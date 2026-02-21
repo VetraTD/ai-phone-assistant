@@ -1,11 +1,12 @@
 {
   "name": "ai-phone-assistant",
   "version": "1.0.0",
+  "type": "module",
   "description": "An intelligent AI-powered phone assistant designed to handle calls, take messages, and more using natural language processing.",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "start": "node server.js"
+},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/VetraTD/ai-phone-assistant.git"
