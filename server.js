@@ -4,7 +4,7 @@ import * as twilio from "twilio";
 import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
-import { buildGatherAndRedirect, buildSayGatherRedirect } from "./lib/twiml.js";
+import { buildGatherAndRedirect, buildSayGatherRedirect, buildSayAndHangup } from "./lib/twiml.js";
 import * as callState from "./lib/callState.js";
 
 const app = express();
@@ -68,14 +68,32 @@ app.post("/twilio/voice", twilioValidation, (req, res) => {
 
   const state = callState.getState(callSid);
 
-  // Branch A: no speech result (first leg or Gather timeout)
+  // Branch A: no speech result (first leg or Gather timeout / silence)
   if (speechResult === "") {
-    const prompt = state.hasGreeted ? "Go ahead." : "Hi, this is your AI receptionist. How can I help you today?";
-    if (!state.hasGreeted) state.hasGreeted = true;
-    return res.send(buildGatherAndRedirect(VOICE_URL, prompt));
+    if (!state.hasGreeted) {
+      state.hasGreeted = true;
+      return res.send(buildGatherAndRedirect(VOICE_URL, "Hi, this is your AI receptionist. How can I help you today?"));
+    }
+
+    // Progressive silence handling: 10s re-listen, then "Are you still there?" (10s), then goodbye
+    const SILENCE_GATHER_TIMEOUT = 10;
+    state.silenceCount++;
+
+    if (state.silenceCount === 1) {
+      // First silence: re-listen for 10s with no message
+      return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT));
+    }
+    if (state.silenceCount === 2) {
+      return res.send(buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT));
+    }
+    // 3rd silence — hang up gracefully
+    return res.send(buildSayAndHangup("It seems like you may have stepped away. Goodbye!"));
   }
 
-  // Branch B: speech result present — idempotency
+  // Branch B: speech result present — reset silence counter
+  state.silenceCount = 0;
+
+  // Idempotency check
   const speechHash = crypto.createHash("sha256").update(speechResult).digest("hex");
   const now = Date.now();
   if (
@@ -85,10 +103,6 @@ app.post("/twilio/voice", twilioValidation, (req, res) => {
     state.lastProcessed.cachedTwiml
   ) {
     return res.send(state.lastProcessed.cachedTwiml);
-  }
-
-  if (speechResult === "") {
-    return res.send(buildSayGatherRedirect(VOICE_URL, "I didn't catch that."));
   }
 
   // Call Gemini (timeout and errors handled in service)
