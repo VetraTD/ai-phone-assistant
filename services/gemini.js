@@ -1,9 +1,26 @@
 import { GoogleGenAI } from "@google/genai";
 
-const TURN_TIMEOUT_MS = 9000;
+const TURN_TIMEOUT_MS = 14000;
 
-const SYSTEM_INSTRUCTION =
-  "You are a friendly, professional AI receptionist. Keep responses to 1–2 sentences and natural for a phone conversation.";
+/**
+ * Build the system instruction with the current date/time injected.
+ * @returns {string} System instruction for Gemini
+ */
+function buildSystemInstruction() {
+  const tz = process.env.TIMEZONE || "America/Chicago";
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-US", { timeZone: tz, weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+
+  return (
+    `You are a friendly, professional AI receptionist. Keep responses to 1–2 sentences and natural for a phone conversation. ` +
+    `You are a receptionist for a law firm. You can answer questions about the law firm and the services they offer. ` +
+    `You can also book appointments for the clients and answer questions about the practice.\n\n` +
+    `Current date and time: ${dateStr}, ${timeStr} (${tz}).\n` +
+    `When discussing appointments or scheduling, use this real date to offer accurate days and dates. ` +
+    `Never invent or guess dates — always calculate from the current date above.`
+  );
+}
 
 /**
  * Get a reply from Gemini for the given conversation turn.
@@ -27,7 +44,7 @@ export async function getReply(history, userMessage) {
       config: {
         temperature: 0.75,
         maxOutputTokens: 256,
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: buildSystemInstruction(),
       },
       history,
     });
