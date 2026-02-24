@@ -4,6 +4,7 @@ import * as twilio from "twilio";
 import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
+import * as db from "./services/supabase.js";
 import { buildGatherAndRedirect, buildSayGatherRedirect, buildSayAndHangup } from "./lib/twiml.js";
 import * as callState from "./lib/callState.js";
 
@@ -61,12 +62,25 @@ function twilioValidation(req, res, next) {
 }
 
 // --- Voice webhook ---
-app.post("/twilio/voice", twilioValidation, (req, res) => {
+app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
   const callSid = req.body.CallSid;
   const speechResult = typeof req.body.SpeechResult === "string" ? req.body.SpeechResult.trim() : "";
 
   const state = callState.getState(callSid);
+
+  // --- DB: create call row on first hit for this CallSid ---
+  if (!state.dbCallId && db.isEnabled()) {
+    const twilioNumber = req.body.To || "";
+    const callerNumber = req.body.From || "";
+    const business = await db.lookupBusinessByPhone(twilioNumber);
+    if (business) {
+      const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
+      if (dbId) state.dbCallId = dbId;
+    } else {
+      console.warn(`No business found for Twilio number ${twilioNumber} — skipping DB persistence`);
+    }
+  }
 
   // Branch A: no speech result (first leg or Gather timeout / silence)
   if (speechResult === "") {
@@ -108,9 +122,18 @@ app.post("/twilio/voice", twilioValidation, (req, res) => {
   // Call Gemini (timeout and errors handled in service)
   geminiService
     .getReply(state.history, speechResult)
-    .then((replyText) => {
+    .then(async (replyText) => {
       state.history.push({ role: "user", parts: [{ text: speechResult }] });
       state.history.push({ role: "model", parts: [{ text: replyText }] });
+
+      // Persist transcript to DB (fire-and-forget, don't block response)
+      if (state.dbCallId) {
+        const seq = state.sequenceCounter;
+        state.sequenceCounter += 2;
+        db.addTranscriptEntry(state.dbCallId, "caller", speechResult, seq).catch(() => {});
+        db.addTranscriptEntry(state.dbCallId, "ai", replyText, seq + 1).catch(() => {});
+      }
+
       const twiml = buildSayGatherRedirect(VOICE_URL, replyText);
       state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
       res.send(twiml);
@@ -125,10 +148,14 @@ app.post("/twilio/voice", twilioValidation, (req, res) => {
 });
 
 // --- Status callback: clear CallSid on terminal status ---
-app.post("/twilio/status", twilioValidation, (req, res) => {
+app.post("/twilio/status", twilioValidation, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
+    const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
+    db.completeCall(callSid, status, duration).catch((err) =>
+      console.error("completeCall error:", err)
+    );
     callState.remove(callSid);
   }
   res.status(200).end();
