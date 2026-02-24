@@ -106,6 +106,42 @@ export async function completeCall(callSid, status, durationSeconds) {
 }
 
 /**
+ * Fetch all transcript entries for a call, ordered by sequence.
+ * @param {string} callId - DB call UUID
+ * @returns {Promise<Array<{speaker: string, message: string, sequence: number}>>}
+ */
+export async function fetchCallTranscript(callId) {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("call_transcripts")
+    .select("speaker, message, sequence")
+    .eq("call_id", callId)
+    .order("sequence", { ascending: true });
+  if (error) {
+    console.error("fetchCallTranscript error:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Update a call's summary and sentiment after generation.
+ * @param {string} callSid - Twilio Call SID
+ * @param {string|null} summary
+ * @param {string|null} sentiment
+ */
+export async function updateCallSummary(callSid, summary, sentiment) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("calls")
+    .update({ summary, sentiment })
+    .eq("twilio_call_sid", callSid);
+  if (error) {
+    console.error("updateCallSummary error:", error.message);
+  }
+}
+
+/**
  * Create an appointment.
  * @param {object} params
  * @param {string} params.businessId

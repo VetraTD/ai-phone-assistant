@@ -76,7 +76,11 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     const business = await db.lookupBusinessByPhone(twilioNumber);
     if (business) {
       const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
-      if (dbId) state.dbCallId = dbId;
+      if (dbId) {
+        state.dbCallId = dbId;
+        state.businessId = business.id;
+        state.callerNumber = callerNumber;
+      }
     } else {
       console.warn(`No business found for Twilio number ${twilioNumber} — skipping DB persistence`);
     }
@@ -122,7 +126,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // Call Gemini (timeout and errors handled in service)
   geminiService
     .getReply(state.history, speechResult)
-    .then(async (replyText) => {
+    .then(async ({ text: replyText, appointmentArgs }) => {
       state.history.push({ role: "user", parts: [{ text: speechResult }] });
       state.history.push({ role: "model", parts: [{ text: replyText }] });
 
@@ -132,6 +136,21 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         state.sequenceCounter += 2;
         db.addTranscriptEntry(state.dbCallId, "caller", speechResult, seq).catch(() => {});
         db.addTranscriptEntry(state.dbCallId, "ai", replyText, seq + 1).catch(() => {});
+      }
+
+      // Save appointment if Gemini booked one (fire-and-forget)
+      if (appointmentArgs && state.businessId) {
+        const notes = [appointmentArgs.service_type, appointmentArgs.notes]
+          .filter(Boolean)
+          .join(" — ") || null;
+        db.createAppointment({
+          businessId: state.businessId,
+          callId: state.dbCallId || null,
+          clientName: appointmentArgs.client_name || null,
+          clientPhone: state.callerNumber || null,
+          scheduledAt: appointmentArgs.scheduled_at,
+          notes,
+        }).catch((err) => console.error("createAppointment error:", err));
       }
 
       const twiml = buildSayGatherRedirect(VOICE_URL, replyText);
@@ -147,15 +166,30 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     });
 });
 
-// --- Status callback: clear CallSid on terminal status ---
+// --- Status callback: update call record on terminal status ---
 app.post("/twilio/status", twilioValidation, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
+    const state = callState.getState(callSid);
+    const dbCallId = state.dbCallId;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
+
     db.completeCall(callSid, status, duration).catch((err) =>
       console.error("completeCall error:", err)
     );
+
+    // Generate summary and sentiment for completed calls (fire-and-forget)
+    if (dbCallId && status === "completed") {
+      (async () => {
+        const transcript = await db.fetchCallTranscript(dbCallId);
+        if (transcript.length > 0) {
+          const { summary, sentiment } = await geminiService.generateSummaryAndSentiment(transcript);
+          await db.updateCallSummary(callSid, summary, sentiment);
+        }
+      })().catch((err) => console.error("Summary generation error:", err));
+    }
+
     callState.remove(callSid);
   }
   res.status(200).end();
