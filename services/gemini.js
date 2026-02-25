@@ -1,4 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
+import { captureException } from "../lib/sentry.js";
+import { log } from "../lib/logger.js";
 
 const TURN_TIMEOUT_MS = 14000;
 const MAX_FC_ROUNDS = 3;
@@ -287,7 +289,8 @@ export async function generateSummaryAndSentiment(transcript) {
         : null,
     };
   } catch (err) {
-    console.error("generateSummaryAndSentiment error:", err.message);
+    log("error", { message: "generateSummaryAndSentiment failed", code: "gemini_summary" });
+    captureException(err);
     return { summary: null, sentiment: null };
   }
 }

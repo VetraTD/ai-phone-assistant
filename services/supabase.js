@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { captureException } from "../lib/sentry.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -59,6 +60,7 @@ export async function createCall(businessId, callSid, callerNumber, twilioNumber
     .single();
   if (error) {
     console.error("createCall error:", error.message);
+    captureException(new Error(error.message), { table: "calls", op: "insert" });
     return null;
   }
   return data.id;
@@ -102,6 +104,7 @@ export async function completeCall(callSid, status, durationSeconds) {
     .eq("twilio_call_sid", callSid);
   if (error) {
     console.error("completeCall error:", error.message);
+    captureException(new Error(error.message), { table: "calls", op: "update_complete" });
   }
 }
 
@@ -170,6 +173,7 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     .single();
   if (error) {
     console.error("createAppointment error:", error.message);
+    captureException(new Error(error.message), { table: "appointments", op: "insert" });
     return null;
   }
   return data.id;

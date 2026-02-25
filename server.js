@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
 import * as twilio from "twilio";
 import crypto from "crypto";
@@ -13,6 +14,7 @@ import {
 } from "./lib/twiml.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
+import { log, createRequestId } from "./lib/logger.js";
 
 const app = express();
 const PORT = 3000;
@@ -113,6 +115,7 @@ function logTranscript(state, callerText, aiText) {
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
   const callSid = req.body.CallSid;
+  const requestId = createRequestId();
   const speechResult =
     typeof req.body.SpeechResult === "string" ? req.body.SpeechResult.trim() : "";
 
@@ -155,6 +158,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   if (speechResult === "") {
     if (state.step === STEPS.GREETING) {
       state.step = STEPS.IDENTIFY_INTENT;
+      log("call_started", { callSid, requestId });
       return res.send(
         buildGatherAndRedirect(
           VOICE_URL,
@@ -184,6 +188,9 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
   // ---- 7. Escape-trigger check (before Gemini) ----
   if (isTransferRequest(speechResult)) {
+    const transferred = !!TRANSFER_NUMBER;
+    log("transfer_requested", { callSid, requestId, transferred });
+
     if (TRANSFER_NUMBER) {
       const msg = "Transferring you now. Please hold.";
       logTranscript(state, speechResult, msg);
@@ -209,10 +216,14 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     return res.send(state.lastProcessed.cachedTwiml);
   }
 
-  // ---- 9. Call Gemini (step-aware) ----
+  // ---- 9. Call Gemini (step-aware) — measure latency ----
+  const geminiStart = Date.now();
+
   geminiService
     .getReply(state.history, speechResult, state.step, state.intent)
     .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs }) => {
+      const turnLatencyMs = Date.now() - geminiStart;
+
       // -- Update conversation history --
       state.history.push({ role: "user", parts: [{ text: speechResult }] });
       state.history.push({ role: "model", parts: [{ text: replyText }] });
@@ -237,8 +248,22 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           clientPhone: state.callerNumber || null,
           scheduledAt: appointmentArgs.scheduled_at,
           notes,
-        }).catch((err) => console.error("createAppointment error:", err));
+        }).catch((err) => {
+          log("error", {
+            callSid,
+            requestId,
+            message: "createAppointment failed",
+            code: "db_appointment",
+          });
+          captureException(err, { callSid, requestId });
+        });
         state.step = STEPS.CONFIRM;
+
+        log("appointment_booked", {
+          callSid,
+          requestId,
+          scheduled_at: appointmentArgs.scheduled_at,
+        });
       }
 
       if (endCallArgs) {
@@ -247,6 +272,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
       // -- Persist transcript --
       logTranscript(state, speechResult, replyText);
+
+      // -- Structured log: turn completed --
+      log("turn_completed", {
+        callSid,
+        requestId,
+        step: state.step,
+        intent: state.intent,
+        turn_latency_ms: turnLatencyMs,
+      });
 
       // -- Build TwiML response --
       if (state.step === STEPS.ENDING) {
@@ -258,7 +292,19 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       res.send(twiml);
     })
     .catch((err) => {
-      if (err?.message === "TURN_TIMEOUT") {
+      const turnLatencyMs = Date.now() - geminiStart;
+      const isTimeout = err?.message === "TURN_TIMEOUT";
+
+      log("error", {
+        callSid,
+        requestId,
+        message: isTimeout ? "Gemini turn timeout" : err?.message,
+        code: isTimeout ? "gemini_timeout" : "gemini_error",
+        turn_latency_ms: turnLatencyMs,
+      });
+      captureException(err, { callSid, requestId });
+
+      if (isTimeout) {
         return res.send(
           buildSayGatherRedirect(
             VOICE_URL,
@@ -266,7 +312,6 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           )
         );
       }
-      console.error("Gemini error:", err);
       res.send(
         buildSayGatherRedirect(
           VOICE_URL,
@@ -288,9 +333,10 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     const dbCallId = state.dbCallId;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
 
-    db.completeCall(callSid, status, duration).catch((err) =>
-      console.error("completeCall error:", err)
-    );
+    db.completeCall(callSid, status, duration).catch((err) => {
+      log("error", { callSid, message: "completeCall failed", code: "db_complete" });
+      captureException(err, { callSid });
+    });
 
     // Generate summary and sentiment for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
@@ -301,7 +347,9 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment);
         }
-      })().catch((err) => console.error("Summary generation error:", err));
+      })().catch((err) => {
+        log("error", { callSid, message: "Summary generation failed", code: "summary_error" });
+      });
     }
 
     callState.remove(callSid);
