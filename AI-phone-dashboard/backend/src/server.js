@@ -47,6 +47,44 @@ app.get("/api/calls", async (req, res) => {
   }
 });
 
+// GET a single call with transcript + appointments
+// /api/calls/:id
+app.get("/api/calls/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Call
+    const callRes = await pool.query(
+      "select * from calls where id = $1 limit 1",
+      [id]
+    );
+
+    if (callRes.rows.length === 0) {
+      return res.status(404).json({ error: "Call not found" });
+    }
+
+    // Transcript ordered by sequence
+    const transcriptRes = await pool.query(
+      "select * from call_transcripts where call_id = $1 order by sequence asc",
+      [id]
+    );
+
+    // Appointments linked to this call
+    const apptRes = await pool.query(
+      "select * from appointments where call_id = $1 order by created_at desc",
+      [id]
+    );
+
+    res.json({
+      call: callRes.rows[0],
+      transcript: transcriptRes.rows,
+      appointments: apptRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {
