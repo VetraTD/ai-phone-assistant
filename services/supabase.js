@@ -18,6 +18,49 @@ export function isEnabled() {
   return supabase !== null;
 }
 
+// ---------------------------------------------------------------------------
+// Per-business config
+// ---------------------------------------------------------------------------
+
+const DEFAULT_GREETING = "Hi, this is your AI receptionist. How can I help you today?";
+const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
+
+/**
+ * Build a normalised config object from a business row.
+ * If `business` is null (no business found / DB disabled), returns safe defaults.
+ *
+ * @param {object|null} business - Row from the businesses table (via select("*"))
+ * @returns {{ businessName: string, greeting: string, timezone: string,
+ *             businessHours: {open_time:string,close_time:string}|null,
+ *             transferPhoneNumber: string|null, allowedTasks: string[],
+ *             voiceStyle: string|null }}
+ */
+export function loadConfig(business) {
+  if (!business) {
+    return {
+      businessName: "our office",
+      greeting: DEFAULT_GREETING,
+      timezone: process.env.TIMEZONE || "America/Chicago",
+      businessHours: null, // always open when no business configured
+      transferPhoneNumber: null,
+      allowedTasks: DEFAULT_ALLOWED_TASKS,
+      voiceStyle: null,
+    };
+  }
+
+  return {
+    businessName: business.name || "our office",
+    greeting: business.greeting || DEFAULT_GREETING,
+    timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
+    businessHours: business.business_hours || null,
+    transferPhoneNumber: business.transfer_phone_number || null,
+    allowedTasks: Array.isArray(business.allowed_tasks)
+      ? business.allowed_tasks
+      : DEFAULT_ALLOWED_TASKS,
+    voiceStyle: business.voice_style || null,
+  };
+}
+
 /**
  * Look up a business by its Twilio phone number.
  * @param {string} twilioNumber - The "To" number from Twilio

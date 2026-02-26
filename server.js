@@ -122,24 +122,30 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // ---- 1. Get or create state ----
   const state = callState.getState(callSid);
 
-  // ---- 2. DB: create call row on first hit ----
-  if (!state.dbCallId && db.isEnabled()) {
-    const twilioNumber = req.body.To || "";
-    const callerNumber = req.body.From || "";
-    const business = await db.lookupBusinessByPhone(twilioNumber);
-    if (business) {
-      const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
-      if (dbId) {
-        state.dbCallId = dbId;
-        state.businessId = business.id;
-        state.callerNumber = callerNumber;
+  // ---- 2. Load config & create call row on first hit ----
+  if (!state.config) {
+    let business = null;
+    if (db.isEnabled()) {
+      const twilioNumber = req.body.To || "";
+      const callerNumber = req.body.From || "";
+      business = await db.lookupBusinessByPhone(twilioNumber);
+      if (business) {
+        const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
+        if (dbId) {
+          state.dbCallId = dbId;
+          state.businessId = business.id;
+          state.callerNumber = callerNumber;
+        }
+      } else {
+        console.warn(
+          `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
+        );
       }
-    } else {
-      console.warn(
-        `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
-      );
     }
+    state.config = db.loadConfig(business);
   }
+
+  const config = state.config;
 
   // ---- 3. Hard time-limit check ----
   if (Date.now() - state.startedAt > CALL_MAX_DURATION_MS) {
@@ -159,12 +165,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     if (state.step === STEPS.GREETING) {
       state.step = STEPS.IDENTIFY_INTENT;
       log("call_started", { callSid, requestId });
-      return res.send(
-        buildGatherAndRedirect(
-          VOICE_URL,
-          "Hi, this is your AI receptionist. How can I help you today?"
-        )
-      );
+      return res.send(buildGatherAndRedirect(VOICE_URL, config.greeting));
     }
 
     // Progressive silence: re-listen → prompt → goodbye
@@ -188,14 +189,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
   // ---- 7. Escape-trigger check (before Gemini) ----
   if (isTransferRequest(speechResult)) {
-    const transferred = !!TRANSFER_NUMBER;
+    const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
+    const transferred = !!transferNumber;
     log("transfer_requested", { callSid, requestId, transferred });
 
-    if (TRANSFER_NUMBER) {
+    if (transferNumber) {
       const msg = "Transferring you now. Please hold.";
       logTranscript(state, speechResult, msg);
       state.step = STEPS.ENDING;
-      return res.send(buildSayAndDial(msg, TRANSFER_NUMBER));
+      return res.send(buildSayAndDial(msg, transferNumber));
     }
     // No transfer number configured — acknowledge and keep helping
     const msg =
@@ -216,11 +218,11 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     return res.send(state.lastProcessed.cachedTwiml);
   }
 
-  // ---- 9. Call Gemini (step-aware) — measure latency ----
+  // ---- 9. Call Gemini (step + config aware) — measure latency ----
   const geminiStart = Date.now();
 
   geminiService
-    .getReply(state.history, speechResult, state.step, state.intent)
+    .getReply(state.history, speechResult, state.step, state.intent, config)
     .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs }) => {
       const turnLatencyMs = Date.now() - geminiStart;
 
@@ -368,9 +370,9 @@ app.listen(PORT, () => {
     `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
   );
   if (TRANSFER_NUMBER) {
-    console.log(`Transfer number: ${TRANSFER_NUMBER}`);
+    console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
   } else {
-    console.log(`TRANSFER_NUMBER not set — live-transfer disabled.`);
+    console.log(`TRANSFER_NUMBER not set — per-business transfer or disabled.`);
   }
   console.log(
     `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`

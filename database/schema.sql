@@ -3,13 +3,25 @@
 -- Run this in the Supabase SQL Editor to create all tables.
 -- ============================================================
 
--- 1. Businesses (tenant root)
+-- 1. Businesses (tenant root + per-business config)
+--    greeting:               Custom greeting text. NULL → app default.
+--    business_hours:         JSON {"open_time":"HH:MM","close_time":"HH:MM"} (24h).
+--                            NULL → always open.
+--    transfer_phone_number:  E.164 number for live transfer. NULL → env fallback.
+--    allowed_tasks:          JSON array of enabled AI tasks.
+--                            Default: ["book_appointment","general_question"].
+--    voice_style:            Optional tone/style hint for the AI. NULL → default.
 CREATE TABLE businesses (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name        text NOT NULL,
-  phone_number text,
-  timezone    text DEFAULT 'America/Chicago',
-  created_at  timestamptz DEFAULT now()
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                  text NOT NULL,
+  phone_number          text,
+  timezone              text DEFAULT 'America/Chicago',
+  greeting              text,
+  business_hours        jsonb DEFAULT '{"open_time":"09:00","close_time":"17:00"}',
+  transfer_phone_number text,
+  allowed_tasks         jsonb DEFAULT '["book_appointment","general_question"]',
+  voice_style           text,
+  created_at            timestamptz DEFAULT now()
 );
 
 -- 2. Users (dashboard users per business)
