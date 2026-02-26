@@ -171,6 +171,29 @@ function buildSystemInstruction(step, intent, config) {
     }
   }
 
+  // --- Address / contact (if available) ---
+  if (config.addressLine1 || config.city || config.country) {
+    const parts = [];
+    if (config.addressLine1) parts.push(config.addressLine1);
+    if (config.addressLine2) parts.push(config.addressLine2);
+    const cityRegionPostal = [config.city, config.stateRegion, config.postalCode]
+      .filter(Boolean)
+      .join(", ");
+    if (cityRegionPostal) parts.push(cityRegionPostal);
+    if (config.country) parts.push(config.country);
+    base += `Business address: ${parts.join(" — ")}.\n`;
+  }
+  if (config.mainPhone) {
+    base += `The main office phone number is ${config.mainPhone}.\n`;
+  }
+
+  // --- General business info block ---
+  if (config.generalInfo) {
+    base +=
+      `\nHere is information about the business. Use it to answer questions about the practice, ` +
+      `providers, services, location, and other general details:\n${config.generalInfo}\n`;
+  }
+
   // --- Capabilities ---
   const caps = [];
   if (config.allowedTasks.includes("book_appointment")) caps.push("book appointments");

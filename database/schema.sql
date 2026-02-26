@@ -21,6 +21,14 @@ CREATE TABLE businesses (
   transfer_phone_number text,
   allowed_tasks         jsonb DEFAULT '["book_appointment","general_question"]',
   voice_style           text,
+  main_phone            text,
+  general_info          text,
+  address_line1         text,
+  address_line2         text,
+  city                  text,
+  state_region          text,
+  postal_code           text,
+  country               text,
   created_at            timestamptz DEFAULT now()
 );
 

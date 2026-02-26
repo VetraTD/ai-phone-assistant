@@ -33,7 +33,9 @@ const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
  * @returns {{ businessName: string, greeting: string, timezone: string,
  *             businessHours: {open_time:string,close_time:string}|null,
  *             transferPhoneNumber: string|null, allowedTasks: string[],
- *             voiceStyle: string|null }}
+ *             voiceStyle: string|null, mainPhone: string|null, generalInfo: string|null,
+ *             addressLine1?: string|null, addressLine2?: string|null, city?: string|null,
+ *             stateRegion?: string|null, postalCode?: string|null, country?: string|null }}
  */
 export function loadConfig(business) {
   if (!business) {
@@ -45,6 +47,14 @@ export function loadConfig(business) {
       transferPhoneNumber: null,
       allowedTasks: DEFAULT_ALLOWED_TASKS,
       voiceStyle: null,
+      mainPhone: null,
+      generalInfo: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: null,
+      stateRegion: null,
+      postalCode: null,
+      country: null,
     };
   }
 
@@ -58,6 +68,14 @@ export function loadConfig(business) {
       ? business.allowed_tasks
       : DEFAULT_ALLOWED_TASKS,
     voiceStyle: business.voice_style || null,
+    mainPhone: business.main_phone || null,
+    generalInfo: business.general_info || null,
+    addressLine1: business.address_line1 || null,
+    addressLine2: business.address_line2 || null,
+    city: business.city || null,
+    stateRegion: business.state_region || null,
+    postalCode: business.postal_code || null,
+    country: business.country || null,
   };
 }
 
