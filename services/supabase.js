@@ -207,16 +207,17 @@ export async function fetchCallTranscript(callId) {
 }
 
 /**
- * Update a call's summary and sentiment after generation.
+ * Update a call's summary, sentiment, and outcome after generation.
  * @param {string} callSid - Twilio Call SID
  * @param {string|null} summary
  * @param {string|null} sentiment
+ * @param {string|null} outcome - One of CALL_OUTCOMES (e.g. general_inquiry, appointment, unknown)
  */
-export async function updateCallSummary(callSid, summary, sentiment) {
+export async function updateCallSummary(callSid, summary, sentiment, outcome) {
   if (!supabase) return;
   const { error } = await supabase
     .from("calls")
-    .update({ summary, sentiment })
+    .update({ summary, sentiment, outcome: outcome ?? null })
     .eq("twilio_call_sid", callSid);
   if (error) {
     console.error("updateCallSummary error:", error.message);
