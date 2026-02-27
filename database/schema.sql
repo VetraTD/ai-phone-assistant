@@ -54,7 +54,8 @@ CREATE TABLE calls (
   ended_at         timestamptz,
   duration_seconds int,
   summary          text,
-  sentiment        text
+  sentiment        text,
+  outcome          text
 );
 
 -- 4. Call transcripts (conversation turns)
