@@ -46,6 +46,7 @@ app.get("/api/calls", async (req, res) => {
       from,
       to,
       has_appointments,
+      needs_followup,
     } = req.query;
 
     const where = [];
@@ -69,6 +70,40 @@ app.get("/api/calls", async (req, res) => {
       // partial match (case-insensitive)
       where.push(`caller_number ILIKE ${addParam(`%${caller.trim()}%`)}`);
     }
+
+
+
+    const { sentiment, has_summary } = req.query;
+
+// sentiment filter
+if (sentiment && sentiment !== "all") {
+  if (sentiment === "unknown") {
+    where.push(`(sentiment IS NULL OR sentiment = '')`);
+  } else {
+    where.push(`sentiment = ${addParam(sentiment)}`);
+  }
+}
+
+// summary present / not present
+if (has_summary === "true") {
+  where.push(`summary IS NOT NULL AND summary <> ''`);
+}
+if (has_summary === "false") {
+  where.push(`(summary IS NULL OR summary = '')`);
+}
+
+// Needs followup = calls with customer requests
+if (needs_followup === "true") {
+  where.push(`
+    EXISTS (
+      SELECT 1
+      FROM customer_requests cr
+      WHERE cr.call_id = calls.id
+    )
+  `);
+}
+
+
 
     // Date filtering
     // from/to are YYYY-MM-DD strings
@@ -106,7 +141,7 @@ app.get("/api/calls", async (req, res) => {
 });
 
 
-// GET a single call with transcript + appointments
+// GET a single call with transcript + appointments + customer requests
 // /api/calls/:id
 app.get("/api/calls/:id", async (req, res) => {
   try {
@@ -134,19 +169,22 @@ app.get("/api/calls/:id", async (req, res) => {
       [id]
     );
 
+    // ✅ Customer requests linked to this call
+    const reqRes = await pool.query(
+      "select * from customer_requests where call_id = $1 order by created_at desc",
+      [id]
+    );
+
     res.json({
       call: callRes.rows[0],
       transcript: transcriptRes.rows,
       appointments: apptRes.rows,
+      customer_requests: reqRes.rows, // ✅ new
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
-
-
-
 
 
 // ✅ Get a business by id
