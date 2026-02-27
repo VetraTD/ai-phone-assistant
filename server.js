@@ -223,7 +223,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
   geminiService
     .getReply(state.history, speechResult, state.step, state.intent, config)
-    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs }) => {
+    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs }) => {
       const turnLatencyMs = Date.now() - geminiStart;
 
       // -- Update conversation history --
@@ -270,6 +270,26 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
       if (endCallArgs) {
         state.step = STEPS.ENDING;
+      }
+
+      if (customerRequestArgs && state.businessId) {
+        db.createCustomerRequest({
+          businessId: state.businessId,
+          callId: state.dbCallId || null,
+          requestType: customerRequestArgs.request_type || "message",
+          callerName: customerRequestArgs.caller_name || null,
+          callbackNumber: customerRequestArgs.callback_number || null,
+          message: customerRequestArgs.message || null,
+          preferredTime: customerRequestArgs.preferred_time || null,
+        }).catch((err) => {
+          log("error", {
+            callSid,
+            requestId,
+            message: "createCustomerRequest failed",
+            code: "db_customer_request",
+          });
+          captureException(err, { callSid, requestId });
+        });
       }
 
       // -- Persist transcript --

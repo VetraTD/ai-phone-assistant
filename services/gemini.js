@@ -24,9 +24,9 @@ const DEFAULT_CONFIG = {
 // ---------------------------------------------------------------------------
 
 function buildCallTools(allowedTasks) {
-  const intents = allowedTasks.filter((t) =>
-    ["book_appointment", "general_question"].includes(t)
-  );
+  const intents = Array.isArray(allowedTasks) && allowedTasks.length > 0
+    ? allowedTasks
+    : ["general_question"];
 
   const declarations = [
     {
@@ -40,7 +40,7 @@ function buildCallTools(allowedTasks) {
         properties: {
           intent: {
             type: "string",
-            enum: intents.length > 0 ? intents : ["general_question"],
+            enum: intents,
             description: "The caller's primary intent",
           },
         },
@@ -87,6 +87,36 @@ function buildCallTools(allowedTasks) {
           },
         },
         required: ["scheduled_at"],
+      },
+    });
+  }
+
+  const hasMessageOrCallback =
+    allowedTasks.includes("take_message") || allowedTasks.includes("callback_request");
+  if (hasMessageOrCallback) {
+    declarations.push({
+      name: "record_customer_request",
+      description:
+        "Record a message or callback request after collecting the caller's name, " +
+        "callback number, and message (and preferred callback time for callbacks). " +
+        "Call this when the caller wants to leave a message or have someone call them back.",
+      parameters: {
+        type: "object",
+        properties: {
+          request_type: {
+            type: "string",
+            enum: ["message", "callback"],
+            description: "Whether this is a message to pass along or a request for a callback",
+          },
+          caller_name: { type: "string", description: "Caller's name" },
+          callback_number: { type: "string", description: "Phone number to call back" },
+          message: { type: "string", description: "The message or reason for callback" },
+          preferred_time: {
+            type: "string",
+            description: "When they prefer to be called back (for callback type)",
+          },
+        },
+        required: ["request_type"],
       },
     });
   }
@@ -199,8 +229,19 @@ function buildSystemInstruction(step, intent, config) {
   if (config.allowedTasks.includes("book_appointment")) caps.push("book appointments");
   if (config.allowedTasks.includes("general_question"))
     caps.push("answer general questions about the business");
+  if (config.allowedTasks.includes("take_message")) caps.push("take messages and promise a callback");
+  if (config.allowedTasks.includes("callback_request")) caps.push("schedule a callback from the team");
+  if (config.allowedTasks.includes("check_appointment"))
+    caps.push("look up or confirm existing appointments (describe what you can do; you do not have access to the schedule)");
+  if (config.allowedTasks.includes("cancel_reschedule"))
+    caps.push("help with cancelling or rescheduling (direct them to call back or take details)");
+  if (config.allowedTasks.includes("quote_request"))
+    caps.push("answer questions about pricing or quotes (no commitment over the phone; take details for follow-up if needed)");
+  if (config.allowedTasks.includes("directions_location")) caps.push("give address and directions");
+  if (config.allowedTasks.includes("form_document_request"))
+    caps.push("explain how to get forms or documents");
   if (caps.length > 0) {
-    base += `You can ${caps.join(" and ")}.\n`;
+    base += `You can ${caps.join(", ")}.\n`;
   }
 
   // --- Transfer availability ---
@@ -227,6 +268,11 @@ function buildSystemInstruction(step, intent, config) {
           `preferred date and time, and what kind of service or consultation they need. ` +
           `Once you have all the details, repeat them back for confirmation. ` +
           `When the caller confirms, call book_appointment.`;
+      } else if (intent === "take_message" || intent === "callback_request") {
+        stepGuide =
+          `\n\nYour current task: Collect the caller's name, callback number, and their message. ` +
+          `For callback requests, also ask when they prefer to be called back. ` +
+          `When you have the details, call record_customer_request with request_type "message" or "callback" as appropriate.`;
       } else {
         stepGuide =
           `\n\nYour current task: Answer the caller's question helpfully and concisely. ` +
@@ -259,7 +305,7 @@ function buildSystemInstruction(step, intent, config) {
  * @param {string} step
  * @param {string|null} intent
  * @param {object} [config] - Per-business config; falls back to DEFAULT_CONFIG
- * @returns {Promise<{ text: string, appointmentArgs: object|null, intentArgs: object|null, endCallArgs: object|null }>}
+ * @returns {Promise<{ text: string, appointmentArgs: object|null, intentArgs: object|null, endCallArgs: object|null, customerRequestArgs: object|null }>}
  */
 export async function getReply(history, userMessage, step, intent, config) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -289,6 +335,7 @@ export async function getReply(history, userMessage, step, intent, config) {
     let appointmentArgs = null;
     let intentArgs = null;
     let endCallArgs = null;
+    let customerRequestArgs = null;
 
     let round = 0;
     while (response.functionCalls?.length > 0 && round < MAX_FC_ROUNDS) {
@@ -315,6 +362,17 @@ export async function getReply(history, userMessage, step, intent, config) {
                 id: fc.id,
                 name: fc.name,
                 response: { success: true, message: "Appointment recorded successfully." },
+              },
+            });
+            break;
+
+          case "record_customer_request":
+            customerRequestArgs = fc.args ?? null;
+            results.push({
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: { success: true, message: "Request recorded. Someone will follow up." },
               },
             });
             break;
@@ -349,7 +407,7 @@ export async function getReply(history, userMessage, step, intent, config) {
       response?.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ??
       "I didn't get that.";
 
-    return { text, appointmentArgs, intentArgs, endCallArgs };
+    return { text, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs };
   })();
 
   chatPromise.catch(() => {}); // prevent unhandled rejection when timeout wins

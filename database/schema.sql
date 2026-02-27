@@ -91,6 +91,20 @@ CREATE TABLE appointments (
   created_at   timestamptz DEFAULT now()
 );
 
+-- 7. Customer requests (messages, callbacks, etc. from AI tool record_customer_request)
+CREATE TABLE customer_requests (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id     uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  call_id         uuid REFERENCES calls(id) ON DELETE SET NULL,
+  request_type    text NOT NULL,
+  caller_name     text,
+  callback_number text,
+  message         text,
+  preferred_time  text,
+  notes           text,
+  created_at      timestamptz DEFAULT now()
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
@@ -103,3 +117,6 @@ CREATE INDEX idx_transcripts_call ON call_transcripts (call_id);
 
 -- Appointment list for a business
 CREATE INDEX idx_appointments_business_scheduled ON appointments (business_id, scheduled_at);
+
+-- Customer requests list for a business
+CREATE INDEX idx_customer_requests_business_created ON customer_requests (business_id, created_at DESC);

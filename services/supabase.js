@@ -23,7 +23,27 @@ export function isEnabled() {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_GREETING = "Hi, this is your AI receptionist. How can I help you today?";
+
+/** All task keys the app supports. DB allowed_tasks are filtered to this set. */
+export const SUPPORTED_TASKS = [
+  "book_appointment",
+  "general_question",
+  "take_message",
+  "callback_request",
+  "check_appointment",
+  "cancel_reschedule",
+  "quote_request",
+  "directions_location",
+  "form_document_request",
+];
+
 const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
+
+function normalizeAllowedTasks(raw) {
+  if (!Array.isArray(raw)) return DEFAULT_ALLOWED_TASKS;
+  const filtered = raw.filter((t) => typeof t === "string" && SUPPORTED_TASKS.includes(t));
+  return filtered.length > 0 ? filtered : DEFAULT_ALLOWED_TASKS;
+}
 
 /**
  * Build a normalised config object from a business row.
@@ -64,9 +84,7 @@ export function loadConfig(business) {
     timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
     businessHours: business.business_hours || null,
     transferPhoneNumber: business.transfer_phone_number || null,
-    allowedTasks: Array.isArray(business.allowed_tasks)
-      ? business.allowed_tasks
-      : DEFAULT_ALLOWED_TASKS,
+    allowedTasks: normalizeAllowedTasks(business.allowed_tasks),
     voiceStyle: business.voice_style || null,
     mainPhone: business.main_phone || null,
     generalInfo: business.general_info || null,
@@ -235,6 +253,52 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
   if (error) {
     console.error("createAppointment error:", error.message);
     captureException(new Error(error.message), { table: "appointments", op: "insert" });
+    return null;
+  }
+  return data.id;
+}
+
+/**
+ * Create a customer request (message or callback) from the record_customer_request tool.
+ * @param {object} params
+ * @param {string} params.businessId
+ * @param {string} [params.callId]
+ * @param {string} params.requestType - e.g. "message" or "callback"
+ * @param {string} [params.callerName]
+ * @param {string} [params.callbackNumber]
+ * @param {string} [params.message]
+ * @param {string} [params.preferredTime]
+ * @param {string} [params.notes]
+ * @returns {Promise<string|null>} The new customer_requests row id or null
+ */
+export async function createCustomerRequest({
+  businessId,
+  callId,
+  requestType,
+  callerName,
+  callbackNumber,
+  message,
+  preferredTime,
+  notes,
+}) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("customer_requests")
+    .insert({
+      business_id: businessId,
+      call_id: callId || null,
+      request_type: requestType || "message",
+      caller_name: callerName || null,
+      callback_number: callbackNumber || null,
+      message: message || null,
+      preferred_time: preferredTime || null,
+      notes: notes || null,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    console.error("createCustomerRequest error:", error.message);
+    captureException(new Error(error.message), { table: "customer_requests", op: "insert" });
     return null;
   }
   return data.id;
