@@ -427,34 +427,58 @@ export async function generateSummaryAndSentiment(transcript) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { summary: null, sentiment: null };
 
+  const transcriptText = (transcript || [])
+    .map((t) => `${t.speaker === "ai" ? "AI" : "Caller"}: ${(t.message || "").trim()}`)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (!transcriptText) {
+    return { summary: null, sentiment: null };
+  }
+
   try {
     const gemini = new GoogleGenAI({ apiKey });
-    const transcriptText = transcript
-      .map((t) => `${t.speaker === "ai" ? "AI" : "Caller"}: ${t.message}`)
-      .join("\n");
-
     const response = await gemini.models.generateContent({
       model: "gemini-2.5-flash",
       contents:
         `Analyze this phone call transcript. Respond with JSON only, no markdown:\n` +
         `{"summary":"1-2 sentence summary of the call","sentiment":"positive|neutral|negative"}\n\n` +
         `Transcript:\n${transcriptText}`,
-      config: { temperature: 0.1, maxOutputTokens: 150 },
+      config: { temperature: 0.1, maxOutputTokens: 320 },
     });
 
     const raw = (response?.text ?? "")
       .trim()
       .replace(/^```(?:json)?\s*/, "")
       .replace(/\s*```$/, "");
-    const parsed = JSON.parse(raw);
+
+    if (!raw) {
+      log("warn", { message: "generateSummaryAndSentiment: empty response text", code: "gemini_summary" });
+      return { summary: null, sentiment: null };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr) {
+      log("warn", { message: "generateSummaryAndSentiment: invalid JSON", raw: raw.slice(0, 200), code: "gemini_summary" });
+      captureException(parseErr);
+      return { summary: null, sentiment: null };
+    }
+
     return {
-      summary: typeof parsed.summary === "string" ? parsed.summary : null,
+      summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
       sentiment: ["positive", "neutral", "negative"].includes(parsed.sentiment)
         ? parsed.sentiment
         : null,
     };
   } catch (err) {
-    log("error", { message: "generateSummaryAndSentiment failed", code: "gemini_summary" });
+    log("error", {
+      message: "generateSummaryAndSentiment failed",
+      code: "gemini_summary",
+      error: err?.message ?? String(err),
+    });
     captureException(err);
     return { summary: null, sentiment: null };
   }
