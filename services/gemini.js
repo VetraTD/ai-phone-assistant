@@ -415,17 +415,38 @@ export async function getReply(history, userMessage, step, intent, config) {
 }
 
 // ---------------------------------------------------------------------------
-// Post-call summary
+// Post-call summary and outcome
 // ---------------------------------------------------------------------------
 
+/** Allowed call outcome values for tagging. */
+export const CALL_OUTCOMES = [
+  "general_inquiry",
+  "appointment",
+  "sales",
+  "support",
+  "message",
+  "callback",
+  "after_hours",
+  "emergency",
+  "transfer",
+  "spam",
+  "unknown",
+];
+
+const OUTCOME_PROMPT =
+  "outcome must be exactly one of: general_inquiry, appointment, sales, support, message, callback, after_hours, emergency, transfer, spam, unknown. " +
+  "general_inquiry=info only; appointment=book/confirm/reschedule/cancel; sales=quote/pricing/new service; support=complaint or issue; " +
+  "message=leave a message; callback=request callback; after_hours=call when closed; emergency=urgent/crisis; transfer=transferred to human; spam=wrong number/spam; unknown=unclear.";
+
 /**
- * Generate a summary and sentiment for a completed call transcript.
+ * Generate summary, sentiment, and outcome for a completed call transcript.
  * @param {Array<{speaker: string, message: string}>} transcript
- * @returns {Promise<{ summary: string|null, sentiment: string|null }>}
+ * @returns {Promise<{ summary: string|null, sentiment: string|null, outcome: string }>}
  */
 export async function generateSummaryAndSentiment(transcript) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { summary: null, sentiment: null };
+  const fallback = { summary: null, sentiment: null, outcome: "unknown" };
+  if (!apiKey) return fallback;
 
   const transcriptText = (transcript || [])
     .map((t) => `${t.speaker === "ai" ? "AI" : "Caller"}: ${(t.message || "").trim()}`)
@@ -434,7 +455,7 @@ export async function generateSummaryAndSentiment(transcript) {
     .trim();
 
   if (!transcriptText) {
-    return { summary: null, sentiment: null };
+    return fallback;
   }
 
   try {
@@ -442,9 +463,9 @@ export async function generateSummaryAndSentiment(transcript) {
     const response = await gemini.models.generateContent({
       model: "gemini-2.5-flash",
       contents:
-        `Analyze this phone call transcript. Respond with JSON only, no markdown:\n` +
-        `{"summary":"1-2 sentence summary of the call","sentiment":"positive|neutral|negative"}\n\n` +
-        `Transcript:\n${transcriptText}`,
+        `Analyze this phone call transcript. Respond with JSON only, no markdown.\n` +
+        `{"summary":"1-2 sentence summary of the call","sentiment":"positive|neutral|negative","outcome":"<one outcome>"}\n` +
+        `${OUTCOME_PROMPT}\n\nTranscript:\n${transcriptText}`,
       config: { temperature: 0.1, maxOutputTokens: 320 },
     });
 
@@ -455,7 +476,7 @@ export async function generateSummaryAndSentiment(transcript) {
 
     if (!raw) {
       log("warn", { message: "generateSummaryAndSentiment: empty response text", code: "gemini_summary" });
-      return { summary: null, sentiment: null };
+      return fallback;
     }
 
     let parsed;
@@ -464,15 +485,17 @@ export async function generateSummaryAndSentiment(transcript) {
     } catch (parseErr) {
       log("warn", { message: "generateSummaryAndSentiment: invalid JSON", raw: raw.slice(0, 200), code: "gemini_summary" });
       captureException(parseErr);
-      return { summary: null, sentiment: null };
+      return fallback;
     }
 
-    return {
-      summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
-      sentiment: ["positive", "neutral", "negative"].includes(parsed.sentiment)
-        ? parsed.sentiment
-        : null,
-    };
+    const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : null;
+    const sentiment = ["positive", "neutral", "negative"].includes(parsed.sentiment)
+      ? parsed.sentiment
+      : null;
+    const rawOutcome = typeof parsed.outcome === "string" ? parsed.outcome.trim().toLowerCase() : "";
+    const outcome = CALL_OUTCOMES.includes(rawOutcome) ? rawOutcome : "unknown";
+
+    return { summary, sentiment, outcome };
   } catch (err) {
     log("error", {
       message: "generateSummaryAndSentiment failed",
@@ -480,6 +503,6 @@ export async function generateSummaryAndSentiment(transcript) {
       error: err?.message ?? String(err),
     });
     captureException(err);
-    return { summary: null, sentiment: null };
+    return fallback;
   }
 }

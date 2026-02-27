@@ -360,14 +360,14 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       captureException(err, { callSid });
     });
 
-    // Generate summary and sentiment for completed calls (fire-and-forget)
+    // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
       (async () => {
         const transcript = await db.fetchCallTranscript(dbCallId);
         if (transcript.length > 0) {
-          const { summary, sentiment } =
+          const { summary, sentiment, outcome } =
             await geminiService.generateSummaryAndSentiment(transcript);
-          await db.updateCallSummary(callSid, summary, sentiment);
+          await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
       })().catch((err) => {
         log("error", { callSid, message: "Summary generation failed", code: "summary_error" });
