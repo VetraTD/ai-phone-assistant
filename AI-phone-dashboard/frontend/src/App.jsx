@@ -27,10 +27,20 @@ function badgeStyle(type) {
   return base;
 }
 
+function kpiCardStyle() {
+  return {
+    border: "1px solid #333",
+    borderRadius: 10,
+    padding: 10,
+    background: "#0f0f0f",
+  };
+}
+
 function App() {
   const API = import.meta.env.VITE_API_URL;
 
   const [business, setBusiness] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
 
   const [calls, setCalls] = useState([]);
   const [selectedCallId, setSelectedCallId] = useState(null);
@@ -55,10 +65,27 @@ function App() {
 
   // Load business header info
   useEffect(() => {
+    if (!API) return;
+
     axios
       .get(`${API}/api/businesses/${BUSINESS_ID}`)
       .then((res) => setBusiness(res.data))
       .catch((err) => console.error(err));
+  }, [API]);
+
+  // Load KPI analytics (auto-refresh every 15s)
+  useEffect(() => {
+    if (!API) return;
+
+    const fetchAnalytics = () =>
+      axios
+        .get(`${API}/api/analytics/${BUSINESS_ID}`)
+        .then((res) => setAnalytics(res.data))
+        .catch((err) => console.error(err));
+
+    fetchAnalytics();
+    const t = setInterval(fetchAnalytics, 15000);
+    return () => clearInterval(t);
   }, [API]);
 
   // Compute date range based on preset unless custom
@@ -101,6 +128,8 @@ function App() {
 
   // Load calls list (refetch whenever filters change)
   useEffect(() => {
+    if (!API) return;
+
     setCalls([]);
 
     axios
@@ -118,6 +147,8 @@ function App() {
 
   // Load one call + transcript + appointments + customer requests
   const loadCallDetails = (id) => {
+    if (!API) return;
+
     setSelectedCallId(id);
 
     axios
@@ -149,9 +180,49 @@ function App() {
         <div style={{ fontSize: 28, fontWeight: 800 }}>
           {business?.name ?? "AI Call Dashboard"}
         </div>
+
         {business ? (
           <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
             {business.phone_number} • {business.timezone}
+          </div>
+        ) : null}
+
+        {analytics ? (
+          <div
+            style={{
+              marginTop: 12,
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            <div style={kpiCardStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Calls Today</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {analytics.calls_today ?? 0}
+              </div>
+            </div>
+
+            <div style={kpiCardStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Appointments Today</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {analytics.appointments_today ?? 0}
+              </div>
+            </div>
+
+            <div style={kpiCardStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Follow Ups Needed</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {analytics.followups_needed ?? 0}
+              </div>
+            </div>
+
+            <div style={kpiCardStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Positive Calls</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {(analytics.positive_calls_percent ?? 0) + "%"}
+              </div>
+            </div>
           </div>
         ) : null}
       </div>
@@ -570,7 +641,7 @@ function App() {
                   )}
                 </div>
 
-                {/* ✅ Customer Requests */}
+                {/* Customer Requests */}
                 <div style={{ fontWeight: 800, flex: "0 0 auto", marginTop: 8 }}>
                   Customer Requests
                 </div>

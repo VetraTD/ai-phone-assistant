@@ -211,6 +211,81 @@ app.get("/api/businesses/:id", async (req, res) => {
   }
 });
 
+
+
+
+app.get("/api/analytics/:businessId", async (req, res) => {
+  const { businessId } = req.params;
+
+  try {
+
+    const callsToday = await pool.query(`
+      SELECT COUNT(*) 
+      FROM calls
+      WHERE business_id = $1
+      AND started_at::date = CURRENT_DATE
+    `, [businessId]);
+
+    const appointmentsToday = await pool.query(`
+      SELECT COUNT(*)
+      FROM appointments a
+      JOIN calls c ON a.call_id = c.id
+      WHERE c.business_id = $1
+      AND a.created_at::date = CURRENT_DATE
+    `, [businessId]);
+
+    const followups = await pool.query(`
+      SELECT COUNT(DISTINCT c.id)
+      FROM customer_requests cr
+      JOIN calls c ON cr.call_id = c.id
+      WHERE c.business_id = $1
+    `, [businessId]);
+
+    const sentiment = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE sentiment = 'positive') * 100.0 /
+        NULLIF(COUNT(*),0) as percent
+      FROM calls
+      WHERE business_id = $1
+    `, [businessId]);
+
+    res.json({
+      calls_today: Number(callsToday.rows[0].count),
+      appointments_today: Number(appointmentsToday.rows[0].count),
+      followups_needed: Number(followups.rows[0].count),
+      positive_calls_percent: Math.round(
+        sentiment.rows[0].percent || 0
+      )
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {
