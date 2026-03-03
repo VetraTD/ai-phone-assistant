@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { supabase } from "./supabaseClient"; //recently added for test login for business connection
 
 const BUSINESS_ID = "33ac8c19-a73b-4d5e-9b92-d6f949d5e4ab";
 
@@ -38,6 +39,33 @@ function kpiCardStyle() {
 
 function App() {
   const API = import.meta.env.VITE_API_URL;
+
+  // ✅ TEMP AUTH TEST (add here)
+  useEffect(() => {
+    const testMe = async () => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: "joshua.tite@me.com",
+        password: "JGt070103@"
+      });
+
+      if (error) {
+        console.error("Login failed:", error.message);
+        return;
+      }
+
+      const token = data.session.access_token;
+
+      const r = await fetch("http://localhost:3001/api/me", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      console.log("✅ /api/me response:", await r.json());
+    };
+
+    testMe();
+  }, []);
 
   const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);

@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const authenticate = require("./middleware/authMiddleware");
 
 // ✅ DB pool (make sure src/db/index.js exports the pool)
 const pool = require("./db");
@@ -264,22 +265,34 @@ app.get("/api/analytics/:businessId", async (req, res) => {
   }
 });
 
+app.get("/api/me", authenticate, async (req, res) => {
+  try {
+    const authUserId = req.authUser.id; // ✅ important
 
+    const result = await pool.query(
+      "select business_id from users where id = $1",
+      [authUserId]
+    );
 
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not linked to business" });
+    }
 
+    const businessId = result.rows[0].business_id;
 
+    const business = await pool.query(
+      "select * from businesses where id = $1",
+      [businessId]
+    );
 
-
-
-
-
-
-
-
-
-
-
-
+    res.json({
+      authUserId,
+      business: business.rows[0],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
