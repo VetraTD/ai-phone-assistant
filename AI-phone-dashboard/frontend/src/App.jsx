@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
-import { supabase } from "./supabaseClient"; //recently added for test login for business connection
-
-const BUSINESS_ID = "33ac8c19-a73b-4d5e-9b92-d6f949d5e4ab";
+import { api } from "./api"; // axios instance that injects Authorization: Bearer <token>
+import { supabase } from "./supabaseClient";
+import Login from "./Login";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -22,9 +21,12 @@ function badgeStyle(type) {
     background: "#141414",
     opacity: 0.9,
   };
-  if (t === "callback") return { ...base, border: "1px solid #2f5b8a", background: "#152233" };
-  if (t === "message") return { ...base, border: "1px solid #4b7b3b", background: "#142114" };
-  if (t === "appointment") return { ...base, border: "1px solid #7b5a2a", background: "#221a10" };
+  if (t === "callback")
+    return { ...base, border: "1px solid #2f5b8a", background: "#152233" };
+  if (t === "message")
+    return { ...base, border: "1px solid #4b7b3b", background: "#142114" };
+  if (t === "appointment")
+    return { ...base, border: "1px solid #7b5a2a", background: "#221a10" };
   return base;
 }
 
@@ -38,35 +40,15 @@ function kpiCardStyle() {
 }
 
 function App() {
-  const API = import.meta.env.VITE_API_URL;
+  // ✅ session state
+  const [session, setSession] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
 
-  // ✅ TEMP AUTH TEST (add here)
-  useEffect(() => {
-    const testMe = async () => {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: "joshua.tite@me.com",
-        password: "JGt070103@"
-      });
+  // ✅ /api/me state
+  const [meLoading, setMeLoading] = useState(true);
+  const [meError, setMeError] = useState(null);
 
-      if (error) {
-        console.error("Login failed:", error.message);
-        return;
-      }
-
-      const token = data.session.access_token;
-
-      const r = await fetch("http://localhost:3001/api/me", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      console.log("✅ /api/me response:", await r.json());
-    };
-
-    testMe();
-  }, []);
-
+  const [businessId, setBusinessId] = useState(null);
   const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);
 
@@ -86,35 +68,69 @@ function App() {
   const [toDate, setToDate] = useState(() => formatDateYYYYMMDD(new Date()));
   const [hasAppointments, setHasAppointments] = useState(false);
 
-  // New filters you added in backend
-  const [sentiment, setSentiment] = useState("all"); // all | positive | neutral | negative | unknown
-  const [hasSummary, setHasSummary] = useState("all"); // all | true | false
+  // New filters
+  const [sentiment, setSentiment] = useState("all");
+  const [hasSummary, setHasSummary] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
 
-  // Load business header info
+  // ✅ 1) Boot session + listen for auth changes
   useEffect(() => {
-    if (!API) return;
+    const boot = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+      setCheckingSession(false);
+    };
 
-    axios
-      .get(`${API}/api/businesses/${BUSINESS_ID}`)
-      .then((res) => setBusiness(res.data))
-      .catch((err) => console.error(err));
-  }, [API]);
+    boot();
 
-  // Load KPI analytics (auto-refresh every 15s)
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        setSession(newSession);
+      }
+    );
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // ✅ 2) Load /api/me ONLY if logged in (session exists)
   useEffect(() => {
-    if (!API) return;
+    const loadMe = async () => {
+      // not logged in -> don't call backend
+      if (!session) {
+        setBusiness(null);
+        setBusinessId(null);
+        setAnalytics(null);
+        setCalls([]);
+        setCallDetails(null);
+        setSelectedCallId(null);
 
-    const fetchAnalytics = () =>
-      axios
-        .get(`${API}/api/analytics/${BUSINESS_ID}`)
-        .then((res) => setAnalytics(res.data))
-        .catch((err) => console.error(err));
+        setMeError(null);
+        setMeLoading(false);
+        return;
+      }
 
-    fetchAnalytics();
-    const t = setInterval(fetchAnalytics, 15000);
-    return () => clearInterval(t);
-  }, [API]);
+      setMeLoading(true);
+      setMeError(null);
+
+      try {
+        const res = await api.get("/api/me");
+        const biz = res.data.business || null;
+
+        setBusiness(biz);
+        setBusinessId(biz?.id || null);
+      } catch (err) {
+        const msg =
+          err?.response?.data?.error || err?.message || "Unknown error";
+        setMeError(msg);
+        setBusiness(null);
+        setBusinessId(null);
+      } finally {
+        setMeLoading(false);
+      }
+    };
+
+    loadMe();
+  }, [session]);
 
   // Compute date range based on preset unless custom
   useEffect(() => {
@@ -130,7 +146,9 @@ function App() {
   }, [datePreset]);
 
   const callsQueryParams = useMemo(() => {
-    const params = { business_id: BUSINESS_ID };
+    const params = {};
+
+    if (businessId) params.business_id = businessId;
 
     if (status !== "all") params.status = status;
     if (callerSearch.trim()) params.caller = callerSearch.trim();
@@ -144,6 +162,7 @@ function App() {
 
     return params;
   }, [
+    businessId,
     status,
     callerSearch,
     fromDate,
@@ -154,14 +173,29 @@ function App() {
     needsFollowUp,
   ]);
 
+  // Load KPI analytics (auto-refresh every 15s)
+  useEffect(() => {
+    if (!businessId) return;
+
+    const fetchAnalytics = () =>
+      api
+        .get(`/api/analytics/${businessId}`)
+        .then((res) => setAnalytics(res.data))
+        .catch((err) => console.error(err));
+
+    fetchAnalytics();
+    const t = setInterval(fetchAnalytics, 15000);
+    return () => clearInterval(t);
+  }, [businessId]);
+
   // Load calls list (refetch whenever filters change)
   useEffect(() => {
-    if (!API) return;
+    if (!businessId) return;
 
     setCalls([]);
 
-    axios
-      .get(`${API}/api/calls`, { params: callsQueryParams })
+    api
+      .get(`/api/calls`, { params: callsQueryParams })
       .then((res) => {
         setCalls(res.data);
 
@@ -171,16 +205,16 @@ function App() {
         }
       })
       .catch((err) => console.error(err));
-  }, [API, callsQueryParams, selectedCallId]);
+  }, [businessId, callsQueryParams, selectedCallId]);
 
   // Load one call + transcript + appointments + customer requests
   const loadCallDetails = (id) => {
-    if (!API) return;
+    if (!businessId) return;
 
     setSelectedCallId(id);
 
-    axios
-      .get(`${API}/api/calls/${id}`)
+    api
+      .get(`/api/calls/${id}`)
       .then((res) => setCallDetails(res.data))
       .catch((err) => console.error(err));
   };
@@ -201,6 +235,80 @@ function App() {
     setNeedsFollowUp(false);
   };
 
+  // ✅ 3) Correct render flow:
+  // - first: check session
+  // - if no session: show login
+  // - then: load /api/me
+  if (checkingSession) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          fontFamily: "system-ui",
+          color: "white",
+          background: "#0b0b0b",
+          minHeight: "100vh",
+        }}
+      >
+        Loading session…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Login />;
+  }
+
+  if (meLoading) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          fontFamily: "system-ui",
+          color: "white",
+          background: "#0b0b0b",
+          minHeight: "100vh",
+        }}
+      >
+        Loading dashboard…
+      </div>
+    );
+  }
+
+  if (meError) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          fontFamily: "system-ui",
+          color: "white",
+          background: "#0b0b0b",
+          minHeight: "100vh",
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>
+          Couldn’t load account
+        </div>
+        <div style={{ opacity: 0.8, marginBottom: 14 }}>{meError}</div>
+
+        <button
+          onClick={() => supabase.auth.signOut()}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            border: "1px solid #444",
+            background: "#111",
+            color: "white",
+            cursor: "pointer",
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
+
+  // ✅ dashboard
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       {/* Top bar */}
@@ -208,6 +316,28 @@ function App() {
         <div style={{ fontSize: 28, fontWeight: 800 }}>
           {business?.name ?? "AI Call Dashboard"}
         </div>
+
+
+      <button
+  onClick={async () => {
+    await supabase.auth.signOut();
+    // optional: hard reset so everything clears
+    window.location.reload();
+  }}
+  style={{
+    marginLeft: 12,
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "1px solid #444",
+    background: "#111",
+    color: "white",
+    cursor: "pointer",
+    fontSize: 12,
+  }}
+>
+  Logout
+</button>
+
 
         {business ? (
           <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
@@ -232,14 +362,18 @@ function App() {
             </div>
 
             <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Appointments Today</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                Appointments Today
+              </div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
                 {analytics.appointments_today ?? 0}
               </div>
             </div>
 
             <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Follow Ups Needed</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                Follow Ups Needed
+              </div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
                 {analytics.followups_needed ?? 0}
               </div>
@@ -277,7 +411,13 @@ function App() {
             minHeight: 0,
           }}
         >
-          <div style={{ padding: 12, borderBottom: "1px solid #333", fontWeight: 700 }}>
+          <div
+            style={{
+              padding: 12,
+              borderBottom: "1px solid #333",
+              fontWeight: 700,
+            }}
+          >
             Calls
           </div>
 
@@ -291,9 +431,19 @@ function App() {
               gap: 10,
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+              }}
+            >
               <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Status</div>
+                <div
+                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                >
+                  Status
+                </div>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
@@ -316,7 +466,11 @@ function App() {
               </div>
 
               <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Date Range</div>
+                <div
+                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                >
+                  Date Range
+                </div>
                 <select
                   value={datePreset}
                   onChange={(e) => setDatePreset(e.target.value)}
@@ -338,9 +492,19 @@ function App() {
             </div>
 
             {datePreset === "custom" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 10,
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>From</div>
+                  <div
+                    style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                  >
+                    From
+                  </div>
                   <input
                     type="date"
                     value={fromDate}
@@ -356,7 +520,11 @@ function App() {
                   />
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>To</div>
+                  <div
+                    style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                  >
+                    To
+                  </div>
                   <input
                     type="date"
                     value={toDate}
@@ -374,9 +542,19 @@ function App() {
               </div>
             ) : null}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+              }}
+            >
               <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Sentiment</div>
+                <div
+                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                >
+                  Sentiment
+                </div>
                 <select
                   value={sentiment}
                   onChange={(e) => setSentiment(e.target.value)}
@@ -398,7 +576,11 @@ function App() {
               </div>
 
               <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Summary</div>
+                <div
+                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
+                >
+                  Summary
+                </div>
                 <select
                   value={hasSummary}
                   onChange={(e) => setHasSummary(e.target.value)}
@@ -419,7 +601,9 @@ function App() {
             </div>
 
             <div>
-              <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Caller search</div>
+              <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
+                Caller search
+              </div>
               <input
                 value={callerSearch}
                 onChange={(e) => setCallerSearch(e.target.value)}
@@ -436,7 +620,14 @@ function App() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 13,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={hasAppointments}
@@ -445,7 +636,14 @@ function App() {
                 Only calls with appointments
               </label>
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 13,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={needsFollowUp}
@@ -492,17 +690,31 @@ function App() {
                 key={call.id}
                 onClick={() => loadCallDetails(call.id)}
                 style={{
-                  border: selectedCallId === call.id ? "2px solid white" : "1px solid #444",
+                  border:
+                    selectedCallId === call.id
+                      ? "2px solid white"
+                      : "1px solid #444",
                   borderRadius: 10,
                   padding: 12,
                   marginBottom: 10,
                   cursor: "pointer",
-                  background: selectedCallId === call.id ? "#151515" : "transparent",
+                  background:
+                    selectedCallId === call.id ? "#151515" : "transparent",
                 }}
               >
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>{call.caller_number}</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  {call.caller_number}
+                </div>
 
-                <div style={{ display: "flex", gap: 12, fontSize: 13, opacity: 0.9, flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    fontSize: 13,
+                    opacity: 0.9,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <span>
                     <b>Status:</b> {call.status}
                   </span>
@@ -518,13 +730,17 @@ function App() {
                 </div>
 
                 <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-                  {call.started_at ? new Date(call.started_at).toLocaleString() : ""}
+                  {call.started_at
+                    ? new Date(call.started_at).toLocaleString()
+                    : ""}
                 </div>
               </div>
             ))}
 
             {!calls.length ? (
-              <div style={{ opacity: 0.7, padding: 10 }}>No calls match filters.</div>
+              <div style={{ opacity: 0.7, padding: 10 }}>
+                No calls match filters.
+              </div>
             ) : null}
           </div>
         </div>
@@ -540,7 +756,13 @@ function App() {
             minHeight: 0,
           }}
         >
-          <div style={{ padding: 12, borderBottom: "1px solid #333", fontWeight: 700 }}>
+          <div
+            style={{
+              padding: 12,
+              borderBottom: "1px solid #333",
+              fontWeight: 700,
+            }}
+          >
             Call Details
           </div>
 
@@ -556,15 +778,31 @@ function App() {
           >
             {!callDetails ? (
               <div style={{ opacity: 0.7 }}>
-                Select a call on the left to view transcript + appointments + customer requests.
+                Select a call on the left to view transcript + appointments +
+                customer requests.
               </div>
             ) : (
               <>
                 {/* Call Info */}
-                <div style={{ border: "1px solid #444", borderRadius: 10, padding: 14, flex: "0 0 auto" }}>
-                  <div style={{ fontWeight: 800, marginBottom: 10 }}>Call Info</div>
+                <div
+                  style={{
+                    border: "1px solid #444",
+                    borderRadius: 10,
+                    padding: 14,
+                    flex: "0 0 auto",
+                  }}
+                >
+                  <div style={{ fontWeight: 800, marginBottom: 10 }}>
+                    Call Info
+                  </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", rowGap: 6 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "140px 1fr",
+                      rowGap: 6,
+                    }}
+                  >
                     <div style={{ opacity: 0.7 }}>Status</div>
                     <div>{callDetails.call.status}</div>
 
@@ -587,7 +825,9 @@ function App() {
                 </div>
 
                 {/* Transcript */}
-                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>Transcript</div>
+                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>
+                  Transcript
+                </div>
 
                 <div
                   style={{
@@ -600,13 +840,22 @@ function App() {
                   }}
                 >
                   {callDetails.transcript?.length ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                      }}
+                    >
                       {callDetails.transcript.map((line) => (
                         <div
                           key={line.id}
                           style={{
                             display: "flex",
-                            justifyContent: line.speaker === "ai" ? "flex-start" : "flex-end",
+                            justifyContent:
+                              line.speaker === "ai"
+                                ? "flex-start"
+                                : "flex-end",
                           }}
                         >
                           <div
@@ -615,11 +864,18 @@ function App() {
                               padding: 10,
                               borderRadius: 12,
                               border: "1px solid #444",
-                              background: line.speaker === "ai" ? "#141414" : "#1b2a3a",
+                              background:
+                                line.speaker === "ai" ? "#141414" : "#1b2a3a",
                               whiteSpace: "pre-wrap",
                             }}
                           >
-                            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                opacity: 0.7,
+                                marginBottom: 4,
+                              }}
+                            >
                               {line.speaker}
                             </div>
                             {line.message}
@@ -633,15 +889,27 @@ function App() {
                 </div>
 
                 {/* Appointments */}
-                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>Appointments</div>
+                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>
+                  Appointments
+                </div>
 
                 <div style={{ flex: "0 0 auto" }}>
                   {callDetails.appointments?.length ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                      }}
+                    >
                       {callDetails.appointments.map((appt) => (
                         <div
                           key={appt.id}
-                          style={{ border: "1px solid #444", borderRadius: 10, padding: 12 }}
+                          style={{
+                            border: "1px solid #444",
+                            borderRadius: 10,
+                            padding: 12,
+                          }}
                         >
                           <div style={{ fontWeight: 700, marginBottom: 6 }}>
                             {appt.client_name} — {appt.client_phone}
@@ -649,7 +917,9 @@ function App() {
 
                           <div style={{ fontSize: 13, opacity: 0.85 }}>
                             <b>Scheduled:</b>{" "}
-                            {appt.scheduled_at ? new Date(appt.scheduled_at).toLocaleString() : "-"}
+                            {appt.scheduled_at
+                              ? new Date(appt.scheduled_at).toLocaleString()
+                              : "-"}
                           </div>
 
                           <div style={{ fontSize: 13, opacity: 0.85 }}>
@@ -657,7 +927,13 @@ function App() {
                           </div>
 
                           {appt.notes ? (
-                            <div style={{ fontSize: 13, opacity: 0.85, marginTop: 6 }}>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                opacity: 0.85,
+                                marginTop: 6,
+                              }}
+                            >
                               <b>Notes:</b> {appt.notes}
                             </div>
                           ) : null}
@@ -665,47 +941,92 @@ function App() {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ opacity: 0.7 }}>No appointments linked to this call.</div>
+                    <div style={{ opacity: 0.7 }}>
+                      No appointments linked to this call.
+                    </div>
                   )}
                 </div>
 
                 {/* Customer Requests */}
-                <div style={{ fontWeight: 800, flex: "0 0 auto", marginTop: 8 }}>
+                <div
+                  style={{
+                    fontWeight: 800,
+                    flex: "0 0 auto",
+                    marginTop: 8,
+                  }}
+                >
                   Customer Requests
                 </div>
 
                 <div style={{ flex: "0 0 auto" }}>
                   {callDetails.customer_requests?.length ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                      }}
+                    >
                       {callDetails.customer_requests.map((r) => (
                         <div
                           key={r.id}
-                          style={{ border: "1px solid #444", borderRadius: 10, padding: 12 }}
+                          style={{
+                            border: "1px solid #444",
+                            borderRadius: 10,
+                            padding: 12,
+                          }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                            <span style={badgeStyle(r.request_type)}>{r.request_type}</span>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              marginBottom: 6,
+                            }}
+                          >
+                            <span style={badgeStyle(r.request_type)}>
+                              {r.request_type}
+                            </span>
                             <div style={{ fontWeight: 700 }}>
                               {r.caller_name || "Unknown"}{" "}
-                              <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                              <span
+                                style={{ opacity: 0.7, fontWeight: 400 }}
+                              >
                                 — {r.callback_number || ""}
                               </span>
                             </div>
                           </div>
 
                           {r.message ? (
-                            <div style={{ fontSize: 13, opacity: 0.9, whiteSpace: "pre-wrap" }}>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                opacity: 0.9,
+                                whiteSpace: "pre-wrap",
+                              }}
+                            >
                               {r.message}
                             </div>
                           ) : null}
 
-                          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
-                            {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
+                          <div
+                            style={{
+                              fontSize: 12,
+                              opacity: 0.6,
+                              marginTop: 8,
+                            }}
+                          >
+                            {r.created_at
+                              ? new Date(r.created_at).toLocaleString()
+                              : ""}
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div style={{ opacity: 0.7 }}>No customer requests for this call.</div>
+                    <div style={{ opacity: 0.7 }}>
+                      No customer requests for this call.
+                    </div>
                   )}
                 </div>
               </>
