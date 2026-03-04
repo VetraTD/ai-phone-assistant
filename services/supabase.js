@@ -134,6 +134,26 @@ export function loadConfig(business) {
 }
 
 /**
+ * Fetch a business by ID (for notifications and dashboard).
+ * @param {string} businessId - UUID of the business
+ * @returns {Promise<object|null>} The business row or null
+ */
+export async function fetchBusinessById(businessId) {
+  if (!supabase || !businessId) return null;
+  const { data, error } = await supabase
+    .from("businesses")
+    .select("*")
+    .eq("id", businessId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("fetchBusinessById error:", error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
  * Look up a business by its Twilio phone number.
  * @param {string} twilioNumber - The "To" number from Twilio
  * @returns {Promise<object|null>} The business row or null
@@ -240,6 +260,30 @@ export async function fetchCallTranscript(callId) {
     return [];
   }
   return data || [];
+}
+
+/**
+ * Update per-business notification settings (for dashboard API).
+ * @param {string} businessId
+ * @param {{ notification_email?: string | null, notification_phone?: string | null, notifications_enabled?: boolean }} payload
+ * @returns {Promise<boolean>} true if update succeeded
+ */
+export async function updateBusinessNotificationSettings(businessId, payload) {
+  if (!supabase || !businessId) return false;
+  const updates = {};
+  if (payload.notification_email !== undefined) updates.notification_email = payload.notification_email || null;
+  if (payload.notification_phone !== undefined) updates.notification_phone = payload.notification_phone || null;
+  if (payload.notifications_enabled !== undefined) updates.notifications_enabled = !!payload.notifications_enabled;
+  if (Object.keys(updates).length === 0) return true;
+  const { error } = await supabase
+    .from("businesses")
+    .update(updates)
+    .eq("id", businessId);
+  if (error) {
+    console.error("updateBusinessNotificationSettings error:", error.message);
+    return false;
+  }
+  return true;
 }
 
 /**
