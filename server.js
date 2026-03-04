@@ -68,6 +68,26 @@ function isTransferRequest(speech) {
 }
 
 // ---------------------------------------------------------------------------
+// Transfer policy resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine if transfer is currently allowed based on config.transferPolicy
+ * and business hours.
+ * @param {object} config - normalised business config
+ * @returns {boolean}
+ */
+function resolveTransferAllowed(config) {
+  if (config.transferPolicy === "never") return false;
+  if (config.transferPolicy === "always") return true;
+  // "business_hours_only" — need to check if currently open
+  if (config.transferPolicy === "business_hours_only") {
+    return geminiService.isBusinessOpen(config);
+  }
+  return true; // default allow
+}
+
+// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 
@@ -122,7 +142,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // ---- 1. Get or create state ----
   const state = callState.getState(callSid);
 
-  // ---- 2. Load config & create call row on first hit ----
+  // ---- 2. Load config, knowledge & create call row on first hit ----
   if (!state.config) {
     let business = null;
     if (db.isEnabled()) {
@@ -136,6 +156,8 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           state.businessId = business.id;
           state.callerNumber = callerNumber;
         }
+        // Load business knowledge Q&A for prompt injection
+        state.knowledge = await db.fetchBusinessKnowledge(business.id);
       } else {
         console.warn(
           `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
@@ -143,6 +165,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       }
     }
     state.config = db.loadConfig(business);
+    if (!state.knowledge) state.knowledge = [];
   }
 
   const config = state.config;
@@ -165,7 +188,17 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     if (state.step === STEPS.GREETING) {
       state.step = STEPS.IDENTIFY_INTENT;
       log("call_started", { callSid, requestId });
-      return res.send(buildGatherAndRedirect(VOICE_URL, config.greeting));
+
+      // Build greeting with optional recording disclosure
+      let greetingText = "";
+      if (config.recordingDisclosureEnabled) {
+        greetingText =
+          (config.recordingDisclosureText ||
+            "This call may be recorded for quality and training purposes.") + " ";
+      }
+      greetingText += config.greeting;
+
+      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText));
     }
 
     // Progressive silence: re-listen → prompt → goodbye
@@ -190,17 +223,17 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // ---- 7. Escape-trigger check (before Gemini) ----
   if (isTransferRequest(speechResult)) {
     const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
-    const transferred = !!transferNumber;
-    log("transfer_requested", { callSid, requestId, transferred });
+    const canTransfer = !!transferNumber && resolveTransferAllowed(config);
+    log("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
 
-    if (transferNumber) {
+    if (canTransfer) {
       const msg = "Transferring you now. Please hold.";
       logTranscript(state, speechResult, msg);
       state.step = STEPS.ENDING;
       return res.send(buildSayAndDial(msg, transferNumber));
     }
-    // No transfer number configured — acknowledge and keep helping
-    const msg =
+    // Transfer not possible — use escalation message or default
+    const msg = config.escalationMessage ||
       "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
     return res.send(buildSayGatherRedirect(VOICE_URL, msg));
@@ -222,20 +255,32 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   const geminiStart = Date.now();
 
   geminiService
-    .getReply(state.history, speechResult, state.step, state.intent, config)
-    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs }) => {
+    .getReply(state.history, speechResult, state.step, state.intent, config, {
+      knowledge: state.knowledge || [],
+      transferAllowed: resolveTransferAllowed(config),
+    })
+    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults }) => {
       const turnLatencyMs = Date.now() - geminiStart;
 
       // -- Update conversation history --
       state.history.push({ role: "user", parts: [{ text: speechResult }] });
       state.history.push({ role: "model", parts: [{ text: replyText }] });
 
+      // -- Log tool call results --
+      if (toolResults && toolResults.length > 0) {
+        for (const tr of toolResults) {
+          log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
+        }
+      }
+
       // -- Step transitions based on function calls --
       if (intentArgs) {
+        const prevStep = state.step;
         state.intent = intentArgs.intent;
         if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
           state.step = STEPS.GATHER_DETAILS;
         }
+        log("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
       }
 
       if (appointmentArgs && state.businessId) {
@@ -270,6 +315,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
       if (endCallArgs) {
         state.step = STEPS.ENDING;
+        log("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
       }
 
       if (customerRequestArgs && state.businessId) {

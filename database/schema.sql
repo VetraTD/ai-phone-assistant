@@ -4,32 +4,40 @@
 -- ============================================================
 
 -- 1. Businesses (tenant root + per-business config)
---    greeting:               Custom greeting text. NULL → app default.
---    business_hours:         JSON {"open_time":"HH:MM","close_time":"HH:MM"} (24h).
---                            NULL → always open.
---    transfer_phone_number:  E.164 number for live transfer. NULL → env fallback.
---    allowed_tasks:          JSON array of enabled AI tasks.
---                            Default: ["book_appointment","general_question"].
---    voice_style:            Optional tone/style hint for the AI. NULL → default.
 CREATE TABLE businesses (
-  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name                  text NOT NULL,
-  phone_number          text,
-  timezone              text DEFAULT 'America/Chicago',
-  greeting              text,
-  business_hours        jsonb DEFAULT '{"open_time":"09:00","close_time":"17:00"}',
-  transfer_phone_number text,
-  allowed_tasks         jsonb DEFAULT '["book_appointment","general_question"]',
-  voice_style           text,
-  main_phone            text,
-  general_info          text,
-  address_line1         text,
-  address_line2         text,
-  city                  text,
-  state_region          text,
-  postal_code           text,
-  country               text,
-  created_at            timestamptz DEFAULT now()
+  id                           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                         text NOT NULL,
+  phone_number                 text,
+  timezone                     text DEFAULT 'America/Chicago',
+  greeting                     text,
+  business_hours               jsonb DEFAULT '{"open_time":"09:00","close_time":"17:00"}',
+  transfer_phone_number        text,
+  allowed_tasks                jsonb DEFAULT '["book_appointment","general_question"]',
+  voice_style                  text,
+  main_phone                   text,
+  general_info                 text,
+  address_line1                text,
+  address_line2                text,
+  city                         text,
+  state_region                 text,
+  postal_code                  text,
+  country                      text,
+  -- Phase 6: overhaul columns
+  business_summary             text,
+  recording_disclosure_enabled boolean DEFAULT false,
+  recording_disclosure_text    text,
+  off_limits_topics            jsonb,
+  after_hours_policy           text DEFAULT 'take_message',
+  escalation_message           text,
+  booking_policy               text,
+  transfer_policy              text DEFAULT 'always',
+  staff_names                  jsonb,
+  service_area                 text,
+  services                     jsonb,
+  languages_spoken             jsonb DEFAULT '["en"]',
+  booking_url                  text,
+  caller_data_policy           text,
+  created_at                   timestamptz DEFAULT now()
 );
 
 -- 2. Users (dashboard users per business)
@@ -92,7 +100,7 @@ CREATE TABLE appointments (
   created_at   timestamptz DEFAULT now()
 );
 
--- 7. Customer requests (messages, callbacks, etc. from AI tool record_customer_request)
+-- 7. Customer requests (messages, callbacks, etc.)
 CREATE TABLE customer_requests (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id     uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -106,18 +114,24 @@ CREATE TABLE customer_requests (
   created_at      timestamptz DEFAULT now()
 );
 
+-- 8. Business knowledge (Q&A pairs injected into AI prompt)
+CREATE TABLE business_knowledge (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  question    text NOT NULL,
+  answer      text NOT NULL,
+  category    text,
+  priority    int DEFAULT 0,
+  enabled     boolean DEFAULT true,
+  created_at  timestamptz DEFAULT now()
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
 
--- Dashboard call list: filter by business, newest first
 CREATE INDEX idx_calls_business_started ON calls (business_id, started_at DESC);
-
--- Loading a call's transcript
 CREATE INDEX idx_transcripts_call ON call_transcripts (call_id);
-
--- Appointment list for a business
 CREATE INDEX idx_appointments_business_scheduled ON appointments (business_id, scheduled_at);
-
--- Customer requests list for a business
 CREATE INDEX idx_customer_requests_business_created ON customer_requests (business_id, created_at DESC);
+CREATE INDEX idx_business_knowledge_business_enabled ON business_knowledge (business_id, enabled, priority DESC);
