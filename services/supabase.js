@@ -45,17 +45,18 @@ function normalizeAllowedTasks(raw) {
   return filtered.length > 0 ? filtered : DEFAULT_ALLOWED_TASKS;
 }
 
+/** Valid after-hours policy values. */
+const AFTER_HOURS_POLICIES = ["take_message", "offer_callback", "book_later", "transfer_if_possible"];
+
+/** Valid transfer policy values. */
+const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];
+
 /**
  * Build a normalised config object from a business row.
  * If `business` is null (no business found / DB disabled), returns safe defaults.
  *
  * @param {object|null} business - Row from the businesses table (via select("*"))
- * @returns {{ businessName: string, greeting: string, timezone: string,
- *             businessHours: {open_time:string,close_time:string}|null,
- *             transferPhoneNumber: string|null, allowedTasks: string[],
- *             voiceStyle: string|null, mainPhone: string|null, generalInfo: string|null,
- *             addressLine1?: string|null, addressLine2?: string|null, city?: string|null,
- *             stateRegion?: string|null, postalCode?: string|null, country?: string|null }}
+ * @returns {object} Normalised config with all fields defaulted
  */
 export function loadConfig(business) {
   if (!business) {
@@ -63,7 +64,7 @@ export function loadConfig(business) {
       businessName: "our office",
       greeting: DEFAULT_GREETING,
       timezone: process.env.TIMEZONE || "America/Chicago",
-      businessHours: null, // always open when no business configured
+      businessHours: null,
       transferPhoneNumber: null,
       allowedTasks: DEFAULT_ALLOWED_TASKS,
       voiceStyle: null,
@@ -75,8 +76,29 @@ export function loadConfig(business) {
       stateRegion: null,
       postalCode: null,
       country: null,
+      businessSummary: null,
+      recordingDisclosureEnabled: false,
+      recordingDisclosureText: null,
+      offLimitsTopics: [],
+      afterHoursPolicy: "take_message",
+      escalationMessage: null,
+      bookingPolicy: null,
+      transferPolicy: "always",
+      staffNames: [],
+      serviceArea: null,
+      services: [],
+      languagesSpoken: ["en"],
+      bookingUrl: null,
+      callerDataPolicy: null,
     };
   }
+
+  const afterHoursPolicy = AFTER_HOURS_POLICIES.includes(business.after_hours_policy)
+    ? business.after_hours_policy
+    : "take_message";
+  const transferPolicy = TRANSFER_POLICIES.includes(business.transfer_policy)
+    ? business.transfer_policy
+    : "always";
 
   return {
     businessName: business.name || "our office",
@@ -94,6 +116,20 @@ export function loadConfig(business) {
     stateRegion: business.state_region || null,
     postalCode: business.postal_code || null,
     country: business.country || null,
+    businessSummary: business.business_summary || null,
+    recordingDisclosureEnabled: !!business.recording_disclosure_enabled,
+    recordingDisclosureText: business.recording_disclosure_text || null,
+    offLimitsTopics: Array.isArray(business.off_limits_topics) ? business.off_limits_topics : [],
+    afterHoursPolicy,
+    escalationMessage: business.escalation_message || null,
+    bookingPolicy: business.booking_policy || null,
+    transferPolicy,
+    staffNames: Array.isArray(business.staff_names) ? business.staff_names : [],
+    serviceArea: business.service_area || null,
+    services: Array.isArray(business.services) ? business.services : [],
+    languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
+    bookingUrl: business.booking_url || null,
+    callerDataPolicy: business.caller_data_policy || null,
   };
 }
 
@@ -303,4 +339,26 @@ export async function createCustomerRequest({
     return null;
   }
   return data.id;
+}
+
+/**
+ * Fetch enabled business_knowledge entries for a business, ordered by priority DESC.
+ * @param {string} businessId
+ * @param {number} [limit=15] - Max entries to return
+ * @returns {Promise<Array<{question: string, answer: string, category: string|null}>>}
+ */
+export async function fetchBusinessKnowledge(businessId, limit = 15) {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("business_knowledge")
+    .select("question, answer, category")
+    .eq("business_id", businessId)
+    .eq("enabled", true)
+    .order("priority", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("fetchBusinessKnowledge error:", error.message);
+    return [];
+  }
+  return data || [];
 }
