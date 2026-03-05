@@ -460,17 +460,6 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
           const { summary, sentiment, outcome } =
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
-          if (businessId) {
-            notifications
-              .notifyCallCompleted({
-                businessId,
-                call: { ...callContext, endedAt: new Date().toISOString() },
-                summary,
-                sentiment,
-                outcome,
-              })
-              .catch(() => {});
-          }
         }
       })().catch((err) => {
         log("error", { callSid, message: "Summary generation failed", code: "summary_error" });

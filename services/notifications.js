@@ -1,12 +1,16 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import * as db from "./supabase.js";
 
 const NOTIFICATIONS_ENABLED = process.env.NOTIFICATIONS_ENABLED === "true";
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "notifications@onboarding.resend.dev";
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
+const SMTP_SECURE = process.env.SMTP_SECURE === "true";
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_FROM_EMAIL = process.env.SMTP_FROM_EMAIL || SMTP_USER;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
@@ -14,13 +18,19 @@ const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
 const RATE_LIMIT_PER_MINUTE = 15;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-/** @type {Resend | null} */
-let resendClient = null;
+/** @type {import("nodemailer").Transporter | null} */
+let mailTransport = null;
 /** @type {ReturnType<typeof twilio> | null} */
 let twilioClient = null;
 
-if (RESEND_API_KEY) {
-  resendClient = new Resend(RESEND_API_KEY);
+if (SMTP_USER && SMTP_PASS) {
+  mailTransport = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    tls: { rejectUnauthorized: false },
+  });
 }
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
   twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
@@ -70,22 +80,19 @@ export async function loadBusinessNotificationConfig(businessId) {
 }
 
 /**
- * Send an email. Logs errors; never throws.
+ * Send an email via SMTP (e.g. Gmail). Logs errors; never throws.
  * @param {{ to: string, subject: string, text: string, html?: string }} opts
  */
 async function sendEmail({ to, subject, text, html }) {
-  if (!resendClient) return;
+  if (!mailTransport) return;
   try {
-    const { error } = await resendClient.emails.send({
-      from: RESEND_FROM_EMAIL,
+    await mailTransport.sendMail({
+      from: SMTP_FROM_EMAIL,
       to,
       subject,
+      text,
       html: html || text.replace(/\n/g, "<br>\n"),
     });
-    if (error) {
-      log("error", { message: "Resend send failed", code: "notification_email", error: error.message });
-      captureException(new Error(`Resend: ${error.message}`), { to, subject });
-    }
   } catch (err) {
     log("error", { message: err?.message, code: "notification_email" });
     captureException(err, { to, subject });
