@@ -267,34 +267,78 @@ app.get("/api/analytics/:businessId", async (req, res) => {
 
 app.get("/api/me", authenticate, async (req, res) => {
   try {
-    const authUserId = req.authUser.id; // ✅ important
+    const authUserId = req.authUser.id;
 
     const result = await pool.query(
-      "select business_id from users where id = $1",
+      `select business_id from users where id = $1`,
       [authUserId]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "User not linked to business" });
+    // no user row OR user has no business yet -> onboarding
+    if (result.rows.length === 0 || !result.rows[0].business_id) {
+      return res.json({ authUserId, needsOnboarding: true });
     }
 
     const businessId = result.rows[0].business_id;
 
-    const business = await pool.query(
-      "select * from businesses where id = $1",
+    const businessRes = await pool.query(
+      `select * from businesses where id = $1`,
       [businessId]
     );
 
-    res.json({
+    return res.json({
       authUserId,
-      business: business.rows[0],
+      needsOnboarding: false,
+      business: businessRes.rows[0] || null,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
+app.post("/api/onboarding/create-business", authenticate, async (req, res) => {
+  try {
+    const userId = req.authUser.id;
+    const { name, timezone } = req.body;
 
+    if (!name || !timezone) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+
+const email = req.authUser.email;
+
+await pool.query(
+  `insert into users (id, email)
+   values ($1, $2)
+   on conflict (id) do update set email = excluded.email`,
+  [userId, email]
+);
+
+    // 2) create business
+    const bizRes = await pool.query(
+      `insert into businesses (name, timezone)
+       values ($1, $2)
+       returning *`,
+      [name, timezone]
+    );
+
+    const newBiz = bizRes.rows[0];
+
+    // 3) link user -> business
+    await pool.query(
+      `update users set business_id = $1 where id = $2`,
+      [newBiz.id, userId]
+    );
+
+    // 4) return business
+    return res.json({ business: newBiz });
+  } catch (err) {
+    console.error("create-business failed:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 
 

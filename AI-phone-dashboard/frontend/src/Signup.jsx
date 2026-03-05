@@ -1,31 +1,48 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
 
-export default function Login({ onSwitchToSignup }) {
+export default function Signup({ onSwitchToLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
-  const signIn = async (e) => {
+  const handleSignup = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccessMsg("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
 
     setLoading(false);
-    if (error) setError(error.message);
-    // ✅ On success, App.jsx's onAuthStateChange will detect session and load dashboard/onboarding
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    // If email confirmations are ON, Supabase will return no session
+    const hasSession = !!data?.session;
+
+    if (hasSession) {
+      // ✅ user is signed in immediately → App.jsx will take over (onboarding/dashboard)
+      setSuccessMsg("Account created — signing you in…");
+    } else {
+      // ✅ user must confirm email first
+      setSuccessMsg("Account created — check your email to confirm, then sign in.");
+    }
   };
 
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
       <form
-        onSubmit={signIn}
+        onSubmit={handleSignup}
         style={{
           width: 360,
           border: "1px solid #333",
@@ -35,7 +52,7 @@ export default function Login({ onSwitchToSignup }) {
           color: "white",
         }}
       >
-        <h2 style={{ marginTop: 0 }}>Sign in</h2>
+        <h2 style={{ marginTop: 0 }}>Sign up</h2>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <input
@@ -79,16 +96,17 @@ export default function Login({ onSwitchToSignup }) {
               cursor: "pointer",
             }}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? "Creating..." : "Create account"}
           </button>
 
           {error ? <div style={{ color: "tomato", fontSize: 13 }}>{error}</div> : null}
+          {successMsg ? <div style={{ color: "#9be59b", fontSize: 13 }}>{successMsg}</div> : null}
 
           <div style={{ fontSize: 13, opacity: 0.8, marginTop: 8 }}>
-            Need an account?{" "}
+            Already have an account?{" "}
             <button
               type="button"
-              onClick={onSwitchToSignup}
+              onClick={onSwitchToLogin}
               style={{
                 background: "transparent",
                 border: "none",
@@ -98,7 +116,7 @@ export default function Login({ onSwitchToSignup }) {
                 padding: 0,
               }}
             >
-              Sign up
+              Sign in
             </button>
           </div>
         </div>

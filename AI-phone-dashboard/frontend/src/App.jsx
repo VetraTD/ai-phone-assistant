@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api"; // axios instance that injects Authorization: Bearer <token>
 import { supabase } from "./supabaseClient";
+
 import Login from "./Login";
+import Signup from "./Signup";
+import Onboarding from "./Onboarding";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -40,14 +43,21 @@ function kpiCardStyle() {
 }
 
 function App() {
+  // ✅ auth view toggle (login <-> signup)
+  const [authView, setAuthView] = useState("login"); // "login" | "signup"
+
   // ✅ session state
   const [session, setSession] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
+
+  // ✅ onboarding state
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   // ✅ /api/me state
   const [meLoading, setMeLoading] = useState(true);
   const [meError, setMeError] = useState(null);
 
+  // ✅ business + dashboard data
   const [businessId, setBusinessId] = useState(null);
   const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -77,15 +87,18 @@ function App() {
   useEffect(() => {
     const boot = async () => {
       const { data } = await supabase.auth.getSession();
-      setSession(data.session);
+      setSession(data.session || null);
       setCheckingSession(false);
+
+      // if user is already logged in, auth view doesn't matter
+      // if not logged in, keep whatever authView was
     };
 
     boot();
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, newSession) => {
-        setSession(newSession);
+        setSession(newSession || null);
       }
     );
 
@@ -104,6 +117,8 @@ function App() {
         setCallDetails(null);
         setSelectedCallId(null);
 
+        setNeedsOnboarding(false);
+
         setMeError(null);
         setMeLoading(false);
         return;
@@ -114,13 +129,15 @@ function App() {
 
       try {
         const res = await api.get("/api/me");
-        const biz = res.data.business || null;
 
+        const needs = !!res.data.needsOnboarding;
+        setNeedsOnboarding(needs);
+
+        const biz = needs ? null : res.data.business || null;
         setBusiness(biz);
         setBusinessId(biz?.id || null);
       } catch (err) {
-        const msg =
-          err?.response?.data?.error || err?.message || "Unknown error";
+        const msg = err?.response?.data?.error || err?.message || "Unknown error";
         setMeError(msg);
         setBusiness(null);
         setBusinessId(null);
@@ -235,10 +252,7 @@ function App() {
     setNeedsFollowUp(false);
   };
 
-  // ✅ 3) Correct render flow:
-  // - first: check session
-  // - if no session: show login
-  // - then: load /api/me
+  // ✅ 3) Render flow
   if (checkingSession) {
     return (
       <div
@@ -255,8 +269,26 @@ function App() {
     );
   }
 
+  // Not logged in -> show login/signup toggle
   if (!session) {
-    return <Login />;
+    return authView === "login" ? (
+      <Login onSwitchToSignup={() => setAuthView("signup")} />
+    ) : (
+      <Signup onSwitchToLogin={() => setAuthView("login")} />
+    );
+  }
+
+  // Logged in but needs onboarding -> show onboarding
+  if (needsOnboarding) {
+    return (
+      <Onboarding
+        onComplete={(biz) => {
+          setNeedsOnboarding(false);
+          setBusiness(biz);
+          setBusinessId(biz.id);
+        }}
+      />
+    );
   }
 
   if (meLoading) {
@@ -292,7 +324,10 @@ function App() {
         <div style={{ opacity: 0.8, marginBottom: 14 }}>{meError}</div>
 
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.location.reload();
+          }}
           style={{
             padding: "10px 14px",
             borderRadius: 10,
@@ -317,27 +352,24 @@ function App() {
           {business?.name ?? "AI Call Dashboard"}
         </div>
 
-
-      <button
-  onClick={async () => {
-    await supabase.auth.signOut();
-    // optional: hard reset so everything clears
-    window.location.reload();
-  }}
-  style={{
-    marginLeft: 12,
-    padding: "8px 12px",
-    borderRadius: 10,
-    border: "1px solid #444",
-    background: "#111",
-    color: "white",
-    cursor: "pointer",
-    fontSize: 12,
-  }}
->
-  Logout
-</button>
-
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.location.reload();
+          }}
+          style={{
+            marginLeft: 12,
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #444",
+            background: "#111",
+            color: "white",
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+        >
+          Logout
+        </button>
 
         {business ? (
           <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
@@ -362,18 +394,14 @@ function App() {
             </div>
 
             <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>
-                Appointments Today
-              </div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Appointments Today</div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
                 {analytics.appointments_today ?? 0}
               </div>
             </div>
 
             <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>
-                Follow Ups Needed
-              </div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Follow Ups Needed</div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
                 {analytics.followups_needed ?? 0}
               </div>
@@ -439,9 +467,7 @@ function App() {
               }}
             >
               <div>
-                <div
-                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                >
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                   Status
                 </div>
                 <select
@@ -466,9 +492,7 @@ function App() {
               </div>
 
               <div>
-                <div
-                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                >
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                   Date Range
                 </div>
                 <select
@@ -500,9 +524,7 @@ function App() {
                 }}
               >
                 <div>
-                  <div
-                    style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                  >
+                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                     From
                   </div>
                   <input
@@ -520,9 +542,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <div
-                    style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                  >
+                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                     To
                   </div>
                   <input
@@ -550,9 +570,7 @@ function App() {
               }}
             >
               <div>
-                <div
-                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                >
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                   Sentiment
                 </div>
                 <select
@@ -576,9 +594,7 @@ function App() {
               </div>
 
               <div>
-                <div
-                  style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}
-                >
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
                   Summary
                 </div>
                 <select
@@ -989,9 +1005,7 @@ function App() {
                             </span>
                             <div style={{ fontWeight: 700 }}>
                               {r.caller_name || "Unknown"}{" "}
-                              <span
-                                style={{ opacity: 0.7, fontWeight: 400 }}
-                              >
+                              <span style={{ opacity: 0.7, fontWeight: 400 }}>
                                 — {r.callback_number || ""}
                               </span>
                             </div>
