@@ -6,6 +6,7 @@ import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
+import * as notifications from "./services/notifications.js";
 import {
   buildGatherAndRedirect,
   buildSayGatherRedirect,
@@ -92,6 +93,7 @@ function resolveTransferAllowed(config) {
 // ---------------------------------------------------------------------------
 
 app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
 // --- Root: confirm server is running ---
 app.get("/", (req, res) => {
@@ -288,6 +290,8 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           [appointmentArgs.service_type, appointmentArgs.notes]
             .filter(Boolean)
             .join(" — ") || null;
+        const twilioNumber = req.body.To || "";
+        state.step = STEPS.CONFIRM;
         db.createAppointment({
           businessId: state.businessId,
           callId: state.dbCallId || null,
@@ -295,22 +299,37 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           clientPhone: state.callerNumber || null,
           scheduledAt: appointmentArgs.scheduled_at,
           notes,
-        }).catch((err) => {
-          log("error", {
-            callSid,
-            requestId,
-            message: "createAppointment failed",
-            code: "db_appointment",
+        })
+          .then((dbId) => {
+            if (dbId) {
+              log("appointment_booked", {
+                callSid,
+                requestId,
+                scheduled_at: appointmentArgs.scheduled_at,
+              });
+              notifications
+                .notifyAppointmentBooked({
+                  businessId: state.businessId,
+                  appointment: {
+                    scheduled_at: appointmentArgs.scheduled_at,
+                    client_name: appointmentArgs.client_name || null,
+                    client_phone: state.callerNumber || null,
+                    notes,
+                  },
+                  call: { callerNumber: state.callerNumber, twilioNumber },
+                })
+                .catch(() => {});
+            }
+          })
+          .catch((err) => {
+            log("error", {
+              callSid,
+              requestId,
+              message: "createAppointment failed",
+              code: "db_appointment",
+            });
+            captureException(err, { callSid, requestId });
           });
-          captureException(err, { callSid, requestId });
-        });
-        state.step = STEPS.CONFIRM;
-
-        log("appointment_booked", {
-          callSid,
-          requestId,
-          scheduled_at: appointmentArgs.scheduled_at,
-        });
       }
 
       if (endCallArgs) {
@@ -327,15 +346,33 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           callbackNumber: customerRequestArgs.callback_number || null,
           message: customerRequestArgs.message || null,
           preferredTime: customerRequestArgs.preferred_time || null,
-        }).catch((err) => {
-          log("error", {
-            callSid,
-            requestId,
-            message: "createCustomerRequest failed",
-            code: "db_customer_request",
+        })
+          .then((id) => {
+            if (id) {
+              notifications
+                .notifyCustomerRequest({
+                  businessId: state.businessId,
+                  customerRequest: {
+                    request_type: customerRequestArgs.request_type || "message",
+                    caller_name: customerRequestArgs.caller_name || null,
+                    callback_number: customerRequestArgs.callback_number || null,
+                    message: customerRequestArgs.message || null,
+                    preferred_time: customerRequestArgs.preferred_time || null,
+                  },
+                  call: { callerNumber: state.callerNumber },
+                })
+                .catch(() => {});
+            }
+          })
+          .catch((err) => {
+            log("error", {
+              callSid,
+              requestId,
+              message: "createCustomerRequest failed",
+              code: "db_customer_request",
+            });
+            captureException(err, { callSid, requestId });
           });
-          captureException(err, { callSid, requestId });
-        });
       }
 
       // -- Persist transcript --
@@ -399,12 +436,21 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
     const state = callState.getState(callSid);
     const dbCallId = state.dbCallId;
+    const businessId = state.businessId;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
+    const callContext = {
+      callerNumber: req.body.From || null,
+      twilioNumber: req.body.To || null,
+    };
 
     db.completeCall(callSid, status, duration).catch((err) => {
       log("error", { callSid, message: "completeCall failed", code: "db_complete" });
       captureException(err, { callSid });
     });
+
+    if (businessId && ["failed", "busy", "no-answer"].includes(status)) {
+      notifications.notifyCallMissed({ businessId, call: callContext, status }).catch(() => {});
+    }
 
     // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
@@ -423,6 +469,42 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     callState.remove(callSid);
   }
   res.status(200).end();
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard API: per-business notification settings (placeholder for future UI)
+// ---------------------------------------------------------------------------
+
+app.get("/api/businesses/:id/notifications", async (req, res) => {
+  const businessId = req.params.id;
+  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  const business = await db.fetchBusinessById(businessId);
+  if (!business) return res.status(404).json({ error: "Business not found" });
+  res.json({
+    notification_email: business.notification_email ?? null,
+    notification_phone: business.notification_phone ?? null,
+    notifications_enabled: business.notifications_enabled !== false,
+  });
+});
+
+app.put("/api/businesses/:id/notifications", async (req, res) => {
+  const businessId = req.params.id;
+  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  const business = await db.fetchBusinessById(businessId);
+  if (!business) return res.status(404).json({ error: "Business not found" });
+  const body = req.body || {};
+  const payload = {};
+  if (body.notification_email !== undefined) payload.notification_email = body.notification_email;
+  if (body.notification_phone !== undefined) payload.notification_phone = body.notification_phone;
+  if (body.notifications_enabled !== undefined) payload.notifications_enabled = body.notifications_enabled;
+  const ok = await db.updateBusinessNotificationSettings(businessId, payload);
+  if (!ok) return res.status(500).json({ error: "Update failed" });
+  const updated = await db.fetchBusinessById(businessId);
+  res.json({
+    notification_email: updated?.notification_email ?? null,
+    notification_phone: updated?.notification_phone ?? null,
+    notifications_enabled: updated?.notifications_enabled !== false,
+  });
 });
 
 // ---------------------------------------------------------------------------
