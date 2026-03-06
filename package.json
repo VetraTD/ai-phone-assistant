@@ -5,7 +5,9 @@
   "description": "An intelligent AI-powered phone assistant designed to handle calls, take messages, and more using natural language processing.",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "repository": {
     "type": "git",
@@ -18,6 +20,10 @@
     "url": "https://github.com/VetraTD/ai-phone-assistant/issues"
   },
   "homepage": "https://github.com/VetraTD/ai-phone-assistant#readme",
+  "devDependencies": {
+    "supertest": "^7.0.0",
+    "vitest": "^2.0.0"
+  },
   "dependencies": {
     "@google/genai": "^1.0.0",
     "@sentry/node": "^9.0.0",
