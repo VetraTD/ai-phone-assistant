@@ -107,7 +107,6 @@ app.use(
   })
 );
 
-app.options("*", cors());
 // --- Root: confirm server is running ---
 app.get("/", (req, res) => {
   res.type("text/plain");
