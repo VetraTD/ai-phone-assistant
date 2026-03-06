@@ -1,4 +1,5 @@
 import "dotenv/config";
+import cors from "cors";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
 import * as twilio from "twilio";
@@ -96,6 +97,17 @@ function resolveTransferAllowed(config) {
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+      : ["http://localhost:5173"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.options("*", cors());
 // --- Root: confirm server is running ---
 app.get("/", (req, res) => {
   res.type("text/plain");
