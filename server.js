@@ -7,6 +7,7 @@ import crypto from "crypto";
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
 import * as notifications from "./services/notifications.js";
+import * as twilioNumbers from "./services/twilioNumbers.js";
 import {
   buildGatherAndRedirect,
   buildSayGatherRedirect,
@@ -508,21 +509,92 @@ app.put("/api/businesses/:id/notifications", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Start
+// Dashboard API: search and buy Twilio phone numbers
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Voice webhook: ${VOICE_URL}`);
-  console.log(
-    `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
-  );
-  if (TRANSFER_NUMBER) {
-    console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
-  } else {
-    console.log(`TRANSFER_NUMBER not set — per-business transfer or disabled.`);
+app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
+  const businessId = req.params.id;
+  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  const business = await db.fetchBusinessById(businessId);
+  if (!business) return res.status(404).json({ error: "Business not found" });
+  const country = req.query.country || "US";
+  const areaCode = req.query.areaCode || undefined;
+  const type = req.query.type === "tollFree" ? "tollFree" : "local";
+  try {
+    const numbers = await twilioNumbers.searchAvailableNumbers({
+      country,
+      areaCode,
+      type,
+      limit: 20,
+    });
+    return res.json({ numbers });
+  } catch (err) {
+    console.error("searchAvailableNumbers error:", err.message);
+    return res.status(502).json({
+      error: err.message || "Failed to search available phone numbers",
+    });
   }
-  console.log(
-    `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`
-  );
 });
+
+app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
+  const businessId = req.params.id;
+  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  const business = await db.fetchBusinessById(businessId);
+  if (!business) return res.status(404).json({ error: "Business not found" });
+  const phoneNumber = req.body?.phone_number;
+  if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
+    return res.status(400).json({ error: "Missing or invalid phone_number in body" });
+  }
+  const trimmed = phoneNumber.trim();
+  if (business.phone_number) {
+    if (business.phone_number === trimmed) {
+      return res.json({ phone_number: trimmed, sid: null });
+    }
+    return res.status(409).json({
+      error: "Business already has a phone number",
+    });
+  }
+  try {
+    const result = await twilioNumbers.purchaseNumber({
+      phoneNumber: trimmed,
+      voiceUrl: VOICE_URL,
+      statusCallback: STATUS_URL,
+    });
+    const ok = await db.updateBusinessPhoneNumber(businessId, result.phone_number);
+    if (!ok) {
+      return res.status(500).json({ error: "Failed to save phone number to business" });
+    }
+    return res.json({ phone_number: result.phone_number, sid: result.sid });
+  } catch (err) {
+    console.error("purchaseNumber error:", err.message);
+    const message =
+      err.code === 21608 || err.message?.includes("available")
+        ? "This number is no longer available. Please search again."
+        : err.message || "Failed to purchase phone number";
+    return res.status(400).json({ error: message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Start (skip when running tests)
+// ---------------------------------------------------------------------------
+
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Voice webhook: ${VOICE_URL}`);
+    console.log(
+      `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
+    );
+    if (TRANSFER_NUMBER) {
+      console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
+    } else {
+      console.log(`TRANSFER_NUMBER not set — per-business transfer or disabled.`);
+    }
+    console.log(
+      `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`
+    );
+  });
+}
