@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import "./Login.css";
 
 export default function Login({ onSwitchToSignup }) {
   const [email, setEmail] = useState("");
@@ -19,90 +20,91 @@ export default function Login({ onSwitchToSignup }) {
 
     setLoading(false);
     if (error) setError(error.message);
-    // ✅ On success, App.jsx's onAuthStateChange will detect session and load dashboard/onboarding
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <form
-        onSubmit={signIn}
-        style={{
-          width: 360,
-          border: "1px solid #333",
-          padding: 20,
-          borderRadius: 12,
-          background: "#0f0f0f",
-          color: "white",
-        }}
-      >
-        <h2 style={{ marginTop: 0 }}>Sign in</h2>
+    <div className="login-page">
+      <div className="login-shell">
+        <div className="login-brand">
+          <div className="login-badge">AI Call Dashboard</div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
-            type="email"
-            required
-            style={{
-              padding: 10,
-              borderRadius: 8,
-              border: "1px solid #444",
-              background: "#111",
-              color: "white",
-            }}
-          />
+          <h1>Run your business calls with clarity.</h1>
 
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            type="password"
-            required
-            style={{
-              padding: 10,
-              borderRadius: 8,
-              border: "1px solid #444",
-              background: "#111",
-              color: "white",
-            }}
-          />
+          <p>
+            Track calls, capture appointments, monitor follow-ups, and turn
+            conversations into action from one clean dashboard.
+          </p>
 
-          <button
-            disabled={loading}
-            style={{
-              padding: 10,
-              borderRadius: 8,
-              border: "1px solid #444",
-              background: "#111",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
+          <div className="login-features">
+            <div className="login-feature">
+              <span className="login-feature-dot" />
+              <span>Call transcripts and summaries</span>
+            </div>
 
-          {error ? <div style={{ color: "tomato", fontSize: 13 }}>{error}</div> : null}
+            <div className="login-feature">
+              <span className="login-feature-dot" />
+              <span>Appointments and customer requests</span>
+            </div>
 
-          <div style={{ fontSize: 13, opacity: 0.8, marginTop: 8 }}>
-            Need an account?{" "}
-            <button
-              type="button"
-              onClick={onSwitchToSignup}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "white",
-                textDecoration: "underline",
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              Sign up
-            </button>
+            <div className="login-feature">
+              <span className="login-feature-dot" />
+              <span>Business analytics and follow-up tracking</span>
+            </div>
           </div>
         </div>
-      </form>
+
+        <div className="login-card-wrap">
+          <form className="login-card" onSubmit={signIn}>
+            <div className="login-card-header">
+              <h2>Sign in</h2>
+              <p>Access your dashboard and manage your business calls.</p>
+            </div>
+
+            <div className="login-form">
+              <div className="login-field">
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  type="email"
+                  required
+                />
+              </div>
+
+              <div className="login-field">
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  type="password"
+                  required
+                />
+              </div>
+
+              {error ? <div className="login-error">{error}</div> : null}
+
+              <button className="login-button" disabled={loading}>
+                {loading ? "Signing in..." : "Sign in"}
+              </button>
+
+              <div className="login-footer">
+                <span>Need an account?</span>
+                <button
+                  type="button"
+                  onClick={onSwitchToSignup}
+                  className="login-link"
+                >
+                  Sign up
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

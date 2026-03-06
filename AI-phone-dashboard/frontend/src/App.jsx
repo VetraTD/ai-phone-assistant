@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "./api"; // axios instance that injects Authorization: Bearer <token>
+import { api } from "./api";
 import { supabase } from "./supabaseClient";
+
+import "./dashboard.css";
 
 import Login from "./Login";
 import Signup from "./Signup";
@@ -15,49 +17,225 @@ function formatDateYYYYMMDD(d) {
 
 function badgeStyle(type) {
   const t = (type || "").toLowerCase();
+
   const base = {
-    display: "inline-block",
-    padding: "3px 8px",
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
     borderRadius: 999,
     fontSize: 12,
-    border: "1px solid #444",
-    background: "#141414",
-    opacity: 0.9,
+    fontWeight: 600,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#e7eef7",
   };
-  if (t === "callback")
-    return { ...base, border: "1px solid #2f5b8a", background: "#152233" };
-  if (t === "message")
-    return { ...base, border: "1px solid #4b7b3b", background: "#142114" };
-  if (t === "appointment")
-    return { ...base, border: "1px solid #7b5a2a", background: "#221a10" };
+
+  if (t === "callback") {
+    return {
+      ...base,
+      background: "rgba(76,129,255,0.14)",
+      border: "1px solid rgba(76,129,255,0.28)",
+      color: "#bcd3ff",
+    };
+  }
+
+  if (t === "message") {
+    return {
+      ...base,
+      background: "rgba(67,182,110,0.14)",
+      border: "1px solid rgba(67,182,110,0.28)",
+      color: "#bcefc9",
+    };
+  }
+
+  if (t === "appointment") {
+    return {
+      ...base,
+      background: "rgba(255,184,76,0.14)",
+      border: "1px solid rgba(255,184,76,0.28)",
+      color: "#ffe0a8",
+    };
+  }
+
   return base;
 }
 
-function kpiCardStyle() {
+function getStatusPillStyle(status) {
+  const s = (status || "").toLowerCase();
+
+  const base = {
+    display: "inline-flex",
+    alignItems: "center",
+    height: 28,
+    padding: "0 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.05)",
+    color: "#dfe8f2",
+  };
+
+  if (s === "completed") {
+    return {
+      ...base,
+      background: "rgba(67,182,110,0.14)",
+      border: "1px solid rgba(67,182,110,0.28)",
+      color: "#bcefc9",
+    };
+  }
+
+  if (s === "failed" || s === "busy" || s === "no-answer") {
+    return {
+      ...base,
+      background: "rgba(255,107,107,0.14)",
+      border: "1px solid rgba(255,107,107,0.28)",
+      color: "#ffb9b9",
+    };
+  }
+
+  if (s === "in-progress") {
+    return {
+      ...base,
+      background: "rgba(76,129,255,0.14)",
+      border: "1px solid rgba(76,129,255,0.28)",
+      color: "#bcd3ff",
+    };
+  }
+
+  return base;
+}
+
+function getSentimentPillStyle(sentiment) {
+  const s = (sentiment || "").toLowerCase();
+
+  const base = {
+    display: "inline-flex",
+    alignItems: "center",
+    height: 28,
+    padding: "0 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.05)",
+    color: "#dfe8f2",
+  };
+
+  if (s === "positive") {
+    return {
+      ...base,
+      background: "rgba(67,182,110,0.14)",
+      border: "1px solid rgba(67,182,110,0.28)",
+      color: "#bcefc9",
+    };
+  }
+
+  if (s === "negative") {
+    return {
+      ...base,
+      background: "rgba(255,107,107,0.14)",
+      border: "1px solid rgba(255,107,107,0.28)",
+      color: "#ffb9b9",
+    };
+  }
+
+  if (s === "neutral") {
+    return {
+      ...base,
+      background: "rgba(255,255,255,0.06)",
+      border: "1px solid rgba(255,255,255,0.1)",
+      color: "#d6dfeb",
+    };
+  }
+
   return {
-    border: "1px solid #333",
-    borderRadius: 10,
-    padding: 10,
-    background: "#0f0f0f",
+    ...base,
+    background: "rgba(255,184,76,0.14)",
+    border: "1px solid rgba(255,184,76,0.28)",
+    color: "#ffe0a8",
   };
 }
 
-function App() {
-  // ✅ auth view toggle (login <-> signup)
-  const [authView, setAuthView] = useState("login"); // "login" | "signup"
+function LoadingScreen({ title, subtitle }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background:
+          "radial-gradient(circle at top left, rgba(45,110,255,0.12), transparent 30%), radial-gradient(circle at bottom right, rgba(31,209,184,0.10), transparent 28%), #08111b",
+        color: "#f4f7fb",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 460,
+          borderRadius: 24,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8, 14, 24, 0.82)",
+          boxShadow: "0 18px 50px rgba(0, 0, 0, 0.25)",
+          backdropFilter: "blur(10px)",
+          padding: 32,
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            margin: "0 auto 18px",
+            borderRadius: "50%",
+            border: "4px solid rgba(255,255,255,0.12)",
+            borderTopColor: "#58a4ff",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 800,
+            letterSpacing: "-0.03em",
+            marginBottom: 8,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            color: "#9bacbf",
+            fontSize: 15,
+            lineHeight: 1.6,
+          }}
+        >
+          {subtitle}
+        </div>
 
-  // ✅ session state
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [authView, setAuthView] = useState("login");
+
   const [session, setSession] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
 
-  // ✅ onboarding state
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
-  // ✅ /api/me state
   const [meLoading, setMeLoading] = useState(true);
   const [meError, setMeError] = useState(null);
 
-  // ✅ business + dashboard data
   const [businessId, setBusinessId] = useState(null);
   const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -66,7 +244,14 @@ function App() {
   const [selectedCallId, setSelectedCallId] = useState(null);
   const [callDetails, setCallDetails] = useState(null);
 
-  // Filters
+  const [callsLoading, setCallsLoading] = useState(false);
+  const [callsError, setCallsError] = useState(null);
+
+  const [callDetailsLoading, setCallDetailsLoading] = useState(false);
+  const [callDetailsError, setCallDetailsError] = useState(null);
+
+  const [analyticsError, setAnalyticsError] = useState(null);
+
   const [status, setStatus] = useState("all");
   const [callerSearch, setCallerSearch] = useState("");
   const [datePreset, setDatePreset] = useState("7");
@@ -78,20 +263,15 @@ function App() {
   const [toDate, setToDate] = useState(() => formatDateYYYYMMDD(new Date()));
   const [hasAppointments, setHasAppointments] = useState(false);
 
-  // New filters
   const [sentiment, setSentiment] = useState("all");
   const [hasSummary, setHasSummary] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
 
-  // ✅ 1) Boot session + listen for auth changes
   useEffect(() => {
     const boot = async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session || null);
       setCheckingSession(false);
-
-      // if user is already logged in, auth view doesn't matter
-      // if not logged in, keep whatever authView was
     };
 
     boot();
@@ -105,10 +285,8 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // ✅ 2) Load /api/me ONLY if logged in (session exists)
   useEffect(() => {
     const loadMe = async () => {
-      // not logged in -> don't call backend
       if (!session) {
         setBusiness(null);
         setBusinessId(null);
@@ -116,11 +294,11 @@ function App() {
         setCalls([]);
         setCallDetails(null);
         setSelectedCallId(null);
-
         setNeedsOnboarding(false);
-
         setMeError(null);
         setMeLoading(false);
+        setCallsError(null);
+        setCallDetailsError(null);
         return;
       }
 
@@ -149,7 +327,6 @@ function App() {
     loadMe();
   }, [session]);
 
-  // Compute date range based on preset unless custom
   useEffect(() => {
     if (datePreset === "custom") return;
 
@@ -190,25 +367,33 @@ function App() {
     needsFollowUp,
   ]);
 
-  // Load KPI analytics (auto-refresh every 15s)
   useEffect(() => {
     if (!businessId) return;
 
     const fetchAnalytics = () =>
       api
         .get(`/api/analytics/${businessId}`)
-        .then((res) => setAnalytics(res.data))
-        .catch((err) => console.error(err));
+        .then((res) => {
+          setAnalytics(res.data);
+          setAnalyticsError(null);
+        })
+        .catch((err) => {
+          console.error(err);
+          setAnalyticsError(
+            err?.response?.data?.error || err?.message || "Failed to load analytics"
+          );
+        });
 
     fetchAnalytics();
     const t = setInterval(fetchAnalytics, 15000);
     return () => clearInterval(t);
   }, [businessId]);
 
-  // Load calls list (refetch whenever filters change)
   useEffect(() => {
     if (!businessId) return;
 
+    setCallsLoading(true);
+    setCallsError(null);
     setCalls([]);
 
     api
@@ -219,30 +404,53 @@ function App() {
         if (selectedCallId && !res.data.some((c) => c.id === selectedCallId)) {
           setSelectedCallId(null);
           setCallDetails(null);
+          setCallDetailsError(null);
         }
       })
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        console.error(err);
+        setCallsError(
+          err?.response?.data?.error || err?.message || "Failed to load calls"
+        );
+      })
+      .finally(() => {
+        setCallsLoading(false);
+      });
   }, [businessId, callsQueryParams, selectedCallId]);
 
-  // Load one call + transcript + appointments + customer requests
   const loadCallDetails = (id) => {
     if (!businessId) return;
 
     setSelectedCallId(id);
+    setCallDetailsLoading(true);
+    setCallDetailsError(null);
 
     api
       .get(`/api/calls/${id}`)
-      .then((res) => setCallDetails(res.data))
-      .catch((err) => console.error(err));
+      .then((res) => {
+        setCallDetails(res.data);
+      })
+      .catch((err) => {
+        console.error(err);
+        setCallDetails(null);
+        setCallDetailsError(
+          err?.response?.data?.error || err?.message || "Failed to load call details"
+        );
+      })
+      .finally(() => {
+        setCallDetailsLoading(false);
+      });
   };
 
   const resetFilters = () => {
     setStatus("all");
     setCallerSearch("");
     setDatePreset("7");
+
     const d = new Date();
     const from = new Date();
     from.setDate(d.getDate() - 7);
+
     setFromDate(formatDateYYYYMMDD(from));
     setToDate(formatDateYYYYMMDD(d));
     setHasAppointments(false);
@@ -252,24 +460,15 @@ function App() {
     setNeedsFollowUp(false);
   };
 
-  // ✅ 3) Render flow
   if (checkingSession) {
     return (
-      <div
-        style={{
-          padding: 24,
-          fontFamily: "system-ui",
-          color: "white",
-          background: "#0b0b0b",
-          minHeight: "100vh",
-        }}
-      >
-        Loading session…
-      </div>
+      <LoadingScreen
+        title="Checking your session"
+        subtitle="Please wait while we securely restore your dashboard access."
+      />
     );
   }
 
-  // Not logged in -> show login/signup toggle
   if (!session) {
     return authView === "login" ? (
       <Login onSwitchToSignup={() => setAuthView("signup")} />
@@ -278,7 +477,6 @@ function App() {
     );
   }
 
-  // Logged in but needs onboarding -> show onboarding
   if (needsOnboarding) {
     return (
       <Onboarding
@@ -293,17 +491,10 @@ function App() {
 
   if (meLoading) {
     return (
-      <div
-        style={{
-          padding: 24,
-          fontFamily: "system-ui",
-          color: "white",
-          background: "#0b0b0b",
-          minHeight: "100vh",
-        }}
-      >
-        Loading dashboard…
-      </div>
+      <LoadingScreen
+        title="Loading dashboard"
+        subtitle="We’re gathering your business overview, calls, and analytics."
+      />
     );
   }
 
@@ -343,710 +534,454 @@ function App() {
     );
   }
 
-  // ✅ dashboard
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Top bar */}
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid #333" }}>
-        <div style={{ fontSize: 28, fontWeight: 800 }}>
-          {business?.name ?? "AI Call Dashboard"}
-        </div>
+    <div className="dashboard-page">
+      <div className="dashboard-shell">
+        <header className="dashboard-topbar">
+          <div className="dashboard-topbar-left">
+            <div className="dashboard-badge">AI Call Dashboard</div>
 
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            window.location.reload();
-          }}
-          style={{
-            marginLeft: 12,
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #444",
-            background: "#111",
-            color: "white",
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          Logout
-        </button>
+            <h1 className="dashboard-business-name">
+              {business?.name ?? "AI Call Dashboard"}
+            </h1>
 
-        {business ? (
-          <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
-            {business.phone_number} • {business.timezone}
+            {business ? (
+              <div className="dashboard-business-meta">
+                <span className="dashboard-meta-pill">
+                  {business.phone_number || "No phone number"}
+                </span>
+                <span className="dashboard-meta-pill">
+                  {business.timezone || "No timezone"}
+                </span>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+
+          <div className="dashboard-topbar-right">
+            <button
+              className="dashboard-logout"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.reload();
+              }}
+            >
+              Logout
+            </button>
+          </div>
+        </header>
 
         {analytics ? (
-          <div
-            style={{
-              marginTop: 12,
-              display: "grid",
-              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-              gap: 10,
-            }}
-          >
-            <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Calls Today</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {analytics.calls_today ?? 0}
-              </div>
+          <section className="dashboard-kpis">
+            <div className="kpi-card">
+              <div className="kpi-label">Calls Today</div>
+              <div className="kpi-value">{analytics.calls_today ?? 0}</div>
             </div>
 
-            <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Appointments Today</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {analytics.appointments_today ?? 0}
-              </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Appointments Today</div>
+              <div className="kpi-value">{analytics.appointments_today ?? 0}</div>
             </div>
 
-            <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Follow Ups Needed</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {analytics.followups_needed ?? 0}
-              </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Follow Ups Needed</div>
+              <div className="kpi-value">{analytics.followups_needed ?? 0}</div>
             </div>
 
-            <div style={kpiCardStyle()}>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Positive Calls</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
+            <div className="kpi-card">
+              <div className="kpi-label">Positive Calls</div>
+              <div className="kpi-value">
                 {(analytics.positive_calls_percent ?? 0) + "%"}
               </div>
             </div>
-          </div>
+          </section>
+        ) : analyticsError ? (
+          <section className="dashboard-kpis">
+            <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
+              <div className="kpi-label">Analytics</div>
+              <div className="empty-note">{analyticsError}</div>
+            </div>
+          </section>
         ) : null}
-      </div>
 
-      {/* Main split layout */}
-      <div
-        style={{
-          flex: 1,
-          display: "grid",
-          gridTemplateColumns: "420px 1fr",
-          gap: 16,
-          padding: 16,
-          overflow: "hidden",
-        }}
-      >
-        {/* LEFT: Calls list */}
-        <div
-          style={{
-            border: "1px solid #333",
-            borderRadius: 10,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <div
-            style={{
-              padding: 12,
-              borderBottom: "1px solid #333",
-              fontWeight: 700,
-            }}
-          >
-            Calls
-          </div>
-
-          {/* FILTER BAR */}
-          <div
-            style={{
-              padding: 12,
-              borderBottom: "1px solid #333",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 10,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                  Status
-                </div>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 8,
-                    borderRadius: 8,
-                    border: "1px solid #444",
-                    background: "#111",
-                    color: "white",
-                  }}
-                >
-                  <option value="all">All</option>
-                  <option value="completed">Completed</option>
-                  <option value="in-progress">In progress</option>
-                  <option value="failed">Failed</option>
-                  <option value="no-answer">No answer</option>
-                  <option value="busy">Busy</option>
-                </select>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                  Date Range
-                </div>
-                <select
-                  value={datePreset}
-                  onChange={(e) => setDatePreset(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 8,
-                    borderRadius: 8,
-                    border: "1px solid #444",
-                    background: "#111",
-                    color: "white",
-                  }}
-                >
-                  <option value="1">Last 24h</option>
-                  <option value="7">Last 7 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
+        <section className="dashboard-main">
+          <aside className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Calls</h2>
             </div>
 
-            {datePreset === "custom" ? (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                    From
-                  </div>
-                  <input
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      borderRadius: 8,
-                      border: "1px solid #444",
-                      background: "#111",
-                      color: "white",
-                    }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                    To
-                  </div>
-                  <input
-                    type="date"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      borderRadius: 8,
-                      border: "1px solid #444",
-                      background: "#111",
-                      color: "white",
-                    }}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 10,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                  Sentiment
-                </div>
-                <select
-                  value={sentiment}
-                  onChange={(e) => setSentiment(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 8,
-                    borderRadius: 8,
-                    border: "1px solid #444",
-                    background: "#111",
-                    color: "white",
-                  }}
-                >
-                  <option value="all">All</option>
-                  <option value="positive">Positive</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="negative">Negative</option>
-                  <option value="unknown">Unknown</option>
-                </select>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                  Summary
-                </div>
-                <select
-                  value={hasSummary}
-                  onChange={(e) => setHasSummary(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 8,
-                    borderRadius: 8,
-                    border: "1px solid #444",
-                    background: "#111",
-                    color: "white",
-                  }}
-                >
-                  <option value="all">All</option>
-                  <option value="true">Has summary</option>
-                  <option value="false">No summary</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                Caller search
-              </div>
-              <input
-                value={callerSearch}
-                onChange={(e) => setCallerSearch(e.target.value)}
-                placeholder="e.g. +4477 or 938887"
-                style={{
-                  width: "100%",
-                  padding: 8,
-                  borderRadius: 8,
-                  border: "1px solid #444",
-                  background: "#111",
-                  color: "white",
-                }}
-              />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={hasAppointments}
-                  onChange={(e) => setHasAppointments(e.target.checked)}
-                />
-                Only calls with appointments
-              </label>
-
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={needsFollowUp}
-                  onChange={(e) => setNeedsFollowUp(e.target.checked)}
-                />
-                Needs follow up
-              </label>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 10,
-                marginTop: 4,
-              }}
-            >
-              <div style={{ fontSize: 12, opacity: 0.6 }}>
-                Showing {calls.length} call{calls.length === 1 ? "" : "s"}
-              </div>
-
-              <button
-                onClick={resetFilters}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #444",
-                  background: "#111",
-                  color: "white",
-                  cursor: "pointer",
-                  fontSize: 12,
-                }}
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-
-          {/* CALL LIST */}
-          <div style={{ padding: 12, overflowY: "auto", minHeight: 0 }}>
-            {calls.map((call) => (
-              <div
-                key={call.id}
-                onClick={() => loadCallDetails(call.id)}
-                style={{
-                  border:
-                    selectedCallId === call.id
-                      ? "2px solid white"
-                      : "1px solid #444",
-                  borderRadius: 10,
-                  padding: 12,
-                  marginBottom: 10,
-                  cursor: "pointer",
-                  background:
-                    selectedCallId === call.id ? "#151515" : "transparent",
-                }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  {call.caller_number}
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    fontSize: 13,
-                    opacity: 0.9,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span>
-                    <b>Status:</b> {call.status}
-                  </span>
-                  <span>
-                    <b>Dur:</b> {call.duration_seconds ?? "-"}s
-                  </span>
-                  <span>
-                    <b>Sent:</b> {call.sentiment ?? "unknown"}
-                  </span>
-                  <span style={{ opacity: call.summary ? 0.9 : 0.6 }}>
-                    <b>Sum:</b> {call.summary ? "✓" : "–"}
-                  </span>
-                </div>
-
-                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-                  {call.started_at
-                    ? new Date(call.started_at).toLocaleString()
-                    : ""}
-                </div>
-              </div>
-            ))}
-
-            {!calls.length ? (
-              <div style={{ opacity: 0.7, padding: 10 }}>
-                No calls match filters.
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* RIGHT: Details */}
-        <div
-          style={{
-            border: "1px solid #333",
-            borderRadius: 10,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <div
-            style={{
-              padding: 12,
-              borderBottom: "1px solid #333",
-              fontWeight: 700,
-            }}
-          >
-            Call Details
-          </div>
-
-          <div
-            style={{
-              padding: 16,
-              minHeight: 0,
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              overflow: "hidden",
-            }}
-          >
-            {!callDetails ? (
-              <div style={{ opacity: 0.7 }}>
-                Select a call on the left to view transcript + appointments +
-                customer requests.
-              </div>
-            ) : (
-              <>
-                {/* Call Info */}
-                <div
-                  style={{
-                    border: "1px solid #444",
-                    borderRadius: 10,
-                    padding: 14,
-                    flex: "0 0 auto",
-                  }}
-                >
-                  <div style={{ fontWeight: 800, marginBottom: 10 }}>
-                    Call Info
+            <div className="panel-body">
+              <div className="filters-grid">
+                <div className="filter-row-2">
+                  <div className="filter-field">
+                    <label>Status</label>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                    >
+                      <option value="all">All</option>
+                      <option value="completed">Completed</option>
+                      <option value="in-progress">In progress</option>
+                      <option value="failed">Failed</option>
+                      <option value="no-answer">No answer</option>
+                      <option value="busy">Busy</option>
+                    </select>
                   </div>
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "140px 1fr",
-                      rowGap: 6,
-                    }}
-                  >
-                    <div style={{ opacity: 0.7 }}>Status</div>
-                    <div>{callDetails.call.status}</div>
+                  <div className="filter-field">
+                    <label>Date Range</label>
+                    <select
+                      value={datePreset}
+                      onChange={(e) => setDatePreset(e.target.value)}
+                    >
+                      <option value="1">Last 24h</option>
+                      <option value="7">Last 7 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                </div>
 
-                    <div style={{ opacity: 0.7 }}>Duration</div>
-                    <div>{callDetails.call.duration_seconds ?? "-"} sec</div>
-
-                    <div style={{ opacity: 0.7 }}>Started</div>
-                    <div>
-                      {callDetails.call.started_at
-                        ? new Date(callDetails.call.started_at).toLocaleString()
-                        : "-"}
+                {datePreset === "custom" ? (
+                  <div className="filter-row-2">
+                    <div className="filter-field">
+                      <label>From</label>
+                      <input
+                        type="date"
+                        value={fromDate}
+                        onChange={(e) => setFromDate(e.target.value)}
+                      />
                     </div>
 
-                    <div style={{ opacity: 0.7 }}>Summary</div>
-                    <div>{callDetails.call.summary ?? "No summary yet"}</div>
+                    <div className="filter-field">
+                      <label>To</label>
+                      <input
+                        type="date"
+                        value={toDate}
+                        onChange={(e) => setToDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                ) : null}
 
-                    <div style={{ opacity: 0.7 }}>Sentiment</div>
-                    <div>{callDetails.call.sentiment ?? "Unknown"}</div>
+                <div className="filter-row-2">
+                  <div className="filter-field">
+                    <label>Sentiment</label>
+                    <select
+                      value={sentiment}
+                      onChange={(e) => setSentiment(e.target.value)}
+                    >
+                      <option value="all">All</option>
+                      <option value="positive">Positive</option>
+                      <option value="neutral">Neutral</option>
+                      <option value="negative">Negative</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </div>
+
+                  <div className="filter-field">
+                    <label>Summary</label>
+                    <select
+                      value={hasSummary}
+                      onChange={(e) => setHasSummary(e.target.value)}
+                    >
+                      <option value="all">All</option>
+                      <option value="true">Has summary</option>
+                      <option value="false">No summary</option>
+                    </select>
                   </div>
                 </div>
 
-                {/* Transcript */}
-                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>
-                  Transcript
+                <div className="filter-field">
+                  <label>Caller search</label>
+                  <input
+                    value={callerSearch}
+                    onChange={(e) => setCallerSearch(e.target.value)}
+                    placeholder="e.g. +4477 or 938887"
+                  />
                 </div>
 
-                <div
-                  style={{
-                    border: "1px solid #444",
-                    borderRadius: 10,
-                    padding: 12,
-                    minHeight: 0,
-                    flex: "1 1 auto",
-                    overflowY: "auto",
-                  }}
-                >
-                  {callDetails.transcript?.length ? (
+                <div className="checkbox-list">
+                  <label className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={hasAppointments}
+                      onChange={(e) => setHasAppointments(e.target.checked)}
+                    />
+                    <span>Only calls with appointments</span>
+                  </label>
+
+                  <label className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={needsFollowUp}
+                      onChange={(e) => setNeedsFollowUp(e.target.checked)}
+                    />
+                    <span>Needs follow up</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="calls-toolbar">
+                <span>
+                  {callsLoading
+                    ? "Loading calls..."
+                    : `Showing ${calls.length} call${calls.length === 1 ? "" : "s"}`}
+                </span>
+
+                <button className="reset-button" onClick={resetFilters}>
+                  Reset
+                </button>
+              </div>
+
+              <div className="calls-list">
+                {callsLoading ? (
+                  <div className="empty-note">Loading calls…</div>
+                ) : callsError ? (
+                  <div className="empty-note">{callsError}</div>
+                ) : !calls.length ? (
+                  <div className="empty-note">
+                    No calls match these filters.
+                  </div>
+                ) : (
+                  calls.map((call) => (
                     <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 10,
-                      }}
+                      key={call.id}
+                      onClick={() => loadCallDetails(call.id)}
+                      className={`call-card ${
+                        selectedCallId === call.id ? "is-active" : ""
+                      }`}
                     >
-                      {callDetails.transcript.map((line) => (
+                      <div className="call-card-top">
                         <div
-                          key={line.id}
-                          style={{
-                            display: "flex",
-                            justifyContent:
-                              line.speaker === "ai"
-                                ? "flex-start"
-                                : "flex-end",
-                          }}
+                          className="call-number"
+                          style={{ fontSize: 18, marginBottom: 0 }}
                         >
-                          <div
-                            style={{
-                              maxWidth: "70%",
-                              padding: 10,
-                              borderRadius: 12,
-                              border: "1px solid #444",
-                              background:
-                                line.speaker === "ai" ? "#141414" : "#1b2a3a",
-                              whiteSpace: "pre-wrap",
-                            }}
-                          >
+                          {call.caller_number}
+                        </div>
+                      </div>
+
+                      <div className="call-date">
+                        {call.started_at
+                          ? new Date(call.started_at).toLocaleString()
+                          : ""}
+                      </div>
+
+                      <div className="call-meta" style={{ marginTop: 12 }}>
+                        <span style={getStatusPillStyle(call.status)}>
+                          {call.status}
+                        </span>
+
+                        <span className="call-pill">
+                          {call.duration_seconds ?? "-"}s
+                        </span>
+
+                        <span style={getSentimentPillStyle(call.sentiment)}>
+                          {call.sentiment ?? "unknown"}
+                        </span>
+
+                        <span className="call-pill">
+                          {call.summary ? "Summary ✓" : "No summary"}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <section className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Call Details</h2>
+            </div>
+
+            <div className="panel-body">
+              {callDetailsLoading ? (
+                <div className="details-empty">Loading call details…</div>
+              ) : callDetailsError ? (
+                <div className="details-empty">{callDetailsError}</div>
+              ) : !callDetails ? (
+                <div className="details-empty">
+                  Select a call on the left to view transcript, appointments, and
+                  customer requests.
+                </div>
+              ) : (
+                <div className="details-stack">
+                  <div className="detail-card">
+                    <h3 className="detail-card-title">Call Info</h3>
+
+                    <div className="info-grid">
+                      <div className="info-label">Status</div>
+                      <div className="info-value">{callDetails.call.status}</div>
+
+                      <div className="info-label">Duration</div>
+                      <div className="info-value">
+                        {callDetails.call.duration_seconds ?? "-"} sec
+                      </div>
+
+                      <div className="info-label">Started</div>
+                      <div className="info-value">
+                        {callDetails.call.started_at
+                          ? new Date(callDetails.call.started_at).toLocaleString()
+                          : "-"}
+                      </div>
+
+                      <div className="info-label">Summary</div>
+                      <div className="info-value">
+                        {callDetails.call.summary ?? "No summary yet"}
+                      </div>
+
+                      <div className="info-label">Sentiment</div>
+                      <div className="info-value">
+                        {callDetails.call.sentiment ?? "Unknown"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="detail-card">
+                    <h3 className="detail-card-title">Transcript</h3>
+
+                    {callDetails.transcript?.length ? (
+                      <div
+                        style={{
+                          maxHeight: 420,
+                          overflowY: "auto",
+                          paddingRight: 6,
+                        }}
+                      >
+                        <div className="transcript-list">
+                          {callDetails.transcript.map((line) => {
+                            const isAi = line.speaker === "ai";
+
+                            return (
+                              <div
+                                key={line.id}
+                                className={`transcript-row ${isAi ? "ai" : "caller"}`}
+                              >
+                                <div
+                                  className={`transcript-bubble ${
+                                    isAi ? "ai" : "caller"
+                                  }`}
+                                >
+                                  <div className="transcript-speaker">
+                                    {isAi ? "AI Receptionist" : "Caller"}
+                                  </div>
+
+                                  <div className="transcript-message">
+                                    {line.message}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-note">
+                        No transcript was captured for this call.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-card">
+                    <h3 className="detail-card-title">Appointments</h3>
+
+                    {callDetails.appointments?.length ? (
+                      <div className="sub-card-stack">
+                        {callDetails.appointments.map((appt) => (
+                          <div key={appt.id} className="sub-card">
+                            <div className="sub-card-title">
+                              {appt.client_name} — {appt.client_phone}
+                            </div>
+
+                            <div className="detail-block-text">
+                              <b>Scheduled:</b>{" "}
+                              {appt.scheduled_at
+                                ? new Date(appt.scheduled_at).toLocaleString()
+                                : "-"}
+                            </div>
+
+                            <div className="detail-block-text">
+                              <b>Status:</b> {appt.status}
+                            </div>
+
+                            {appt.notes ? (
+                              <div className="detail-block-text">
+                                <b>Notes:</b> {appt.notes}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-note">
+                        No appointments were linked to this call.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-card">
+                    <h3 className="detail-card-title">Customer Requests</h3>
+
+                    {callDetails.customer_requests?.length ? (
+                      <div className="sub-card-stack">
+                        {callDetails.customer_requests.map((r) => (
+                          <div key={r.id} className="sub-card">
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                marginBottom: 6,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <span style={badgeStyle(r.request_type)}>
+                                {r.request_type}
+                              </span>
+
+                              <div style={{ fontWeight: 700 }}>
+                                {r.caller_name || "Unknown"}{" "}
+                                <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                                  — {r.callback_number || ""}
+                                </span>
+                              </div>
+                            </div>
+
+                            {r.message ? (
+                              <div
+                                className="detail-block-text"
+                                style={{ whiteSpace: "pre-wrap" }}
+                              >
+                                {r.message}
+                              </div>
+                            ) : null}
+
                             <div
                               style={{
                                 fontSize: 12,
-                                opacity: 0.7,
-                                marginBottom: 4,
+                                opacity: 0.6,
+                                marginTop: 8,
                               }}
                             >
-                              {line.speaker}
-                            </div>
-                            {line.message}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ opacity: 0.7 }}>No transcript found.</div>
-                  )}
-                </div>
-
-                {/* Appointments */}
-                <div style={{ fontWeight: 800, flex: "0 0 auto" }}>
-                  Appointments
-                </div>
-
-                <div style={{ flex: "0 0 auto" }}>
-                  {callDetails.appointments?.length ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 10,
-                      }}
-                    >
-                      {callDetails.appointments.map((appt) => (
-                        <div
-                          key={appt.id}
-                          style={{
-                            border: "1px solid #444",
-                            borderRadius: 10,
-                            padding: 12,
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                            {appt.client_name} — {appt.client_phone}
-                          </div>
-
-                          <div style={{ fontSize: 13, opacity: 0.85 }}>
-                            <b>Scheduled:</b>{" "}
-                            {appt.scheduled_at
-                              ? new Date(appt.scheduled_at).toLocaleString()
-                              : "-"}
-                          </div>
-
-                          <div style={{ fontSize: 13, opacity: 0.85 }}>
-                            <b>Status:</b> {appt.status}
-                          </div>
-
-                          {appt.notes ? (
-                            <div
-                              style={{
-                                fontSize: 13,
-                                opacity: 0.85,
-                                marginTop: 6,
-                              }}
-                            >
-                              <b>Notes:</b> {appt.notes}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ opacity: 0.7 }}>
-                      No appointments linked to this call.
-                    </div>
-                  )}
-                </div>
-
-                {/* Customer Requests */}
-                <div
-                  style={{
-                    fontWeight: 800,
-                    flex: "0 0 auto",
-                    marginTop: 8,
-                  }}
-                >
-                  Customer Requests
-                </div>
-
-                <div style={{ flex: "0 0 auto" }}>
-                  {callDetails.customer_requests?.length ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 10,
-                      }}
-                    >
-                      {callDetails.customer_requests.map((r) => (
-                        <div
-                          key={r.id}
-                          style={{
-                            border: "1px solid #444",
-                            borderRadius: 10,
-                            padding: 12,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              marginBottom: 6,
-                            }}
-                          >
-                            <span style={badgeStyle(r.request_type)}>
-                              {r.request_type}
-                            </span>
-                            <div style={{ fontWeight: 700 }}>
-                              {r.caller_name || "Unknown"}{" "}
-                              <span style={{ opacity: 0.7, fontWeight: 400 }}>
-                                — {r.callback_number || ""}
-                              </span>
+                              {r.created_at
+                                ? new Date(r.created_at).toLocaleString()
+                                : ""}
                             </div>
                           </div>
-
-                          {r.message ? (
-                            <div
-                              style={{
-                                fontSize: 13,
-                                opacity: 0.9,
-                                whiteSpace: "pre-wrap",
-                              }}
-                            >
-                              {r.message}
-                            </div>
-                          ) : null}
-
-                          <div
-                            style={{
-                              fontSize: 12,
-                              opacity: 0.6,
-                              marginTop: 8,
-                            }}
-                          >
-                            {r.created_at
-                              ? new Date(r.created_at).toLocaleString()
-                              : ""}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ opacity: 0.7 }}>
-                      No customer requests for this call.
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-note">
+                        No customer requests were captured for this call.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </>
-            )}
-          </div>
-        </div>
+              )}
+            </div>
+          </section>
+        </section>
       </div>
     </div>
   );

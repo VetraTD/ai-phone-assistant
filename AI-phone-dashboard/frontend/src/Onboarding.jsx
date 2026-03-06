@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api } from "./api";
+import {api} from "./api";
+import "./Onboarding.css";
 
 export default function Onboarding({ onComplete }) {
   const [name, setName] = useState("");
@@ -7,35 +8,74 @@ export default function Onboarding({ onComplete }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const submit = async (e) => {
+  const createBusiness = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      const res = await api.post("/api/onboarding/create-business", { name, timezone });
-      onComplete(res.data.business);
+      await api.post("/api/onboarding/create-business", {
+        name,
+        timezone,
+      });
+
+      if (onComplete) onComplete();
     } catch (err) {
-      setError(err?.response?.data?.error || err.message);
+      setError(err?.response?.data?.error || "Failed to create business");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <form onSubmit={submit} style={{ width: 360, border: "1px solid #333", padding: 20, borderRadius: 12 }}>
-        <h2>Create your business</h2>
+    <div className="onboarding-page">
+      <div className="onboarding-shell">
+        <form className="onboarding-card" onSubmit={createBusiness}>
+          <div className="onboarding-badge">Business setup</div>
 
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Business name" required />
-        <input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Timezone" required />
+          <div className="onboarding-header">
+            <h1>Create your business</h1>
+            <p>
+              Set up your workspace so you can start tracking calls,
+              appointments, and follow-ups from your dashboard.
+            </p>
+          </div>
 
-        <button disabled={loading} type="submit">
-          {loading ? "Creating..." : "Create Business"}
-        </button>
+          <div className="onboarding-form">
+            <div className="onboarding-field">
+              <label htmlFor="business-name">Business name</label>
+              <input
+                id="business-name"
+                type="text"
+                placeholder="e.g. Excel Cardiac Care"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
 
-        {error ? <div style={{ color: "tomato", marginTop: 10 }}>{error}</div> : null}
-      </form>
+            <div className="onboarding-field">
+              <label htmlFor="timezone">Timezone</label>
+              <select
+                id="timezone"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+              >
+                <option value="America/Chicago">America/Chicago</option>
+                <option value="America/New_York">America/New_York</option>
+                <option value="America/Los_Angeles">America/Los_Angeles</option>
+                <option value="Europe/London">Europe/London</option>
+              </select>
+            </div>
+
+            {error ? <div className="onboarding-error">{error}</div> : null}
+
+            <button className="onboarding-button" disabled={loading}>
+              {loading ? "Creating business..." : "Create Business"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
