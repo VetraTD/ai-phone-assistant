@@ -287,6 +287,25 @@ export async function updateBusinessNotificationSettings(businessId, payload) {
 }
 
 /**
+ * Update a business's Twilio phone number (for buy-number API).
+ * @param {string} businessId
+ * @param {string} phoneNumber - E.164 phone number
+ * @returns {Promise<boolean>} true if update succeeded
+ */
+export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
+  if (!supabase || !businessId) return false;
+  const { error } = await supabase
+    .from("businesses")
+    .update({ phone_number: phoneNumber || null })
+    .eq("id", businessId);
+  if (error) {
+    console.error("updateBusinessPhoneNumber error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Update a call's summary, sentiment, and outcome after generation.
  * @param {string} callSid - Twilio Call SID
  * @param {string|null} summary
