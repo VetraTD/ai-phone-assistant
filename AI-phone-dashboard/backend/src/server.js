@@ -342,6 +342,37 @@ await pool.query(
 
 
 
+//RECENTLY ADDED - UPDATE BUSINESS SETTINGS  TAKE OUT IF NOT NEEDED
+
+
+app.put("/api/business/:id/settings", authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      name,
+      timezone,
+      greeting_message,
+      business_hours,
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE businesses
+       SET name = $1,
+           timezone = $2,
+           greeting = $3
+       WHERE id = $4
+       RETURNING *`,
+      [name, timezone, greeting_message, id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("settings update failed:", err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
 
 const PORT = process.env.PORT || 3001;
 
