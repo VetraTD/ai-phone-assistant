@@ -344,7 +344,6 @@ await pool.query(
 
 //RECENTLY ADDED - UPDATE BUSINESS SETTINGS  TAKE OUT IF NOT NEEDED
 
-
 app.put("/api/business/:id/settings", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -353,17 +352,36 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
       name,
       timezone,
       greeting_message,
-      business_hours,
+      after_hours_policy,
+      transfer_policy,
+      transfer_phone_number,
+      notification_email,
+      notification_phone,
     } = req.body;
 
     const result = await pool.query(
       `UPDATE businesses
        SET name = $1,
            timezone = $2,
-           greeting = $3
-       WHERE id = $4
+           greeting = $3,
+           after_hours_policy = $4,
+           transfer_policy = $5,
+           transfer_phone_number = $6,
+           notification_email = $7,
+           notification_phone = $8
+       WHERE id = $9
        RETURNING *`,
-      [name, timezone, greeting_message, id]
+      [
+        name,
+        timezone,
+        greeting_message,
+        after_hours_policy,
+        transfer_policy,
+        transfer_phone_number,
+        notification_email,
+        notification_phone,
+        id,
+      ]
     );
 
     res.json(result.rows[0]);

@@ -6,11 +6,14 @@ export default function Login({ onSwitchToSignup }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const signIn = async (e) => {
     e.preventDefault();
     setError("");
+    setMessage("");
     setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -20,6 +23,30 @@ export default function Login({ onSwitchToSignup }) {
 
     setLoading(false);
     if (error) setError(error.message);
+  };
+
+  const handleForgotPassword = async () => {
+    setError("");
+    setMessage("");
+
+    if (!email) {
+      setError("Enter your email first.");
+      return;
+    }
+
+    setResetLoading(true);
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: "http://localhost:5173/reset-password",
+    });
+
+    setResetLoading(false);
+
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage("Password reset email sent.");
+    }
   };
 
   return (
@@ -85,7 +112,19 @@ export default function Login({ onSwitchToSignup }) {
                 />
               </div>
 
+              <div className="login-forgot-row">
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="login-link"
+                  disabled={resetLoading}
+                >
+                  {resetLoading ? "Sending..." : "Forgot password?"}
+                </button>
+              </div>
+
               {error ? <div className="login-error">{error}</div> : null}
+              {message ? <div className="login-success">{message}</div> : null}
 
               <button className="login-button" disabled={loading}>
                 {loading ? "Signing in..." : "Sign in"}

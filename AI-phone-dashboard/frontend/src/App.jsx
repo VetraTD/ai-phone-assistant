@@ -159,13 +159,10 @@ function getSentimentPillStyle(sentiment) {
 
 function formatBusinessHours(hours) {
   if (!hours) return "Mon–Fri, 9:00 AM – 5:00 PM";
-
   if (typeof hours === "string") return hours;
-
   if (hours.open_time && hours.close_time) {
     return `${hours.open_time} - ${hours.close_time}`;
   }
-
   return "Mon–Fri, 9:00 AM – 5:00 PM";
 }
 
@@ -298,6 +295,12 @@ function App() {
   const [settingsTransferPolicy, setSettingsTransferPolicy] = useState(
     "business_hours_only"
   );
+  const [settingsTransferPhoneNumber, setSettingsTransferPhoneNumber] =
+    useState("");
+  const [settingsNotificationEmail, setSettingsNotificationEmail] =
+    useState("");
+  const [settingsNotificationPhone, setSettingsNotificationPhone] =
+    useState("");
   const [settingsEmergencyMessage, setSettingsEmergencyMessage] = useState(
     "If this is a medical emergency, please hang up and call emergency services immediately."
   );
@@ -366,6 +369,13 @@ function App() {
             biz.greeting || "Thank you for calling. How can I help you today?"
           );
           setSettingsBusinessHours(formatBusinessHours(biz.business_hours));
+          setSettingsAfterHoursMode(biz.after_hours_policy || "take-message");
+          setSettingsTransferPolicy(
+            biz.transfer_policy || "business_hours_only"
+          );
+          setSettingsTransferPhoneNumber(biz.transfer_phone_number || "");
+          setSettingsNotificationEmail(biz.notification_email || "");
+          setSettingsNotificationPhone(biz.notification_phone || "");
         }
       } catch (err) {
         const msg =
@@ -535,6 +545,11 @@ function App() {
         name: settingsBusinessName,
         timezone: settingsTimezone,
         greeting_message: settingsGreeting,
+        after_hours_policy: settingsAfterHoursMode,
+        transfer_policy: settingsTransferPolicy,
+        transfer_phone_number: settingsTransferPhoneNumber,
+        notification_email: settingsNotificationEmail,
+        notification_phone: settingsNotificationPhone,
       });
 
       const updatedBusiness = res.data;
@@ -551,6 +566,17 @@ function App() {
           "Thank you for calling. How can I help you today?"
       );
       setSettingsBusinessHours(formatBusinessHours(updatedBusiness.business_hours));
+      setSettingsAfterHoursMode(
+        updatedBusiness.after_hours_policy || "take-message"
+      );
+      setSettingsTransferPolicy(
+        updatedBusiness.transfer_policy || "business_hours_only"
+      );
+      setSettingsTransferPhoneNumber(
+        updatedBusiness.transfer_phone_number || ""
+      );
+      setSettingsNotificationEmail(updatedBusiness.notification_email || "");
+      setSettingsNotificationPhone(updatedBusiness.notification_phone || "");
 
       setSettingsSavedMessage("Settings saved successfully.");
     } catch (err) {
@@ -1254,6 +1280,7 @@ function App() {
                     value={settingsBusinessHours}
                     onChange={(e) => setSettingsBusinessHours(e.target.value)}
                     placeholder="Mon–Fri, 9:00 AM – 5:00 PM"
+                    disabled
                   />
                 </div>
 
@@ -1264,8 +1291,8 @@ function App() {
                     onChange={(e) => setSettingsAfterHoursMode(e.target.value)}
                   >
                     <option value="take-message">Take a message</option>
-                    <option value="request-callback">Request callback</option>
-                    <option value="book-anyway">Allow booking anyway</option>
+                    <option value="book-later">Book later</option>
+                    <option value="book_appointment">Book appointment</option>
                   </select>
                 </div>
 
@@ -1322,6 +1349,17 @@ function App() {
                       Business hours only
                     </option>
                   </select>
+                </div>
+
+                <div className="filter-field">
+                  <label>Transfer phone number</label>
+                  <input
+                    value={settingsTransferPhoneNumber}
+                    onChange={(e) =>
+                      setSettingsTransferPhoneNumber(e.target.value)
+                    }
+                    placeholder="+447700900123"
+                  />
                 </div>
 
                 <div className="filter-field">
@@ -1400,6 +1438,36 @@ function App() {
               </div>
             </section>
 
+            <section className="panel">
+              <div className="panel-header">
+                <h2 className="panel-title">Notifications</h2>
+              </div>
+
+              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
+                <div className="filter-field">
+                  <label>Notification email</label>
+                  <input
+                    value={settingsNotificationEmail}
+                    onChange={(e) =>
+                      setSettingsNotificationEmail(e.target.value)
+                    }
+                    placeholder="you@business.com"
+                  />
+                </div>
+
+                <div className="filter-field">
+                  <label>Notification phone</label>
+                  <input
+                    value={settingsNotificationPhone}
+                    onChange={(e) =>
+                      setSettingsNotificationPhone(e.target.value)
+                    }
+                    placeholder="+447700900123"
+                  />
+                </div>
+              </div>
+            </section>
+
             <section className="panel" style={{ gridColumn: "1 / -1" }}>
               <div className="panel-header">
                 <h2 className="panel-title">Save Settings</h2>
@@ -1446,7 +1514,8 @@ function App() {
                     </div>
                   ) : (
                     <div className="empty-note">
-                      This saves your business name, timezone, and greeting to
+                      This saves your business name, timezone, greeting,
+                      after-hours policy, transfer settings, and notifications to
                       the database.
                     </div>
                   )}

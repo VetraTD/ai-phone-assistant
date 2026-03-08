@@ -266,3 +266,20 @@
     font-size: 28px;
   }
 }
+
+
+
+
+
+.login-forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+
+.login-success {
+  font-size: 14px;
+  color: #4fd1c5;
+  margin-top: 6px;
+}
