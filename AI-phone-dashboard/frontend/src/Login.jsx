@@ -22,7 +22,10 @@ export default function Login({ onSwitchToSignup }) {
     });
 
     setLoading(false);
-    if (error) setError(error.message);
+
+    if (error) {
+      setError(error.message);
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -45,7 +48,8 @@ export default function Login({ onSwitchToSignup }) {
     if (error) {
       setError(error.message);
     } else {
-      setMessage("Password reset email sent.");
+      setMessage("Check your email for a password reset link.");
+      setPassword("");
     }
   };
 
