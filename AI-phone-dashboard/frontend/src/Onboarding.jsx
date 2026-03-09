@@ -1,0 +1,253 @@
+import { useState } from "react";
+import { api } from "./api";
+import { numberApi } from "./numberAPI";
+import "./Onboarding.css";
+
+export default function Onboarding({ onComplete }) {
+  const [name, setName] = useState("");
+  const [timezone, setTimezone] = useState("America/Chicago");
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const [businessId, setBusinessId] = useState(null);
+  const [businessCreated, setBusinessCreated] = useState(false);
+
+  const [country, setCountry] = useState("US");
+  const [areaCode, setAreaCode] = useState("");
+  const [numberType, setNumberType] = useState("local");
+
+  const [searchingNumbers, setSearchingNumbers] = useState(false);
+  const [availableNumbers, setAvailableNumbers] = useState([]);
+  const [numbersError, setNumbersError] = useState("");
+
+  const [buyingNumber, setBuyingNumber] = useState(false);
+  const [selectedNumber, setSelectedNumber] = useState("");
+
+  const createBusiness = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await api.post("/api/onboarding/create-business", {
+        name,
+        timezone,
+      });
+
+      const createdBusinessId = res.data.business.id;
+
+      if (!createdBusinessId) {
+        throw new Error("Business created but no business ID was returned");
+      }
+
+      setBusinessId(createdBusinessId);
+      setBusinessCreated(true);
+    } catch (err) {
+      setError(
+        err?.response?.data?.error ||
+          err?.message ||
+          "Failed to create business"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const findNumbers = async () => {
+    if (!businessId) return;
+
+    setNumbersError("");
+    setAvailableNumbers([]);
+    setSearchingNumbers(true);
+
+    try {
+      const res = await numberApi.get(
+        `/api/businesses/${businessId}/phone-numbers/available`,
+        {
+          params: {
+            country,
+            areaCode: areaCode.trim() || undefined,
+            type: numberType,
+          },
+        }
+      );
+
+      setAvailableNumbers(res?.data?.numbers || []);
+    } catch (err) {
+      setNumbersError(
+        err?.response?.data?.error || "Failed to load available numbers"
+      );
+    } finally {
+      setSearchingNumbers(false);
+    }
+  };
+
+  const buyNumber = async (phoneNumber) => {
+    if (!businessId || !phoneNumber) return;
+
+    setNumbersError("");
+    setBuyingNumber(true);
+    setSelectedNumber(phoneNumber);
+
+    try {
+      await numberApi.post(`/api/businesses/${businessId}/phone-numbers/buy`, {
+        phone_number: phoneNumber,
+      });
+
+      if (onComplete) {
+        onComplete();
+      }
+    } catch (err) {
+      setNumbersError(
+        err?.response?.data?.error || "Failed to buy phone number"
+      );
+    } finally {
+      setBuyingNumber(false);
+      setSelectedNumber("");
+    }
+  };
+
+  return (
+    <div className="onboarding-page">
+      <div className="onboarding-shell">
+        <div className="onboarding-card">
+          <div className="onboarding-badge">Business setup</div>
+
+          <div className="onboarding-header">
+            <h1>Create your business</h1>
+            <p>
+              Set up your workspace so you can start tracking calls,
+              appointments, and follow-ups from your dashboard.
+            </p>
+          </div>
+
+          {!businessCreated ? (
+            <form className="onboarding-form" onSubmit={createBusiness}>
+              <div className="onboarding-field">
+                <label htmlFor="business-name">Business name</label>
+                <input
+                  id="business-name"
+                  type="text"
+                  placeholder="e.g. Excel Cardiac Care"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="timezone">Timezone</label>
+                <select
+                  id="timezone"
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                >
+                  <option value="America/Chicago">America/Chicago</option>
+                  <option value="America/New_York">America/New_York</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles</option>
+                  <option value="Europe/London">Europe/London</option>
+                </select>
+              </div>
+
+              {error ? <div className="onboarding-error">{error}</div> : null}
+
+              <button className="onboarding-button" disabled={loading}>
+                {loading ? "Creating business..." : "Create Business"}
+              </button>
+            </form>
+          ) : (
+            <div className="onboarding-form">
+              <div className="onboarding-success">
+                Business created successfully. Now choose a phone number.
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="country">Country</label>
+                <select
+                  id="country"
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                >
+                  <option value="US">United States</option>
+                </select>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="area-code">Area code (optional)</label>
+                <input
+                  id="area-code"
+                  type="text"
+                  placeholder="e.g. 512"
+                  value={areaCode}
+                  onChange={(e) => setAreaCode(e.target.value)}
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="number-type">Number type</label>
+                <select
+                  id="number-type"
+                  value={numberType}
+                  onChange={(e) => setNumberType(e.target.value)}
+                >
+                  <option value="local">Local</option>
+                  <option value="toll-free">Toll-free</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                className="onboarding-button"
+                disabled={searchingNumbers}
+                onClick={findNumbers}
+              >
+                {searchingNumbers ? "Finding numbers..." : "Find Numbers"}
+              </button>
+
+              {numbersError ? (
+                <div className="onboarding-error">{numbersError}</div>
+              ) : null}
+
+              {availableNumbers.length > 0 ? (
+                <div className="number-results">
+                  <div className="number-results-title">Available numbers</div>
+
+                  <div className="number-results-list">
+                    {availableNumbers.map((num) => (
+                      <div
+                        key={num.phone_number}
+                        className="number-result-card"
+                      >
+                        <div className="number-result-info">
+                          <div className="number-result-phone">
+                            {num.friendly_name || num.phone_number}
+                          </div>
+                          <div className="number-result-meta">
+                            {num.phone_number}
+                            {num.locality ? ` • ${num.locality}` : ""}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="number-buy-button"
+                          disabled={buyingNumber}
+                          onClick={() => buyNumber(num.phone_number)}
+                        >
+                          {buyingNumber && selectedNumber === num.phone_number
+                            ? "Buying..."
+                            : "Buy this number"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
