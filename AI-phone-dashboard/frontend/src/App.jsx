@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { supabase } from "./supabaseClient";
 
-import "./dashboard.css";
+import "./Dashboard.css";
 
 import Login from "./Login";
 import Signup from "./Signup";
