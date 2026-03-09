@@ -7,6 +7,7 @@ import "./Dashboard.css";
 import Login from "./Login";
 import Signup from "./Signup";
 import Onboarding from "./Onboarding";
+import ResetPassword from "./resetPassword";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -235,6 +236,8 @@ function LoadingScreen({ title, subtitle }) {
 }
 
 function App() {
+  const isResetPasswordPage = window.location.pathname === "/reset-password";
+
   const [authView, setAuthView] = useState("login");
 
   const [session, setSession] = useState(null);
@@ -565,7 +568,9 @@ function App() {
         updatedBusiness.greeting ||
           "Thank you for calling. How can I help you today?"
       );
-      setSettingsBusinessHours(formatBusinessHours(updatedBusiness.business_hours));
+      setSettingsBusinessHours(
+        formatBusinessHours(updatedBusiness.business_hours)
+      );
       setSettingsAfterHoursMode(
         updatedBusiness.after_hours_policy || "take-message"
       );
@@ -588,6 +593,10 @@ function App() {
       setSettingsSaving(false);
     }
   };
+
+  if (isResetPasswordPage) {
+    return <ResetPassword />;
+  }
 
   if (checkingSession) {
     return (
@@ -1004,7 +1013,9 @@ function App() {
 
                         <div className="info-grid">
                           <div className="info-label">Status</div>
-                          <div className="info-value">{callDetails.call.status}</div>
+                          <div className="info-value">
+                            {callDetails.call.status}
+                          </div>
 
                           <div className="info-label">Duration</div>
                           <div className="info-value">

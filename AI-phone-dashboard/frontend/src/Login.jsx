@@ -22,7 +22,10 @@ export default function Login({ onSwitchToSignup }) {
     });
 
     setLoading(false);
-    if (error) setError(error.message);
+
+    if (error) {
+      setError(error.message);
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -37,7 +40,7 @@ export default function Login({ onSwitchToSignup }) {
     setResetLoading(true);
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "http://localhost:5173/reset-password",
+      redirectTo: "https://ai-phone-dashboard-lemon.vercel.app/reset-password",
     });
 
     setResetLoading(false);
@@ -45,7 +48,8 @@ export default function Login({ onSwitchToSignup }) {
     if (error) {
       setError(error.message);
     } else {
-      setMessage("Password reset email sent.");
+      setMessage("Check your email for a password reset link.");
+      setPassword("");
     }
   };
 
