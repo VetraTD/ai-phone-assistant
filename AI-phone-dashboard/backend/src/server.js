@@ -11,8 +11,8 @@ const app = express();
 
 app.use(cors({
   origin: [
-    "http://localhost:5173/",
-    "https://ai-phone-dashboard.vercel.app/"
+    "http://localhost:5173",
+    "https://ai-phone-dashboard-lemon.vercel.app"
   ]
 }));
 
@@ -365,6 +365,7 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
       transfer_phone_number,
       notification_email,
       notification_phone,
+      default_language,
     } = req.body;
 
     const result = await pool.query(
@@ -376,8 +377,9 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
            transfer_policy = $5,
            transfer_phone_number = $6,
            notification_email = $7,
-           notification_phone = $8
-       WHERE id = $9
+           notification_phone = $8,
+           default_language = $9
+       WHERE id = $10
        RETURNING *`,
       [
         name,
@@ -388,6 +390,7 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
         transfer_phone_number,
         notification_email,
         notification_phone,
+        default_language,
         id,
       ]
     );
