@@ -216,7 +216,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     }
 
     // Progressive silence: re-listen → prompt → goodbye
-    const SILENCE_GATHER_TIMEOUT = 10;
+    const SILENCE_GATHER_TIMEOUT = 6;
     state.silenceCount++;
 
     if (state.silenceCount === 1) {
