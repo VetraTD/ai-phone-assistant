@@ -6,6 +6,13 @@ import "./Onboarding.css";
 export default function Onboarding({ onComplete }) {
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
+  const [defaultLanguage, setDefaultLanguage] = useState("en");
+  const [greeting, setGreeting] = useState("Thank you for calling. How can I help you today?");
+  const [afterHoursMode, setAfterHoursMode] = useState("take-message");
+  const [transferPolicy, setTransferPolicy] = useState("business_hours_only");
+  const [transferPhoneNumber, setTransferPhoneNumber] = useState("");
+  const [notificationEmail, setNotificationEmail] = useState("");
+  const [notificationPhone, setNotificationPhone] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -42,6 +49,20 @@ export default function Onboarding({ onComplete }) {
       }
 
       setBusinessId(createdBusinessId);
+
+      // Save AI & call settings (same fields as Settings page)
+      await api.put(`/api/business/${createdBusinessId}/settings`, {
+        name,
+        timezone,
+        greeting_message: greeting,
+        after_hours_policy: afterHoursMode,
+        transfer_policy: transferPolicy,
+        transfer_phone_number: transferPhoneNumber || "",
+        notification_email: notificationEmail || "",
+        notification_phone: notificationPhone || "",
+        default_language: defaultLanguage,
+      });
+
       setBusinessCreated(true);
     } catch (err) {
       setError(
@@ -148,6 +169,90 @@ export default function Onboarding({ onComplete }) {
                   <option value="America/Los_Angeles">America/Los_Angeles</option>
                   <option value="Europe/London">Europe/London</option>
                 </select>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="default-language">Preferred language</label>
+                <select
+                  id="default-language"
+                  value={defaultLanguage}
+                  onChange={(e) => setDefaultLanguage(e.target.value)}
+                >
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                </select>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="greeting">Greeting message</label>
+                <textarea
+                  id="greeting"
+                  rows={3}
+                  placeholder="What callers hear when they call"
+                  value={greeting}
+                  onChange={(e) => setGreeting(e.target.value)}
+                  className="onboarding-textarea"
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="after-hours">After-hours behaviour</label>
+                <select
+                  id="after-hours"
+                  value={afterHoursMode}
+                  onChange={(e) => setAfterHoursMode(e.target.value)}
+                >
+                  <option value="take-message">Take a message</option>
+                  <option value="book-later">Book for later</option>
+                  <option value="book_appointment">Book appointment</option>
+                </select>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="transfer-policy">Transfer policy</label>
+                <select
+                  id="transfer-policy"
+                  value={transferPolicy}
+                  onChange={(e) => setTransferPolicy(e.target.value)}
+                >
+                  <option value="never">Never transfer</option>
+                  <option value="always">Always transfer</option>
+                  <option value="business_hours_only">Business hours only</option>
+                </select>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="transfer-phone">Transfer phone number (optional)</label>
+                <input
+                  id="transfer-phone"
+                  type="text"
+                  placeholder="e.g. +18552700615"
+                  value={transferPhoneNumber}
+                  onChange={(e) => setTransferPhoneNumber(e.target.value)}
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="notification-email">Notification email (optional)</label>
+                <input
+                  id="notification-email"
+                  type="email"
+                  placeholder="you@business.com"
+                  value={notificationEmail}
+                  onChange={(e) => setNotificationEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="notification-phone">Notification phone (optional)</label>
+                <input
+                  id="notification-phone"
+                  type="text"
+                  placeholder="e.g. +14699338887"
+                  value={notificationPhone}
+                  onChange={(e) => setNotificationPhone(e.target.value)}
+                />
               </div>
 
               {error ? <div className="onboarding-error">{error}</div> : null}

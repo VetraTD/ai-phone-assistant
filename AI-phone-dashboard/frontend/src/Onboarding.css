@@ -108,10 +108,32 @@
 }
 
 .onboarding-field input:focus,
-.onboarding-field select:focus {
+.onboarding-field select:focus,
+.onboarding-field textarea:focus {
   border-color: rgba(66, 160, 255, 0.7);
   box-shadow: 0 0 0 4px rgba(66, 160, 255, 0.12);
   background: rgba(9, 15, 24, 0.96);
+}
+
+.onboarding-field textarea,
+.onboarding-textarea {
+  width: 100%;
+  min-height: 88px;
+  padding: 14px 15px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(6, 11, 19, 0.85);
+  color: #f5f7fb;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.onboarding-field textarea::placeholder {
+  color: #70839a;
 }
 
 .onboarding-button {
