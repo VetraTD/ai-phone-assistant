@@ -12,7 +12,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173/",
-    "https://ai-phone-dashboard.vercel.app/"
+    "https://ai-phone-dashboard-lemon.vercel.app"
   ]
 }));
 
