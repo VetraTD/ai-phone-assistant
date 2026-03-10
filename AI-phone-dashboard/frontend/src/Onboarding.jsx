@@ -13,6 +13,12 @@ export default function Onboarding({ onComplete }) {
   const [transferPhoneNumber, setTransferPhoneNumber] = useState("");
   const [notificationEmail, setNotificationEmail] = useState("");
   const [notificationPhone, setNotificationPhone] = useState("");
+  const [generalInfo, setGeneralInfo] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [stateRegion, setStateRegion] = useState("");
+  const [postalCode, setPostalCode] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -61,6 +67,12 @@ export default function Onboarding({ onComplete }) {
         notification_email: notificationEmail || "",
         notification_phone: notificationPhone || "",
         default_language: defaultLanguage,
+        general_info: generalInfo || "",
+        address_line1: addressLine1 || "",
+        address_line2: addressLine2 || "",
+        city: city || "",
+        state_region: stateRegion || "",
+        postal_code: postalCode || "",
       });
 
       setBusinessCreated(true);
@@ -252,6 +264,74 @@ export default function Onboarding({ onComplete }) {
                   placeholder="e.g. +14699338887"
                   value={notificationPhone}
                   onChange={(e) => setNotificationPhone(e.target.value)}
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="general-info">General info (optional)</label>
+                <textarea
+                  id="general-info"
+                  rows={2}
+                  placeholder="e.g. Excel Cardiac Care is a specialized medical practice."
+                  value={generalInfo}
+                  onChange={(e) => setGeneralInfo(e.target.value)}
+                  className="onboarding-textarea"
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="address-line1">Address line 1 (optional)</label>
+                <input
+                  id="address-line1"
+                  type="text"
+                  placeholder="e.g. 4400 Heritage Trace Pkwy, #208"
+                  value={addressLine1}
+                  onChange={(e) => setAddressLine1(e.target.value)}
+                />
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="address-line2">Address line 2 (optional)</label>
+                <input
+                  id="address-line2"
+                  type="text"
+                  placeholder="Optional"
+                  value={addressLine2}
+                  onChange={(e) => setAddressLine2(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="onboarding-field">
+                  <label htmlFor="city">City (optional)</label>
+                  <input
+                    id="city"
+                    type="text"
+                    placeholder="e.g. Keller"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                  />
+                </div>
+                <div className="onboarding-field">
+                  <label htmlFor="state-region">State / Region (optional)</label>
+                  <input
+                    id="state-region"
+                    type="text"
+                    placeholder="e.g. Texas"
+                    value={stateRegion}
+                    onChange={(e) => setStateRegion(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="onboarding-field">
+                <label htmlFor="postal-code">Postal code (optional)</label>
+                <input
+                  id="postal-code"
+                  type="text"
+                  placeholder="e.g. 76244"
+                  value={postalCode}
+                  onChange={(e) => setPostalCode(e.target.value)}
                 />
               </div>
 

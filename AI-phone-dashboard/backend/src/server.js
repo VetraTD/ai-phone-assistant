@@ -366,6 +366,12 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
       notification_email,
       notification_phone,
       default_language,
+      general_info,
+      address_line1,
+      address_line2,
+      city,
+      state_region,
+      postal_code,
     } = req.body;
 
     const result = await pool.query(
@@ -378,8 +384,14 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
            transfer_phone_number = $6,
            notification_email = $7,
            notification_phone = $8,
-           default_language = $9
-       WHERE id = $10
+           default_language = $9,
+           general_info = $10,
+           address_line1 = $11,
+           address_line2 = $12,
+           city = $13,
+           state_region = $14,
+           postal_code = $15
+       WHERE id = $16
        RETURNING *`,
       [
         name,
@@ -391,6 +403,12 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
         notification_email,
         notification_phone,
         default_language,
+        general_info ?? "",
+        address_line1 ?? "",
+        address_line2 ?? "",
+        city ?? "",
+        state_region ?? "",
+        postal_code ?? "",
         id,
       ]
     );
