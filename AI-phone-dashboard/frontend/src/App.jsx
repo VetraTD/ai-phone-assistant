@@ -203,10 +203,10 @@ function App() {
       try {
         const res = await api.get("/api/me");
         const biz = res.data.business || null;
-        // Treat "no business yet" OR "business without phone number" as needing onboarding.
+        // Need onboarding if there is no business yet or the business has no phone number.
         const needs = !biz || !biz.phone_number;
         setNeedsOnboarding(needs);
-        setBusiness(needs ? null : biz); setBusinessId(needs ? null : biz.id);
+        setBusiness(biz); setBusinessId(biz?.id || null);
         if (biz) {
           setSettingsBusinessName(biz.name || "");
           setSettingsTimezone(biz.timezone || "America/Chicago");
@@ -379,6 +379,7 @@ function App() {
   if (needsOnboarding)
     return (
       <Onboarding
+        existingBusiness={business && !business.phone_number ? business : null}
         onBack={() => supabase.auth.signOut()}
         onComplete={(biz) => {
           setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
