@@ -449,6 +449,17 @@ function App() {
               >
                 {t.navSettings}
               </button>
+              <button
+                className="dashboard-logout"
+                style={{
+                  height: 40,
+                  background: activePage === "guide" ? "rgba(88,164,255,0.16)" : "transparent",
+                  border: activePage === "guide" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
+                }}
+                onClick={() => setActivePage("guide")}
+              >
+                {t.navGuide}
+              </button>
             </div>
 
             <button
@@ -693,7 +704,7 @@ function App() {
               </section>
             </section>
           </>
-        ) : (
+        ) : activePage === "settings" ? (
           <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">{t.businessSettings}</h2></div>
@@ -888,7 +899,84 @@ function App() {
               </div>
             </section>
           </section>
+        ) : (
+          <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16 }}>
+            <section className="panel" style={{ gridColumn: "1 / -1" }}>
+              <div className="panel-header">
+                <h2 className="panel-title">How your AI receptionist works</h2>
+              </div>
+              <div className="panel-body" style={{ display: "grid", gap: 12, fontSize: 14, color: "#c2d0e3" }}>
+                <p>
+                  This dashboard shows everything your AI receptionist is handling for your business – from incoming calls and transcripts to appointments and follow-ups.
+                  Share this page with your team so everyone understands how calls are being handled.
+                </p>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">1. Getting set up</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 10, fontSize: 14, color: "#c2d0e3" }}>
+                <ol style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 6 }}>
+                  <li><strong>Create your business</strong> – complete the onboarding form with your name, timezone, language, greeting, and call-handling rules.</li>
+                  <li><strong>Choose a phone number</strong> – buy a local or toll-free number for the AI receptionist to answer.</li>
+                  <li><strong>Configure settings</strong> – review transfer rules, notification email/phone, and emergency/fallback messages under <strong>Settings</strong>.</li>
+                  <li><strong>Make a test call</strong> – call your new number from your own phone to hear the greeting and see a test call appear in the dashboard.</li>
+                </ol>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">2. What callers experience</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+                <p style={{ margin: 0 }}>
+                  The typical call flow looks like this:
+                </p>
+                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+                  <li><strong>Caller dials your number</strong> – shown at the top of the dashboard.</li>
+                  <li><strong>AI receptionist answers</strong> – uses your greeting, language, and business info to talk naturally.</li>
+                  <li><strong>During the call</strong> – it can book appointments, take messages, collect callback details, and follow your transfer rules.</li>
+                  <li><strong>After the call</strong> – the transcript, summary, sentiment, and any requests appear instantly in the dashboard.</li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">3. Reading the dashboard</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+                  <li><strong>KPIs (top row)</strong> – quick snapshot of calls today, appointments today, follow-ups needed, and the percentage of positive calls.</li>
+                  <li><strong>Calls list (left)</strong> – every call with status, duration, sentiment, and whether a summary exists. Use filters to drill into specific days, sentiment, or appointment calls.</li>
+                  <li><strong>Call Details (right)</strong> – full summary, sentiment, transcript, appointments, and customer requests for the selected call.</li>
+                  <li><strong>Follow-ups</strong> – calls with customer requests or callbacks needed will be easy to spot using the filters and request badges.</li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">4. Best practices</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+                  <li><strong>Greeting</strong> – be clear about who you are and what the receptionist can help with (booking, messages, emergencies).</li>
+                  <li><strong>Transfer rules</strong> – use “Business hours only” to avoid forwarding calls to a mobile at night, and rely on message taking after hours.</li>
+                  <li><strong>Notifications</strong> – set a notification email and phone so important messages and callbacks never get missed.</li>
+                  <li><strong>Review calls regularly</strong> – skim summaries and requests each day to close the loop on callbacks and messages.</li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">5. Getting help</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+                <p style={{ margin: 0 }}>
+                  If something doesn’t look right – or you’d like help tuning prompts, greetings, or call-handling rules – reach out to the product team using the support contact you received when you signed up.
+                </p>
+              </div>
+            </section>
+          </section>
         )}
+        <footer style={{ marginTop: 24, padding: "12px 0 4px", fontSize: 11, color: "#6f8197", textAlign: "center" }}>
+          {t.securityFooter}
+        </footer>
       </div>
     </div>
   );

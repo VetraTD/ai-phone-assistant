@@ -9,6 +9,15 @@ const pool = require("./db");
 
 const app = express();
 
+// Helper: get the business_id for the authenticated user
+async function getBusinessIdForUser(userId) {
+  const r = await pool.query(
+    `select business_id from users where id = $1`,
+    [userId]
+  );
+  return r.rows[0]?.business_id || null;
+}
+
 app.use(cors({
   origin: [
     "http://localhost:5173",
@@ -38,7 +47,7 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
-// ✅ Calls list with filters
+// ✅ Calls list with filters (scoped to the authenticated user's business)
 // Supports query params:
 // business_id (uuid)
 // status (text)          e.g. completed | in-progress
@@ -46,10 +55,15 @@ app.get("/db-test", async (req, res) => {
 // from (YYYY-MM-DD)      started_at >= from 00:00
 // to (YYYY-MM-DD)        started_at <  (to + 1 day)
 // has_appointments=true  only calls with at least 1 appointment
-app.get("/api/calls", async (req, res) => {
+app.get("/api/calls", authenticate, async (req, res) => {
   try {
+    const authUserId = req.authUser.id;
+    const userBusinessId = await getBusinessIdForUser(authUserId);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+
     const {
-      business_id,
       status,
       caller,
       from,
@@ -67,9 +81,8 @@ app.get("/api/calls", async (req, res) => {
       return `$${params.length}`;
     };
 
-    if (business_id) {
-      where.push(`business_id = ${addParam(business_id)}`);
-    }
+    // Always scope to the authenticated user's business
+    where.push(`business_id = ${addParam(userBusinessId)}`);
 
     if (status && status !== "all") {
       where.push(`status = ${addParam(status)}`);
@@ -151,15 +164,21 @@ if (needs_followup === "true") {
 
 
 // GET a single call with transcript + appointments + customer requests
-// /api/calls/:id
-app.get("/api/calls/:id", async (req, res) => {
+// /api/calls/:id (scoped to the authenticated user's business)
+app.get("/api/calls/:id", authenticate, async (req, res) => {
   try {
+    const authUserId = req.authUser.id;
+    const userBusinessId = await getBusinessIdForUser(authUserId);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+
     const { id } = req.params;
 
-    // Call
+    // Call (ensure it belongs to the user's business)
     const callRes = await pool.query(
-      "select * from calls where id = $1 limit 1",
-      [id]
+      "select * from calls where id = $1 and business_id = $2 limit 1",
+      [id, userBusinessId]
     );
 
     if (callRes.rows.length === 0) {
@@ -196,10 +215,16 @@ app.get("/api/calls/:id", async (req, res) => {
 });
 
 
-// ✅ Get a business by id
+// ✅ Get a business by id (must match authenticated user's business)
 // /api/businesses/:id
-app.get("/api/businesses/:id", async (req, res) => {
+app.get("/api/businesses/:id", authenticate, async (req, res) => {
   try {
+    const authUserId = req.authUser.id;
+    const userBusinessId = await getBusinessIdForUser(authUserId);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+
     const { id } = req.params;
 
     const r = await pool.query(
@@ -210,6 +235,10 @@ app.get("/api/businesses/:id", async (req, res) => {
       [id]
     );
 
+    // Do not leak other businesses
+    if (r.rows.length && r.rows[0].id !== userBusinessId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     if (r.rows.length === 0) {
       return res.status(404).json({ error: "Business not found" });
     }
@@ -223,10 +252,14 @@ app.get("/api/businesses/:id", async (req, res) => {
 
 
 
-app.get("/api/analytics/:businessId", async (req, res) => {
-  const { businessId } = req.params;
-
+// Analytics for the authenticated user's business
+app.get("/api/analytics/:businessId", authenticate, async (req, res) => {
+  const authUserId = req.authUser.id;
   try {
+    const businessId = await getBusinessIdForUser(authUserId);
+    if (!businessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
 
     const callsToday = await pool.query(`
       SELECT COUNT(*) 
@@ -355,6 +388,13 @@ await pool.query(
 app.put("/api/business/:id/settings", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Ensure the authenticated user actually owns this business
+    const authUserId = req.authUser.id;
+    const userBusinessId = await getBusinessIdForUser(authUserId);
+    if (!userBusinessId || userBusinessId !== id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const {
       name,

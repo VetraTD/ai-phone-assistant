@@ -63,6 +63,7 @@ export const TRANSLATIONS = {
     appTitle: "AI Call Dashboard",
     navDashboard: "Dashboard",
     navSettings: "Settings",
+    navGuide: "Guide",
     logout: "Logout",
 
     // KPIs
@@ -183,11 +184,14 @@ export const TRANSLATIONS = {
     currentPlan: "Current plan",
     billingStatus: "Billing status",
     usageThisMonth: "Usage this month",
-    comingSoon: "Coming soon",
+    comingSoon: "Detailed usage coming soon",
     phoneNumber: "Phone number",
     notConnectedYet: "Not connected yet",
     stripeComing:
-      "Stripe billing and subscription controls can live here next.",
+      "You're on the Starter beta plan. Paid plans with detailed usage and billing controls are coming soon.",
+
+    securityFooter:
+      "Your data is stored securely using Supabase auth and PostgreSQL. Rotate API keys and enable RLS in your Supabase project for best protection.",
 
     notifications: "Notifications",
     notificationEmail: "Notification email",
@@ -217,6 +221,7 @@ export const TRANSLATIONS = {
     appTitle: "Panel de Llamadas IA",
     navDashboard: "Panel",
     navSettings: "Configuración",
+    navGuide: "Guía",
     logout: "Cerrar sesión",
 
     callsToday: "Llamadas hoy",
@@ -333,11 +338,14 @@ export const TRANSLATIONS = {
     currentPlan: "Plan actual",
     billingStatus: "Estado de facturación",
     usageThisMonth: "Uso este mes",
-    comingSoon: "Próximamente",
+    comingSoon: "Detalles de uso próximamente",
     phoneNumber: "Número de teléfono",
     notConnectedYet: "Aún no conectado",
     stripeComing:
-      "Los controles de facturación y suscripción de Stripe irán aquí.",
+      "Estás en el plan beta Starter. Los planes de pago con uso detallado y controles de facturación llegarán pronto.",
+
+    securityFooter:
+      "Tus datos se almacenan de forma segura con Supabase y PostgreSQL. Rota tus claves API y habilita RLS en tu proyecto de Supabase para mayor protección.",
 
     notifications: "Notificaciones",
     notificationEmail: "Email de notificación",
@@ -365,6 +373,7 @@ export const TRANSLATIONS = {
     appTitle: "Tableau de bord IA",
     navDashboard: "Tableau de bord",
     navSettings: "Paramètres",
+    navGuide: "Guide",
     logout: "Déconnexion",
 
     callsToday: "Appels aujourd'hui",
@@ -480,12 +489,15 @@ export const TRANSLATIONS = {
     billingPlan: "Facturation et plan",
     currentPlan: "Plan actuel",
     billingStatus: "Statut de facturation",
-    usageThisMonth: "Utilisation ce mois",
-    comingSoon: "Bientôt disponible",
+    usageThisMonth: "Utilisation ce mois-ci",
+    comingSoon: "Détails à venir",
     phoneNumber: "Numéro de téléphone",
     notConnectedYet: "Pas encore connecté",
     stripeComing:
-      "Les contrôles de facturation Stripe et d'abonnement seront ici.",
+      "Vous êtes sur le plan bêta Starter. Des offres payantes avec utilisation détaillée et contrôles de facturation arrivent bientôt.",
+
+    securityFooter:
+      "Vos données sont stockées en toute sécurité avec Supabase et PostgreSQL. Faites tourner vos clés API et activez RLS dans votre projet Supabase pour une meilleure protection.",
 
     notifications: "Notifications",
     notificationEmail: "E-mail de notification",
