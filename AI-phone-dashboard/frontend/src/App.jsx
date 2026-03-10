@@ -202,10 +202,11 @@ function App() {
       setMeLoading(true); setMeError(null);
       try {
         const res = await api.get("/api/me");
-        const needs = !!res.data.needsOnboarding;
+        const biz = res.data.business || null;
+        // Treat "no business yet" OR "business without phone number" as needing onboarding.
+        const needs = !biz || !biz.phone_number;
         setNeedsOnboarding(needs);
-        const biz = needs ? null : res.data.business || null;
-        setBusiness(biz); setBusinessId(biz?.id || null);
+        setBusiness(needs ? null : biz); setBusinessId(needs ? null : biz.id);
         if (biz) {
           setSettingsBusinessName(biz.name || "");
           setSettingsTimezone(biz.timezone || "America/Chicago");

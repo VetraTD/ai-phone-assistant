@@ -41,7 +41,7 @@ export default function Onboarding({ onBack, onComplete }) {
   const [selectedNumber, setSelectedNumber] = useState("");
 
   const createBusiness = async (e) => {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
     setError("");
     setLoading(true);
 
@@ -166,7 +166,20 @@ export default function Onboarding({ onBack, onComplete }) {
           </div>
 
           {!businessCreated ? (
-            <form className="onboarding-form" onSubmit={createBusiness}>
+            <form
+              className="onboarding-form"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                const tag = (e.target?.tagName || "").toLowerCase();
+                if (tag === "textarea") return;
+                // Never let Enter submit the form; only our explicit
+                // button at the bottom is allowed to create the business.
+                e.preventDefault();
+                if (formStep < TOTAL_FORM_STEPS) {
+                  setFormStep((s) => Math.min(TOTAL_FORM_STEPS, s + 1));
+                }
+              }}
+            >
               <div className="onboarding-stepper" role="tablist" aria-label="Setup steps">
                 {[1, 2, 3].map((step) => (
                   <button
@@ -394,7 +407,12 @@ export default function Onboarding({ onBack, onComplete }) {
                       Next
                     </button>
                   ) : (
-                    <button className="onboarding-button" type="submit" disabled={loading}>
+                    <button
+                      className="onboarding-button"
+                      type="button"
+                      disabled={loading}
+                      onClick={() => createBusiness()}
+                    >
                       {loading ? "Creating business..." : "Create Business"}
                     </button>
                   )}
