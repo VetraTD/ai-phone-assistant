@@ -3,7 +3,7 @@ import { api } from "./api";
 import { numberApi } from "./numberAPI";
 import "./Onboarding.css";
 
-export default function Onboarding({ onComplete }) {
+export default function Onboarding({ onBack, onComplete }) {
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("America/Chicago");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
@@ -145,7 +145,14 @@ export default function Onboarding({ onComplete }) {
     <div className="onboarding-page">
       <div className="onboarding-shell">
         <div className="onboarding-card">
-          <div className="onboarding-badge">Business setup</div>
+          <div className="onboarding-top-row">
+            {onBack ? (
+              <button type="button" className="onboarding-back" onClick={onBack}>
+                ← Back
+              </button>
+            ) : null}
+            <div className="onboarding-badge">Business setup</div>
+          </div>
 
           <div className="onboarding-header">
             <h1>Create your business</h1>

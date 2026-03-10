@@ -364,9 +364,12 @@ function App() {
 
   if (needsOnboarding)
     return (
-      <Onboarding onComplete={(biz) => {
-        setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
-      }} />
+      <Onboarding
+        onBack={() => supabase.auth.signOut()}
+        onComplete={(biz) => {
+          setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
+        }}
+      />
     );
 
   if (meLoading)
