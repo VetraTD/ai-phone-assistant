@@ -99,6 +99,81 @@
   line-height: 1.7;
 }
 
+/* Stepper: 1 — 2 — 3 */
+.onboarding-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.onboarding-step-dot {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: #9bacbf;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.onboarding-step-dot:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #d8e1ec;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.onboarding-step-dot.active {
+  background: linear-gradient(135deg, #3576f6, #44d2c8);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(53, 118, 246, 0.35);
+}
+
+.onboarding-step-label {
+  text-align: center;
+  font-size: 13px;
+  color: #93a4b8;
+  margin-bottom: 20px;
+}
+
+.onboarding-step-content {
+  display: grid;
+  gap: 18px;
+  min-height: 120px;
+}
+
+.onboarding-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.onboarding-form-actions-primary {
+  margin-left: auto;
+}
+
+.onboarding-button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #c8d3df;
+  box-shadow: none;
+}
+
+.onboarding-button.secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #e7eef7;
+}
+
 .onboarding-form {
   display: grid;
   gap: 18px;

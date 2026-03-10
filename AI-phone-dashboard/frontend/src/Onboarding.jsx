@@ -23,6 +23,9 @@ export default function Onboarding({ onBack, onComplete }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [formStep, setFormStep] = useState(1);
+  const TOTAL_FORM_STEPS = 3;
+
   const [businessId, setBusinessId] = useState(null);
   const [businessCreated, setBusinessCreated] = useState(false);
 
@@ -164,189 +167,239 @@ export default function Onboarding({ onBack, onComplete }) {
 
           {!businessCreated ? (
             <form className="onboarding-form" onSubmit={createBusiness}>
-              <div className="onboarding-field">
-                <label htmlFor="business-name">Business name</label>
-                <input
-                  id="business-name"
-                  type="text"
-                  placeholder="e.g. Excel Cardiac Care"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
+              <div className="onboarding-stepper" role="tablist" aria-label="Setup steps">
+                {[1, 2, 3].map((step) => (
+                  <button
+                    key={step}
+                    type="button"
+                    className={`onboarding-step-dot ${formStep === step ? "active" : ""}`}
+                    onClick={() => setFormStep(step)}
+                    aria-current={formStep === step ? "step" : undefined}
+                    aria-label={`Step ${step} of ${TOTAL_FORM_STEPS}`}
+                  >
+                    {step}
+                  </button>
+                ))}
+              </div>
+              <div className="onboarding-step-label">
+                Step {formStep} of {TOTAL_FORM_STEPS}
+                {formStep === 1 && " — Basics"}
+                {formStep === 2 && " — AI & calls"}
+                {formStep === 3 && " — Details & address"}
               </div>
 
-              <div className="onboarding-field">
-                <label htmlFor="timezone">Timezone</label>
-                <select
-                  id="timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                >
-                  <option value="America/Chicago">America/Chicago</option>
-                  <option value="America/New_York">America/New_York</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles</option>
-                  <option value="Europe/London">Europe/London</option>
-                </select>
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="default-language">Preferred language</label>
-                <select
-                  id="default-language"
-                  value={defaultLanguage}
-                  onChange={(e) => setDefaultLanguage(e.target.value)}
-                >
-                  <option value="en">English</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                </select>
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="greeting">Greeting message</label>
-                <textarea
-                  id="greeting"
-                  rows={3}
-                  placeholder="What callers hear when they call"
-                  value={greeting}
-                  onChange={(e) => setGreeting(e.target.value)}
-                  className="onboarding-textarea"
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="after-hours">After-hours behaviour</label>
-                <select
-                  id="after-hours"
-                  value={afterHoursMode}
-                  onChange={(e) => setAfterHoursMode(e.target.value)}
-                >
-                  <option value="take-message">Take a message</option>
-                  <option value="book-later">Book for later</option>
-                  <option value="book_appointment">Book appointment</option>
-                </select>
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="transfer-policy">Transfer policy</label>
-                <select
-                  id="transfer-policy"
-                  value={transferPolicy}
-                  onChange={(e) => setTransferPolicy(e.target.value)}
-                >
-                  <option value="never">Never transfer</option>
-                  <option value="always">Always transfer</option>
-                  <option value="business_hours_only">Business hours only</option>
-                </select>
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="transfer-phone">Transfer phone number (optional)</label>
-                <input
-                  id="transfer-phone"
-                  type="text"
-                  placeholder="e.g. +18552700615"
-                  value={transferPhoneNumber}
-                  onChange={(e) => setTransferPhoneNumber(e.target.value)}
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="notification-email">Notification email (optional)</label>
-                <input
-                  id="notification-email"
-                  type="email"
-                  placeholder="you@business.com"
-                  value={notificationEmail}
-                  onChange={(e) => setNotificationEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="notification-phone">Notification phone (optional)</label>
-                <input
-                  id="notification-phone"
-                  type="text"
-                  placeholder="e.g. +14699338887"
-                  value={notificationPhone}
-                  onChange={(e) => setNotificationPhone(e.target.value)}
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="general-info">General info (optional)</label>
-                <textarea
-                  id="general-info"
-                  rows={2}
-                  placeholder="e.g. Excel Cardiac Care is a specialized medical practice."
-                  value={generalInfo}
-                  onChange={(e) => setGeneralInfo(e.target.value)}
-                  className="onboarding-textarea"
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="address-line1">Address line 1 (optional)</label>
-                <input
-                  id="address-line1"
-                  type="text"
-                  placeholder="e.g. 4400 Heritage Trace Pkwy, #208"
-                  value={addressLine1}
-                  onChange={(e) => setAddressLine1(e.target.value)}
-                />
-              </div>
-
-              <div className="onboarding-field">
-                <label htmlFor="address-line2">Address line 2 (optional)</label>
-                <input
-                  id="address-line2"
-                  type="text"
-                  placeholder="Optional"
-                  value={addressLine2}
-                  onChange={(e) => setAddressLine2(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div className="onboarding-field">
-                  <label htmlFor="city">City (optional)</label>
-                  <input
-                    id="city"
-                    type="text"
-                    placeholder="e.g. Keller"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                  />
+              {/* Step 1: Basics */}
+              {formStep === 1 && (
+                <div className="onboarding-step-content">
+                  <div className="onboarding-field">
+                    <label htmlFor="business-name">Business name</label>
+                    <input
+                      id="business-name"
+                      type="text"
+                      placeholder="e.g. Excel Cardiac Care"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="timezone">Timezone</label>
+                    <select
+                      id="timezone"
+                      value={timezone}
+                      onChange={(e) => setTimezone(e.target.value)}
+                    >
+                      <option value="America/Chicago">America/Chicago</option>
+                      <option value="America/New_York">America/New_York</option>
+                      <option value="America/Los_Angeles">America/Los_Angeles</option>
+                      <option value="Europe/London">Europe/London</option>
+                    </select>
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="default-language">Preferred language</label>
+                    <select
+                      id="default-language"
+                      value={defaultLanguage}
+                      onChange={(e) => setDefaultLanguage(e.target.value)}
+                    >
+                      <option value="en">English</option>
+                      <option value="es">Spanish</option>
+                      <option value="fr">French</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="onboarding-field">
-                  <label htmlFor="state-region">State / Region (optional)</label>
-                  <input
-                    id="state-region"
-                    type="text"
-                    placeholder="e.g. Texas"
-                    value={stateRegion}
-                    onChange={(e) => setStateRegion(e.target.value)}
-                  />
-                </div>
-              </div>
+              )}
 
-              <div className="onboarding-field">
-                <label htmlFor="postal-code">Postal code (optional)</label>
-                <input
-                  id="postal-code"
-                  type="text"
-                  placeholder="e.g. 76244"
-                  value={postalCode}
-                  onChange={(e) => setPostalCode(e.target.value)}
-                />
-              </div>
+              {/* Step 2: AI & calls */}
+              {formStep === 2 && (
+                <div className="onboarding-step-content">
+                  <div className="onboarding-field">
+                    <label htmlFor="greeting">Greeting message</label>
+                    <textarea
+                      id="greeting"
+                      rows={3}
+                      placeholder="What callers hear when they call"
+                      value={greeting}
+                      onChange={(e) => setGreeting(e.target.value)}
+                      className="onboarding-textarea"
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="after-hours">After-hours behaviour</label>
+                    <select
+                      id="after-hours"
+                      value={afterHoursMode}
+                      onChange={(e) => setAfterHoursMode(e.target.value)}
+                    >
+                      <option value="take-message">Take a message</option>
+                      <option value="book-later">Book for later</option>
+                      <option value="book_appointment">Book appointment</option>
+                    </select>
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="transfer-policy">Transfer policy</label>
+                    <select
+                      id="transfer-policy"
+                      value={transferPolicy}
+                      onChange={(e) => setTransferPolicy(e.target.value)}
+                    >
+                      <option value="never">Never transfer</option>
+                      <option value="always">Always transfer</option>
+                      <option value="business_hours_only">Business hours only</option>
+                    </select>
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="transfer-phone">Transfer phone number (optional)</label>
+                    <input
+                      id="transfer-phone"
+                      type="text"
+                      placeholder="e.g. +18552700615"
+                      value={transferPhoneNumber}
+                      onChange={(e) => setTransferPhoneNumber(e.target.value)}
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="notification-email">Notification email (optional)</label>
+                    <input
+                      id="notification-email"
+                      type="email"
+                      placeholder="you@business.com"
+                      value={notificationEmail}
+                      onChange={(e) => setNotificationEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="notification-phone">Notification phone (optional)</label>
+                    <input
+                      id="notification-phone"
+                      type="text"
+                      placeholder="e.g. +14699338887"
+                      value={notificationPhone}
+                      onChange={(e) => setNotificationPhone(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Details & address */}
+              {formStep === 3 && (
+                <div className="onboarding-step-content">
+                  <div className="onboarding-field">
+                    <label htmlFor="general-info">General info (optional)</label>
+                    <textarea
+                      id="general-info"
+                      rows={2}
+                      placeholder="e.g. Excel Cardiac Care is a specialized medical practice."
+                      value={generalInfo}
+                      onChange={(e) => setGeneralInfo(e.target.value)}
+                      className="onboarding-textarea"
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="address-line1">Address line 1 (optional)</label>
+                    <input
+                      id="address-line1"
+                      type="text"
+                      placeholder="e.g. 4400 Heritage Trace Pkwy, #208"
+                      value={addressLine1}
+                      onChange={(e) => setAddressLine1(e.target.value)}
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="address-line2">Address line 2 (optional)</label>
+                    <input
+                      id="address-line2"
+                      type="text"
+                      placeholder="Optional"
+                      value={addressLine2}
+                      onChange={(e) => setAddressLine2(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div className="onboarding-field">
+                      <label htmlFor="city">City (optional)</label>
+                      <input
+                        id="city"
+                        type="text"
+                        placeholder="e.g. Keller"
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                      />
+                    </div>
+                    <div className="onboarding-field">
+                      <label htmlFor="state-region">State / Region (optional)</label>
+                      <input
+                        id="state-region"
+                        type="text"
+                        placeholder="e.g. Texas"
+                        value={stateRegion}
+                        onChange={(e) => setStateRegion(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="postal-code">Postal code (optional)</label>
+                    <input
+                      id="postal-code"
+                      type="text"
+                      placeholder="e.g. 76244"
+                      value={postalCode}
+                      onChange={(e) => setPostalCode(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
               {error ? <div className="onboarding-error">{error}</div> : null}
 
-              <button className="onboarding-button" disabled={loading}>
-                {loading ? "Creating business..." : "Create Business"}
-              </button>
+              <div className="onboarding-form-actions">
+                {formStep > 1 ? (
+                  <button
+                    type="button"
+                    className="onboarding-button secondary"
+                    onClick={() => setFormStep(formStep - 1)}
+                  >
+                    ← Back
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="onboarding-form-actions-primary">
+                  {formStep < TOTAL_FORM_STEPS ? (
+                    <button
+                      type="button"
+                      className="onboarding-button"
+                      onClick={() => setFormStep(formStep + 1)}
+                    >
+                      Next
+                    </button>
+                  ) : (
+                    <button className="onboarding-button" type="submit" disabled={loading}>
+                      {loading ? "Creating business..." : "Create Business"}
+                    </button>
+                  )}
+                </div>
+              </div>
             </form>
           ) : (
             <div className="onboarding-form">
