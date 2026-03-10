@@ -256,6 +256,19 @@ function App() {
     return params;
   }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp]);
 
+  const hasActiveCallFilters = useMemo(() => {
+    const caller = callerSearch.trim();
+    return (
+      status !== "all" ||
+      datePreset !== "7" ||
+      hasAppointments ||
+      sentiment !== "all" ||
+      hasSummary !== "all" ||
+      needsFollowUp ||
+      !!caller
+    );
+  }, [status, datePreset, hasAppointments, sentiment, hasSummary, needsFollowUp, callerSearch]);
+
   useEffect(() => {
     if (!businessId) return;
     const fetchAnalytics = () =>
@@ -556,7 +569,7 @@ function App() {
                     ) : callsError ? (
                       <div className="empty-note">{callsError}</div>
                     ) : !calls.length ? (
-                      <div className="empty-note">{t.noCallsMatch}</div>
+                      <div className="empty-note">{hasActiveCallFilters ? t.noCallsMatch : t.noCallsYet}</div>
                     ) : (
                       calls.map((call) => (
                         <div
@@ -589,7 +602,7 @@ function App() {
                   ) : callDetailsError ? (
                     <div className="details-empty">{callDetailsError}</div>
                   ) : !callDetails ? (
-                    <div className="details-empty">{t.selectCallPrompt}</div>
+                    <div className="details-empty">{calls.length ? t.selectCallPrompt : t.noCallsYetDetails}</div>
                   ) : (
                     <div className="details-stack">
                       <div className="detail-card">

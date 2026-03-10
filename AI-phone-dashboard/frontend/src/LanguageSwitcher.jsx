@@ -103,11 +103,14 @@ export const TRANSLATIONS = {
     loadingCalls: "Loading calls...",
     reset: "Reset",
     noCallsMatch: "No calls match these filters.",
+    noCallsYet: "No calls yet. Once your number receives calls, they’ll show up here.",
 
     // Call details
     callDetails: "Call Details",
     selectCallPrompt:
       "Select a call on the left to view transcript, appointments, and customer requests.",
+    noCallsYetDetails:
+      "No calls yet. When your phone number receives a call, you’ll see it here.",
     callInfo: "Call Info",
     infoStatus: "Status",
     infoDuration: "Duration",
@@ -252,10 +255,13 @@ export const TRANSLATIONS = {
     loadingCalls: "Cargando llamadas...",
     reset: "Restablecer",
     noCallsMatch: "Ninguna llamada coincide con estos filtros.",
+    noCallsYet: "Aún no hay llamadas. Cuando tu número reciba llamadas, aparecerán aquí.",
 
     callDetails: "Detalles de llamada",
     selectCallPrompt:
       "Selecciona una llamada a la izquierda para ver la transcripción, citas y solicitudes.",
+    noCallsYetDetails:
+      "Aún no hay llamadas. Cuando tu número reciba una llamada, la verás aquí.",
     callInfo: "Info de llamada",
     infoStatus: "Estado",
     infoDuration: "Duración",
@@ -397,10 +403,13 @@ export const TRANSLATIONS = {
     loadingCalls: "Chargement des appels...",
     reset: "Réinitialiser",
     noCallsMatch: "Aucun appel ne correspond à ces filtres.",
+    noCallsYet: "Pas encore d’appels. Quand votre numéro recevra des appels, ils apparaîtront ici.",
 
     callDetails: "Détails de l'appel",
     selectCallPrompt:
       "Sélectionnez un appel à gauche pour voir la transcription, les rendez-vous et les demandes.",
+    noCallsYetDetails:
+      "Pas encore d’appels. Quand votre numéro recevra un appel, vous le verrez ici.",
     callInfo: "Infos sur l'appel",
     infoStatus: "Statut",
     infoDuration: "Durée",
