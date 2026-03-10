@@ -613,6 +613,122 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
 });
 
 
+// ---------------------------------------------------------------------------
+// Integrations API (list, create/update, definitions)
+// ---------------------------------------------------------------------------
+
+const INTEGRATION_DEFINITIONS = [
+  {
+    id: "webhook",
+    name: "Custom webhook",
+    authType: "webhook",
+    configSchema: {
+      type: "object",
+      required: ["url", "method"],
+      properties: {
+        url: { type: "string", format: "uri", description: "HTTPS URL to call when the AI invokes this tool" },
+        method: { type: "string", enum: ["POST", "PUT"], default: "POST" },
+        headers: { type: "object", additionalProperties: { type: "string" } },
+        params_schema: { type: "object", description: "JSON Schema for tool parameters" },
+        description: { type: "string", description: "Human-readable description for the AI" },
+      },
+    },
+  },
+];
+
+const BUILTIN_TOOL_NAMES = ["set_call_intent", "end_call", "book_appointment", "record_customer_request"];
+
+app.get("/api/integrations/definitions", (req, res) => {
+  res.json(INTEGRATION_DEFINITIONS);
+});
+
+app.get("/api/integrations", authenticate, async (req, res) => {
+  try {
+    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+    const r = await pool.query(
+      `SELECT id, business_id, provider, name, enabled, config, created_at, updated_at
+       FROM integrations
+       WHERE business_id = $1
+       ORDER BY created_at ASC`,
+      [userBusinessId]
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error("list integrations error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/integrations", authenticate, async (req, res) => {
+  try {
+    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+    const { provider, name, config, enabled } = req.body || {};
+    if (!provider || !name) {
+      return res.status(400).json({ error: "provider and name are required" });
+    }
+    if (BUILTIN_TOOL_NAMES.includes(name)) {
+      return res.status(400).json({ error: "name cannot be a built-in tool name" });
+    }
+    if (provider !== "webhook") {
+      return res.status(400).json({ error: "Only webhook provider is supported in v1" });
+    }
+    const cfg = config && typeof config === "object" ? config : {};
+    const url = cfg.url;
+    if (!url || typeof url !== "string" || !url.startsWith("https://")) {
+      return res.status(400).json({ error: "config.url must be an HTTPS URL" });
+    }
+    const method = (cfg.method || "POST").toUpperCase();
+    if (!["POST", "PUT"].includes(method)) {
+      return res.status(400).json({ error: "config.method must be POST or PUT" });
+    }
+    const r = await pool.query(
+      `INSERT INTO integrations (business_id, provider, name, enabled, config, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (business_id, name)
+       DO UPDATE SET provider = EXCLUDED.provider, enabled = EXCLUDED.enabled, config = EXCLUDED.config, updated_at = now()
+       RETURNING id, business_id, provider, name, enabled, config, created_at, updated_at`,
+      [userBusinessId, provider, name, enabled !== false, JSON.stringify(cfg)]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error("create/update integration error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/integrations/:id", authenticate, async (req, res) => {
+  try {
+    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
+    if (!userBusinessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+    const { id } = req.params;
+    const softDisable = req.query.soft === "true";
+    if (softDisable) {
+      await pool.query(
+        `UPDATE integrations SET enabled = false, updated_at = now() WHERE id = $1 AND business_id = $2`,
+        [id, userBusinessId]
+      );
+    } else {
+      await pool.query(
+        `DELETE FROM integrations WHERE id = $1 AND business_id = $2`,
+        [id, userBusinessId]
+      );
+    }
+    res.status(204).end();
+  } catch (err) {
+    console.error("delete integration error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {

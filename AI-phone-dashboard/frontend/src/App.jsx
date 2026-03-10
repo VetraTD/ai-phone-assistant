@@ -8,7 +8,6 @@ import "./Dashboard.css";
 import Login from "./Login";
 import Signup from "./Signup";
 import Onboarding from "./Onboarding";
-import ResetPassword from "./resetPassword";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -105,8 +104,6 @@ function LoadingScreen({ title, subtitle }) {
 }
 
 function App() {
-  const isResetPasswordPage = window.location.pathname === "/reset-password";
-
   // ── Language ──────────────────────────────────────────────────────────────
   const [lang, setLang] = useState(() => localStorage.getItem("ui_lang") || "en");
   const t = useTranslations(lang);
@@ -382,8 +379,6 @@ function App() {
       setSettingsSaving(false);
     }
   };
-
-  if (isResetPasswordPage) return <ResetPassword />;
 
   if (checkingSession)
     return <LoadingScreen title={t.checkingSession} subtitle={t.checkingSubtitle} />;

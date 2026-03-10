@@ -57,29 +57,64 @@ export default function Login({ onSwitchToSignup }) {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-brand">
-          <div className="login-badge">AI Call Dashboard</div>
+          <div className="login-badge">Vetra AI Receptionist</div>
 
-          <h1>Run your business calls with clarity.</h1>
+          <h1>Clinical-grade call handling for modern practices.</h1>
 
           <p>
-            Track calls, capture appointments, monitor follow-ups, and turn
-            conversations into action from one clean dashboard.
+            Vetra AI answers every call, books appointments, and captures
+            clinical messages, then delivers clear summaries to your team.
           </p>
 
           <div className="login-features">
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Call transcripts and summaries</span>
+              <span>Structured call transcripts and summaries</span>
             </div>
 
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Appointments and customer requests</span>
+              <span>Appointment capture and follow‑up requests</span>
             </div>
 
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Business analytics and follow-up tracking</span>
+              <span>Analytics and safety‑focused call oversight</span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 24,
+              padding: 16,
+              borderRadius: 16,
+              border: "1px solid rgba(120,196,255,0.35)",
+              background:
+                "radial-gradient(circle at top left, rgba(120,196,255,0.12), transparent 55%), rgba(4,12,24,0.9)",
+              color: "#e5f2ff",
+              maxWidth: 360,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                opacity: 0.8,
+                marginBottom: 6,
+              }}
+            >
+              Try the receptionist
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
+              Call the Vetra AI demo line
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
+              +1 (817) 601‑1171
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.5 }}>
+              Hear a live example of how Vetra AI answers, triages, and books
+              appointments in under a minute.
             </div>
           </div>
         </div>
