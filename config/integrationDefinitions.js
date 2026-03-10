@@ -24,6 +24,19 @@ export const INTEGRATION_DEFINITIONS = [
       },
     },
   },
+  {
+    id: "athenahealth",
+    name: "Athenahealth",
+    authType: "client_credentials",
+    configSchema: {
+      type: "object",
+      required: ["practice_id"],
+      properties: {
+        practice_id: { type: "string", description: "Athena practice ID for this clinic" },
+        use_ecc_app: { type: "boolean", description: "If true, use ECC_ATHENA_* env (ECC's app); otherwise use ATHENA_* (platform app)" },
+      },
+    },
+  },
 ];
 
 /**

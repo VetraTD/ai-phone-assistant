@@ -141,8 +141,16 @@ describe("integrations service", () => {
       expect(result.error).toContain("Unknown");
     });
 
-    it("returns not available for athenahealth", async () => {
-      const integration = { provider: "athenahealth", name: "get_appointments", enabled: true, config: {} };
+    it("routes athenahealth to executeAthenahealth and returns error when practice_id missing", async () => {
+      const integration = { provider: "athenahealth", name: "athenahealth", enabled: true, config: {} };
+      const result = await executeIntegration(integration, { tool: "get_caller_appointments", arguments: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toMatch(/practice_id|Missing/);
+    });
+
+    it("returns not available for mcp", async () => {
+      const integration = { provider: "mcp", name: "mcp_tool", enabled: true, config: {} };
       const result = await executeIntegration(integration, {});
       expect(result.success).toBe(false);
       expect(result.error).toContain("not available");

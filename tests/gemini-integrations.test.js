@@ -57,9 +57,19 @@ describe("gemini buildIntegrationTools", () => {
     expect(result.functionDeclarations[0].name).toBe("enabled_tool");
   });
 
-  it("skips non-webhook providers", () => {
+  it("adds athena tools when athenahealth integration is present", () => {
     const integrations = [
-      { provider: "athenahealth", name: "ehr_tool", enabled: true, config: {} },
+      { provider: "athenahealth", name: "athenahealth", enabled: true, config: { practice_id: "195900" } },
+    ];
+    const result = buildIntegrationTools(integrations);
+    expect(result.functionDeclarations).toHaveLength(3);
+    const names = result.functionDeclarations.map((d) => d.name).sort();
+    expect(names).toEqual(["book_appointment_in_ehr", "get_available_slots", "get_caller_appointments"]);
+  });
+
+  it("skips mcp provider (no tool declarations)", () => {
+    const integrations = [
+      { provider: "mcp", name: "mcp_tool", enabled: true, config: {} },
     ];
     const result = buildIntegrationTools(integrations);
     expect(result.functionDeclarations).toHaveLength(0);

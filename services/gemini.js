@@ -147,30 +147,83 @@ function buildCallTools(allowedTasks) {
 /** Valid tool name: alphanumeric and underscore only. */
 const TOOL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
+/** Athenahealth tool names — resolve integration by provider when fc.name is one of these. */
+const ATHENA_TOOL_NAMES = ["get_caller_appointments", "get_available_slots", "book_appointment_in_ehr"];
+
 /**
- * Build Gemini function declarations from business integrations (webhooks).
+ * Build Gemini function declarations from business integrations (webhooks and athenahealth).
  * @param {Array<{ provider: string, name: string, enabled: boolean, config: object }>} businessIntegrations
  * @returns {{ functionDeclarations: Array }}
  */
+/** Fixed athena tool declarations (when business has athenahealth integration). */
+const ATHENA_FUNCTION_DECLARATIONS = [
+  {
+    name: "get_caller_appointments",
+    description: "Look up the caller's upcoming appointments in the EHR.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+      },
+      required: ["caller_name"],
+    },
+  },
+  {
+    name: "get_available_slots",
+    description: "Get available appointment slots for a given date and optional service type.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date to check (YYYY-MM-DD)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "book_appointment_in_ehr",
+    description: "Book an appointment in the EHR for the caller.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD, optional)" },
+        scheduled_at: { type: "string", description: "Appointment date and time (ISO 8601)" },
+        service_type: { type: "string", description: "Type of appointment" },
+        notes: { type: "string", description: "Optional notes" },
+      },
+      required: ["caller_name", "caller_phone", "scheduled_at", "service_type"],
+    },
+  },
+];
+
 export function buildIntegrationTools(businessIntegrations) {
   const declarations = [];
   const integrations = Array.isArray(businessIntegrations) ? businessIntegrations : [];
+
   for (const int of integrations) {
-    if (!int.enabled || int.provider !== "webhook") continue;
-    const name = String(int.name || "").trim();
-    if (!name || !TOOL_NAME_REGEX.test(name)) continue;
-    const config = int.config || {};
-    const description = config.description || `Call the ${name} integration.`;
-    let paramsSchema = config.params_schema;
-    if (!paramsSchema || typeof paramsSchema !== "object") {
-      paramsSchema = { type: "object", additionalProperties: true };
+    if (!int.enabled) continue;
+    if (int.provider === "webhook") {
+      const name = String(int.name || "").trim();
+      if (!name || !TOOL_NAME_REGEX.test(name)) continue;
+      const config = int.config || {};
+      const description = config.description || `Call the ${name} integration.`;
+      let paramsSchema = config.params_schema;
+      if (!paramsSchema || typeof paramsSchema !== "object") {
+        paramsSchema = { type: "object", additionalProperties: true };
+      }
+      declarations.push({ name, description, parameters: paramsSchema });
     }
-    declarations.push({
-      name,
-      description,
-      parameters: paramsSchema,
-    });
   }
+
+  const hasAthena = integrations.some((i) => i.enabled && i.provider === "athenahealth");
+  if (hasAthena) {
+    declarations.push(...ATHENA_FUNCTION_DECLARATIONS);
+  }
+
   return { functionDeclarations: declarations };
 }
 
@@ -582,12 +635,15 @@ export async function getReply(history, userMessage, step, intent, config, extra
             break;
 
           default: {
-            // Dynamic integration tools (webhook, etc.)
+            // Dynamic integration tools (webhook, athenahealth)
             const integrations = extras?.integrations || [];
             const businessId = extras?.businessId || null;
             const callerPhone = extras?.callerPhone || null;
             const callId = extras?.callId || null;
-            const integration = integrations.find((i) => i.name === fc.name);
+            const isAthenaTool = ATHENA_TOOL_NAMES.includes(fc.name);
+            const integration = isAthenaTool
+              ? integrations.find((i) => i.provider === "athenahealth" && i.enabled)
+              : integrations.find((i) => i.name === fc.name);
             if (integration && integration.enabled) {
               const execResult = await executeIntegration(integration, {
                 tool: fc.name,
