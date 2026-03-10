@@ -159,6 +159,12 @@ function App() {
   const [settingsTransferPhoneNumber, setSettingsTransferPhoneNumber] = useState("");
   const [settingsNotificationEmail, setSettingsNotificationEmail] = useState("");
   const [settingsNotificationPhone, setSettingsNotificationPhone] = useState("");
+  const [settingsGeneralInfo, setSettingsGeneralInfo] = useState("");
+  const [settingsAddressLine1, setSettingsAddressLine1] = useState("");
+  const [settingsAddressLine2, setSettingsAddressLine2] = useState("");
+  const [settingsCity, setSettingsCity] = useState("");
+  const [settingsStateRegion, setSettingsStateRegion] = useState("");
+  const [settingsPostalCode, setSettingsPostalCode] = useState("");
   const [settingsEmergencyMessage, setSettingsEmergencyMessage] = useState(
     "If this is a medical emergency, please hang up and call emergency services immediately."
   );
@@ -211,6 +217,12 @@ function App() {
           setSettingsTransferPhoneNumber(biz.transfer_phone_number || "");
           setSettingsNotificationEmail(biz.notification_email || "");
           setSettingsNotificationPhone(biz.notification_phone || "");
+          setSettingsGeneralInfo(biz.general_info || "");
+          setSettingsAddressLine1(biz.address_line1 || "");
+          setSettingsAddressLine2(biz.address_line2 || "");
+          setSettingsCity(biz.city || "");
+          setSettingsStateRegion(biz.state_region || "");
+          setSettingsPostalCode(biz.postal_code || "");
         }
       } catch (err) {
         const msg = err?.response?.data?.error || err?.message || "Unknown error";
@@ -306,6 +318,12 @@ function App() {
         transfer_policy: settingsTransferPolicy, transfer_phone_number: settingsTransferPhoneNumber,
         notification_email: settingsNotificationEmail, notification_phone: settingsNotificationPhone,
         default_language: settingsDefaultLanguage,
+        general_info: settingsGeneralInfo,
+        address_line1: settingsAddressLine1,
+        address_line2: settingsAddressLine2,
+        city: settingsCity,
+        state_region: settingsStateRegion,
+        postal_code: settingsPostalCode,
       });
       const updatedBusiness = res.data;
       setBusiness((prev) => ({ ...(prev || {}), ...updatedBusiness }));
@@ -319,6 +337,12 @@ function App() {
       setSettingsTransferPhoneNumber(updatedBusiness.transfer_phone_number || "");
       setSettingsNotificationEmail(updatedBusiness.notification_email || "");
       setSettingsNotificationPhone(updatedBusiness.notification_phone || "");
+      setSettingsGeneralInfo(updatedBusiness.general_info || "");
+      setSettingsAddressLine1(updatedBusiness.address_line1 || "");
+      setSettingsAddressLine2(updatedBusiness.address_line2 || "");
+      setSettingsCity(updatedBusiness.city || "");
+      setSettingsStateRegion(updatedBusiness.state_region || "");
+      setSettingsPostalCode(updatedBusiness.postal_code || "");
       setSettingsSavedMessage("Settings saved successfully.");
     } catch (err) {
       console.error(err);
@@ -340,9 +364,12 @@ function App() {
 
   if (needsOnboarding)
     return (
-      <Onboarding onComplete={(biz) => {
-        setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
-      }} />
+      <Onboarding
+        onBack={() => supabase.auth.signOut()}
+        onComplete={(biz) => {
+          setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
+        }}
+      />
     );
 
   if (meLoading)
@@ -688,6 +715,40 @@ function App() {
                     <input value={business?.phone_number ? t.businessActive : t.businessNoPhone} disabled />
                   </div>
                 </form>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">{t.businessDetailsAddress}</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
+                <div className="filter-field">
+                  <label>{t.generalInfo}</label>
+                  <textarea value={settingsGeneralInfo} onChange={(e) => setSettingsGeneralInfo(e.target.value)} rows={3}
+                    placeholder={t.generalInfoPlaceholder}
+                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(6,11,19,0.85)", color: "#f5f7fb", outline: "none", fontSize: 14, resize: "vertical", minHeight: 80 }} />
+                </div>
+                <div className="filter-field">
+                  <label>{t.addressLine1}</label>
+                  <input value={settingsAddressLine1} onChange={(e) => setSettingsAddressLine1(e.target.value)} placeholder={t.addressLine1Placeholder} />
+                </div>
+                <div className="filter-field">
+                  <label>{t.addressLine2}</label>
+                  <input value={settingsAddressLine2} onChange={(e) => setSettingsAddressLine2(e.target.value)} placeholder={t.addressLine2Placeholder} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div className="filter-field">
+                    <label>{t.city}</label>
+                    <input value={settingsCity} onChange={(e) => setSettingsCity(e.target.value)} placeholder={t.cityPlaceholder} />
+                  </div>
+                  <div className="filter-field">
+                    <label>{t.stateRegion}</label>
+                    <input value={settingsStateRegion} onChange={(e) => setSettingsStateRegion(e.target.value)} placeholder={t.stateRegionPlaceholder} />
+                  </div>
+                </div>
+                <div className="filter-field">
+                  <label>{t.postalCode}</label>
+                  <input value={settingsPostalCode} onChange={(e) => setSettingsPostalCode(e.target.value)} placeholder={t.postalCodePlaceholder} />
+                </div>
               </div>
             </section>
 

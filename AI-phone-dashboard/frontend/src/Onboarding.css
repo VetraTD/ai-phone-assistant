@@ -42,6 +42,34 @@
   backdrop-filter: blur(12px);
 }
 
+.onboarding-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.onboarding-back {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9bacbf;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.onboarding-back:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #d8e1ec;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .onboarding-badge {
   display: inline-flex;
   align-items: center;
@@ -51,7 +79,6 @@
   background: rgba(255, 255, 255, 0.04);
   color: #c8d3df;
   font-size: 13px;
-  margin-bottom: 22px;
 }
 
 .onboarding-header {
