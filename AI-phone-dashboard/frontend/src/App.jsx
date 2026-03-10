@@ -146,6 +146,7 @@ function App() {
   const [hasSummary, setHasSummary] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
+  const [appointmentsEmailRange, setAppointmentsEmailRange] = useState("today");
   const [settingsBusinessName, setSettingsBusinessName] = useState("");
   const [settingsTimezone, setSettingsTimezone] = useState("America/Chicago");
   const [settingsDefaultLanguage, setSettingsDefaultLanguage] = useState("en");
@@ -313,6 +314,22 @@ function App() {
       .finally(() => setCallDetailsLoading(false));
   };
 
+  const emailAppointments = async (range) => {
+    if (!businessId) return;
+    const to = settingsNotificationEmail || business?.notification_email;
+    if (!to) {
+      window.alert("Add a notification email in Settings first.");
+      return;
+    }
+    try {
+      await api.post("/api/appointments/email", { range });
+      window.alert(`Appointments email has been sent to ${to}.`);
+    } catch (err) {
+      console.error(err);
+      window.alert("Failed to send appointments email. Please try again.");
+    }
+  };
+
   const resetFilters = () => {
     setStatus("all"); setCallerSearch(""); setDatePreset("7");
     const d = new Date(); const from = new Date();
@@ -409,7 +426,10 @@ function App() {
       <div className="dashboard-shell">
         <header className="dashboard-topbar">
           <div className="dashboard-topbar-left">
-            <div className="dashboard-badge">{t.appTitle}</div>
+            <div className="dashboard-badge">
+              {t.appTitle}
+              <span className="dashboard-beta-pill">Beta</span>
+            </div>
             <h1 className="dashboard-business-name">{business?.name ?? t.appTitle}</h1>
             {business ? (
               <div className="dashboard-business-meta">
@@ -474,14 +494,44 @@ function App() {
 
         {activePage === "dashboard" ? (
           <>
-            {analytics ? (
-              <section className="dashboard-kpis">
-                <div className="kpi-card"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value">{analytics.calls_today ?? 0}</div></div>
-                <div className="kpi-card"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value">{analytics.appointments_today ?? 0}</div></div>
-                <div className="kpi-card"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value">{analytics.followups_needed ?? 0}</div></div>
-                <div className="kpi-card"><div className="kpi-label">{t.positiveCalls}</div><div className="kpi-value">{(analytics.positive_calls_percent ?? 0) + "%"}</div></div>
-              </section>
-            ) : analyticsError ? (
+            <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
+              {analytics ? (
+                <>
+                  <div className="kpi-card"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value">{analytics.calls_today ?? 0}</div></div>
+                  <div className="kpi-card"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value">{analytics.appointments_today ?? 0}</div></div>
+                  <div className="kpi-card"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value">{analytics.followups_needed ?? 0}</div></div>
+                  <div className="kpi-card"><div className="kpi-label">{t.positiveCalls}</div><div className="kpi-value">{(analytics.positive_calls_percent ?? 0) + "%"}</div></div>
+                </>
+              ) : analyticsError ? (
+                <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
+                  <div className="kpi-label">Analytics</div>
+                  <div className="empty-note">{analyticsError}</div>
+                </div>
+              ) : null}
+
+              <div
+                className="kpi-card"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  minWidth: 0,
+                }}
+              >
+                <div className="kpi-label">Upcoming appointments email</div>
+                <button
+                  type="button"
+                  className="detail-card-action-button"
+                  style={{ marginTop: 8 }}
+                  onClick={() => emailAppointments("upcoming")}
+                >
+                  Email upcoming appointments
+                </button>
+              </div>
+            </section>
+            {analyticsError && !analytics ? null : null}
+
+            {!analytics && analyticsError ? (
               <section className="dashboard-kpis">
                 <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
                   <div className="kpi-label">Analytics</div>
@@ -608,7 +658,9 @@ function App() {
               </aside>
 
               <section className="panel">
-                <div className="panel-header"><h2 className="panel-title">{t.callDetails}</h2></div>
+                <div className="panel-header">
+                  <h2 className="panel-title">{t.callDetails}</h2>
+                </div>
                 <div className="panel-body">
                   {callDetailsLoading ? (
                     <div className="details-empty">{t.loadingCallDetails}</div>
