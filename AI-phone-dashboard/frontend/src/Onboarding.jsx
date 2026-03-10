@@ -3,9 +3,9 @@ import { api } from "./api";
 import { numberApi } from "./numberAPI";
 import "./Onboarding.css";
 
-export default function Onboarding({ onBack, onComplete }) {
-  const [name, setName] = useState("");
-  const [timezone, setTimezone] = useState("America/Chicago");
+export default function Onboarding({ existingBusiness, onBack, onComplete }) {
+  const [name, setName] = useState(existingBusiness?.name || "");
+  const [timezone, setTimezone] = useState(existingBusiness?.timezone || "America/Chicago");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
   const [greeting, setGreeting] = useState("Thank you for calling. How can I help you today?");
   const [afterHoursMode, setAfterHoursMode] = useState("take-message");
@@ -26,8 +26,8 @@ export default function Onboarding({ onBack, onComplete }) {
   const [formStep, setFormStep] = useState(1);
   const TOTAL_FORM_STEPS = 3;
 
-  const [businessId, setBusinessId] = useState(null);
-  const [businessCreated, setBusinessCreated] = useState(false);
+  const [businessId, setBusinessId] = useState(existingBusiness?.id || null);
+  const [businessCreated, setBusinessCreated] = useState(!!existingBusiness);
 
   const [country, setCountry] = useState("US");
   const [areaCode, setAreaCode] = useState("");
