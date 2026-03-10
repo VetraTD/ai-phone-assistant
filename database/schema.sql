@@ -126,6 +126,19 @@ CREATE TABLE business_knowledge (
   created_at  timestamptz DEFAULT now()
 );
 
+-- 9. Integrations (per-business: webhooks, athenahealth, mcp)
+CREATE TABLE integrations (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  provider    text NOT NULL,
+  name        text NOT NULL,
+  enabled     boolean NOT NULL DEFAULT true,
+  config      jsonb NOT NULL DEFAULT '{}',
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now(),
+  UNIQUE(business_id, name)
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
@@ -135,3 +148,5 @@ CREATE INDEX idx_transcripts_call ON call_transcripts (call_id);
 CREATE INDEX idx_appointments_business_scheduled ON appointments (business_id, scheduled_at);
 CREATE INDEX idx_customer_requests_business_created ON customer_requests (business_id, created_at DESC);
 CREATE INDEX idx_business_knowledge_business_enabled ON business_knowledge (business_id, enabled, priority DESC);
+CREATE INDEX idx_integrations_business ON integrations (business_id);
+CREATE INDEX idx_integrations_business_enabled ON integrations (business_id, enabled) WHERE enabled = true;

@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
+import { BUILTIN_TOOL_NAMES } from "./supabase.js";
+import { executeIntegration } from "./integrations.js";
 
 const TURN_TIMEOUT_MS = 6500;
 const MAX_FC_ROUNDS = 3;
@@ -135,6 +137,40 @@ function buildCallTools(allowedTasks) {
     });
   }
 
+  return { functionDeclarations: declarations };
+}
+
+// ---------------------------------------------------------------------------
+// Integration tools — dynamic tools from integrations table
+// ---------------------------------------------------------------------------
+
+/** Valid tool name: alphanumeric and underscore only. */
+const TOOL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+
+/**
+ * Build Gemini function declarations from business integrations (webhooks).
+ * @param {Array<{ provider: string, name: string, enabled: boolean, config: object }>} businessIntegrations
+ * @returns {{ functionDeclarations: Array }}
+ */
+export function buildIntegrationTools(businessIntegrations) {
+  const declarations = [];
+  const integrations = Array.isArray(businessIntegrations) ? businessIntegrations : [];
+  for (const int of integrations) {
+    if (!int.enabled || int.provider !== "webhook") continue;
+    const name = String(int.name || "").trim();
+    if (!name || !TOOL_NAME_REGEX.test(name)) continue;
+    const config = int.config || {};
+    const description = config.description || `Call the ${name} integration.`;
+    let paramsSchema = config.params_schema;
+    if (!paramsSchema || typeof paramsSchema !== "object") {
+      paramsSchema = { type: "object", additionalProperties: true };
+    }
+    declarations.push({
+      name,
+      description,
+      parameters: paramsSchema,
+    });
+  }
   return { functionDeclarations: declarations };
 }
 
@@ -462,13 +498,21 @@ export async function getReply(history, userMessage, step, intent, config, extra
   );
 
   const chatPromise = (async () => {
+    const builtInTools = buildCallTools(cfg.allowedTasks);
+    const integrationTools = buildIntegrationTools(extras?.integrations || []);
+    const allDeclarations = [
+      ...(builtInTools.functionDeclarations || []),
+      ...(integrationTools.functionDeclarations || []),
+    ];
+    const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+
     const chat = gemini.chats.create({
       model: "gemini-2.5-flash",
       config: {
         temperature: 0.75,
         maxOutputTokens: getMaxTokensForStep(step),
         systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
-        tools: [buildCallTools(cfg.allowedTasks)],
+        tools: toolsConfig,
       },
       history,
     });
@@ -537,15 +581,44 @@ export async function getReply(history, userMessage, step, intent, config, extra
             toolResults.push({ name: fc.name, success: true });
             break;
 
-          default:
-            results.push({
-              functionResponse: {
-                id: fc.id,
-                name: fc.name,
-                response: { error: "Unknown function" },
-              },
-            });
-            toolResults.push({ name: fc.name, success: false });
+          default: {
+            // Dynamic integration tools (webhook, etc.)
+            const integrations = extras?.integrations || [];
+            const businessId = extras?.businessId || null;
+            const callerPhone = extras?.callerPhone || null;
+            const callId = extras?.callId || null;
+            const integration = integrations.find((i) => i.name === fc.name);
+            if (integration && integration.enabled) {
+              const execResult = await executeIntegration(integration, {
+                tool: fc.name,
+                arguments: fc.args || {},
+                business_id: businessId,
+                call_id: callId,
+                caller_phone: callerPhone,
+              });
+              const success = execResult.success === true;
+              results.push({
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: success
+                    ? { success: true, message: execResult.message }
+                    : { success: false, error: execResult.error },
+                },
+              });
+              toolResults.push({ name: fc.name, success });
+            } else {
+              results.push({
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: { error: "Unknown function" },
+                },
+              });
+              toolResults.push({ name: fc.name, success: false });
+            }
+            break;
+          }
         }
       }
 

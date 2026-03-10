@@ -7,6 +7,7 @@ import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
+import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
 import {
@@ -172,6 +173,8 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         }
         // Load business knowledge Q&A for prompt injection
         state.knowledge = await db.fetchBusinessKnowledge(business.id);
+        // Load integrations for dynamic tools (webhooks, etc.)
+        state.integrations = await db.listIntegrationsForBusiness(business.id, { enabledOnly: true });
       } else {
         console.warn(
           `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
@@ -180,6 +183,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     }
     state.config = db.loadConfig(business);
     if (!state.knowledge) state.knowledge = [];
+    if (!state.integrations) state.integrations = [];
   }
 
   const config = state.config;
@@ -272,6 +276,10 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     .getReply(state.history, speechResult, state.step, state.intent, config, {
       knowledge: state.knowledge || [],
       transferAllowed: resolveTransferAllowed(config),
+      integrations: state.integrations || [],
+      businessId: state.businessId || null,
+      callerPhone: state.callerNumber || null,
+      callId: state.dbCallId || null,
     })
     .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults }) => {
       const turnLatencyMs = Date.now() - geminiStart;
@@ -481,6 +489,27 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     callState.remove(callSid);
   }
   res.status(200).end();
+});
+
+// ---------------------------------------------------------------------------
+// Integrations API: definitions (catalog for dashboard)
+// ---------------------------------------------------------------------------
+
+app.get("/api/integrations/definitions", (req, res) => {
+  res.json(listIntegrationDefinitions());
+});
+
+// ---------------------------------------------------------------------------
+// OAuth callback routes (reserved for future first-party providers)
+// e.g. GET /api/integrations/athenahealth/callback
+// ---------------------------------------------------------------------------
+
+app.get("/api/integrations/:provider/callback", (req, res) => {
+  res.status(501).send("OAuth callback not implemented for this provider yet.");
+});
+
+app.post("/api/integrations/:provider/callback", (req, res) => {
+  res.status(501).send("OAuth callback not implemented for this provider yet.");
 });
 
 // ---------------------------------------------------------------------------
