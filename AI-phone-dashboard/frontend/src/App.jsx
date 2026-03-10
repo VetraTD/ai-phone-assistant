@@ -47,6 +47,8 @@ function getStatusPillStyle(status) {
   };
   if (s === "completed")
     return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.28)", color: "#bcefc9" };
+  if (s === "transferred")
+    return { ...base, background: "rgba(76,129,255,0.14)", border: "1px solid rgba(76,129,255,0.28)", color: "#bcd3ff" };
   if (s === "failed" || s === "busy" || s === "no-answer")
     return { ...base, background: "rgba(255,107,107,0.14)", border: "1px solid rgba(255,107,107,0.28)", color: "#ffb9b9" };
   if (s === "in-progress")
@@ -75,6 +77,30 @@ function formatBusinessHours(hours) {
   if (typeof hours === "string") return hours;
   if (hours.open_time && hours.close_time) return `${hours.open_time} - ${hours.close_time}`;
   return "Mon–Fri, 9:00 AM – 5:00 PM";
+}
+
+function AnimatedNumber({ value, duration = 1200, suffix = "" }) {
+  const num = Number(value);
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    if (typeof num !== "number" || isNaN(num) || num < 0) return;
+    setDisplay(0);
+    const start = performance.now();
+    let rafId;
+    const tick = (now) => {
+      const elapsed = now - start;
+      const t = Math.min(elapsed / duration, 1);
+      const easeOut = 1 - Math.pow(1 - t, 2);
+      setDisplay(Math.round(easeOut * num));
+      if (t < 1) rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [num, duration]);
+
+  if (typeof num !== "number" || isNaN(num)) return <>{String(0) + suffix}</>;
+  return <>{display}{suffix}</>;
 }
 
 function LoadingScreen({ title, subtitle }) {
@@ -143,6 +169,8 @@ function App() {
   const [hasSummary, setHasSummary] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
+  const [analyticsBreakdown, setAnalyticsBreakdown] = useState(null);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState("90d");
   const [appointmentsEmailRange, setAppointmentsEmailRange] = useState("today");
   const [settingsBusinessName, setSettingsBusinessName] = useState("");
   const [settingsTimezone, setSettingsTimezone] = useState("America/Chicago");
@@ -281,6 +309,16 @@ function App() {
     const ti = setInterval(fetchAnalytics, 15000);
     return () => clearInterval(ti);
   }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId || activePage !== "analytics") return;
+    setAnalyticsBreakdown(null);
+    api.get("/api/analytics-breakdown", { params: { period: analyticsPeriod } })
+      .then((res) => setAnalyticsBreakdown(res.data))
+      .catch((err) => {
+        console.error(err);
+      });
+  }, [businessId, activePage, analyticsPeriod]);
 
   useEffect(() => {
     if (!businessId || activePage !== "dashboard") return;
@@ -458,6 +496,17 @@ function App() {
                 className="dashboard-logout"
                 style={{
                   height: 40,
+                  background: activePage === "analytics" ? "rgba(88,164,255,0.16)" : "transparent",
+                  border: activePage === "analytics" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
+                }}
+                onClick={() => setActivePage("analytics")}
+              >
+                {t.navAnalytics}
+              </button>
+              <button
+                className="dashboard-logout"
+                style={{
+                  height: 40,
                   background: activePage === "settings" ? "rgba(88,164,255,0.16)" : "transparent",
                   border: activePage === "settings" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
                 }}
@@ -495,7 +544,7 @@ function App() {
                   <div className="kpi-card"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value">{analytics.calls_today ?? 0}</div></div>
                   <div className="kpi-card"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value">{analytics.appointments_today ?? 0}</div></div>
                   <div className="kpi-card"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value">{analytics.followups_needed ?? 0}</div></div>
-                  <div className="kpi-card"><div className="kpi-label">{t.positiveCalls}</div><div className="kpi-value">{(analytics.positive_calls_percent ?? 0) + "%"}</div></div>
+                  <div className="kpi-card"><div className="kpi-label">{t.transferredToHuman}</div><div className="kpi-value">{analytics.transferred_today ?? 0}</div></div>
                 </>
               ) : analyticsError ? (
                 <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
@@ -546,6 +595,7 @@ function App() {
                         <select value={status} onChange={(e) => setStatus(e.target.value)}>
                           <option value="all">{t.filterAll}</option>
                           <option value="completed">{t.filterCompleted}</option>
+                          <option value="transferred">{t.filterTransferred}</option>
                           <option value="in-progress">{t.filterInProgress}</option>
                           <option value="failed">{t.filterFailed}</option>
                           <option value="no-answer">{t.filterNoAnswer}</option>
@@ -640,7 +690,9 @@ function App() {
                           </div>
                           <div className="call-date">{call.started_at ? new Date(call.started_at).toLocaleString() : ""}</div>
                           <div className="call-meta" style={{ marginTop: 12 }}>
-                            <span style={getStatusPillStyle(call.status)}>{call.status}</span>
+                            <span style={getStatusPillStyle(call.inferred_transferred ? "transferred" : call.status)}>
+                              {call.inferred_transferred ? "Transferred" : (call.status || "")}
+                            </span>
                             <span className="call-pill">{call.duration_seconds ?? "-"}s</span>
                             <span style={getSentimentPillStyle(call.sentiment)}>{call.sentiment ?? t.filterUnknown}</span>
                             <span className="call-pill">{call.summary ? t.summaryCheck : t.noSummaryShort}</span>
@@ -669,7 +721,7 @@ function App() {
                         <h3 className="detail-card-title">{t.callInfo}</h3>
                         <div className="info-grid">
                           <div className="info-label">{t.infoStatus}</div>
-                          <div className="info-value">{callDetails.call.status}</div>
+                          <div className="info-value">{callDetails.call.inferred_transferred ? "Transferred" : (callDetails.call.status || "")}</div>
                           <div className="info-label">{t.infoDuration}</div>
                           <div className="info-value">{callDetails.call.duration_seconds ?? "-"} {t.sec}</div>
                           <div className="info-label">{t.infoStarted}</div>
@@ -752,6 +804,248 @@ function App() {
               </section>
             </section>
           </>
+        ) : activePage === "analytics" ? (
+          <section className="analytics-page">
+            <div className="analytics-page-header">
+              <div className="analytics-page-title-row">
+                <h2 className="analytics-page-title">Call analytics</h2>
+                <select
+                  className="analytics-period-select"
+                  value={analyticsPeriod}
+                  onChange={(e) => setAnalyticsPeriod(e.target.value)}
+                  aria-label="Time period"
+                >
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 3 months</option>
+                </select>
+              </div>
+              <p className="analytics-page-subtitle">Trends and totals for your receptionist calls</p>
+            </div>
+
+            <section className="analytics-overview">
+              <h3 className="analytics-section-label">Overview</h3>
+              <div className="dashboard-kpis analytics-kpis">
+              <div className="kpi-card kpi-card-orange">
+                <div className="kpi-value">
+                  <AnimatedNumber value={analyticsBreakdown?.total_calls_3m ?? 0} duration={1200} />
+                </div>
+                <div className="kpi-label">Receptionist calls</div>
+              </div>
+              <div className="kpi-card kpi-card-green">
+                <div className="kpi-value">
+                  <AnimatedNumber value={analyticsBreakdown?.actions?.appointments ?? 0} duration={1200} />
+                </div>
+                <div className="kpi-label">Appointments scheduled</div>
+              </div>
+              <div className="kpi-card kpi-card-blue">
+                <div className="kpi-value">
+                  <AnimatedNumber value={analyticsBreakdown?.followups_needed ?? 0} duration={1200} />
+                </div>
+                <div className="kpi-label">Follow-ups needed</div>
+              </div>
+              <div className="kpi-card kpi-card-teal">
+                <div className="kpi-value">
+                  <AnimatedNumber value={analyticsBreakdown?.positive_calls_percent ?? 0} duration={1200} suffix="%" />
+                </div>
+                <div className="kpi-label">Positive calls</div>
+              </div>
+              <div className="kpi-card kpi-card-purple">
+                <div className="kpi-value">
+                  <AnimatedNumber value={analyticsBreakdown?.appointment_conversion_percent ?? 0} duration={1200} suffix="%" />
+                </div>
+                <div className="kpi-label">Calls → appointments</div>
+              </div>
+              </div>
+            </section>
+
+            <section className="analytics-charts">
+              <div className="panel analytics-chart-panel">
+                <div className="panel-header">
+                  <h3 className="panel-title">
+                    {analyticsPeriod === "7d" ? "Calls this week" : analyticsPeriod === "30d" ? "Calls by week" : "Calls last 3 months"}
+                  </h3>
+                </div>
+                <div className="panel-body">
+                  {analyticsBreakdown?.calls_by_month?.length ? (
+                    <div className="calls-chart">
+                      {(() => {
+                        const chartHeightPx = 160;
+                        const buckets = analyticsBreakdown.calls_by_month;
+                        const max = Math.max(...buckets.map((b) => Number(b.total_calls) || 0), 1);
+                        return buckets.map((b) => {
+                          const count = Number(b.total_calls) || 0;
+                          const pct = max > 0 ? count / max : 0;
+                          const barPx = Math.max(Math.round(pct * chartHeightPx), 12);
+                          return (
+                            <div key={b.month_label} className="calls-chart-column">
+                              <div
+                                className="calls-chart-bar-wrap"
+                                style={{ height: `${barPx}px` }}
+                              >
+                                <div
+                                  className="calls-chart-bar"
+                                  title={`${count} calls`}
+                                />
+                              </div>
+                              <div className="calls-chart-label">{b.month_label || b.bucket_label}</div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="empty-note">
+                      No call data for {analyticsPeriod === "7d" ? "the last 7 days" : analyticsPeriod === "30d" ? "the last 30 days" : "the last 3 months"}.
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="panel analytics-chart-panel">
+                <div className="panel-header">
+                  <h3 className="panel-title">Actions taken</h3>
+                </div>
+                <div className="panel-body">
+                  <div className="actions-summary">
+                    <div className="actions-row">
+                      <span className="actions-dot actions-dot-appointments" />
+                      <span>Appointment scheduled</span>
+                      <span className="actions-count">{analyticsBreakdown?.actions?.appointments ?? 0}</span>
+                    </div>
+                    <div className="actions-row">
+                      <span className="actions-dot actions-dot-callbacks" />
+                      <span>Callback requested</span>
+                      <span className="actions-count">{analyticsBreakdown?.actions?.callbacks ?? 0}</span>
+                    </div>
+                    <div className="actions-row">
+                      <span className="actions-dot actions-dot-messages" />
+                      <span>Message taken</span>
+                      <span className="actions-count">{analyticsBreakdown?.actions?.messages ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="analytics-charts analytics-charts-second-row">
+              <div className="panel analytics-chart-panel">
+                <div className="panel-header">
+                  <h3 className="panel-title">Calls by day of week</h3>
+                </div>
+                <div className="panel-body">
+                  {analyticsBreakdown?.calls_by_weekday?.length ? (
+                    <div className="calls-chart calls-chart-weekday">
+                      {analyticsBreakdown.calls_by_weekday.map((d) => {
+                        const count = Number(d.total_calls) || 0;
+                        const max = Math.max(...analyticsBreakdown.calls_by_weekday.map((x) => Number(x.total_calls) || 0), 1);
+                        const chartHeightPx = 100;
+                        const barPx = Math.max(Math.round((count / max) * chartHeightPx), 8);
+                        return (
+                          <div key={d.day_name} className="calls-chart-column">
+                            <div className="calls-chart-bar-wrap" style={{ height: `${barPx}px` }}>
+                              <div className="calls-chart-bar" title={`${count} calls`} />
+                            </div>
+                            <div className="calls-chart-label">{d.day_name}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="empty-note">No call data for this period.</div>
+                  )}
+                </div>
+              </div>
+              <div className="panel analytics-chart-panel">
+                <div className="panel-header">
+                  <h3 className="panel-title">Sentiment</h3>
+                </div>
+                <div className="panel-body">
+                  <div className="sentiment-summary">
+                    <div className="sentiment-row sentiment-positive">
+                      <span className="sentiment-dot" />
+                      <span>Positive</span>
+                      <span className="sentiment-count">{analyticsBreakdown?.sentiment_counts?.positive ?? 0}</span>
+                    </div>
+                    <div className="sentiment-row sentiment-neutral">
+                      <span className="sentiment-dot" />
+                      <span>Neutral</span>
+                      <span className="sentiment-count">{analyticsBreakdown?.sentiment_counts?.neutral ?? 0}</span>
+                    </div>
+                    <div className="sentiment-row sentiment-negative">
+                      <span className="sentiment-dot" />
+                      <span>Negative</span>
+                      <span className="sentiment-count">{analyticsBreakdown?.sentiment_counts?.negative ?? 0}</span>
+                    </div>
+                    <div className="sentiment-row sentiment-unknown">
+                      <span className="sentiment-dot" />
+                      <span>Unknown</span>
+                      <span className="sentiment-count">{analyticsBreakdown?.sentiment_counts?.unknown ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="panel analytics-chart-panel">
+                <div className="panel-header">
+                  <h3 className="panel-title">Call outcomes</h3>
+                </div>
+                <div className="panel-body">
+                  {(() => {
+                    const sc = analyticsBreakdown?.status_counts || {};
+                    const completed = Number(sc.completed ?? 0);
+                    const transferred = Number(sc.transferred ?? 0);
+                    const failed = Number(sc.failed ?? 0);
+                    const noAnswer = Number(sc.no_answer ?? 0);
+                    const busy = Number(sc.busy ?? 0);
+                    const inProgress = Number(sc.in_progress ?? 0);
+                    const total = completed + transferred + failed + noAnswer + busy + inProgress;
+                    const answerRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+                    return (
+                      <>
+                        <div className="outcome-rate">
+                          <span className="outcome-rate-value">{answerRate}%</span>
+                          <span className="outcome-rate-label">answered / completed</span>
+                        </div>
+                        <div className="outcomes-list">
+                          <div className="outcome-row outcome-completed">
+                            <span className="outcome-dot" />
+                            <span>Completed</span>
+                            <span className="outcome-count">{completed}</span>
+                          </div>
+                          <div className="outcome-row outcome-transferred">
+                            <span className="outcome-dot" />
+                            <span>Transferred</span>
+                            <span className="outcome-count">{transferred}</span>
+                          </div>
+                          <div className="outcome-row outcome-missed">
+                            <span className="outcome-dot" />
+                            <span>Failed</span>
+                            <span className="outcome-count">{failed}</span>
+                          </div>
+                          <div className="outcome-row outcome-missed">
+                            <span className="outcome-dot" />
+                            <span>No answer</span>
+                            <span className="outcome-count">{noAnswer}</span>
+                          </div>
+                          <div className="outcome-row outcome-missed">
+                            <span className="outcome-dot" />
+                            <span>Busy</span>
+                            <span className="outcome-count">{busy}</span>
+                          </div>
+                          {inProgress > 0 && (
+                            <div className="outcome-row outcome-pending">
+                              <span className="outcome-dot" />
+                              <span>In progress</span>
+                              <span className="outcome-count">{inProgress}</span>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </section>
+          </section>
         ) : activePage === "settings" ? (
           <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
             <section className="panel">
