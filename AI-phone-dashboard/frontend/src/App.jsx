@@ -202,10 +202,11 @@ function App() {
       setMeLoading(true); setMeError(null);
       try {
         const res = await api.get("/api/me");
-        const needs = !!res.data.needsOnboarding;
+        const biz = res.data.business || null;
+        // Treat "no business yet" OR "business without phone number" as needing onboarding.
+        const needs = !biz || !biz.phone_number;
         setNeedsOnboarding(needs);
-        const biz = needs ? null : res.data.business || null;
-        setBusiness(biz); setBusinessId(biz?.id || null);
+        setBusiness(needs ? null : biz); setBusinessId(needs ? null : biz.id);
         if (biz) {
           setSettingsBusinessName(biz.name || "");
           setSettingsTimezone(biz.timezone || "America/Chicago");
@@ -255,6 +256,19 @@ function App() {
     if (needsFollowUp) params.needs_followup = "true";
     return params;
   }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp]);
+
+  const hasActiveCallFilters = useMemo(() => {
+    const caller = callerSearch.trim();
+    return (
+      status !== "all" ||
+      datePreset !== "7" ||
+      hasAppointments ||
+      sentiment !== "all" ||
+      hasSummary !== "all" ||
+      needsFollowUp ||
+      !!caller
+    );
+  }, [status, datePreset, hasAppointments, sentiment, hasSummary, needsFollowUp, callerSearch]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -556,7 +570,7 @@ function App() {
                     ) : callsError ? (
                       <div className="empty-note">{callsError}</div>
                     ) : !calls.length ? (
-                      <div className="empty-note">{t.noCallsMatch}</div>
+                      <div className="empty-note">{hasActiveCallFilters ? t.noCallsMatch : t.noCallsYet}</div>
                     ) : (
                       calls.map((call) => (
                         <div
@@ -589,7 +603,7 @@ function App() {
                   ) : callDetailsError ? (
                     <div className="details-empty">{callDetailsError}</div>
                   ) : !callDetails ? (
-                    <div className="details-empty">{t.selectCallPrompt}</div>
+                    <div className="details-empty">{calls.length ? t.selectCallPrompt : t.noCallsYetDetails}</div>
                   ) : (
                     <div className="details-stack">
                       <div className="detail-card">
