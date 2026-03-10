@@ -45,6 +45,19 @@
   font-size: 13px;
 }
 
+.dashboard-beta-pill {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 184, 76, 0.18);
+  border: 1px solid rgba(255, 184, 76, 0.42);
+  color: #ffd89a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .dashboard-business-name {
   margin: 0;
   font-size: clamp(32px, 3vw, 44px);
@@ -314,10 +327,38 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+.detail-card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .detail-card-title {
   margin: 0 0 14px;
   font-size: 24px;
   letter-spacing: -0.02em;
+}
+
+.detail-card-action-button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfd9eb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.18s ease;
+}
+
+.detail-card-action-button:hover {
+  border-color: rgba(88, 164, 255, 0.5);
+  background: rgba(88, 164, 255, 0.14);
+  transform: translateY(-0.5px);
 }
 
 .info-grid {
