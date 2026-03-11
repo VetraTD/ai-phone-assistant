@@ -161,7 +161,7 @@
 
 .dashboard-main {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 380px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
   margin-top: 20px;
@@ -212,7 +212,7 @@
 }
 
 .panel-body {
-  padding: 18px;
+  padding: 20px;
 }
 
 .usage-panel .usage-stats {
@@ -248,7 +248,7 @@
 
 .filters-grid {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .filter-row-2 {
@@ -315,7 +315,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
   color: #9bacbf;
   font-size: 14px;
 }
