@@ -458,6 +458,9 @@ function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState("");
   const [settingsError, setSettingsError] = useState("");
+  const [usage, setUsage] = useState(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState(null);
 
   const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
 
@@ -530,6 +533,15 @@ function App() {
     from.setDate(to.getDate() - days);
     setFromDate(formatDateYYYYMMDD(from)); setToDate(formatDateYYYYMMDD(to));
   }, [datePreset]);
+
+  useEffect(() => {
+    if (activePage !== "settings" || !businessId) return;
+    setUsageLoading(true); setUsageError(null);
+    api.get("/api/usage")
+      .then((res) => { setUsage(res.data); })
+      .catch((err) => { setUsageError(err?.response?.data?.error || "Failed to load usage"); setUsage(null); })
+      .finally(() => { setUsageLoading(false); });
+  }, [activePage, businessId]);
 
   const callsQueryParams = useMemo(() => {
     const params = { limit: 200, offset: 0 };
@@ -1496,7 +1508,38 @@ function App() {
             )}
           </section>
         ) : activePage === "settings" ? (
-          <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+          <>
+            <section className="panel usage-panel" style={{ marginBottom: 16 }}>
+              <div className="panel-header">
+                <h2 className="panel-title">Usage this month</h2>
+              </div>
+              <div className="panel-body">
+                {usageLoading ? (
+                  <div className="usage-loading">
+                    <span className="kpi-skeleton" style={{ display: "inline-block", width: 48, height: 28, borderRadius: 8 }} />
+                    <span className="kpi-skeleton" style={{ display: "inline-block", width: 56, height: 28, borderRadius: 8, marginLeft: 16 }} />
+                  </div>
+                ) : usageError ? (
+                  <p style={{ margin: 0, color: "#9bacbf", fontSize: 14 }}>{usageError}</p>
+                ) : usage ? (
+                  <div className="usage-stats">
+                    <div className="usage-stat">
+                      <span className="usage-stat-value">{usage.calls_this_month}</span>
+                      <span className="usage-stat-label">Calls</span>
+                    </div>
+                    <div className="usage-stat">
+                      <span className="usage-stat-value">{usage.minutes_this_month}</span>
+                      <span className="usage-stat-label">Minutes</span>
+                    </div>
+                  </div>
+                ) : null}
+                <p style={{ margin: "12px 0 0", fontSize: 12, color: "#7b8fa3" }}>
+                  Resets on the 1st of each month. Useful for billing and limits later.
+                </p>
+              </div>
+            </section>
+
+            <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">{t.businessSettings}</h2></div>
               <div className="panel-body">
@@ -1641,7 +1684,7 @@ function App() {
                   <div className="info-grid">
                     <div className="info-label">{t.currentPlan}</div><div className="info-value">{settingsPlanName}</div>
                     <div className="info-label">{t.billingStatus}</div><div className="info-value">{settingsBillingStatus}</div>
-                    <div className="info-label">{t.usageThisMonth}</div><div className="info-value">{t.comingSoon}</div>
+                    <div className="info-label">{t.usageThisMonth}</div><div className="info-value">{usage ? `${usage.calls_this_month} calls, ${usage.minutes_this_month} min` : usageLoading ? "…" : t.comingSoon}</div>
                     <div className="info-label">{t.phoneNumber}</div><div className="info-value">{business?.phone_number || t.notConnectedYet}</div>
                   </div>
                 </div>
@@ -1690,7 +1733,8 @@ function App() {
                 </button>
               </div>
             </section>
-          </section>
+            </section>
+          </>
         ) : (
           <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16 }}>
             <section className="panel" style={{ gridColumn: "1 / -1" }}>

@@ -215,6 +215,37 @@
   padding: 18px;
 }
 
+.usage-panel .usage-stats {
+  display: flex;
+  gap: 24px;
+  align-items: baseline;
+}
+
+.usage-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-stat-value {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #f4f7fb;
+}
+
+.usage-stat-label {
+  font-size: 13px;
+  color: #9bacbf;
+}
+
+.usage-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .filters-grid {
   display: grid;
   gap: 14px;

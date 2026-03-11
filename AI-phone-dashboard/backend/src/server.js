@@ -502,6 +502,38 @@ app.get("/api/analytics/:businessId", authenticate, async (req, res) => {
   }
 });
 
+// Usage this month (calls count + total minutes) for Settings
+app.get("/api/usage", authenticate, async (req, res) => {
+  try {
+    const authUserId = req.authUser.id;
+    const businessId = await getBusinessIdForUser(authUserId);
+    if (!businessId) {
+      return res.status(403).json({ error: "No business linked to this user" });
+    }
+
+    const usageRes = await pool.query(
+      `SELECT
+        COUNT(*)::int AS calls_this_month,
+        COALESCE(SUM(duration_seconds), 0)::bigint AS total_seconds
+       FROM calls
+       WHERE business_id = $1
+         AND started_at >= date_trunc('month', CURRENT_DATE)
+         AND started_at < date_trunc('month', CURRENT_DATE) + interval '1 month'`,
+      [businessId]
+    );
+
+    const row = usageRes.rows[0];
+    const callsThisMonth = Number(row?.calls_this_month ?? 0);
+    const totalSeconds = Number(row?.total_seconds ?? 0);
+    const minutesThisMonth = Math.floor(totalSeconds / 60);
+
+    res.json({ calls_this_month: callsThisMonth, minutes_this_month: minutesThisMonth });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load usage" });
+  }
+});
+
 // Analytics breakdown: period=7d|30d|90d, returns time buckets + totals for analytics page
 app.get("/api/analytics-breakdown", authenticate, async (req, res) => {
   try {
