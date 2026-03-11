@@ -401,11 +401,6 @@ function App() {
       });
   }, [businessId, callsQueryParams]);
 
-  useEffect(() => {
-    if (!businessId || activePage !== "dashboard") return;
-    fetchCalls();
-  }, [businessId, activePage, fetchCalls]);
-
   const loadMoreCalls = () => {
     if (callsLoadingMore || callsLoading || (callsTotal != null && calls.length >= callsTotal)) return;
     setCallsLoadingMore(true);
@@ -428,6 +423,20 @@ function App() {
       })
       .finally(() => setCallDetailsLoading(false));
   };
+
+  useEffect(() => {
+    if (!businessId || activePage !== "dashboard") return;
+    fetchCalls();
+  }, [businessId, activePage, fetchCalls]);
+
+  useEffect(() => {
+    if (activePage !== "dashboard") return;
+    if (selectedCallId || !calls.length) return;
+    const first = calls[0];
+    if (first?.id) {
+      loadCallDetails(first.id);
+    }
+  }, [activePage, selectedCallId, calls]);
 
   const emailAppointments = async (range) => {
     if (!businessId) return;
@@ -549,6 +558,9 @@ function App() {
               <span className="dashboard-beta-pill">Beta</span>
             </div>
             <h1 className="dashboard-business-name">{business?.name ?? t.appTitle}</h1>
+            <p className="dashboard-context-line">
+              AI receptionist overview for today
+            </p>
             {business ? (
               <div className="dashboard-business-meta">
                 <span className="dashboard-meta-pill">{business.phone_number || "No phone number"}</span>
@@ -640,17 +652,41 @@ function App() {
             <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
               {analytics ? (
                 <>
-                  <div className="kpi-card"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value">{analytics.calls_today ?? 0}</div></div>
-                  <div className="kpi-card"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value">{analytics.appointments_today ?? 0}</div></div>
-                  <div className="kpi-card"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value">{analytics.followups_needed ?? 0}</div></div>
-                  <div className="kpi-card"><div className="kpi-label">{t.transferredToHuman}</div><div className="kpi-value">{analytics.transferred_today ?? 0}</div></div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">{t.callsToday}</div>
+                    <div className="kpi-value">{analytics.calls_today ?? 0}</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">{t.appointmentsToday}</div>
+                    <div className="kpi-value">{analytics.appointments_today ?? 0}</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">{t.followUpsNeeded}</div>
+                    <div className="kpi-value">{analytics.followups_needed ?? 0}</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">{t.transferredToHuman}</div>
+                    <div className="kpi-value">{analytics.transferred_today ?? 0}</div>
+                  </div>
                 </>
               ) : !analyticsError ? (
                 <>
-                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value kpi-skeleton" /></div>
-                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value kpi-skeleton" /></div>
-                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value kpi-skeleton" /></div>
-                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.transferredToHuman}</div><div className="kpi-value kpi-skeleton" /></div>
+                  <div className="kpi-card kpi-card-skeleton">
+                    <div className="kpi-label">{t.callsToday}</div>
+                    <div className="kpi-value kpi-skeleton" />
+                  </div>
+                  <div className="kpi-card kpi-card-skeleton">
+                    <div className="kpi-label">{t.appointmentsToday}</div>
+                    <div className="kpi-value kpi-skeleton" />
+                  </div>
+                  <div className="kpi-card kpi-card-skeleton">
+                    <div className="kpi-label">{t.followUpsNeeded}</div>
+                    <div className="kpi-value kpi-skeleton" />
+                  </div>
+                  <div className="kpi-card kpi-card-skeleton">
+                    <div className="kpi-label">{t.transferredToHuman}</div>
+                    <div className="kpi-value kpi-skeleton" />
+                  </div>
                 </>
               ) : analyticsError ? (
                 <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
@@ -658,26 +694,6 @@ function App() {
                   <div className="empty-note">{analyticsError}</div>
                 </div>
               ) : null}
-
-              <div
-                className="kpi-card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  minWidth: 0,
-                }}
-              >
-                <div className="kpi-label">Upcoming appointments email</div>
-                <button
-                  type="button"
-                  className="detail-card-action-button"
-                  style={{ marginTop: 8 }}
-                  onClick={() => emailAppointments("upcoming")}
-                >
-                  Email upcoming appointments
-                </button>
-              </div>
             </section>
             {analyticsError && !analytics ? null : null}
 
@@ -692,7 +708,10 @@ function App() {
 
             <section className="dashboard-main">
               <aside className="panel">
-                <div className="panel-header"><h2 className="panel-title">{t.calls}</h2></div>
+                <div className="panel-header">
+                  <p className="panel-section-label">Activity</p>
+                  <h2 className="panel-title">{t.calls}</h2>
+                </div>
                 <div className="panel-body">
                   <div className="filters-grid">
                     <div className="filter-row-2">
@@ -775,7 +794,22 @@ function App() {
                       {callsLoading ? t.loadingCalls : t.showingCalls(calls.length, callsTotal ?? undefined)}
                     </span>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" className="reset-button" onClick={() => { const csv = buildCallsCsv(calls); if (csv) downloadCsv(csv, `calls-${formatDateYYYYMMDD(new Date())}.csv`); }} disabled={!calls.length}>
+                      <button
+                        type="button"
+                        className="reset-button"
+                        onClick={() => emailAppointments("upcoming")}
+                      >
+                        Email upcoming appointments
+                      </button>
+                      <button
+                        type="button"
+                        className="reset-button"
+                        onClick={() => {
+                          const csv = buildCallsCsv(calls);
+                          if (csv) downloadCsv(csv, `calls-${formatDateYYYYMMDD(new Date())}.csv`);
+                        }}
+                        disabled={!calls.length}
+                      >
                         {t.exportCallsCsv}
                       </button>
                       <button className="reset-button" onClick={resetFilters}>{t.reset}</button>
@@ -824,11 +858,15 @@ function App() {
 
               <section className="panel">
                 <div className="panel-header">
+                  <p className="panel-section-label">Details</p>
                   <h2 className="panel-title">{t.callDetails}</h2>
                 </div>
                 <div className="panel-body">
                   {callDetailsLoading ? (
-                    <div className="details-empty">{t.loadingCallDetails}</div>
+                    <div className="details-empty">
+                      <div className="details-spinner" aria-hidden="true" />
+                      <div>{t.loadingCallDetails}</div>
+                    </div>
                   ) : callDetailsError ? (
                     <div className="details-empty">{callDetailsError}</div>
                   ) : !callDetails ? (
