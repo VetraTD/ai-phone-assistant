@@ -153,7 +153,8 @@ if (needs_followup === "true") {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const sql = `
-      SELECT *
+      SELECT calls.*,
+        (SELECT a.client_name FROM appointments a WHERE a.call_id = calls.id ORDER BY a.created_at DESC LIMIT 1) AS caller_name_guess
       FROM calls
       ${whereSql}
       ORDER BY started_at DESC
