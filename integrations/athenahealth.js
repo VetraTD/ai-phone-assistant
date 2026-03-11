@@ -63,7 +63,7 @@ export async function getAthenaAccessToken(config = {}) {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Basic ${auth}`,
       },
-      body: "grant_type=client_credentials",
+      body: "grant_type=client_credentials&scope=athena/service/Athenanet.MDP.*",
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -185,7 +185,10 @@ export async function getCallerAppointments(apiBase, practiceId, accessToken, ar
     return { success: true, message: "I didn't find any upcoming appointments for you." };
   }
 
-  const apptRes = await athenaGet(apiBase, practiceId, accessToken, `patients/${patientId}/appointments`, {});
+  const now = new Date();
+  const startDate = now.toISOString().slice(0, 10);
+  const endDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const apptRes = await athenaGet(apiBase, practiceId, accessToken, `patients/${patientId}/appointments`, { start_date: startDate, end_date: endDate });
   if (!apptRes.ok) {
     log("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: apptRes.status });
     return { success: false, message: "I couldn't retrieve your appointments. Please try again or call the office." };
