@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { supabase } from "./supabaseClient";
 import { LanguageSwitcher, useTranslations } from "./LanguageSwitcher";
@@ -14,6 +14,37 @@ function formatDateYYYYMMDD(d) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function escapeCsvCell(s) {
+  const str = s == null ? "" : String(s);
+  if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function buildCallsCsv(calls) {
+  if (!calls?.length) return null;
+  const headers = ["Date", "Caller", "Status", "Duration (s)", "Sentiment", "Summary"];
+  const rows = calls.map((c) => [
+    c.started_at ? new Date(c.started_at).toISOString() : "",
+    c.caller_name_guess || c.caller_number || "",
+    c.inferred_transferred ? "Transferred" : (c.status || ""),
+    c.duration_seconds ?? "",
+    c.sentiment ?? "",
+    (c.summary || "").slice(0, 500),
+  ]);
+  const line = (arr) => arr.map(escapeCsvCell).join(",");
+  return [line(headers), ...rows.map(line)].join("\r\n");
+}
+
+function downloadCsv(csvContent, filename) {
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function badgeStyle(type) {
@@ -150,10 +181,15 @@ function App() {
   const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [calls, setCalls] = useState([]);
+  const [callsTotal, setCallsTotal] = useState(null);
   const [selectedCallId, setSelectedCallId] = useState(null);
   const [callDetails, setCallDetails] = useState(null);
   const [callsLoading, setCallsLoading] = useState(false);
   const [callsError, setCallsError] = useState(null);
+  const [callsLoadingMore, setCallsLoadingMore] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(null);
+  const selectedCallIdRef = useRef(null);
+  selectedCallIdRef.current = selectedCallId;
   const [callDetailsLoading, setCallDetailsLoading] = useState(false);
   const [callDetailsError, setCallDetailsError] = useState(null);
   const [analyticsError, setAnalyticsError] = useState(null);
@@ -270,7 +306,7 @@ function App() {
   }, [datePreset]);
 
   const callsQueryParams = useMemo(() => {
-    const params = {};
+    const params = { limit: 200, offset: 0 };
     if (businessId) params.business_id = businessId;
     if (status !== "all") params.status = status;
     if (callerSearch.trim()) params.caller = callerSearch.trim();
@@ -282,6 +318,12 @@ function App() {
     if (needsFollowUp) params.needs_followup = "true";
     return params;
   }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp]);
+
+  const settingsDirty = useMemo(() => {
+    if (!business) return false;
+    const b = business;
+    return (settingsBusinessName !== (b.name || "")) || (settingsTimezone !== (b.timezone || "America/Chicago")) || (settingsGreeting !== (b.greeting || "")) || (settingsAfterHoursMode !== (b.after_hours_policy || "take-message")) || (settingsTransferPolicy !== (b.transfer_policy || "business_hours_only")) || (settingsTransferPhoneNumber !== (b.transfer_phone_number || "")) || (settingsNotificationEmail !== (b.notification_email || "")) || (settingsNotificationPhone !== (b.notification_phone || "")) || (settingsDefaultLanguage !== (b.default_language || "en")) || (settingsGeneralInfo !== (b.general_info || "")) || (settingsAddressLine1 !== (b.address_line1 || "")) || (settingsAddressLine2 !== (b.address_line2 || "")) || (settingsCity !== (b.city || "")) || (settingsStateRegion !== (b.state_region || "")) || (settingsPostalCode !== (b.postal_code || ""));
+  }, [business, settingsBusinessName, settingsTimezone, settingsGreeting, settingsAfterHoursMode, settingsTransferPolicy, settingsTransferPhoneNumber, settingsNotificationEmail, settingsNotificationPhone, settingsDefaultLanguage, settingsGeneralInfo, settingsAddressLine1, settingsAddressLine2, settingsCity, settingsStateRegion, settingsPostalCode]);
 
   const hasActiveCallFilters = useMemo(() => {
     const caller = callerSearch.trim();
@@ -296,19 +338,22 @@ function App() {
     );
   }, [status, datePreset, hasAppointments, sentiment, hasSummary, needsFollowUp, callerSearch]);
 
+  const fetchAnalytics = useCallback(() => {
+    if (!businessId) return;
+    api.get(`/api/analytics/${businessId}`)
+      .then((res) => { setAnalytics(res.data); setAnalyticsError(null); })
+      .catch((err) => {
+        console.error(err);
+        setAnalyticsError(err?.response?.data?.error || err?.message || "Failed to load analytics");
+      });
+  }, [businessId]);
+
   useEffect(() => {
     if (!businessId) return;
-    const fetchAnalytics = () =>
-      api.get(`/api/analytics/${businessId}`)
-        .then((res) => { setAnalytics(res.data); setAnalyticsError(null); })
-        .catch((err) => {
-          console.error(err);
-          setAnalyticsError(err?.response?.data?.error || err?.message || "Failed to load analytics");
-        });
     fetchAnalytics();
     const ti = setInterval(fetchAnalytics, 15000);
     return () => clearInterval(ti);
-  }, [businessId]);
+  }, [businessId, fetchAnalytics]);
 
   useEffect(() => {
     if (!businessId || activePage !== "analytics") return;
@@ -320,22 +365,57 @@ function App() {
       });
   }, [businessId, activePage, analyticsPeriod]);
 
-  useEffect(() => {
-    if (!businessId || activePage !== "dashboard") return;
-    setCallsLoading(true); setCallsError(null); setCalls([]);
-    api.get(`/api/calls`, { params: callsQueryParams })
+  const fetchCalls = useCallback((opts = {}) => {
+    if (!businessId) return Promise.resolve();
+    const { append = false, offset: optOffset } = opts;
+    if (!append) {
+      setCallsLoading(true);
+      setCallsError(null);
+      setCalls([]);
+    }
+    const params = { ...callsQueryParams, limit: 200, offset: append ? (optOffset ?? 0) : 0 };
+    return api.get(`/api/calls`, { params })
       .then((res) => {
-        setCalls(res.data);
-        if (selectedCallId && !res.data.some((c) => c.id === selectedCallId)) {
-          setSelectedCallId(null); setCallDetails(null); setCallDetailsError(null);
+        const data = res.data?.calls != null ? res.data : { calls: res.data, total: res.data?.length };
+        const list = Array.isArray(data.calls) ? data.calls : [];
+        const total = data.total != null ? data.total : list.length;
+        if (append) {
+          setCalls((prev) => [...prev, ...list]);
+          setCallsTotal((prev) => (prev != null ? prev : total));
+        } else {
+          setCalls(list);
+          setCallsTotal(total);
+          const sid = selectedCallIdRef.current;
+          if (sid && !list.some((c) => c.id === sid)) {
+            setSelectedCallId(null); setCallDetails(null); setCallDetailsError(null);
+          }
         }
       })
       .catch((err) => {
         console.error(err);
         setCallsError(err?.response?.data?.error || err?.message || "Failed to load calls");
       })
-      .finally(() => setCallsLoading(false));
-  }, [businessId, callsQueryParams, selectedCallId, activePage]);
+      .finally(() => {
+        setCallsLoading(false);
+        setCallsLoadingMore(false);
+      });
+  }, [businessId, callsQueryParams]);
+
+  useEffect(() => {
+    if (!businessId || activePage !== "dashboard") return;
+    fetchCalls();
+  }, [businessId, activePage, fetchCalls]);
+
+  const loadMoreCalls = () => {
+    if (callsLoadingMore || callsLoading || (callsTotal != null && calls.length >= callsTotal)) return;
+    setCallsLoadingMore(true);
+    fetchCalls({ append: true, offset: calls.length });
+  };
+
+  const refreshDashboard = () => {
+    fetchAnalytics();
+    if (activePage === "dashboard") fetchCalls();
+  };
 
   const loadCallDetails = (id) => {
     if (!businessId) return;
@@ -363,6 +443,11 @@ function App() {
       console.error(err);
       window.alert("Failed to send appointments email. Please try again.");
     }
+  };
+
+  const goToPage = (page) => {
+    if (activePage === "settings" && settingsDirty && !window.confirm(t.unsavedChanges)) return;
+    setActivePage(page);
   };
 
   const resetFilters = () => {
@@ -488,7 +573,7 @@ function App() {
                   background: activePage === "dashboard" ? "rgba(88,164,255,0.16)" : "transparent",
                   border: activePage === "dashboard" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
                 }}
-                onClick={() => setActivePage("dashboard")}
+                onClick={() => goToPage("dashboard")}
               >
                 {t.navDashboard}
               </button>
@@ -499,7 +584,7 @@ function App() {
                   background: activePage === "analytics" ? "rgba(88,164,255,0.16)" : "transparent",
                   border: activePage === "analytics" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
                 }}
-                onClick={() => setActivePage("analytics")}
+                onClick={() => goToPage("analytics")}
               >
                 {t.navAnalytics}
               </button>
@@ -521,7 +606,7 @@ function App() {
                   background: activePage === "guide" ? "rgba(88,164,255,0.16)" : "transparent",
                   border: activePage === "guide" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
                 }}
-                onClick={() => setActivePage("guide")}
+                onClick={() => goToPage("guide")}
               >
                 {t.navGuide}
               </button>
@@ -538,9 +623,20 @@ function App() {
 
         {activePage === "dashboard" ? (
           <>
-            <p className="dashboard-today-label" aria-hidden="true">
-              {t.dataForToday} {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
-            </p>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+              <p className="dashboard-today-label" style={{ margin: 0 }} aria-hidden="true">
+                {t.dataForToday} {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+              </p>
+              <button
+                type="button"
+                className="dashboard-logout"
+                style={{ fontSize: 13, height: 32, padding: "0 12px" }}
+                onClick={refreshDashboard}
+                title={t.refresh}
+              >
+                {t.refresh}
+              </button>
+            </div>
             <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
               {analytics ? (
                 <>
@@ -676,9 +772,14 @@ function App() {
 
                   <div className="calls-toolbar">
                     <span>
-                      {callsLoading ? t.loadingCalls : t.showingCalls(calls.length)}
+                      {callsLoading ? t.loadingCalls : t.showingCalls(calls.length, callsTotal ?? undefined)}
                     </span>
-                    <button className="reset-button" onClick={resetFilters}>{t.reset}</button>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" className="reset-button" onClick={() => { const csv = buildCallsCsv(calls); if (csv) downloadCsv(csv, `calls-${formatDateYYYYMMDD(new Date())}.csv`); }} disabled={!calls.length}>
+                        {t.exportCallsCsv}
+                      </button>
+                      <button className="reset-button" onClick={resetFilters}>{t.reset}</button>
+                    </div>
                   </div>
 
                   <div className="calls-list">
@@ -711,6 +812,13 @@ function App() {
                       ))
                     )}
                   </div>
+                  {!callsLoading && calls.length > 0 && callsTotal != null && calls.length < callsTotal && (
+                    <div style={{ marginTop: 12, textAlign: "center" }}>
+                      <button type="button" className="reset-button" onClick={loadMoreCalls} disabled={callsLoadingMore}>
+                        {callsLoadingMore ? "…" : t.loadMore}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </aside>
 
@@ -737,14 +845,22 @@ function App() {
                           <div className="info-label">{t.infoStarted}</div>
                           <div className="info-value">{callDetails.call.started_at ? new Date(callDetails.call.started_at).toLocaleString() : "-"}</div>
                           <div className="info-label">{t.infoSummary}</div>
-                          <div className="info-value">{callDetails.call.summary ?? t.noSummaryYet}</div>
+                          <div className="info-value" style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ flex: "1 1 auto", minWidth: 0 }}>{callDetails.call.summary ?? t.noSummaryYet}</span>
+                            <button type="button" className="reset-button" style={{ flexShrink: 0, fontSize: 12 }} onClick={() => { const s = callDetails.call?.summary || ""; if (s) { navigator.clipboard.writeText(s); setCopyFeedback("summary"); setTimeout(() => setCopyFeedback(null), 2000); } }}>{copyFeedback === "summary" ? t.copied : t.copySummary}</button>
+                          </div>
                           <div className="info-label">{t.infoSentiment}</div>
                           <div className="info-value">{callDetails.call.sentiment ?? t.unknownSentiment}</div>
                         </div>
                       </div>
 
                       <div className="detail-card">
-                        <h3 className="detail-card-title">{t.transcript}</h3>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                          <h3 className="detail-card-title" style={{ margin: 0 }}>{t.transcript}</h3>
+                          {callDetails.transcript?.length ? (
+                            <button type="button" className="reset-button" style={{ fontSize: 12 }} onClick={() => { const text = callDetails.transcript.map((l) => `${l.speaker === "ai" ? t.aiReceptionist : t.caller}: ${l.message}`).join("\n"); navigator.clipboard.writeText(text); setCopyFeedback("transcript"); setTimeout(() => setCopyFeedback(null), 2000); }}>{copyFeedback === "transcript" ? t.copied : t.copyTranscript}</button>
+                          ) : null}
+                        </div>
                         {callDetails.transcript?.length ? (
                           <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 6 }}>
                             <div className="transcript-list">
@@ -833,6 +949,47 @@ function App() {
               <p className="analytics-page-subtitle">Trends and totals for your receptionist calls</p>
             </div>
 
+            {!analyticsBreakdown ? (
+              <>
+                <section className="analytics-overview">
+                  <h3 className="analytics-section-label">Overview</h3>
+                  <div className="dashboard-kpis analytics-kpis">
+                    <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Receptionist calls</div><div className="kpi-value kpi-skeleton" /></div>
+                    <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Appointments scheduled</div><div className="kpi-value kpi-skeleton" /></div>
+                    <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Follow-ups needed</div><div className="kpi-value kpi-skeleton" /></div>
+                    <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Positive calls</div><div className="kpi-value kpi-skeleton" /></div>
+                    <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Calls → appointments</div><div className="kpi-value kpi-skeleton" /></div>
+                  </div>
+                </section>
+                <section className="analytics-charts">
+                  <div className="panel analytics-chart-panel">
+                    <div className="panel-header">
+                      <h3 className="panel-title">{analyticsPeriod === "7d" ? "Calls this week" : analyticsPeriod === "30d" ? "Calls by week" : "Calls last 3 months"}</h3>
+                    </div>
+                    <div className="panel-body"><div className="empty-note">{t.loadingAnalytics}</div></div>
+                  </div>
+                  <div className="panel analytics-chart-panel">
+                    <div className="panel-header"><h3 className="panel-title">Actions taken</h3></div>
+                    <div className="panel-body"><div className="empty-note">{t.loadingAnalytics}</div></div>
+                  </div>
+                </section>
+                <section className="analytics-charts analytics-charts-second-row">
+                  <div className="panel analytics-chart-panel">
+                    <div className="panel-header"><h3 className="panel-title">Calls by day of week</h3></div>
+                    <div className="panel-body"><div className="empty-note">{t.loadingAnalytics}</div></div>
+                  </div>
+                  <div className="panel analytics-chart-panel">
+                    <div className="panel-header"><h3 className="panel-title">Sentiment</h3></div>
+                    <div className="panel-body"><div className="empty-note">{t.loadingAnalytics}</div></div>
+                  </div>
+                  <div className="panel analytics-chart-panel">
+                    <div className="panel-header"><h3 className="panel-title">Call outcomes</h3></div>
+                    <div className="panel-body"><div className="empty-note">{t.loadingAnalytics}</div></div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <>
             <section className="analytics-overview">
               <h3 className="analytics-section-label">Overview</h3>
               <div className="dashboard-kpis analytics-kpis">
@@ -1055,6 +1212,8 @@ function App() {
                 </div>
               </div>
             </section>
+              </>
+            )}
           </section>
         ) : activePage === "settings" ? (
           <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>

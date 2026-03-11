@@ -88,6 +88,8 @@ app.get("/api/calls", authenticate, async (req, res) => {
     if (status && status !== "all") {
       if (status === "transferred") {
         where.push(`(status = 'transferred' OR (status = 'completed' AND summary IS NOT NULL AND summary ILIKE '%transfer%'))`);
+      } else if (status === "completed") {
+        where.push(`(status = 'completed' AND (summary IS NULL OR summary NOT ILIKE '%transfer%'))`);
       } else {
         where.push(`status = ${addParam(status)}`);
       }
@@ -151,6 +153,14 @@ if (needs_followup === "true") {
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*) AS total FROM calls ${whereSql}`,
+      params
+    );
+    const total = parseInt(countRes.rows[0]?.total ?? 0, 10);
 
     const sql = `
       SELECT calls.*,
@@ -158,7 +168,7 @@ if (needs_followup === "true") {
       FROM calls
       ${whereSql}
       ORDER BY started_at DESC
-      LIMIT 200
+      LIMIT ${limit} OFFSET ${offset}
     `;
 
     const r = await pool.query(sql, params);
@@ -166,7 +176,7 @@ if (needs_followup === "true") {
       ...row,
       inferred_transferred: !!(row.summary && /transfer/i.test(String(row.summary))),
     }));
-    res.json(rows);
+    res.json({ calls: rows, total });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
