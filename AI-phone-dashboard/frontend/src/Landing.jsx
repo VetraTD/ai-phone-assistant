@@ -22,7 +22,7 @@ export default function Landing() {
           <nav className="landing-nav">
             <a href="#features">Features</a>
             <a href="#preview">Dashboard</a>
-            <a href="#demo">Try demo</a>
+            <Link to="/app?demo=1">Guided demo</Link>
             <a href="#different">Why Vetra</a>
             <a href="#faq">FAQ</a>
           </nav>
@@ -55,6 +55,10 @@ export default function Landing() {
             <a href="#demo" className="landing-cta-secondary">
               Try the demo line
             </a>
+            <span className="landing-hero-or">or</span>
+            <Link to="/app?demo=1" className="landing-cta-secondary">
+              Open guided dashboard
+            </Link>
           </div>
           <p className="landing-hero-trust">
             Secure • Full transcripts • One dashboard
@@ -184,8 +188,8 @@ export default function Landing() {
               </div>
             </div>
           </div>
-          <Link to="/app" className="landing-preview-cta">
-            Open your dashboard
+          <Link to="/app?demo=1" className="landing-preview-cta">
+            Launch guided dashboard demo
           </Link>
         </div>
       </section>

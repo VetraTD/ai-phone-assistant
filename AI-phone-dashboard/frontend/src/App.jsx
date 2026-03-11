@@ -160,6 +160,225 @@ function LoadingScreen({ title, subtitle }) {
   );
 }
 
+function DemoDashboard({ t, lang, onChangeLang }) {
+  const demoBusiness = {
+    name: "Excel Cardiac Care (Demo)",
+    phone_number: "+1 (817) 601-1171",
+    timezone: "America/Chicago",
+  };
+
+  const demoCalls = [
+    {
+      id: "demo-1",
+      caller_name_guess: "New patient inquiry",
+      caller_number: "+1 469 555 0199",
+      started_at: new Date().toISOString(),
+      status: "completed",
+      inferred_transferred: false,
+      duration_seconds: 182,
+      sentiment: "positive",
+      summary: "New patient called to book an initial consultation next week.",
+    },
+    {
+      id: "demo-2",
+      caller_name_guess: "Follow-up question",
+      caller_number: "+1 214 555 2334",
+      started_at: new Date().toISOString(),
+      status: "transferred",
+      inferred_transferred: true,
+      duration_seconds: 96,
+      sentiment: "neutral",
+      summary: "Existing patient had a medication question and was transferred to front desk.",
+    },
+    {
+      id: "demo-3",
+      caller_name_guess: null,
+      caller_number: "+1 972 555 8842",
+      started_at: new Date().toISOString(),
+      status: "completed",
+      inferred_transferred: false,
+      duration_seconds: 74,
+      sentiment: "negative",
+      summary: "Caller reported a billing issue; receptionist captured callback details.",
+    },
+  ];
+
+  const [selectedId, setSelectedId] = useState(demoCalls[0].id);
+
+  const selectedCall = demoCalls.find((c) => c.id === selectedId) || demoCalls[0];
+
+  const demoTranscript = [
+    { id: "t1", speaker: "caller", message: "Hi, I’m a new patient and I’d like to book an appointment." },
+    { id: "t2", speaker: "ai", message: "Of course. I can help with that. What day works best for you next week?" },
+    { id: "t3", speaker: "caller", message: "Sometime on Tuesday afternoon." },
+    { id: "t4", speaker: "ai", message: "We have availability at 2:30 PM and 4:15 PM. Which do you prefer?" },
+    { id: "t5", speaker: "caller", message: "Let’s do 4:15 PM." },
+  ];
+
+  return (
+    <div className="dashboard-page">
+      <div className="dashboard-shell">
+        <header className="dashboard-topbar">
+          <div className="dashboard-topbar-left">
+            <div className="dashboard-badge">
+              {t.appTitle}
+              <span className="dashboard-beta-pill">Beta</span>
+            </div>
+            <h1 className="dashboard-business-name">{demoBusiness.name}</h1>
+            <p className="dashboard-context-line">
+              Guided demo — click a call to see how Vetra logs it.
+            </p>
+            <div className="dashboard-business-meta">
+              <span className="dashboard-meta-pill">{demoBusiness.phone_number}</span>
+              <span className="dashboard-meta-pill">{demoBusiness.timezone}</span>
+            </div>
+          </div>
+
+          <div className="dashboard-topbar-right" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <LanguageSwitcher lang={lang} onChange={onChangeLang} />
+          </div>
+        </header>
+
+        <main className="dashboard-content page-dashboard">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+            <p className="dashboard-today-label" style={{ margin: 0 }} aria-hidden="true">
+              Example day for your AI receptionist
+            </p>
+            <span style={{ fontSize: 12, color: "#7b8fa3" }}>Demo mode — no real data or calls</span>
+          </div>
+
+          <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
+            <div className="kpi-card">
+              <div className="kpi-label">Calls today</div>
+              <div className="kpi-value">
+                <AnimatedNumber value={34} duration={900} />
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Appointments today</div>
+              <div className="kpi-value">
+                <AnimatedNumber value={9} duration={900} />
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Follow-ups needed</div>
+              <div className="kpi-value">
+                <AnimatedNumber value={4} duration={900} />
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Transferred to human</div>
+              <div className="kpi-value">
+                <AnimatedNumber value={3} duration={900} />
+              </div>
+            </div>
+          </section>
+
+          <section className="dashboard-main">
+            <aside className="panel">
+              <div className="panel-header">
+                <p className="panel-section-label">Activity</p>
+                <h2 className="panel-title">{t.calls}</h2>
+              </div>
+              <div className="panel-body">
+                <div className="filters-grid" style={{ marginBottom: 12 }}>
+                  <div className="filter-field">
+                    <label>Guided steps</label>
+                    <p style={{ fontSize: 13, color: "#9bacbf", margin: 0 }}>
+                      1) Click a call on the left. 2) Read Call Info. 3) Scroll the Transcript.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="calls-list">
+                  {demoCalls.map((call) => (
+                    <div
+                      key={call.id}
+                      onClick={() => setSelectedId(call.id)}
+                      className={`call-card ${selectedId === call.id ? "is-active" : ""}`}
+                    >
+                      <div className="call-card-top">
+                        <div className="call-number" style={{ fontSize: 18, marginBottom: 0 }}>
+                          {call.caller_name_guess || call.caller_number}
+                        </div>
+                      </div>
+                      <div className="call-date">
+                        Today • {call.duration_seconds}s
+                      </div>
+                      <div className="call-meta" style={{ marginTop: 12 }}>
+                        <span style={getStatusPillStyle(call.inferred_transferred ? "transferred" : call.status)}>
+                          {call.inferred_transferred ? "Transferred" : (call.status || "")}
+                        </span>
+                        <span className="call-pill">{call.duration_seconds}s</span>
+                        <span style={getSentimentPillStyle(call.sentiment)}>{call.sentiment}</span>
+                        <span className="call-pill">{call.summary ? t.summaryCheck : t.noSummaryShort}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
+
+            <section className="panel">
+              <div className="panel-header">
+                <p className="panel-section-label">Details</p>
+                <h2 className="panel-title">{t.callDetails}</h2>
+              </div>
+              <div className="panel-body">
+                <div className="details-stack">
+                  <div className="detail-card">
+                    <h3 className="detail-card-title">{t.callInfo}</h3>
+                    <div className="info-grid">
+                      <div className="info-label">{t.infoStatus}</div>
+                      <div className="info-value">{selectedCall.inferred_transferred ? "Transferred" : (selectedCall.status || "")}</div>
+                      <div className="info-label">{t.infoDuration}</div>
+                      <div className="info-value">{selectedCall.duration_seconds} {t.sec}</div>
+                      <div className="info-label">{t.infoStarted}</div>
+                      <div className="info-value">Today • demo data</div>
+                      <div className="info-label">{t.infoSummary}</div>
+                      <div className="info-value">
+                        {selectedCall.summary}
+                      </div>
+                      <div className="info-label">{t.infoSentiment}</div>
+                      <div className="info-value">{selectedCall.sentiment}</div>
+                    </div>
+                  </div>
+
+                  <div className="detail-card">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <h3 className="detail-card-title" style={{ margin: 0 }}>{t.transcript}</h3>
+                      <span style={{ fontSize: 12, color: "#9bacbf" }}>Example conversation only</span>
+                    </div>
+                    <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 6 }}>
+                      <div className="transcript-list">
+                        {demoTranscript.map((line) => {
+                          const isAi = line.speaker === "ai";
+                          return (
+                            <div key={line.id} className={`transcript-row ${isAi ? "ai" : "caller"}`}>
+                              <div className={`transcript-bubble ${isAi ? "ai" : "caller"}`}>
+                                <div className="transcript-speaker">{isAi ? t.aiReceptionist : t.caller}</div>
+                                <div className="transcript-message">{line.message}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </section>
+        </main>
+
+        <footer style={{ marginTop: 24, padding: "12px 0 4px", fontSize: 11, color: "#6f8197", textAlign: "center" }}>
+          Viewing demo data. Not all features are available in demo mode. Sign up or log in to see your own calls.
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   // ── Language ──────────────────────────────────────────────────────────────
   const [lang, setLang] = useState(() => localStorage.getItem("ui_lang") || "en");
@@ -239,6 +458,12 @@ function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState("");
   const [settingsError, setSettingsError] = useState("");
+
+  const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
+
+  if (isDemo) {
+    return <DemoDashboard t={t} lang={lang} onChangeLang={handleLangChange} />;
+  }
 
   useEffect(() => {
     const boot = async () => {
