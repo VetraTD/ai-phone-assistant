@@ -2,6 +2,8 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const axios = require("axios");
 const authenticate = require("./middleware/authMiddleware");
 
@@ -9,6 +11,9 @@ const authenticate = require("./middleware/authMiddleware");
 const pool = require("./db");
 
 const app = express();
+
+// Behind Vercel/other proxies, trust the proxy so rate-limits and IP logging work correctly
+app.set("trust proxy", 1);
 
 // Helper: get the business_id for the authenticated user
 async function getBusinessIdForUser(userId) {
@@ -19,16 +24,65 @@ async function getBusinessIdForUser(userId) {
   return r.rows[0]?.business_id || null;
 }
 
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://ai-phone-dashboard-lemon.vercel.app"
-  ]
-}));
+// Basic security headers
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
 
+// CORS: allow localhost for dev and explicitly configured production origins
+const defaultOrigins = [
+  "http://localhost:5173",
+  "http://localhost:4173",
+  "https://ai-phone-dashboard-lemon.vercel.app",
+];
 
+const envOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
 
-app.use(express.json());
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow non-browser/health requests with no origin
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: "1mb" }));
+
+// Global rate limiter (per IP) – conservative defaults for now
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 600, // 600 requests per 15 minutes per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter limiter for expensive / sensitive endpoints
+const sensitiveLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply global limiter to all API traffic except health/db-test
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path === "/db-test") {
+    return next();
+  }
+  return apiLimiter(req, res, next);
+});
 
 // ✅ Health check
 app.get("/health", (req, res) => {
@@ -549,7 +603,7 @@ app.get("/api/appointments", authenticate, async (req, res) => {
 
 // Send appointments summary email to the business notification email
 // POST /api/appointments/email  { range: "today" | "7days" | "upcoming" }
-app.post("/api/appointments/email", authenticate, async (req, res) => {
+app.post("/api/appointments/email", sensitiveLimiter, authenticate, async (req, res) => {
   try {
     if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
       return res
@@ -924,6 +978,16 @@ app.delete("/api/integrations/:id", authenticate, async (req, res) => {
   }
 });
 
+// Centralized error handler – avoid leaking stack traces in production
+// Note: keep this AFTER all route declarations
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  if (res.headersSent) {
+    return;
+  }
+  res.status(500).json({ error: "Internal server error" });
+});
 
 const PORT = process.env.PORT || 3001;
 
