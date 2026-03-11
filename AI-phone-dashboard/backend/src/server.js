@@ -24,6 +24,51 @@ async function getBusinessIdForUser(userId) {
   return r.rows[0]?.business_id || null;
 }
 
+// Security helpers -----------------------------------------------------------
+const ALLOWED_TIMEZONES = [
+  "America/Chicago",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Europe/London",
+];
+
+const ALLOWED_LANGUAGES = ["en", "es", "fr"];
+
+function createRateLimitHandler() {
+  return (req, res, next, options) => {
+    if (res.headersSent) return;
+    res.status(options.statusCode).json({
+      error: "Too many requests. Please slow down and try again shortly.",
+    });
+  };
+}
+
+function sanitizeString(value, maxLength) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (maxLength && trimmed.length > maxLength) {
+    return trimmed.slice(0, maxLength);
+  }
+  return trimmed;
+}
+
+function isValidEmail(email) {
+  const v = sanitizeString(email, 254);
+  if (!v) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+function rejectUnexpectedKeys(obj, allowedKeys) {
+  if (!obj || typeof obj !== "object") return;
+  const extra = Object.keys(obj).filter((k) => !allowedKeys.includes(k));
+  if (extra.length) {
+    const err = new Error("Unexpected fields in request body");
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
 // Basic security headers
 app.use(
   helmet({
@@ -68,6 +113,7 @@ const apiLimiter = rateLimit({
   max: 600, // 600 requests per 15 minutes per IP
   standardHeaders: true,
   legacyHeaders: false,
+  handler: createRateLimitHandler(),
 });
 
 // Stricter limiter for expensive / sensitive endpoints
@@ -76,6 +122,17 @@ const sensitiveLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  handler: createRateLimitHandler(),
+});
+
+// Authenticated sensitive limiter – keyed by user id when available
+const authSensitiveLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req /* , res */) => req.authUser?.id || req.ip,
+  handler: createRateLimitHandler(),
 });
 
 // Contact form: strict limit (no auth)
@@ -84,6 +141,7 @@ const contactLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  handler: createRateLimitHandler(),
 });
 
 // Apply global limiter to all API traffic except health/db-test
@@ -108,15 +166,21 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
     if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
       return res.status(503).json({ error: "Contact form is not configured." });
     }
-    const { name, email, message } = req.body || {};
-    const trimmedName = typeof name === "string" ? name.trim() : "";
-    const trimmedEmail = typeof email === "string" ? email.trim() : "";
-    const trimmedMessage = typeof message === "string" ? message.trim() : "";
-    if (!trimmedName || !trimmedEmail || !trimmedMessage) {
+    const allowedKeys = ["name", "email", "message"];
+    rejectUnexpectedKeys(req.body || {}, allowedKeys);
+
+    const name = sanitizeString(req.body?.name, 120);
+    const email = sanitizeString(req.body?.email, 254);
+    const message = sanitizeString(req.body?.message, 4000);
+
+    if (!name || !email || !message) {
       return res.status(400).json({ error: "Name, email, and message are required." });
     }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: "Please provide a valid email address." });
+    }
     const toEmail = process.env.CONTACT_EMAIL || process.env.BREVO_FROM_EMAIL || "support@vetratd.com";
-    const text = `Contact form submission from Vetra AI\n\nName: ${trimmedName}\nEmail: ${trimmedEmail}\n\nMessage:\n${trimmedMessage}`;
+    const text = `Contact form submission from Vetra AI\n\nName: ${name}\nEmail: ${email}\n\nMessage:\n${message}`;
     await axios.post(
       "https://api.brevo.com/v3/smtp/email",
       {
@@ -125,8 +189,8 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
           name: process.env.BREVO_FROM_NAME || "Vetra AI",
         },
         to: [{ email: toEmail }],
-        replyTo: { email: trimmedEmail, name: trimmedName },
-        subject: `Vetra AI contact: ${trimmedName}`,
+        replyTo: { email, name },
+        subject: `Vetra AI contact: ${name}`,
         textContent: text,
       },
       {
@@ -204,9 +268,10 @@ app.get("/api/calls", authenticate, async (req, res) => {
       }
     }
 
-    if (caller && caller.trim()) {
+    const callerSearch = sanitizeString(caller, 64);
+    if (callerSearch) {
       // partial match (case-insensitive)
-      where.push(`caller_number ILIKE ${addParam(`%${caller.trim()}%`)}`);
+      where.push(`caller_number ILIKE ${addParam(`%${callerSearch}%`)}`);
     }
 
 
@@ -287,7 +352,8 @@ if (needs_followup === "true") {
     }));
     res.json({ calls: rows, total });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    res.status(status).json({ error: status === 500 ? "Failed to load calls" : err.message });
   }
 });
 
@@ -658,7 +724,7 @@ app.get("/api/appointments", authenticate, async (req, res) => {
 
 // Send appointments summary email to the business notification email
 // POST /api/appointments/email  { range: "today" | "7days" | "upcoming" }
-app.post("/api/appointments/email", sensitiveLimiter, authenticate, async (req, res) => {
+app.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, async (req, res) => {
   try {
     if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
       return res
@@ -684,7 +750,10 @@ app.post("/api/appointments/email", sensitiveLimiter, authenticate, async (req, 
         .json({ error: "Notification email is not set for this business." });
     }
 
-    const { range } = req.body || {};
+    const allowedKeys = ["range"];
+    rejectUnexpectedKeys(req.body || {}, allowedKeys);
+    const rawRange = req.body?.range;
+    const range = rawRange === "7days" || rawRange === "upcoming" ? rawRange : "today";
     let dateCondition = "";
     let label;
     if (range === "7days") {
@@ -798,10 +867,16 @@ app.get("/api/me", authenticate, async (req, res) => {
 app.post("/api/onboarding/create-business", authenticate, async (req, res) => {
   try {
     const userId = req.authUser.id;
-    const { name, timezone } = req.body;
+    const allowedKeys = ["name", "timezone"];
+    rejectUnexpectedKeys(req.body || {}, allowedKeys);
+    const name = sanitizeString(req.body?.name, 120);
+    const timezone = sanitizeString(req.body?.timezone, 64);
 
     if (!name || !timezone) {
-      return res.status(400).json({ error: "Missing fields" });
+      return res.status(400).json({ error: "Name and timezone are required." });
+    }
+    if (!ALLOWED_TIMEZONES.includes(timezone)) {
+      return res.status(400).json({ error: "Timezone is not supported." });
     }
 
 
@@ -853,23 +928,47 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const {
-      name,
-      timezone,
-      greeting_message,
-      after_hours_policy,
-      transfer_policy,
-      transfer_phone_number,
-      notification_email,
-      notification_phone,
-      default_language,
-      general_info,
-      address_line1,
-      address_line2,
-      city,
-      state_region,
-      postal_code,
-    } = req.body;
+    const allowedKeys = [
+      "name",
+      "timezone",
+      "greeting_message",
+      "after_hours_policy",
+      "transfer_policy",
+      "transfer_phone_number",
+      "notification_email",
+      "notification_phone",
+      "default_language",
+      "general_info",
+      "address_line1",
+      "address_line2",
+      "city",
+      "state_region",
+      "postal_code",
+    ];
+    rejectUnexpectedKeys(req.body || {}, allowedKeys);
+
+    const name = sanitizeString(req.body?.name, 120);
+    const timezone = sanitizeString(req.body?.timezone, 64);
+    const greeting_message = sanitizeString(req.body?.greeting_message, 1000);
+    const after_hours_policy = sanitizeString(req.body?.after_hours_policy, 64);
+    const transfer_policy = sanitizeString(req.body?.transfer_policy, 64);
+    const transfer_phone_number = sanitizeString(req.body?.transfer_phone_number, 32);
+    const notification_email = sanitizeString(req.body?.notification_email, 254);
+    const notification_phone = sanitizeString(req.body?.notification_phone, 32);
+    const default_language = sanitizeString(req.body?.default_language, 8);
+    const general_info = sanitizeString(req.body?.general_info || "", 4000);
+    const address_line1 = sanitizeString(req.body?.address_line1 || "", 256);
+    const address_line2 = sanitizeString(req.body?.address_line2 || "", 256);
+    const city = sanitizeString(req.body?.city || "", 128);
+    const state_region = sanitizeString(req.body?.state_region || "", 128);
+    const postal_code = sanitizeString(req.body?.postal_code || "", 32);
+
+    if (timezone && !ALLOWED_TIMEZONES.includes(timezone)) {
+      return res.status(400).json({ error: "Timezone is not supported." });
+    }
+    if (default_language && !ALLOWED_LANGUAGES.includes(default_language)) {
+      return res.status(400).json({ error: "Language is not supported." });
+    }
 
     const result = await pool.query(
       `UPDATE businesses
@@ -967,7 +1066,7 @@ app.get("/api/integrations", authenticate, async (req, res) => {
   }
 });
 
-app.post("/api/integrations", authenticate, async (req, res) => {
+app.post("/api/integrations", authSensitiveLimiter, authenticate, async (req, res) => {
   try {
     const userBusinessId = await getBusinessIdForUser(req.authUser.id);
     if (!userBusinessId) {
@@ -1007,7 +1106,7 @@ app.post("/api/integrations", authenticate, async (req, res) => {
   }
 });
 
-app.delete("/api/integrations/:id", authenticate, async (req, res) => {
+app.delete("/api/integrations/:id", authSensitiveLimiter, authenticate, async (req, res) => {
   try {
     const userBusinessId = await getBusinessIdForUser(req.authUser.id);
     if (!userBusinessId) {
@@ -1041,7 +1140,10 @@ app.use((err, req, res, next) => {
   if (res.headersSent) {
     return;
   }
-  res.status(500).json({ error: "Internal server error" });
+  const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+  res.status(status).json({
+    error: status === 500 ? "Internal server error" : err.message || "Request failed",
+  });
 });
 
 const PORT = process.env.PORT || 3001;
