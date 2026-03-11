@@ -31,11 +31,13 @@ app.use(
   })
 );
 
-// CORS: allow localhost for dev and explicitly configured production origins
+// CORS: allow localhost for dev, Vercel preview, and production domain(s)
 const defaultOrigins = [
   "http://localhost:5173",
   "http://localhost:4173",
   "https://ai-phone-dashboard-lemon.vercel.app",
+  "https://vetratd.com",
+  "https://www.vetratd.com",
 ];
 
 const envOrigins = process.env.CORS_ORIGINS
@@ -92,8 +94,11 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ✅ DB connection test
+// ✅ DB connection test (disabled in production)
 app.get("/db-test", async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ error: "Not found" });
+  }
   try {
     const r = await pool.query("select now() as now");
     res.json(r.rows[0]);
