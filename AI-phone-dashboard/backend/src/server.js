@@ -78,6 +78,14 @@ const sensitiveLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Contact form: strict limit (no auth)
+const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Apply global limiter to all API traffic except health/db-test
 app.use((req, res, next) => {
   if (req.path === "/health" || req.path === "/db-test") {
@@ -92,6 +100,48 @@ app.get("/health", (req, res) => {
     status: "running",
     service: "dashboard-backend",
   });
+});
+
+// Contact form (public, rate-limited) – sends to CONTACT_EMAIL via Brevo
+app.post("/api/contact", contactLimiter, async (req, res) => {
+  try {
+    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+      return res.status(503).json({ error: "Contact form is not configured." });
+    }
+    const { name, email, message } = req.body || {};
+    const trimmedName = typeof name === "string" ? name.trim() : "";
+    const trimmedEmail = typeof email === "string" ? email.trim() : "";
+    const trimmedMessage = typeof message === "string" ? message.trim() : "";
+    if (!trimmedName || !trimmedEmail || !trimmedMessage) {
+      return res.status(400).json({ error: "Name, email, and message are required." });
+    }
+    const toEmail = process.env.CONTACT_EMAIL || process.env.BREVO_FROM_EMAIL || "support@vetratd.com";
+    const text = `Contact form submission from Vetra AI\n\nName: ${trimmedName}\nEmail: ${trimmedEmail}\n\nMessage:\n${trimmedMessage}`;
+    await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          email: process.env.BREVO_FROM_EMAIL,
+          name: process.env.BREVO_FROM_NAME || "Vetra AI",
+        },
+        to: [{ email: toEmail }],
+        replyTo: { email: trimmedEmail, name: trimmedName },
+        subject: `Vetra AI contact: ${trimmedName}`,
+        textContent: text,
+      },
+      {
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json",
+          accept: "application/json",
+        },
+      }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("contact form failed:", err.response?.data || err);
+    res.status(500).json({ error: "Failed to send message. Please try again or email us directly." });
+  }
 });
 
 // ✅ DB connection test (disabled in production)

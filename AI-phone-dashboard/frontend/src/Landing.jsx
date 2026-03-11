@@ -24,6 +24,7 @@ export default function Landing() {
             <a href="#preview">Dashboard</a>
             <a href="#demo">Try demo</a>
             <a href="#different">Why Vetra</a>
+            <a href="#faq">FAQ</a>
           </nav>
           <div className="landing-header-actions">
             <Link to="/app" className="landing-header-login">
@@ -206,6 +207,51 @@ export default function Landing() {
         </div>
       </section>
 
+      <section id="faq" className="landing-faq">
+        <div className="landing-faq-inner">
+          <p className="landing-section-label">FAQ</p>
+          <h2 className="landing-faq-title">Common questions</h2>
+          <div className="landing-faq-list">
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">How do we connect our phone number?</summary>
+              <p className="landing-faq-answer">
+                After you sign up and complete onboarding, you’ll get a dedicated number for your practice or connect an existing one through your phone provider. Business hours and transfer rules are set in your dashboard and in your provider’s settings.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Is our call data secure?</summary>
+              <p className="landing-faq-answer">
+                Yes. Calls, transcripts, and summaries are stored securely. Access is restricted to your account, and we use industry-standard encryption. You can review our security practices and data handling in our privacy policy.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">What if we already have an answering service?</summary>
+              <p className="landing-faq-answer">
+                Vetra AI can replace or complement your current setup. Many practices switch to Vetra for 24/7 coverage and a single dashboard for every call. You can try the demo line with no signup to see how it handles intake and booking.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Can the AI transfer calls to a human?</summary>
+              <p className="landing-faq-answer">
+                Yes. You configure transfer rules in Settings—for example, during business hours only. When a caller needs a live person, Vetra can transfer to your designated number. The dashboard shows which calls were transferred so your team can follow up.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">What languages are supported?</summary>
+              <p className="landing-faq-answer">
+                The AI receptionist can be configured for English, Spanish, and French. You set your preferred language in the dashboard; the greeting and call handling follow that setting.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">How quickly can we get started?</summary>
+              <p className="landing-faq-answer">
+                You can create an account and complete onboarding in a few minutes. Once your greeting, hours, and transfer rules are set, you can start receiving calls. Call the demo line anytime to experience the flow before going live.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
       <section className="landing-cta-block">
         <div className="landing-cta-block-inner">
           <h2 className="landing-cta-block-title">Ready to run your calls with clarity?</h2>
@@ -228,6 +274,8 @@ export default function Landing() {
           </Link>
           <div className="landing-footer-links">
             <Link to="/app">Log in</Link>
+            <Link to="/contact">Contact</Link>
+            <Link to="/legal">Privacy & Terms</Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}>
               <PhoneIcon className="landing-footer-phone-icon" />
               {DEMO_NUMBER}
