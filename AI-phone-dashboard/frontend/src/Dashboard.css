@@ -164,6 +164,22 @@
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+  margin-top: 20px;
+}
+
+.dashboard-content {
+  animation: dashboard-page-fade-in 180ms ease-out;
+}
+
+@keyframes dashboard-page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .panel {
@@ -298,7 +314,8 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, transform 0.18s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  animation: call-card-enter 220ms ease-out both;
 }
 
 .call-card:hover {
@@ -311,6 +328,59 @@
   border-color: rgba(88, 164, 255, 0.7);
   box-shadow: 0 0 0 1px rgba(88, 164, 255, 0.25);
   background: rgba(88, 164, 255, 0.08);
+}
+
+.call-card:nth-child(1) { animation-delay: 40ms; }
+.call-card:nth-child(2) { animation-delay: 70ms; }
+.call-card:nth-child(3) { animation-delay: 100ms; }
+.call-card:nth-child(4) { animation-delay: 130ms; }
+.call-card:nth-child(5) { animation-delay: 160ms; }
+.call-card:nth-child(6) { animation-delay: 190ms; }
+
+@keyframes call-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  max-width: 260px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  background: rgba(8, 14, 24, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  color: #e6f1ff;
+  z-index: 40;
+  animation: dashboard-toast-fade 220ms ease-out;
+}
+
+.dashboard-toast-success {
+  border-color: rgba(68, 210, 200, 0.8);
+}
+
+.dashboard-toast-error {
+  border-color: rgba(255, 120, 120, 0.9);
+}
+
+@keyframes dashboard-toast-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .call-card-top {
@@ -476,6 +546,7 @@
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  animation: transcript-fade-in 200ms ease-out;
 }
 
 .transcript-bubble.ai {
@@ -497,6 +568,17 @@
   line-height: 1.65;
   font-size: 14px;
   color: #e8eef6;
+}
+
+@keyframes transcript-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .sub-card {

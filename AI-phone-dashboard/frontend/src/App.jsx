@@ -205,6 +205,7 @@ function App() {
   const [hasSummary, setHasSummary] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
+  const [toast, setToast] = useState(null);
   const [analyticsBreakdown, setAnalyticsBreakdown] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState("90d");
   const [appointmentsEmailRange, setAppointmentsEmailRange] = useState("today");
@@ -442,15 +443,18 @@ function App() {
     if (!businessId) return;
     const to = settingsNotificationEmail || business?.notification_email;
     if (!to) {
-      window.alert("Add a notification email in Settings first.");
+      setToast({ type: "error", message: "Add a notification email in Settings first." });
+      setTimeout(() => setToast(null), 2200);
       return;
     }
     try {
       await api.post("/api/appointments/email", { range });
-      window.alert(`Appointments email has been sent to ${to}.`);
+      setToast({ type: "success", message: `Appointments email has been sent to ${to}.` });
+      setTimeout(() => setToast(null), 2200);
     } catch (err) {
       console.error(err);
-      window.alert("Failed to send appointments email. Please try again.");
+      setToast({ type: "error", message: "Failed to send appointments email. Please try again." });
+      setTimeout(() => setToast(null), 2200);
     }
   };
 
@@ -633,6 +637,7 @@ function App() {
           </div>
         </header>
 
+        <main className={`dashboard-content page-${activePage}`}>
         {activePage === "dashboard" ? (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
@@ -654,19 +659,27 @@ function App() {
                 <>
                   <div className="kpi-card">
                     <div className="kpi-label">{t.callsToday}</div>
-                    <div className="kpi-value">{analytics.calls_today ?? 0}</div>
+                    <div className="kpi-value">
+                      <AnimatedNumber value={analytics.calls_today ?? 0} duration={900} />
+                    </div>
                   </div>
                   <div className="kpi-card">
                     <div className="kpi-label">{t.appointmentsToday}</div>
-                    <div className="kpi-value">{analytics.appointments_today ?? 0}</div>
+                    <div className="kpi-value">
+                      <AnimatedNumber value={analytics.appointments_today ?? 0} duration={900} />
+                    </div>
                   </div>
                   <div className="kpi-card">
                     <div className="kpi-label">{t.followUpsNeeded}</div>
-                    <div className="kpi-value">{analytics.followups_needed ?? 0}</div>
+                    <div className="kpi-value">
+                      <AnimatedNumber value={analytics.followups_needed ?? 0} duration={900} />
+                    </div>
                   </div>
                   <div className="kpi-card">
                     <div className="kpi-label">{t.transferredToHuman}</div>
-                    <div className="kpi-value">{analytics.transferred_today ?? 0}</div>
+                    <div className="kpi-value">
+                      <AnimatedNumber value={analytics.transferred_today ?? 0} duration={900} />
+                    </div>
                   </div>
                 </>
               ) : !analyticsError ? (
@@ -806,7 +819,11 @@ function App() {
                         className="reset-button"
                         onClick={() => {
                           const csv = buildCallsCsv(calls);
-                          if (csv) downloadCsv(csv, `calls-${formatDateYYYYMMDD(new Date())}.csv`);
+                          if (csv) {
+                            downloadCsv(csv, `calls-${formatDateYYYYMMDD(new Date())}.csv`);
+                            setToast({ type: "success", message: t.exportedCallsCsv });
+                            setTimeout(() => setToast(null), 2200);
+                          }
                         }}
                         disabled={!calls.length}
                       >
@@ -1524,6 +1541,14 @@ function App() {
             </section>
           </section>
         )}
+        </main>
+
+        {toast && (
+          <div className={`dashboard-toast dashboard-toast-${toast.type}`}>
+            {toast.message}
+          </div>
+        )}
+
         <footer style={{ marginTop: 24, padding: "12px 0 4px", fontSize: 11, color: "#6f8197", textAlign: "center" }}>
           {t.securityFooter}
         </footer>
