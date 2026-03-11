@@ -68,6 +68,7 @@ export const TRANSLATIONS = {
     logout: "Logout",
 
     // KPIs
+    dataForToday: "Data for today",
     callsToday: "Calls Today",
     appointmentsToday: "Appointments Today",
     followUpsNeeded: "Follow Ups Needed",
@@ -165,6 +166,7 @@ export const TRANSLATIONS = {
     aiReceptionistTitle: "AI Receptionist",
     greetingMessage: "Greeting message",
     businessHours: "Business hours",
+    businessHoursHint: "Display only; set in your phone provider.",
     afterHoursBehaviour: "After-hours behaviour",
     takeMessage: "Take a message",
     bookLater: "Book later",
@@ -227,6 +229,7 @@ export const TRANSLATIONS = {
     navGuide: "Guía",
     logout: "Cerrar sesión",
 
+    dataForToday: "Datos de hoy",
     callsToday: "Llamadas hoy",
     appointmentsToday: "Citas hoy",
     followUpsNeeded: "Seguimientos pendientes",
@@ -321,6 +324,7 @@ export const TRANSLATIONS = {
     aiReceptionistTitle: "Recepcionista IA",
     greetingMessage: "Mensaje de bienvenida",
     businessHours: "Horario comercial",
+    businessHoursHint: "Solo lectura; configúralo en tu proveedor de teléfono.",
     afterHoursBehaviour: "Comportamiento fuera de horario",
     takeMessage: "Tomar un mensaje",
     bookLater: "Reservar más tarde",
@@ -381,6 +385,7 @@ export const TRANSLATIONS = {
     navGuide: "Guide",
     logout: "Déconnexion",
 
+    dataForToday: "Données du jour",
     callsToday: "Appels aujourd'hui",
     appointmentsToday: "Rendez-vous aujourd'hui",
     followUpsNeeded: "Suivis nécessaires",
@@ -475,6 +480,7 @@ export const TRANSLATIONS = {
     aiReceptionistTitle: "Réceptionniste IA",
     greetingMessage: "Message d'accueil",
     businessHours: "Heures d'ouverture",
+    businessHoursHint: "Affichage seul; à configurer chez votre opérateur.",
     afterHoursBehaviour: "Comportement hors horaires",
     takeMessage: "Prendre un message",
     bookLater: "Réserver plus tard",

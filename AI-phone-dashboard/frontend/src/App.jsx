@@ -538,6 +538,9 @@ function App() {
 
         {activePage === "dashboard" ? (
           <>
+            <p className="dashboard-today-label" aria-hidden="true">
+              {t.dataForToday} {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+            </p>
             <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
               {analytics ? (
                 <>
@@ -545,6 +548,13 @@ function App() {
                   <div className="kpi-card"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value">{analytics.appointments_today ?? 0}</div></div>
                   <div className="kpi-card"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value">{analytics.followups_needed ?? 0}</div></div>
                   <div className="kpi-card"><div className="kpi-label">{t.transferredToHuman}</div><div className="kpi-value">{analytics.transferred_today ?? 0}</div></div>
+                </>
+              ) : !analyticsError ? (
+                <>
+                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.callsToday}</div><div className="kpi-value kpi-skeleton" /></div>
+                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.appointmentsToday}</div><div className="kpi-value kpi-skeleton" /></div>
+                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.followUpsNeeded}</div><div className="kpi-value kpi-skeleton" /></div>
+                  <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">{t.transferredToHuman}</div><div className="kpi-value kpi-skeleton" /></div>
                 </>
               ) : analyticsError ? (
                 <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
@@ -686,7 +696,7 @@ function App() {
                           className={`call-card ${selectedCallId === call.id ? "is-active" : ""}`}
                         >
                           <div className="call-card-top">
-                            <div className="call-number" style={{ fontSize: 18, marginBottom: 0 }}>{call.caller_number}</div>
+                            <div className="call-number" style={{ fontSize: 18, marginBottom: 0 }}>{call.caller_name_guess || call.caller_number}</div>
                           </div>
                           <div className="call-date">{call.started_at ? new Date(call.started_at).toLocaleString() : ""}</div>
                           <div className="call-meta" style={{ marginTop: 12 }}>
@@ -1130,6 +1140,7 @@ function App() {
                 <div className="filter-field">
                   <label>{t.businessHours}</label>
                   <input value={settingsBusinessHours} onChange={(e) => setSettingsBusinessHours(e.target.value)} placeholder="Mon–Fri, 9:00 AM – 5:00 PM" disabled />
+                  <span className="field-hint">{t.businessHoursHint}</span>
                 </div>
                 <div className="filter-field">
                   <label>{t.afterHoursBehaviour}</label>
@@ -1286,7 +1297,7 @@ function App() {
               <div className="panel-header"><h2 className="panel-title">3. Reading the dashboard</h2></div>
               <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
                 <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
-                  <li><strong>KPIs (top row)</strong> – quick snapshot of calls today, appointments today, follow-ups needed, and the percentage of positive calls.</li>
+                  <li><strong>KPIs (top row)</strong> – quick snapshot of calls today, appointments today, follow-ups needed, and calls transferred to a human today.</li>
                   <li><strong>Calls list (left)</strong> – every call with status, duration, sentiment, and whether a summary exists. Use filters to drill into specific days, sentiment, or appointment calls.</li>
                   <li><strong>Call Details (right)</strong> – full summary, sentiment, transcript, appointments, and customer requests for the selected call.</li>
                   <li><strong>Follow-ups</strong> – calls with customer requests or callbacks needed will be easy to spot using the filters and request badges.</li>

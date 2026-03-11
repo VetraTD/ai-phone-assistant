@@ -133,6 +133,26 @@
   line-height: 1;
 }
 
+.kpi-skeleton {
+  min-height: 32px;
+  width: 56px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: kpi-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes kpi-skeleton-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.dashboard-today-label {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  color: #7b8fa3;
+  font-weight: 500;
+}
+
 .dashboard-main {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -207,6 +227,12 @@
 .filter-field select:focus {
   border-color: rgba(66, 160, 255, 0.7);
   box-shadow: 0 0 0 4px rgba(66, 160, 255, 0.12);
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #7b8fa3;
+  margin-top: 2px;
 }
 
 .checkbox-list {
