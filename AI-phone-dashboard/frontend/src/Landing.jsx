@@ -3,6 +3,14 @@ import "./Landing.css";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
 
+function PhoneIcon({ className }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+
 export default function Landing() {
   return (
     <div className="landing-page">
@@ -13,6 +21,7 @@ export default function Landing() {
           </Link>
           <nav className="landing-nav">
             <a href="#features">Features</a>
+            <a href="#preview">Dashboard</a>
             <a href="#demo">Try demo</a>
             <a href="#different">Why Vetra</a>
           </nav>
@@ -21,6 +30,7 @@ export default function Landing() {
               Log in
             </Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-header-phone">
+              <PhoneIcon className="landing-header-phone-icon" />
               {DEMO_NUMBER}
             </a>
           </div>
@@ -45,19 +55,22 @@ export default function Landing() {
               Try the demo line
             </a>
           </div>
+          <p className="landing-hero-trust">
+            Secure • Full transcripts • One dashboard
+          </p>
         </div>
       </section>
 
       <section id="demo" className="landing-demo">
         <div className="landing-demo-inner">
-          <h2 className="landing-section-label">Try it yourself</h2>
-          <h3 className="landing-demo-title">Talk to an AI receptionist</h3>
+          <p className="landing-section-label">Try it yourself</p>
+          <h2 className="landing-demo-title">Talk to an AI receptionist</h2>
           <p className="landing-demo-desc">
             Call the number below to hear Vetra AI answer, triage, and book an appointment.
             No signup required.
           </p>
           <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-demo-phone">
-            <span className="landing-demo-phone-icon" aria-hidden>📞</span>
+            <PhoneIcon className="landing-demo-phone-icon" />
             {DEMO_NUMBER}
           </a>
         </div>
@@ -121,6 +134,61 @@ export default function Landing() {
         </div>
       </section>
 
+      <section id="preview" className="landing-preview">
+        <div className="landing-preview-inner">
+          <p className="landing-section-label">See it in action</p>
+          <h2 className="landing-preview-title">One dashboard for every call</h2>
+          <p className="landing-preview-sub">
+            Trends, outcomes, and sentiment — all in one place.
+          </p>
+          <div className="landing-preview-browser">
+            <div className="landing-preview-browser-bar">
+              <span className="landing-preview-dot" />
+              <span className="landing-preview-dot" />
+              <span className="landing-preview-dot" />
+              <span className="landing-preview-url">app / analytics</span>
+            </div>
+            <div className="landing-preview-dashboard">
+              <div className="landing-preview-dashboard-header">
+                <div>
+                  <h3 className="landing-preview-dashboard-title">Call analytics</h3>
+                  <p className="landing-preview-dashboard-desc">Trends and totals for your receptionist calls</p>
+                </div>
+                <div className="landing-preview-select">Last 3 months</div>
+              </div>
+              <div className="landing-preview-kpis">
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">74</span><span className="landing-preview-kpi-label">Receptionist calls</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">19</span><span className="landing-preview-kpi-label">Appointments scheduled</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">4</span><span className="landing-preview-kpi-label">Follow-ups needed</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">26%</span><span className="landing-preview-kpi-label">Calls → appointments</span></div>
+              </div>
+              <div className="landing-preview-charts">
+                <div className="landing-preview-panel">
+                  <h4 className="landing-preview-panel-title">Calls last 3 months</h4>
+                  <div className="landing-preview-bars">
+                    <div className="landing-preview-bar-wrap"><div className="landing-preview-bar" style={{ width: "30%" }} /><span>Jan</span></div>
+                    <div className="landing-preview-bar-wrap"><div className="landing-preview-bar" style={{ width: "75%" }} /><span>Feb</span></div>
+                    <div className="landing-preview-bar-wrap"><div className="landing-preview-bar" style={{ width: "100%" }} /><span>Mar</span></div>
+                  </div>
+                </div>
+                <div className="landing-preview-panel">
+                  <h4 className="landing-preview-panel-title">Call outcomes</h4>
+                  <div className="landing-preview-outcome">89% answered / completed</div>
+                  <ul className="landing-preview-list">
+                    <li><span className="landing-preview-bullet landing-preview-bullet-done" />Completed: 56</li>
+                    <li><span className="landing-preview-bullet landing-preview-bullet-xfer" />Transferred: 8</li>
+                    <li><span className="landing-preview-bullet landing-preview-bullet-fail" />Failed: 0</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <Link to="/app" className="landing-preview-cta">
+            Open your dashboard
+          </Link>
+        </div>
+      </section>
+
       <section className="landing-stats">
         <div className="landing-stats-inner">
           <div className="landing-stat">
@@ -160,8 +228,12 @@ export default function Landing() {
           </Link>
           <div className="landing-footer-links">
             <Link to="/app">Log in</Link>
-            <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}>{DEMO_NUMBER}</a>
+            <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}>
+              <PhoneIcon className="landing-footer-phone-icon" />
+              {DEMO_NUMBER}
+            </a>
           </div>
+          <span className="landing-footer-copy">© {new Date().getFullYear()} Vetra AI</span>
         </div>
       </footer>
     </div>
