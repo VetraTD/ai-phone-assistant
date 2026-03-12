@@ -759,7 +759,8 @@ function App() {
       setSettingsCity(updatedBusiness.city || "");
       setSettingsStateRegion(updatedBusiness.state_region || "");
       setSettingsPostalCode(updatedBusiness.postal_code || "");
-      setSettingsSavedMessage("Settings saved successfully.");
+      setToast({ type: "success", message: "Settings saved successfully." });
+      setTimeout(() => setToast(null), 2600);
     } catch (err) {
       console.error(err);
       setSettingsError(err?.response?.data?.error || "Failed to save settings");
@@ -1514,41 +1515,64 @@ function App() {
           </section>
         ) : activePage === "settings" ? (
           <>
-            <section className="panel usage-panel" style={{ marginBottom: 16 }}>
-              <div className="panel-header">
-                <h2 className="panel-title">Usage this month</h2>
-              </div>
-              <div className="panel-body">
-                {usageLoading ? (
-                  <div className="usage-loading">
-                    <span className="kpi-skeleton" style={{ display: "inline-block", width: 48, height: 28, borderRadius: 8 }} />
-                    <span className="kpi-skeleton" style={{ display: "inline-block", width: 56, height: 28, borderRadius: 8, marginLeft: 16 }} />
-                  </div>
-                ) : usageError ? (
-                  <p style={{ margin: 0, color: "#9bacbf", fontSize: 14 }}>{usageError}</p>
-                ) : usage ? (
-                  <div className="usage-stats">
-                    <div className="usage-stat">
-                      <span className="usage-stat-value">
-                        <AnimatedNumber value={usage.calls_this_month ?? 0} duration={900} />
-                      </span>
-                      <span className="usage-stat-label">Calls</span>
+            <section className="settings-overview">
+              <section className="panel usage-panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">Usage this month</h2>
+                </div>
+                <div className="panel-body">
+                  {usageLoading ? (
+                    <div className="usage-loading">
+                      <span className="kpi-skeleton" style={{ display: "inline-block", width: 48, height: 28, borderRadius: 8 }} />
+                      <span className="kpi-skeleton" style={{ display: "inline-block", width: 56, height: 28, borderRadius: 8, marginLeft: 16 }} />
                     </div>
-                    <div className="usage-stat">
-                      <span className="usage-stat-value">
-                        <AnimatedNumber value={usage.minutes_this_month ?? 0} duration={900} />
-                      </span>
-                      <span className="usage-stat-label">Minutes</span>
+                  ) : usageError ? (
+                    <p style={{ margin: 0, color: "#9bacbf", fontSize: 14 }}>{usageError}</p>
+                  ) : usage ? (
+                    <div className="usage-stats">
+                      <div className="usage-stat">
+                        <span className="usage-stat-value">
+                          <AnimatedNumber value={usage.calls_this_month ?? 0} duration={900} />
+                        </span>
+                        <span className="usage-stat-label">Calls</span>
+                      </div>
+                      <div className="usage-stat">
+                        <span className="usage-stat-value">
+                          <AnimatedNumber value={usage.minutes_this_month ?? 0} duration={900} />
+                        </span>
+                        <span className="usage-stat-label">Minutes</span>
+                      </div>
+                    </div>
+                  ) : null}
+                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "#7b8fa3" }}>
+                    Resets on the 1st of each month. Useful for billing and limits later.
+                  </p>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header"><h2 className="panel-title">{t.billingPlan}</h2></div>
+                <div className="panel-body" style={{ display: "grid", gap: 14 }}>
+                  <div className="detail-card" style={{ padding: 14 }}>
+                    <div className="info-grid">
+                      <div className="info-label">{t.currentPlan}</div>
+                      <div className="info-value">
+                        <span className="plan-pill">{settingsPlanName}</span>
+                      </div>
+                      <div className="info-label">{t.billingStatus}</div><div className="info-value">{settingsBillingStatus}</div>
+                      <div className="info-label">{t.usageThisMonth}</div>
+                      <div className="info-value">
+                        {usage ? `${usage.calls_this_month ?? 0} calls, ${usage.minutes_this_month ?? 0} min` : t.comingSoon}
+                      </div>
+                      <div className="info-label">{t.phoneNumber}</div><div className="info-value">{business?.phone_number || t.notConnectedYet}</div>
                     </div>
                   </div>
-                ) : null}
-                <p style={{ margin: "12px 0 0", fontSize: 12, color: "#7b8fa3" }}>
-                  Resets on the 1st of each month. Useful for billing and limits later.
-                </p>
-              </div>
+                  <div className="empty-note">{t.stripeComing}</div>
+                </div>
+              </section>
             </section>
 
-            <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+            <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">{t.businessSettings}</h2></div>
               <div className="panel-body">
@@ -1687,21 +1711,6 @@ function App() {
             </section>
 
             <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.billingPlan}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <div className="detail-card" style={{ padding: 14 }}>
-                  <div className="info-grid">
-                    <div className="info-label">{t.currentPlan}</div><div className="info-value">{settingsPlanName}</div>
-                    <div className="info-label">{t.billingStatus}</div><div className="info-value">{settingsBillingStatus}</div>
-                    <div className="info-label">{t.usageThisMonth}</div><div className="info-value">{usage ? `${usage.calls_this_month} calls, ${usage.minutes_this_month} min` : usageLoading ? "…" : t.comingSoon}</div>
-                    <div className="info-label">{t.phoneNumber}</div><div className="info-value">{business?.phone_number || t.notConnectedYet}</div>
-                  </div>
-                </div>
-                <div className="empty-note">{t.stripeComing}</div>
-              </div>
-            </section>
-
-            <section className="panel">
               <div className="panel-header"><h2 className="panel-title">{t.notifications}</h2></div>
               <div className="panel-body" style={{ display: "grid", gap: 14 }}>
                 <div className="filter-field">
@@ -1719,11 +1728,6 @@ function App() {
               <div className="panel-header"><h2 className="panel-title">{t.saveSettings}</h2></div>
               <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                 <div style={{ display: "grid", gap: 8 }}>
-                  {settingsSavedMessage ? (
-                    <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(67,182,110,0.25)", background: "rgba(67,182,110,0.08)", color: "#9ce5b1", fontSize: 13 }}>
-                      {settingsSavedMessage}
-                    </div>
-                  ) : null}
                   {settingsError ? (
                     <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,107,107,0.25)", background: "rgba(255,107,107,0.08)", color: "#ff9191", fontSize: 13 }}>
                       {settingsError}
@@ -1745,8 +1749,8 @@ function App() {
             </section>
           </>
         ) : (
-          <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16 }}>
-            <section className="panel" style={{ gridColumn: "1 / -1" }}>
+          <section className="guide-page">
+            <section className="panel guide-intro-panel">
               <div className="panel-header">
                 <h2 className="panel-title">How your AI receptionist works</h2>
               </div>

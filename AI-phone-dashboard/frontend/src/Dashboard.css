@@ -393,6 +393,27 @@
   gap: 8px;
 }
 
+.settings-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.plan-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 0% 0%, rgba(255,255,255,0.2), transparent 55%), linear-gradient(135deg, #3576f6, #44d2c8);
+  color: #fdfdff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 24px rgba(12, 32, 85, 0.55);
+}
+
 .filters-grid {
   display: grid;
   gap: 18px;
@@ -999,6 +1020,50 @@
   font-size: 18px;
 }
 
+/* Guide page */
+.guide-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.guide-intro-panel {
+  grid-column: 1 / -1;
+}
+
+.guide-page > .panel {
+  position: relative;
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: guide-card-fade-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.guide-page > .panel:nth-of-type(2) { animation-delay: 40ms; }
+.guide-page > .panel:nth-of-type(3) { animation-delay: 80ms; }
+.guide-page > .panel:nth-of-type(4) { animation-delay: 120ms; }
+.guide-page > .panel:nth-of-type(5) { animation-delay: 160ms; }
+.guide-page > .panel:nth-of-type(6) { animation-delay: 200ms; }
+
+.guide-page > .panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45);
+  border-color: rgba(88, 164, 255, 0.35);
+}
+
+@keyframes guide-card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .calls-chart {
   display: flex;
   align-items: flex-end;
@@ -1097,6 +1162,12 @@
 
 @media (max-width: 960px) {
   .analytics-charts-second-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .guide-page {
     grid-template-columns: 1fr;
   }
 }
