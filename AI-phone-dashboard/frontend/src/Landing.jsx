@@ -211,6 +211,29 @@ export default function Landing() {
         </div>
       </section>
 
+      <section className="landing-testimonial">
+        <div className="landing-testimonial-inner">
+          <p className="landing-section-label">Early user feedback</p>
+          <div className="landing-testimonial-card">
+            <div className="landing-testimonial-avatar">
+              <div className="landing-testimonial-photo">
+                <img src="/IMG_7988.png" alt="James T., small business owner" />
+              </div>
+            </div>
+            <div className="landing-testimonial-copy">
+              <p className="landing-testimonial-quote">
+                “The AI receptionist answered our calls instantly and logged everything in a dashboard.
+                It’s surprisingly useful for handling missed calls and after-hours enquiries.”
+              </p>
+              <p className="landing-testimonial-author">
+                <span className="landing-testimonial-name">James T.</span>
+                <span className="landing-testimonial-role">Small business owner</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="faq" className="landing-faq">
         <div className="landing-faq-inner">
           <p className="landing-section-label">FAQ</p>
