@@ -425,6 +425,8 @@ function App() {
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
   const [toast, setToast] = useState(null);
+  const navTabsRef = useRef(null);
+  const [navHighlight, setNavHighlight] = useState({ left: 0, width: 0 });
   const [analyticsBreakdown, setAnalyticsBreakdown] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState("90d");
   const [appointmentsEmailRange, setAppointmentsEmailRange] = useState("today");
@@ -467,6 +469,19 @@ function App() {
   if (isDemo) {
     return <DemoDashboard t={t} lang={lang} onChangeLang={handleLangChange} />;
   }
+
+  useEffect(() => {
+    const container = navTabsRef.current;
+    if (!container) return;
+    const el = container.querySelector(`[data-tab="${activePage}"]`);
+    if (!el) return;
+    const crect = container.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    setNavHighlight({
+      left: rect.left - crect.left,
+      width: rect.width,
+    });
+  }, [activePage]);
 
   useEffect(() => {
     const boot = async () => {
@@ -815,50 +830,40 @@ function App() {
             <LanguageSwitcher lang={lang} onChange={handleLangChange} />
 
             {/* ── Nav tabs ── */}
-            <div style={{
-              display: "inline-flex", padding: 4, borderRadius: 14,
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", gap: 4,
-            }}>
+            <div className="nav-tabs" ref={navTabsRef}>
+              {navHighlight.width > 0 && (
+                <div
+                  className="nav-tab-highlight"
+                  style={{
+                    width: navHighlight.width,
+                    transform: `translateX(${navHighlight.left}px)`,
+                  }}
+                />
+              )}
               <button
-                className="dashboard-logout"
-                style={{
-                  height: 40,
-                  background: activePage === "dashboard" ? "rgba(88,164,255,0.16)" : "transparent",
-                  border: activePage === "dashboard" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
-                }}
+                className={`nav-tab ${activePage === "dashboard" ? "is-active" : ""}`}
+                data-tab="dashboard"
                 onClick={() => goToPage("dashboard")}
               >
                 {t.navDashboard}
               </button>
               <button
-                className="dashboard-logout"
-                style={{
-                  height: 40,
-                  background: activePage === "analytics" ? "rgba(88,164,255,0.16)" : "transparent",
-                  border: activePage === "analytics" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
-                }}
+                className={`nav-tab ${activePage === "analytics" ? "is-active" : ""}`}
+                data-tab="analytics"
                 onClick={() => goToPage("analytics")}
               >
                 {t.navAnalytics}
               </button>
               <button
-                className="dashboard-logout"
-                style={{
-                  height: 40,
-                  background: activePage === "settings" ? "rgba(88,164,255,0.16)" : "transparent",
-                  border: activePage === "settings" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
-                }}
+                className={`nav-tab ${activePage === "settings" ? "is-active" : ""}`}
+                data-tab="settings"
                 onClick={() => setActivePage("settings")}
               >
                 {t.navSettings}
               </button>
               <button
-                className="dashboard-logout"
-                style={{
-                  height: 40,
-                  background: activePage === "guide" ? "rgba(88,164,255,0.16)" : "transparent",
-                  border: activePage === "guide" ? "1px solid rgba(88,164,255,0.32)" : "1px solid transparent",
-                }}
+                className={`nav-tab ${activePage === "guide" ? "is-active" : ""}`}
+                data-tab="guide"
                 onClick={() => goToPage("guide")}
               >
                 {t.navGuide}
