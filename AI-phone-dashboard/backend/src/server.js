@@ -674,6 +674,65 @@ app.get("/api/analytics-breakdown", authenticate, async (req, res) => {
       return { day_name: dayNames[dow], total_calls: row ? Number(row.total_calls) : 0 };
     });
 
+    // First-time vs returning callers within the period
+    const callerMixRes = await pool.query(
+      `
+      WITH calls_in_period AS (
+        SELECT id, caller_number, started_at
+        FROM calls
+        WHERE business_id = $1 AND started_at >= ${since}
+      ),
+      first_calls AS (
+        SELECT caller_number, MIN(started_at) AS first_started
+        FROM calls
+        WHERE business_id = $1
+        GROUP BY caller_number
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE cip.started_at = fc.first_started) AS first_time,
+        COUNT(*) FILTER (WHERE cip.started_at > fc.first_started) AS returning
+      FROM calls_in_period cip
+      JOIN first_calls fc ON fc.caller_number = cip.caller_number
+      `,
+      [businessId]
+    );
+
+    // Peak call hour in the period (0-23)
+    const peakHourRes = await pool.query(
+      `
+      SELECT EXTRACT(HOUR FROM started_at)::int AS hour, COUNT(*) AS total_calls
+      FROM calls
+      WHERE business_id = $1 AND started_at >= ${since}
+      GROUP BY EXTRACT(HOUR FROM started_at)
+      ORDER BY total_calls DESC
+      LIMIT 1
+      `,
+      [businessId]
+    );
+
+    // Calls inside vs outside typical business hours (09:00–17:00, business timezone)
+    const bizTzRes = await pool.query(
+      `SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`,
+      [businessId]
+    );
+    const businessTimezone = bizTzRes.rows[0]?.timezone || "America/Chicago";
+
+    const businessHoursRes = await pool.query(
+      `
+      SELECT
+        COUNT(*) FILTER (
+          WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE $2) BETWEEN 9 AND 16
+        ) AS in_hours,
+        COUNT(*) FILTER (
+          WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE $2) < 9
+             OR EXTRACT(HOUR FROM started_at AT TIME ZONE $2) >= 17
+        ) AS out_hours
+      FROM calls
+      WHERE business_id = $1 AND started_at >= ${since}
+      `,
+      [businessId, businessTimezone]
+    );
+
     const totalCalls = Number(totalRes.rows[0]?.total ?? 0);
     const appointmentsCount = Number(actionsRes.rows[0]?.appointments ?? 0);
     const appointmentConversionPercent =
@@ -700,6 +759,26 @@ app.get("/api/analytics-breakdown", authenticate, async (req, res) => {
         const completed = Math.max(0, completedRaw - inferredTransferred);
         const transferred = transferredRaw + inferredTransferred;
         return { completed, transferred, failed: Number(r.failed ?? 0), no_answer: Number(r.no_answer ?? 0), busy: Number(r.busy ?? 0), in_progress: Number(r.in_progress ?? 0) };
+      })(),
+      caller_mix: (() => {
+        const r = callerMixRes.rows[0];
+        return r
+          ? { first_time: Number(r.first_time ?? 0), returning: Number(r.returning ?? 0) }
+          : { first_time: 0, returning: 0 };
+      })(),
+      peak_hour: (() => {
+        const r = peakHourRes.rows[0];
+        if (!r) return null;
+        return { hour: Number(r.hour ?? 0), calls: Number(r.total_calls ?? 0) };
+      })(),
+      business_hours: (() => {
+        const r = businessHoursRes.rows[0];
+        if (!r) return { in_hours: 0, out_hours: 0, timezone: businessTimezone };
+        return {
+          in_hours: Number(r.in_hours ?? 0),
+          out_hours: Number(r.out_hours ?? 0),
+          timezone: businessTimezone,
+        };
       })(),
       calls_by_weekday: byWeekday,
       period,

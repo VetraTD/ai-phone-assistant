@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import "./Signup.css";
 
@@ -33,6 +34,11 @@ export default function Signup({ onSwitchToLogin }) {
   return (
     <div className="signup-page">
       <div className="signup-shell">
+        <div className="signup-top-row">
+          <Link to="/" className="signup-back-home">
+            ← Back to website
+          </Link>
+        </div>
         <div className="signup-brand">
           <div className="signup-badge">AI Call Dashboard</div>
 
@@ -99,6 +105,10 @@ export default function Signup({ onSwitchToLogin }) {
               <button className="signup-button" disabled={loading}>
                 {loading ? "Creating account..." : "Create account"}
               </button>
+
+              <p className="signup-security-note">
+                Accounts are secured using Supabase auth and encrypted PostgreSQL storage.
+              </p>
 
               <div className="signup-footer">
                 <span>Already have an account?</span>
