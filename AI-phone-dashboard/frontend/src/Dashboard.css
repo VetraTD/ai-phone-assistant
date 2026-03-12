@@ -254,8 +254,8 @@
 }
 
 .dashboard-logout:hover {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 99, 99, 0.7);
+  background: rgba(220, 38, 38, 0.9);
   transform: translateY(-1px);
 }
 
@@ -1206,6 +1206,23 @@
     gap: 12px;
   }
 
+  .dashboard-topbar-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .nav-tabs {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .nav-tab {
+    flex: 0 0 auto;
+  }
+
   .dashboard-business-name {
     font-size: 28px;
   }
@@ -1220,6 +1237,32 @@
 
   .dashboard-page {
     padding: 14px;
+  }
+
+  .dashboard-shell {
+    gap: 16px;
+  }
+
+  .dashboard-topbar {
+    padding: 16px;
+  }
+
+  .dashboard-topbar-right {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lang-switcher {
+    align-self: flex-end;
+  }
+
+  .nav-tabs {
+    order: 2;
+  }
+
+  .dashboard-logout {
+    width: 100%;
+    justify-content: center;
   }
 
   .panel-body {

@@ -14,7 +14,7 @@
 .contact-header-inner {
   max-width: 560px;
   margin: 0 auto;
-  padding: 16px 24px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -45,7 +45,7 @@
 }
 
 .contact-main {
-  padding: 48px 24px 64px;
+  padding: 36px 20px 56px;
 }
 
 .contact-inner {
