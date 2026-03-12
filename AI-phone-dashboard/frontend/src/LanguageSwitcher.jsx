@@ -2,55 +2,63 @@
 // Drop this file next to App.jsx and import it.
 // Usage: <LanguageSwitcher lang={lang} onChange={setLang} />
 
+import { useEffect, useRef, useState } from "react";
+
 export const LANGUAGES = [
-  { code: "en", label: "EN", flag: "🇬🇧", name: "English" },
-  { code: "es", label: "ES", flag: "🇪🇸", name: "Español" },
-  { code: "fr", label: "FR", flag: "🇫🇷", name: "Français" },
+  { code: "en", label: "EN", name: "English" },
+  { code: "es", label: "ES", name: "Español" },
+  { code: "fr", label: "FR", name: "Français" },
 ];
 
 export function LanguageSwitcher({ lang, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (!ref.current || ref.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const current = LANGUAGES.find((l) => l.code === lang) || LANGUAGES[0];
+
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        padding: 4,
-        borderRadius: 14,
-        background: "rgba(255,255,255,0.04)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        gap: 4,
-      }}
-    >
-      {LANGUAGES.map((l) => {
-        const active = lang === l.code;
-        return (
-          <button
-            key={l.code}
-            title={l.name}
-            onClick={() => onChange(l.code)}
-            style={{
-              height: 40,
-              padding: "0 12px",
-              borderRadius: 10,
-              border: active
-                ? "1px solid rgba(88,164,255,0.32)"
-                : "1px solid transparent",
-              background: active ? "rgba(88,164,255,0.16)" : "transparent",
-              color: active ? "#bcd3ff" : "#9bacbf",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              transition: "all 0.15s ease",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span style={{ fontSize: 15 }}>{l.flag}</span>
-            {l.label}
-          </button>
-        );
-      })}
+    <div className="lang-switcher" ref={ref}>
+      <button
+        type="button"
+        className="lang-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="lang-toggle-icon">🌐</span>
+        <span className="lang-toggle-label">{current.label}</span>
+      </button>
+
+      {open && (
+        <div className="lang-menu" role="listbox" aria-label="Interface language">
+          {LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              type="button"
+              className={`lang-menu-item ${l.code === lang ? "is-active" : ""}`}
+              onClick={() => {
+                onChange(l.code);
+                setOpen(false);
+              }}
+              role="option"
+              aria-selected={l.code === lang}
+            >
+              <span className="lang-menu-code">{l.label}</span>
+              <span className="lang-menu-name">{l.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

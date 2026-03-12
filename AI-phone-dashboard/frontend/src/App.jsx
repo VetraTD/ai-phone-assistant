@@ -1524,11 +1524,15 @@ function App() {
                 ) : usage ? (
                   <div className="usage-stats">
                     <div className="usage-stat">
-                      <span className="usage-stat-value">{usage.calls_this_month}</span>
+                      <span className="usage-stat-value">
+                        <AnimatedNumber value={usage.calls_this_month ?? 0} duration={900} />
+                      </span>
                       <span className="usage-stat-label">Calls</span>
                     </div>
                     <div className="usage-stat">
-                      <span className="usage-stat-value">{usage.minutes_this_month}</span>
+                      <span className="usage-stat-value">
+                        <AnimatedNumber value={usage.minutes_this_month ?? 0} duration={900} />
+                      </span>
                       <span className="usage-stat-label">Minutes</span>
                     </div>
                   </div>
