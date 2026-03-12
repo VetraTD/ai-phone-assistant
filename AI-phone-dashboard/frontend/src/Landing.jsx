@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useEffect, useRef } from "react";
 import "./Landing.css";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
@@ -12,6 +13,34 @@ function PhoneIcon({ className }) {
 }
 
 export default function Landing() {
+  const revealRefs = useRef([]);
+
+  useEffect(() => {
+    const sections = revealRefs.current || [];
+    if (!sections.length) return;
+
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      sections.forEach((el) => el && el.classList.add("reveal-visible"));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("reveal-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.16 }
+    );
+
+    sections.forEach((el) => el && observer.observe(el));
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="landing-page">
       <header className="landing-header">
@@ -66,7 +95,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="demo" className="landing-demo">
+      <section
+        id="demo"
+        className="landing-demo reveal-section"
+        ref={(el) => {
+          revealRefs.current[0] = el;
+        }}
+      >
         <div className="landing-demo-inner">
           <p className="landing-section-label">Try it yourself</p>
           <h2 className="landing-demo-title">Talk to an AI receptionist</h2>
@@ -81,7 +116,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="different" className="landing-different">
+      <section
+        id="different"
+        className="landing-different reveal-section"
+        ref={(el) => {
+          revealRefs.current[1] = el;
+        }}
+      >
         <div className="landing-different-inner">
           <p className="landing-section-label">How we&apos;re different</p>
           <h2 className="landing-different-title">Why practices choose Vetra AI</h2>
@@ -118,7 +159,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="features" className="landing-benefits">
+      <section
+        id="features"
+        className="landing-benefits reveal-section"
+        ref={(el) => {
+          revealRefs.current[2] = el;
+        }}
+      >
         <div className="landing-benefits-inner">
           <div className="landing-benefit">
             <span className="landing-benefit-icon">✓</span>
@@ -139,7 +186,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="preview" className="landing-preview">
+      <section
+        id="preview"
+        className="landing-preview reveal-section"
+        ref={(el) => {
+          revealRefs.current[3] = el;
+        }}
+      >
         <div className="landing-preview-inner">
           <p className="landing-section-label">See it in action</p>
           <h2 className="landing-preview-title">One dashboard for every call</h2>
@@ -194,7 +247,12 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="landing-stats">
+      <section
+        className="landing-stats reveal-section"
+        ref={(el) => {
+          revealRefs.current[4] = el;
+        }}
+      >
         <div className="landing-stats-inner">
           <div className="landing-stat">
             <span className="landing-stat-num">24/7</span>
@@ -211,7 +269,12 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="landing-testimonial">
+      <section
+        className="landing-testimonial reveal-section"
+        ref={(el) => {
+          revealRefs.current[5] = el;
+        }}
+      >
         <div className="landing-testimonial-inner">
           <p className="landing-section-label">Early user feedback</p>
           <div className="landing-testimonial-card">
@@ -234,7 +297,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="faq" className="landing-faq">
+      <section
+        id="faq"
+        className="landing-faq reveal-section"
+        ref={(el) => {
+          revealRefs.current[6] = el;
+        }}
+      >
         <div className="landing-faq-inner">
           <p className="landing-section-label">FAQ</p>
           <h2 className="landing-faq-title">Common questions</h2>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import "./Login.css";
 
@@ -56,6 +57,11 @@ export default function Login({ onSwitchToSignup }) {
   return (
     <div className="login-page">
       <div className="login-shell">
+        <div className="login-top-row">
+          <Link to="/" className="login-back-home">
+            ← Back to website
+          </Link>
+        </div>
         <div className="login-brand">
           <div className="login-badge">Vetra AI Receptionist</div>
 
@@ -80,41 +86,6 @@ export default function Login({ onSwitchToSignup }) {
             <div className="login-feature">
               <span className="login-feature-dot" />
               <span>Analytics and safety‑focused call oversight</span>
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: 24,
-              padding: 16,
-              borderRadius: 16,
-              border: "1px solid rgba(120,196,255,0.35)",
-              background:
-                "radial-gradient(circle at top left, rgba(120,196,255,0.12), transparent 55%), rgba(4,12,24,0.9)",
-              color: "#e5f2ff",
-              maxWidth: 360,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                opacity: 0.8,
-                marginBottom: 6,
-              }}
-            >
-              Try the receptionist
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
-              Call the Vetra AI demo line
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
-              +1 (817) 601‑1171
-            </div>
-            <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.5 }}>
-              Hear a live example of how Vetra AI answers, triages, and books
-              appointments in under a minute.
             </div>
           </div>
         </div>
@@ -168,6 +139,10 @@ export default function Login({ onSwitchToSignup }) {
               <button className="login-button" disabled={loading}>
                 {loading ? "Signing in..." : "Sign in"}
               </button>
+
+              <p className="login-security-note">
+                Your session is secured using Supabase auth and encrypted PostgreSQL storage.
+              </p>
 
               <div className="login-footer">
                 <span>Need an account?</span>

@@ -1348,38 +1348,96 @@ function App() {
             <section className="analytics-overview">
               <h3 className="analytics-section-label">Overview</h3>
               <div className="dashboard-kpis analytics-kpis">
-              <div className="kpi-card kpi-card-orange">
-                <div className="kpi-value">
-                  <AnimatedNumber value={analyticsBreakdown?.total_calls_3m ?? 0} duration={1200} />
+                <div className="kpi-card kpi-card-orange">
+                  <div className="kpi-value">
+                    <AnimatedNumber value={analyticsBreakdown?.total_calls_3m ?? 0} duration={1200} />
+                  </div>
+                  <div className="kpi-label">Receptionist calls</div>
                 </div>
-                <div className="kpi-label">Receptionist calls</div>
-              </div>
-              <div className="kpi-card kpi-card-green">
-                <div className="kpi-value">
-                  <AnimatedNumber value={analyticsBreakdown?.actions?.appointments ?? 0} duration={1200} />
+                <div className="kpi-card kpi-card-green">
+                  <div className="kpi-value">
+                    <AnimatedNumber value={analyticsBreakdown?.actions?.appointments ?? 0} duration={1200} />
+                  </div>
+                  <div className="kpi-label">Appointments scheduled</div>
                 </div>
-                <div className="kpi-label">Appointments scheduled</div>
-              </div>
-              <div className="kpi-card kpi-card-blue">
-                <div className="kpi-value">
-                  <AnimatedNumber value={analyticsBreakdown?.followups_needed ?? 0} duration={1200} />
+                <div className="kpi-card kpi-card-blue">
+                  <div className="kpi-value">
+                    <AnimatedNumber value={analyticsBreakdown?.followups_needed ?? 0} duration={1200} />
+                  </div>
+                  <div className="kpi-label">Follow-ups needed</div>
                 </div>
-                <div className="kpi-label">Follow-ups needed</div>
-              </div>
-              <div className="kpi-card kpi-card-teal">
-                <div className="kpi-value">
-                  <AnimatedNumber value={analyticsBreakdown?.positive_calls_percent ?? 0} duration={1200} suffix="%" />
+                <div className="kpi-card kpi-card-teal">
+                  <div className="kpi-value">
+                    <AnimatedNumber value={analyticsBreakdown?.positive_calls_percent ?? 0} duration={1200} suffix="%" />
+                  </div>
+                  <div className="kpi-label">Positive calls</div>
                 </div>
-                <div className="kpi-label">Positive calls</div>
-              </div>
-              <div className="kpi-card kpi-card-purple">
-                <div className="kpi-value">
-                  <AnimatedNumber value={analyticsBreakdown?.appointment_conversion_percent ?? 0} duration={1200} suffix="%" />
+                <div className="kpi-card kpi-card-purple">
+                  <div className="kpi-value">
+                    <AnimatedNumber value={analyticsBreakdown?.appointment_conversion_percent ?? 0} duration={1200} suffix="%" />
+                  </div>
+                  <div className="kpi-label">Calls → appointments</div>
                 </div>
-                <div className="kpi-label">Calls → appointments</div>
-              </div>
+                {analyticsBreakdown?.caller_mix && (
+                  <div className="kpi-card">
+                    <div className="kpi-value">
+                      <AnimatedNumber
+                        value={Number(analyticsBreakdown.caller_mix.first_time ?? 0)}
+                        duration={1200}
+                      />
+                    </div>
+                    <div className="kpi-label">New callers this period</div>
+                  </div>
+                )}
               </div>
             </section>
+
+            {analyticsBreakdown?.caller_mix && (
+              <section className="panel analytics-insights">
+                <div className="panel-body analytics-insights-body">
+                  {(() => {
+                    const mix = analyticsBreakdown.caller_mix || {};
+                    const first = Number(mix.first_time ?? 0);
+                    const returning = Number(mix.returning ?? 0);
+                    const total = first + returning;
+                    const firstPct = total > 0 ? Math.round((first / total) * 100) : 0;
+                    const returningPct = total > 0 ? 100 - firstPct : 0;
+                    const peak = analyticsBreakdown.peak_hour;
+                    const bh = analyticsBreakdown.business_hours;
+                    const lines = [];
+                    lines.push(`${firstPct}% first-time callers, ${returningPct}% returning`);
+                    if (peak && typeof peak.hour === "number") {
+                      const h = peak.hour;
+                      const pad = (n) => String(n).padStart(2, "0");
+                      const next = (h + 1) % 24;
+                      lines.push(`Peak hour this period: ${pad(h)}:00–${pad(next)}:00`);
+                    }
+                    if (bh) {
+                      const inHours = Number(bh.in_hours ?? 0);
+                      const outHours = Number(bh.out_hours ?? 0);
+                      const totalBh = inHours + outHours;
+                      if (totalBh > 0) {
+                        const outPct = Math.round((outHours / totalBh) * 100);
+                        const tzLabel = bh.timezone || (business?.timezone || "");
+                        lines.push(
+                          `${outPct}% of calls came outside typical hours (09:00–17:00${tzLabel ? `, ${tzLabel}` : ""})`
+                        );
+                      }
+                    }
+                    return (
+                      <>
+                        <p className="analytics-insights-title">Insights for this period</p>
+                        <ul className="analytics-insights-list">
+                          {lines.map((text) => (
+                            <li key={text}>{text}</li>
+                          ))}
+                        </ul>
+                      </>
+                    );
+                  })()}
+                </div>
+              </section>
+            )}
 
             <section className="analytics-charts">
               <div className="panel analytics-chart-panel">

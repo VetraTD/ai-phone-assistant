@@ -990,6 +990,52 @@
   font-weight: 400;
 }
 
+.analytics-insights {
+  margin-top: 10px;
+}
+
+.analytics-insights-body {
+  font-size: 13px;
+  color: #c2d0e3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analytics-insights-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7b8fa3;
+}
+
+.analytics-insights-list {
+  margin: 0;
+  padding-left: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.analytics-insights-list li {
+  list-style: none;
+  position: relative;
+  padding-left: 14px;
+  color: #dde6f3;
+}
+
+.analytics-insights-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3576f6, #44d2c8);
+}
+
 .analytics-overview {
   display: grid;
   gap: 10px;
@@ -1005,7 +1051,7 @@
 }
 
 .analytics-kpis {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .analytics-kpis .kpi-card {
