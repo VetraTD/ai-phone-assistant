@@ -87,6 +87,69 @@ function getStatusPillStyle(status) {
   return base;
 }
 
+function AnalyticsPeriodSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (!ref.current || ref.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const options = [
+    { value: "7d", label: "Last 7 days" },
+    { value: "30d", label: "Last 30 days" },
+    { value: "90d", label: "Last 3 months" },
+  ];
+
+  const current = options.find((o) => o.value === value) || options[1];
+
+  return (
+    <div className="analytics-period" ref={ref}>
+      <button
+        type="button"
+        className="analytics-period-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="analytics-period-label">{current.label}</span>
+        <span className="analytics-period-chevron">▾</span>
+      </button>
+      {open && (
+        <div
+          className="analytics-period-menu"
+          role="listbox"
+          aria-label="Analytics period"
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={`analytics-period-item ${
+                opt.value === value ? "is-active" : ""
+              }`}
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+              role="option"
+              aria-selected={opt.value === value}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getSentimentPillStyle(sentiment) {
   const s = (sentiment || "").toLowerCase();
   const base = {
@@ -1233,16 +1296,10 @@ function App() {
             <div className="analytics-page-header">
               <div className="analytics-page-title-row">
                 <h2 className="analytics-page-title">Call analytics</h2>
-                <select
-                  className="analytics-period-select"
+                <AnalyticsPeriodSelect
                   value={analyticsPeriod}
-                  onChange={(e) => setAnalyticsPeriod(e.target.value)}
-                  aria-label="Time period"
-                >
-                  <option value="7d">Last 7 days</option>
-                  <option value="30d">Last 30 days</option>
-                  <option value="90d">Last 3 months</option>
-                </select>
+                  onChange={setAnalyticsPeriod}
+                />
               </div>
               <p className="analytics-page-subtitle">Trends and totals for your receptionist calls</p>
             </div>

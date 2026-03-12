@@ -447,6 +447,11 @@
   color: #f5f7fb;
   outline: none;
   font-size: 14px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.12s ease;
 }
 
 .filter-field input::placeholder {
@@ -457,6 +462,8 @@
 .filter-field select:focus {
   border-color: rgba(66, 160, 255, 0.7);
   box-shadow: 0 0 0 4px rgba(66, 160, 255, 0.12);
+  background: rgba(10, 18, 32, 0.98);
+  transform: translateY(-1px);
 }
 
 .field-hint {
@@ -878,7 +885,15 @@
   letter-spacing: -0.03em;
 }
 
-.analytics-period-select {
+.analytics-period {
+  position: relative;
+}
+
+.analytics-period-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -887,13 +902,85 @@
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  min-width: 160px;
+  min-width: 170px;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.14s ease;
 }
 
-.analytics-period-select:hover,
-.analytics-period-select:focus {
-  border-color: rgba(88, 164, 255, 0.35);
-  outline: none;
+.analytics-period-toggle:hover,
+.analytics-period-toggle[aria-expanded="true"] {
+  border-color: rgba(88, 164, 255, 0.55);
+  background: rgba(16, 28, 52, 0.98);
+  box-shadow: 0 0 0 3px rgba(88, 164, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.analytics-period-label {
+  white-space: nowrap;
+}
+
+.analytics-period-chevron {
+  font-size: 12px;
+  opacity: 0.9;
+  transition: transform 0.18s ease;
+}
+
+.analytics-period-toggle[aria-expanded="true"] .analytics-period-chevron {
+  transform: rotate(180deg);
+}
+
+.analytics-period-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 14, 24, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+  z-index: 40;
+  transform-origin: top right;
+  animation: analytics-period-menu-in 150ms ease-out;
+}
+
+.analytics-period-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: #cfd8e4;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.analytics-period-item:hover {
+  background: rgba(53, 118, 246, 0.14);
+  color: #e7f0ff;
+}
+
+.analytics-period-item.is-active {
+  background: rgba(53, 118, 246, 0.22);
+  color: #f4f7ff;
+}
+
+@keyframes analytics-period-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .analytics-page-subtitle {
@@ -969,6 +1056,7 @@
   gap: 10px;
   font-size: 14px;
   color: #d6e0ec;
+  transition: background 0.15s ease, transform 0.12s ease;
 }
 
 .sentiment-dot,
@@ -977,6 +1065,7 @@
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
 }
 
 .sentiment-positive .sentiment-dot { background: #43b67a; }
@@ -994,6 +1083,18 @@
   margin-left: auto;
   font-weight: 600;
   color: #e7eef7;
+}
+
+.sentiment-row:hover,
+.outcome-row:hover {
+  background: rgba(12, 28, 60, 0.7);
+  transform: translateY(-1px);
+  border-radius: 10px;
+}
+
+.sentiment-row:hover .sentiment-dot,
+.outcome-row:hover .outcome-dot {
+  transform: scale(1.25);
 }
 
 .outcome-rate {
@@ -1018,6 +1119,20 @@
 
 .analytics-chart-panel .panel-title {
   font-size: 18px;
+}
+
+.analytics-chart-panel {
+  position: relative;
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.analytics-chart-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45);
+  border-color: rgba(88, 164, 255, 0.35);
 }
 
 /* Guide page */
@@ -1123,6 +1238,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  transition: background 0.15s ease, transform 0.12s ease;
 }
 
 .actions-dot {
@@ -1130,6 +1246,7 @@
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
 }
 
 .actions-dot-appointments { background: #44d2c8; }
@@ -1139,6 +1256,16 @@
 .actions-count {
   font-weight: 700;
   color: #e6edf6;
+}
+
+.actions-row:hover {
+  background: rgba(16, 34, 68, 0.7);
+  transform: translateY(-1px);
+  border-radius: 10px;
+}
+
+.actions-row:hover .actions-dot {
+  transform: scale(1.2);
 }
 
 .analytics-log-panel .panel-title {
