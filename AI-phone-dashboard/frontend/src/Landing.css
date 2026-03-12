@@ -23,7 +23,7 @@
 .landing-header-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px 24px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -628,6 +628,20 @@
 }
 
 @media (max-width: 768px) {
+  .landing-header-inner {
+    padding: 10px 14px;
+    gap: 16px;
+  }
+
+  .landing-header-actions {
+    gap: 8px;
+  }
+
+  .landing-header-phone {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
   .landing-preview-kpis {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -968,9 +982,22 @@
 }
 
 @media (max-width: 480px) {
-  .landing-header-phone {
-    padding: 8px 14px;
-    font-size: 13px;
+  .landing-hero {
+    padding: 40px 16px 56px;
+  }
+
+  .landing-hero-sub {
+    font-size: 16px;
+  }
+
+  .landing-hero-ctas {
+    flex-direction: column;
+  }
+
+  .landing-cta-primary,
+  .landing-cta-secondary {
+    width: 100%;
+    text-align: center;
   }
 
   .landing-demo-phone {
