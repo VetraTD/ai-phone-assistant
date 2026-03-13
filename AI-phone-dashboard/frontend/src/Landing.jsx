@@ -97,35 +97,10 @@ export default function Landing() {
       </section>
 
       <section
-        id="download"
-        className="landing-download reveal-section"
-        ref={(el) => {
-          revealRefs.current[0] = el;
-        }}
-      >
-        <div className="landing-download-inner">
-          <p className="landing-section-label">Desktop app</p>
-          <h2 className="landing-download-title">Download Vetra for Windows</h2>
-          <p className="landing-download-desc">
-            Run Vetra as a native desktop app. Same secure dashboard, faster access from your taskbar.
-          </p>
-          <a
-            href="https://github.com/VetraTD/ai-phone-assistant/releases/download/v0.1.0/vetra-desktop_0.1.0_x64_en-US.msi"
-           className="landing-download-button"
-          >
-            Download for Windows
-          </a>
-          <p className="landing-download-note">
-            Requires Windows 10 or later. Internet connection needed for login and syncing.
-          </p>
-        </div>
-      </section>
-
-      <section
         id="demo"
         className="landing-demo reveal-section"
         ref={(el) => {
-          revealRefs.current[1] = el;
+          revealRefs.current[0] = el;
         }}
       >
         <div className="landing-demo-inner">
@@ -146,7 +121,7 @@ export default function Landing() {
         id="different"
         className="landing-different reveal-section"
         ref={(el) => {
-          revealRefs.current[2] = el;
+          revealRefs.current[1] = el;
         }}
       >
         <div className="landing-different-inner">
@@ -189,7 +164,7 @@ export default function Landing() {
         id="features"
         className="landing-benefits reveal-section"
         ref={(el) => {
-          revealRefs.current[3] = el;
+          revealRefs.current[2] = el;
         }}
       >
         <div className="landing-benefits-inner">
@@ -216,7 +191,7 @@ export default function Landing() {
         id="preview"
         className="landing-preview reveal-section"
         ref={(el) => {
-          revealRefs.current[4] = el;
+          revealRefs.current[3] = el;
         }}
       >
         <div className="landing-preview-inner">
@@ -276,7 +251,7 @@ export default function Landing() {
       <section
         className="landing-stats reveal-section"
         ref={(el) => {
-          revealRefs.current[5] = el;
+          revealRefs.current[4] = el;
         }}
       >
         <div className="landing-stats-inner">
@@ -298,7 +273,7 @@ export default function Landing() {
       <section
         className="landing-testimonial reveal-section"
         ref={(el) => {
-          revealRefs.current[6] = el;
+          revealRefs.current[5] = el;
         }}
       >
         <div className="landing-testimonial-inner">
@@ -327,7 +302,7 @@ export default function Landing() {
         id="faq"
         className="landing-faq reveal-section"
         ref={(el) => {
-          revealRefs.current[7] = el;
+          revealRefs.current[6] = el;
         }}
       >
         <div className="landing-faq-inner">
@@ -371,6 +346,33 @@ export default function Landing() {
               </p>
             </details>
           </div>
+        </div>
+      </section>
+
+      <section
+        id="download"
+        className="landing-download reveal-section"
+        ref={(el) => {
+          revealRefs.current[7] = el;
+        }}
+      >
+        <div className="landing-download-inner">
+          <p className="landing-section-label">Desktop app (optional)</p>
+          <h2 className="landing-download-title">Download Vetra for Windows</h2>
+          <p className="landing-download-desc">
+            Prefer a native app? Run the same secure dashboard from your Windows taskbar.
+          </p>
+          <a
+            href="https://github.com/VetraTD/ai-phone-assistant/releases/download/v0.1.0/vetra-desktop_0.1.0_x64_en-US.msi"
+            className="landing-download-button"
+          >
+            Download for Windows
+          </a>
+          <p className="landing-download-note">
+            Requires Windows 10 or later. Internet connection needed for login and syncing. Windows may
+            show a SmartScreen warning because this is a new app; choose “More info” → “Run anyway” to
+            continue.
+          </p>
         </div>
       </section>
 
