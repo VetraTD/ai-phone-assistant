@@ -50,6 +50,7 @@ export default function Landing() {
           </Link>
           <nav className="landing-nav">
             <a href="#features">Features</a>
+            <a href="#download">Download</a>
             <a href="#preview">Dashboard</a>
             <Link to="/app?demo=1">Guided demo</Link>
             <a href="#different">Why Vetra</a>
@@ -96,10 +97,35 @@ export default function Landing() {
       </section>
 
       <section
+        id="download"
+        className="landing-download reveal-section"
+        ref={(el) => {
+          revealRefs.current[0] = el;
+        }}
+      >
+        <div className="landing-download-inner">
+          <p className="landing-section-label">Desktop app</p>
+          <h2 className="landing-download-title">Download Vetra for Windows</h2>
+          <p className="landing-download-desc">
+            Run Vetra as a native desktop app. Same secure dashboard, faster access from your taskbar.
+          </p>
+          <a
+            href="https://github.com/VetraTD/ai-phone-assistant/releases/download/v0.1.0/vetra-desktop_0.1.0_x64_en-US.msi"
+           className="landing-download-button"
+          >
+            Download for Windows
+          </a>
+          <p className="landing-download-note">
+            Requires Windows 10 or later. Internet connection needed for login and syncing.
+          </p>
+        </div>
+      </section>
+
+      <section
         id="demo"
         className="landing-demo reveal-section"
         ref={(el) => {
-          revealRefs.current[0] = el;
+          revealRefs.current[1] = el;
         }}
       >
         <div className="landing-demo-inner">
@@ -120,7 +146,7 @@ export default function Landing() {
         id="different"
         className="landing-different reveal-section"
         ref={(el) => {
-          revealRefs.current[1] = el;
+          revealRefs.current[2] = el;
         }}
       >
         <div className="landing-different-inner">
@@ -163,7 +189,7 @@ export default function Landing() {
         id="features"
         className="landing-benefits reveal-section"
         ref={(el) => {
-          revealRefs.current[2] = el;
+          revealRefs.current[3] = el;
         }}
       >
         <div className="landing-benefits-inner">
@@ -190,7 +216,7 @@ export default function Landing() {
         id="preview"
         className="landing-preview reveal-section"
         ref={(el) => {
-          revealRefs.current[3] = el;
+          revealRefs.current[4] = el;
         }}
       >
         <div className="landing-preview-inner">
@@ -250,7 +276,7 @@ export default function Landing() {
       <section
         className="landing-stats reveal-section"
         ref={(el) => {
-          revealRefs.current[4] = el;
+          revealRefs.current[5] = el;
         }}
       >
         <div className="landing-stats-inner">
@@ -272,7 +298,7 @@ export default function Landing() {
       <section
         className="landing-testimonial reveal-section"
         ref={(el) => {
-          revealRefs.current[5] = el;
+          revealRefs.current[6] = el;
         }}
       >
         <div className="landing-testimonial-inner">
@@ -301,7 +327,7 @@ export default function Landing() {
         id="faq"
         className="landing-faq reveal-section"
         ref={(el) => {
-          revealRefs.current[6] = el;
+          revealRefs.current[7] = el;
         }}
       >
         <div className="landing-faq-inner">
