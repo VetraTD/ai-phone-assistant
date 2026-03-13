@@ -8,6 +8,11 @@ export const LANGUAGES = [
   { code: "en", label: "EN", name: "English" },
   { code: "es", label: "ES", name: "Español" },
   { code: "fr", label: "FR", name: "Français" },
+  { code: "de", label: "DE", name: "Deutsch" },
+  { code: "pt", label: "PT", name: "Português" },
+  { code: "it", label: "IT", name: "Italiano" },
+  { code: "nl", label: "NL", name: "Nederlands" },
+  { code: "pl", label: "PL", name: "Polski" },
 ];
 
 export function LanguageSwitcher({ lang, onChange }) {

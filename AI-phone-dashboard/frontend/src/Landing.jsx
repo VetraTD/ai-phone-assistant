@@ -336,7 +336,7 @@ export default function Landing() {
             <details className="landing-faq-item">
               <summary className="landing-faq-question">What languages are supported?</summary>
               <p className="landing-faq-answer">
-                The AI receptionist can be configured for English, Spanish, and French. You set your preferred language in the dashboard; the greeting and call handling follow that setting.
+                The AI receptionist can be configured for English, Spanish, French, German, Portuguese, Italian, Dutch, and Polish. You set your preferred language in the dashboard; the greeting and call handling follow that setting.
               </p>
             </details>
             <details className="landing-faq-item">
