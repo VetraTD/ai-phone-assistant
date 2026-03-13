@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
+import { BUILTIN_TOOL_NAMES } from "./supabase.js";
+import { executeIntegration } from "./integrations.js";
 
 const TURN_TIMEOUT_MS = 6500;
 const MAX_FC_ROUNDS = 3;
@@ -133,6 +135,127 @@ function buildCallTools(allowedTasks) {
         required: ["request_type"],
       },
     });
+  }
+
+  return { functionDeclarations: declarations };
+}
+
+// ---------------------------------------------------------------------------
+// Integration tools — dynamic tools from integrations table
+// ---------------------------------------------------------------------------
+
+/** Valid tool name: alphanumeric and underscore only. */
+const TOOL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+
+/** Athenahealth tool names — resolve integration by provider when fc.name is one of these. */
+const ATHENA_TOOL_NAMES = ["get_caller_appointments", "get_available_slots", "book_appointment_in_ehr", "cancel_appointment", "reschedule_appointment"];
+
+/**
+ * Build Gemini function declarations from business integrations (webhooks and athenahealth).
+ * @param {Array<{ provider: string, name: string, enabled: boolean, config: object }>} businessIntegrations
+ * @returns {{ functionDeclarations: Array }}
+ */
+/** Fixed athena tool declarations (when business has athenahealth integration). */
+const ATHENA_FUNCTION_DECLARATIONS = [
+  {
+    name: "get_caller_appointments",
+    description: "Look up the caller's upcoming appointments in the EHR.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+      },
+      required: ["caller_name"],
+    },
+  },
+  {
+    name: "get_available_slots",
+    description: "Get available appointment slots for a given date and optional service type.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date to check (YYYY-MM-DD)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "book_appointment_in_ehr",
+    description: "Book an appointment in the EHR for the caller.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        scheduled_at: { type: "string", description: "Appointment date and time (ISO 8601)" },
+        service_type: { type: "string", description: "Type of appointment" },
+        notes: { type: "string", description: "Optional notes" },
+      },
+      required: ["caller_name", "caller_dob", "scheduled_at"],
+    },
+  },
+  {
+    name: "cancel_appointment",
+    description: "Cancel an existing appointment for the caller. Requires their name and date of birth to verify identity, plus the date of the appointment to cancel.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        appointment_date: { type: "string", description: "Date of the appointment to cancel (YYYY-MM-DD)" },
+        appointment_time: { type: "string", description: "Time of the appointment to cancel (HH:MM, optional)" },
+        reason: { type: "string", description: "Reason for cancellation (optional)" },
+      },
+      required: ["caller_name", "caller_dob"],
+    },
+  },
+  {
+    name: "reschedule_appointment",
+    description: "Reschedule an existing appointment to a new date and time. Requires the caller's name and date of birth, the current appointment date, and the desired new date.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        current_appointment_date: { type: "string", description: "Date of the existing appointment (YYYY-MM-DD)" },
+        current_appointment_time: { type: "string", description: "Time of the existing appointment (HH:MM, optional)" },
+        new_date: { type: "string", description: "Desired new date (YYYY-MM-DD)" },
+        new_time: { type: "string", description: "Desired new time (HH:MM, optional)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["caller_name", "caller_dob", "new_date"],
+    },
+  },
+];
+
+export function buildIntegrationTools(businessIntegrations) {
+  const declarations = [];
+  const integrations = Array.isArray(businessIntegrations) ? businessIntegrations : [];
+
+  for (const int of integrations) {
+    if (!int.enabled) continue;
+    if (int.provider === "webhook") {
+      const name = String(int.name || "").trim();
+      if (!name || !TOOL_NAME_REGEX.test(name)) continue;
+      const config = int.config || {};
+      const description = config.description || `Call the ${name} integration.`;
+      let paramsSchema = config.params_schema;
+      if (!paramsSchema || typeof paramsSchema !== "object") {
+        paramsSchema = { type: "object", additionalProperties: true };
+      }
+      declarations.push({ name, description, parameters: paramsSchema });
+    }
+  }
+
+  const hasAthena = integrations.some((i) => i.enabled && i.provider === "athenahealth");
+  if (hasAthena) {
+    declarations.push(...ATHENA_FUNCTION_DECLARATIONS);
   }
 
   return { functionDeclarations: declarations };
@@ -462,13 +585,21 @@ export async function getReply(history, userMessage, step, intent, config, extra
   );
 
   const chatPromise = (async () => {
+    const builtInTools = buildCallTools(cfg.allowedTasks);
+    const integrationTools = buildIntegrationTools(extras?.integrations || []);
+    const allDeclarations = [
+      ...(builtInTools.functionDeclarations || []),
+      ...(integrationTools.functionDeclarations || []),
+    ];
+    const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+
     const chat = gemini.chats.create({
       model: "gemini-2.5-flash",
       config: {
         temperature: 0.75,
         maxOutputTokens: getMaxTokensForStep(step),
         systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
-        tools: [buildCallTools(cfg.allowedTasks)],
+        tools: toolsConfig,
       },
       history,
     });
@@ -537,15 +668,47 @@ export async function getReply(history, userMessage, step, intent, config, extra
             toolResults.push({ name: fc.name, success: true });
             break;
 
-          default:
-            results.push({
-              functionResponse: {
-                id: fc.id,
-                name: fc.name,
-                response: { error: "Unknown function" },
-              },
-            });
-            toolResults.push({ name: fc.name, success: false });
+          default: {
+            // Dynamic integration tools (webhook, athenahealth)
+            const integrations = extras?.integrations || [];
+            const businessId = extras?.businessId || null;
+            const callerPhone = extras?.callerPhone || null;
+            const callId = extras?.callId || null;
+            const isAthenaTool = ATHENA_TOOL_NAMES.includes(fc.name);
+            const integration = isAthenaTool
+              ? integrations.find((i) => i.provider === "athenahealth" && i.enabled)
+              : integrations.find((i) => i.name === fc.name);
+            if (integration && integration.enabled) {
+              const execResult = await executeIntegration(integration, {
+                tool: fc.name,
+                arguments: fc.args || {},
+                business_id: businessId,
+                call_id: callId,
+                caller_phone: callerPhone,
+              });
+              const success = execResult.success === true;
+              results.push({
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: success
+                    ? { success: true, message: execResult.message }
+                    : { success: false, error: execResult.error },
+                },
+              });
+              toolResults.push({ name: fc.name, success });
+            } else {
+              results.push({
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: { error: "Unknown function" },
+                },
+              });
+              toolResults.push({ name: fc.name, success: false });
+            }
+            break;
+          }
         }
       }
 
