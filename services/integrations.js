@@ -13,4 +13,6 @@ export {
   getCallerAppointments,
   getAvailableSlots,
   bookAppointment,
+  cancelAppointment,
+  rescheduleAppointment,
 } from "../integrations/index.js";

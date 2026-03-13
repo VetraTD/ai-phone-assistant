@@ -7,7 +7,7 @@ import { executeWebhook, validateWebhookConfig } from "./webhook.js";
 import { executeAthenahealth } from "./athenahealth.js";
 
 export { validateWebhookConfig, executeWebhook } from "./webhook.js";
-export { executeAthenahealth, getAthenaAccessToken, clearAthenaTokenCache, getCallerAppointments, getAvailableSlots, bookAppointment } from "./athenahealth.js";
+export { executeAthenahealth, getAthenaAccessToken, clearAthenaTokenCache, getCallerAppointments, getAvailableSlots, bookAppointment, cancelAppointment, rescheduleAppointment } from "./athenahealth.js";
 
 /**
  * Execute an integration based on provider.

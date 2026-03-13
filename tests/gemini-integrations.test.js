@@ -62,9 +62,9 @@ describe("gemini buildIntegrationTools", () => {
       { provider: "athenahealth", name: "athenahealth", enabled: true, config: { practice_id: "195900" } },
     ];
     const result = buildIntegrationTools(integrations);
-    expect(result.functionDeclarations).toHaveLength(3);
+    expect(result.functionDeclarations).toHaveLength(5);
     const names = result.functionDeclarations.map((d) => d.name).sort();
-    expect(names).toEqual(["book_appointment_in_ehr", "get_available_slots", "get_caller_appointments"]);
+    expect(names).toEqual(["book_appointment_in_ehr", "cancel_appointment", "get_available_slots", "get_caller_appointments", "reschedule_appointment"]);
   });
 
   it("skips mcp provider (no tool declarations)", () => {

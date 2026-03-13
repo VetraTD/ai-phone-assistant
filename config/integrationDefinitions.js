@@ -33,6 +33,7 @@ export const INTEGRATION_DEFINITIONS = [
       required: ["practice_id"],
       properties: {
         practice_id: { type: "string", description: "Athena practice ID for this clinic" },
+        department_id: { type: "string", description: "Default department ID for appointment slot searches" },
         use_ecc_app: { type: "boolean", description: "If true, use ECC_ATHENA_* env (ECC's app); otherwise use ATHENA_* (platform app)" },
       },
     },

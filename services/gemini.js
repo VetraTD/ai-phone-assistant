@@ -148,7 +148,7 @@ function buildCallTools(allowedTasks) {
 const TOOL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
 /** Athenahealth tool names — resolve integration by provider when fc.name is one of these. */
-const ATHENA_TOOL_NAMES = ["get_caller_appointments", "get_available_slots", "book_appointment_in_ehr"];
+const ATHENA_TOOL_NAMES = ["get_caller_appointments", "get_available_slots", "book_appointment_in_ehr", "cancel_appointment", "reschedule_appointment"];
 
 /**
  * Build Gemini function declarations from business integrations (webhooks and athenahealth).
@@ -190,12 +190,46 @@ const ATHENA_FUNCTION_DECLARATIONS = [
       properties: {
         caller_name: { type: "string", description: "Caller's full name" },
         caller_phone: { type: "string", description: "Caller's phone number" },
-        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD, optional)" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
         scheduled_at: { type: "string", description: "Appointment date and time (ISO 8601)" },
         service_type: { type: "string", description: "Type of appointment" },
         notes: { type: "string", description: "Optional notes" },
       },
-      required: ["caller_name", "caller_phone", "scheduled_at", "service_type"],
+      required: ["caller_name", "caller_dob", "scheduled_at"],
+    },
+  },
+  {
+    name: "cancel_appointment",
+    description: "Cancel an existing appointment for the caller. Requires their name and date of birth to verify identity, plus the date of the appointment to cancel.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        appointment_date: { type: "string", description: "Date of the appointment to cancel (YYYY-MM-DD)" },
+        appointment_time: { type: "string", description: "Time of the appointment to cancel (HH:MM, optional)" },
+        reason: { type: "string", description: "Reason for cancellation (optional)" },
+      },
+      required: ["caller_name", "caller_dob"],
+    },
+  },
+  {
+    name: "reschedule_appointment",
+    description: "Reschedule an existing appointment to a new date and time. Requires the caller's name and date of birth, the current appointment date, and the desired new date.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        current_appointment_date: { type: "string", description: "Date of the existing appointment (YYYY-MM-DD)" },
+        current_appointment_time: { type: "string", description: "Time of the existing appointment (HH:MM, optional)" },
+        new_date: { type: "string", description: "Desired new date (YYYY-MM-DD)" },
+        new_time: { type: "string", description: "Desired new time (HH:MM, optional)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["caller_name", "caller_dob", "new_date"],
     },
   },
 ];
