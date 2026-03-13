@@ -425,3 +425,139 @@ export async function fetchBusinessKnowledge(businessId, limit = 15) {
   }
   return data || [];
 }
+
+// ---------------------------------------------------------------------------
+// Integrations (per-business: webhooks, athenahealth, mcp)
+// ---------------------------------------------------------------------------
+
+/** Built-in tool names — integration names must not collide with these. */
+export const BUILTIN_TOOL_NAMES = [
+  "set_call_intent",
+  "end_call",
+  "book_appointment",
+  "record_customer_request",
+];
+
+/**
+ * List all integrations for a business.
+ * @param {string} businessId
+ * @param {{ enabledOnly?: boolean }} [opts]
+ * @returns {Promise<Array<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object, created_at: string, updated_at: string }>>}
+ */
+export async function listIntegrationsForBusiness(businessId, opts = {}) {
+  if (!supabase || !businessId) return [];
+  let query = supabase
+    .from("integrations")
+    .select("*")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: true });
+  if (opts.enabledOnly) {
+    query = query.eq("enabled", true);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error("listIntegrationsForBusiness error:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Get a single integration by business and tool name.
+ * @param {string} businessId
+ * @param {string} name - Tool name
+ * @returns {Promise<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object } | null>}
+ */
+export async function getIntegrationByName(businessId, name) {
+  if (!supabase || !businessId || !name) return null;
+  const { data, error } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("name", name)
+    .maybeSingle();
+  if (error) {
+    console.error("getIntegrationByName error:", error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Create or update an integration (upsert by business_id + name).
+ * @param {object} params
+ * @param {string} params.businessId
+ * @param {string} params.provider - webhook | athenahealth | mcp
+ * @param {string} params.name - Tool name (must not be a built-in tool name)
+ * @param {object} params.config
+ * @param {boolean} [params.enabled=true]
+ * @returns {Promise<{ id: string } | null>}
+ */
+export async function createOrUpdateIntegration({
+  businessId,
+  provider,
+  name,
+  config,
+  enabled = true,
+}) {
+  if (!supabase || !businessId || !provider || !name) return null;
+  if (BUILTIN_TOOL_NAMES.includes(name)) {
+    console.error("createOrUpdateIntegration: name cannot be a built-in tool:", name);
+    return null;
+  }
+  const now = new Date().toISOString();
+  const payload = {
+    business_id: businessId,
+    provider,
+    name,
+    config: config || {},
+    enabled: !!enabled,
+    updated_at: now,
+  };
+  const { data, error } = await supabase
+    .from("integrations")
+    .upsert(payload, {
+      onConflict: "business_id,name",
+      ignoreDuplicates: false,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    console.error("createOrUpdateIntegration error:", error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Delete or soft-disable an integration.
+ * @param {string} businessId
+ * @param {string} integrationId
+ * @param {{ softDisable?: boolean }} [opts] - If true, set enabled=false instead of delete
+ * @returns {Promise<boolean>}
+ */
+export async function deleteIntegration(businessId, integrationId, opts = {}) {
+  if (!supabase || !businessId || !integrationId) return false;
+  if (opts.softDisable) {
+    const { error } = await supabase
+      .from("integrations")
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .eq("id", integrationId)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("deleteIntegration softDisable error:", error.message);
+      return false;
+    }
+    return true;
+  }
+  const { error } = await supabase
+    .from("integrations")
+    .delete()
+    .eq("id", integrationId)
+    .eq("business_id", businessId);
+  if (error) {
+    console.error("deleteIntegration error:", error.message);
+    return false;
+  }
+  return true;
+}
