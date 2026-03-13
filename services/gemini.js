@@ -423,7 +423,9 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   if (config.allowedTasks.includes("check_appointment"))
     caps.push("help with appointment inquiries (you cannot access the schedule directly — take details for follow-up)");
   if (config.allowedTasks.includes("cancel_reschedule"))
-    caps.push("help with cancelling or rescheduling (take details for follow-up)");
+    caps.push(
+      "help with cancelling or rescheduling appointments (using scheduling tools when available, or by taking detailed information for follow-up)"
+    );
   if (config.allowedTasks.includes("quote_request"))
     caps.push("discuss pricing/quotes (take details for follow-up, no commitments)");
   if (config.allowedTasks.includes("directions_location")) caps.push("provide address and directions");
@@ -508,6 +510,30 @@ function buildStepGuidance(step, intent, config) {
       );
 
     case "gather_details":
+      if (intent === "cancel_reschedule") {
+        let guide = `
+The caller wants to reschedule an existing appointment.
+
+1) Ask for the caller's full name and date of birth.
+2) Call get_caller_appointments to find their upcoming appointment(s).
+   - If you find a single clear upcoming appointment, say:
+     "I see you have an appointment on [DATE] at [TIME] with [PROVIDER]."
+   - If there are multiple, briefly clarify which one they want to move.
+3) Ask when they would like to move the appointment to, and clarify whether they prefer mornings or afternoons.
+4) Use get_available_slots on the requested date (or nearby dates if needed) to fetch a few options.
+   Offer 2–3 specific time options that match their preference.
+5) After they choose a time, call reschedule_appointment with:
+   - their name and date of birth,
+   - the current appointment date (and time, if known),
+   - and the chosen new date and time.
+6) Once reschedule_appointment succeeds, clearly confirm the new appointment details
+   and ask if there's anything else they need.
+`.trim();
+        if (config.bookingPolicy) {
+          guide += ` Remember: ${config.bookingPolicy}`;
+        }
+        return guide;
+      }
       if (intent === "book_appointment") {
         let guide =
           `Your task: Collect appointment details — name, preferred date/time, service needed. ` +
