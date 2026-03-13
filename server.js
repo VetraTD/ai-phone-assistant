@@ -59,6 +59,7 @@ const IDEMPOTENCY_WINDOW_MS = 15_000;
 const TRANSFER_NUMBER = process.env.TRANSFER_NUMBER || "";
 const CALL_MAX_DURATION_MS =
   (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
+const TYPING_SOUND_URL = process.env.TYPING_SOUND_URL || "";
 
 // ---------------------------------------------------------------------------
 // Escape-trigger detection (case-insensitive, word-boundary)
@@ -228,7 +229,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     }
     if (state.silenceCount === 2) {
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT)
+        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT, TYPING_SOUND_URL)
       );
     }
     // 3rd silence — hang up
@@ -254,7 +255,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     const msg = config.escalationMessage ||
       "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg));
+    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL));
   }
 
   // ---- 8. Idempotency check ----
@@ -280,8 +281,9 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       businessId: state.businessId || null,
       callerPhone: state.callerNumber || null,
       callId: state.dbCallId || null,
+      selectedAppointmentId: state.selectedAppointmentId || null,
     })
-    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults }) => {
+    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults, selectedAppointmentId }) => {
       const turnLatencyMs = Date.now() - geminiStart;
 
       // -- Update conversation history --
@@ -293,6 +295,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         for (const tr of toolResults) {
           log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
         }
+      }
+
+      // -- Update selected appointment when lookup returned exactly one --
+      if (selectedAppointmentId != null) {
+        state.selectedAppointmentId = selectedAppointmentId;
+      }
+      // Clear when cancel succeeded so we don't reuse a cancelled id
+      if (toolResults?.some((tr) => tr.name === "cancel_appointment_db" && tr.success)) {
+        state.selectedAppointmentId = null;
       }
 
       // -- Step transitions based on function calls --
@@ -412,7 +423,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         return res.send(buildSayAndHangup(replyText));
       }
 
-      const twiml = buildSayGatherRedirect(VOICE_URL, replyText);
+      const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, TYPING_SOUND_URL);
       state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
       res.send(twiml);
     })
@@ -433,14 +444,18 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         return res.send(
           buildSayGatherRedirect(
             VOICE_URL,
-            "Sorry, I'm taking a bit longer. Please try again."
+            "Sorry, I'm taking a bit longer. Please try again.",
+            undefined,
+            TYPING_SOUND_URL
           )
         );
       }
       res.send(
         buildSayGatherRedirect(
           VOICE_URL,
-          "Sorry, I'm having a technical issue. Please try again in a moment."
+          "Sorry, I'm having a technical issue. Please try again in a moment.",
+          undefined,
+          TYPING_SOUND_URL
         )
       );
     });

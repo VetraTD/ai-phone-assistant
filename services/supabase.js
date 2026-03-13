@@ -26,6 +26,7 @@ const DEFAULT_GREETING = "Hi, this is your AI receptionist. How can I help you t
 
 /** All task keys the app supports. DB allowed_tasks are filtered to this set. */
 export const SUPPORTED_TASKS = [
+  "appointments",
   "book_appointment",
   "general_question",
   "take_message",
@@ -39,10 +40,17 @@ export const SUPPORTED_TASKS = [
 
 const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
 
+/** When "appointments" is present, it expands to book, check, cancel_reschedule for internal use. */
+const APPOINTMENTS_EXPAND = ["book_appointment", "check_appointment", "cancel_reschedule"];
+
 function normalizeAllowedTasks(raw) {
   if (!Array.isArray(raw)) return DEFAULT_ALLOWED_TASKS;
   const filtered = raw.filter((t) => typeof t === "string" && SUPPORTED_TASKS.includes(t));
-  return filtered.length > 0 ? filtered : DEFAULT_ALLOWED_TASKS;
+  if (filtered.length === 0) return DEFAULT_ALLOWED_TASKS;
+  const expanded = filtered.includes("appointments")
+    ? [...filtered.filter((t) => t !== "appointments"), ...APPOINTMENTS_EXPAND]
+    : filtered;
+  return [...new Set(expanded)];
 }
 
 /** Valid after-hours policy values. */
@@ -356,6 +364,80 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     return null;
   }
   return data.id;
+}
+
+/**
+ * List scheduled appointments for a caller by business, optional phone and name.
+ * @param {string} businessId
+ * @param {object} [opts]
+ * @param {string} [opts.clientPhone] - Caller phone (matched after normalizing to digits)
+ * @param {string} [opts.clientName] - Caller name (case-insensitive partial match)
+ * @returns {Promise<Array<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}>>}
+ */
+export async function listAppointmentsByCaller(businessId, opts = {}) {
+  if (!supabase || !businessId) return [];
+  let q = supabase
+    .from("appointments")
+    .select("id, client_name, client_phone, scheduled_at, status, notes")
+    .eq("business_id", businessId)
+    .eq("status", "scheduled")
+    .order("scheduled_at", { ascending: true });
+  const phone = typeof opts.clientPhone === "string" ? opts.clientPhone.replace(/\D/g, "").trim() : "";
+  const name = typeof opts.clientName === "string" ? opts.clientName.trim() : "";
+  if (name) {
+    q = q.ilike("client_name", `%${name.replace(/%/g, "\\%")}%`);
+  }
+  const { data: rows, error } = await q;
+  if (error) {
+    console.error("listAppointmentsByCaller error:", error.message);
+    return [];
+  }
+  const list = rows || [];
+  if (phone) {
+    return list.filter((r) => {
+      const p = (r.client_phone || "").replace(/\D/g, "").trim();
+      return p && p.slice(-10) === phone.slice(-10);
+    });
+  }
+  return list;
+}
+
+/**
+ * Update an appointment's status (e.g. cancel).
+ * @param {string} appointmentId
+ * @param {string} status - e.g. 'cancelled'
+ * @param {string} [businessId] - If provided, restricts update to this business
+ * @returns {Promise<boolean>}
+ */
+export async function updateAppointmentStatus(appointmentId, status, businessId) {
+  if (!supabase || !appointmentId) return false;
+  let q = supabase.from("appointments").update({ status }).eq("id", appointmentId);
+  if (businessId) q = q.eq("business_id", businessId);
+  const { data, error } = await q.select("id").maybeSingle();
+  if (error) {
+    console.error("updateAppointmentStatus error:", error.message);
+    return false;
+  }
+  return data != null;
+}
+
+/**
+ * Update an appointment (e.g. reschedule).
+ * @param {string} appointmentId
+ * @param {object} updates - e.g. { scheduled_at: "2026-04-15T10:00:00" }
+ * @param {string} [businessId] - If provided, restricts update to this business
+ * @returns {Promise<boolean>}
+ */
+export async function updateAppointment(appointmentId, updates, businessId) {
+  if (!supabase || !appointmentId || !updates || typeof updates !== "object") return false;
+  let q = supabase.from("appointments").update(updates).eq("id", appointmentId);
+  if (businessId) q = q.eq("business_id", businessId);
+  const { data, error } = await q.select("id").maybeSingle();
+  if (error) {
+    console.error("updateAppointment error:", error.message);
+    return false;
+  }
+  return data != null;
 }
 
 /**
