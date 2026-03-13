@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import "./Login.css";
 
 export default function ResetPassword() {
   const [password, setPassword] = useState("");
@@ -29,15 +30,23 @@ export default function ResetPassword() {
       password,
     });
 
+    if (error) {
+      setLoading(false);
+      setError(error.message);
+      return;
+    }
+
+    setMessage("Password updated successfully. Redirecting to sign in...");
+    setPassword("");
+    setConfirmPassword("");
+
+    await supabase.auth.signOut();
+
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
-    } else {
-      setMessage("Password updated successfully. You can now sign in.");
-      setPassword("");
-      setConfirmPassword("");
-    }
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 1200);
   };
 
   return (
