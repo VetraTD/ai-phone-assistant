@@ -15,10 +15,11 @@ import {
   buildSayGatherRedirect,
   buildSayAndHangup,
   buildSayAndDial,
+  buildHoldAndRedirect,
 } from "./lib/twiml.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
-import { log, createRequestId } from "./lib/logger.js";
+import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
 
 const app = express();
 const PORT = 3000;
@@ -59,13 +60,14 @@ const IDEMPOTENCY_WINDOW_MS = 15_000;
 const TRANSFER_NUMBER = process.env.TRANSFER_NUMBER || "";
 const CALL_MAX_DURATION_MS =
   (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
+const TYPING_SOUND_URL = process.env.TYPING_SOUND_URL || "";
 
 // ---------------------------------------------------------------------------
 // Escape-trigger detection (case-insensitive, word-boundary)
 // ---------------------------------------------------------------------------
 
 const TRANSFER_TRIGGERS =
-  /\b(representative|human|operator|real person|speak to someone|talk to someone|stop|enough)\b/i;
+  /\b(representative|human|operator|real person|speak to someone|talk to someone|talk to a person|manager|supervisor)\b/i;
 
 function isTransferRequest(speech) {
   return TRANSFER_TRIGGERS.test(speech);
@@ -171,10 +173,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
           state.businessId = business.id;
           state.callerNumber = callerNumber;
         }
-        // Load business knowledge Q&A for prompt injection
-        state.knowledge = await db.fetchBusinessKnowledge(business.id);
-        // Load integrations for dynamic tools (webhooks, etc.)
-        state.integrations = await db.listIntegrationsForBusiness(business.id, { enabledOnly: true });
+        // Load business knowledge, integrations, and caller context in parallel
+        const [knowledge, integrations, callerContext] = await Promise.all([
+          db.fetchBusinessKnowledge(business.id),
+          db.listIntegrationsForBusiness(business.id, { enabledOnly: true }),
+          callerNumber ? db.fetchCallerContext(business.id, callerNumber) : Promise.resolve(null),
+        ]);
+        state.knowledge = knowledge;
+        state.integrations = integrations;
+        state.callerContext = callerContext;
       } else {
         console.warn(
           `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
@@ -187,36 +194,73 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   }
 
   const config = state.config;
+  const voiceOpts = {
+    voice: config.ttsVoice || "Polly.Joanna",
+    language: config.languagesSpoken,
+    bargeIn: config.bargeIn,
+  };
 
   // ---- 3. Hard time-limit check ----
   if (Date.now() - state.startedAt > CALL_MAX_DURATION_MS) {
     const msg =
       "I'm sorry, but we've reached the maximum call time. Please call back if you need further assistance. Goodbye!";
     logTranscript(state, speechResult || "(time limit)", msg);
-    return res.send(buildSayAndHangup(msg));
+    return res.send(buildSayAndHangup(msg, voiceOpts));
   }
 
   // ---- 4. If a previous turn already set step to ENDING, hang up ----
   if (state.step === STEPS.ENDING) {
-    return res.send(buildSayAndHangup("Thank you for calling. Goodbye!"));
+    return res.send(buildSayAndHangup("Thank you for calling. Goodbye!", voiceOpts));
   }
 
-  // ---- 5. No speech: greeting or silence handling ----
+  // ---- 5. No speech: greeting, pending reply, or silence handling ----
+
+  // ---- 5a. Pending Gemini reply (returning from hold redirect) ----
+  if (speechResult === "" && state.pendingReply) {
+    const pendingReply = state.pendingReply;
+    const pendingSpeech = state.pendingSpeech;
+    const geminiStart = state.pendingGeminiStart;
+    const pendingRequestId = state.pendingRequestId || requestId;
+    // Clear pending state immediately to avoid re-processing on subsequent redirects
+    state.pendingReply = null;
+    state.pendingSpeech = null;
+    state.pendingGeminiStart = null;
+    state.pendingRequestId = null;
+
+    return processGeminiReply(
+      pendingReply, pendingSpeech, geminiStart, pendingRequestId,
+      state, config, callSid, req, res
+    );
+  }
+
   if (speechResult === "") {
     if (state.step === STEPS.GREETING) {
       state.step = STEPS.IDENTIFY_INTENT;
       log("call_started", { callSid, requestId });
 
-      // Build greeting with optional recording disclosure
+      // Build greeting with optional recording disclosure and time-of-day warmth
       let greetingText = "";
       if (config.recordingDisclosureEnabled) {
         greetingText =
           (config.recordingDisclosureText ||
             "This call may be recorded for quality and training purposes.") + " ";
       }
-      greetingText += config.greeting;
 
-      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText));
+      // Prepend time-of-day greeting unless the business set a custom greeting
+      const isDefaultGreeting = !config._hasCustomGreeting;
+      if (isDefaultGreeting) {
+        const tz = config.timezone || "America/Chicago";
+        const hour = parseInt(
+          new Date().toLocaleTimeString("en-GB", { timeZone: tz, hour12: false }).split(":")[0],
+          10
+        );
+        const tod = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+        greetingText += `${tod}! ${config.greeting}`;
+      } else {
+        greetingText += config.greeting;
+      }
+
+      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, voiceOpts));
     }
 
     // Progressive silence: re-listen → prompt → goodbye
@@ -224,15 +268,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     state.silenceCount++;
 
     if (state.silenceCount === 1) {
-      return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT));
+      return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT, voiceOpts));
     }
     if (state.silenceCount === 2) {
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT)
+        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT, "", voiceOpts)
       );
     }
     // 3rd silence — hang up
-    return res.send(buildSayAndHangup("It seems like you may have stepped away. Goodbye!"));
+    return res.send(buildSayAndHangup("It seems like you may have stepped away. Goodbye!", voiceOpts));
   }
 
   // ---- 6. Speech present — reset silence counter ----
@@ -248,13 +292,13 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       const msg = "Transferring you now. Please hold.";
       logTranscript(state, speechResult, msg);
       state.step = STEPS.ENDING;
-      return res.send(buildSayAndDial(msg, transferNumber));
+      return res.send(buildSayAndDial(msg, transferNumber, voiceOpts));
     }
     // Transfer not possible — use escalation message or default
     const msg = config.escalationMessage ||
       "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg));
+    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", voiceOpts));
   }
 
   // ---- 8. Idempotency check ----
@@ -269,182 +313,213 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     return res.send(state.lastProcessed.cachedTwiml);
   }
 
-  // ---- 9. Call Gemini (step + config aware) — measure latency ----
+  // ---- 9. Fire Gemini in background and return hold audio ----
+  // Start the Gemini request immediately, store the promise in state,
+  // and return brief hold audio + redirect. The caller hears "One moment"
+  // (or a typing sound) while Gemini processes in parallel. When Twilio
+  // redirects back (step 5a above), we await the result.
   const geminiStart = Date.now();
-
-  geminiService
-    .getReply(state.history, speechResult, state.step, state.intent, config, {
+  state.pendingReply = geminiService.getReply(
+    state.history, speechResult, state.step, state.intent, config, {
       knowledge: state.knowledge || [],
       transferAllowed: resolveTransferAllowed(config),
       integrations: state.integrations || [],
       businessId: state.businessId || null,
       callerPhone: state.callerNumber || null,
       callId: state.dbCallId || null,
-    })
-    .then(async ({ text: replyText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults }) => {
-      const turnLatencyMs = Date.now() - geminiStart;
+      selectedAppointmentId: state.selectedAppointmentId || null,
+      callerContext: state.callerContext || null,
+    }
+  );
+  state.pendingReply.catch(() => {}); // prevent unhandled rejection if redirect processes the error
+  state.pendingSpeech = speechResult;
+  state.pendingSpeechHash = speechHash;
+  state.pendingGeminiStart = geminiStart;
+  state.pendingRequestId = requestId;
 
-      // -- Update conversation history --
-      state.history.push({ role: "user", parts: [{ text: speechResult }] });
-      state.history.push({ role: "model", parts: [{ text: replyText }] });
+  return res.send(buildHoldAndRedirect(VOICE_URL, TYPING_SOUND_URL, voiceOpts));
+});
 
-      // -- Log tool call results --
-      if (toolResults && toolResults.length > 0) {
-        for (const tr of toolResults) {
-          log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
-        }
+// ---------------------------------------------------------------------------
+// processGeminiReply — awaits a pending Gemini promise and handles the result
+// ---------------------------------------------------------------------------
+
+async function processGeminiReply(
+  replyPromise, speechResult, geminiStart, requestId,
+  state, config, callSid, req, res
+) {
+  const voiceOpts = {
+    voice: config.ttsVoice || "Polly.Joanna",
+    language: config.languagesSpoken,
+    bargeIn: config.bargeIn,
+  };
+  try {
+    const reply = await replyPromise;
+    let {
+      text: replyText,
+      appointmentArgs,
+      intentArgs,
+      endCallArgs,
+      customerRequestArgs,
+      toolResults,
+      selectedAppointmentId,
+    } = reply;
+    const turnLatencyMs = Date.now() - geminiStart;
+
+    // -- Update conversation history --
+    state.history.push({ role: "user", parts: [{ text: speechResult }] });
+    state.history.push({ role: "model", parts: [{ text: replyText }] });
+
+    // -- Log tool call results --
+    if (toolResults && toolResults.length > 0) {
+      for (const tr of toolResults) {
+        log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
       }
+    }
 
-      // -- Step transitions based on function calls --
-      if (intentArgs) {
-        const prevStep = state.step;
-        state.intent = intentArgs.intent;
-        if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
-          state.step = STEPS.GATHER_DETAILS;
-        }
-        log("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
+    // -- Update selected appointment when lookup returned exactly one --
+    if (selectedAppointmentId != null) {
+      state.selectedAppointmentId = selectedAppointmentId;
+    }
+    // Clear when cancel succeeded so we don't reuse a cancelled id
+    if (toolResults?.some((tr) => tr.name === "cancel_appointment_db" && tr.success)) {
+      state.selectedAppointmentId = null;
+    }
+
+    // -- Step transitions based on function calls --
+    if (intentArgs) {
+      const prevStep = state.step;
+      state.intent = intentArgs.intent;
+      if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
+        state.step = STEPS.GATHER_DETAILS;
       }
+      log("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
+    }
 
-      if (appointmentArgs && state.businessId) {
-        const notes =
-          [appointmentArgs.service_type, appointmentArgs.notes]
-            .filter(Boolean)
-            .join(" — ") || null;
-        const twilioNumber = req.body.To || "";
-        state.step = STEPS.CONFIRM;
-        db.createAppointment({
+    // Booking DB write now happens inside getReply (gemini.js) so the model
+    // gets real success/failure. Here we just handle notifications and step transition.
+    if (appointmentArgs && state.businessId) {
+      state.step = STEPS.CONFIRM;
+      const notes =
+        [appointmentArgs.service_type, appointmentArgs.notes]
+          .filter(Boolean)
+          .join(" — ") || null;
+      const twilioNumber = req.body.To || "";
+      notifications
+        .notifyAppointmentBooked({
           businessId: state.businessId,
-          callId: state.dbCallId || null,
-          clientName: appointmentArgs.client_name || null,
-          clientPhone: state.callerNumber || null,
-          scheduledAt: appointmentArgs.scheduled_at,
-          notes,
+          appointment: {
+            scheduled_at: appointmentArgs.scheduled_at,
+            client_name: appointmentArgs.client_name || null,
+            client_phone: state.callerNumber || null,
+            notes,
+          },
+          call: { callerNumber: state.callerNumber, twilioNumber },
         })
-          .then((dbId) => {
-            if (dbId) {
-              log("appointment_booked", {
-                callSid,
-                requestId,
-                scheduled_at: appointmentArgs.scheduled_at,
-              });
-              notifications
-                .notifyAppointmentBooked({
-                  businessId: state.businessId,
-                  appointment: {
-                    scheduled_at: appointmentArgs.scheduled_at,
-                    client_name: appointmentArgs.client_name || null,
-                    client_phone: state.callerNumber || null,
-                    notes,
-                  },
-                  call: { callerNumber: state.callerNumber, twilioNumber },
-                })
-                .catch(() => {});
-            }
-          })
-          .catch((err) => {
-            log("error", {
-              callSid,
-              requestId,
-              message: "createAppointment failed",
-              code: "db_appointment",
-            });
-            captureException(err, { callSid, requestId });
-          });
-      }
+        .catch(() => {});
+    }
 
-      if (endCallArgs) {
-        state.step = STEPS.ENDING;
-        log("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
-      }
+    if (endCallArgs) {
+      state.step = STEPS.ENDING;
+      log("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
+    }
 
-      if (customerRequestArgs && state.businessId) {
-        db.createCustomerRequest({
-          businessId: state.businessId,
-          callId: state.dbCallId || null,
-          requestType: customerRequestArgs.request_type || "message",
-          callerName: customerRequestArgs.caller_name || null,
-          callbackNumber: customerRequestArgs.callback_number || null,
-          message: customerRequestArgs.message || null,
-          preferredTime: customerRequestArgs.preferred_time || null,
+    if (customerRequestArgs && state.businessId) {
+      db.createCustomerRequest({
+        businessId: state.businessId,
+        callId: state.dbCallId || null,
+        requestType: customerRequestArgs.request_type || "message",
+        callerName: customerRequestArgs.caller_name || null,
+        callbackNumber: customerRequestArgs.callback_number || null,
+        message: customerRequestArgs.message || null,
+        preferredTime: customerRequestArgs.preferred_time || null,
+      })
+        .then((id) => {
+          if (id) {
+            notifications
+              .notifyCustomerRequest({
+                businessId: state.businessId,
+                customerRequest: {
+                  request_type: customerRequestArgs.request_type || "message",
+                  caller_name: customerRequestArgs.caller_name || null,
+                  callback_number: customerRequestArgs.callback_number || null,
+                  message: customerRequestArgs.message || null,
+                  preferred_time: customerRequestArgs.preferred_time || null,
+                },
+                call: { callerNumber: state.callerNumber },
+              })
+              .catch(() => {});
+          }
         })
-          .then((id) => {
-            if (id) {
-              notifications
-                .notifyCustomerRequest({
-                  businessId: state.businessId,
-                  customerRequest: {
-                    request_type: customerRequestArgs.request_type || "message",
-                    caller_name: customerRequestArgs.caller_name || null,
-                    callback_number: customerRequestArgs.callback_number || null,
-                    message: customerRequestArgs.message || null,
-                    preferred_time: customerRequestArgs.preferred_time || null,
-                  },
-                  call: { callerNumber: state.callerNumber },
-                })
-                .catch(() => {});
-            }
-          })
-          .catch((err) => {
-            log("error", {
-              callSid,
-              requestId,
-              message: "createCustomerRequest failed",
-              code: "db_customer_request",
-            });
-            captureException(err, { callSid, requestId });
+        .catch((err) => {
+          log("error", {
+            callSid,
+            requestId,
+            message: "createCustomerRequest failed",
+            code: "db_customer_request",
           });
-      }
+          captureException(err, { callSid, requestId });
+        });
+    }
 
-      // -- Persist transcript --
-      logTranscript(state, speechResult, replyText);
+    // -- Persist transcript --
+    logTranscript(state, speechResult, replyText);
 
-      // -- Structured log: turn completed --
-      log("turn_completed", {
-        callSid,
-        requestId,
-        step: state.step,
-        intent: state.intent,
-        turn_latency_ms: turnLatencyMs,
-      });
+    // -- Structured log: turn completed --
+    log("turn_completed", {
+      callSid,
+      requestId,
+      step: state.step,
+      intent: state.intent,
+      turn_latency_ms: turnLatencyMs,
+    });
+    recordTurnLatency(state.businessId, turnLatencyMs);
 
-      // -- Build TwiML response --
-      if (state.step === STEPS.ENDING) {
-        return res.send(buildSayAndHangup(replyText));
-      }
+    // -- Build TwiML response --
+    if (state.step === STEPS.ENDING) {
+      return res.send(buildSayAndHangup(replyText, voiceOpts));
+    }
 
-      const twiml = buildSayGatherRedirect(VOICE_URL, replyText);
-      state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
-      res.send(twiml);
-    })
-    .catch((err) => {
-      const turnLatencyMs = Date.now() - geminiStart;
-      const isTimeout = err?.message === "TURN_TIMEOUT";
+    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", voiceOpts);
+    const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
+    state.pendingSpeechHash = null;
+    state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
+    res.send(twiml);
+  } catch (err) {
+    const turnLatencyMs = Date.now() - geminiStart;
+    const isTimeout = err?.message === "TURN_TIMEOUT";
 
-      log("error", {
-        callSid,
-        requestId,
-        message: isTimeout ? "Gemini turn timeout" : err?.message,
-        code: isTimeout ? "gemini_timeout" : "gemini_error",
-        turn_latency_ms: turnLatencyMs,
-      });
-      captureException(err, { callSid, requestId });
+    log("error", {
+      callSid,
+      requestId,
+      message: isTimeout ? "Gemini turn timeout" : err?.message,
+      code: isTimeout ? "gemini_timeout" : "gemini_error",
+      turn_latency_ms: turnLatencyMs,
+    });
+    captureException(err, { callSid, requestId });
 
-      if (isTimeout) {
-        return res.send(
-          buildSayGatherRedirect(
-            VOICE_URL,
-            "Sorry, I'm taking a bit longer. Please try again."
-          )
-        );
-      }
-      res.send(
+    if (isTimeout) {
+      return res.send(
         buildSayGatherRedirect(
           VOICE_URL,
-          "Sorry, I'm having a technical issue. Please try again in a moment."
+          "Sorry, I'm taking a bit longer. Please try again.",
+          undefined,
+          TYPING_SOUND_URL,
+          voiceOpts
         )
       );
-    });
-});
+    }
+    res.send(
+      buildSayGatherRedirect(
+        VOICE_URL,
+        "Sorry, I'm having a technical issue. Please try again in a moment.",
+        undefined,
+        TYPING_SOUND_URL,
+        voiceOpts
+      )
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Status callback — update call record on terminal status
@@ -489,6 +564,20 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     callState.remove(callSid);
   }
   res.status(200).end();
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard API: caller profile (reuses the same data as AI prompt injection)
+// ---------------------------------------------------------------------------
+
+app.get("/api/businesses/:id/callers/:phone", async (req, res) => {
+  const businessId = req.params.id;
+  const callerPhone = decodeURIComponent(req.params.phone);
+  if (!businessId || !callerPhone) return res.status(400).json({ error: "Missing business id or phone" });
+  const business = await db.fetchBusinessById(businessId);
+  if (!business) return res.status(404).json({ error: "Business not found" });
+  const context = await db.fetchCallerContext(businessId, callerPhone);
+  res.json(context);
 });
 
 // ---------------------------------------------------------------------------
