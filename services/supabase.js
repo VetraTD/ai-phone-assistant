@@ -22,7 +22,7 @@ export function isEnabled() {
 // Per-business config
 // ---------------------------------------------------------------------------
 
-const DEFAULT_GREETING = "Hi, this is your AI receptionist. How can I help you today?";
+const DEFAULT_GREETING = "Hi, how can I help you today?";
 
 /** All task keys the app supports. DB allowed_tasks are filtered to this set. */
 export const SUPPORTED_TASKS = [
@@ -71,6 +71,7 @@ export function loadConfig(business) {
     return {
       businessName: "our office",
       greeting: DEFAULT_GREETING,
+      _hasCustomGreeting: false,
       timezone: process.env.TIMEZONE || "America/Chicago",
       businessHours: null,
       transferPhoneNumber: null,
@@ -98,6 +99,8 @@ export function loadConfig(business) {
       languagesSpoken: ["en"],
       bookingUrl: null,
       callerDataPolicy: null,
+      ttsVoice: "Polly.Joanna",
+    bargeIn: false,
     };
   }
 
@@ -111,6 +114,7 @@ export function loadConfig(business) {
   return {
     businessName: business.name || "our office",
     greeting: business.greeting || DEFAULT_GREETING,
+    _hasCustomGreeting: !!business.greeting,
     timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
     businessHours: business.business_hours || null,
     transferPhoneNumber: business.transfer_phone_number || null,
@@ -138,6 +142,8 @@ export function loadConfig(business) {
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     bookingUrl: business.booking_url || null,
     callerDataPolicy: business.caller_data_policy || null,
+    ttsVoice: business.tts_voice || "Polly.Joanna",
+    bargeIn: !!business.barge_in,
   };
 }
 
@@ -484,6 +490,46 @@ export async function createCustomerRequest({
     return null;
   }
   return data.id;
+}
+
+/**
+ * Fetch caller context for personalization — recent call history and upcoming appointments.
+ * Used to inject "returning caller" context into the AI prompt and to power
+ * the dashboard caller profile view.
+ * @param {string} businessId
+ * @param {string} callerNumber - Caller's phone number (E.164)
+ * @returns {Promise<{ callCount: number, lastCallSummary: string|null, upcomingAppointments: Array }>}
+ */
+export async function fetchCallerContext(businessId, callerNumber) {
+  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  if (!supabase || !businessId || !callerNumber) return empty;
+
+  // Run both queries in parallel
+  const [callsResult, appointmentsResult] = await Promise.all([
+    supabase
+      .from("calls")
+      .select("id, started_at, summary")
+      .eq("business_id", businessId)
+      .eq("caller_number", callerNumber)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("appointments")
+      .select("id, client_name, scheduled_at, notes")
+      .eq("business_id", businessId)
+      .eq("client_phone", callerNumber)
+      .eq("status", "scheduled")
+      .gte("scheduled_at", new Date().toISOString())
+      .order("scheduled_at", { ascending: true })
+      .limit(5),
+  ]);
+
+  const calls = callsResult.data || [];
+  const upcomingAppointments = appointmentsResult.data || [];
+  const lastCallSummary = calls[0]?.summary || null;
+
+  return { callCount: calls.length, lastCallSummary, upcomingAppointments };
 }
 
 /**
