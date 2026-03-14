@@ -516,7 +516,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
       });
       ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
     }
-    ctx += `\nUse this context to personalize the conversation — e.g. "Welcome back!" or reference their upcoming appointment if relevant. Do NOT read out all their history unprompted; use it naturally when it helps.`;
+    ctx += `\nUse this context to personalize the conversation — e.g. reference their upcoming appointment if relevant. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps.`;
     sections.push(ctx);
   }
 

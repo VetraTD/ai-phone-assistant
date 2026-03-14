@@ -272,7 +272,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     }
     if (state.silenceCount === 2) {
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT, TYPING_SOUND_URL, voiceOpts)
+        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT, "", voiceOpts)
       );
     }
     // 3rd silence — hang up
@@ -298,7 +298,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     const msg = config.escalationMessage ||
       "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL, voiceOpts));
+    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", voiceOpts));
   }
 
   // ---- 8. Idempotency check ----
@@ -480,7 +480,7 @@ async function processGeminiReply(
       return res.send(buildSayAndHangup(replyText, voiceOpts));
     }
 
-    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, TYPING_SOUND_URL, voiceOpts);
+    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", voiceOpts);
     const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
     state.pendingSpeechHash = null;
     state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
