@@ -526,6 +526,13 @@ function App() {
   const [usage, setUsage] = useState(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState(null);
+  const [appointmentsList, setAppointmentsList] = useState([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false);
+  const [appointmentsError, setAppointmentsError] = useState(null);
+  const [appointmentsRange, setAppointmentsRange] = useState("upcoming");
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarSyncing, setCalendarSyncing] = useState(false);
 
   const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
 
@@ -621,6 +628,31 @@ function App() {
       .finally(() => { setUsageLoading(false); });
   }, [activePage, businessId]);
 
+  useEffect(() => {
+    if (activePage !== "settings" || !businessId) return;
+    setCalendarLoading(true);
+    api.get("/api/calendar/status")
+      .then((res) => setCalendarConnected(res.data?.connected === true))
+      .catch(() => setCalendarConnected(false))
+      .finally(() => setCalendarLoading(false));
+  }, [activePage, businessId]);
+
+  useEffect(() => {
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    if (!params?.get("calendar")) return;
+    if (params.get("calendar") === "connected") {
+      setToast({ type: "success", message: t.calendarConnected });
+      setTimeout(() => setToast(null), 3000);
+      setCalendarConnected(true);
+    }
+    if (typeof window?.history?.replaceState === "function") {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("calendar");
+      u.searchParams.delete("message");
+      window.history.replaceState({}, "", u.pathname + u.search);
+    }
+  }, [t.calendarConnected]);
+
   const callsQueryParams = useMemo(() => {
     const params = { limit: 200, offset: 0 };
     if (businessId) params.business_id = businessId;
@@ -680,6 +712,19 @@ function App() {
         console.error(err);
       });
   }, [businessId, activePage, analyticsPeriod]);
+
+  useEffect(() => {
+    if (!businessId || activePage !== "appointments") return;
+    setAppointmentsLoading(true);
+    setAppointmentsError(null);
+    api.get("/api/appointments", { params: { range: appointmentsRange } })
+      .then((res) => { setAppointmentsList(Array.isArray(res.data) ? res.data : []); })
+      .catch((err) => {
+        setAppointmentsError(err?.response?.data?.error || err?.message || "Failed to load appointments");
+        setAppointmentsList([]);
+      })
+      .finally(() => setAppointmentsLoading(false));
+  }, [businessId, activePage, appointmentsRange]);
 
   const fetchCalls = useCallback((opts = {}) => {
     if (!businessId) return Promise.resolve();
@@ -917,6 +962,13 @@ function App() {
                 onClick={() => goToPage("analytics")}
               >
                 {t.navAnalytics}
+              </button>
+              <button
+                className={`nav-tab ${activePage === "appointments" ? "is-active" : ""}`}
+                data-tab="appointments"
+                onClick={() => goToPage("appointments")}
+              >
+                {t.navAppointments}
               </button>
               <button
                 className={`nav-tab ${activePage === "settings" ? "is-active" : ""}`}
@@ -1291,6 +1343,65 @@ function App() {
               </section>
             </section>
           </>
+        ) : activePage === "appointments" ? (
+          <section className="appointments-page">
+            <div className="appointments-page-header">
+              <h2 className="appointments-page-title">{t.appointmentsPageTitle}</h2>
+              <div className="appointments-range-tabs">
+                {["today", "7days", "upcoming"].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className={`appointments-range-tab ${appointmentsRange === r ? "is-active" : ""}`}
+                    onClick={() => setAppointmentsRange(r)}
+                  >
+                    {r === "today" ? t.appointmentsRangeToday : r === "7days" ? t.appointmentsRange7Days : t.appointmentsRangeUpcoming}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {appointmentsLoading ? (
+              <div className="appointments-loading">{t.loadingCalls}</div>
+            ) : appointmentsError ? (
+              <div className="appointments-error">{appointmentsError}</div>
+            ) : !appointmentsList?.length ? (
+              <div className="appointments-empty">{t.noAppointmentsInRange}</div>
+            ) : (
+              <div className="appointments-list">
+                {appointmentsList.map((appt) => (
+                  <div key={appt.id} className="appointment-card">
+                    <div className="appointment-card-main">
+                      <div className="appointment-card-time">
+                        {appt.scheduled_at ? new Date(appt.scheduled_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—"}
+                      </div>
+                      <div className="appointment-card-client">
+                        <strong>{appt.client_name || t.caller}</strong>
+                        {appt.client_phone ? <span className="appointment-card-phone">{appt.client_phone}</span> : null}
+                      </div>
+                      <div className="appointment-card-meta">
+                        <span style={badgeStyle("appointment")}>{appt.status || "scheduled"}</span>
+                        {appt.notes ? <span className="appointment-card-notes">{appt.notes}</span> : null}
+                      </div>
+                    </div>
+                    {appt.call_id ? (
+                      <button
+                        type="button"
+                        className="appointment-view-call"
+                        onClick={() => {
+                          setSelectedCallId(appt.call_id);
+                          setActivePage("dashboard");
+                          fetchCalls();
+                          loadCallDetails(appt.call_id);
+                        }}
+                      >
+                        {t.viewCall}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         ) : activePage === "analytics" ? (
           <section className="analytics-page">
             <div className="analytics-page-header">
@@ -1841,6 +1952,77 @@ function App() {
                   <label>{t.notificationPhone}</label>
                   <input value={settingsNotificationPhone} onChange={(e) => setSettingsNotificationPhone(e.target.value)} placeholder="+447700900123" />
                 </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">{t.calendarSync}</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
+                <p className="field-hint" style={{ margin: 0 }}>{t.calendarSyncDescription}</p>
+                {calendarLoading ? (
+                  <span className="field-hint">{t.loadingCalls}</span>
+                ) : calendarConnected ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                    <span className="field-hint" style={{ color: "var(--success, #9ce5b1)" }}>{t.calendarConnected}</span>
+                    <button
+                      type="button"
+                      className="dashboard-logout"
+                      style={{ fontSize: 13, height: 36, padding: "0 14px" }}
+                      disabled={calendarSyncing}
+                      onClick={async () => {
+                        setCalendarSyncing(true);
+                        try {
+                          const res = await api.post("/api/calendar/sync");
+                          setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
+                          setTimeout(() => setToast(null), 3000);
+                        } catch (err) {
+                          setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
+                          setTimeout(() => setToast(null), 3000);
+                        } finally {
+                          setCalendarSyncing(false);
+                        }
+                      }}
+                    >
+                      {calendarSyncing ? "Syncing…" : t.syncToCalendarNow}
+                    </button>
+                    <button
+                      type="button"
+                      className="dashboard-logout"
+                      style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(255,107,107,0.3)", color: "#ffb9b9" }}
+                      onClick={async () => {
+                        try {
+                          await api.delete("/api/calendar/disconnect");
+                          setCalendarConnected(false);
+                          setToast({ type: "success", message: t.disconnectCalendar });
+                          setTimeout(() => setToast(null), 2000);
+                        } catch (err) {
+                          setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
+                          setTimeout(() => setToast(null), 2000);
+                        }
+                      }}
+                    >
+                      {t.disconnectCalendar}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="landing-cta-primary"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={async () => {
+                      try {
+                        const res = await api.get("/api/calendar/auth-url");
+                        if (res.data?.url) window.location.href = res.data.url;
+                        else setToast({ type: "error", message: "Calendar not configured" });
+                      } catch (err) {
+                        setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
+                        setTimeout(() => setToast(null), 2000);
+                      }
+                    }}
+                  >
+                    {t.connectGoogleCalendar}
+                  </button>
+                )}
               </div>
             </section>
 
