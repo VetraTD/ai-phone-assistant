@@ -2092,7 +2092,33 @@ function App() {
             </section>
 
             <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">3. Reading the dashboard</h2></div>
+              <div className="panel-header"><h2 className="panel-title">3. What happens after a call</h2></div>
+              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+                  <li>
+                    <strong>Transcript + summary</strong> – your call is saved with a full transcript and an AI summary so you can skim quickly.
+                  </li>
+                  <li>
+                    <strong>Appointments</strong> – if the caller booked, Vetra creates an appointment record linked to the call.
+                    You can view it in <strong>Call Details</strong> and on the <strong>Appointments</strong> tab.
+                  </li>
+                  <li>
+                    <strong>Customer requests</strong> – messages, callback requests, and follow-up notes are stored as requests tied to the call.
+                  </li>
+                  <li>
+                    <strong>Notifications</strong> – if your business has a notification email/phone set, Vetra sends alerts for important events
+                    (appointment booked, missed call, and call completed summaries).
+                  </li>
+                  <li>
+                    <strong>Calendar sync (optional)</strong> – if you connected Google Calendar in <strong>Settings</strong>, you can sync upcoming appointments
+                    so they appear in the calendar you already use.
+                  </li>
+                </ul>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header"><h2 className="panel-title">4. Reading the dashboard</h2></div>
               <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
                 <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
                   <li><strong>KPIs (top row)</strong> – quick snapshot of calls today, appointments today, follow-ups needed, and calls transferred to a human today.</li>
@@ -2104,7 +2130,7 @@ function App() {
             </section>
 
             <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">4. Best practices</h2></div>
+              <div className="panel-header"><h2 className="panel-title">5. Best practices</h2></div>
               <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
                 <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
                   <li><strong>Greeting</strong> – be clear about who you are and what the receptionist can help with (booking, messages, emergencies).</li>
@@ -2116,7 +2142,7 @@ function App() {
             </section>
 
             <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">5. Getting help</h2></div>
+              <div className="panel-header"><h2 className="panel-title">6. Getting help</h2></div>
               <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
                 <p style={{ margin: 0 }}>
                   If something doesn’t look right – or you’d like help tuning prompts, greetings, or call-handling rules – reach out to the product team using the support contact you received when you signed up.
