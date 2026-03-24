@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock dns.promises.lookup so webhook SSRF check resolves to a public IP
+vi.mock("dns", () => ({
+  default: { promises: { lookup: vi.fn(() => Promise.resolve({ address: "93.184.216.34" })) } },
+  promises: { lookup: vi.fn(() => Promise.resolve({ address: "93.184.216.34" })) },
+}));
+
 import {
   validateWebhookConfig,
   executeWebhook,

@@ -1,9 +1,34 @@
 /**
  * Webhook integration: POST to config.url with payload.
- * No PHI in logs; HTTPS only.
+ * No PHI in logs; HTTPS only; private IP blocking for SSRF prevention.
  */
 
+import dns from "dns";
 import { log } from "../lib/logger.js";
+
+/**
+ * Check if an IP address is private/reserved.
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isPrivateIP(ip) {
+  if (!ip) return true;
+  // IPv6 loopback and link-local
+  if (ip === "::1" || ip === "::") return true;
+  if (ip.startsWith("fc") || ip.startsWith("fd")) return true; // fc00::/7
+  if (ip.startsWith("fe80")) return true; // fe80::/10
+
+  // IPv4
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4) return false;
+  if (parts[0] === 127) return true; // 127.0.0.0/8
+  if (parts[0] === 10) return true; // 10.0.0.0/8
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+  if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+  if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16
+  if (parts[0] === 0) return true; // 0.0.0.0/8
+  return false;
+}
 
 const WEBHOOK_TIMEOUT_MS = 10_000;
 const ALLOWED_METHODS = ["POST", "PUT"];
@@ -37,6 +62,18 @@ export async function executeWebhook(integration, payload) {
   }
 
   const url = config.url;
+
+  // SSRF protection: resolve hostname and block private/reserved IPs
+  try {
+    const hostname = new URL(url).hostname;
+    const { address } = await dns.promises.lookup(hostname);
+    if (isPrivateIP(address)) {
+      return { success: false, error: "URL resolves to a private/reserved address" };
+    }
+  } catch (e) {
+    return { success: false, error: `Cannot resolve webhook hostname: ${e.message}` };
+  }
+
   const method = (config.method || "POST").toUpperCase();
   const headers = {
     "Content-Type": "application/json",
