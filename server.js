@@ -1,5 +1,7 @@
 import "dotenv/config";
+import helmet from "helmet";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
 import * as twilio from "twilio";
@@ -20,6 +22,13 @@ import {
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
+import {
+  isValidUUID,
+  isValidE164,
+  isValidCountryCode,
+  isValidEmail,
+  sanitizeString,
+} from "./lib/validate.js";
 
 const app = express();
 const PORT = 3000;
@@ -97,6 +106,7 @@ function resolveTransferAllowed(config) {
 // Middleware
 // ---------------------------------------------------------------------------
 
+app.use(helmet());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -104,11 +114,35 @@ app.use(
   cors({
     origin: process.env.CORS_ORIGIN
       ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-      : ["http://localhost:5173"],
+      : process.env.NODE_ENV === "production"
+        ? false
+        : ["http://localhost:5173"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// --- Rate limiting (skip in test to avoid flakiness) ---
+if (process.env.NODE_ENV !== "test") {
+  app.use(
+    "/twilio",
+    rateLimit({
+      windowMs: 60_000,
+      max: 300,
+      standardHeaders: true,
+      legacyHeaders: false,
+    })
+  );
+  app.use(
+    "/api",
+    rateLimit({
+      windowMs: 60_000,
+      max: 60,
+      standardHeaders: true,
+      legacyHeaders: false,
+    })
+  );
+}
 
 // --- Root: confirm server is running ---
 app.get("/", (req, res) => {
@@ -573,7 +607,8 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 app.get("/api/businesses/:id/callers/:phone", async (req, res) => {
   const businessId = req.params.id;
   const callerPhone = decodeURIComponent(req.params.phone);
-  if (!businessId || !callerPhone) return res.status(400).json({ error: "Missing business id or phone" });
+  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
+  if (!callerPhone || !isValidE164(callerPhone)) return res.status(400).json({ error: "Invalid phone number" });
   const business = await db.fetchBusinessById(businessId);
   if (!business) return res.status(404).json({ error: "Business not found" });
   const context = await db.fetchCallerContext(businessId, callerPhone);
@@ -607,7 +642,7 @@ app.post("/api/integrations/:provider/callback", (req, res) => {
 
 app.get("/api/businesses/:id/notifications", async (req, res) => {
   const businessId = req.params.id;
-  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);
   if (!business) return res.status(404).json({ error: "Business not found" });
   res.json({
@@ -619,13 +654,23 @@ app.get("/api/businesses/:id/notifications", async (req, res) => {
 
 app.put("/api/businesses/:id/notifications", async (req, res) => {
   const businessId = req.params.id;
-  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);
   if (!business) return res.status(404).json({ error: "Business not found" });
   const body = req.body || {};
   const payload = {};
-  if (body.notification_email !== undefined) payload.notification_email = body.notification_email;
-  if (body.notification_phone !== undefined) payload.notification_phone = body.notification_phone;
+  if (body.notification_email !== undefined) {
+    if (body.notification_email !== null && body.notification_email !== "" && !isValidEmail(body.notification_email)) {
+      return res.status(400).json({ error: "Invalid notification email" });
+    }
+    payload.notification_email = body.notification_email;
+  }
+  if (body.notification_phone !== undefined) {
+    if (body.notification_phone !== null && body.notification_phone !== "" && !isValidE164(body.notification_phone)) {
+      return res.status(400).json({ error: "Invalid notification phone number" });
+    }
+    payload.notification_phone = body.notification_phone;
+  }
   if (body.notifications_enabled !== undefined) payload.notifications_enabled = body.notifications_enabled;
   const ok = await db.updateBusinessNotificationSettings(businessId, payload);
   if (!ok) return res.status(500).json({ error: "Update failed" });
@@ -643,11 +688,13 @@ app.put("/api/businesses/:id/notifications", async (req, res) => {
 
 app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
   const businessId = req.params.id;
-  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);
   if (!business) return res.status(404).json({ error: "Business not found" });
   const country = req.query.country || "US";
+  if (!isValidCountryCode(country)) return res.status(400).json({ error: "Invalid country code" });
   const areaCode = req.query.areaCode || undefined;
+  if (areaCode && !/^\d{1,5}$/.test(areaCode)) return res.status(400).json({ error: "Invalid area code" });
   const type = req.query.type === "tollFree" ? "tollFree" : "local";
   try {
     const numbers = await twilioNumbers.searchAvailableNumbers({
@@ -667,7 +714,7 @@ app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
 
 app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
   const businessId = req.params.id;
-  if (!businessId) return res.status(400).json({ error: "Missing business id" });
+  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);
   if (!business) return res.status(404).json({ error: "Business not found" });
   const phoneNumber = req.body?.phone_number;
@@ -701,6 +748,18 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
         ? "This number is no longer available. Please search again."
         : err.message || "Failed to purchase phone number";
     return res.status(400).json({ error: message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Centralized error handler — never expose stack traces
+// ---------------------------------------------------------------------------
+
+app.use((err, req, res, next) => {
+  captureException(err);
+  log("error", { message: err.message, code: "unhandled" });
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
