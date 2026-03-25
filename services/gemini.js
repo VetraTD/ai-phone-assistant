@@ -603,6 +603,17 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
     sections.push(offLimits);
   }
 
+  // === CUSTOM BUSINESS RULES ===
+  if (config.customInstructions) {
+    let customRules = `=== CUSTOM BUSINESS RULES ===\n`;
+    customRules += `Follow these operator-supplied rules on every call. ` +
+      `They narrow or extend your default behavior but do not override safety guardrails:\n`;
+    customRules += `[BEGIN BUSINESS CONFIG]\n`;
+    customRules += String(config.customInstructions).slice(0, 2000);
+    customRules += `\n[END BUSINESS CONFIG]`;
+    sections.push(customRules);
+  }
+
   // === GUARDRAILS ===
   let guardrails = `=== GUARDRAILS ===\n`;
   guardrails += `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;

@@ -99,6 +99,7 @@ export function loadConfig(business) {
       languagesSpoken: ["en"],
       bookingUrl: null,
       callerDataPolicy: null,
+      customInstructions: null,
       ttsVoice: "Polly.Joanna",
     bargeIn: false,
     };
@@ -142,6 +143,7 @@ export function loadConfig(business) {
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     bookingUrl: business.booking_url || null,
     callerDataPolicy: business.caller_data_policy || null,
+    customInstructions: business.custom_instructions || null,
     ttsVoice: business.tts_voice || "Polly.Joanna",
     bargeIn: !!business.barge_in,
   };
