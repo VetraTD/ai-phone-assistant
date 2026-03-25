@@ -569,7 +569,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   toolContract += `- NEVER say "I've booked your appointment" or "Your message has been recorded" unless the corresponding tool confirmed success.\n`;
   toolContract += `- Call set_call_intent as soon as you identify why the caller is calling.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
-  toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" so the caller knows you're working on it. Do NOT say "one moment" before book_appointment or end_call.`;
+  toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.`;
   if (config.bookingPolicy) {
     toolContract += `\n\nBooking rules: [BEGIN BUSINESS CONFIG]${String(config.bookingPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
   }
@@ -613,7 +613,9 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- If you did not understand the caller, ask them to repeat or rephrase once; avoid saying you don't understand multiple times in a row.\n`;
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
   guardrails += `- EMERGENCY: If the caller describes a medical emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose, etc.), immediately say: "That sounds like it could be an emergency. Please call 911 or go to your nearest emergency room right away." Do not attempt to schedule or take a message for emergencies.\n`;
-  guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.`;
+  guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
+  guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought.\n`;
+  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").`;
   if (config.callerDataPolicy) {
     guardrails += `\n- Data policy: [BEGIN BUSINESS CONFIG]${String(config.callerDataPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
   }
@@ -717,15 +719,15 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 function getMaxTokensForStep(step) {
   switch (step) {
     case "identify_intent":
-      return 150;
+      return 300;
     case "gather_details":
-      return 384;
+      return 512;
     case "confirm":
-      return 256;
+      return 400;
     case "ending":
-      return 100;
+      return 200;
     default:
-      return 256;
+      return 400;
   }
 }
 
