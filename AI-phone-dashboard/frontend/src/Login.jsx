@@ -40,8 +40,13 @@ export default function Login({ onSwitchToSignup }) {
 
     setResetLoading(true);
 
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/reset-password`
+        : "http://localhost:5173/reset-password";
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://ai-phone-dashboard-lemon.vercel.app/reset-password",
+      redirectTo,
     });
 
     setResetLoading(false);
