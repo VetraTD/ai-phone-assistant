@@ -417,6 +417,20 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     }
   );
   state.pendingReply.catch(() => {}); // prevent unhandled rejection if redirect processes the error
+
+  // Pipeline: chain TTS synthesis onto Gemini promise so synthesis runs during
+  // hold-audio playback rather than after the redirect arrives.
+  if (config.googleTtsVoice && googleTts.isConfigured()) {
+    state.pendingTts = state.pendingReply
+      .then((reply) =>
+        googleTts.synthesizeAndStore(reply.text, config.googleTtsVoice)
+          .then((id) => `${BASE_URL}/audio/${id}`)
+      )
+      .catch(() => null); // silent fallback — resolveVoiceOpts used instead
+  } else {
+    state.pendingTts = null;
+  }
+
   state.pendingSpeech = speechResult;
   state.pendingSpeechHash = speechHash;
   state.pendingGeminiStart = geminiStart;
@@ -556,11 +570,26 @@ async function processGeminiReply(
     recordTurnLatency(state.businessId, turnLatencyMs);
 
     // -- Build TwiML response --
+    // Use pre-synthesized audio if TTS ran during hold-audio (pipeline optimization).
+    // Falls back to resolveVoiceOpts (on-demand) when pendingTts is null or errored.
+    const prebuiltAudioUrl = state.pendingTts ? await state.pendingTts : null;
+    state.pendingTts = null;
+    const baseVoiceOpts = {
+      voice: config.ttsVoice || "Polly.Joanna",
+      language: config.languagesSpoken,
+      bargeIn: config.bargeIn,
+    };
+
     if (state.step === STEPS.ENDING) {
-      return res.send(buildSayAndHangup(replyText, await resolveVoiceOpts(replyText, config)));
+      const opts = prebuiltAudioUrl
+        ? { ...baseVoiceOpts, audioUrl: prebuiltAudioUrl }
+        : await resolveVoiceOpts(replyText, config);
+      return res.send(buildSayAndHangup(replyText, opts));
     }
 
-    const replyVoiceOpts = await resolveVoiceOpts(replyText, config);
+    const replyVoiceOpts = prebuiltAudioUrl
+      ? { ...baseVoiceOpts, audioUrl: prebuiltAudioUrl }
+      : await resolveVoiceOpts(replyText, config);
     const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", replyVoiceOpts);
     const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
     state.pendingSpeechHash = null;
