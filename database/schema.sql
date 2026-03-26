@@ -37,6 +37,10 @@ CREATE TABLE businesses (
   languages_spoken             jsonb DEFAULT '["en"]',
   booking_url                  text,
   caller_data_policy           text,
+  custom_instructions          text,
+  tts_voice                    text,
+  barge_in                     boolean DEFAULT false,
+  google_tts_voice             text,
   created_at                   timestamptz DEFAULT now()
 );
 

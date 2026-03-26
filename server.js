@@ -9,6 +9,7 @@ import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
+import * as googleTts from "./services/googleTts.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
@@ -152,6 +153,18 @@ app.get("/", (req, res) => {
   );
 });
 
+// --- Google TTS audio — one-time serve for Twilio <Play> ---
+// UUID-keyed, deleted immediately after first fetch. Not behind Twilio validation
+// because Twilio fetches <Play> URLs with a plain GET (no X-Twilio-Signature).
+app.get("/audio/:id", (req, res) => {
+  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(400).end();
+  const buffer = googleTts.consumeAudio(req.params.id);
+  if (!buffer) return res.status(404).end();
+  res.set("Content-Type", "audio/mpeg");
+  res.set("Cache-Control", "no-store");
+  res.send(buffer);
+});
+
 // --- Twilio signature validation ---
 function twilioValidation(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();
@@ -177,6 +190,41 @@ function logTranscript(state, callerText, aiText) {
   state.sequenceCounter += 2;
   db.addTranscriptEntry(state.dbCallId, "caller", callerText, seq).catch(() => {});
   db.addTranscriptEntry(state.dbCallId, "ai", aiText, seq + 1).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// resolveVoiceOpts — build voiceOpts, optionally pre-synthesizing with Google TTS
+// ---------------------------------------------------------------------------
+
+/**
+ * Build voiceOpts for a TwiML builder. When googleTtsVoice is configured and
+ * Google TTS credentials are present, synthesizes the text to MP3, stores it
+ * in the ephemeral audio store, and returns an audioUrl for Twilio <Play>.
+ * Falls back silently to Twilio <Say> on any error or when not configured.
+ *
+ * @param {string} text - Text to synthesize
+ * @param {object} config - Normalised business config
+ * @returns {Promise<object>} voiceOpts (with optional audioUrl)
+ */
+async function resolveVoiceOpts(text, config) {
+  const base = {
+    voice: config.ttsVoice || "Polly.Joanna",
+    language: config.languagesSpoken,
+    bargeIn: config.bargeIn,
+  };
+
+  if (!config.googleTtsVoice || !googleTts.isConfigured()) {
+    return base;
+  }
+
+  try {
+    const audioId = await googleTts.synthesizeAndStore(text, config.googleTtsVoice);
+    return { ...base, audioUrl: `${BASE_URL}/audio/${audioId}` };
+  } catch (err) {
+    console.error("Google TTS failed, falling back to Twilio Say:", err.message);
+    captureException(err, { context: "googleTts.synthesizeAndStore" });
+    return base;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,12 +287,13 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     const msg =
       "I'm sorry, but we've reached the maximum call time. Please call back if you need further assistance. Goodbye!";
     logTranscript(state, speechResult || "(time limit)", msg);
-    return res.send(buildSayAndHangup(msg, voiceOpts));
+    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
   }
 
   // ---- 4. If a previous turn already set step to ENDING, hang up ----
   if (state.step === STEPS.ENDING) {
-    return res.send(buildSayAndHangup("Thank you for calling. Goodbye!", voiceOpts));
+    const msg = "Thank you for calling. Goodbye!";
+    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
   }
 
   // ---- 5. No speech: greeting, pending reply, or silence handling ----
@@ -294,7 +343,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         greetingText += config.greeting;
       }
 
-      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, voiceOpts));
+      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, await resolveVoiceOpts(greetingText, config)));
     }
 
     // Progressive silence: re-listen → prompt → goodbye
@@ -305,12 +354,14 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT, voiceOpts));
     }
     if (state.silenceCount === 2) {
+      const msg = "Are you still there?";
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, "Are you still there?", SILENCE_GATHER_TIMEOUT, "", voiceOpts)
+        buildSayGatherRedirect(VOICE_URL, msg, SILENCE_GATHER_TIMEOUT, "", await resolveVoiceOpts(msg, config))
       );
     }
     // 3rd silence — hang up
-    return res.send(buildSayAndHangup("It seems like you may have stepped away. Goodbye!", voiceOpts));
+    const byeMsg = "It seems like you may have stepped away. Goodbye!";
+    return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
   }
 
   // ---- 6. Speech present — reset silence counter ----
@@ -326,13 +377,13 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       const msg = "Transferring you now. Please hold.";
       logTranscript(state, speechResult, msg);
       state.step = STEPS.ENDING;
-      return res.send(buildSayAndDial(msg, transferNumber, voiceOpts));
+      return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
     }
     // Transfer not possible — use escalation message or default
     const msg = config.escalationMessage ||
       "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", voiceOpts));
+    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
   }
 
   // ---- 8. Idempotency check ----
@@ -382,11 +433,6 @@ async function processGeminiReply(
   replyPromise, speechResult, geminiStart, requestId,
   state, config, callSid, req, res
 ) {
-  const voiceOpts = {
-    voice: config.ttsVoice || "Polly.Joanna",
-    language: config.languagesSpoken,
-    bargeIn: config.bargeIn,
-  };
   try {
     const reply = await replyPromise;
     let {
@@ -511,13 +557,16 @@ async function processGeminiReply(
 
     // -- Build TwiML response --
     if (state.step === STEPS.ENDING) {
-      return res.send(buildSayAndHangup(replyText, voiceOpts));
+      return res.send(buildSayAndHangup(replyText, await resolveVoiceOpts(replyText, config)));
     }
 
-    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", voiceOpts);
+    const replyVoiceOpts = await resolveVoiceOpts(replyText, config);
+    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", replyVoiceOpts);
     const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
     state.pendingSpeechHash = null;
-    state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
+    // Don't cache TwiML when Google TTS is active — <Play> URLs are one-time-use
+    const googleTtsActive = !!(config.googleTtsVoice && googleTts.isConfigured());
+    state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: googleTtsActive ? null : twiml };
     res.send(twiml);
   } catch (err) {
     const turnLatencyMs = Date.now() - geminiStart;
@@ -533,24 +582,14 @@ async function processGeminiReply(
     captureException(err, { callSid, requestId });
 
     if (isTimeout) {
+      const msg = "Sorry, I'm taking a bit longer. Please try again.";
       return res.send(
-        buildSayGatherRedirect(
-          VOICE_URL,
-          "Sorry, I'm taking a bit longer. Please try again.",
-          undefined,
-          TYPING_SOUND_URL,
-          voiceOpts
-        )
+        buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL, await resolveVoiceOpts(msg, config))
       );
     }
+    const msg = "Sorry, I'm having a technical issue. Please try again in a moment.";
     res.send(
-      buildSayGatherRedirect(
-        VOICE_URL,
-        "Sorry, I'm having a technical issue. Please try again in a moment.",
-        undefined,
-        TYPING_SOUND_URL,
-        voiceOpts
-      )
+      buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL, await resolveVoiceOpts(msg, config))
     );
   }
 }

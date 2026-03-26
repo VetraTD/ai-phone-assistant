@@ -102,6 +102,7 @@ export function loadConfig(business) {
       customInstructions: null,
       ttsVoice: "Polly.Joanna",
     bargeIn: false,
+    googleTtsVoice: null,
     };
   }
 
@@ -146,6 +147,7 @@ export function loadConfig(business) {
     customInstructions: business.custom_instructions || null,
     ttsVoice: business.tts_voice || "Polly.Joanna",
     bargeIn: !!business.barge_in,
+    googleTtsVoice: business.google_tts_voice || null,
   };
 }
 

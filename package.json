@@ -30,6 +30,7 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
     "@sentry/node": "^9.0.0",
     "@supabase/supabase-js": "^2.97.0",
