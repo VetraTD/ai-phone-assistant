@@ -1103,6 +1103,11 @@ app.post("/api/calendar/sync", authSensitiveLimiter, authenticate, async (req, r
     if (!accessToken) {
       return res.status(400).json({ error: "Google Calendar is not connected. Connect it in Settings first." });
     }
+    const bizRes = await pool.query(
+      `SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`,
+      [businessId]
+    );
+    const businessTimezone = bizRes.rows[0]?.timezone || "UTC";
     const apptsRes = await pool.query(
       `SELECT id, client_name, client_phone, scheduled_at, status, notes, call_id
        FROM appointments WHERE business_id = $1 AND scheduled_at >= now() ORDER BY scheduled_at ASC LIMIT 100`,
@@ -1126,8 +1131,8 @@ app.post("/api/calendar/sync", authSensitiveLimiter, authenticate, async (req, r
           {
             summary,
             description: description || undefined,
-            start: { dateTime: start.toISOString(), timeZone: "UTC" },
-            end: { dateTime: end.toISOString(), timeZone: "UTC" },
+            start: { dateTime: start.toISOString(), timeZone: businessTimezone },
+            end: { dateTime: end.toISOString(), timeZone: businessTimezone },
           },
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
