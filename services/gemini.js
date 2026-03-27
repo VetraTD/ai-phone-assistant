@@ -391,7 +391,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   // === IDENTITY ===
   let identity = `=== IDENTITY ===\n`;
   identity += `You are a friendly, professional AI receptionist for ${config.businessName}.`;
-  identity += `\nYou are on a live phone call. Keep every response brief (usually 2–3 sentences). Be warm, conversational, and natural.`;
+  identity += `\nYou are on a live phone call. Be as brief as possible — ideally 2–3 sentences — but always give a complete, useful answer. Never cut off a thought mid-way just to stay short. Be warm, conversational, and natural.`;
   identity += `\nUse natural acknowledgments like "Of course," "Absolutely," "No problem at all," "I'd be happy to help with that." If the caller sounds frustrated, upset, or anxious, acknowledge their feelings before proceeding: "I understand," "I'm sorry about that — let me help."`;
 
   if (config.languagesSpoken && config.languagesSpoken.length > 1) {
@@ -565,7 +565,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
   guardrails += `- EMERGENCY: If the caller describes a medical emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose, etc.), immediately say: "That sounds like it could be an emergency. Please call 911 or go to your nearest emergency room right away." Do not attempt to schedule or take a message for emergencies.\n`;
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
-  guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought.\n`;
+  guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
   guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").`;
   sections.push(guardrails);
 
@@ -652,24 +652,6 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// maxOutputTokens per step — keep early steps tight
-// ---------------------------------------------------------------------------
-
-function getMaxTokensForStep(step) {
-  switch (step) {
-    case "identify_intent":
-      return 300;
-    case "gather_details":
-      return 512;
-    case "confirm":
-      return 400;
-    case "ending":
-      return 200;
-    default:
-      return 400;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // getReply — step + config aware, handles function-call loop, tool truthfulness
 // ---------------------------------------------------------------------------
@@ -717,7 +699,6 @@ export async function getReply(history, userMessage, step, intent, config, extra
       model,
       config: {
         temperature: 0.4,
-        maxOutputTokens: getMaxTokensForStep(step),
         systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
         tools: toolsConfig,
       },
