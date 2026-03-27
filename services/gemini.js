@@ -24,21 +24,12 @@ const DEFAULT_CONFIG = {
   businessHours: null,
   transferPhoneNumber: null,
   allowedTasks: ["book_appointment", "general_question"],
-  voiceStyle: null,
   mainPhone: null,
   generalInfo: null,
-  businessSummary: null,
-  offLimitsTopics: [],
   afterHoursPolicy: "take_message",
-  escalationMessage: null,
-  bookingPolicy: null,
   transferPolicy: "always",
-  staffNames: [],
-  serviceArea: null,
-  services: [],
   languagesSpoken: ["en"],
-  bookingUrl: null,
-  callerDataPolicy: null,
+  customInstructions: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -400,12 +391,6 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   // === IDENTITY ===
   let identity = `=== IDENTITY ===\n`;
   identity += `You are a friendly, professional AI receptionist for ${config.businessName}.`;
-  if (config.voiceStyle) {
-    identity += ` Your tone: [BEGIN BUSINESS CONFIG]${String(config.voiceStyle).slice(0, 200)}[END BUSINESS CONFIG].`;
-  }
-  if (config.businessSummary) {
-    identity += `\n[BEGIN BUSINESS CONFIG]${config.businessSummary.slice(0, 600)}[END BUSINESS CONFIG]`;
-  }
   identity += `\nYou are on a live phone call. Keep every response brief (usually 2–3 sentences). Be warm, conversational, and natural.`;
   identity += `\nUse natural acknowledgments like "Of course," "Absolutely," "No problem at all," "I'd be happy to help with that." If the caller sounds frustrated, upset, or anxious, acknowledge their feelings before proceeding: "I understand," "I'm sorry about that — let me help."`;
 
@@ -448,34 +433,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
 
   // === BUSINESS INFO ===
   const infoLines = [];
-  if (config.addressLine1 || config.city || config.country) {
-    const addrParts = [];
-    if (config.addressLine1) addrParts.push(config.addressLine1);
-    if (config.addressLine2) addrParts.push(config.addressLine2);
-    const cityRegionPostal = [config.city, config.stateRegion, config.postalCode]
-      .filter(Boolean)
-      .join(", ");
-    if (cityRegionPostal) addrParts.push(cityRegionPostal);
-    if (config.country) addrParts.push(config.country);
-    infoLines.push(`Address: ${addrParts.join(", ")}`);
-  }
   if (config.mainPhone) infoLines.push(`Phone: ${config.mainPhone}`);
-  if (config.serviceArea) infoLines.push(`Service area: ${config.serviceArea}`);
-  if (config.bookingUrl) infoLines.push(`Online booking: ${config.bookingUrl}`);
-  if (config.staffNames && config.staffNames.length > 0) {
-    infoLines.push(`Staff: ${config.staffNames.join(", ")}`);
-  }
-  if (config.services && config.services.length > 0) {
-    const svcList = config.services
-      .map((s) => {
-        let desc = s.name || s;
-        if (s.duration_minutes) desc += ` (${s.duration_minutes} min)`;
-        if (s.price) desc += ` — ${s.price}`;
-        return desc;
-      })
-      .join("; ");
-    infoLines.push(`Services: ${svcList}`);
-  }
   if (config.generalInfo) {
     infoLines.push(`General info:\n${config.generalInfo}`);
   }
@@ -570,9 +528,6 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   toolContract += `- Call set_call_intent as soon as you identify why the caller is calling.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
   toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.`;
-  if (config.bookingPolicy) {
-    toolContract += `\n\nBooking rules: [BEGIN BUSINESS CONFIG]${String(config.bookingPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
-  }
   sections.push(toolContract);
 
   // === ESCALATION ===
@@ -584,24 +539,9 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   } else {
     escalation += `Transfers are not available right now.`;
   }
-  escalation += `\nIf you cannot answer a question and cannot transfer:`;
-  if (config.escalationMessage) {
-    escalation += ` Say: "[BEGIN BUSINESS CONFIG]${String(config.escalationMessage).slice(0, 500)}[END BUSINESS CONFIG]"`;
-  } else {
-    escalation += ` Offer to take a message or record their question so someone can follow up.`;
-  }
+  escalation += `\nIf you cannot answer a question and cannot transfer: Offer to take a message or record their question so someone can follow up.`;
   escalation += `\nUse record_customer_request to save the details.`;
   sections.push(escalation);
-
-  // === OFF-LIMITS ===
-  if (config.offLimitsTopics && config.offLimitsTopics.length > 0) {
-    let offLimits = `=== OFF-LIMITS TOPICS ===\n`;
-    offLimits += `You MUST NOT discuss the following topics. If asked, politely decline and redirect:\n`;
-    offLimits += `[BEGIN BUSINESS CONFIG]\n`;
-    offLimits += config.offLimitsTopics.map((t) => `- ${String(t).slice(0, 200)}`).join("\n");
-    offLimits += `\n[END BUSINESS CONFIG]`;
-    sections.push(offLimits);
-  }
 
   // === CUSTOM BUSINESS RULES ===
   if (config.customInstructions) {
@@ -627,9 +567,6 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought.\n`;
   guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").`;
-  if (config.callerDataPolicy) {
-    guardrails += `\n- Data policy: [BEGIN BUSINESS CONFIG]${String(config.callerDataPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
-  }
   sections.push(guardrails);
 
   // === CURRENT TASK AND STATE ===
@@ -666,13 +603,7 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
     case "gather_details":
       if (intent === "cancel_reschedule") {
         if (hasEhrIntegration) {
-          let guide = [
-            "Reschedule flow: (1) Ask name and DOB. (2) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (3) Ask when they want to move it; clarify morning/afternoon. (4) Call get_available_slots; offer 2–3 options. (5) Call reschedule_appointment with name, DOB, current date/time, new date/time. (6) Confirm new details and ask if anything else.",
-          ].join("");
-          if (config.bookingPolicy) {
-            guide += ` Remember: ${config.bookingPolicy}`;
-          }
-          return guide;
+          return "Reschedule flow: (1) Ask name and DOB. (2) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (3) Ask when they want to move it; clarify morning/afternoon. (4) Call get_available_slots; offer 2–3 options. (5) Call reschedule_appointment with name, DOB, current date/time, new date/time. (6) Confirm new details and ask if anything else.";
         }
         return (
           `The caller wants to cancel or reschedule an appointment. ` +
@@ -692,9 +623,6 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
           `3. Once they pick a time, confirm name and service, then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
           `4. Do NOT call book_appointment until the caller clearly confirms.\n` +
           `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`;
-        if (config.bookingPolicy) {
-          guide += `\nRemember: ${config.bookingPolicy}`;
-        }
         return guide;
       }
       if (intent === "take_message" || intent === "callback_request") {

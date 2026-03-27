@@ -210,19 +210,22 @@ function logTranscript(state, callerText, aiText) {
  * @param {object} config - Normalised business config
  * @returns {Promise<object>} voiceOpts (with optional audioUrl)
  */
+const POLLY_VOICE = "Polly.Joanna";
+const GOOGLE_TTS_VOICE = "en-US-Chirp3-HD-Aoede";
+
 async function resolveVoiceOpts(text, config) {
   const base = {
-    voice: config.ttsVoice || "Polly.Joanna",
+    voice: POLLY_VOICE,
     language: config.languagesSpoken,
-    bargeIn: config.bargeIn,
+    bargeIn: false,
   };
 
-  if (!config.googleTtsVoice || !googleTts.isConfigured()) {
+  if (!googleTts.isConfigured()) {
     return base;
   }
 
   try {
-    const audioId = await googleTts.synthesizeAndStore(text, config.googleTtsVoice);
+    const audioId = await googleTts.synthesizeAndStore(text, GOOGLE_TTS_VOICE);
     return { ...base, audioUrl: `${BASE_URL}/audio/${audioId}` };
   } catch (err) {
     console.error("Google TTS failed, falling back to Twilio Say:", err.message);
@@ -281,9 +284,9 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
   const config = state.config;
   const voiceOpts = {
-    voice: config.ttsVoice || "Polly.Joanna",
+    voice: POLLY_VOICE,
     language: config.languagesSpoken,
-    bargeIn: config.bargeIn,
+    bargeIn: false,
   };
 
   // ---- 3. Hard time-limit check ----
@@ -383,9 +386,8 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       state.step = STEPS.ENDING;
       return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
     }
-    // Transfer not possible — use escalation message or default
-    const msg = config.escalationMessage ||
-      "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
+    // Transfer not possible — use default escalation message
+    const msg = "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
     logTranscript(state, speechResult, msg);
     return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
   }
@@ -424,10 +426,10 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 
   // Pipeline: chain TTS synthesis onto Gemini promise so synthesis runs during
   // hold-audio playback rather than after the redirect arrives.
-  if (config.googleTtsVoice && googleTts.isConfigured()) {
+  if (googleTts.isConfigured()) {
     state.pendingTts = state.pendingReply
       .then((reply) =>
-        googleTts.synthesizeAndStore(reply.text, config.googleTtsVoice)
+        googleTts.synthesizeAndStore(reply.text, GOOGLE_TTS_VOICE)
           .then((id) => `${BASE_URL}/audio/${id}`)
       )
       .catch(() => null); // silent fallback — resolveVoiceOpts used instead
@@ -579,9 +581,9 @@ async function processGeminiReply(
     const prebuiltAudioUrl = state.pendingTts ? await state.pendingTts : null;
     state.pendingTts = null;
     const baseVoiceOpts = {
-      voice: config.ttsVoice || "Polly.Joanna",
+      voice: POLLY_VOICE,
       language: config.languagesSpoken,
-      bargeIn: config.bargeIn,
+      bargeIn: false,
     };
 
     if (state.step === STEPS.ENDING) {
@@ -598,7 +600,7 @@ async function processGeminiReply(
     const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
     state.pendingSpeechHash = null;
     // Don't cache TwiML when Google TTS is active — <Play> URLs are one-time-use
-    const googleTtsActive = !!(config.googleTtsVoice && googleTts.isConfigured());
+    const googleTtsActive = googleTts.isConfigured();
     state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: googleTtsActive ? null : twiml };
     res.send(twiml);
   } catch (err) {
