@@ -49,7 +49,7 @@ export async function createStream({
     language,
     smart_format: true,
     interim_results: true,
-    utterance_end_ms: 1000,
+    utterance_end_ms: 1500,
     vad_events: true,
     Authorization: `Token ${DEEPGRAM_API_KEY}`,
   });
