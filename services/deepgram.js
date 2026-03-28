@@ -49,7 +49,7 @@ export async function createStream({
     language,
     smart_format: true,
     interim_results: true,
-    utterance_end_ms: 1500,
+    utterance_end_ms: 3000, // 3 s — gives callers time to pause mid-thought without cutting off
     vad_events: true,
     Authorization: `Token ${DEEPGRAM_API_KEY}`,
   });

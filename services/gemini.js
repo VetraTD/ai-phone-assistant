@@ -566,7 +566,17 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- EMERGENCY: If the caller describes a medical emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose, etc.), immediately say: "That sounds like it could be an emergency. Please call 911 or go to your nearest emergency room right away." Do not attempt to schedule or take a message for emergencies.\n`;
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
-  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").`;
+  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
+  // === DISFLUENCY AND CORRECTION RULES ===
+  // These rules handle the messy reality of live phone speech: filler words,
+  // false starts, and self-corrections. Without them the LLM may try to reason
+  // about partial or contradictory input rather than extracting clean intent.
+  guardrails += `- Focus on the caller's intent, not their exact words. Messy phrasing, repeated words, or fragmented sentences are normal on phone calls. Extract what the caller is trying to accomplish and respond to that.\n`;
+  guardrails += `- Never comment on, repeat, acknowledge, or ask about filler words, stutters, or speech disfluencies. If the caller says "uh, I'd like to, um, book an appointment", respond as though they said "I'd like to book an appointment" cleanly.\n`;
+  guardrails += `- If the caller self-corrects ("actually", "I mean", "wait, no", "scratch that"), always use the most recent version of the information they gave. Discard the earlier version entirely — do not acknowledge or comment on the correction.\n`;
+  guardrails += `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?". Example: "Are you looking to book a new appointment, or reschedule an existing one?"\n`;
+  // Booking confirmation gate — prompt-level enforcement before tool execution
+  guardrails += `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good").`;
   sections.push(guardrails);
 
   // === CURRENT TASK AND STATE ===

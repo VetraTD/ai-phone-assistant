@@ -34,6 +34,7 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
+import { cleanTranscript, isIncomplete, extractFinalIntent } from "./lib/transcriptUtils.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -422,29 +423,45 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
   }
 
-  // ---- 6. Speech present — reset silence counter ----
+  // ---- 6. Speech present — reset silence counter + transcript quality pipeline ----
   state.silenceCount = 0;
 
+  // Stage 1: Strip filler words. Re-listen silently if nothing actionable remains.
+  const cleaned = cleanTranscript(speechResult);
+  if (!cleaned) {
+    log("transcript_discarded", { callSid, requestId, reason: "filler_only", raw: speechResult.slice(0, 60) });
+    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
+  }
+  // Stage 2: Incomplete utterance — re-listen silently. Catches trailing
+  // conjunctions, partial phone numbers, and partial dates that Twilio's
+  // speechTimeout="auto" may not catch before firing the webhook.
+  if (isIncomplete(cleaned)) {
+    log("transcript_held", { callSid, requestId, reason: "incomplete_utterance", text: cleaned.slice(0, 60) });
+    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
+  }
+  // Stage 3: Self-correction — keep only the final intent after correction markers.
+  const processedSpeech = extractFinalIntent(cleaned);
+
   // ---- 7. Escape-trigger check (before Gemini) ----
-  if (isTransferRequest(speechResult)) {
+  if (isTransferRequest(processedSpeech)) {
     const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
     const canTransfer = !!transferNumber && resolveTransferAllowed(config);
     log("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
 
     if (canTransfer) {
       const msg = "Transferring you now. Please hold.";
-      logTranscript(state, speechResult, msg);
+      logTranscript(state, processedSpeech, msg);
       state.step = STEPS.ENDING;
       return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
     }
     // Transfer not possible — use default escalation message
     const msg = "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
-    logTranscript(state, speechResult, msg);
+    logTranscript(state, processedSpeech, msg);
     return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
   }
 
   // ---- 8. Idempotency check ----
-  const speechHash = crypto.createHash("sha256").update(speechResult).digest("hex");
+  const speechHash = crypto.createHash("sha256").update(processedSpeech).digest("hex");
   const now = Date.now();
   if (
     state.lastProcessed &&
@@ -462,7 +479,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // redirects back (step 5a above), we await the result.
   const geminiStart = Date.now();
   state.pendingReply = geminiService.getReply(
-    state.history, speechResult, state.step, state.intent, config, {
+    state.history, processedSpeech, state.step, state.intent, config, {
       knowledge: state.knowledge || [],
       transferAllowed: resolveTransferAllowed(config),
       integrations: state.integrations || [],
@@ -493,7 +510,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     state.pendingTts = null;
   }
 
-  state.pendingSpeech = speechResult;
+  state.pendingSpeech = processedSpeech;
   state.pendingSpeechHash = speechHash;
   state.pendingGeminiStart = geminiStart;
   state.pendingRequestId = requestId;
