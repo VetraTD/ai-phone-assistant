@@ -22,6 +22,8 @@ import {
   buildMultiPlayGatherRedirect,
   buildMultiPlayAndHangup,
 } from "./lib/twiml.js";
+import { WebSocketServer } from "ws";
+import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
@@ -269,6 +271,26 @@ async function resolveVoiceOpts(text, config) {
 
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
+
+  // ---- Media Streams mode: first hit returns <Connect><Stream> ----
+  if (USE_MEDIA_STREAMS) {
+    const callSid = req.body.CallSid;
+    const existingState = callState.getState(callSid);
+    // Only connect the stream on the very first webhook hit (greeting step)
+    if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
+      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+      log("media_stream_initiated", { callSid });
+      return res.send(
+        `<Response><Connect><Stream url="${wsUrl}">` +
+        `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
+        `<Parameter name="callerPhone" value="${req.body.From || ""}" />` +
+        `</Stream></Connect></Response>`
+      );
+    }
+    // If we get here on a media-stream call (e.g. redirect from transfer),
+    // fall through to TwiML logic as a fallback.
+  }
+
   const callSid = req.body.CallSid;
   const requestId = createRequestId();
   const speechResult =
@@ -877,13 +899,42 @@ app.use((err, req, res, next) => {
 
 export { app };
 
+// ---------------------------------------------------------------------------
+// Media Streams — WebSocket server for real-time audio
+// ---------------------------------------------------------------------------
+
+const wss = new WebSocketServer({ noServer: true });
+
+function attachWebSocket(httpServer) {
+  httpServer.on("upgrade", (req, socket, head) => {
+    // Only accept upgrades on the media-stream path
+    const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+    if (pathname === "/twilio/media-stream") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleMediaStreamConnection(ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+}
+
+// Whether to use Media Streams (requires DEEPGRAM_API_KEY)
+const USE_MEDIA_STREAMS = !!process.env.DEEPGRAM_API_KEY;
+
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
+  const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Voice webhook: ${VOICE_URL}`);
     console.log(
       `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
     );
+    if (USE_MEDIA_STREAMS) {
+      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+      console.log(`Media Streams (WebSocket): ${wsUrl}`);
+    } else {
+      console.log("Media Streams disabled (no DEEPGRAM_API_KEY) — using TwiML webhook mode.");
+    }
     if (TRANSFER_NUMBER) {
       console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
     } else {
@@ -893,4 +944,5 @@ if (process.env.NODE_ENV !== "test") {
       `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`
     );
   });
+  attachWebSocket(httpServer);
 }

@@ -1012,6 +1012,244 @@ export async function getReply(history, userMessage, step, intent, config, extra
 }
 
 // ---------------------------------------------------------------------------
+// Streaming variant — yields text deltas for real-time TTS (Media Streams)
+// ---------------------------------------------------------------------------
+
+/**
+ * Streaming version of getReply for Media Streams real-time audio pipeline.
+ *
+ * Yields objects of these shapes:
+ *   { delta: string }               — incremental text tokens (pipe to TTS)
+ *   { toolCall: { name, args } }    — a tool was called (informational)
+ *   { done: true, reply: object }   — final aggregated reply (same shape as getReply return)
+ *
+ * Function calls are handled transparently inside the generator: when a
+ * function call appears in the stream, the generator executes it, sends the
+ * result back to the chat, and continues streaming the follow-up text.
+ *
+ * @param {Array}  history
+ * @param {string} userMessage
+ * @param {string} step
+ * @param {string|null} intent
+ * @param {object} [config]
+ * @param {object} [extras]
+ * @yields {{ delta?: string, toolCall?: object, done?: boolean, reply?: object }}
+ */
+export async function* getReplyStreaming(history, userMessage, step, intent, config, extras) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const cfg = config || DEFAULT_CONFIG;
+  const gemini = new GoogleGenAI({ apiKey });
+
+  const builtInTools = buildCallTools(cfg.allowedTasks);
+  const integrationTools = buildIntegrationTools(extras?.integrations || []);
+  const dbAppointmentTools = buildDbAppointmentTools(cfg, extras);
+  const allDeclarations = [
+    ...(builtInTools.functionDeclarations || []),
+    ...(integrationTools.functionDeclarations || []),
+    ...(dbAppointmentTools.functionDeclarations || []),
+  ];
+  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+
+  const MAX_HISTORY_TURNS = 40;
+  const trimmedHistory = history.length > MAX_HISTORY_TURNS
+    ? history.slice(-MAX_HISTORY_TURNS)
+    : history;
+
+  const model = "gemini-2.5-flash";
+  const chat = gemini.chats.create({
+    model,
+    config: {
+      temperature: 0.4,
+      systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
+      tools: toolsConfig,
+    },
+    history: trimmedHistory,
+  });
+
+  let appointmentArgs = null;
+  let intentArgs = null;
+  let endCallArgs = null;
+  let customerRequestArgs = null;
+  let selectedAppointmentIdFromTurn = null;
+  const toolResults = [];
+  let fullText = "";
+  let round = 0;
+
+  // First request — stream it
+  let streamResponse = await chat.sendMessageStream({ message: userMessage });
+
+  while (true) {
+    // Drain the stream, yielding text deltas and collecting function calls
+    let functionCalls = [];
+
+    for await (const chunk of streamResponse) {
+      // Text delta
+      const delta = chunk.text ?? "";
+      if (delta) {
+        fullText += delta;
+        yield { delta };
+      }
+      // Function calls arrive (usually in the last chunk)
+      if (chunk.functionCalls?.length) {
+        functionCalls.push(...chunk.functionCalls);
+      }
+    }
+
+    // No function calls — we're done
+    if (functionCalls.length === 0 || round >= MAX_FC_ROUNDS) break;
+    round++;
+
+    // Execute function calls (same logic as getReply)
+    const results = [];
+    for (const fc of functionCalls) {
+      switch (fc.name) {
+        case "set_call_intent":
+          intentArgs = fc.args ?? null;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true } } });
+          toolResults.push({ name: fc.name, success: true, message: "How can I help you with that?" });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+
+        case "book_appointment": {
+          const args = fc.args ?? {};
+          const businessId = extras?.businessId || null;
+          const callerPhone = extras?.callerPhone || null;
+          const callId = extras?.callId || null;
+          let bookSuccess = false;
+          let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+
+          if (businessId && args.scheduled_at) {
+            const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+            try {
+              const dbId = await createAppointment({ businessId, callId, clientName: args.client_name || null, clientPhone: callerPhone || null, scheduledAt: args.scheduled_at, notes });
+              if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
+            } catch (err) {
+              const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+              bookMessage = isSlotTaken
+                ? "That time slot is no longer available. Please ask the caller to pick a different time."
+                : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+              captureException(err);
+            }
+          }
+          appointmentArgs = bookSuccess ? args : null;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: bookSuccess, message: bookMessage } } });
+          toolResults.push({ name: fc.name, success: bookSuccess, message: bookMessage });
+          yield { toolCall: { name: fc.name, args } };
+          break;
+        }
+
+        case "record_customer_request": {
+          const args = fc.args ?? {};
+          customerRequestArgs = args;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true, message: "I'll make sure they get your message." } } });
+          toolResults.push({ name: fc.name, success: true, message: "I'll make sure they get your message." });
+          yield { toolCall: { name: fc.name, args } };
+          break;
+        }
+
+        case "end_call": {
+          endCallArgs = fc.args ?? {};
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true } } });
+          toolResults.push({ name: fc.name, success: true, message: "Goodbye!" });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "get_caller_appointments_from_db": {
+          const callerPhone = extras?.callerPhone || fc.args?.caller_phone;
+          const businessId = extras?.businessId || null;
+          let appointments = [];
+          if (callerPhone && businessId) {
+            appointments = await listAppointmentsByCaller(businessId, callerPhone);
+            if (appointments.length === 1) selectedAppointmentIdFromTurn = appointments[0].id;
+          }
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } } });
+          toolResults.push({ name: fc.name, success: true, message: `Found ${appointments.length} appointments.` });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "cancel_appointment_db": {
+          const appointmentId = fc.args?.appointment_id || extras?.selectedAppointmentId;
+          const businessId = extras?.businessId || null;
+          if (!appointmentId) {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "Which appointment?" } } });
+            toolResults.push({ name: fc.name, success: false, message: "I need to look up your appointment first." });
+            break;
+          }
+          const ok = await updateAppointmentStatus(appointmentId, "cancelled", businessId);
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: ok ? { success: true, message: "That appointment has been cancelled." } : { success: false, message: "I couldn't cancel that appointment." } } });
+          toolResults.push({ name: fc.name, success: ok, message: ok ? "Cancelled." : "Couldn't cancel." });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "reschedule_appointment_db": {
+          const appointmentId = fc.args?.appointment_id || extras?.selectedAppointmentId;
+          const newScheduledAt = fc.args?.new_scheduled_at;
+          const businessId = extras?.businessId || null;
+          if (!appointmentId || !newScheduledAt) {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: !appointmentId ? "Which appointment?" : "New date/time required." } } });
+            toolResults.push({ name: fc.name, success: false, message: "Missing info." });
+            break;
+          }
+          const ok = await updateAppointment(appointmentId, { scheduled_at: newScheduledAt }, businessId);
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: ok ? { success: true, message: "Rescheduled." } : { success: false, message: "Couldn't reschedule." } } });
+          toolResults.push({ name: fc.name, success: ok, message: ok ? "Rescheduled." : "Couldn't reschedule." });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        default: {
+          const integrations = extras?.integrations || [];
+          const businessId = extras?.businessId || null;
+          const callerPhone = extras?.callerPhone || null;
+          const callId = extras?.callId || null;
+          const isAthenaTool = ATHENA_TOOL_NAMES.includes(fc.name);
+          const integration = isAthenaTool
+            ? integrations.find((i) => i.provider === "athenahealth" && i.enabled)
+            : integrations.find((i) => i.name === fc.name);
+          if (integration && integration.enabled) {
+            const execResult = await executeIntegration(integration, { tool: fc.name, arguments: fc.args || {}, business_id: businessId, call_id: callId, caller_phone: callerPhone });
+            const success = execResult.success === true;
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: success ? { success: true, message: execResult.message } : { success: false, error: execResult.error } } });
+            toolResults.push({ name: fc.name, success, message: success ? execResult.message : (execResult.error || "Something went wrong.") });
+          } else {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { error: "Unknown function" } } });
+            toolResults.push({ name: fc.name, success: false, message: "I'm sorry, I wasn't able to do that." });
+          }
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+      }
+    }
+
+    // Send function results back to chat and stream the follow-up
+    streamResponse = await chat.sendMessageStream({ message: results });
+  }
+
+  // Fallback if model returned no text at all
+  if (!fullText && toolResults.length > 0) {
+    const last = toolResults[toolResults.length - 1];
+    fullText = last.message || (last.success
+      ? "Done. Is there anything else I can help you with?"
+      : "I'm sorry, I wasn't able to complete that. Let me take your details so someone can follow up.");
+    yield { delta: fullText };
+  }
+  if (!fullText) {
+    fullText = "I'm sorry, could you say that again?";
+    yield { delta: fullText };
+  }
+
+  yield {
+    done: true,
+    reply: { text: fullText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults, selectedAppointmentId: selectedAppointmentIdFromTurn },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Post-call summary and outcome
 // ---------------------------------------------------------------------------
 
