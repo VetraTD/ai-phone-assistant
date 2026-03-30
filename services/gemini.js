@@ -24,21 +24,12 @@ const DEFAULT_CONFIG = {
   businessHours: null,
   transferPhoneNumber: null,
   allowedTasks: ["book_appointment", "general_question"],
-  voiceStyle: null,
   mainPhone: null,
   generalInfo: null,
-  businessSummary: null,
-  offLimitsTopics: [],
   afterHoursPolicy: "take_message",
-  escalationMessage: null,
-  bookingPolicy: null,
   transferPolicy: "always",
-  staffNames: [],
-  serviceArea: null,
-  services: [],
   languagesSpoken: ["en"],
-  bookingUrl: null,
-  callerDataPolicy: null,
+  customInstructions: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -400,13 +391,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   // === IDENTITY ===
   let identity = `=== IDENTITY ===\n`;
   identity += `You are a friendly, professional AI receptionist for ${config.businessName}.`;
-  if (config.voiceStyle) {
-    identity += ` Your tone: [BEGIN BUSINESS CONFIG]${String(config.voiceStyle).slice(0, 200)}[END BUSINESS CONFIG].`;
-  }
-  if (config.businessSummary) {
-    identity += `\n[BEGIN BUSINESS CONFIG]${config.businessSummary.slice(0, 600)}[END BUSINESS CONFIG]`;
-  }
-  identity += `\nYou are on a live phone call. Keep every response brief (usually 2–3 sentences). Be warm, conversational, and natural.`;
+  identity += `\nYou are on a live phone call. Be as brief as possible — ideally 2–3 sentences — but always give a complete, useful answer. Never cut off a thought mid-way just to stay short. Be warm, conversational, and natural.`;
   identity += `\nUse natural acknowledgments like "Of course," "Absolutely," "No problem at all," "I'd be happy to help with that." If the caller sounds frustrated, upset, or anxious, acknowledge their feelings before proceeding: "I understand," "I'm sorry about that — let me help."`;
 
   if (config.languagesSpoken && config.languagesSpoken.length > 1) {
@@ -448,34 +433,7 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
 
   // === BUSINESS INFO ===
   const infoLines = [];
-  if (config.addressLine1 || config.city || config.country) {
-    const addrParts = [];
-    if (config.addressLine1) addrParts.push(config.addressLine1);
-    if (config.addressLine2) addrParts.push(config.addressLine2);
-    const cityRegionPostal = [config.city, config.stateRegion, config.postalCode]
-      .filter(Boolean)
-      .join(", ");
-    if (cityRegionPostal) addrParts.push(cityRegionPostal);
-    if (config.country) addrParts.push(config.country);
-    infoLines.push(`Address: ${addrParts.join(", ")}`);
-  }
   if (config.mainPhone) infoLines.push(`Phone: ${config.mainPhone}`);
-  if (config.serviceArea) infoLines.push(`Service area: ${config.serviceArea}`);
-  if (config.bookingUrl) infoLines.push(`Online booking: ${config.bookingUrl}`);
-  if (config.staffNames && config.staffNames.length > 0) {
-    infoLines.push(`Staff: ${config.staffNames.join(", ")}`);
-  }
-  if (config.services && config.services.length > 0) {
-    const svcList = config.services
-      .map((s) => {
-        let desc = s.name || s;
-        if (s.duration_minutes) desc += ` (${s.duration_minutes} min)`;
-        if (s.price) desc += ` — ${s.price}`;
-        return desc;
-      })
-      .join("; ");
-    infoLines.push(`Services: ${svcList}`);
-  }
   if (config.generalInfo) {
     infoLines.push(`General info:\n${config.generalInfo}`);
   }
@@ -570,9 +528,6 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   toolContract += `- Call set_call_intent as soon as you identify why the caller is calling.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
   toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.`;
-  if (config.bookingPolicy) {
-    toolContract += `\n\nBooking rules: [BEGIN BUSINESS CONFIG]${String(config.bookingPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
-  }
   sections.push(toolContract);
 
   // === ESCALATION ===
@@ -584,24 +539,9 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   } else {
     escalation += `Transfers are not available right now.`;
   }
-  escalation += `\nIf you cannot answer a question and cannot transfer:`;
-  if (config.escalationMessage) {
-    escalation += ` Say: "[BEGIN BUSINESS CONFIG]${String(config.escalationMessage).slice(0, 500)}[END BUSINESS CONFIG]"`;
-  } else {
-    escalation += ` Offer to take a message or record their question so someone can follow up.`;
-  }
+  escalation += `\nIf you cannot answer a question and cannot transfer: Offer to take a message or record their question so someone can follow up.`;
   escalation += `\nUse record_customer_request to save the details.`;
   sections.push(escalation);
-
-  // === OFF-LIMITS ===
-  if (config.offLimitsTopics && config.offLimitsTopics.length > 0) {
-    let offLimits = `=== OFF-LIMITS TOPICS ===\n`;
-    offLimits += `You MUST NOT discuss the following topics. If asked, politely decline and redirect:\n`;
-    offLimits += `[BEGIN BUSINESS CONFIG]\n`;
-    offLimits += config.offLimitsTopics.map((t) => `- ${String(t).slice(0, 200)}`).join("\n");
-    offLimits += `\n[END BUSINESS CONFIG]`;
-    sections.push(offLimits);
-  }
 
   // === CUSTOM BUSINESS RULES ===
   if (config.customInstructions) {
@@ -625,11 +565,18 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
   guardrails += `- EMERGENCY: If the caller describes a medical emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose, etc.), immediately say: "That sounds like it could be an emergency. Please call 911 or go to your nearest emergency room right away." Do not attempt to schedule or take a message for emergencies.\n`;
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
-  guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought.\n`;
-  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").`;
-  if (config.callerDataPolicy) {
-    guardrails += `\n- Data policy: [BEGIN BUSINESS CONFIG]${String(config.callerDataPolicy).slice(0, 500)}[END BUSINESS CONFIG]`;
-  }
+  guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
+  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
+  // === DISFLUENCY AND CORRECTION RULES ===
+  // These rules handle the messy reality of live phone speech: filler words,
+  // false starts, and self-corrections. Without them the LLM may try to reason
+  // about partial or contradictory input rather than extracting clean intent.
+  guardrails += `- Focus on the caller's intent, not their exact words. Messy phrasing, repeated words, or fragmented sentences are normal on phone calls. Extract what the caller is trying to accomplish and respond to that.\n`;
+  guardrails += `- Never comment on, repeat, acknowledge, or ask about filler words, stutters, or speech disfluencies. If the caller says "uh, I'd like to, um, book an appointment", respond as though they said "I'd like to book an appointment" cleanly.\n`;
+  guardrails += `- If the caller self-corrects ("actually", "I mean", "wait, no", "scratch that"), always use the most recent version of the information they gave. Discard the earlier version entirely — do not acknowledge or comment on the correction.\n`;
+  guardrails += `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?". Example: "Are you looking to book a new appointment, or reschedule an existing one?"\n`;
+  // Booking confirmation gate — prompt-level enforcement before tool execution
+  guardrails += `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good").`;
   sections.push(guardrails);
 
   // === CURRENT TASK AND STATE ===
@@ -666,13 +613,7 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
     case "gather_details":
       if (intent === "cancel_reschedule") {
         if (hasEhrIntegration) {
-          let guide = [
-            "Reschedule flow: (1) Ask name and DOB. (2) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (3) Ask when they want to move it; clarify morning/afternoon. (4) Call get_available_slots; offer 2–3 options. (5) Call reschedule_appointment with name, DOB, current date/time, new date/time. (6) Confirm new details and ask if anything else.",
-          ].join("");
-          if (config.bookingPolicy) {
-            guide += ` Remember: ${config.bookingPolicy}`;
-          }
-          return guide;
+          return "Reschedule flow: (1) Ask name and DOB. (2) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (3) Ask when they want to move it; clarify morning/afternoon. (4) Call get_available_slots; offer 2–3 options. (5) Call reschedule_appointment with name, DOB, current date/time, new date/time. (6) Confirm new details and ask if anything else.";
         }
         return (
           `The caller wants to cancel or reschedule an appointment. ` +
@@ -692,9 +633,6 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
           `3. Once they pick a time, confirm name and service, then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
           `4. Do NOT call book_appointment until the caller clearly confirms.\n` +
           `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`;
-        if (config.bookingPolicy) {
-          guide += `\nRemember: ${config.bookingPolicy}`;
-        }
         return guide;
       }
       if (intent === "take_message" || intent === "callback_request") {
@@ -724,24 +662,6 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// maxOutputTokens per step — keep early steps tight
-// ---------------------------------------------------------------------------
-
-function getMaxTokensForStep(step) {
-  switch (step) {
-    case "identify_intent":
-      return 300;
-    case "gather_details":
-      return 512;
-    case "confirm":
-      return 400;
-    case "ending":
-      return 200;
-    default:
-      return 400;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // getReply — step + config aware, handles function-call loop, tool truthfulness
 // ---------------------------------------------------------------------------
@@ -789,7 +709,6 @@ export async function getReply(history, userMessage, step, intent, config, extra
       model,
       config: {
         temperature: 0.4,
-        maxOutputTokens: getMaxTokensForStep(step),
         systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
         tools: toolsConfig,
       },
@@ -1100,6 +1019,244 @@ export async function getReply(history, userMessage, step, intent, config, extra
 
   chatPromise.catch(() => {}); // prevent unhandled rejection when timeout wins
   return Promise.race([chatPromise, timeoutPromise]);
+}
+
+// ---------------------------------------------------------------------------
+// Streaming variant — yields text deltas for real-time TTS (Media Streams)
+// ---------------------------------------------------------------------------
+
+/**
+ * Streaming version of getReply for Media Streams real-time audio pipeline.
+ *
+ * Yields objects of these shapes:
+ *   { delta: string }               — incremental text tokens (pipe to TTS)
+ *   { toolCall: { name, args } }    — a tool was called (informational)
+ *   { done: true, reply: object }   — final aggregated reply (same shape as getReply return)
+ *
+ * Function calls are handled transparently inside the generator: when a
+ * function call appears in the stream, the generator executes it, sends the
+ * result back to the chat, and continues streaming the follow-up text.
+ *
+ * @param {Array}  history
+ * @param {string} userMessage
+ * @param {string} step
+ * @param {string|null} intent
+ * @param {object} [config]
+ * @param {object} [extras]
+ * @yields {{ delta?: string, toolCall?: object, done?: boolean, reply?: object }}
+ */
+export async function* getReplyStreaming(history, userMessage, step, intent, config, extras) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const cfg = config || DEFAULT_CONFIG;
+  const gemini = new GoogleGenAI({ apiKey });
+
+  const builtInTools = buildCallTools(cfg.allowedTasks);
+  const integrationTools = buildIntegrationTools(extras?.integrations || []);
+  const dbAppointmentTools = buildDbAppointmentTools(cfg, extras);
+  const allDeclarations = [
+    ...(builtInTools.functionDeclarations || []),
+    ...(integrationTools.functionDeclarations || []),
+    ...(dbAppointmentTools.functionDeclarations || []),
+  ];
+  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+
+  const MAX_HISTORY_TURNS = 40;
+  const trimmedHistory = history.length > MAX_HISTORY_TURNS
+    ? history.slice(-MAX_HISTORY_TURNS)
+    : history;
+
+  const model = "gemini-2.5-flash";
+  const chat = gemini.chats.create({
+    model,
+    config: {
+      temperature: 0.4,
+      systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
+      tools: toolsConfig,
+    },
+    history: trimmedHistory,
+  });
+
+  let appointmentArgs = null;
+  let intentArgs = null;
+  let endCallArgs = null;
+  let customerRequestArgs = null;
+  let selectedAppointmentIdFromTurn = null;
+  const toolResults = [];
+  let fullText = "";
+  let round = 0;
+
+  // First request — stream it
+  let streamResponse = await chat.sendMessageStream({ message: userMessage });
+
+  while (true) {
+    // Drain the stream, yielding text deltas and collecting function calls
+    let functionCalls = [];
+
+    for await (const chunk of streamResponse) {
+      // Text delta
+      const delta = chunk.text ?? "";
+      if (delta) {
+        fullText += delta;
+        yield { delta };
+      }
+      // Function calls arrive (usually in the last chunk)
+      if (chunk.functionCalls?.length) {
+        functionCalls.push(...chunk.functionCalls);
+      }
+    }
+
+    // No function calls — we're done
+    if (functionCalls.length === 0 || round >= MAX_FC_ROUNDS) break;
+    round++;
+
+    // Execute function calls (same logic as getReply)
+    const results = [];
+    for (const fc of functionCalls) {
+      switch (fc.name) {
+        case "set_call_intent":
+          intentArgs = fc.args ?? null;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true } } });
+          toolResults.push({ name: fc.name, success: true, message: "How can I help you with that?" });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+
+        case "book_appointment": {
+          const args = fc.args ?? {};
+          const businessId = extras?.businessId || null;
+          const callerPhone = extras?.callerPhone || null;
+          const callId = extras?.callId || null;
+          let bookSuccess = false;
+          let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+
+          if (businessId && args.scheduled_at) {
+            const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+            try {
+              const dbId = await createAppointment({ businessId, callId, clientName: args.client_name || null, clientPhone: callerPhone || null, scheduledAt: args.scheduled_at, notes });
+              if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
+            } catch (err) {
+              const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+              bookMessage = isSlotTaken
+                ? "That time slot is no longer available. Please ask the caller to pick a different time."
+                : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+              captureException(err);
+            }
+          }
+          appointmentArgs = bookSuccess ? args : null;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: bookSuccess, message: bookMessage } } });
+          toolResults.push({ name: fc.name, success: bookSuccess, message: bookMessage });
+          yield { toolCall: { name: fc.name, args } };
+          break;
+        }
+
+        case "record_customer_request": {
+          const args = fc.args ?? {};
+          customerRequestArgs = args;
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true, message: "I'll make sure they get your message." } } });
+          toolResults.push({ name: fc.name, success: true, message: "I'll make sure they get your message." });
+          yield { toolCall: { name: fc.name, args } };
+          break;
+        }
+
+        case "end_call": {
+          endCallArgs = fc.args ?? {};
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true } } });
+          toolResults.push({ name: fc.name, success: true, message: "Goodbye!" });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "get_caller_appointments_from_db": {
+          const callerPhone = extras?.callerPhone || fc.args?.caller_phone;
+          const businessId = extras?.businessId || null;
+          let appointments = [];
+          if (callerPhone && businessId) {
+            appointments = await listAppointmentsByCaller(businessId, callerPhone);
+            if (appointments.length === 1) selectedAppointmentIdFromTurn = appointments[0].id;
+          }
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } } });
+          toolResults.push({ name: fc.name, success: true, message: `Found ${appointments.length} appointments.` });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "cancel_appointment_db": {
+          const appointmentId = fc.args?.appointment_id || extras?.selectedAppointmentId;
+          const businessId = extras?.businessId || null;
+          if (!appointmentId) {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "Which appointment?" } } });
+            toolResults.push({ name: fc.name, success: false, message: "I need to look up your appointment first." });
+            break;
+          }
+          const ok = await updateAppointmentStatus(appointmentId, "cancelled", businessId);
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: ok ? { success: true, message: "That appointment has been cancelled." } : { success: false, message: "I couldn't cancel that appointment." } } });
+          toolResults.push({ name: fc.name, success: ok, message: ok ? "Cancelled." : "Couldn't cancel." });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        case "reschedule_appointment_db": {
+          const appointmentId = fc.args?.appointment_id || extras?.selectedAppointmentId;
+          const newScheduledAt = fc.args?.new_scheduled_at;
+          const businessId = extras?.businessId || null;
+          if (!appointmentId || !newScheduledAt) {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: !appointmentId ? "Which appointment?" : "New date/time required." } } });
+            toolResults.push({ name: fc.name, success: false, message: "Missing info." });
+            break;
+          }
+          const ok = await updateAppointment(appointmentId, { scheduled_at: newScheduledAt }, businessId);
+          results.push({ functionResponse: { id: fc.id, name: fc.name, response: ok ? { success: true, message: "Rescheduled." } : { success: false, message: "Couldn't reschedule." } } });
+          toolResults.push({ name: fc.name, success: ok, message: ok ? "Rescheduled." : "Couldn't reschedule." });
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+
+        default: {
+          const integrations = extras?.integrations || [];
+          const businessId = extras?.businessId || null;
+          const callerPhone = extras?.callerPhone || null;
+          const callId = extras?.callId || null;
+          const isAthenaTool = ATHENA_TOOL_NAMES.includes(fc.name);
+          const integration = isAthenaTool
+            ? integrations.find((i) => i.provider === "athenahealth" && i.enabled)
+            : integrations.find((i) => i.name === fc.name);
+          if (integration && integration.enabled) {
+            const execResult = await executeIntegration(integration, { tool: fc.name, arguments: fc.args || {}, business_id: businessId, call_id: callId, caller_phone: callerPhone });
+            const success = execResult.success === true;
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: success ? { success: true, message: execResult.message } : { success: false, error: execResult.error } } });
+            toolResults.push({ name: fc.name, success, message: success ? execResult.message : (execResult.error || "Something went wrong.") });
+          } else {
+            results.push({ functionResponse: { id: fc.id, name: fc.name, response: { error: "Unknown function" } } });
+            toolResults.push({ name: fc.name, success: false, message: "I'm sorry, I wasn't able to do that." });
+          }
+          yield { toolCall: { name: fc.name, args: fc.args } };
+          break;
+        }
+      }
+    }
+
+    // Send function results back to chat and stream the follow-up
+    streamResponse = await chat.sendMessageStream({ message: results });
+  }
+
+  // Fallback if model returned no text at all
+  if (!fullText && toolResults.length > 0) {
+    const last = toolResults[toolResults.length - 1];
+    fullText = last.message || (last.success
+      ? "Done. Is there anything else I can help you with?"
+      : "I'm sorry, I wasn't able to complete that. Let me take your details so someone can follow up.");
+    yield { delta: fullText };
+  }
+  if (!fullText) {
+    fullText = "I'm sorry, could you say that again?";
+    yield { delta: fullText };
+  }
+
+  yield {
+    done: true,
+    reply: { text: fullText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults, selectedAppointmentId: selectedAppointmentIdFromTurn },
+  };
 }
 
 // ---------------------------------------------------------------------------
