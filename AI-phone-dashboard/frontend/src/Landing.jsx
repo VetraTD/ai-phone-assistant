@@ -12,6 +12,10 @@ function PhoneIcon({ className }) {
   );
 }
 
+const privacyOrigin =
+  (import.meta.env.VITE_SITE_URL && String(import.meta.env.VITE_SITE_URL).replace(/\/$/, "")) ||
+  (typeof window !== "undefined" ? window.location.origin : "https://vetratd.com");
+
 export default function Landing() {
   const revealRefs = useRef([]);
 
@@ -399,7 +403,8 @@ export default function Landing() {
           <div className="landing-footer-links">
             <Link to="/app">Log in</Link>
             <Link to="/contact">Contact</Link>
-            <Link to="/legal">Privacy & Terms</Link>
+            <a href={`${privacyOrigin}/legal`}>Privacy Policy</a>
+            <Link to="/legal">Terms</Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}>
               <PhoneIcon className="landing-footer-phone-icon" />
               {DEMO_NUMBER}
