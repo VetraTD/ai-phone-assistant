@@ -31,6 +31,7 @@ export async function createStream({
   onUtteranceEnd,
   onError,
   onClose,
+  callSid,
 }) {
   if (!DEEPGRAM_API_KEY) {
     throw new Error("DEEPGRAM_API_KEY is not set");
@@ -56,14 +57,13 @@ export async function createStream({
 
   socket.connect(); // initiates the WebSocket connection
   await socket.waitForOpen(); // wait until the connection is ready
-  log("deepgram_open", { language });
+  log.info("deepgram_open", { callSid, language });
 
   // Accumulate is_final transcript segments until UtteranceEnd fires.
   // This ensures we capture the full utterance before calling Gemini.
   let utteranceBuffer = "";
 
   socket.on("message", (msg) => {
-    log("deepgram_msg", { type: msg?.type, is_final: msg?.is_final, speech_final: msg?.speech_final, transcript: msg?.channel?.alternatives?.[0]?.transcript?.slice(0, 80) });
     if (!msg || !msg.type) return;
 
     switch (msg.type) {
@@ -81,7 +81,10 @@ export async function createStream({
         if (msg.speech_final && utteranceBuffer) {
           const text = utteranceBuffer.trim();
           utteranceBuffer = "";
-          if (text) onTranscript(text);
+          if (text) {
+            log.debug("deepgram_transcript", { callSid, text: text.slice(0, 100), wordCount: text.split(/\s+/).length });
+            onTranscript(text);
+          }
         }
         break;
       }
@@ -90,13 +93,17 @@ export async function createStream({
         if (utteranceBuffer) {
           const text = utteranceBuffer.trim();
           utteranceBuffer = "";
-          if (text) onTranscript(text);
+          if (text) {
+            log.debug("deepgram_utterance_end", { callSid, text: text.slice(0, 100), wordCount: text.split(/\s+/).length });
+            onTranscript(text);
+          }
         }
         if (onUtteranceEnd) onUtteranceEnd();
         break;
       }
 
       case "SpeechStarted": {
+        log.debug("deepgram_speech_started", { callSid });
         if (onSpeechStart) onSpeechStart();
         break;
       }
@@ -104,8 +111,8 @@ export async function createStream({
   });
 
   socket.on("error", (err) => {
-    log("error", { message: "Deepgram error", code: "deepgram_error", detail: err?.message });
-    captureException(err, { context: "deepgram" });
+    log.error("deepgram_error", { callSid, message: err?.message });
+    captureException(err, { callSid, context: "deepgram" });
     if (onError) onError(err);
   });
 
@@ -116,6 +123,7 @@ export async function createStream({
       utteranceBuffer = "";
       if (text) onTranscript(text);
     }
+    log.debug("deepgram_closed", { callSid });
     if (onClose) onClose();
   });
 
@@ -128,16 +136,17 @@ export async function createStream({
  * @param {Buffer} chunk  - Raw mulaw bytes
  */
 let _audioChunkCount = 0;
-export function sendAudio(socket, chunk) {
+export function sendAudio(socket, chunk, callSid = null) {
   try {
     socket.sendMedia(chunk);
     _audioChunkCount++;
-    if (_audioChunkCount % 50 === 0) {
-      log("deepgram_audio_sent", { chunks: _audioChunkCount, readyState: socket.readyState });
+    // Only log periodically to reduce noise (every 500 chunks ~= once per 2-3 seconds)
+    if (_audioChunkCount % 500 === 0) {
+      log.debug("deepgram_audio_status", { callSid, chunks: _audioChunkCount, readyState: socket.readyState });
     }
   } catch (err) {
-    if (_audioChunkCount % 50 === 0) {
-      log("deepgram_audio_drop", { chunks: _audioChunkCount, reason: err?.message });
+    if (_audioChunkCount % 500 === 0) {
+      log.error("deepgram_audio_drop", { callSid, chunks: _audioChunkCount, reason: err?.message });
     }
     _audioChunkCount++;
   }
