@@ -281,14 +281,20 @@ app.get("/audio/:id", (req, res) => {
 function twilioValidation(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();
   if (!TWILIO_AUTH_TOKEN) {
-    console.warn("TWILIO_VALIDATE_SIGNATURE is enabled but TWILIO_AUTH_TOKEN is missing");
+    log.error("twilio_signature_validation_disabled", { reason: "no_auth_token", severity: "warn" });
     return res.status(403).send("Forbidden");
   }
   const signature = req.headers["x-twilio-signature"];
-  if (!signature) return res.status(403).send("Forbidden");
+  if (!signature) {
+    log.error("twilio_signature_missing", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
   const url = BASE_URL + (req.originalUrl || req.url);
   const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
-  if (!valid) return res.status(403).send("Forbidden");
+  if (!valid) {
+    log.error("twilio_signature_invalid", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
   next();
 }
 
@@ -356,7 +362,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     // Only connect the stream on the very first webhook hit (greeting step)
     if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
       const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
-      log("media_stream_initiated", { callSid });
+      log.info("media_stream_initiated", { callSid });
       return res.send(
         `<Response><Connect><Stream url="${wsUrl}">` +
         `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
@@ -454,7 +460,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   if (speechResult === "") {
     if (state.step === STEPS.GREETING) {
       state.step = STEPS.IDENTIFY_INTENT;
-      log("call_started", { callSid, requestId });
+      log.info("call_started", { callSid, requestId });
 
       // Build greeting with optional recording disclosure and time-of-day warmth
       let greetingText = "";
@@ -486,13 +492,13 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     // recalling info); identify_intent gets less (confusion → engage sooner).
     const silenceTimeout = getSilenceTimeout(state.step);
     state.silenceCount++;
-    log("silence_event", { callSid, requestId, silenceCount: state.silenceCount, step: state.step, intent: state.intent });
+    log.debug("silence_event", { callSid, requestId, silenceCount: state.silenceCount, step: state.step, intent: state.intent });
 
     if (state.silenceCount === 1) {
       // First silence — gentle, non-intrusive acknowledgment.
       // Does NOT repeat the previous question (sounds robotic if caller heard it fine).
       const msg = "I'm still here whenever you're ready.";
-      log("silence_nudge", { callSid, requestId, stage: 1, step: state.step, intent: state.intent });
+      log.info("silence_nudge", { callSid, requestId, stage: 1, step: state.step, intent: state.intent });
       return res.send(
         buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
       );
@@ -501,14 +507,14 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       // Second silence — step-aware re-prompt. Simpler than original question,
       // with a concrete example of what's needed.
       const msg = buildTwimlSilenceNudge(state.step, state.intent);
-      log("silence_nudge", { callSid, requestId, stage: 2, step: state.step, intent: state.intent });
+      log.info("silence_nudge", { callSid, requestId, stage: 2, step: state.step, intent: state.intent });
       return res.send(
         buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
       );
     }
     // Third silence — caller has not responded after two nudges; end gracefully.
     // Set step to ENDING and log so the business can follow up if needed.
-    log("silence_hangup", { callSid, requestId, step: state.step, intent: state.intent, totalNudges: 2 });
+    log.info("silence_hangup", { callSid, requestId, step: state.step, intent: state.intent, totalNudges: 2 });
     state.step = STEPS.ENDING;
     const byeMsg = buildSilenceGoodbye(config);
     return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
@@ -520,14 +526,14 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // Stage 1: Strip filler words. Re-listen silently if nothing actionable remains.
   const cleaned = cleanTranscript(speechResult);
   if (!cleaned) {
-    log("transcript_discarded", { callSid, requestId, reason: "filler_only", raw: speechResult.slice(0, 60) });
+    log.debug("transcript_discarded", { callSid, requestId, reason: "filler_only", raw: speechResult.slice(0, 60) });
     return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
   }
   // Stage 2: Incomplete utterance — re-listen silently. Catches trailing
   // conjunctions, partial phone numbers, and partial dates that Twilio's
   // speechTimeout="auto" may not catch before firing the webhook.
   if (isIncomplete(cleaned)) {
-    log("transcript_held", { callSid, requestId, reason: "incomplete_utterance", text: cleaned.slice(0, 60) });
+    log.debug("transcript_held", { callSid, requestId, reason: "incomplete_utterance", text: cleaned.slice(0, 60) });
     return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
   }
   // Stage 3: Self-correction — keep only the final intent after correction markers.
@@ -537,7 +543,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   if (isTransferRequest(processedSpeech)) {
     const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
     const canTransfer = !!transferNumber && resolveTransferAllowed(config);
-    log("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
+    log.info("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
 
     if (canTransfer) {
       const msg = "Transferring you now. Please hold.";
@@ -637,7 +643,7 @@ async function processGeminiReply(
     // -- Log tool call results --
     if (toolResults && toolResults.length > 0) {
       for (const tr of toolResults) {
-        log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
+        log.info("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
       }
     }
 
@@ -657,7 +663,7 @@ async function processGeminiReply(
       if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
         state.step = STEPS.GATHER_DETAILS;
       }
-      log("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
+      log.info("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
     }
 
     // Booking DB write now happens inside getReply (gemini.js) so the model
@@ -685,7 +691,7 @@ async function processGeminiReply(
 
     if (endCallArgs) {
       state.step = STEPS.ENDING;
-      log("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
+      log.info("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
     }
 
     if (customerRequestArgs && state.businessId) {
@@ -716,7 +722,7 @@ async function processGeminiReply(
           }
         })
         .catch((err) => {
-          log("error", {
+          log.error("createCustomerRequest_failed", {
             callSid,
             requestId,
             message: "createCustomerRequest failed",
@@ -730,7 +736,7 @@ async function processGeminiReply(
     logTranscript(state, speechResult, replyText);
 
     // -- Structured log: turn completed --
-    log("turn_completed", {
+    log.info("turn_completed", {
       callSid,
       requestId,
       step: state.step,
@@ -771,7 +777,7 @@ async function processGeminiReply(
     const turnLatencyMs = Date.now() - geminiStart;
     const isTimeout = err?.message === "TURN_TIMEOUT";
 
-    log("error", {
+    log.error("gemini_error", {
       callSid,
       requestId,
       message: isTimeout ? "Gemini turn timeout" : err?.message,
@@ -810,8 +816,14 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       twilioNumber: req.body.To || null,
     };
 
+    log.info("call_ended_status_callback", {
+      callSid,
+      callStatus: status,
+      durationSeconds: duration,
+    });
+
     db.completeCall(callSid, status, duration).catch((err) => {
-      log("error", { callSid, message: "completeCall failed", code: "db_complete" });
+      log.error("db_complete_call_failed", { callSid, message: err?.message });
       captureException(err, { callSid });
     });
 
@@ -829,7 +841,7 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
       })().catch((err) => {
-        log("error", { callSid, message: "Summary generation failed", code: "summary_error" });
+        log.error("summary_generation_failed", { callSid, message: err?.message });
       });
     }
 
@@ -995,7 +1007,7 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
 
 app.use((err, req, res, next) => {
   captureException(err);
-  log("error", { message: err.message, code: "unhandled" });
+  log.error("unhandled_error", { message: err.message, code: "unhandled" });
   if (!res.headersSent) {
     res.status(500).json({ error: "Internal server error" });
   }

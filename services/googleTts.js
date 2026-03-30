@@ -1,6 +1,7 @@
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 import crypto from "crypto";
 import { buildSayContent } from "../lib/twiml.js";
+import { log } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------
 // In-memory audio store: UUID → { buffer, ts }
@@ -160,38 +161,50 @@ function stripWavHeader(buffer) {
  *
  * @param {string} text      - Plain text to speak
  * @param {string} voiceName - Google voice name, e.g. "en-US-Chirp3-HD-Aoede"
+ * @param {string|null} callSid - Optional call ID for logging
  * @returns {Promise<Buffer>} Raw mulaw audio bytes (no container/header)
  */
-export async function synthesizeMulaw(text, voiceName) {
+export async function synthesizeMulaw(text, voiceName, callSid = null) {
   const cacheKey = crypto
     .createHash("sha256")
     .update("mulaw|" + voiceName + "|" + text)
     .digest("hex");
 
   if (audioCache.has(cacheKey)) {
+    log.debug("tts_cache_hit", { callSid, text: text.slice(0, 40) });
     return audioCache.get(cacheKey);
   }
 
+  log.debug("tts_synthesizing", { callSid, voiceName, text: text.slice(0, 40) });
   const languageCode = voiceName.split("-").slice(0, 2).join("-");
   const ssml = `<speak>${buildSayContent(text)}</speak>`;
 
-  const [response] = await getClient().synthesizeSpeech({
-    input: { ssml },
-    voice: { languageCode, name: voiceName },
-    audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
-  });
+  try {
+    const start = Date.now();
+    const [response] = await getClient().synthesizeSpeech({
+      input: { ssml },
+      voice: { languageCode, name: voiceName },
+      audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
+    });
+    const elapsed = Date.now() - start;
+    log.debug("tts_synthesized", { callSid, latencyMs: elapsed, audioBytes: response.audioContent?.length || 0 });
 
-  // Google TTS MULAW output is a WAV container — strip the WAV header so
-  // Twilio receives raw mulaw bytes (otherwise the header bytes play as a click).
-  const raw = Buffer.from(response.audioContent, "binary");
-  const buffer = stripWavHeader(raw);
+    // Google TTS MULAW output is a WAV container — strip the WAV header so
+    // Twilio receives raw mulaw bytes (otherwise the header bytes play as a click).
+    const raw = Buffer.from(response.audioContent, "binary");
+    const buffer = stripWavHeader(raw);
+    log.debug("tts_wav_stripped", { callSid, bytes: buffer.length });
 
-  if (audioCache.size >= CACHE_MAX) {
-    audioCache.delete(audioCache.keys().next().value);
+    if (audioCache.size >= CACHE_MAX) {
+      audioCache.delete(audioCache.keys().next().value);
+    }
+    audioCache.set(cacheKey, buffer);
+
+    return buffer;
+  } catch (err) {
+    log.error("tts_error", { callSid, text: text.slice(0, 80), error: err.message });
+    throw err;
   }
-  audioCache.set(cacheKey, buffer);
-
-  return buffer;
 }
 
 // ---------------------------------------------------------------------------
