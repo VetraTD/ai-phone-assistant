@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { captureException } from "../lib/sentry.js";
+import { log } from "../lib/logger.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -10,7 +11,7 @@ let supabase = null;
 if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 } else {
-  console.warn("SUPABASE_URL or SUPABASE_SERVICE_KEY not set — DB persistence disabled");
+  log.error("supabase_not_configured", { reason: "missing_url_or_key", severity: "warn" });
 }
 
 /** @returns {boolean} Whether the Supabase client is configured */
@@ -127,7 +128,7 @@ export async function fetchBusinessById(businessId) {
     .limit(1)
     .maybeSingle();
   if (error) {
-    console.error("fetchBusinessById error:", error.message);
+    log.error("db_error", { operation: "fetchBusinessById", error: error.message });
     return null;
   }
   return data;
@@ -147,7 +148,7 @@ export async function lookupBusinessByPhone(twilioNumber) {
     .limit(1)
     .maybeSingle();
   if (error) {
-    console.error("lookupBusinessByPhone error:", error.message);
+    log.error("db_error", { operation: "lookupBusinessByPhone", error: error.message });
     return null;
   }
   return data;
@@ -174,7 +175,7 @@ export async function createCall(businessId, callSid, callerNumber, twilioNumber
     .select("id")
     .single();
   if (error) {
-    console.error("createCall error:", error.message);
+    log.error("db_error", { callSid, operation: "createCall", error: error.message });
     captureException(new Error(error.message), { table: "calls", op: "insert" });
     return null;
   }
@@ -194,7 +195,7 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
     .from("call_transcripts")
     .insert({ call_id: callId, speaker, message, sequence });
   if (error) {
-    console.error("addTranscriptEntry error:", error.message);
+    log.error("db_error", { callSid, operation: "addTranscriptEntry", error: error.message });
   }
 }
 
@@ -218,7 +219,7 @@ export async function completeCall(callSid, status, durationSeconds) {
     .update(updates)
     .eq("twilio_call_sid", callSid);
   if (error) {
-    console.error("completeCall error:", error.message);
+    log.error("db_error", { callSid, operation: "completeCall", error: error.message });
     captureException(new Error(error.message), { table: "calls", op: "update_complete" });
   }
 }
@@ -236,7 +237,7 @@ export async function fetchCallTranscript(callId) {
     .eq("call_id", callId)
     .order("sequence", { ascending: true });
   if (error) {
-    console.error("fetchCallTranscript error:", error.message);
+    log.error("db_error", { operation: "fetchCallTranscript", error: error.message });
     return [];
   }
   return data || [];
@@ -260,7 +261,7 @@ export async function updateBusinessNotificationSettings(businessId, payload) {
     .update(updates)
     .eq("id", businessId);
   if (error) {
-    console.error("updateBusinessNotificationSettings error:", error.message);
+    log.error("db_error", { operation: "updateBusinessNotificationSettings", error: error.message });
     return false;
   }
   return true;
@@ -279,7 +280,7 @@ export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
     .update({ phone_number: phoneNumber || null })
     .eq("id", businessId);
   if (error) {
-    console.error("updateBusinessPhoneNumber error:", error.message);
+    log.error("db_error", { operation: "updateBusinessPhoneNumber", error: error.message });
     return false;
   }
   return true;
@@ -299,7 +300,7 @@ export async function updateCallSummary(callSid, summary, sentiment, outcome) {
     .update({ summary, sentiment, outcome: outcome ?? null })
     .eq("twilio_call_sid", callSid);
   if (error) {
-    console.error("updateCallSummary error:", error.message);
+    log.error("db_error", { callSid, operation: "updateCallSummary", error: error.message });
   }
 }
 
@@ -331,7 +332,7 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     .select("id")
     .single();
   if (error) {
-    console.error("createAppointment error:", error.message);
+    log.error("db_error", { operation: "createAppointment", error: error.message });
     captureException(new Error(error.message), { table: "appointments", op: "insert" });
     return null;
   }
@@ -361,7 +362,7 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
   }
   const { data: rows, error } = await q;
   if (error) {
-    console.error("listAppointmentsByCaller error:", error.message);
+    log.error("db_error", { operation: "listAppointmentsByCaller", error: error.message });
     return [];
   }
   const list = rows || [];
@@ -387,7 +388,7 @@ export async function updateAppointmentStatus(appointmentId, status, businessId)
   if (businessId) q = q.eq("business_id", businessId);
   const { data, error } = await q.select("id").maybeSingle();
   if (error) {
-    console.error("updateAppointmentStatus error:", error.message);
+    log.error("db_error", { operation: "updateAppointmentStatus", error: error.message });
     return false;
   }
   return data != null;
@@ -406,7 +407,7 @@ export async function updateAppointment(appointmentId, updates, businessId) {
   if (businessId) q = q.eq("business_id", businessId);
   const { data, error } = await q.select("id").maybeSingle();
   if (error) {
-    console.error("updateAppointment error:", error.message);
+    log.error("db_error", { operation: "updateAppointment", error: error.message });
     return false;
   }
   return data != null;
@@ -451,7 +452,7 @@ export async function createCustomerRequest({
     .select("id")
     .single();
   if (error) {
-    console.error("createCustomerRequest error:", error.message);
+    log.error("db_error", { operation: "createCustomerRequest", error: error.message });
     captureException(new Error(error.message), { table: "customer_requests", op: "insert" });
     return null;
   }
@@ -514,7 +515,7 @@ export async function fetchBusinessKnowledge(businessId, limit = 15) {
     .order("priority", { ascending: false })
     .limit(limit);
   if (error) {
-    console.error("fetchBusinessKnowledge error:", error.message);
+    log.error("db_error", { operation: "fetchBusinessKnowledge", error: error.message });
     return [];
   }
   return data || [];
@@ -550,7 +551,7 @@ export async function listIntegrationsForBusiness(businessId, opts = {}) {
   }
   const { data, error } = await query;
   if (error) {
-    console.error("listIntegrationsForBusiness error:", error.message);
+    log.error("db_error", { operation: "listIntegrationsForBusiness", error: error.message });
     return [];
   }
   return data || [];
@@ -571,7 +572,7 @@ export async function getIntegrationByName(businessId, name) {
     .eq("name", name)
     .maybeSingle();
   if (error) {
-    console.error("getIntegrationByName error:", error.message);
+    log.error("db_error", { operation: "getIntegrationByName", error: error.message });
     return null;
   }
   return data;
@@ -596,7 +597,7 @@ export async function createOrUpdateIntegration({
 }) {
   if (!supabase || !businessId || !provider || !name) return null;
   if (BUILTIN_TOOL_NAMES.includes(name)) {
-    console.error("createOrUpdateIntegration: name cannot be a built-in tool:", name);
+    log.error("integration_invalid_name", { name, reason: "built_in_tool" });
     return null;
   }
   const now = new Date().toISOString();
@@ -617,7 +618,7 @@ export async function createOrUpdateIntegration({
     .select("id")
     .single();
   if (error) {
-    console.error("createOrUpdateIntegration error:", error.message);
+    log.error("db_error", { operation: "createOrUpdateIntegration", error: error.message });
     return null;
   }
   return data;
@@ -639,7 +640,7 @@ export async function deleteIntegration(businessId, integrationId, opts = {}) {
       .eq("id", integrationId)
       .eq("business_id", businessId);
     if (error) {
-      console.error("deleteIntegration softDisable error:", error.message);
+      log.error("db_error", { operation: "deleteIntegration_softDisable", error: error.message });
       return false;
     }
     return true;
@@ -650,7 +651,7 @@ export async function deleteIntegration(businessId, integrationId, opts = {}) {
     .eq("id", integrationId)
     .eq("business_id", businessId);
   if (error) {
-    console.error("deleteIntegration error:", error.message);
+    log.error("db_error", { operation: "deleteIntegration", error: error.message });
     return false;
   }
   return true;

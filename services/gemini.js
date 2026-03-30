@@ -766,7 +766,7 @@ export async function getReply(history, userMessage, step, intent, config, extra
                 if (dbId) {
                   bookSuccess = true;
                   bookMessage = "Appointment booked successfully.";
-                  log("appointment_booked", { scheduled_at: args.scheduled_at });
+                  log.info("appointment_booked", { scheduled_at: args.scheduled_at });
                 }
               } catch (err) {
                 // Unique slot constraint or other DB error
@@ -774,7 +774,7 @@ export async function getReply(history, userMessage, step, intent, config, extra
                 bookMessage = isSlotTaken
                   ? "That time slot is no longer available. Please ask the caller to pick a different time."
                   : "There was an error booking the appointment. Please take the caller's details for follow-up.";
-                log("error", { message: "book_appointment DB write failed", code: "db_appointment" });
+                log.error("appointment_book_failed", { message: err?.message, code: err?.code });
                 captureException(err);
               }
             }
@@ -1320,7 +1320,7 @@ export async function generateSummaryAndSentiment(transcript) {
       .replace(/\s*```$/, "");
 
     if (!raw) {
-      log("warn", { message: "generateSummaryAndSentiment: empty response text", code: "gemini_summary" });
+      log.error("gemini_summary_empty", { severity: "warn" });
       return fallback;
     }
 
@@ -1328,7 +1328,7 @@ export async function generateSummaryAndSentiment(transcript) {
     try {
       parsed = JSON.parse(raw);
     } catch (parseErr) {
-      log("warn", { message: "generateSummaryAndSentiment: invalid JSON", raw: raw.slice(0, 200), code: "gemini_summary" });
+      log.error("gemini_summary_invalid_json", { raw: raw.slice(0, 200), severity: "warn" });
       captureException(parseErr);
       return fallback;
     }
@@ -1342,10 +1342,8 @@ export async function generateSummaryAndSentiment(transcript) {
 
     return { summary, sentiment, outcome };
   } catch (err) {
-    log("error", {
-      message: "generateSummaryAndSentiment failed",
-      code: "gemini_summary",
-      error: err?.message ?? String(err),
+    log.error("gemini_summary_failed", {
+      message: err?.message ?? String(err),
     });
     captureException(err);
     return fallback;
