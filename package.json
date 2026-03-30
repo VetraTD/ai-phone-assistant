@@ -30,6 +30,7 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@deepgram/sdk": "^5.0.0",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
     "@sentry/node": "^9.0.0",
@@ -40,6 +41,7 @@
     "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
     "nodemailer": "^8.0.2",
-    "twilio": "^5.0.0"
+    "twilio": "^5.0.0",
+    "ws": "^8.20.0"
   }
 }

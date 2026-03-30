@@ -22,6 +22,8 @@ import {
   buildMultiPlayGatherRedirect,
   buildMultiPlayAndHangup,
 } from "./lib/twiml.js";
+import { WebSocketServer } from "ws";
+import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
@@ -32,6 +34,7 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
+import { cleanTranscript, isIncomplete, extractFinalIntent } from "./lib/transcriptUtils.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -134,6 +137,82 @@ function resolveTransferAllowed(config) {
     return geminiService.isBusinessOpen(config);
   }
   return true; // default allow
+}
+
+// ---------------------------------------------------------------------------
+// Silence handling — TwiML webhook path
+//
+// The TwiML Gather `timeout` governs how long Twilio waits for the caller to
+// begin speaking each round-trip.  Silence is detected when the webhook fires
+// with an empty SpeechResult.  Cumulative wait before hangup ≈ 3 × timeout.
+//
+// Per-step timeouts (seconds):
+//  - identify_intent / greeting: 6 s → nudge1 ~6 s, nudge2 ~12 s, end ~18 s
+//  - gather_details: 10 s → nudge1 ~10 s, nudge2 ~20 s, end ~30 s
+//    (longer because callers may be recalling dates, phone numbers, etc.)
+//  - confirm: 8 s → nudge1 ~8 s, nudge2 ~16 s, end ~24 s
+//
+// Three stages: nudge1 (gentle acknowledgment), nudge2 (step-aware re-prompt),
+// then a graceful goodbye.  The old silent-re-listen first stage has been
+// removed — the first silence now immediately triggers a non-intrusive nudge.
+// ---------------------------------------------------------------------------
+const SILENCE_GATHER_TIMEOUT_BY_STEP = {
+  greeting:        6,
+  identify_intent: 6,
+  gather_details:  10,
+  confirm:         8,
+  _default:        7,
+};
+
+/**
+ * Return the Gather timeout (seconds) appropriate for the current call step.
+ * @param {string} step
+ * @returns {number}
+ */
+function getSilenceTimeout(step) {
+  return SILENCE_GATHER_TIMEOUT_BY_STEP[step] ?? SILENCE_GATHER_TIMEOUT_BY_STEP._default;
+}
+
+/**
+ * Build the second silence nudge text for the TwiML path.
+ * Stage 2 is step-aware: it restates what's needed more simply with a
+ * concrete example, without repeating the AI's previous question verbatim.
+ * @param {string} step - Current STEPS value
+ * @param {string|null} intent - Current call intent
+ * @returns {string}
+ */
+function buildTwimlSilenceNudge(step, intent) {
+  switch (step) {
+    case STEPS.IDENTIFY_INTENT:
+    case STEPS.GREETING:
+      return "I'm here to help — are you calling to book an appointment, leave a message, or something else?";
+    case STEPS.GATHER_DETAILS:
+      if (intent === "book_appointment") {
+        return "Take your time — I just need something like a preferred date or time to get started.";
+      }
+      if (intent === "take_message" || intent === "callback_request") {
+        return "Whenever you're ready — I just need your name and a brief message.";
+      }
+      return "Take your time — just let me know what you need and I'll help.";
+    case STEPS.CONFIRM:
+      return "Just say yes to confirm, or let me know if anything needs to change.";
+    default:
+      return "I'm still here — feel free to continue whenever you're ready.";
+  }
+}
+
+/**
+ * Build the goodbye message when ending a call due to extended silence.
+ * Includes the business callback number when available.
+ * @param {object|null} config - Business config
+ * @returns {string}
+ */
+function buildSilenceGoodbye(config) {
+  const phone = config?.transferPhoneNumber || config?.phone || "";
+  if (phone) {
+    return `It seems like you may have stepped away. Feel free to call us back at ${phone} anytime. Goodbye!`;
+  }
+  return "It seems like you may have stepped away. Feel free to call us back anytime. Goodbye!";
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +348,26 @@ async function resolveVoiceOpts(text, config) {
 
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
+
+  // ---- Media Streams mode: first hit returns <Connect><Stream> ----
+  if (USE_MEDIA_STREAMS) {
+    const callSid = req.body.CallSid;
+    const existingState = callState.getState(callSid);
+    // Only connect the stream on the very first webhook hit (greeting step)
+    if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
+      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+      log("media_stream_initiated", { callSid });
+      return res.send(
+        `<Response><Connect><Stream url="${wsUrl}">` +
+        `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
+        `<Parameter name="callerPhone" value="${req.body.From || ""}" />` +
+        `</Stream></Connect></Response>`
+      );
+    }
+    // If we get here on a media-stream call (e.g. redirect from transfer),
+    // fall through to TwiML logic as a fallback.
+  }
+
   const callSid = req.body.CallSid;
   const requestId = createRequestId();
   const speechResult =
@@ -382,47 +481,78 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, await resolveVoiceOpts(greetingText, config)));
     }
 
-    // Progressive silence: re-listen → prompt → goodbye
-    const SILENCE_GATHER_TIMEOUT = 6;
+    // ---- Progressive silence: nudge1 → nudge2 → graceful goodbye ----
+    // Step-aware timeout: gather_details gets more time (caller may be
+    // recalling info); identify_intent gets less (confusion → engage sooner).
+    const silenceTimeout = getSilenceTimeout(state.step);
     state.silenceCount++;
+    log("silence_event", { callSid, requestId, silenceCount: state.silenceCount, step: state.step, intent: state.intent });
 
     if (state.silenceCount === 1) {
-      return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT, voiceOpts));
-    }
-    if (state.silenceCount === 2) {
-      const msg = "Are you still there?";
+      // First silence — gentle, non-intrusive acknowledgment.
+      // Does NOT repeat the previous question (sounds robotic if caller heard it fine).
+      const msg = "I'm still here whenever you're ready.";
+      log("silence_nudge", { callSid, requestId, stage: 1, step: state.step, intent: state.intent });
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, SILENCE_GATHER_TIMEOUT, "", await resolveVoiceOpts(msg, config))
+        buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
       );
     }
-    // 3rd silence — hang up
-    const byeMsg = "It seems like you may have stepped away. Goodbye!";
+    if (state.silenceCount === 2) {
+      // Second silence — step-aware re-prompt. Simpler than original question,
+      // with a concrete example of what's needed.
+      const msg = buildTwimlSilenceNudge(state.step, state.intent);
+      log("silence_nudge", { callSid, requestId, stage: 2, step: state.step, intent: state.intent });
+      return res.send(
+        buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
+      );
+    }
+    // Third silence — caller has not responded after two nudges; end gracefully.
+    // Set step to ENDING and log so the business can follow up if needed.
+    log("silence_hangup", { callSid, requestId, step: state.step, intent: state.intent, totalNudges: 2 });
+    state.step = STEPS.ENDING;
+    const byeMsg = buildSilenceGoodbye(config);
     return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
   }
 
-  // ---- 6. Speech present — reset silence counter ----
+  // ---- 6. Speech present — reset silence counter + transcript quality pipeline ----
   state.silenceCount = 0;
 
+  // Stage 1: Strip filler words. Re-listen silently if nothing actionable remains.
+  const cleaned = cleanTranscript(speechResult);
+  if (!cleaned) {
+    log("transcript_discarded", { callSid, requestId, reason: "filler_only", raw: speechResult.slice(0, 60) });
+    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
+  }
+  // Stage 2: Incomplete utterance — re-listen silently. Catches trailing
+  // conjunctions, partial phone numbers, and partial dates that Twilio's
+  // speechTimeout="auto" may not catch before firing the webhook.
+  if (isIncomplete(cleaned)) {
+    log("transcript_held", { callSid, requestId, reason: "incomplete_utterance", text: cleaned.slice(0, 60) });
+    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
+  }
+  // Stage 3: Self-correction — keep only the final intent after correction markers.
+  const processedSpeech = extractFinalIntent(cleaned);
+
   // ---- 7. Escape-trigger check (before Gemini) ----
-  if (isTransferRequest(speechResult)) {
+  if (isTransferRequest(processedSpeech)) {
     const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
     const canTransfer = !!transferNumber && resolveTransferAllowed(config);
     log("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
 
     if (canTransfer) {
       const msg = "Transferring you now. Please hold.";
-      logTranscript(state, speechResult, msg);
+      logTranscript(state, processedSpeech, msg);
       state.step = STEPS.ENDING;
       return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
     }
     // Transfer not possible — use default escalation message
     const msg = "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
-    logTranscript(state, speechResult, msg);
+    logTranscript(state, processedSpeech, msg);
     return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
   }
 
   // ---- 8. Idempotency check ----
-  const speechHash = crypto.createHash("sha256").update(speechResult).digest("hex");
+  const speechHash = crypto.createHash("sha256").update(processedSpeech).digest("hex");
   const now = Date.now();
   if (
     state.lastProcessed &&
@@ -440,7 +570,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // redirects back (step 5a above), we await the result.
   const geminiStart = Date.now();
   state.pendingReply = geminiService.getReply(
-    state.history, speechResult, state.step, state.intent, config, {
+    state.history, processedSpeech, state.step, state.intent, config, {
       knowledge: state.knowledge || [],
       transferAllowed: resolveTransferAllowed(config),
       integrations: state.integrations || [],
@@ -471,7 +601,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     state.pendingTts = null;
   }
 
-  state.pendingSpeech = speechResult;
+  state.pendingSpeech = processedSpeech;
   state.pendingSpeechHash = speechHash;
   state.pendingGeminiStart = geminiStart;
   state.pendingRequestId = requestId;
@@ -877,13 +1007,42 @@ app.use((err, req, res, next) => {
 
 export { app };
 
+// ---------------------------------------------------------------------------
+// Media Streams — WebSocket server for real-time audio
+// ---------------------------------------------------------------------------
+
+const wss = new WebSocketServer({ noServer: true });
+
+function attachWebSocket(httpServer) {
+  httpServer.on("upgrade", (req, socket, head) => {
+    // Only accept upgrades on the media-stream path
+    const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+    if (pathname === "/twilio/media-stream") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleMediaStreamConnection(ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+}
+
+// Whether to use Media Streams (requires DEEPGRAM_API_KEY)
+const USE_MEDIA_STREAMS = !!process.env.DEEPGRAM_API_KEY;
+
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
+  const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Voice webhook: ${VOICE_URL}`);
     console.log(
       `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
     );
+    if (USE_MEDIA_STREAMS) {
+      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+      console.log(`Media Streams (WebSocket): ${wsUrl}`);
+    } else {
+      console.log("Media Streams disabled (no DEEPGRAM_API_KEY) — using TwiML webhook mode.");
+    }
     if (TRANSFER_NUMBER) {
       console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
     } else {
@@ -893,4 +1052,5 @@ if (process.env.NODE_ENV !== "test") {
       `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`
     );
   });
+  attachWebSocket(httpServer);
 }
