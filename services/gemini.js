@@ -1308,10 +1308,10 @@ export async function generateSummaryAndSentiment(transcript) {
     const response = await gemini.models.generateContent({
       model: "gemini-2.5-flash",
       contents:
-        `Analyze this phone call transcript. Respond with JSON only, no markdown.\n` +
-        `{"summary":"1-2 sentence summary of the call","sentiment":"positive|neutral|negative","outcome":"<one outcome>"}\n` +
+        `Analyze this phone call transcript. Respond with ONLY valid JSON, no markdown, no extra text.\n` +
+        `Format: {"summary":"1-2 sentence summary","sentiment":"positive|neutral|negative","outcome":"<outcome>"}\n` +
         `${OUTCOME_PROMPT}\n\nTranscript:\n${transcriptText}`,
-      config: { temperature: 0.1, maxOutputTokens: 320 },
+      config: { temperature: 0.1, maxOutputTokens: 512 },
     });
 
     const raw = (response?.text ?? "")
