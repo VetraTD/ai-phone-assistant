@@ -115,13 +115,26 @@ app.use(helmet());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+// Match dashboard backend: prod domains + localhost. Override/extend with CORS_ORIGIN (comma-separated).
+const defaultCorsOrigins = [
+  "http://localhost:5173",
+  "http://localhost:4173",
+  "https://vetratd.com",
+  "https://www.vetratd.com",
+  "https://ai-phone-dashboard-lemon.vercel.app",
+];
+const envCorsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
+const allowedCorsOrigins = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])];
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN
-      ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-      : process.env.NODE_ENV === "production"
-        ? false
-        : ["http://localhost:5173"],
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedCorsOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })

@@ -111,8 +111,14 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
 
       setAvailableNumbers(res?.data?.numbers || []);
     } catch (err) {
+      const serverMsg = err?.response?.data?.error;
+      const noResponse =
+        err?.code === "ERR_NETWORK" || err?.message === "Network Error";
       setNumbersError(
-        err?.response?.data?.error || "Failed to load available numbers"
+        serverMsg ||
+          (noResponse
+            ? "Could not reach the phone service. On your live site this is often CORS: the voice API (Railway) must allow https://www.vetratd.com (or redeploy after updating server CORS defaults)."
+            : err?.message || "Failed to load available numbers")
       );
     } finally {
       setSearchingNumbers(false);
