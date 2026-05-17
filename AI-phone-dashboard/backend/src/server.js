@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const axios = require("axios");
 const authenticate = require("./middleware/authMiddleware");
 
@@ -131,7 +131,7 @@ const authSensitiveLimiter = rateLimit({
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req /* , res */) => req.authUser?.id || req.ip,
+  keyGenerator: (req /* , res */) => req.authUser?.id || ipKeyGenerator(req.ip),
   handler: createRateLimitHandler(),
 });
 
