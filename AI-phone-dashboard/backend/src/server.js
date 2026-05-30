@@ -94,7 +94,7 @@ const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow non-browser/health requests with no origin
+     //  Allow non-browser/health requests with no origin
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -104,6 +104,9 @@ app.use(
     credentials: true,
   })
 );
+
+console.log("Allowed CORS origins:", allowedOrigins);
+
 
 app.use(express.json({ limit: "1mb" }));
 
