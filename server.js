@@ -338,7 +338,7 @@ function logTranscript(state, callerText, aiText) {
  * @returns {Promise<object>} voiceOpts (with optional audioUrl)
  */
 const POLLY_VOICE = "Polly.Joanna";
-const GOOGLE_TTS_VOICE = "en-US-Chirp3-HD-Aoede";
+const GOOGLE_TTS_VOICE = "en-GB-Chirp3-HD-Aoede";
 
 async function resolveVoiceOpts(text, config) {
   const base = {
