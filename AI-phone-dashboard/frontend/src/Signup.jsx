@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+import VetraMark from "./components/VetraMark";
 import "./Signup.css";
 
 export default function Signup({ onSwitchToLogin }) {
@@ -40,29 +41,32 @@ export default function Signup({ onSwitchToLogin }) {
           </Link>
         </div>
         <div className="signup-brand">
-          <div className="signup-badge">AI Call Dashboard</div>
+          <div className="signup-badge">
+            <VetraMark size={18} className="signup-badge-mark" />
+            Get started with Vetra
+          </div>
 
-          <h1>Get your business calls organised from day one.</h1>
+          <h1>Never miss a call again.</h1>
 
           <p>
             Create your account, connect your business, and start turning calls
-            into appointments, follow-ups, and clear customer insights.
+            into bookings, messages, and clear follow-ups — without the admin headache.
           </p>
 
           <div className="signup-features">
             <div className="signup-feature">
               <span className="signup-feature-dot" />
-              <span>Capture appointments automatically</span>
+              <span>Bookings captured automatically</span>
             </div>
 
             <div className="signup-feature">
               <span className="signup-feature-dot" />
-              <span>Track transcripts and customer requests</span>
+              <span>Every call summarised for you</span>
             </div>
 
             <div className="signup-feature">
               <span className="signup-feature-dot" />
-              <span>Manage everything from one dashboard</span>
+              <span>One dashboard for everything</span>
             </div>
           </div>
         </div>
@@ -71,7 +75,7 @@ export default function Signup({ onSwitchToLogin }) {
           <form className="signup-card" onSubmit={signUp}>
             <div className="signup-card-header">
               <h2>Create account</h2>
-              <p>Set up your dashboard and start managing business calls.</p>
+              <p>Set up your dashboard — it only takes a minute.</p>
             </div>
 
             <div className="signup-form">
@@ -107,7 +111,7 @@ export default function Signup({ onSwitchToLogin }) {
               </button>
 
               <p className="signup-security-note">
-                Accounts are secured using Supabase auth and encrypted PostgreSQL storage.
+                Your account is protected with secure sign-in and encrypted storage.
               </p>
 
               <div className="signup-footer">

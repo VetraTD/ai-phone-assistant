@@ -59,7 +59,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
 
       setBusinessId(createdBusinessId);
 
-      // Save AI & call settings (same fields as Settings page)
+      // Save call settings (same fields as Settings page)
       await api.put(`/api/business/${createdBusinessId}/settings`, {
         name,
         timezone,
@@ -117,7 +117,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
       setNumbersError(
         serverMsg ||
           (noResponse
-            ? "Could not reach the phone service. On your live site this is often CORS: the voice API (Railway) must allow https://www.vetratd.com (or redeploy after updating server CORS defaults)."
+            ? "Could not reach the phone service. Please try again in a moment or contact us if the problem continues."
             : err?.message || "Failed to load available numbers")
       );
     } finally {
@@ -203,7 +203,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
               <div className="onboarding-step-label">
                 Step {formStep} of {TOTAL_FORM_STEPS}
                 {formStep === 1 && " — Basics"}
-                {formStep === 2 && " — AI & calls"}
+                {formStep === 2 && " — Calls & greeting"}
                 {formStep === 3 && " — Details & address"}
               </div>
 
@@ -215,7 +215,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                     <input
                       id="business-name"
                       type="text"
-                      placeholder="e.g. Excel Cardiac Care"
+                      placeholder="e.g. Acme Plumbing"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       required
@@ -254,7 +254,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                 </div>
               )}
 
-              {/* Step 2: AI & calls */}
+              {/* Step 2: Calls & greeting */}
               {formStep === 2 && (
                 <div className="onboarding-step-content">
                   <div className="onboarding-field">
@@ -333,7 +333,7 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                     <textarea
                       id="general-info"
                       rows={2}
-                      placeholder="e.g. Excel Cardiac Care is a specialized medical practice."
+                      placeholder="e.g. Acme Plumbing — family-run, serving Dallas since 2010."
                       value={generalInfo}
                       onChange={(e) => setGeneralInfo(e.target.value)}
                       className="onboarding-textarea"

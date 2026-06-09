@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import "./Login.css";
 
@@ -52,6 +53,11 @@ export default function ResetPassword() {
   return (
     <div className="login-page">
       <div className="login-shell">
+        <div className="login-top-row">
+          <Link to="/" className="login-back-home">
+            ← Back to website
+          </Link>
+        </div>
         <div className="login-card-wrap">
           <form className="login-card" onSubmit={handleUpdatePassword}>
             <div className="login-card-header">

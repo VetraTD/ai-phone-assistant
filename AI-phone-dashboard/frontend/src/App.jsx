@@ -56,16 +56,16 @@ function badgeStyle(type) {
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 600,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#e7eef7",
+    border: "1px solid var(--vetra-border)",
+    background: "var(--vetra-bg-2)",
+    color: "var(--vetra-muted)",
   };
   if (t === "callback")
-    return { ...base, background: "rgba(76,129,255,0.14)", border: "1px solid rgba(76,129,255,0.28)", color: "#bcd3ff" };
+    return { ...base, background: "rgba(58,143,242,0.12)", border: "1px solid rgba(58,143,242,0.3)", color: "#2a6fd6" };
   if (t === "message")
-    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.28)", color: "#bcefc9" };
+    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.32)", color: "#1f8a4c" };
   if (t === "appointment")
-    return { ...base, background: "rgba(255,184,76,0.14)", border: "1px solid rgba(255,184,76,0.28)", color: "#ffe0a8" };
+    return { ...base, background: "rgba(255,184,76,0.16)", border: "1px solid rgba(255,184,76,0.42)", color: "#9a6a12" };
   return base;
 }
 
@@ -74,16 +74,16 @@ function getStatusPillStyle(status) {
   const base = {
     display: "inline-flex", alignItems: "center", height: 28, padding: "0 10px",
     borderRadius: 999, fontSize: 12, fontWeight: 600,
-    border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.05)", color: "#dfe8f2",
+    border: "1px solid var(--vetra-border)", background: "var(--vetra-bg-2)", color: "var(--vetra-muted)",
   };
   if (s === "completed")
-    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.28)", color: "#bcefc9" };
+    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.32)", color: "#1f8a4c" };
   if (s === "transferred")
-    return { ...base, background: "rgba(76,129,255,0.14)", border: "1px solid rgba(76,129,255,0.28)", color: "#bcd3ff" };
+    return { ...base, background: "rgba(58,143,242,0.12)", border: "1px solid rgba(58,143,242,0.3)", color: "#2a6fd6" };
   if (s === "failed" || s === "busy" || s === "no-answer")
-    return { ...base, background: "rgba(255,107,107,0.14)", border: "1px solid rgba(255,107,107,0.28)", color: "#ffb9b9" };
+    return { ...base, background: "rgba(220,80,80,0.12)", border: "1px solid rgba(220,80,80,0.32)", color: "#b91c1c" };
   if (s === "in-progress")
-    return { ...base, background: "rgba(76,129,255,0.14)", border: "1px solid rgba(76,129,255,0.28)", color: "#bcd3ff" };
+    return { ...base, background: "rgba(58,143,242,0.12)", border: "1px solid rgba(58,143,242,0.3)", color: "#2a6fd6" };
   return base;
 }
 
@@ -155,15 +155,15 @@ function getSentimentPillStyle(sentiment) {
   const base = {
     display: "inline-flex", alignItems: "center", height: 28, padding: "0 10px",
     borderRadius: 999, fontSize: 12, fontWeight: 600,
-    border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.05)", color: "#dfe8f2",
+    border: "1px solid var(--vetra-border)", background: "var(--vetra-bg-2)", color: "var(--vetra-muted)",
   };
   if (s === "positive")
-    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.28)", color: "#bcefc9" };
+    return { ...base, background: "rgba(67,182,110,0.14)", border: "1px solid rgba(67,182,110,0.32)", color: "#1f8a4c" };
   if (s === "negative")
-    return { ...base, background: "rgba(255,107,107,0.14)", border: "1px solid rgba(255,107,107,0.28)", color: "#ffb9b9" };
+    return { ...base, background: "rgba(220,80,80,0.12)", border: "1px solid rgba(220,80,80,0.32)", color: "#b91c1c" };
   if (s === "neutral")
-    return { ...base, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#d6dfeb" };
-  return { ...base, background: "rgba(255,184,76,0.14)", border: "1px solid rgba(255,184,76,0.28)", color: "#ffe0a8" };
+    return { ...base, background: "var(--vetra-bg-2)", border: "1px solid var(--vetra-border-strong)", color: "var(--vetra-muted)" };
+  return { ...base, background: "rgba(255,184,76,0.16)", border: "1px solid rgba(255,184,76,0.42)", color: "#9a6a12" };
 }
 
 function formatBusinessHours(hours) {
@@ -199,25 +199,11 @@ function AnimatedNumber({ value, duration = 1200, suffix = "" }) {
 
 function LoadingScreen({ title, subtitle }) {
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "radial-gradient(circle at top left, rgba(45,110,255,0.12), transparent 30%), radial-gradient(circle at bottom right, rgba(31,209,184,0.10), transparent 28%), #08111b",
-      color: "#f4f7fb", display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-    }}>
-      <div style={{
-        width: "100%", maxWidth: 460, borderRadius: 24,
-        border: "1px solid rgba(255,255,255,0.08)", background: "rgba(8, 14, 24, 0.82)",
-        boxShadow: "0 18px 50px rgba(0, 0, 0, 0.25)", backdropFilter: "blur(10px)",
-        padding: 32, textAlign: "center",
-      }}>
-        <div style={{
-          width: 52, height: 52, margin: "0 auto 18px", borderRadius: "50%",
-          border: "4px solid rgba(255,255,255,0.12)", borderTopColor: "#58a4ff",
-          animation: "spin 0.8s linear infinite",
-        }} />
-        <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 8 }}>{title}</div>
-        <div style={{ color: "#9bacbf", fontSize: 15, lineHeight: 1.6 }}>{subtitle}</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div className="dashboard-loading-screen">
+      <div className="dashboard-loading-card">
+        <div className="dashboard-loading-spinner" />
+        <div className="dashboard-loading-title">{title}</div>
+        <div className="dashboard-loading-subtitle">{subtitle}</div>
       </div>
     </div>
   );
@@ -225,7 +211,7 @@ function LoadingScreen({ title, subtitle }) {
 
 function DemoDashboard({ t, lang, onChangeLang }) {
   const demoBusiness = {
-    name: "Excel Cardiac Care (Demo)",
+    name: "Sunrise Home Services (Demo)",
     phone_number: "+1 (817) 601-1171",
     timezone: "America/Chicago",
   };
@@ -233,14 +219,14 @@ function DemoDashboard({ t, lang, onChangeLang }) {
   const demoCalls = [
     {
       id: "demo-1",
-      caller_name_guess: "New patient inquiry",
+      caller_name_guess: "New customer inquiry",
       caller_number: "+1 469 555 0199",
       started_at: new Date().toISOString(),
       status: "completed",
       inferred_transferred: false,
       duration_seconds: 182,
       sentiment: "positive",
-      summary: "New patient called to book an initial consultation next week.",
+      summary: "New customer called to book a service visit next week.",
     },
     {
       id: "demo-2",
@@ -251,7 +237,7 @@ function DemoDashboard({ t, lang, onChangeLang }) {
       inferred_transferred: true,
       duration_seconds: 96,
       sentiment: "neutral",
-      summary: "Existing patient had a medication question and was transferred to front desk.",
+      summary: "Existing customer had a scheduling question and was transferred to the office.",
     },
     {
       id: "demo-3",
@@ -271,7 +257,7 @@ function DemoDashboard({ t, lang, onChangeLang }) {
   const selectedCall = demoCalls.find((c) => c.id === selectedId) || demoCalls[0];
 
   const demoTranscript = [
-    { id: "t1", speaker: "caller", message: "Hi, I’m a new patient and I’d like to book an appointment." },
+    { id: "t1", speaker: "caller", message: "Hi, I’d like to book a service appointment." },
     { id: "t2", speaker: "ai", message: "Of course. I can help with that. What day works best for you next week?" },
     { id: "t3", speaker: "caller", message: "Sometime on Tuesday afternoon." },
     { id: "t4", speaker: "ai", message: "We have availability at 2:30 PM and 4:15 PM. Which do you prefer?" },
@@ -285,7 +271,6 @@ function DemoDashboard({ t, lang, onChangeLang }) {
           <div className="dashboard-topbar-left">
             <div className="dashboard-badge">
               {t.appTitle}
-              <span className="dashboard-beta-pill">Beta</span>
             </div>
             <h1 className="dashboard-business-name">{demoBusiness.name}</h1>
             <p className="dashboard-context-line">
@@ -305,9 +290,9 @@ function DemoDashboard({ t, lang, onChangeLang }) {
         <main className="dashboard-content page-dashboard">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
             <p className="dashboard-today-label" style={{ margin: 0 }} aria-hidden="true">
-              Example day for your AI receptionist
+              {t.demoExampleDay}
             </p>
-            <span style={{ fontSize: 12, color: "#7b8fa3" }}>Demo mode — no real data or calls</span>
+            <span style={{ fontSize: 12, color: "var(--vetra-muted)" }}>Demo mode — no real data or calls</span>
           </div>
 
           <section className="dashboard-kpis" style={{ alignItems: "stretch", gap: 12 }}>
@@ -347,7 +332,7 @@ function DemoDashboard({ t, lang, onChangeLang }) {
                 <div className="filters-grid" style={{ marginBottom: 12 }}>
                   <div className="filter-field">
                     <label>Guided steps</label>
-                    <p style={{ fontSize: 13, color: "#9bacbf", margin: 0 }}>
+                    <p style={{ fontSize: 13, color: "var(--vetra-muted)", margin: 0 }}>
                       1) Click a call on the left. 2) Read Call Info. 3) Scroll the Transcript.
                     </p>
                   </div>
@@ -410,7 +395,7 @@ function DemoDashboard({ t, lang, onChangeLang }) {
                   <div className="detail-card">
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                       <h3 className="detail-card-title" style={{ margin: 0 }}>{t.transcript}</h3>
-                      <span style={{ fontSize: 12, color: "#9bacbf" }}>Example conversation only</span>
+                      <span style={{ fontSize: 12, color: "var(--vetra-muted)" }}>Example conversation only</span>
                     </div>
                     <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 6 }}>
                       <div className="transcript-list">
@@ -434,7 +419,7 @@ function DemoDashboard({ t, lang, onChangeLang }) {
           </section>
         </main>
 
-        <footer style={{ marginTop: 24, padding: "12px 0 4px", fontSize: 11, color: "#6f8197", textAlign: "center" }}>
+        <footer className="dashboard-footer">
           Viewing demo data. Not all features are available in demo mode. Sign up or log in to see your own calls.
         </footer>
       </div>
@@ -513,7 +498,7 @@ function App() {
   const [settingsStateRegion, setSettingsStateRegion] = useState("");
   const [settingsPostalCode, setSettingsPostalCode] = useState("");
   const [settingsEmergencyMessage, setSettingsEmergencyMessage] = useState(
-    "If this is a medical emergency, please hang up and call emergency services immediately."
+    "If this is an emergency, please hang up and call emergency services immediately."
   );
   const [settingsFallbackInstructions, setSettingsFallbackInstructions] = useState(
     "If you cannot help the caller, take a message and let them know the team will follow up."
@@ -901,15 +886,18 @@ function App() {
 
   if (meError)
     return (
-      <div style={{ padding: 24, fontFamily: "system-ui", color: "white", background: "#0b0b0b", minHeight: "100vh" }}>
-        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{t.couldntLoad}</div>
-        <div style={{ opacity: 0.8, marginBottom: 14 }}>{meError}</div>
-        <button
-          onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
-          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #444", background: "#111", color: "white", cursor: "pointer" }}
-        >
-          {t.signOut}
-        </button>
+      <div className="dashboard-error-screen">
+        <div className="dashboard-error-card">
+          <div className="dashboard-error-title">{t.couldntLoad}</div>
+          <div className="dashboard-error-message">{meError}</div>
+          <button
+            type="button"
+            className="dashboard-logout"
+            onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+          >
+            {t.signOut}
+          </button>
+        </div>
       </div>
     );
 
@@ -920,11 +908,10 @@ function App() {
           <div className="dashboard-topbar-left">
             <div className="dashboard-badge">
               {t.appTitle}
-              <span className="dashboard-beta-pill">Beta</span>
             </div>
             <h1 className="dashboard-business-name">{business?.name ?? t.appTitle}</h1>
             <p className="dashboard-context-line">
-              AI receptionist overview for today
+              {t.dashboardOverview}
             </p>
             {business ? (
               <div className="dashboard-business-meta">
@@ -1753,7 +1740,7 @@ function App() {
                       <span className="kpi-skeleton" style={{ display: "inline-block", width: 56, height: 28, borderRadius: 8, marginLeft: 16 }} />
                     </div>
                   ) : usageError ? (
-                    <p style={{ margin: 0, color: "#9bacbf", fontSize: 14 }}>{usageError}</p>
+                    <p style={{ margin: 0, color: "var(--vetra-muted)", fontSize: 14 }}>{usageError}</p>
                   ) : usage ? (
                     <div className="usage-stats">
                       <div className="usage-stat">
@@ -1770,7 +1757,7 @@ function App() {
                       </div>
                     </div>
                   ) : null}
-                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "#7b8fa3" }}>
+                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--vetra-muted)" }}>
                     Resets on the 1st of each month. Useful for billing and limits later.
                   </p>
                 </div>
@@ -1848,7 +1835,7 @@ function App() {
                   <label>{t.generalInfo}</label>
                   <textarea value={settingsGeneralInfo} onChange={(e) => setSettingsGeneralInfo(e.target.value)} rows={3}
                     placeholder={t.generalInfoPlaceholder}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(6,11,19,0.85)", color: "#f5f7fb", outline: "none", fontSize: 14, resize: "vertical", minHeight: 80 }} />
+                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 80 }} />
                 </div>
                 <div className="filter-field">
                   <label>{t.addressLine1}</label>
@@ -1881,7 +1868,7 @@ function App() {
                 <div className="filter-field">
                   <label>{t.greetingMessage}</label>
                   <textarea value={settingsGreeting} onChange={(e) => setSettingsGreeting(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(6,11,19,0.85)", color: "#f5f7fb", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
+                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
                 </div>
                 <div className="filter-field">
                   <label>{t.businessHours}</label>
@@ -1931,12 +1918,12 @@ function App() {
                 <div className="filter-field">
                   <label>{t.emergencyMessage}</label>
                   <textarea value={settingsEmergencyMessage} onChange={(e) => setSettingsEmergencyMessage(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(6,11,19,0.85)", color: "#f5f7fb", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
+                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
                 </div>
                 <div className="filter-field">
                   <label>{t.fallbackInstructions}</label>
                   <textarea value={settingsFallbackInstructions} onChange={(e) => setSettingsFallbackInstructions(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(6,11,19,0.85)", color: "#f5f7fb", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
+                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
                 </div>
               </div>
             </section>
@@ -1963,7 +1950,7 @@ function App() {
                   <span className="field-hint">{t.loadingCalls}</span>
                 ) : calendarConnected ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-                    <span className="field-hint" style={{ color: "var(--success, #9ce5b1)" }}>{t.calendarConnected}</span>
+                    <span className="field-hint" style={{ color: "#1f8a4c" }}>{t.calendarConnected}</span>
                     <button
                       type="button"
                       className="dashboard-logout"
@@ -1988,7 +1975,7 @@ function App() {
                     <button
                       type="button"
                       className="dashboard-logout"
-                      style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(255,107,107,0.3)", color: "#ffb9b9" }}
+                      style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(220,80,80,0.4)", color: "#b91c1c" }}
                       onClick={async () => {
                         try {
                           await api.delete("/api/calendar/disconnect");
@@ -2031,7 +2018,7 @@ function App() {
               <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                 <div style={{ display: "grid", gap: 8 }}>
                   {settingsError ? (
-                    <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(255,107,107,0.25)", background: "rgba(255,107,107,0.08)", color: "#ff9191", fontSize: 13 }}>
+                    <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,80,80,0.3)", background: "rgba(220,80,80,0.06)", color: "#b91c1c", fontSize: 13 }}>
                       {settingsError}
                     </div>
                   ) : (
@@ -2039,8 +2026,7 @@ function App() {
                   )}
                 </div>
                 <button
-                  className="dashboard-logout"
-                  style={{ minWidth: 180, height: 48, background: "linear-gradient(135deg, #3576f6, #44d2c8)", border: "none", color: "#fff", boxShadow: "0 14px 34px rgba(53,118,246,0.24)" }}
+                  className="dashboard-logout dashboard-save-button"
                   onClick={saveSettings}
                   disabled={settingsSaving}
                 >
@@ -2054,11 +2040,11 @@ function App() {
           <section className="guide-page">
             <section className="panel guide-intro-panel">
               <div className="panel-header">
-                <h2 className="panel-title">How your AI receptionist works</h2>
+                <h2 className="panel-title">How Vetra works</h2>
               </div>
-              <div className="panel-body" style={{ display: "grid", gap: 12, fontSize: 14, color: "#c2d0e3" }}>
+              <div className="panel-body guide-panel-body">
                 <p>
-                  This dashboard shows everything your AI receptionist is handling for your business – from incoming calls and transcripts to appointments and follow-ups.
+                  This dashboard shows everything Vetra is handling for your business — from incoming calls and written summaries to appointments and follow-ups.
                   Share this page with your team so everyone understands how calls are being handled.
                 </p>
               </div>
@@ -2066,10 +2052,10 @@ function App() {
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">1. Getting set up</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 10, fontSize: 14, color: "#c2d0e3" }}>
-                <ol style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 6 }}>
+              <div className="panel-body guide-panel-body">
+                <ol className="guide-list">
                   <li><strong>Create your business</strong> – complete the onboarding form with your name, timezone, language, greeting, and call-handling rules.</li>
-                  <li><strong>Choose a phone number</strong> – buy a local or toll-free number for the AI receptionist to answer.</li>
+                  <li><strong>Choose a phone number</strong> – buy a local or toll-free number for Vetra to answer.</li>
                   <li><strong>Configure settings</strong> – review transfer rules, notification email/phone, and emergency/fallback messages under <strong>Settings</strong>.</li>
                   <li><strong>Make a test call</strong> – call your new number from your own phone to hear the greeting and see a test call appear in the dashboard.</li>
                 </ol>
@@ -2078,25 +2064,25 @@ function App() {
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">2. What callers experience</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+              <div className="panel-body guide-panel-body">
                 <p style={{ margin: 0 }}>
                   The typical call flow looks like this:
                 </p>
-                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+                <ul className="guide-list guide-list-tight">
                   <li><strong>Caller dials your number</strong> – shown at the top of the dashboard.</li>
-                  <li><strong>AI receptionist answers</strong> – uses your greeting, language, and business info to talk naturally.</li>
-                  <li><strong>During the call</strong> – it can book appointments, take messages, collect callback details, and follow your transfer rules.</li>
-                  <li><strong>After the call</strong> – the transcript, summary, sentiment, and any requests appear instantly in the dashboard.</li>
+                  <li><strong>Vetra answers</strong> – uses your greeting, language, and business info to talk naturally.</li>
+                  <li><strong>During the call</strong> – we can book appointments, take messages, collect callback details, and follow your transfer rules.</li>
+                  <li><strong>After the call</strong> – the written summary and any requests appear instantly in the dashboard.</li>
                 </ul>
               </div>
             </section>
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">3. What happens after a call</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
-                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+              <div className="panel-body guide-panel-body">
+                <ul className="guide-list guide-list-tight">
                   <li>
-                    <strong>Transcript + summary</strong> – your call is saved with a full transcript and an AI summary so you can skim quickly.
+                    <strong>Written summary</strong> – every call is saved with a full conversation record and a short summary so you can skim quickly.
                   </li>
                   <li>
                     <strong>Appointments</strong> – if the caller booked, Vetra creates an appointment record linked to the call.
@@ -2119,10 +2105,10 @@ function App() {
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">4. Reading the dashboard</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
-                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
+              <div className="panel-body guide-panel-body">
+                <ul className="guide-list guide-list-tight">
                   <li><strong>KPIs (top row)</strong> – quick snapshot of calls today, appointments today, follow-ups needed, and calls transferred to a human today.</li>
-                  <li><strong>Calls list (left)</strong> – every call with status, duration, sentiment, and whether a summary exists. Use filters to drill into specific days, sentiment, or appointment calls.</li>
+                  <li><strong>Calls list (left)</strong> – every call with status, duration, and whether a summary exists. Use filters to drill into specific days or appointment calls.</li>
                   <li><strong>Call Details (right)</strong> – full summary, sentiment, transcript, appointments, and customer requests for the selected call.</li>
                   <li><strong>Follow-ups</strong> – calls with customer requests or callbacks needed will be easy to spot using the filters and request badges.</li>
                 </ul>
@@ -2131,9 +2117,9 @@ function App() {
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">5. Best practices</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
-                <ul style={{ paddingLeft: 18, margin: 0, display: "grid", gap: 4 }}>
-                  <li><strong>Greeting</strong> – be clear about who you are and what the receptionist can help with (booking, messages, emergencies).</li>
+              <div className="panel-body guide-panel-body">
+                <ul className="guide-list guide-list-tight">
+                  <li><strong>Greeting</strong> – be clear about who you are and what Vetra can help with (booking, messages, urgent calls).</li>
                   <li><strong>Transfer rules</strong> – use “Business hours only” to avoid forwarding calls to a mobile at night, and rely on message taking after hours.</li>
                   <li><strong>Notifications</strong> – set a notification email and phone so important messages and callbacks never get missed.</li>
                   <li><strong>Review calls regularly</strong> – skim summaries and requests each day to close the loop on callbacks and messages.</li>
@@ -2143,9 +2129,9 @@ function App() {
 
             <section className="panel">
               <div className="panel-header"><h2 className="panel-title">6. Getting help</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 8, fontSize: 14, color: "#c2d0e3" }}>
+              <div className="panel-body guide-panel-body">
                 <p style={{ margin: 0 }}>
-                  If something doesn’t look right – or you’d like help tuning prompts, greetings, or call-handling rules – reach out to the product team using the support contact you received when you signed up.
+                  If something doesn’t look right – or you’d like help tuning greetings, or call-handling rules – reach out to us at support@vetratd.com.
                 </p>
               </div>
             </section>
@@ -2159,7 +2145,7 @@ function App() {
           </div>
         )}
 
-        <footer style={{ marginTop: 24, padding: "12px 0 4px", fontSize: 11, color: "#6f8197", textAlign: "center" }}>
+        <footer className="dashboard-footer">
           {t.securityFooter}
         </footer>
       </div>

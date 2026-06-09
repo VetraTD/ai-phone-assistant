@@ -1,14 +1,136 @@
 import { Link } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Phone,
+  PhoneCall,
+  CalendarCheck,
+  ClipboardList,
+  FileText,
+  MessageSquareText,
+  Clock,
+  LineChart,
+  ShieldCheck,
+  Hash,
+  Inbox,
+  LayoutDashboard,
+  Signal,
+  Wifi,
+  BatteryFull,
+  Pause,
+} from "lucide-react";
+import VetraMark from "./components/VetraMark";
+import VetraLogo from "./components/VetraLogo";
 import "./Landing.css";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
 
-function PhoneIcon({ className }) {
+function HeroPhone() {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onTime = () => setElapsed(audio.currentTime);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => {
+      setIsPlaying(false);
+      setElapsed(0);
+    };
+
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const total = Math.floor(seconds || 0);
+    const mins = String(Math.floor(total / 60)).padStart(2, "0");
+    const secs = String(total % 60).padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
   return (
-    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-    </svg>
+    <div className="hero-phone">
+      <div className="hero-phone-frame">
+        <span className="hero-phone-island" />
+        <div className="hero-phone-screen">
+          <div className="hero-phone-status">
+            <span className="hero-phone-time">9:41</span>
+            <span className="hero-phone-status-icons">
+              <Signal size={14} strokeWidth={2.4} />
+              <Wifi size={14} strokeWidth={2.4} />
+              <BatteryFull size={18} strokeWidth={2} />
+            </span>
+          </div>
+
+          <div className="hero-call">
+            <div className="hero-call-avatar-circle">
+              <span className="hero-call-avatar-initial">V</span>
+            </div>
+            <div className="hero-call-name">Vetra</div>
+            {isPlaying ? (
+              <div className="hero-call-live">
+                <span className="hero-call-eq">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="hero-call-time">{formatTime(elapsed)}</span>
+              </div>
+            ) : (
+              <div className="hero-call-sub">
+                {elapsed > 0 ? `paused · ${formatTime(elapsed)}` : "calling…"}
+              </div>
+            )}
+          </div>
+
+          <div className="hero-call-action">
+            <button
+              type="button"
+              className={`hero-call-green ${isPlaying ? "is-playing" : ""}`}
+              onClick={togglePlay}
+              aria-label={isPlaying ? "Pause demo call" : "Play demo call"}
+            >
+              {isPlaying ? (
+                <Pause size={28} strokeWidth={2.4} />
+              ) : (
+                <PhoneCall size={28} strokeWidth={2.4} />
+              )}
+            </button>
+            <span className="hero-call-action-label">
+              {isPlaying ? "Playing demo call" : "Tap to hear a real call"}
+            </span>
+          </div>
+
+          <span className="hero-phone-home" aria-hidden />
+        </div>
+      </div>
+      <audio ref={audioRef} src="/vetra-demo-call.mp3" preload="none" />
+    </div>
   );
 }
 
@@ -49,23 +171,23 @@ export default function Landing() {
     <div className="landing-page">
       <header className="landing-header">
         <div className="landing-header-inner">
-          <Link to="/" className="landing-logo">
-            Vetra<span className="landing-logo-ai">.ai</span>
-          </Link>
+          <VetraLogo to="/" />
           <nav className="landing-nav">
+            <a href="#how-it-works">How it works</a>
             <a href="#features">Features</a>
-            <a href="#download">Download</a>
             <a href="#preview">Dashboard</a>
-            <Link to="/app?demo=1">Guided demo</Link>
             <a href="#different">Why Vetra</a>
             <a href="#faq">FAQ</a>
           </nav>
           <div className="landing-header-actions">
+            <Link to="/contact" className="landing-header-login">
+              Contact us
+            </Link>
             <Link to="/app" className="landing-header-login">
               Log in
             </Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-header-phone">
-              <PhoneIcon className="landing-header-phone-icon" />
+              <Phone className="landing-header-phone-icon" size={16} strokeWidth={2.4} />
               {DEMO_NUMBER}
             </a>
           </div>
@@ -73,30 +195,90 @@ export default function Landing() {
       </header>
 
       <section className="landing-hero">
+        <div className="landing-hero-glow landing-hero-glow-1" aria-hidden />
+        <div className="landing-hero-glow landing-hero-glow-2" aria-hidden />
         <div className="landing-hero-inner">
-          <h1 className="landing-hero-title">
-            Your AI receptionist for the front office. Fully staffed, 24/7.
-          </h1>
-          <p className="landing-hero-sub">
-            Clinical-grade call handling: Vetra AI answers, qualifies, schedules, and captures
-            every call — then delivers clear summaries and appointments to your team.
-          </p>
-          <div className="landing-hero-ctas">
-            <Link to="/app" className="landing-cta-primary">
-              Get started
-            </Link>
-            <span className="landing-hero-or">or</span>
-            <a href="#demo" className="landing-cta-secondary">
-              Try the demo line
-            </a>
-            <span className="landing-hero-or">or</span>
-            <Link to="/app?demo=1" className="landing-cta-secondary">
-              Open guided dashboard
-            </Link>
+          <div className="landing-hero-copy">
+            <div className="landing-hero-badge">
+              <VetraMark size={20} className="landing-hero-badge-mark" />
+              Call handling for modern businesses
+            </div>
+            <h1 className="landing-hero-title">
+              Your virtual receptionist, <span className="landing-hero-title-accent">always on.</span>
+            </h1>
+            <p className="landing-hero-sub">
+              We answer your phone when you can&apos;t — bookings, messages, and follow-ups
+              handled for you, day and night. You get a simple dashboard with everything in one place.
+            </p>
+            <div className="landing-hero-ctas">
+              <Link to="/app" className="landing-cta-primary">
+                Get started
+              </Link>
+              <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-cta-secondary">
+                Call the demo line
+              </a>
+              <Link to="/contact" className="landing-cta-secondary">
+                Talk to us
+              </Link>
+            </div>
+            <p className="landing-hero-trust">
+              <ShieldCheck size={15} strokeWidth={2.2} className="landing-hero-trust-icon" />
+              Secure • Written summaries of every call • One dashboard
+            </p>
           </div>
-          <p className="landing-hero-trust">
-            Secure • Full transcripts • One dashboard
+          <div className="landing-hero-visual">
+            <HeroPhone />
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="how-it-works"
+        className="landing-how reveal-section"
+        ref={(el) => {
+          revealRefs.current[0] = el;
+        }}
+      >
+        <div className="landing-how-inner">
+          <h2 className="landing-how-title">How it works</h2>
+          <p className="landing-how-sub">
+            Three simple steps — no technical setup required.
           </p>
+          <div className="landing-how-steps">
+            <div className="landing-how-step">
+              <div className="landing-how-step-icon">
+                <Hash size={24} strokeWidth={2} />
+              </div>
+              <span className="landing-how-step-num">1</span>
+              <h3>Get your number</h3>
+              <p>
+                Sign up and choose a phone number for your business. Set your greeting,
+                hours, and when calls should come through to you.
+              </p>
+            </div>
+            <div className="landing-how-step">
+              <div className="landing-how-step-icon">
+                <PhoneCall size={24} strokeWidth={2} />
+              </div>
+              <span className="landing-how-step-num">2</span>
+              <h3>We answer every call</h3>
+              <p>
+                When someone rings, Vetra picks up, has a natural conversation, books
+                appointments, and takes messages — even after hours.
+              </p>
+            </div>
+            <div className="landing-how-step">
+              <div className="landing-how-step-icon">
+                <LayoutDashboard size={24} strokeWidth={2} />
+              </div>
+              <span className="landing-how-step-num">3</span>
+              <h3>Everything in one place</h3>
+              <p>
+                Every call shows up in your dashboard with a summary, bookings, and
+                follow-ups — so nothing slips through the cracks.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -104,20 +286,25 @@ export default function Landing() {
         id="demo"
         className="landing-demo reveal-section"
         ref={(el) => {
-          revealRefs.current[0] = el;
+          revealRefs.current[1] = el;
         }}
       >
         <div className="landing-demo-inner">
-          <p className="landing-section-label">Try it yourself</p>
-          <h2 className="landing-demo-title">Talk to an AI receptionist</h2>
+          <h2 className="landing-demo-title">Hear it for yourself</h2>
           <p className="landing-demo-desc">
-            Call the number below to hear Vetra AI answer, triage, and book an appointment.
-            No signup required.
+            Call our demo line — no signup needed. You&apos;ll hear how Vetra answers,
+            handles a conversation, and books an appointment.
           </p>
           <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-demo-phone">
-            <PhoneIcon className="landing-demo-phone-icon" />
+            <Phone className="landing-demo-phone-icon" size={24} strokeWidth={2.2} />
             {DEMO_NUMBER}
           </a>
+          <p className="landing-demo-or">
+            Prefer to talk to us first?{" "}
+            <Link to="/contact" className="landing-demo-contact-link">
+              Get in touch
+            </Link>
+          </p>
         </div>
       </section>
 
@@ -125,39 +312,43 @@ export default function Landing() {
         id="different"
         className="landing-different reveal-section"
         ref={(el) => {
-          revealRefs.current[1] = el;
+          revealRefs.current[2] = el;
         }}
       >
         <div className="landing-different-inner">
-          <p className="landing-section-label">How we&apos;re different</p>
-          <h2 className="landing-different-title">Why practices choose Vetra AI</h2>
+          <h2 className="landing-different-title">Why businesses choose Vetra</h2>
           <p className="landing-different-tagline">
-            We don&apos;t just answer calls. We deliver structured outcomes.
+            We don&apos;t just answer calls — we help you stay on top of every enquiry.
           </p>
           <div className="landing-cards">
             <div className="landing-card">
-              <div className="landing-card-icon">◆</div>
-              <h4>Clinical-grade call handling</h4>
+              <div className="landing-card-icon">
+                <PhoneCall size={22} strokeWidth={2} />
+              </div>
+              <h4>Calls answered, instantly</h4>
               <p>
-                Vetra AI handles intake with clear protocols, captures appointments and
-                follow-up requests, and escalates appropriately — with full transcripts
-                and summaries for your team.
+                Every call gets a friendly, professional answer — mornings, evenings,
+                weekends, and holidays included.
               </p>
             </div>
             <div className="landing-card">
-              <div className="landing-card-icon">◇</div>
-              <h4>Configured to your practice</h4>
+              <div className="landing-card-icon">
+                <CalendarCheck size={22} strokeWidth={2} />
+              </div>
+              <h4>Bookings &amp; messages handled</h4>
               <p>
-                Set your greeting, business hours, transfer rules, and notification
-                preferences. One dashboard for calls, appointments, and follow-ups.
+                Appointments go straight into your dashboard. Messages are captured with
+                the details you need — no sticky notes required.
               </p>
             </div>
             <div className="landing-card">
-              <div className="landing-card-icon">▣</div>
-              <h4>Transparent oversight</h4>
+              <div className="landing-card-icon">
+                <ClipboardList size={22} strokeWidth={2} />
+              </div>
+              <h4>Nothing slips through</h4>
               <p>
-                Every call is logged with transcript, summary, and sentiment. Email
-                digests of upcoming appointments and follow-ups keep your team in sync.
+                Each call comes with a written summary and any follow-ups flagged for your
+                team. We can email you a digest so you stay in the loop.
               </p>
             </div>
           </div>
@@ -168,25 +359,33 @@ export default function Landing() {
         id="features"
         className="landing-benefits reveal-section"
         ref={(el) => {
-          revealRefs.current[2] = el;
+          revealRefs.current[3] = el;
         }}
       >
         <div className="landing-benefits-inner">
           <div className="landing-benefit">
-            <span className="landing-benefit-icon">✓</span>
-            <span>Structured transcripts and summaries</span>
+            <span className="landing-benefit-icon">
+              <FileText size={14} strokeWidth={2.4} />
+            </span>
+            <span>Written summary of every call</span>
           </div>
           <div className="landing-benefit">
-            <span className="landing-benefit-icon">✓</span>
-            <span>Appointment capture and email digests</span>
+            <span className="landing-benefit-icon">
+              <MessageSquareText size={14} strokeWidth={2.4} />
+            </span>
+            <span>Bookings and messages captured</span>
           </div>
           <div className="landing-benefit">
-            <span className="landing-benefit-icon">✓</span>
+            <span className="landing-benefit-icon">
+              <Clock size={14} strokeWidth={2.4} />
+            </span>
             <span>24/7 coverage, one number</span>
           </div>
           <div className="landing-benefit">
-            <span className="landing-benefit-icon">✓</span>
-            <span>Follow-up tracking and analytics</span>
+            <span className="landing-benefit-icon">
+              <Inbox size={14} strokeWidth={2.4} />
+            </span>
+            <span>Follow-ups organised for you</span>
           </div>
         </div>
       </section>
@@ -195,14 +394,13 @@ export default function Landing() {
         id="preview"
         className="landing-preview reveal-section"
         ref={(el) => {
-          revealRefs.current[3] = el;
+          revealRefs.current[4] = el;
         }}
       >
         <div className="landing-preview-inner">
-          <p className="landing-section-label">See it in action</p>
           <h2 className="landing-preview-title">One dashboard for every call</h2>
           <p className="landing-preview-sub">
-            Trends, outcomes, and sentiment — all in one place.
+            See what happened on each call, how busy you&apos;ve been, and what needs your attention.
           </p>
           <div className="landing-preview-browser">
             <div className="landing-preview-browser-bar">
@@ -214,16 +412,16 @@ export default function Landing() {
             <div className="landing-preview-dashboard">
               <div className="landing-preview-dashboard-header">
                 <div>
-                  <h3 className="landing-preview-dashboard-title">Call analytics</h3>
-                  <p className="landing-preview-dashboard-desc">Trends and totals for your receptionist calls</p>
+                  <h3 className="landing-preview-dashboard-title">Call overview</h3>
+                  <p className="landing-preview-dashboard-desc">A clear picture of your business calls</p>
                 </div>
                 <div className="landing-preview-select">Last 3 months</div>
               </div>
               <div className="landing-preview-kpis">
-                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">74</span><span className="landing-preview-kpi-label">Receptionist calls</span></div>
-                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">19</span><span className="landing-preview-kpi-label">Appointments scheduled</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">74</span><span className="landing-preview-kpi-label">Calls handled</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">19</span><span className="landing-preview-kpi-label">Appointments booked</span></div>
                 <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">4</span><span className="landing-preview-kpi-label">Follow-ups needed</span></div>
-                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">26%</span><span className="landing-preview-kpi-label">Calls → appointments</span></div>
+                <div className="landing-preview-kpi"><span className="landing-preview-kpi-num">26%</span><span className="landing-preview-kpi-label">Calls → bookings</span></div>
               </div>
               <div className="landing-preview-charts">
                 <div className="landing-preview-panel">
@@ -247,7 +445,7 @@ export default function Landing() {
             </div>
           </div>
           <Link to="/app?demo=1" className="landing-preview-cta">
-            Launch guided dashboard demo
+            Try the guided dashboard demo
           </Link>
         </div>
       </section>
@@ -255,7 +453,7 @@ export default function Landing() {
       <section
         className="landing-stats reveal-section"
         ref={(el) => {
-          revealRefs.current[4] = el;
+          revealRefs.current[5] = el;
         }}
       >
         <div className="landing-stats-inner">
@@ -277,11 +475,10 @@ export default function Landing() {
       <section
         className="landing-testimonial reveal-section"
         ref={(el) => {
-          revealRefs.current[5] = el;
+          revealRefs.current[6] = el;
         }}
       >
         <div className="landing-testimonial-inner">
-          <p className="landing-section-label">Early user feedback</p>
           <div className="landing-testimonial-card">
             <div className="landing-testimonial-avatar">
               <div className="landing-testimonial-photo">
@@ -290,8 +487,8 @@ export default function Landing() {
             </div>
             <div className="landing-testimonial-copy">
               <p className="landing-testimonial-quote">
-                “The AI receptionist answered our calls instantly and logged everything in a dashboard.
-                It’s surprisingly useful for handling missed calls and after-hours enquiries.”
+                &ldquo;Our calls get answered straight away and everything lands in one dashboard.
+                It&apos;s been a real help for after-hours and when we&apos;re busy with customers.&rdquo;
               </p>
               <p className="landing-testimonial-author">
                 <span className="landing-testimonial-name">James T.</span>
@@ -306,47 +503,46 @@ export default function Landing() {
         id="faq"
         className="landing-faq reveal-section"
         ref={(el) => {
-          revealRefs.current[6] = el;
+          revealRefs.current[7] = el;
         }}
       >
         <div className="landing-faq-inner">
-          <p className="landing-section-label">FAQ</p>
           <h2 className="landing-faq-title">Common questions</h2>
           <div className="landing-faq-list">
             <details className="landing-faq-item">
               <summary className="landing-faq-question">How do we connect our phone number?</summary>
               <p className="landing-faq-answer">
-                After you sign up and complete onboarding, you’ll get a dedicated number for your practice or connect an existing one through your phone provider. Business hours and transfer rules are set in your dashboard and in your provider’s settings.
+                After you sign up, you&apos;ll get a dedicated number for your business or connect an existing one through your phone provider. Set your hours and transfer rules in the dashboard — we&apos;ll walk you through it.
               </p>
             </details>
             <details className="landing-faq-item">
               <summary className="landing-faq-question">Is our call data secure?</summary>
               <p className="landing-faq-answer">
-                Yes. Calls, transcripts, and summaries are stored securely. Access is restricted to your account, and we use industry-standard encryption. You can review our security practices and data handling in our privacy policy.
+                Yes. Your calls and summaries are stored securely with industry-standard encryption. Only your account can access them. See our privacy policy for details.
               </p>
             </details>
             <details className="landing-faq-item">
               <summary className="landing-faq-question">What if we already have an answering service?</summary>
               <p className="landing-faq-answer">
-                Vetra AI can replace or complement your current setup. Many practices switch to Vetra for 24/7 coverage and a single dashboard for every call. You can try the demo line with no signup to see how it handles intake and booking.
+                Vetra can replace or work alongside your current setup. Many businesses switch for 24/7 coverage and one place to see every call. Try the demo line anytime — no signup needed.
               </p>
             </details>
             <details className="landing-faq-item">
-              <summary className="landing-faq-question">Can the AI transfer calls to a human?</summary>
+              <summary className="landing-faq-question">Can calls be transferred to a person?</summary>
               <p className="landing-faq-answer">
-                Yes. You configure transfer rules in Settings—for example, during business hours only. When a caller needs a live person, Vetra can transfer to your designated number. The dashboard shows which calls were transferred so your team can follow up.
+                Yes. You choose when — for example, during business hours only. When someone needs a live person, Vetra can transfer to your number. Your dashboard shows which calls were handed over.
               </p>
             </details>
             <details className="landing-faq-item">
               <summary className="landing-faq-question">What languages are supported?</summary>
               <p className="landing-faq-answer">
-                The AI receptionist can be configured for English, Spanish, French, German, Portuguese, Italian, Dutch, and Polish. You set your preferred language in the dashboard; the greeting and call handling follow that setting.
+                English, Spanish, French, German, Portuguese, Italian, Dutch, and Polish. Pick your language in the dashboard and your greeting and call handling follow that setting.
               </p>
             </details>
             <details className="landing-faq-item">
               <summary className="landing-faq-question">How quickly can we get started?</summary>
               <p className="landing-faq-answer">
-                You can create an account and complete onboarding in a few minutes. Once your greeting, hours, and transfer rules are set, you can start receiving calls. Call the demo line anytime to experience the flow before going live.
+                Most businesses are set up in a few minutes. Add your greeting, hours, and transfer rules, then you&apos;re ready to receive calls. Call the demo line first if you&apos;d like to hear how it works.
               </p>
             </details>
           </div>
@@ -357,14 +553,13 @@ export default function Landing() {
         id="download"
         className="landing-download reveal-section"
         ref={(el) => {
-          revealRefs.current[7] = el;
+          revealRefs.current[8] = el;
         }}
       >
         <div className="landing-download-inner">
-          <p className="landing-section-label">Desktop app (optional)</p>
           <h2 className="landing-download-title">Download Vetra for Windows</h2>
           <p className="landing-download-desc">
-            Prefer a native app? Run the same secure dashboard from your Windows taskbar.
+            Prefer a desktop app? Run the same dashboard from your taskbar.
           </p>
           <a
             href="https://github.com/VetraTD/ai-phone-assistant/releases/download/v0.1.0/vetra-desktop_0.1.0_x64_en-US.msi"
@@ -373,23 +568,26 @@ export default function Landing() {
             Download for Windows
           </a>
           <p className="landing-download-note">
-            Requires Windows 10 or later. Internet connection needed for login and syncing. Windows may
-            show a SmartScreen warning because this is a new app; choose “More info” → “Run anyway” to
-            continue.
+            Requires Windows 10 or later. Internet connection needed for login and syncing.
           </p>
         </div>
       </section>
 
       <section className="landing-cta-block">
+        <div className="landing-cta-block-glow" aria-hidden />
         <div className="landing-cta-block-inner">
-          <h2 className="landing-cta-block-title">Ready to run your calls with clarity?</h2>
-          <p className="landing-cta-block-sub">Sign in to your dashboard or create an account.</p>
+          <VetraMark size={48} className="landing-cta-block-mark" />
+          <h2 className="landing-cta-block-title">Ready to never miss a call again?</h2>
+          <p className="landing-cta-block-sub">Create an account, call the demo line, or drop us a message — whatever suits you.</p>
           <div className="landing-cta-block-buttons">
             <Link to="/app" className="landing-cta-primary">
-              Sign in to dashboard
+              Get started
             </Link>
-            <Link to="/app" className="landing-cta-secondary">
-              Create account
+            <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-cta-secondary">
+              Call demo line
+            </a>
+            <Link to="/contact" className="landing-cta-secondary">
+              Contact us
             </Link>
           </div>
         </div>
@@ -397,20 +595,18 @@ export default function Landing() {
 
       <footer className="landing-footer">
         <div className="landing-footer-inner">
-          <Link to="/" className="landing-logo landing-logo-footer">
-            Vetra<span className="landing-logo-ai">.ai</span>
-          </Link>
+          <VetraLogo to="/" className="vetra-logo-footer" />
           <div className="landing-footer-links">
             <Link to="/app">Log in</Link>
             <Link to="/contact">Contact</Link>
             <a href={`${privacyOrigin}/legal`}>Privacy Policy</a>
             <Link to="/legal">Terms</Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`}>
-              <PhoneIcon className="landing-footer-phone-icon" />
+              <Phone className="landing-footer-phone-icon" size={14} strokeWidth={2.4} />
               {DEMO_NUMBER}
             </a>
           </div>
-          <span className="landing-footer-copy">© {new Date().getFullYear()} Vetra AI</span>
+          <span className="landing-footer-copy">© {new Date().getFullYear()} Vetra</span>
         </div>
       </footer>
     </div>

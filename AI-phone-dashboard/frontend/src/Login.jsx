@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+import VetraMark from "./components/VetraMark";
 import "./Login.css";
 
 export default function Login({ onSwitchToSignup }) {
@@ -68,29 +69,32 @@ export default function Login({ onSwitchToSignup }) {
           </Link>
         </div>
         <div className="login-brand">
-          <div className="login-badge">Vetra AI Receptionist</div>
+          <div className="login-badge">
+            <VetraMark size={18} className="login-badge-mark" />
+            Welcome back
+          </div>
 
-          <h1>Clinical-grade call handling for modern practices.</h1>
+          <h1>Your calls, handled — even when you&apos;re not there.</h1>
 
           <p>
-            Vetra AI answers every call, books appointments, and captures
-            clinical messages, then delivers clear summaries to your team.
+            Sign in to see every call, booking, and follow-up in one simple dashboard.
+            We keep things organised so you can focus on running your business.
           </p>
 
           <div className="login-features">
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Structured call transcripts and summaries</span>
+              <span>Written summary of every call</span>
             </div>
 
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Appointment capture and follow‑up requests</span>
+              <span>Bookings and messages in one place</span>
             </div>
 
             <div className="login-feature">
               <span className="login-feature-dot" />
-              <span>Analytics and safety‑focused call oversight</span>
+              <span>Follow-ups flagged so nothing gets missed</span>
             </div>
           </div>
         </div>
@@ -146,7 +150,7 @@ export default function Login({ onSwitchToSignup }) {
               </button>
 
               <p className="login-security-note">
-                Your session is secured using Supabase auth and encrypted PostgreSQL storage.
+                Your account is protected with secure sign-in and encrypted storage.
               </p>
 
               <div className="login-footer">
