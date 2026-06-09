@@ -73,7 +73,9 @@ export function LanguageSwitcher({ lang, onChange }) {
 export const TRANSLATIONS = {
   en: {
     // Topbar
-    appTitle: "AI Call Dashboard",
+    appTitle: "Vetra Dashboard",
+    dashboardOverview: "Your calls at a glance for today",
+    demoExampleDay: "Example day with Vetra",
     navDashboard: "Dashboard",
     navAnalytics: "Analytics",
     navAppointments: "Appointments",
@@ -154,7 +156,7 @@ export const TRANSLATIONS = {
     unknownSentiment: "Unknown",
     sec: "sec",
     transcript: "Transcript",
-    aiReceptionist: "AI Receptionist",
+    aiReceptionist: "Vetra",
     caller: "Caller",
     noTranscript: "No transcript was captured for this call.",
     appointments: "Appointments",
@@ -180,7 +182,7 @@ export const TRANSLATIONS = {
 
     businessDetailsAddress: "Business details & address",
     generalInfo: "General info",
-    generalInfoPlaceholder: "e.g. Excel Cardiac Care is a specialized medical practice.",
+    generalInfoPlaceholder: "e.g. Sunrise Home Services — we handle repairs and maintenance across the metro area.",
     addressLine1: "Address line 1",
     addressLine1Placeholder: "e.g. 4400 Heritage Trace Pkwy, #208",
     addressLine2: "Address line 2",
@@ -192,7 +194,7 @@ export const TRANSLATIONS = {
     postalCode: "Postal code",
     postalCodePlaceholder: "e.g. 76244",
 
-    aiReceptionistTitle: "AI Receptionist",
+    aiReceptionistTitle: "Greeting & calls",
     greetingMessage: "Greeting message",
     businessHours: "Business hours",
     businessHoursHint: "Display only; set in your phone provider.",
@@ -224,7 +226,7 @@ export const TRANSLATIONS = {
       "You're on the Starter beta plan. Paid plans with detailed usage and billing controls are coming soon.",
 
     securityFooter:
-      "Your data is stored securely using Supabase auth and PostgreSQL. Rotate API keys and enable RLS in your Supabase project for best protection.",
+      "Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.",
 
     notifications: "Notifications",
     notificationEmail: "Notification email",
@@ -261,7 +263,9 @@ export const TRANSLATIONS = {
   },
 
   es: {
-    appTitle: "Panel de Llamadas IA",
+    appTitle: "Panel Vetra",
+    dashboardOverview: "Tus llamadas de hoy de un vistazo",
+    demoExampleDay: "Día de ejemplo con Vetra",
     navDashboard: "Panel",
     navAnalytics: "Analíticas",
     navAppointments: "Citas",
@@ -339,7 +343,7 @@ export const TRANSLATIONS = {
     unknownSentiment: "Desconocido",
     sec: "seg",
     transcript: "Transcripción",
-    aiReceptionist: "Recepcionista IA",
+    aiReceptionist: "Vetra",
     caller: "Llamante",
     noTranscript: "No se capturó transcripción para esta llamada.",
     appointments: "Citas",
@@ -364,7 +368,7 @@ export const TRANSLATIONS = {
 
     businessDetailsAddress: "Datos del negocio y dirección",
     generalInfo: "Info general",
-    generalInfoPlaceholder: "ej. Excel Cardiac Care es una práctica médica especializada.",
+    generalInfoPlaceholder: "ej. Servicios Sol — reparaciones y mantenimiento en toda la zona.",
     addressLine1: "Dirección línea 1",
     addressLine1Placeholder: "ej. 4400 Heritage Trace Pkwy, #208",
     addressLine2: "Dirección línea 2",
@@ -376,7 +380,7 @@ export const TRANSLATIONS = {
     postalCode: "Código postal",
     postalCodePlaceholder: "ej. 76244",
 
-    aiReceptionistTitle: "Recepcionista IA",
+    aiReceptionistTitle: "Saludo y llamadas",
     greetingMessage: "Mensaje de bienvenida",
     businessHours: "Horario comercial",
     businessHoursHint: "Solo lectura; configúralo en tu proveedor de teléfono.",
@@ -408,7 +412,7 @@ export const TRANSLATIONS = {
       "Estás en el plan beta Starter. Los planes de pago con uso detallado y controles de facturación llegarán pronto.",
 
     securityFooter:
-      "Tus datos se almacenan de forma segura con Supabase y PostgreSQL. Rota tus claves API y habilita RLS en tu proyecto de Supabase para mayor protección.",
+      "Tus datos están cifrados y se almacenan en infraestructura de nivel empresarial. Solo tu cuenta puede acceder a tus llamadas y datos del negocio.",
 
     notifications: "Notificaciones",
     notificationEmail: "Email de notificación",
@@ -443,7 +447,9 @@ export const TRANSLATIONS = {
   },
 
   fr: {
-    appTitle: "Tableau de bord IA",
+    appTitle: "Tableau de bord Vetra",
+    dashboardOverview: "Vos appels du jour en un coup d'œil",
+    demoExampleDay: "Journée type avec Vetra",
     navDashboard: "Tableau de bord",
     navAnalytics: "Analytiques",
     navAppointments: "Rendez-vous",
@@ -521,7 +527,7 @@ export const TRANSLATIONS = {
     unknownSentiment: "Inconnu",
     sec: "sec",
     transcript: "Transcription",
-    aiReceptionist: "Réceptionniste IA",
+    aiReceptionist: "Vetra",
     caller: "Appelant",
     noTranscript: "Aucune transcription capturée pour cet appel.",
     appointments: "Rendez-vous",
@@ -546,7 +552,7 @@ export const TRANSLATIONS = {
 
     businessDetailsAddress: "Infos entreprise et adresse",
     generalInfo: "Info générale",
-    generalInfoPlaceholder: "ex. Excel Cardiac Care est un cabinet médical spécialisé.",
+    generalInfoPlaceholder: "ex. Services Sol — réparations et entretien dans toute la région.",
     addressLine1: "Adresse ligne 1",
     addressLine1Placeholder: "ex. 4400 Heritage Trace Pkwy, #208",
     addressLine2: "Adresse ligne 2",
@@ -558,7 +564,7 @@ export const TRANSLATIONS = {
     postalCode: "Code postal",
     postalCodePlaceholder: "ex. 76244",
 
-    aiReceptionistTitle: "Réceptionniste IA",
+    aiReceptionistTitle: "Accueil et appels",
     greetingMessage: "Message d'accueil",
     businessHours: "Heures d'ouverture",
     businessHoursHint: "Affichage seul; à configurer chez votre opérateur.",
@@ -590,7 +596,7 @@ export const TRANSLATIONS = {
       "Vous êtes sur le plan bêta Starter. Des offres payantes avec utilisation détaillée et contrôles de facturation arrivent bientôt.",
 
     securityFooter:
-      "Vos données sont stockées en toute sécurité avec Supabase et PostgreSQL. Faites tourner vos clés API et activez RLS dans votre projet Supabase pour une meilleure protection.",
+      "Vos données sont chiffrées et stockées sur une infrastructure conforme aux standards du secteur. Seul votre compte peut accéder à vos appels et informations.",
 
     notifications: "Notifications",
     notificationEmail: "E-mail de notification",

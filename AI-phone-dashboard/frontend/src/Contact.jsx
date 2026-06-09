@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import VetraLogo from "./components/VetraLogo";
 import "./Contact.css";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const DEMO_NUMBER = "+1 (817) 601-1171";
 
 export default function Contact() {
   const [name, setName] = useState("");
@@ -34,23 +36,27 @@ export default function Contact() {
     <div className="contact-page">
       <header className="contact-header">
         <div className="contact-header-inner">
-          <Link to="/" className="contact-logo">
-            Vetra<span className="contact-logo-ai">.ai</span>
-          </Link>
+          <VetraLogo to="/" />
           <Link to="/" className="contact-back">← Back to home</Link>
         </div>
       </header>
 
       <main className="contact-main">
         <div className="contact-inner">
-          <h1 className="contact-title">Contact & support</h1>
+          <h1 className="contact-title">We&apos;d love to hear from you</h1>
           <p className="contact-intro">
-            Have a question or need help? Send us a message and we’ll get back to you as soon as we can.
+            Questions about Vetra, need help getting set up, or want to see if we&apos;re a good fit?
+            Send us a message and we&apos;ll get back to you as soon as we can. You can also call our
+            demo line at{" "}
+            <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="contact-link">
+              {DEMO_NUMBER}
+            </a>
+            .
           </p>
 
           {sent ? (
             <div className="contact-success">
-              <p><strong>Thanks for reaching out.</strong> We’ve received your message and will reply to the email you provided.</p>
+              <p><strong>Thanks for reaching out.</strong> We&apos;ve received your message and will reply to the email you provided.</p>
               <button type="button" className="contact-cta" onClick={() => setSent(false)}>Send another message</button>
             </div>
           ) : (
@@ -98,7 +104,7 @@ export default function Contact() {
           )}
 
           <p className="contact-fallback">
-            You can also email us directly at{" "}
+            Prefer email? Write to{" "}
             <a href="mailto:support@vetratd.com" className="contact-link">support@vetratd.com</a>.
           </p>
         </div>

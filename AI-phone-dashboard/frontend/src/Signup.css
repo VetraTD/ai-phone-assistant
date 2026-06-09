@@ -2,10 +2,10 @@
   min-height: 100vh;
   width: 100%;
   background:
-    radial-gradient(circle at top left, rgba(45, 110, 255, 0.12), transparent 28%),
-    radial-gradient(circle at bottom center, rgba(31, 209, 184, 0.1), transparent 26%),
-    #08111b;
-  color: #f4f7fb;
+    radial-gradient(circle at top left, rgba(58, 143, 242, 0.1), transparent 28%),
+    radial-gradient(circle at bottom center, rgba(53, 215, 210, 0.08), transparent 26%),
+    var(--vetra-bg);
+  color: var(--vetra-text);
 }
 
 .signup-shell {
@@ -30,22 +30,22 @@
 
 .signup-back-home {
   font-size: 13px;
-  color: #9baabd;
+  color: var(--vetra-muted);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
+  padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(6, 11, 19, 0.7);
+  border: 1px solid var(--vetra-border-strong);
+  background: rgba(255, 255, 255, 0.85);
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.16s ease;
 }
 
 .signup-back-home:hover {
-  background: rgba(10, 20, 34, 0.9);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #e6edf6;
+  background: #fff;
+  border-color: rgba(53, 215, 210, 0.5);
+  color: var(--vetra-accent);
   transform: translateY(-1px);
 }
 
@@ -56,29 +56,37 @@
 .signup-badge {
   display: inline-flex;
   align-items: center;
-  padding: 8px 14px;
+  gap: 10px;
+  padding: 8px 14px 8px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: #c8d3df;
+  border: 1px solid var(--vetra-border-strong);
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c4055;
   font-size: 13px;
+  font-weight: 600;
   margin-bottom: 28px;
+  box-shadow: 0 6px 18px var(--vetra-shadow);
+}
+
+.signup-badge-mark {
+  border-radius: 6px;
 }
 
 .signup-brand h1 {
   margin: 0 0 18px;
-  font-size: clamp(48px, 4.5vw, 72px);
-  line-height: 0.97;
+  font-size: clamp(40px, 4.5vw, 56px);
+  line-height: 1.02;
   letter-spacing: -0.045em;
   max-width: 580px;
+  color: var(--vetra-text);
 }
 
 .signup-brand p {
   margin: 0;
   max-width: 560px;
-  color: #9baabd;
+  color: var(--vetra-muted);
   font-size: 18px;
-  line-height: 1.7;
+  line-height: 1.65;
 }
 
 .signup-features {
@@ -91,7 +99,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #e6edf6;
+  color: #34465a;
   font-size: 16px;
 }
 
@@ -99,8 +107,8 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #46d7cb;
-  box-shadow: 0 0 18px rgba(70, 215, 203, 0.45);
+  background: var(--vetra-teal);
+  box-shadow: 0 0 12px rgba(53, 215, 210, 0.5);
   flex-shrink: 0;
 }
 
@@ -116,7 +124,7 @@
   width: 380px;
   height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(30, 209, 184, 0.18), transparent 68%);
+  background: radial-gradient(circle, rgba(58, 143, 242, 0.16), transparent 68%);
   bottom: -90px;
   right: -40px;
   filter: blur(16px);
@@ -130,10 +138,9 @@
   max-width: 460px;
   padding: 38px;
   border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(8, 14, 24, 0.9);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(12px);
+  border: 1px solid var(--vetra-border);
+  background: var(--vetra-card);
+  box-shadow: 0 28px 70px var(--vetra-shadow-strong);
   opacity: 0;
   transform: translateY(20px);
   animation: signup-card-in 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -148,11 +155,12 @@
   font-size: 30px;
   line-height: 1.1;
   letter-spacing: -0.03em;
+  color: var(--vetra-text);
 }
 
 .signup-card-header p {
   margin: 0;
-  color: #93a4b8;
+  color: var(--vetra-muted);
   font-size: 14px;
   line-height: 1.6;
 }
@@ -170,7 +178,7 @@
 .signup-field label {
   font-size: 13px;
   font-weight: 600;
-  color: #d8e1ec;
+  color: var(--vetra-text);
 }
 
 .signup-field input {
@@ -178,39 +186,39 @@
   height: 52px;
   padding: 0 15px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(6, 11, 19, 0.85);
-  color: #f5f7fb;
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  color: var(--vetra-text);
   font-size: 15px;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .signup-field input::placeholder {
-  color: #70839a;
+  color: var(--vetra-muted-soft);
 }
 
 .signup-field input:focus {
-  border-color: rgba(66, 160, 255, 0.7);
-  box-shadow: 0 0 0 4px rgba(66, 160, 255, 0.12);
-  background: rgba(9, 15, 24, 0.96);
+  border-color: var(--vetra-blue);
+  box-shadow: 0 0 0 4px rgba(58, 143, 242, 0.12);
 }
 
 .signup-button {
   height: 52px;
   border: none;
   border-radius: 14px;
-  background: linear-gradient(135deg, #3576f6, #44d2c8);
+  background: var(--vetra-gradient);
   color: #ffffff;
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-  box-shadow: 0 14px 34px rgba(53, 118, 246, 0.24);
+  box-shadow: 0 14px 34px rgba(58, 143, 242, 0.3);
 }
 
 .signup-button:hover:not(:disabled) {
   transform: translateY(-1px);
+  box-shadow: 0 18px 40px rgba(53, 215, 210, 0.36);
 }
 
 .signup-button:disabled {
@@ -221,24 +229,24 @@
 .signup-security-note {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #7b8fa3;
+  color: var(--vetra-muted-soft);
 }
 
 .signup-error {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 107, 107, 0.25);
-  background: rgba(255, 107, 107, 0.08);
-  color: #ff9191;
+  border: 1px solid rgba(220, 80, 80, 0.35);
+  background: rgba(220, 80, 80, 0.08);
+  color: #b91c1c;
   font-size: 13px;
 }
 
 .signup-success {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(72, 187, 120, 0.3);
-  background: rgba(72, 187, 120, 0.1);
-  color: #8ee6a8;
+  border: 1px solid rgba(53, 215, 210, 0.4);
+  background: rgba(53, 215, 210, 0.1);
+  color: var(--vetra-accent);
   font-size: 13px;
 }
 
@@ -246,15 +254,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #93a4b8;
+  color: var(--vetra-muted);
   font-size: 14px;
 }
 
 .signup-link {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--vetra-accent);
   text-decoration: underline;
+  text-underline-offset: 3px;
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -292,7 +301,7 @@
   }
 
   .signup-brand h1 {
-    font-size: 52px;
+    font-size: 44px;
     max-width: 100%;
   }
 

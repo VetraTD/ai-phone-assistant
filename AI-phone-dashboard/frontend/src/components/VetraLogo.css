@@ -1,0 +1,24 @@
+.vetra-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vetra-text);
+  text-decoration: none;
+}
+
+.vetra-logo-mark {
+  flex-shrink: 0;
+  border-radius: 8px;
+  filter: drop-shadow(0 4px 12px rgba(58, 143, 242, 0.28));
+}
+
+.vetra-logo-word {
+  line-height: 1;
+}
+
+.vetra-logo-footer {
+  font-size: 18px;
+}

@@ -1,9 +1,27 @@
 :root {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Vetra brand tokens */
+  --vetra-bg: #f4f9fe;
+  --vetra-bg-2: #eaf2fb;
+  --vetra-card: #ffffff;
+  --vetra-card-2: #ffffff;
+  --vetra-blue: #3a8ff2;
+  --vetra-teal: #35d7d2;
+  --vetra-accent: #119c97;
+  --vetra-gradient: linear-gradient(135deg, #3a8ff2, #35d7d2);
+  --vetra-text: #0e1c2c;
+  --vetra-muted: #56697e;
+  --vetra-muted-soft: #8497a9;
+  --vetra-border: rgba(14, 28, 44, 0.08);
+  --vetra-border-strong: rgba(14, 28, 44, 0.14);
+  --vetra-shadow: rgba(20, 48, 82, 0.1);
+  --vetra-shadow-strong: rgba(20, 48, 82, 0.16);
+
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #f5f7fb;
-  background: #08111b;
+  color: var(--vetra-text);
+  background: var(--vetra-bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -26,8 +44,8 @@ body,
 body {
   min-width: 320px;
   min-height: 100vh;
-  background: #08111b;
-  color: #f5f7fb;
+  background: var(--vetra-bg);
+  color: var(--vetra-text);
 }
 
 a {
