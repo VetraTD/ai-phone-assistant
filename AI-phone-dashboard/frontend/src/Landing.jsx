@@ -169,6 +169,18 @@ export default function Landing() {
 
   return (
     <div className="landing-page">
+      <div className="landing-announcement" role="region" aria-label="Launch announcement">
+        <div className="landing-announcement-inner">
+          <span className="landing-announcement-label">Launching very soon</span>
+          <span className="landing-announcement-divider" aria-hidden>
+            ·
+          </span>
+          <span className="landing-announcement-price">
+            Plans from <strong>$49/mo</strong>
+          </span>
+        </div>
+      </div>
+
       <header className="landing-header">
         <div className="landing-header-inner">
           <VetraLogo to="/" />

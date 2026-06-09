@@ -10,6 +10,44 @@
   scroll-margin-top: 72px;
 }
 
+/* Launch announcement */
+.landing-announcement {
+  background: var(--vetra-gradient);
+  color: #fff;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+}
+
+.landing-announcement-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.landing-announcement-label {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.landing-announcement-price strong {
+  font-weight: 800;
+}
+
+.landing-announcement-divider {
+  opacity: 0.75;
+}
+
+.landing-announcement-note {
+  opacity: 0.95;
+}
+
 /* Header */
 .landing-header {
   position: sticky;
@@ -1243,6 +1281,20 @@
 }
 
 @media (max-width: 768px) {
+  .landing-announcement {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .landing-announcement-divider {
+    display: none;
+  }
+
+  .landing-announcement-inner {
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .landing-header-inner {
     padding: 10px 14px;
     gap: 16px;
