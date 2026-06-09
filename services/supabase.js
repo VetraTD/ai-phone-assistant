@@ -22,10 +22,11 @@ export function isEnabled() {
 // Per-business config
 // ---------------------------------------------------------------------------
 
-const DEFAULT_GREETING = "Hi, this is your AI receptionist. How can I help you today?";
+const DEFAULT_GREETING = "Hi, how can I help you today?";
 
 /** All task keys the app supports. DB allowed_tasks are filtered to this set. */
 export const SUPPORTED_TASKS = [
+  "appointments",
   "book_appointment",
   "general_question",
   "take_message",
@@ -39,10 +40,17 @@ export const SUPPORTED_TASKS = [
 
 const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
 
+/** When "appointments" is present, it expands to book, check, cancel_reschedule for internal use. */
+const APPOINTMENTS_EXPAND = ["book_appointment", "check_appointment", "cancel_reschedule"];
+
 function normalizeAllowedTasks(raw) {
   if (!Array.isArray(raw)) return DEFAULT_ALLOWED_TASKS;
   const filtered = raw.filter((t) => typeof t === "string" && SUPPORTED_TASKS.includes(t));
-  return filtered.length > 0 ? filtered : DEFAULT_ALLOWED_TASKS;
+  if (filtered.length === 0) return DEFAULT_ALLOWED_TASKS;
+  const expanded = filtered.includes("appointments")
+    ? [...filtered.filter((t) => t !== "appointments"), ...APPOINTMENTS_EXPAND]
+    : filtered;
+  return [...new Set(expanded)];
 }
 
 /** Valid after-hours policy values. */
@@ -63,6 +71,7 @@ export function loadConfig(business) {
     return {
       businessName: "our office",
       greeting: DEFAULT_GREETING,
+      _hasCustomGreeting: false,
       timezone: process.env.TIMEZONE || "America/Chicago",
       businessHours: null,
       transferPhoneNumber: null,
@@ -90,6 +99,10 @@ export function loadConfig(business) {
       languagesSpoken: ["en"],
       bookingUrl: null,
       callerDataPolicy: null,
+      customInstructions: null,
+      ttsVoice: "Polly.Joanna",
+    bargeIn: false,
+    googleTtsVoice: null,
     };
   }
 
@@ -103,6 +116,7 @@ export function loadConfig(business) {
   return {
     businessName: business.name || "our office",
     greeting: business.greeting || DEFAULT_GREETING,
+    _hasCustomGreeting: !!business.greeting,
     timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
     businessHours: business.business_hours || null,
     transferPhoneNumber: business.transfer_phone_number || null,
@@ -130,6 +144,10 @@ export function loadConfig(business) {
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     bookingUrl: business.booking_url || null,
     callerDataPolicy: business.caller_data_policy || null,
+    customInstructions: business.custom_instructions || null,
+    ttsVoice: business.tts_voice || "Polly.Joanna",
+    bargeIn: !!business.barge_in,
+    googleTtsVoice: business.google_tts_voice || null,
   };
 }
 
@@ -359,6 +377,80 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
 }
 
 /**
+ * List scheduled appointments for a caller by business, optional phone and name.
+ * @param {string} businessId
+ * @param {object} [opts]
+ * @param {string} [opts.clientPhone] - Caller phone (matched after normalizing to digits)
+ * @param {string} [opts.clientName] - Caller name (case-insensitive partial match)
+ * @returns {Promise<Array<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}>>}
+ */
+export async function listAppointmentsByCaller(businessId, opts = {}) {
+  if (!supabase || !businessId) return [];
+  let q = supabase
+    .from("appointments")
+    .select("id, client_name, client_phone, scheduled_at, status, notes")
+    .eq("business_id", businessId)
+    .eq("status", "scheduled")
+    .order("scheduled_at", { ascending: true });
+  const phone = typeof opts.clientPhone === "string" ? opts.clientPhone.replace(/\D/g, "").trim() : "";
+  const name = typeof opts.clientName === "string" ? opts.clientName.trim() : "";
+  if (name) {
+    q = q.ilike("client_name", `%${name.replace(/%/g, "\\%")}%`);
+  }
+  const { data: rows, error } = await q;
+  if (error) {
+    console.error("listAppointmentsByCaller error:", error.message);
+    return [];
+  }
+  const list = rows || [];
+  if (phone) {
+    return list.filter((r) => {
+      const p = (r.client_phone || "").replace(/\D/g, "").trim();
+      return p && p.slice(-10) === phone.slice(-10);
+    });
+  }
+  return list;
+}
+
+/**
+ * Update an appointment's status (e.g. cancel).
+ * @param {string} appointmentId
+ * @param {string} status - e.g. 'cancelled'
+ * @param {string} [businessId] - If provided, restricts update to this business
+ * @returns {Promise<boolean>}
+ */
+export async function updateAppointmentStatus(appointmentId, status, businessId) {
+  if (!supabase || !appointmentId) return false;
+  let q = supabase.from("appointments").update({ status }).eq("id", appointmentId);
+  if (businessId) q = q.eq("business_id", businessId);
+  const { data, error } = await q.select("id").maybeSingle();
+  if (error) {
+    console.error("updateAppointmentStatus error:", error.message);
+    return false;
+  }
+  return data != null;
+}
+
+/**
+ * Update an appointment (e.g. reschedule).
+ * @param {string} appointmentId
+ * @param {object} updates - e.g. { scheduled_at: "2026-04-15T10:00:00" }
+ * @param {string} [businessId] - If provided, restricts update to this business
+ * @returns {Promise<boolean>}
+ */
+export async function updateAppointment(appointmentId, updates, businessId) {
+  if (!supabase || !appointmentId || !updates || typeof updates !== "object") return false;
+  let q = supabase.from("appointments").update(updates).eq("id", appointmentId);
+  if (businessId) q = q.eq("business_id", businessId);
+  const { data, error } = await q.select("id").maybeSingle();
+  if (error) {
+    console.error("updateAppointment error:", error.message);
+    return false;
+  }
+  return data != null;
+}
+
+/**
  * Create a customer request (message or callback) from the record_customer_request tool.
  * @param {object} params
  * @param {string} params.businessId
@@ -405,6 +497,46 @@ export async function createCustomerRequest({
 }
 
 /**
+ * Fetch caller context for personalization — recent call history and upcoming appointments.
+ * Used to inject "returning caller" context into the AI prompt and to power
+ * the dashboard caller profile view.
+ * @param {string} businessId
+ * @param {string} callerNumber - Caller's phone number (E.164)
+ * @returns {Promise<{ callCount: number, lastCallSummary: string|null, upcomingAppointments: Array }>}
+ */
+export async function fetchCallerContext(businessId, callerNumber) {
+  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  if (!supabase || !businessId || !callerNumber) return empty;
+
+  // Run both queries in parallel
+  const [callsResult, appointmentsResult] = await Promise.all([
+    supabase
+      .from("calls")
+      .select("id, started_at, summary")
+      .eq("business_id", businessId)
+      .eq("caller_number", callerNumber)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("appointments")
+      .select("id, client_name, scheduled_at, notes")
+      .eq("business_id", businessId)
+      .eq("client_phone", callerNumber)
+      .eq("status", "scheduled")
+      .gte("scheduled_at", new Date().toISOString())
+      .order("scheduled_at", { ascending: true })
+      .limit(5),
+  ]);
+
+  const calls = callsResult.data || [];
+  const upcomingAppointments = appointmentsResult.data || [];
+  const lastCallSummary = calls[0]?.summary || null;
+
+  return { callCount: calls.length, lastCallSummary, upcomingAppointments };
+}
+
+/**
  * Fetch enabled business_knowledge entries for a business, ordered by priority DESC.
  * @param {string} businessId
  * @param {number} [limit=15] - Max entries to return
@@ -424,4 +556,140 @@ export async function fetchBusinessKnowledge(businessId, limit = 15) {
     return [];
   }
   return data || [];
+}
+
+// ---------------------------------------------------------------------------
+// Integrations (per-business: webhooks, athenahealth, mcp)
+// ---------------------------------------------------------------------------
+
+/** Built-in tool names — integration names must not collide with these. */
+export const BUILTIN_TOOL_NAMES = [
+  "set_call_intent",
+  "end_call",
+  "book_appointment",
+  "record_customer_request",
+];
+
+/**
+ * List all integrations for a business.
+ * @param {string} businessId
+ * @param {{ enabledOnly?: boolean }} [opts]
+ * @returns {Promise<Array<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object, created_at: string, updated_at: string }>>}
+ */
+export async function listIntegrationsForBusiness(businessId, opts = {}) {
+  if (!supabase || !businessId) return [];
+  let query = supabase
+    .from("integrations")
+    .select("*")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: true });
+  if (opts.enabledOnly) {
+    query = query.eq("enabled", true);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error("listIntegrationsForBusiness error:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Get a single integration by business and tool name.
+ * @param {string} businessId
+ * @param {string} name - Tool name
+ * @returns {Promise<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object } | null>}
+ */
+export async function getIntegrationByName(businessId, name) {
+  if (!supabase || !businessId || !name) return null;
+  const { data, error } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("name", name)
+    .maybeSingle();
+  if (error) {
+    console.error("getIntegrationByName error:", error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Create or update an integration (upsert by business_id + name).
+ * @param {object} params
+ * @param {string} params.businessId
+ * @param {string} params.provider - webhook | athenahealth | mcp
+ * @param {string} params.name - Tool name (must not be a built-in tool name)
+ * @param {object} params.config
+ * @param {boolean} [params.enabled=true]
+ * @returns {Promise<{ id: string } | null>}
+ */
+export async function createOrUpdateIntegration({
+  businessId,
+  provider,
+  name,
+  config,
+  enabled = true,
+}) {
+  if (!supabase || !businessId || !provider || !name) return null;
+  if (BUILTIN_TOOL_NAMES.includes(name)) {
+    console.error("createOrUpdateIntegration: name cannot be a built-in tool:", name);
+    return null;
+  }
+  const now = new Date().toISOString();
+  const payload = {
+    business_id: businessId,
+    provider,
+    name,
+    config: config || {},
+    enabled: !!enabled,
+    updated_at: now,
+  };
+  const { data, error } = await supabase
+    .from("integrations")
+    .upsert(payload, {
+      onConflict: "business_id,name",
+      ignoreDuplicates: false,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    console.error("createOrUpdateIntegration error:", error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Delete or soft-disable an integration.
+ * @param {string} businessId
+ * @param {string} integrationId
+ * @param {{ softDisable?: boolean }} [opts] - If true, set enabled=false instead of delete
+ * @returns {Promise<boolean>}
+ */
+export async function deleteIntegration(businessId, integrationId, opts = {}) {
+  if (!supabase || !businessId || !integrationId) return false;
+  if (opts.softDisable) {
+    const { error } = await supabase
+      .from("integrations")
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .eq("id", integrationId)
+      .eq("business_id", businessId);
+    if (error) {
+      console.error("deleteIntegration softDisable error:", error.message);
+      return false;
+    }
+    return true;
+  }
+  const { error } = await supabase
+    .from("integrations")
+    .delete()
+    .eq("id", integrationId)
+    .eq("business_id", businessId);
+  if (error) {
+    console.error("deleteIntegration error:", error.message);
+    return false;
+  }
+  return true;
 }

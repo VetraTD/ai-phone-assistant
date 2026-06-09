@@ -29,7 +29,7 @@ if (SMTP_USER && SMTP_PASS) {
     port: SMTP_PORT,
     secure: SMTP_SECURE,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
-    tls: { rejectUnauthorized: false },
+    tls: { rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== "false" },
   });
 }
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {

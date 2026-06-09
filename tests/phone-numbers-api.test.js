@@ -44,13 +44,13 @@ describe("GET /api/businesses/:id/phone-numbers/available", () => {
   });
 
   it("returns 200 with numbers when search succeeds", async () => {
-    mockFetchBusinessById.mockResolvedValue({ id: "biz-1", name: "Test Biz" });
+    mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", name: "Test Biz" });
     mockSearchAvailableNumbers.mockResolvedValue([
       { phone_number: "+15551234567", friendly_name: "(555) 123-4567", locality: "SF", region: "CA" },
     ]);
     const { app } = await import("../server.js");
     const res = await request(app)
-      .get("/api/businesses/biz-1/phone-numbers/available")
+      .get("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/available")
       .query({ country: "US", areaCode: "555" });
 
     expect(res.status).toBe(200);
@@ -62,10 +62,10 @@ describe("GET /api/businesses/:id/phone-numbers/available", () => {
   });
 
   it("returns 502 when Twilio search throws", async () => {
-    mockFetchBusinessById.mockResolvedValue({ id: "biz-1" });
+    mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111" });
     mockSearchAvailableNumbers.mockRejectedValue(new Error("Twilio error"));
     const { app } = await import("../server.js");
-    const res = await request(app).get("/api/businesses/biz-1/phone-numbers/available");
+    const res = await request(app).get("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/available");
 
     expect(res.status).toBe(502);
     expect(res.body.error).toBeDefined();
@@ -90,9 +90,9 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
   });
 
   it("returns 400 when phone_number is missing", async () => {
-    mockFetchBusinessById.mockResolvedValue({ id: "biz-1", phone_number: null });
+    mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", phone_number: null });
     const { app } = await import("../server.js");
-    const res = await request(app).post("/api/businesses/biz-1/phone-numbers/buy").send({});
+    const res = await request(app).post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy").send({});
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/phone_number/i);
@@ -100,12 +100,12 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
 
   it("returns 409 when business already has a different number", async () => {
     mockFetchBusinessById.mockResolvedValue({
-      id: "biz-1",
+      id: "11111111-1111-1111-1111-111111111111",
       phone_number: "+15559999999",
     });
     const { app } = await import("../server.js");
     const res = await request(app)
-      .post("/api/businesses/biz-1/phone-numbers/buy")
+      .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
 
     expect(res.status).toBe(409);
@@ -115,8 +115,8 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
 
   it("returns 200 with phone_number and sid when purchase succeeds", async () => {
     mockFetchBusinessById
-      .mockResolvedValueOnce({ id: "biz-1", phone_number: null })
-      .mockResolvedValueOnce({ id: "biz-1", phone_number: null });
+      .mockResolvedValueOnce({ id: "11111111-1111-1111-1111-111111111111", phone_number: null })
+      .mockResolvedValueOnce({ id: "11111111-1111-1111-1111-111111111111", phone_number: null });
     mockPurchaseNumber.mockResolvedValue({
       sid: "PNabc123",
       phone_number: "+15551234567",
@@ -124,7 +124,7 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
     mockUpdateBusinessPhoneNumber.mockResolvedValue(true);
     const { app } = await import("../server.js");
     const res = await request(app)
-      .post("/api/businesses/biz-1/phone-numbers/buy")
+      .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
 
     expect(res.status).toBe(200);
@@ -137,18 +137,18 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
         statusCallback: "https://test.example.com/twilio/status",
       })
     );
-    expect(mockUpdateBusinessPhoneNumber).toHaveBeenCalledWith("biz-1", "+15551234567");
+    expect(mockUpdateBusinessPhoneNumber).toHaveBeenCalledWith("11111111-1111-1111-1111-111111111111", "+15551234567");
   });
 
   it("returns 200 with sid null when buying same number already on business (idempotent)", async () => {
     mockFetchBusinessById.mockResolvedValue({
-      id: "biz-1",
+      id: "11111111-1111-1111-1111-111111111111",
       phone_number: "+15551234567",
     });
     mockPurchaseNumber.mockResolvedValue({ sid: "PNunused", phone_number: "+15551234567" });
     const { app } = await import("../server.js");
     const res = await request(app)
-      .post("/api/businesses/biz-1/phone-numbers/buy")
+      .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
 
     expect(res.status).toBe(200);
@@ -158,13 +158,13 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
   });
 
   it("returns 400 when Twilio says number no longer available", async () => {
-    mockFetchBusinessById.mockResolvedValue({ id: "biz-1", phone_number: null });
+    mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", phone_number: null });
     const err = new Error("not available");
     err.code = 21608;
     mockPurchaseNumber.mockRejectedValue(err);
     const { app } = await import("../server.js");
     const res = await request(app)
-      .post("/api/businesses/biz-1/phone-numbers/buy")
+      .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
 
     expect(res.status).toBe(400);
@@ -172,7 +172,7 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
   });
 
   it("returns 500 when DB update fails after purchase", async () => {
-    mockFetchBusinessById.mockResolvedValue({ id: "biz-1", phone_number: null });
+    mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", phone_number: null });
     mockPurchaseNumber.mockResolvedValue({
       sid: "PNabc123",
       phone_number: "+15551234567",
@@ -180,7 +180,7 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
     mockUpdateBusinessPhoneNumber.mockResolvedValue(false);
     const { app } = await import("../server.js");
     const res = await request(app)
-      .post("/api/businesses/biz-1/phone-numbers/buy")
+      .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
 
     expect(res.status).toBe(500);
