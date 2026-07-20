@@ -48,7 +48,7 @@ const DEFAULT_CONFIG = {
 // Tool builder — creates function declarations from allowedTasks
 // ---------------------------------------------------------------------------
 
-function buildCallTools(allowedTasks) {
+export function buildCallTools(allowedTasks) {
   const intents = Array.isArray(allowedTasks) && allowedTasks.length > 0
     ? allowedTasks
     : ["general_question"];
@@ -116,35 +116,56 @@ function buildCallTools(allowedTasks) {
     });
   }
 
-  const hasMessageOrCallback =
-    allowedTasks.includes("take_message") || allowedTasks.includes("callback_request");
-  if (hasMessageOrCallback) {
-    declarations.push({
-      name: "record_customer_request",
-      description:
-        "Record a message or callback request after collecting the caller's name, " +
-        "callback number, and message (and preferred callback time for callbacks). " +
-        "Call this when the caller wants to leave a message or have someone call them back.",
-      parameters: {
-        type: "object",
-        properties: {
-          request_type: {
-            type: "string",
-            enum: ["message", "callback"],
-            description: "Whether this is a message to pass along or a request for a callback",
-          },
-          caller_name: { type: "string", description: "Caller's name" },
-          callback_number: { type: "string", description: "Phone number to call back" },
-          message: { type: "string", description: "The message or reason for callback" },
-          preferred_time: {
-            type: "string",
-            description: "When they prefer to be called back (for callback type)",
-          },
+  // record_customer_request is CORE (message-taking is always-on, not
+  // module-gated) — always registered. Previously gated on
+  // take_message/callback_request being in allowedTasks, which meant the
+  // prompt's ESCALATION section could tell the model to call a tool that
+  // wasn't actually registered (phantom-tool bug) whenever a business had
+  // neither task enabled.
+  declarations.push({
+    name: "record_customer_request",
+    description:
+      "Record a message or callback request after collecting the caller's name, " +
+      "callback number, and message (and preferred callback time for callbacks). " +
+      "Call this when the caller wants to leave a message or have someone call them back.",
+    parameters: {
+      type: "object",
+      properties: {
+        request_type: {
+          type: "string",
+          enum: ["message", "callback"],
+          description: "Whether this is a message to pass along or a request for a callback",
         },
-        required: ["request_type"],
+        caller_name: { type: "string", description: "Caller's name" },
+        callback_number: { type: "string", description: "Phone number to call back" },
+        message: { type: "string", description: "The message or reason for callback" },
+        preferred_time: {
+          type: "string",
+          description: "When they prefer to be called back (for callback type)",
+        },
       },
-    });
-  }
+      required: ["request_type"],
+    },
+  });
+
+  // request_transfer is CORE (transfer-to-human is always-on) — always
+  // registered, gated at execution time (see tools.js) on ctx.transferAllowed
+  // rather than on allowedTasks, so it's available in any language the
+  // caller asks in, not just via the English regex fast-path.
+  declarations.push({
+    name: "request_transfer",
+    description:
+      "Transfer the caller to a human. Use when the caller asks for a person/" +
+      "representative/manager in any language, or when you cannot help and " +
+      "transfer is appropriate.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: { type: "string", description: "Brief reason for the transfer" },
+      },
+      required: ["reason"],
+    },
+  });
 
   return { functionDeclarations: declarations };
 }
@@ -329,8 +350,11 @@ function buildDbAppointmentTools(config, extras) {
     (i) => i.enabled && (i.provider === "athenahealth" /* future EHR */)
   );
   const allowed = config?.allowedTasks || [];
+  // "appointments" is a legacy bundle name — normalizeAllowedTasks always
+  // expands it to the three appointment MODULE_TASKS before config reaches
+  // here, so gating is purely module-name-based now.
   const hasAppointmentTask =
-    allowed.includes("cancel_reschedule") || allowed.includes("appointments");
+    allowed.includes("cancel_reschedule") || allowed.includes("check_appointment");
   if (hasEhr || !hasAppointmentTask) return { functionDeclarations: [] };
   return { functionDeclarations: [...DB_APPOINTMENT_DECLARATIONS] };
 }
@@ -456,6 +480,9 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   }
 
   // === CAPABILITIES ===
+  // transferAllowed also gates the ESCALATION section below; computed once
+  // here so both sections read the same value.
+  const transferAllowed = extras.transferAllowed !== false;
   const caps = [];
   const hasAllAppointmentTasks =
     config.allowedTasks.includes("book_appointment") &&
@@ -476,13 +503,15 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   }
   if (config.allowedTasks.includes("general_question"))
     caps.push("answer general questions about the business");
-  if (config.allowedTasks.includes("take_message")) caps.push("take messages");
-  if (config.allowedTasks.includes("callback_request")) caps.push("schedule callbacks");
+  // take_message / callback_request are CORE — always available, not gated
+  // on allowedTasks.
+  caps.push("take messages and schedule callbacks for follow-up");
   if (config.allowedTasks.includes("quote_request"))
     caps.push("discuss pricing/quotes (take details for follow-up, no commitments)");
   if (config.allowedTasks.includes("directions_location")) caps.push("provide address and directions");
   if (config.allowedTasks.includes("form_document_request"))
     caps.push("explain how to get forms or documents");
+  if (transferAllowed) caps.push("transfer the caller to a person when needed");
   if (caps.length > 0) {
     sections.push(`=== CAPABILITIES ===\nYou can: ${caps.join(", ")}.`);
   }
@@ -495,15 +524,15 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += `- NEVER say "I've booked your appointment" or "Your message has been recorded" unless the corresponding tool confirmed success.\n`;
   toolContract += `- Call set_call_intent as soon as you identify why the caller is calling.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
-  toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.`;
+  toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.\n`;
+  toolContract += `- If the caller asks for a person, representative, or manager — in any language — briefly let them know you're transferring them, then call request_transfer with a short reason.`;
   sections.push(toolContract);
 
   // === ESCALATION ===
   let escalation = `=== ESCALATION ===\n`;
-  const transferAllowed = extras.transferAllowed !== false;
   if (transferAllowed) {
-    escalation += `If the caller explicitly asks to speak with a person, let them know you can transfer them.\n`;
-    escalation += `If the caller seems frustrated or you cannot help after 2+ attempts, proactively offer a transfer.`;
+    escalation += `If the caller explicitly asks to speak with a person, let them know you can transfer them, then call request_transfer.\n`;
+    escalation += `If the caller seems frustrated or you cannot help after 2+ attempts, proactively offer a transfer and call request_transfer if they accept.`;
   } else {
     escalation += `Transfers are not available right now.`;
   }
@@ -786,6 +815,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let endCallArgs = null;
   let customerRequestArgs = null;
   let selectedAppointmentIdFromTurn = null;
+  let transferRequested = null;
   const toolResults = [];
   let fullText = "";
   let round = 0;
@@ -818,8 +848,8 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     if (functionCalls.length === 0 || round >= MAX_FC_ROUNDS) break;
     round++;
 
-    // Execute function calls — delegated to services/tools.js (pure move,
-    // see executeToolCall for the per-tool logic and TODO(phase2) markers).
+    // Execute function calls — delegated to services/tools.js (see
+    // executeToolCall for the per-tool logic).
     const results = [];
     const toolCtx = {
       businessId: extras?.businessId || null,
@@ -827,6 +857,8 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       callId: extras?.callId || null,
       integrations: extras?.integrations || [],
       selectedAppointmentId: extras?.selectedAppointmentId || null,
+      step,
+      transferAllowed: extras?.transferAllowed !== false,
       config: cfg,
     };
     for (const fc of functionCalls) {
@@ -838,6 +870,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       if ("endCallArgs" in stateEffects) endCallArgs = stateEffects.endCallArgs;
       if ("customerRequestArgs" in stateEffects) customerRequestArgs = stateEffects.customerRequestArgs;
       if ("selectedAppointmentId" in stateEffects) selectedAppointmentIdFromTurn = stateEffects.selectedAppointmentId;
+      if ("transferRequested" in stateEffects) transferRequested = stateEffects.transferRequested;
       if (stateEffects.toolCallEvent) yield { toolCall: stateEffects.toolCallEvent };
     }
 
@@ -867,7 +900,16 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
 
   yield {
     done: true,
-    reply: { text: fullText, appointmentArgs, intentArgs, endCallArgs, customerRequestArgs, toolResults, selectedAppointmentId: selectedAppointmentIdFromTurn },
+    reply: {
+      text: fullText,
+      appointmentArgs,
+      intentArgs,
+      endCallArgs,
+      customerRequestArgs,
+      toolResults,
+      selectedAppointmentId: selectedAppointmentIdFromTurn,
+      transferRequested,
+    },
   };
 }
 

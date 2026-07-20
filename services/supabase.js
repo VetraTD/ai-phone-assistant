@@ -25,13 +25,16 @@ export function isEnabled() {
 
 const DEFAULT_GREETING = "Hi, how can I help you today?";
 
-/** All task keys the app supports. DB allowed_tasks are filtered to this set. */
-export const SUPPORTED_TASKS = [
-  "appointments",
+/**
+ * Task model: CORE tasks are always available on every call, regardless of
+ * per-business configuration — general Q&A, message-taking, callback
+ * requests, and transferring to a human are baseline receptionist behavior,
+ * not opt-in features. MODULE tasks are the opt-in capabilities a business
+ * can turn on (e.g. appointment booking).
+ */
+export const CORE_TASKS = ["general_question", "take_message", "callback_request", "transfer_human"];
+export const MODULE_TASKS = [
   "book_appointment",
-  "general_question",
-  "take_message",
-  "callback_request",
   "check_appointment",
   "cancel_reschedule",
   "quote_request",
@@ -39,19 +42,31 @@ export const SUPPORTED_TASKS = [
   "form_document_request",
 ];
 
-const DEFAULT_ALLOWED_TASKS = ["book_appointment", "general_question"];
+/** Default modules for a business with no allowed_tasks configured. */
+const DEFAULT_MODULE_TASKS = ["book_appointment"];
 
-/** When "appointments" is present, it expands to book, check, cancel_reschedule for internal use. */
+/** Legacy bundle: "appointments" expands to the three appointment modules. */
 const APPOINTMENTS_EXPAND = ["book_appointment", "check_appointment", "cancel_reschedule"];
 
-function normalizeAllowedTasks(raw) {
-  if (!Array.isArray(raw)) return DEFAULT_ALLOWED_TASKS;
-  const filtered = raw.filter((t) => typeof t === "string" && SUPPORTED_TASKS.includes(t));
-  if (filtered.length === 0) return DEFAULT_ALLOWED_TASKS;
-  const expanded = filtered.includes("appointments")
-    ? [...filtered.filter((t) => t !== "appointments"), ...APPOINTMENTS_EXPAND]
-    : filtered;
-  return [...new Set(expanded)];
+/**
+ * Normalize a business's raw `allowed_tasks` DB value into the full
+ * effective task list: CORE tasks (always present) + whichever MODULE tasks
+ * the business opted into. Legacy `"appointments"` expands to the three
+ * appointment modules; legacy core entries (general_question, take_message,
+ * callback_request) present in old DB rows are dropped silently — they're
+ * no longer module-gated.
+ * @param {Array<string>|null|undefined} raw - business.allowed_tasks from the DB
+ * @returns {Array<string>}
+ */
+export function normalizeAllowedTasks(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [...CORE_TASKS, ...DEFAULT_MODULE_TASKS];
+  }
+  const expanded = raw.includes("appointments")
+    ? [...raw.filter((t) => t !== "appointments"), ...APPOINTMENTS_EXPAND]
+    : raw;
+  const modules = expanded.filter((t) => typeof t === "string" && MODULE_TASKS.includes(t));
+  return [...CORE_TASKS, ...new Set(modules)];
 }
 
 /** Valid after-hours policy values. */
@@ -76,7 +91,7 @@ export function loadConfig(business) {
       timezone: process.env.TIMEZONE || "America/Chicago",
       businessHours: null,
       transferPhoneNumber: null,
-      allowedTasks: DEFAULT_ALLOWED_TASKS,
+      allowedTasks: normalizeAllowedTasks(null),
       mainPhone: null,
       generalInfo: null,
       recordingDisclosureEnabled: false,

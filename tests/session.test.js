@@ -431,6 +431,44 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(ws.closeCount).toBe(1);
   });
 
+  it("9. done event with transferRequested effect triggers the transfer flow (doTransfer)", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Of course, transferring you now." },
+      {
+        type: "done",
+        reply: {
+          text: "Of course, transferring you now.",
+          transferRequested: { reason: "caller asked for a person" },
+          toolResults: [{ name: "request_transfer", success: true, message: "ok" }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    // Non-English phrasing — must NOT match the English TRANSFER_TRIGGERS
+    // regex escape-hatch, so this exercises the tool-driven path only.
+    tm.opts.onTurnEnd("quiero hablar con una persona");
+    await flush();
+    await flush();
+    await flush(); // doTransfer() is fire-and-forget from applyReply
+
+    // doTransfer's own "Transferring you now. Please hold." line was spoken
+    // (a TTS turn distinct from the model's own reply turn).
+    const wroteTransferLine = H.ttsTurns.some((t) =>
+      t.write.mock.calls.some((c) => /Transferring you now/i.test(c[0] || ""))
+    );
+    expect(wroteTransferLine).toBe(true);
+
+    const state = callState.getState(sid);
+    expect(state.step).toBe("ending");
+  });
+
   it("8. silence timer does not fire a nudge while audioOut.isPlaying() is true", async () => {
     vi.useFakeTimers();
     try {
