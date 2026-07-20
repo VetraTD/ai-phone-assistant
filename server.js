@@ -27,6 +27,7 @@ import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
+import { getLatencyStats } from "./lib/voice/metrics.js";
 import {
   isValidUUID,
   isValidE164,
@@ -1012,6 +1013,17 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
         : err.message || "Failed to purchase phone number";
     return res.status(400).json({ error: message });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Dev-only: per-turn voice pipeline latency stats (Phase 0 instrumentation)
+// ---------------------------------------------------------------------------
+
+app.get("/api/debug/latency", (req, res) => {
+  if (process.env.DEBUG_ENDPOINTS !== "true") {
+    return res.status(404).end();
+  }
+  res.json(getLatencyStats());
 });
 
 // ---------------------------------------------------------------------------
