@@ -667,10 +667,68 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const state = callState.getState(sid);
     expect(state.step).toBe("ending");
 
+    // The redial must NOT have happened yet: updating the call's TwiML tears
+    // down the media stream, so firing it here would cut the announcement off
+    // and leave the caller listening to silence.
+    expect(mockTwilioCallsUpdate).not.toHaveBeenCalled();
+
+    // Twilio echoes the announcement's playback mark -> now we redial.
+    ws.emit({ event: "mark", mark: { name: "transfer-done" } });
+    await flush();
+    await flush();
+
+    expect(mockTwilioCallsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ twiml: expect.stringContaining("<Dial>+15551234567</Dial>") })
+    );
+
     // Real transferred status (Part 1) — the redial succeeded (mocked
     // "twilio" above), so the call must be marked transferred in the DB.
     const db = await import("../services/supabase.js");
     expect(db.markCallTransferred).toHaveBeenCalledWith(sid);
+  });
+
+  it("9c. transfer redials on the CLOSE_FALLBACK_MS backstop if the playback mark never echoes back", async () => {
+    vi.useFakeTimers();
+    try {
+      H.llmFactory = () => makeGen([
+        {
+          type: "done",
+          reply: {
+            text: "",
+            transferRequested: { reason: "caller asked for a person" },
+            toolResults: [{ name: "request_transfer", success: true, message: "ok" }],
+          },
+        },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-transfer-${++sidCounter}`;
+      ws.emit({ event: "start", start: { callSid: sid, streamSid: "MZ9", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } } });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("quiero hablar con una persona");
+      await vi.advanceTimersByTimeAsync(1);
+
+      // Audio never finished playing (no mark echoed) — still waiting.
+      expect(mockTwilioCallsUpdate).not.toHaveBeenCalled();
+
+      // The backstop fires so the caller is never stranded on a promise of a
+      // transfer that silently never happens.
+      await vi.advanceTimersByTimeAsync(9000);
+
+      // redialForTransfer dynamically imports "twilio"; module resolution
+      // needs real ticks, which advanceTimersByTimeAsync (microtasks only)
+      // cannot provide — hand the clock back before asserting.
+      vi.useRealTimers();
+      await flush();
+      await flush();
+
+      expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("9b. transferRequested skips the redundant hardcoded announcement when the model already spoke this turn", async () => {
@@ -712,6 +770,18 @@ describe("session.js — v2 pipeline orchestrator", () => {
     // the extra spoken line that's skipped.
     const state = callState.getState(sid);
     expect(state.step).toBe("ending");
+
+    // Still deferred: the model's OWN announcement has to finish playing
+    // before the redial tears the stream down, otherwise the caller hears its
+    // sentence chopped off mid-word.
+    expect(mockTwilioCallsUpdate).not.toHaveBeenCalled();
+
+    ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+    await flush();
+    await flush();
+
+    expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
+    expect(ws.closeCount).toBe(0); // the Twilio redial tears the stream down, not us
   });
 
   it("8. silence timer does not fire a nudge while audioOut.isPlaying() is true", async () => {
