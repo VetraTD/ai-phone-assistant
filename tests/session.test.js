@@ -17,6 +17,7 @@ const H = vi.hoisted(() => {
     audioOutInstances: [],
     turnManagerInstances: [],
     metricsInstances: [],
+    fallbackFlowInstances: [],
     // controllable runLlmTurn factory: () => async-iterable
     llmFactory: null,
     // spies for services
@@ -115,6 +116,22 @@ vi.mock("../lib/voice/llmTurn.js", () => ({
   }),
 }));
 
+// ---- lib/voice/fallbackFlow.js ----------------------------------------------
+vi.mock("../lib/voice/fallbackFlow.js", () => ({
+  createFallbackFlow: vi.fn((opts) => {
+    const inst = {
+      opts,
+      _active: false,
+      start: vi.fn(function () { inst._active = true; }),
+      handleInput: vi.fn(),
+      isActive: vi.fn(function () { return inst._active; }),
+      getState: vi.fn(() => "awaiting_name"),
+    };
+    H.fallbackFlowInstances.push(inst);
+    return inst;
+  }),
+}));
+
 // ---- services --------------------------------------------------------------
 vi.mock("../services/supabase.js", () => ({
   isEnabled: vi.fn(() => true),
@@ -163,6 +180,7 @@ vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 import { handleVoiceSessionConnection } from "../lib/voice/session.js";
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
+import { runLlmTurn } from "../lib/voice/llmTurn.js";
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -221,6 +239,7 @@ beforeEach(() => {
   H.audioOutInstances.length = 0;
   H.turnManagerInstances.length = 0;
   H.metricsInstances.length = 0;
+  H.fallbackFlowInstances.length = 0;
   H.llmFactory = null;
   vi.clearAllMocks();
   process.env.ELEVENLABS_DEFAULT_VOICE_ID = "voice-xyz";
@@ -377,6 +396,45 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     const state = callState.getState(sid);
     expect(state.consecutiveFailures).toBe(1);
+  });
+
+  it("5b. 2 consecutive LLM failures enter the no-LLM fallback flow; further finals route to it, never to the LLM", async () => {
+    H.llmFactory = () => makeThrowingGen(Object.assign(new Error("down"), { code: "LLM_TIMEOUT" }));
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+
+    // Failure #1 — should NOT enter the fallback flow yet.
+    tm.opts.onTurnEnd("what are your hours today please");
+    await flush();
+    await flush();
+    expect(H.fallbackFlowInstances.length).toBe(0);
+    expect(callState.getState(sid).consecutiveFailures).toBe(1);
+
+    // Failure #2 — crosses the threshold, enters the fallback flow.
+    tm.opts.onTurnEnd("can you check my appointment please");
+    await flush();
+    await flush();
+
+    expect(H.fallbackFlowInstances.length).toBe(1);
+    const flow = H.fallbackFlowInstances[0];
+    expect(flow.start).toHaveBeenCalledTimes(1);
+    expect(callState.getState(sid).consecutiveFailures).toBe(2);
+
+    // A third caller final must be routed straight to the flow, bypassing
+    // the LLM entirely (no new runLlmTurn call, no cleanTranscript filter
+    // dropping a short reply — e.g. a bare "yes"/"no").
+    const llmCallsBefore = runLlmTurn.mock.calls.length;
+    tm.opts.onTurnEnd("my name is Jordan Lee");
+    await flush();
+
+    expect(flow.handleInput).toHaveBeenCalledWith("my name is Jordan Lee");
+    expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore);
   });
 
   it("6. STT terminal failure: apology spoken then graceful close", async () => {
