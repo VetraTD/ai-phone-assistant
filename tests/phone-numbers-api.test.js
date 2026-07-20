@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import request from "supertest";
 
 const mockFetchBusinessById = vi.fn();
@@ -16,13 +16,24 @@ vi.mock("../services/twilioNumbers.js", () => ({
   purchaseNumber: (...args) => mockPurchaseNumber(...args),
 }));
 
+// server.js's cold import pulls in a large dependency graph (express, twilio,
+// ws, gemini/mediaStream/session, etc.) — ~2s+ even outside vitest, more
+// under concurrent worker load. Importing it lazily inside whichever `it()`
+// happens to run first left that test racing the default 5000ms test
+// timeout (observed flaky: intermittent "Test timed out in 5000ms" here and
+// in tests/degradedMode.test.js). Hoist to a beforeAll with a generous
+// hookTimeout so the cost is paid once, during setup, deterministically.
+let app;
+beforeAll(async () => {
+  ({ app } = await import("../server.js"));
+}, 20000);
+
 describe("GET /api/businesses/:id/phone-numbers/available", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns 400 when business id is missing", async () => {
-    const { app } = await import("../server.js");
     // Path with empty :id segment (double slash) - Express may return 404 if route does not match
     const res = await request(app)
       .get("/api/businesses//phone-numbers/available")
@@ -34,7 +45,6 @@ describe("GET /api/businesses/:id/phone-numbers/available", () => {
 
   it("returns 404 when business not found", async () => {
     mockFetchBusinessById.mockResolvedValue(null);
-    const { app } = await import("../server.js");
     const res = await request(app).get(
       "/api/businesses/00000000-0000-0000-0000-000000000000/phone-numbers/available"
     );
@@ -48,7 +58,6 @@ describe("GET /api/businesses/:id/phone-numbers/available", () => {
     mockSearchAvailableNumbers.mockResolvedValue([
       { phone_number: "+15551234567", friendly_name: "(555) 123-4567", locality: "SF", region: "CA" },
     ]);
-    const { app } = await import("../server.js");
     const res = await request(app)
       .get("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/available")
       .query({ country: "US", areaCode: "555" });
@@ -64,7 +73,6 @@ describe("GET /api/businesses/:id/phone-numbers/available", () => {
   it("returns 502 when Twilio search throws", async () => {
     mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111" });
     mockSearchAvailableNumbers.mockRejectedValue(new Error("Twilio error"));
-    const { app } = await import("../server.js");
     const res = await request(app).get("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/available");
 
     expect(res.status).toBe(502);
@@ -80,7 +88,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
 
   it("returns 404 when business not found", async () => {
     mockFetchBusinessById.mockResolvedValue(null);
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/00000000-0000-0000-0000-000000000000/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
@@ -91,7 +98,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
 
   it("returns 400 when phone_number is missing", async () => {
     mockFetchBusinessById.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", phone_number: null });
-    const { app } = await import("../server.js");
     const res = await request(app).post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy").send({});
 
     expect(res.status).toBe(400);
@@ -103,7 +109,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
       id: "11111111-1111-1111-1111-111111111111",
       phone_number: "+15559999999",
     });
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
@@ -122,7 +127,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
       phone_number: "+15551234567",
     });
     mockUpdateBusinessPhoneNumber.mockResolvedValue(true);
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
@@ -146,7 +150,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
       phone_number: "+15551234567",
     });
     mockPurchaseNumber.mockResolvedValue({ sid: "PNunused", phone_number: "+15551234567" });
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
@@ -162,7 +165,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
     const err = new Error("not available");
     err.code = 21608;
     mockPurchaseNumber.mockRejectedValue(err);
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });
@@ -178,7 +180,6 @@ describe("POST /api/businesses/:id/phone-numbers/buy", () => {
       phone_number: "+15551234567",
     });
     mockUpdateBusinessPhoneNumber.mockResolvedValue(false);
-    const { app } = await import("../server.js");
     const res = await request(app)
       .post("/api/businesses/11111111-1111-1111-1111-111111111111/phone-numbers/buy")
       .send({ phone_number: "+15551234567" });

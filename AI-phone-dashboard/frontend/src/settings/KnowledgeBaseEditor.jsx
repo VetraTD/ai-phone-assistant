@@ -154,8 +154,13 @@ export default function KnowledgeBaseEditor({ businessId }) {
                 type="number"
                 min={0}
                 max={100}
+                step="1"
                 value={form.priority}
-                onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const priority = raw === "" ? "" : Math.trunc(Number(raw));
+                  setForm((f) => ({ ...f, priority }));
+                }}
               />
             </div>
           </div>

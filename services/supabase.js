@@ -226,10 +226,24 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
  */
 export async function completeCall(callSid, status, durationSeconds) {
   if (!supabase) return;
+  // A transfer already marked this call's status='transferred' via
+  // markCallTransferred() — the Twilio "completed" status callback that
+  // follows for the same (now-redialed) call leg must not clobber that back
+  // to 'completed'. Still record ended_at/duration_seconds either way.
+  const { data: existing, error: fetchError } = await supabase
+    .from("calls")
+    .select("status")
+    .eq("twilio_call_sid", callSid)
+    .maybeSingle();
+  if (fetchError) {
+    log.error("db_error", { callSid, operation: "completeCall_fetch", error: fetchError.message });
+  }
   const updates = {
-    status,
     ended_at: new Date().toISOString(),
   };
+  if (existing?.status !== "transferred") {
+    updates.status = status;
+  }
   if (durationSeconds != null) {
     updates.duration_seconds = Number(durationSeconds);
   }
@@ -240,6 +254,24 @@ export async function completeCall(callSid, status, durationSeconds) {
   if (error) {
     log.error("db_error", { callSid, operation: "completeCall", error: error.message });
     captureException(new Error(error.message), { table: "calls", op: "update_complete" });
+  }
+}
+
+/**
+ * Mark a call as transferred to a human. Kept distinct from completeCall so
+ * a later Twilio "completed" status callback doesn't overwrite this — see
+ * the transferred-status guard in completeCall above.
+ * @param {string} callSid - Twilio Call SID
+ */
+export async function markCallTransferred(callSid) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("calls")
+    .update({ status: "transferred" })
+    .eq("twilio_call_sid", callSid);
+  if (error) {
+    log.error("db_error", { callSid, operation: "markCallTransferred", error: error.message });
+    captureException(new Error(error.message), { table: "calls", op: "update_transferred" });
   }
 }
 

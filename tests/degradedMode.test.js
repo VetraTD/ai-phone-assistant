@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import request from "supertest";
 
 // Twilio signature validation is orthogonal to what this file tests — disable
@@ -24,6 +24,18 @@ vi.mock("../services/notifications.js", () => ({
 
 import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";
 import { setDegraded, clearDegraded, isDegraded } from "../lib/voice/health.js";
+
+// server.js's cold import pulls in a large dependency graph (express, twilio,
+// ws, gemini/mediaStream/session, etc.) — ~2s+ even outside vitest, more
+// under concurrent worker load. Importing it lazily inside whichever `it()`
+// happens to run first left that test racing the default 5000ms test
+// timeout (observed flaky: intermittent "Test timed out in 5000ms" here and
+// in tests/phone-numbers-api.test.js). Hoist to a beforeAll with a generous
+// hookTimeout so the cost is paid once, during setup, deterministically.
+let app;
+beforeAll(async () => {
+  ({ app } = await import("../server.js"));
+}, 20000);
 
 describe("lib/voice/health.js — degraded-mode flag", () => {
   afterEach(() => clearDegraded());
@@ -67,7 +79,6 @@ describe("POST /twilio/voice — degraded mode", () => {
 
   it("returns the voicemail-fallback TwiML instead of <Connect><Stream> when degraded", async () => {
     setDegraded("tts_down");
-    const { app } = await import("../server.js");
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -81,7 +92,6 @@ describe("POST /twilio/voice — degraded mode", () => {
   });
 
   it("returns <Connect><Stream> as normal when not degraded", async () => {
-    const { app } = await import("../server.js");
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -103,7 +113,6 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
   it("looks up the business by the dialed number and records a customer request + notifies", async () => {
     mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
     mockCreateCustomerRequest.mockResolvedValue("req-1");
-    const { app } = await import("../server.js");
 
     const res = await request(app)
       .post("/twilio/voicemail")
@@ -138,7 +147,6 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
 
   it("skips gracefully (still 200) when no business matches the dialed number", async () => {
     mockLookupBusinessByPhone.mockResolvedValue(null);
-    const { app } = await import("../server.js");
 
     const res = await request(app)
       .post("/twilio/voicemail")

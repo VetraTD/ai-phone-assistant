@@ -43,13 +43,9 @@ router.get("/api/calls", authenticate, async (req, res) => {
     where.push(`business_id = ${addParam(userBusinessId)}`);
 
     if (status && status !== "all") {
-      if (status === "transferred") {
-        where.push(`(status = 'transferred' OR (status = 'completed' AND summary IS NOT NULL AND summary ILIKE '%transfer%'))`);
-      } else if (status === "completed") {
-        where.push(`(status = 'completed' AND (summary IS NULL OR summary NOT ILIKE '%transfer%'))`);
-      } else {
-        where.push(`status = ${addParam(status)}`);
-      }
+      // status is set authoritatively by markCallTransferred()/completeCall()
+      // now (see services/supabase.js) — no summary-text inference needed.
+      where.push(`status = ${addParam(status)}`);
     }
 
     const callerSearch = sanitizeString(caller, 64);
@@ -60,7 +56,7 @@ router.get("/api/calls", authenticate, async (req, res) => {
 
 
 
-    const { sentiment, has_summary } = req.query;
+    const { sentiment, has_summary, outcome } = req.query;
 
 // sentiment filter
 if (sentiment && sentiment !== "all") {
@@ -69,6 +65,11 @@ if (sentiment && sentiment !== "all") {
   } else {
     where.push(`sentiment = ${addParam(sentiment)}`);
   }
+}
+
+// outcome filter (e.g. ?outcome=spam)
+if (outcome && outcome !== "all") {
+  where.push(`outcome = ${addParam(outcome)}`);
 }
 
 // summary present / not present
@@ -130,9 +131,13 @@ if (needs_followup === "true") {
     `;
 
     const r = await pool.query(sql, params);
+    // inferred_transferred is a legacy field name kept for frontend
+    // compatibility — it now just mirrors the authoritative status column
+    // (set by markCallTransferred()/completeCall(), see services/supabase.js)
+    // instead of regexing the summary text for "transfer".
     const rows = (r.rows || []).map((row) => ({
       ...row,
-      inferred_transferred: !!(row.summary && /transfer/i.test(String(row.summary))),
+      inferred_transferred: row.status === "transferred",
     }));
     res.json({ calls: rows, total });
   } catch (err) {
@@ -182,8 +187,9 @@ router.get("/api/calls/:id", authenticate, async (req, res) => {
     );
 
     const call = callRes.rows[0];
-    const summary = call?.summary;
-    const inferredTransferred = !!(summary && /transfer/i.test(String(summary)));
+    // See the /api/calls list handler above — mirrors the authoritative
+    // status column rather than regexing the summary text.
+    const inferredTransferred = call?.status === "transferred";
     res.json({
       call: { ...call, inferred_transferred: inferredTransferred },
       transcript: transcriptRes.rows,

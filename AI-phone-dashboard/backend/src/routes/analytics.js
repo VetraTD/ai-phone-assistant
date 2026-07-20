@@ -41,7 +41,7 @@ router.get("/api/analytics/:businessId", authenticate, async (req, res) => {
       FROM calls
       WHERE business_id = $1
       AND started_at::date = CURRENT_DATE
-      AND (status = 'transferred' OR (status = 'completed' AND summary IS NOT NULL AND summary ILIKE '%transfer%'))
+      AND status = 'transferred'
     `, [businessId]);
 
     res.json({
@@ -196,8 +196,9 @@ router.get("/api/analytics-breakdown", authenticate, async (req, res) => {
       [businessId]
     );
 
-    // Call status breakdown (completed, transferred, missed, etc.)
-    // Infer "transferred" from completed calls whose summary mentions transfer (when status isn't already 'transferred')
+    // Call status breakdown (completed, transferred, missed, etc.) — status
+    // is set authoritatively by markCallTransferred()/completeCall() now, no
+    // summary-text inference needed.
     const statusCountsRes = await pool.query(
       `SELECT
         COUNT(*) FILTER (WHERE status = 'completed') AS completed,
@@ -209,11 +210,6 @@ router.get("/api/analytics-breakdown", authenticate, async (req, res) => {
       FROM calls WHERE business_id = $1 AND started_at >= ${since}`,
       [businessId]
     );
-    const inferredTransferredRes = await pool.query(
-      `SELECT COUNT(*) AS cnt FROM calls WHERE business_id = $1 AND started_at >= ${since} AND status = 'completed' AND summary IS NOT NULL AND summary ILIKE '%transfer%'`,
-      [businessId]
-    );
-    const inferredTransferred = Number(inferredTransferredRes.rows[0]?.cnt ?? 0);
 
     // Calls by day of week (1=Mon .. 7=Sun) for the period
     const weekdayRes = await pool.query(
@@ -309,11 +305,14 @@ router.get("/api/analytics-breakdown", authenticate, async (req, res) => {
       status_counts: (() => {
         const r = statusCountsRes.rows[0];
         if (!r) return { completed: 0, transferred: 0, failed: 0, no_answer: 0, busy: 0, in_progress: 0 };
-        const completedRaw = Number(r.completed ?? 0);
-        const transferredRaw = Number(r.transferred ?? 0);
-        const completed = Math.max(0, completedRaw - inferredTransferred);
-        const transferred = transferredRaw + inferredTransferred;
-        return { completed, transferred, failed: Number(r.failed ?? 0), no_answer: Number(r.no_answer ?? 0), busy: Number(r.busy ?? 0), in_progress: Number(r.in_progress ?? 0) };
+        return {
+          completed: Number(r.completed ?? 0),
+          transferred: Number(r.transferred ?? 0),
+          failed: Number(r.failed ?? 0),
+          no_answer: Number(r.no_answer ?? 0),
+          busy: Number(r.busy ?? 0),
+          in_progress: Number(r.in_progress ?? 0),
+        };
       })(),
       caller_mix: (() => {
         const r = callerMixRes.rows[0];

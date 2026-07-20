@@ -175,11 +175,13 @@ vi.mock("../services/supabase.js", () => ({
   addTranscriptEntry: vi.fn(async () => {}),
   createCustomerRequest: vi.fn(async () => "req1"),
   completeCall: vi.fn(async () => {}),
+  markCallTransferred: vi.fn(async () => {}),
 }));
 
 vi.mock("../services/notifications.js", () => ({
   notifyAppointmentBooked: vi.fn(async () => {}),
   notifyCustomerRequest: vi.fn(async () => {}),
+  sendCallerSms: vi.fn(async () => {}),
 }));
 
 vi.mock("../services/gemini.js", () => ({
@@ -197,6 +199,16 @@ vi.mock("../lib/logger.js", () => ({
 }));
 
 vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
+
+// doTransfer() dynamically imports "twilio" to redial the call — mock it so
+// the transfer redial succeeds deterministically instead of attempting a
+// real (and in test env, failing) network call to Twilio's API.
+const mockTwilioCallsUpdate = vi.fn(async () => ({}));
+vi.mock("twilio", () => ({
+  default: vi.fn(() => ({
+    calls: () => ({ update: (...args) => mockTwilioCallsUpdate(...args) }),
+  })),
+}));
 
 import { handleVoiceSessionConnection } from "../lib/voice/session.js";
 import * as callState from "../lib/callState.js";
@@ -606,6 +618,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     const state = callState.getState(sid);
     expect(state.step).toBe("ending");
+
+    // Real transferred status (Part 1) — the redial succeeded (mocked
+    // "twilio" above), so the call must be marked transferred in the DB.
+    const db = await import("../services/supabase.js");
+    expect(db.markCallTransferred).toHaveBeenCalledWith(sid);
   });
 
   it("9b. transferRequested skips the redundant hardcoded announcement when the model already spoke this turn", async () => {
