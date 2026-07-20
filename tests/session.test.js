@@ -25,6 +25,8 @@ const H = vi.hoisted(() => {
     llmFactory: null,
     // spies for services
     fetchKnowledgeResolve: null,
+    // monotonic source for the mocked createRequestId (see the logger mock)
+    requestIdCounter: 0,
   };
 });
 
@@ -193,9 +195,11 @@ vi.mock("../services/googleTts.js", () => ({
   synthesizeMulaw: vi.fn(async () => Buffer.from([0xff, 0xff])),
 }));
 
+// createRequestId returns a fresh id per call so tests can prove that one
+// turn's log lines share an id AND that a later turn gets a different one.
 vi.mock("../lib/logger.js", () => ({
   log: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
-  createRequestId: vi.fn(() => "req-1"),
+  createRequestId: vi.fn(() => `req-${++H.requestIdCounter}`),
   recordTurnLatency: vi.fn(),
 }));
 
@@ -782,6 +786,57 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
     expect(ws.closeCount).toBe(0); // the Twilio redial tears the stream down, not us
+  });
+
+  // Request-ID correlation. The legacy pipeline (lib/mediaStream.js) stamps a
+  // per-turn createRequestId() on its turn log lines; v2 shipped without it,
+  // so there was no way to group one turn's lines in aggregated logs when
+  // concurrent calls interleave.
+  it("13a. every log line for one turn carries the same requestId, and the next turn gets a new one", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure thing." },
+      {
+        type: "done",
+        reply: {
+          text: "Sure thing.",
+          intentArgs: { intent: "book_appointment" },
+          toolResults: [{ name: "set_call_intent", success: true }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("I would like to book an appointment");
+    await flush();
+    await flush();
+
+    const idsFor = (event) =>
+      log.info.mock.calls.filter(([e]) => e === event).map(([, f]) => f?.requestId);
+
+    const completed = idsFor("turn_completed");
+    expect(completed).toHaveLength(1);
+    const turn1Id = completed[0];
+    expect(turn1Id).toBeTruthy();
+
+    // Other lines emitted while handling the SAME turn share it.
+    expect(idsFor("tool_result")).toEqual([turn1Id]);
+    expect(idsFor("intent_set")).toEqual([turn1Id]);
+
+    // A second turn gets its own id.
+    tm.opts.onTurnEnd("actually make it Tuesday");
+    await flush();
+    await flush();
+
+    const allCompleted = idsFor("turn_completed");
+    expect(allCompleted).toHaveLength(2);
+    expect(allCompleted[1]).toBeTruthy();
+    expect(allCompleted[1]).not.toBe(turn1Id);
   });
 
   it("8. silence timer does not fire a nudge while audioOut.isPlaying() is true", async () => {

@@ -3,10 +3,10 @@ An intelligent AI-powered phone assistant designed to handle calls, take message
 
 ## PIPELINE_V2 — the two voice pipelines
 
-There are two live call pipelines behind `/twilio/media-stream`, selected per-connection by an env var (`server.js`'s `attachWebSocket`):
+There are two live call pipelines behind `/twilio/media-stream`, selected per-connection by an env var (`server.js`'s `selectPipelineHandler`). `PIPELINE_V2` is an **opt-OUT** switch — leave it unset:
 
-- **`PIPELINE_V2=true`** → `lib/voice/session.js`, the rebuilt low-latency pipeline (streaming STT/LLM/TTS, barge-in, per-turn latency metrics). This is where new work happens.
-- unset / anything else (default) → `lib/mediaStream.js`, the original pipeline. Kept for parity/rollback; both get the same SMS/transfer/spam-detection wiring so switching between them mid-rollout doesn't lose features.
+- unset / anything other than `"false"` (**default**) → `lib/voice/session.js`, the rebuilt low-latency pipeline (streaming STT/LLM/TTS, barge-in, per-turn latency metrics, per-turn `requestId` log correlation). This is where new work happens.
+- **`PIPELINE_V2=false`** → `lib/mediaStream.js`, the original pipeline. Retained this release purely as a rollback escape hatch. It lacks the LLM turn timeout (a hung Gemini stream holds the call to the 30-minute cap), the deterministic take-message fallback, ElevenLabs/per-business voice selection (the dashboard's voice picker writes columns legacy never reads), multilingual STT, the `toSpeakable` normalizer, the utterance cache, and VAD barge-in — so only fall back if v2 is actively misbehaving.
 
 **Required env vars** (both pipelines):
 
@@ -23,7 +23,7 @@ There are two live call pipelines behind `/twilio/media-stream`, selected per-co
 
 ```bash
 npm install
-cp .env.example .env.dev   # fill in the keys above, plus PIPELINE_V2=true
+cp .env.example .env.dev   # fill in the keys above (leave PIPELINE_V2 unset)
 ngrok http 3000            # copy the https URL into BASE_URL, restart
 node --env-file=.env.dev server.js
 ```

@@ -30,9 +30,9 @@ npm install
 cp .env.example .env.dev     # fill in the keys above
 ```
 
-`.env.dev` essentials:
+`.env.dev` essentials (leave `PIPELINE_V2` unset — v2 is the default; set it
+to `false` only if you deliberately want to exercise the legacy pipeline):
 ```
-PIPELINE_V2=true
 DEEPGRAM_API_KEY=...
 GEMINI_API_KEY=...
 ELEVENLABS_API_KEY=...
@@ -83,7 +83,7 @@ Targets: `voice_to_voice_ms` p50 ≤ 800ms (ideal 500), `llm_ttfb_ms` and `tts_t
 
 Only after the checks above pass:
 1. Run migrations 013–018 against the production database (staging first).
-2. Set the same env vars in production, including `PIPELINE_V2=true`.
+2. Set the same env vars in production. Leave `PIPELINE_V2` unset — v2 is the default; `PIPELINE_V2=false` is the rollback escape hatch if v2 misbehaves.
 3. Repoint the production number's webhooks to the production `BASE_URL`.
 4. Keep the dev number for future testing.
 

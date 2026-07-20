@@ -167,8 +167,8 @@ function twilioValidation(req, res, next) {
 // Voice webhook
 //
 // The only remaining responsibility here is handing the call off to the
-// Media Streams pipeline (lib/mediaStream.js or lib/voice/session.js,
-// selected by PIPELINE_V2 in attachWebSocket below). The legacy TwiML
+// Media Streams pipeline (lib/voice/session.js by default; lib/mediaStream.js
+// only when PIPELINE_V2=false — see selectPipelineHandler below). The legacy TwiML
 // <Gather> conversation loop has been removed — DEEPGRAM_API_KEY is
 // required at boot (see above), so Media Streams is always available.
 //
@@ -578,16 +578,33 @@ export { app };
 
 const wss = new WebSocketServer({ noServer: true });
 
+/**
+ * Pick the call pipeline for a new Media Streams connection.
+ *
+ * v2 (lib/voice/session.js) is the DEFAULT. PIPELINE_V2 is an opt-OUT: only
+ * the explicit string "false" falls back to the legacy lib/mediaStream.js,
+ * which is retained this release purely as a rollback escape hatch. Legacy
+ * lacks the LLM turn timeout (a hung Gemini stream holds the call to the
+ * 30-minute cap), the take-message fallback, ElevenLabs/per-business voice
+ * selection (the dashboard's voice picker writes columns legacy never reads),
+ * multilingual STT, the toSpeakable normalizer, the utterance cache, and VAD
+ * barge-in — so it must never be what a real caller gets by default.
+ *
+ * @returns {Function} the connection handler
+ */
+export function selectPipelineHandler() {
+  return process.env.PIPELINE_V2 === "false"
+    ? handleMediaStreamConnection
+    : handleVoiceSessionConnection;
+}
+
 function attachWebSocket(httpServer) {
   httpServer.on("upgrade", (req, socket, head) => {
     // Only accept upgrades on the media-stream path
     const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
     if (pathname === "/twilio/media-stream") {
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const handler = process.env.PIPELINE_V2 === "true"
-          ? handleVoiceSessionConnection
-          : handleMediaStreamConnection;
-        handler(ws, req);
+        selectPipelineHandler()(ws, req);
       });
     } else {
       socket.destroy();
