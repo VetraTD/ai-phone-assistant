@@ -100,6 +100,8 @@ export function loadConfig(business) {
       transferPolicy: "always",
       languagesSpoken: ["en"],
       customInstructions: null,
+      voiceProvider: "elevenlabs",
+      voiceId: null,
     };
   }
 
@@ -126,6 +128,8 @@ export function loadConfig(business) {
     transferPolicy,
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     customInstructions: business.custom_instructions || null,
+    voiceProvider: business.voice_provider || "elevenlabs",
+    voiceId: business.voice_id || null,
   };
 }
 

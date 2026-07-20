@@ -259,4 +259,76 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
       vi.useRealTimers();
     }
   });
+
+  it("9. voiceSettings opt is passed through to the ElevenLabs handshake, merged over its defaults", () => {
+    createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA9",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    });
+
+    const sock = instances[0];
+    sock._open();
+
+    expect(sock.sentMessages()).toEqual([
+      {
+        text: " ",
+        // merged over elevenlabs.js's DEFAULT_VOICE_SETTINGS — stability/
+        // similarity_boost overridden, use_speaker_boost/speed kept.
+        voice_settings: { stability: 0.6, similarity_boost: 0.75, use_speaker_boost: false, speed: 1 },
+      },
+    ]);
+  });
+
+  it("10. forceFallback=true opens no ElevenLabs connection and routes the whole turn through Google TTS", async () => {
+    const onAudioChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const buf = Buffer.from([7, 7]);
+    mockSynthesizeMulaw.mockResolvedValueOnce(buf);
+
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA10",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk,
+      onDone,
+      onError,
+      forceFallback: true,
+      googleFallbackVoice: "en-GB-Chirp3-HD-Aoede",
+    });
+
+    turn.write("Hello there.");
+    turn.end();
+
+    // No ElevenLabs WS connection was ever opened.
+    expect(instances).toHaveLength(0);
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there.", "en-GB-Chirp3-HD-Aoede", "CA10");
+    expect(onAudioChunk).toHaveBeenCalledWith(buf);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("11. forceFallback=true still respects abort() (no ElevenLabs conn to close, must not throw)", () => {
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA11",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write("Hello");
+    expect(() => turn.abort()).not.toThrow();
+    expect(instances).toHaveLength(0);
+  });
 });
