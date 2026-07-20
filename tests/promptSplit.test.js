@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   buildSystemInstruction,
   buildStaticSystemPrefix,
@@ -88,5 +88,72 @@ describe("gemini.js — system prompt split (static prefix + dynamic tail)", () 
     const a = getClient();
     const b = getClient();
     expect(a).toBe(b);
+  });
+});
+
+describe("gemini.js — business hours rendering in prompts (legacy + weekly shapes)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("legacy shape: DATE/TIME section renders the single window unchanged, never 'undefined'", () => {
+    const legacyConfig = { ...config, timezone: "UTC", businessHours: { open_time: "09:00", close_time: "17:00" } };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T15:00:00Z")); // Monday 15:00 UTC — within window
+
+    const tail = buildDynamicTail("gather_details", "book_appointment", legacyConfig, extras);
+
+    expect(tail).toContain("Business hours: 09:00 – 17:00.");
+    expect(tail).toContain("Status: OPEN.");
+    expect(tail).not.toContain("undefined");
+  });
+
+  it("weekly shape (post-migration-014 / the new business default): DATE/TIME section renders today's hours + closed days, never 'undefined'", () => {
+    const weeklyConfig = {
+      ...config,
+      timezone: "UTC",
+      businessHours: {
+        mon: { open: "09:00", close: "17:00", closed: false },
+        tue: { open: "09:00", close: "17:00", closed: false },
+        wed: { open: "09:00", close: "17:00", closed: false },
+        thu: { open: "09:00", close: "17:00", closed: false },
+        fri: { open: "09:00", close: "17:00", closed: false },
+        sat: { open: null, close: null, closed: true },
+        sun: { open: null, close: null, closed: true },
+      },
+    };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T15:00:00Z")); // Monday 15:00 UTC
+
+    const tail = buildDynamicTail("gather_details", "book_appointment", weeklyConfig, extras);
+
+    expect(tail).toContain("Business hours today (Monday): 9:00 AM – 5:00 PM.");
+    expect(tail).toContain("Closed Saturday, Sunday.");
+    expect(tail).toContain("Status: OPEN.");
+    expect(tail).not.toContain("undefined");
+
+    // book_appointment step guidance must also render real hours inline,
+    // not "business hours (undefined – undefined)".
+    expect(tail).toContain("today's hours, 9:00 AM – 5:00 PM");
+  });
+
+  it("weekly shape: closed-today renders 'closed today (Day)' and Status: CLOSED, never 'undefined'", () => {
+    const weeklyConfig = {
+      ...config,
+      timezone: "UTC",
+      businessHours: {
+        mon: { open: "09:00", close: "17:00", closed: false },
+        sat: { open: null, close: null, closed: true },
+        sun: { open: null, close: null, closed: true },
+      },
+    };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday 15:00 UTC
+
+    const tail = buildDynamicTail("gather_details", "book_appointment", weeklyConfig, extras);
+
+    expect(tail).toContain("Business hours: closed today (Saturday).");
+    expect(tail).toContain("Status: CLOSED.");
+    expect(tail).not.toContain("undefined");
   });
 });

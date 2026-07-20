@@ -13,6 +13,15 @@
 -- Idempotent: rows already in the weekly shape (detected via the "mon" key)
 -- are skipped, so re-running this migration is a no-op for already-migrated
 -- rows.
+--
+-- KNOWN LIMITATION (pre-existing, not introduced by this migration): hours
+-- that span midnight (close < open, e.g. open="22:00" close="02:00") are
+-- read literally as a same-day [open,close) window by both
+-- services/gemini.js isBusinessOpen() and the weekly-hours validator in
+-- AI-phone-dashboard/backend/src/settingsValidation.js — an overnight
+-- window like that validates successfully but the business will read as
+-- CLOSED for its entire configured window. Out of scope here; overnight
+-- businesses need dedicated handling that doesn't exist yet.
 
 UPDATE businesses
 SET business_hours = jsonb_build_object(

@@ -68,6 +68,18 @@ function validateBoolean(value) {
   return { value };
 }
 
+// A day with closed !== true MUST carry valid open/close times — the AI
+// (services/gemini.js isBusinessOpen / buildDynamicTail) gates after-hours
+// behavior on this field, so a day silently treated as "open all day" (no
+// hours) would have the AI telling callers the business is open with no
+// actual window. Reject rather than default.
+//
+// KNOWN LIMITATION (pre-existing, out of scope here): this does not check
+// close > open, so an overnight window like {open:"22:00", close:"02:00"}
+// validates successfully but isBusinessOpen() reads it as always-closed
+// (same-day-window comparison only — see its docstring in
+// services/gemini.js). Overnight businesses need dedicated handling that
+// doesn't exist yet.
 function validateBusinessHours(value) {
   if (value === null) return { value: null };
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -89,13 +101,8 @@ function validateBusinessHours(value) {
       out[day] = { open: null, close: null, closed: true };
       continue;
     }
-    if (dayVal.open === undefined && dayVal.close === undefined) {
-      // Open day with no explicit hours — treat as open all day.
-      out[day] = { open: null, close: null, closed: false };
-      continue;
-    }
     if (!TIME_RE.test(dayVal.open) || !TIME_RE.test(dayVal.close)) {
-      return { error: `.${day} requires open/close in HH:MM format unless closed` };
+      return { error: `.${day} requires open and close in HH:MM format unless closed is true` };
     }
     out[day] = { open: dayVal.open, close: dayVal.close, closed: false };
   }

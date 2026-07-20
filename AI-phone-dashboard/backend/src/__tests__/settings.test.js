@@ -152,6 +152,41 @@ describe("PUT /api/business/:id/settings", () => {
     expect(res.status).toBe(400);
   });
 
+  it("weekly business_hours: a day not marked closed but missing open/close -> 400 (not silently open-all-day)", async () => {
+    mockOwnership();
+
+    const res = await request(app)
+      .put(`/api/business/${BUSINESS_ID}/settings`)
+      .set("Authorization", "Bearer test-token")
+      .send({ business_hours: { mon: { closed: false } } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/business_hours/);
+    expect(res.body.error).toMatch(/open and close/);
+  });
+
+  it("weekly business_hours: a day not marked closed with only open (no close) -> 400", async () => {
+    mockOwnership();
+
+    const res = await request(app)
+      .put(`/api/business/${BUSINESS_ID}/settings`)
+      .set("Authorization", "Bearer test-token")
+      .send({ business_hours: { tue: { open: "09:00" } } });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("weekly business_hours: closed:true day does not require open/close -> 200", async () => {
+    mockOwnership();
+
+    const res = await request(app)
+      .put(`/api/business/${BUSINESS_ID}/settings`)
+      .set("Authorization", "Bearer test-token")
+      .send({ business_hours: { sun: { closed: true } } });
+
+    expect(res.status).toBe(200);
+  });
+
   it("voice_id not in the ElevenLabs catalog -> 400", async () => {
     mockOwnership();
 

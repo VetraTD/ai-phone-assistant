@@ -387,6 +387,13 @@ export function buildDbAppointmentTools(config, extras) {
  * `{"mon":{"open":"HH:MM","close":"HH:MM","closed":bool}, ..., "sun":{...}}`
  * — detected by the presence of a `mon` key. See
  * database/014_business_hours_weekly.sql.
+ *
+ * KNOWN LIMITATION (pre-existing, not introduced by migration 014): hours
+ * that span midnight (close < open, e.g. "22:00"-"02:00") are NOT handled —
+ * both shapes compare currentMinutes against a same-day [open,close)
+ * window, so an overnight business reads as CLOSED for its entire window.
+ * Overnight businesses need dedicated handling that doesn't exist yet.
+ *
  * @param {{ businessHours: {open_time:string,close_time:string}|Record<string,{open:string,close:string,closed:boolean}>|null, timezone: string }} config
  * @returns {boolean}
  */
@@ -426,6 +433,84 @@ export function isBusinessOpen(config) {
   const [closeH, closeM] = close_time.split(":").map(Number);
 
   return currentMinutes >= openH * 60 + openM && currentMinutes < closeH * 60 + closeM;
+}
+
+const WEEKDAY_LABELS = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
+const WEEKDAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+/**
+ * "09:00" -> "9:00 AM", "17:00" -> "5:00 PM". Returns null for anything that
+ * doesn't parse as HH:MM (never renders "undefined" into the prompt).
+ * @param {string|null|undefined} hhmm
+ * @returns {string|null}
+ */
+function formatClockTime(hhmm) {
+  if (typeof hhmm !== "string") return null;
+  const parts = hhmm.split(":");
+  if (parts.length !== 2) return null;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Resolve business_hours (either shape — see isBusinessOpen) into a shape
+ * convenient for prompt rendering: today's hours plus which days are fully
+ * closed. Shared by buildDynamicTail's DATE/TIME section and the
+ * book_appointment step guidance so both stay in sync.
+ *
+ * Same midnight-spanning limitation as isBusinessOpen (see its docstring) —
+ * rangeText is rendered literally even if close < open.
+ *
+ * @param {object} config - loadConfig() output
+ * @param {Date} now
+ * @returns {null | { weekly: boolean, todayLabel: string|null, closedToday: boolean, rangeText: string|null, closedDays: string[] }}
+ */
+function resolveBusinessHoursForPrompt(config, now) {
+  const hours = config.businessHours;
+  if (!hours) return null;
+
+  if (hours.mon !== undefined) {
+    // Weekly shape (migration 014-plus; also the default for every new
+    // business via the businesses.business_hours column default).
+    const todayLabel = new Intl.DateTimeFormat("en-US", {
+      timeZone: config.timezone,
+      weekday: "long",
+    }).format(now);
+    const shortWeekday = todayLabel.slice(0, 3).toLowerCase();
+    const today = hours[shortWeekday];
+    const closedDays = WEEKDAY_ORDER.filter((d) => hours[d]?.closed).map((d) => WEEKDAY_LABELS[d]);
+
+    if (!today || today.closed) {
+      return { weekly: true, todayLabel, closedToday: true, rangeText: null, closedDays };
+    }
+    const openText = formatClockTime(today.open);
+    const closeText = formatClockTime(today.close);
+    return {
+      weekly: true,
+      todayLabel,
+      closedToday: false,
+      rangeText: openText && closeText ? `${openText} – ${closeText}` : null,
+      closedDays,
+    };
+  }
+
+  // Legacy shape: single window applied every day.
+  if (hours.open_time && hours.close_time) {
+    return { weekly: false, todayLabel: null, closedToday: false, rangeText: `${hours.open_time} – ${hours.close_time}`, closedDays: [] };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -671,8 +756,18 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   let dateTime = `=== DATE AND TIME ===\n`;
   dateTime += `Current: ${dateStr}, ${timeStr} (${tz}).\n`;
   dateTime += `When scheduling, always calculate from this real date. Never invent dates.`;
-  if (config.businessHours) {
-    dateTime += `\nBusiness hours: ${config.businessHours.open_time} – ${config.businessHours.close_time}.`;
+  const resolvedHours = resolveBusinessHoursForPrompt(config, now);
+  if (resolvedHours) {
+    if (resolvedHours.weekly) {
+      dateTime += resolvedHours.closedToday
+        ? `\nBusiness hours: closed today (${resolvedHours.todayLabel}).`
+        : `\nBusiness hours today (${resolvedHours.todayLabel}): ${resolvedHours.rangeText || "open, no fixed hours"}.`;
+      if (resolvedHours.closedDays.length) {
+        dateTime += ` Closed ${resolvedHours.closedDays.join(", ")}.`;
+      }
+    } else {
+      dateTime += `\nBusiness hours: ${resolvedHours.rangeText}.`;
+    }
     dateTime += ` Status: ${open ? "OPEN" : "CLOSED"}.`;
   }
   sections.push(dateTime);
@@ -708,7 +803,7 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   taskState += `Step: ${step}`;
   if (intent) taskState += ` | Intent: ${intent}`;
   taskState += `\n`;
-  taskState += buildStepGuidance(step, intent, config, { hasEhrIntegration });
+  taskState += buildStepGuidance(step, intent, config, { hasEhrIntegration, now });
   sections.push(taskState);
 
   return sections.join("\n\n");
@@ -733,10 +828,11 @@ export function buildSystemInstruction(step, intent, config, extras = {}) {
 
 /**
  * Build step-specific guidance text.
- * @param {object} [stepExtras] - { hasEhrIntegration: boolean } for EHR-gated flows
+ * @param {object} [stepExtras] - { hasEhrIntegration: boolean, now: Date } for EHR-gated flows / hours rendering
  */
 function buildStepGuidance(step, intent, config, stepExtras = {}) {
   const hasEhrIntegration = stepExtras.hasEhrIntegration === true;
+  const now = stepExtras.now instanceof Date ? stepExtras.now : new Date();
 
   switch (step) {
     case "identify_intent":
@@ -759,9 +855,19 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         );
       }
       if (intent === "book_appointment") {
-        const businessHoursStr = config.businessHours
-          ? `${config.businessHours.open_time} – ${config.businessHours.close_time}`
-          : "business hours";
+        const resolvedHours = resolveBusinessHoursForPrompt(config, now);
+        let businessHoursStr = "business hours";
+        if (resolvedHours) {
+          if (resolvedHours.weekly) {
+            businessHoursStr = resolvedHours.closedToday
+              ? `closed today (${resolvedHours.todayLabel})`
+              : resolvedHours.rangeText
+              ? `today's hours, ${resolvedHours.rangeText}`
+              : "business hours";
+          } else if (resolvedHours.rangeText) {
+            businessHoursStr = resolvedHours.rangeText;
+          }
+        }
         let guide =
           `Your task: Help the caller find a good appointment time and collect their details. ` +
           `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
