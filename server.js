@@ -258,7 +258,7 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
           .sendCallerSms(config, callerNumber, "message_received", {
             name_part: "",
             business: config.businessName,
-            sla: "as soon as possible",
+            sla: notifications.MESSAGE_SLA_TEXT,
           })
           .catch((err) => log.error("sms_followup_failed", { callSid, kind: "message_received", reason: err?.message }));
       }
@@ -284,6 +284,11 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     const state = callState.getState(callSid);
     const dbCallId = state.dbCallId;
     const businessId = state.businessId;
+    // Captured synchronously, before any await below and before
+    // callState.remove(callSid) at the end of this handler — the spam
+    // heuristic's async block (below) needs this in-memory signal, not a
+    // fresh callState.getState() call that could read a since-removed state.
+    const sawCallerFinal = !!state.sawCallerFinal;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
     const callContext = {
       callerNumber: req.body.From || null,
@@ -316,6 +321,10 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     // "not a pure miss" and skip texting for.
     if (["failed", "busy", "no-answer"].includes(status) && (duration == null || duration === 0)) {
       (async () => {
+        // Short-circuit before the DB round-trip when SMS sending isn't
+        // configured at all (sendCallerSms would no-op anyway) — no reason
+        // to look the business up by phone first.
+        if (!notifications.HAS_SMS_CREDS) return;
         if (!db.isEnabled() || !callContext.twilioNumber || !callContext.callerNumber) return;
         const business = await db.lookupBusinessByPhone(callContext.twilioNumber);
         if (!business) return;
@@ -340,7 +349,17 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
         // stays silent 8+ minutes without ever speaking is unusual but not
         // necessarily spam, so don't tag it). Skips the Gemini summary call
         // entirely in the spam case (saves cost).
-        if (callerTurns.length === 0 && duration != null && duration < 8) {
+        //
+        // Race guard: call_transcripts inserts are fire-and-forget during
+        // the live call (db.addTranscriptEntry), so a legitimate short call
+        // where the caller DID speak can have its status callback arrive
+        // before that insert lands — callerTurns.length would read 0 from
+        // the DB even though the caller genuinely spoke. sawCallerFinal is
+        // set live, in-memory, the moment STT delivers a caller final (both
+        // pipelines — see lib/callState.js), well before the call even
+        // ends, so it can't lose this race the same way the DB read can.
+        // Require BOTH signals before tagging spam.
+        if (!sawCallerFinal && callerTurns.length === 0 && duration != null && duration < 8) {
           await db.updateCallSummary(callSid, "No caller speech (likely spam/robocall)", null, "spam");
         } else if (transcript.length > 0) {
           const { summary, sentiment, outcome } =

@@ -230,34 +230,41 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
  */
 export async function completeCall(callSid, status, durationSeconds) {
   if (!supabase) return;
-  // A transfer already marked this call's status='transferred' via
-  // markCallTransferred() — the Twilio "completed" status callback that
-  // follows for the same (now-redialed) call leg must not clobber that back
-  // to 'completed'. Still record ended_at/duration_seconds either way.
-  const { data: existing, error: fetchError } = await supabase
-    .from("calls")
-    .select("status")
-    .eq("twilio_call_sid", callSid)
-    .maybeSingle();
-  if (fetchError) {
-    log.error("db_error", { callSid, operation: "completeCall_fetch", error: fetchError.message });
-  }
-  const updates = {
-    ended_at: new Date().toISOString(),
-  };
-  if (existing?.status !== "transferred") {
-    updates.status = status;
-  }
+
+  // ended_at/duration_seconds are written unconditionally — a transferred
+  // call still ends and has a real duration, regardless of what happens to
+  // the `status` column below.
+  const timingUpdates = { ended_at: new Date().toISOString() };
   if (durationSeconds != null) {
-    updates.duration_seconds = Number(durationSeconds);
+    timingUpdates.duration_seconds = Number(durationSeconds);
   }
-  const { error } = await supabase
+  const { error: timingError } = await supabase
     .from("calls")
-    .update(updates)
+    .update(timingUpdates)
     .eq("twilio_call_sid", callSid);
-  if (error) {
-    log.error("db_error", { callSid, operation: "completeCall", error: error.message });
-    captureException(new Error(error.message), { table: "calls", op: "update_complete" });
+  if (timingError) {
+    log.error("db_error", { callSid, operation: "completeCall_timing", error: timingError.message });
+    captureException(new Error(timingError.message), { table: "calls", op: "update_complete_timing" });
+  }
+
+  // `status`: a single atomic UPDATE ... WHERE status <> 'transferred' —
+  // NOT a separate SELECT-then-UPDATE (the prior implementation). That
+  // read-then-write had a race window: a markCallTransferred() landing
+  // between the SELECT and the UPDATE would get silently clobbered back to
+  // `status` here — the exact bug this guard exists to prevent. A single
+  // WHERE-guarded statement can't have that gap: Postgres serializes
+  // concurrent UPDATEs to the same row, so whichever of this and
+  // markCallTransferred() commits second always sees the other's already-
+  // committed value, not a stale snapshot read earlier. Also saves a
+  // round-trip on every terminal status callback.
+  const { error: statusError } = await supabase
+    .from("calls")
+    .update({ status })
+    .eq("twilio_call_sid", callSid)
+    .neq("status", "transferred");
+  if (statusError) {
+    log.error("db_error", { callSid, operation: "completeCall_status", error: statusError.message });
+    captureException(new Error(statusError.message), { table: "calls", op: "update_complete_status" });
   }
 }
 

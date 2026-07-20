@@ -182,6 +182,7 @@ vi.mock("../services/notifications.js", () => ({
   notifyAppointmentBooked: vi.fn(async () => {}),
   notifyCustomerRequest: vi.fn(async () => {}),
   sendCallerSms: vi.fn(async () => {}),
+  MESSAGE_SLA_TEXT: "as soon as possible",
 }));
 
 vi.mock("../services/gemini.js", () => ({
@@ -335,6 +336,24 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(stt.sendAudio.mock.calls[0][0]).toEqual(Buffer.from([9, 8, 7]));
     expect(tm.handleAudioFrame).toHaveBeenCalledTimes(1);
     expect(tm.handleAudioFrame.mock.calls[0][0]).toEqual(Buffer.from([9, 8, 7]));
+  });
+
+  it("2b. state.sawCallerFinal is set true the moment turnManager delivers a non-empty caller final (read synchronously by server.js's spam heuristic)", async () => {
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "OK", toolResults: [] } }]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    expect(callState.getState(sid).sawCallerFinal).toBe(false);
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours");
+    await flush();
+
+    expect(callState.getState(sid).sawCallerFinal).toBe(true);
   });
 
   it("3. full happy turn: deltas -> tts.write (sentence-batched + speakable-normalized), done -> tts.end, transcript rows + metrics marks in order", async () => {

@@ -23,6 +23,7 @@ vi.mock("../services/notifications.js", () => ({
   notifyCustomerRequest: (...args) => mockNotifyCustomerRequest(...args),
   notifyCallMissed: vi.fn(async () => {}),
   sendCallerSms: (...args) => mockSendCallerSms(...args),
+  MESSAGE_SLA_TEXT: "as soon as possible",
 }));
 
 import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";

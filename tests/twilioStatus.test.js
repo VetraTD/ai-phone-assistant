@@ -36,6 +36,10 @@ const mockSendCallerSms = vi.fn(async () => {});
 vi.mock("../services/notifications.js", () => ({
   notifyCallMissed: (...args) => mockNotifyCallMissed(...args),
   sendCallerSms: (...args) => mockSendCallerSms(...args),
+  // Required so server.js's missed-call block doesn't short-circuit before
+  // ever calling lookupBusinessByPhone/sendCallerSms (see MINOR c fix).
+  HAS_SMS_CREDS: true,
+  MESSAGE_SLA_TEXT: "as soon as possible",
 }));
 
 const mockGenerateSummaryAndSentiment = vi.fn(async () => ({
@@ -152,6 +156,57 @@ describe("POST /twilio/status", () => {
       expect(mockGenerateSummaryAndSentiment).not.toHaveBeenCalled();
       expect(mockUpdateCallSummary).toHaveBeenCalledWith(
         "CA_spam_1",
+        "No caller speech (likely spam/robocall)",
+        null,
+        "spam"
+      );
+    });
+
+    it("does NOT tag spam when sawCallerFinal is true, even if the transcript read raced ahead of the fire-and-forget insert (zero caller rows)", async () => {
+      // Simulates the exact race the fix guards against: call_transcripts
+      // inserts are fire-and-forget during the live call, so a legitimate
+      // short call where the caller DID speak can have its status callback
+      // read zero caller rows if that insert hasn't landed yet. The
+      // in-memory sawCallerFinal flag (set live, well before the call
+      // ends — see lib/callState.js) must override the stale DB read.
+      mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
+      const state = callState.getState("CA_spam_race");
+      state.dbCallId = "call-db-race";
+      state.sawCallerFinal = true;
+
+      await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_spam_race", CallStatus: "completed", CallDuration: "3", To: "+15550001111", From: "+15559998888" });
+
+      await new Promise((r) => setImmediate(r));
+      expect(mockUpdateCallSummary).not.toHaveBeenCalledWith(
+        "CA_spam_race",
+        "No caller speech (likely spam/robocall)",
+        null,
+        "spam"
+      );
+      // Not spam-tagged, so it correctly falls through to the normal
+      // summary path — the (mocked) transcript read still has the AI's
+      // greeting row, so there's something to summarize even though the
+      // caller's own row hasn't landed yet.
+      expect(mockGenerateSummaryAndSentiment).toHaveBeenCalled();
+    });
+
+    it("still tags spam when sawCallerFinal is false (genuine silent/robo call) and the DB read agrees (zero caller rows)", async () => {
+      mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
+      const state = callState.getState("CA_spam_genuine");
+      state.dbCallId = "call-db-genuine";
+      state.sawCallerFinal = false;
+
+      await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_spam_genuine", CallStatus: "completed", CallDuration: "3", To: "+15550001111", From: "+15559998888" });
+
+      await new Promise((r) => setImmediate(r));
+      expect(mockUpdateCallSummary).toHaveBeenCalledWith(
+        "CA_spam_genuine",
         "No caller speech (likely spam/robocall)",
         null,
         "spam"

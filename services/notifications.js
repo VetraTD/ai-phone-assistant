@@ -16,7 +16,11 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
 
 const HAS_EMAIL_CREDS = !!(SMTP_USER && SMTP_PASS);
-const HAS_SMS_CREDS = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_SMS_FROM);
+// Exported (read-only) so callers can cheaply short-circuit before doing
+// any DB work for an SMS-only feature when Twilio SMS isn't configured at
+// all (e.g. server.js's missed-call text-back — no point looking up the
+// business by phone if sendCallerSms is guaranteed to no-op afterward).
+export const HAS_SMS_CREDS = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_SMS_FROM);
 
 // Notifications are ON BY DEFAULT as soon as either delivery channel (SMTP
 // email or Twilio SMS) is configured — no opt-in env var required anymore.
@@ -274,6 +278,12 @@ export async function notifyCallMissed({ businessId, call, status }) {
 // business on config.smsFollowupEnabled (see loadConfig in
 // services/supabase.js). Off by default.
 // ---------------------------------------------------------------------------
+
+// Generic "someone will get back to you {sla}" text for the message_received
+// caller text-back. Single source of truth — session.js, mediaStream.js,
+// and server.js's degraded-mode voicemail webhook all import this instead
+// of each declaring/duplicating their own copy of the literal.
+export const MESSAGE_SLA_TEXT = "as soon as possible";
 
 /** Default caller SMS templates, keyed by kind. Overridable per business via
  * businesses.sms_templates (loadConfig's config.smsTemplates). */
