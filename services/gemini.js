@@ -376,27 +376,18 @@ export function isBusinessOpen(config) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {string} step
- * @param {string|null} intent
+ * Static, per-call-stable portion of the system prompt — everything that
+ * does NOT depend on the current time or the current step/intent. Kept as a
+ * stable prefix (same text across turns of the same call, and across calls
+ * for the same business) so Gemini's implicit prompt caching can hit on it;
+ * see `buildDynamicTail` for the time/step-dependent remainder, which must
+ * stay at the END of the combined instruction for the cache hit to apply.
+ *
  * @param {object} config - Per-business config from loadConfig
- * @param {object} [extras] - { knowledge: Array, transferAllowed: boolean }
+ * @param {object} [extras] - { knowledge: Array, callerContext: object, transferAllowed: boolean }
  */
-function buildSystemInstruction(step, intent, config, extras = {}) {
+export function buildStaticSystemPrefix(config, extras = {}) {
   const tz = config.timezone;
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", {
-    timeZone: tz,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const timeStr = now.toLocaleTimeString("en-US", {
-    timeZone: tz,
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  const open = isBusinessOpen(config);
 
   const sections = [];
 
@@ -417,38 +408,6 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
     identity += `\nYou can speak: ${config.languagesSpoken.join(", ")}. Match the caller's language when possible.`;
   }
   sections.push(identity);
-
-  // === DATE / TIME / HOURS ===
-  let dateTime = `=== DATE AND TIME ===\n`;
-  dateTime += `Current: ${dateStr}, ${timeStr} (${tz}).\n`;
-  dateTime += `When scheduling, always calculate from this real date. Never invent dates.`;
-  if (config.businessHours) {
-    dateTime += `\nBusiness hours: ${config.businessHours.open_time} – ${config.businessHours.close_time}.`;
-    dateTime += ` Status: ${open ? "OPEN" : "CLOSED"}.`;
-  }
-  sections.push(dateTime);
-
-  // === AFTER-HOURS BEHAVIOR ===
-  if (!open && config.businessHours) {
-    let afterHours = `=== AFTER-HOURS BEHAVIOR ===\n`;
-    afterHours += `The office is currently CLOSED. `;
-    switch (config.afterHoursPolicy) {
-      case "offer_callback":
-        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Ask for their name, number, and preferred callback time.`;
-        break;
-      case "book_later":
-        afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
-        break;
-      case "transfer_if_possible":
-        afterHours += `Inform the caller the office is closed. If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
-        break;
-      case "take_message":
-      default:
-        afterHours += `Inform the caller the office is closed. Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
-        break;
-    }
-    sections.push(afterHours);
-  }
 
   // === BUSINESS INFO ===
   const infoLines = [];
@@ -598,6 +557,74 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   guardrails += `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good").`;
   sections.push(guardrails);
 
+  return sections.join("\n\n");
+}
+
+/**
+ * Time- and step-dependent tail of the system prompt. Must stay at the END
+ * of the combined instruction (see `buildSystemInstruction`) — Gemini's
+ * implicit caching hits on a stable *prefix*, so all per-turn-variable
+ * content (current time, open/closed status, step/intent) has to live after
+ * the stable `buildStaticSystemPrefix` content, not before or inside it.
+ *
+ * @param {string} step
+ * @param {string|null} intent
+ * @param {object} config - Per-business config from loadConfig
+ * @param {object} [extras] - { integrations: Array } — needed for EHR-aware step guidance
+ */
+export function buildDynamicTail(step, intent, config, extras = {}) {
+  const tz = config.timezone;
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  // hour/minute only (no seconds) so this string — and the whole prompt — is
+  // stable within a given minute, not just within a single call.
+  const timeStr = now.toLocaleTimeString("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const open = isBusinessOpen(config);
+
+  const sections = [];
+
+  // === DATE / TIME / HOURS ===
+  let dateTime = `=== DATE AND TIME ===\n`;
+  dateTime += `Current: ${dateStr}, ${timeStr} (${tz}).\n`;
+  dateTime += `When scheduling, always calculate from this real date. Never invent dates.`;
+  if (config.businessHours) {
+    dateTime += `\nBusiness hours: ${config.businessHours.open_time} – ${config.businessHours.close_time}.`;
+    dateTime += ` Status: ${open ? "OPEN" : "CLOSED"}.`;
+  }
+  sections.push(dateTime);
+
+  // === AFTER-HOURS BEHAVIOR ===
+  if (!open && config.businessHours) {
+    let afterHours = `=== AFTER-HOURS BEHAVIOR ===\n`;
+    afterHours += `The office is currently CLOSED. `;
+    switch (config.afterHoursPolicy) {
+      case "offer_callback":
+        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Ask for their name, number, and preferred callback time.`;
+        break;
+      case "book_later":
+        afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
+        break;
+      case "transfer_if_possible":
+        afterHours += `Inform the caller the office is closed. If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
+        break;
+      case "take_message":
+      default:
+        afterHours += `Inform the caller the office is closed. Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
+        break;
+    }
+    sections.push(afterHours);
+  }
+
   // === CURRENT TASK AND STATE ===
   const integrations = Array.isArray(extras?.integrations) ? extras.integrations : [];
   const hasEhrIntegration = integrations.some(
@@ -611,6 +638,23 @@ function buildSystemInstruction(step, intent, config, extras = {}) {
   sections.push(taskState);
 
   return sections.join("\n\n");
+}
+
+/**
+ * Thin wrapper joining the cacheable static prefix and the time/step-
+ * dependent tail. Legacy callers (`getReply`, `getReplyStreaming`) use this
+ * unchanged; new code can call `buildStaticSystemPrefix`/`buildDynamicTail`
+ * directly if it needs to reason about the two halves separately.
+ *
+ * @param {string} step
+ * @param {string|null} intent
+ * @param {object} config - Per-business config from loadConfig
+ * @param {object} [extras] - { knowledge: Array, transferAllowed: boolean }
+ */
+export function buildSystemInstruction(step, intent, config, extras = {}) {
+  const staticPrefix = buildStaticSystemPrefix(config, extras);
+  const dynamicTail = buildDynamicTail(step, intent, config, extras);
+  return `${staticPrefix}\n\n${dynamicTail}`;
 }
 
 /**
