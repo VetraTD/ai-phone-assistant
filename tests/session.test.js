@@ -742,45 +742,61 @@ describe("session.js — v2 pipeline orchestrator", () => {
   });
 
   describe("11. pre-cached micro-utterances (lib/voice/utteranceCache.js wiring)", () => {
-    it("11a. warm() is kicked off in the background at call start (after the greeting cache check), never blocking pickup", async () => {
+    it("11a. warm() is kicked off in the background at call start, never blocking pickup, and never includes the greeting or any dead (never-get()'d) entry", async () => {
       const ws = new FakeWs();
       handleVoiceSessionConnection(ws);
       const sid = newSid();
       await startCall(ws, sid);
 
-      // Greeting was spoken live (cache.get() returned null, the mock's
-      // default) — proves the get() check ran synchronously before pickup
-      // completed, i.e. before/independent of warm() settling.
+      // Greeting was spoken live, unconditionally (see 11b) — proves pickup
+      // never waited on any cache lookup or on warm() settling.
       expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
       expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
 
       // warm() was still kicked off (fire-and-forget) with this call's voice
-      // key and a non-empty set of entries (greeting/filler/nudges/goodbye).
+      // key and a non-empty set of entries.
       expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
       const [, entries] = H.utteranceCacheInstance.warm.mock.calls[0];
       expect(Array.isArray(entries)).toBe(true);
-      expect(entries.some((e) => e.text === "Hello, thanks for calling Test Biz.")).toBe(true);
       expect(entries.some((e) => e.text === "One moment.")).toBe(true);
+
+      // The greeting text must never be warmed — utteranceCache's synthesize
+      // backend is the Google fallback voice, not the business's chosen
+      // ElevenLabs voice, so caching the greeting would mean every caller
+      // after the first hears the wrong voice for the most
+      // identity-defining moment of the call.
+      expect(entries.some((e) => e.text === "Hello, thanks for calling Test Biz.")).toBe(false);
+      expect(entries.some((e) => e.kind === "greeting")).toBe(false);
+
+      // No dead synthesis: every warmed entry must have a real get() call
+      // site somewhere in session.js. "checking"/"ack" were removed because
+      // no code path ever looks them up.
+      expect(entries.some((e) => e.kind === "checking")).toBe(false);
+      expect(entries.some((e) => e.kind === "ack")).toBe(false);
+      expect(entries.some((e) => e.text === "Let me check that for you…")).toBe(false);
+      expect(entries.some((e) => e.text === "Sorry, go ahead.")).toBe(false);
     });
 
-    it("11b. greeting: a cache hit (warmed by a previous call) plays the cached buffer directly — no TTS turn at all", async () => {
+    it("11b. greeting always speaks live — never checks or uses the cache, even when the cache has a hit for that exact text", async () => {
       const cachedGreeting = Buffer.from([1, 2, 3, 4]);
       const ws = new FakeWs();
       handleVoiceSessionConnection(ws);
       const sid = newSid();
 
-      H.utteranceCacheInstance.get.mockImplementationOnce((voiceKey, kind, text) =>
+      // Even if the cache WOULD hit for this exact text (e.g. a stale/buggy
+      // warm from elsewhere), the greeting must not use it.
+      H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
         text === "Hello, thanks for calling Test Biz." ? cachedGreeting : null
       );
 
       await startCall(ws, sid);
 
-      // No live TTS turn was created for the greeting.
-      expect(H.ttsTurns.length).toBe(0);
-      // The cached buffer was enqueued and the greeting mark sent directly.
+      // A live TTS turn was created and written to for the greeting — the
+      // cached buffer was never enqueued in its place.
+      expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
+      expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
       const audioOut = H.audioOutInstances[0];
-      expect(audioOut.enqueue).toHaveBeenCalledWith(cachedGreeting);
-      expect(audioOut.sendMark).toHaveBeenCalledWith("greeting-done");
+      expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedGreeting);
     });
 
     it("11c. filler: a cache hit for the exact filler text is used instead of a live googleTts.synthesizeMulaw call", async () => {
