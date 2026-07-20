@@ -93,6 +93,35 @@ router.put("/api/business/:id/settings", authenticate, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Voice catalog (dashboard voice picker) — mirrors root repo config/voices.js
+// VOICE_CATALOG by hand. This dashboard backend is a separate deployable app
+// and cannot import across the apps/ package boundary (same constraint
+// constants.js's header comment documents for the enum lists it mirrors) —
+// keep this in sync when config/voices.js changes. Only the fields the
+// picker UI needs are exposed; `voiceSettings` (stability/similarity_boost
+// tuning) stays internal to lib/voice/session.js's resolveVoice() and isn't
+// relevant to the dashboard. `voiceId` values must stay in sync with
+// constants.js's ELEVENLABS_VOICE_IDS, which settingsValidation.js validates
+// against on save.
+// ---------------------------------------------------------------------------
+const VOICE_CATALOG = [
+  { id: "rachel", voiceId: "21m00Tcm4TlvDq8ikWAM", label: "Rachel", description: "Calm, professional US female voice.", gender: "female", accent: "US", previewText: "Thanks for calling — how can I help you today?" },
+  { id: "adam", voiceId: "pNInz6obpgDQGcFmaJgB", label: "Adam", description: "Deep, confident US male voice.", gender: "male", accent: "US", previewText: "Hi there, thanks for calling. What can I do for you?" },
+  { id: "antoni", voiceId: "ErXwobaYiN019PkySvjV", label: "Antoni", description: "Warm, friendly US male voice.", gender: "male", accent: "US", previewText: "Hey! Thanks for giving us a call — how can I help?" },
+  { id: "bella", voiceId: "EXAVITQu4vr4xnSDxMaL", label: "Bella", description: "Soft, approachable US female voice.", gender: "female", accent: "US", previewText: "Hi, thank you for calling! What can I help you with today?" },
+  { id: "elli", voiceId: "MF3mGyEYCk7xN5WJycdo", label: "Elli", description: "Young, friendly US female voice.", gender: "female", accent: "US", previewText: "Hi there! Thanks so much for calling — how can I help?" },
+  { id: "josh", voiceId: "TxGEqnHWrfWFTfGW9XjX", label: "Josh", description: "Casual, easygoing US male voice.", gender: "male", accent: "US", previewText: "Hey, thanks for calling — what can I do for you today?" },
+  { id: "charlotte", voiceId: "XB0fDUnXU5powFXDhCwa", label: "Charlotte", description: "Polished UK female voice.", gender: "female", accent: "UK", previewText: "Thanks for calling — how may I help you today?" },
+  { id: "charlie", voiceId: "IKne3meq5aSn9XLyUdCD", label: "Charlie", description: "Relaxed Australian male voice.", gender: "male", accent: "AU", previewText: "G'day, thanks for calling — how can I help you today?" },
+];
+
+// Public catalog listing, same access pattern as /api/integrations/definitions
+// below (no auth — static reference data, nothing business-specific).
+router.get("/api/voices", (req, res) => {
+  res.json(VOICE_CATALOG);
+});
+
+// ---------------------------------------------------------------------------
 // Integrations API (list, create/update, definitions) — configured from the
 // dashboard's Settings page, kept alongside the other settings routes.
 // ---------------------------------------------------------------------------

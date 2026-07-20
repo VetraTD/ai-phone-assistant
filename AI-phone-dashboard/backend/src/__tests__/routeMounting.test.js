@@ -76,6 +76,14 @@ describe("route mounting smoke test (all split route files wired)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("GET /api/voices (settings.js, no auth)", async () => {
+    const res = await request(app).get("/api/voices");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+    expect(res.body[0]).toHaveProperty("voiceId");
+  });
+
   it("GET /api/knowledge (knowledge.js)", async () => {
     poolQueryMock.mockImplementation((sql) => {
       if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: "b1" }] });

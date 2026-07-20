@@ -8,6 +8,7 @@ import "./Dashboard.css";
 import Login from "./Login";
 import Signup from "./Signup";
 import Onboarding from "./Onboarding";
+import SettingsPage from "./settings/SettingsPage";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -164,13 +165,6 @@ function getSentimentPillStyle(sentiment) {
   if (s === "neutral")
     return { ...base, background: "var(--vetra-bg-2)", border: "1px solid var(--vetra-border-strong)", color: "var(--vetra-muted)" };
   return { ...base, background: "rgba(255,184,76,0.16)", border: "1px solid rgba(255,184,76,0.42)", color: "#9a6a12" };
-}
-
-function formatBusinessHours(hours) {
-  if (!hours) return "Mon–Fri, 9:00 AM – 5:00 PM";
-  if (typeof hours === "string") return hours;
-  if (hours.open_time && hours.close_time) return `${hours.open_time} - ${hours.close_time}`;
-  return "Mon–Fri, 9:00 AM – 5:00 PM";
 }
 
 function AnimatedNumber({ value, duration = 1200, suffix = "" }) {
@@ -478,36 +472,9 @@ function App() {
   const [analyticsBreakdown, setAnalyticsBreakdown] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState("90d");
   const [appointmentsEmailRange, setAppointmentsEmailRange] = useState("today");
-  const [settingsBusinessName, setSettingsBusinessName] = useState("");
-  const [settingsTimezone, setSettingsTimezone] = useState("America/Chicago");
-  const [settingsDefaultLanguage, setSettingsDefaultLanguage] = useState("en");
-  const [settingsGreeting, setSettingsGreeting] = useState("Thank you for calling. How can I help you today?");
-  const [settingsBusinessHours, setSettingsBusinessHours] = useState("Mon–Fri, 9:00 AM – 5:00 PM");
-  const [settingsAfterHoursMode, setSettingsAfterHoursMode] = useState("take-message");
-  const [settingsAllowAppointments, setSettingsAllowAppointments] = useState(true);
-  const [settingsAllowCallbacks, setSettingsAllowCallbacks] = useState(true);
-  const [settingsAllowMessages, setSettingsAllowMessages] = useState(true);
-  const [settingsTransferPolicy, setSettingsTransferPolicy] = useState("business_hours_only");
-  const [settingsTransferPhoneNumber, setSettingsTransferPhoneNumber] = useState("");
-  const [settingsNotificationEmail, setSettingsNotificationEmail] = useState("");
-  const [settingsNotificationPhone, setSettingsNotificationPhone] = useState("");
-  const [settingsGeneralInfo, setSettingsGeneralInfo] = useState("");
-  const [settingsAddressLine1, setSettingsAddressLine1] = useState("");
-  const [settingsAddressLine2, setSettingsAddressLine2] = useState("");
-  const [settingsCity, setSettingsCity] = useState("");
-  const [settingsStateRegion, setSettingsStateRegion] = useState("");
-  const [settingsPostalCode, setSettingsPostalCode] = useState("");
-  const [settingsEmergencyMessage, setSettingsEmergencyMessage] = useState(
-    "If this is an emergency, please hang up and call emergency services immediately."
-  );
-  const [settingsFallbackInstructions, setSettingsFallbackInstructions] = useState(
-    "If you cannot help the caller, take a message and let them know the team will follow up."
-  );
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsPlanName] = useState("Starter");
   const [settingsBillingStatus] = useState("Not connected yet");
-  const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsSavedMessage, setSettingsSavedMessage] = useState("");
-  const [settingsError, setSettingsError] = useState("");
   const [usage, setUsage] = useState(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState(null);
@@ -568,24 +535,6 @@ function App() {
         const needs = !biz || !biz.phone_number;
         setNeedsOnboarding(needs);
         setBusiness(biz); setBusinessId(biz?.id || null);
-        if (biz) {
-          setSettingsBusinessName(biz.name || "");
-          setSettingsTimezone(biz.timezone || "America/Chicago");
-          setSettingsDefaultLanguage(biz.default_language || "en");
-          setSettingsGreeting(biz.greeting || "Thank you for calling. How can I help you today?");
-          setSettingsBusinessHours(formatBusinessHours(biz.business_hours));
-          setSettingsAfterHoursMode(biz.after_hours_policy || "take-message");
-          setSettingsTransferPolicy(biz.transfer_policy || "business_hours_only");
-          setSettingsTransferPhoneNumber(biz.transfer_phone_number || "");
-          setSettingsNotificationEmail(biz.notification_email || "");
-          setSettingsNotificationPhone(biz.notification_phone || "");
-          setSettingsGeneralInfo(biz.general_info || "");
-          setSettingsAddressLine1(biz.address_line1 || "");
-          setSettingsAddressLine2(biz.address_line2 || "");
-          setSettingsCity(biz.city || "");
-          setSettingsStateRegion(biz.state_region || "");
-          setSettingsPostalCode(biz.postal_code || "");
-        }
       } catch (err) {
         const msg = err?.response?.data?.error || err?.message || "Unknown error";
         setMeError(msg); setBusiness(null); setBusinessId(null);
@@ -651,12 +600,6 @@ function App() {
     if (needsFollowUp) params.needs_followup = "true";
     return params;
   }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp]);
-
-  const settingsDirty = useMemo(() => {
-    if (!business) return false;
-    const b = business;
-    return (settingsBusinessName !== (b.name || "")) || (settingsTimezone !== (b.timezone || "America/Chicago")) || (settingsGreeting !== (b.greeting || "")) || (settingsAfterHoursMode !== (b.after_hours_policy || "take-message")) || (settingsTransferPolicy !== (b.transfer_policy || "business_hours_only")) || (settingsTransferPhoneNumber !== (b.transfer_phone_number || "")) || (settingsNotificationEmail !== (b.notification_email || "")) || (settingsNotificationPhone !== (b.notification_phone || "")) || (settingsDefaultLanguage !== (b.default_language || "en")) || (settingsGeneralInfo !== (b.general_info || "")) || (settingsAddressLine1 !== (b.address_line1 || "")) || (settingsAddressLine2 !== (b.address_line2 || "")) || (settingsCity !== (b.city || "")) || (settingsStateRegion !== (b.state_region || "")) || (settingsPostalCode !== (b.postal_code || ""));
-  }, [business, settingsBusinessName, settingsTimezone, settingsGreeting, settingsAfterHoursMode, settingsTransferPolicy, settingsTransferPhoneNumber, settingsNotificationEmail, settingsNotificationPhone, settingsDefaultLanguage, settingsGeneralInfo, settingsAddressLine1, settingsAddressLine2, settingsCity, settingsStateRegion, settingsPostalCode]);
 
   const hasActiveCallFilters = useMemo(() => {
     const caller = callerSearch.trim();
@@ -786,7 +729,7 @@ function App() {
 
   const emailAppointments = async (range) => {
     if (!businessId) return;
-    const to = settingsNotificationEmail || business?.notification_email;
+    const to = business?.notification_email;
     if (!to) {
       setToast({ type: "error", message: "Add a notification email in Settings first." });
       setTimeout(() => setToast(null), 2200);
@@ -814,52 +757,6 @@ function App() {
     from.setDate(d.getDate() - 7);
     setFromDate(formatDateYYYYMMDD(from)); setToDate(formatDateYYYYMMDD(d));
     setHasAppointments(false); setSentiment("all"); setHasSummary("all"); setNeedsFollowUp(false);
-  };
-
-  const saveSettings = async (e) => {
-    e.preventDefault();
-    if (!businessId) { setSettingsError("No business selected."); return; }
-    setSettingsSaving(true); setSettingsSavedMessage(""); setSettingsError("");
-    try {
-      const res = await api.put(`/api/business/${businessId}/settings`, {
-        name: settingsBusinessName, timezone: settingsTimezone,
-        greeting_message: settingsGreeting, after_hours_policy: settingsAfterHoursMode,
-        transfer_policy: settingsTransferPolicy, transfer_phone_number: settingsTransferPhoneNumber,
-        notification_email: settingsNotificationEmail, notification_phone: settingsNotificationPhone,
-        default_language: settingsDefaultLanguage,
-        general_info: settingsGeneralInfo,
-        address_line1: settingsAddressLine1,
-        address_line2: settingsAddressLine2,
-        city: settingsCity,
-        state_region: settingsStateRegion,
-        postal_code: settingsPostalCode,
-      });
-      const updatedBusiness = res.data;
-      setBusiness((prev) => ({ ...(prev || {}), ...updatedBusiness }));
-      setSettingsBusinessName(updatedBusiness.name || "");
-      setSettingsTimezone(updatedBusiness.timezone || "America/Chicago");
-      setSettingsDefaultLanguage(updatedBusiness.default_language || "en");
-      setSettingsGreeting(updatedBusiness.greeting || "Thank you for calling. How can I help you today?");
-      setSettingsBusinessHours(formatBusinessHours(updatedBusiness.business_hours));
-      setSettingsAfterHoursMode(updatedBusiness.after_hours_policy || "take-message");
-      setSettingsTransferPolicy(updatedBusiness.transfer_policy || "business_hours_only");
-      setSettingsTransferPhoneNumber(updatedBusiness.transfer_phone_number || "");
-      setSettingsNotificationEmail(updatedBusiness.notification_email || "");
-      setSettingsNotificationPhone(updatedBusiness.notification_phone || "");
-      setSettingsGeneralInfo(updatedBusiness.general_info || "");
-      setSettingsAddressLine1(updatedBusiness.address_line1 || "");
-      setSettingsAddressLine2(updatedBusiness.address_line2 || "");
-      setSettingsCity(updatedBusiness.city || "");
-      setSettingsStateRegion(updatedBusiness.state_region || "");
-      setSettingsPostalCode(updatedBusiness.postal_code || "");
-      setToast({ type: "success", message: "Settings saved successfully." });
-      setTimeout(() => setToast(null), 2600);
-    } catch (err) {
-      console.error(err);
-      setSettingsError(err?.response?.data?.error || "Failed to save settings");
-    } finally {
-      setSettingsSaving(false);
-    }
   };
 
   if (checkingSession)
@@ -1785,255 +1682,84 @@ function App() {
               </section>
             </section>
 
+            <SettingsPage
+              business={business}
+              businessId={businessId}
+              onBusinessUpdate={(updated) => setBusiness((prev) => ({ ...(prev || {}), ...updated }))}
+              onDirtyChange={setSettingsDirty}
+            />
+
             <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.businessSettings}</h2></div>
-              <div className="panel-body">
-                <form onSubmit={saveSettings} style={{ display: "grid", gap: 14 }}>
-                  <div className="filter-field">
-                    <label>{t.businessName}</label>
-                    <input value={settingsBusinessName} onChange={(e) => setSettingsBusinessName(e.target.value)} placeholder={t.businessName} />
-                  </div>
-                  <div className="filter-field">
-                    <label>{t.timezone}</label>
-                    <select value={settingsTimezone} onChange={(e) => setSettingsTimezone(e.target.value)}>
-                      <option value="America/Chicago">America/Chicago</option>
-                      <option value="America/New_York">America/New_York</option>
-                      <option value="America/Los_Angeles">America/Los_Angeles</option>
-                      <option value="Europe/London">Europe/London</option>
-                    </select>
-                  </div>
-                  <div className="filter-field">
-                    <label>{t.preferredLanguage}</label>
-                    <select value={settingsDefaultLanguage} onChange={(e) => setSettingsDefaultLanguage(e.target.value)}>
-                      <option value="en">English</option>
-                      <option value="es">Spanish</option>
-                      <option value="fr">French</option>
-                      <option value="de">German</option>
-                      <option value="pt">Portuguese</option>
-                      <option value="it">Italian</option>
-                      <option value="nl">Dutch</option>
-                      <option value="pl">Polish</option>
-                    </select>
-                  </div>
-                  <div className="filter-field">
-                    <label>{t.businessPhone}</label>
-                    <input value={business?.phone_number || t.noPhoneConnected} disabled />
-                  </div>
-                  <div className="filter-field">
-                    <label>{t.setupStatus}</label>
-                    <input value={business?.phone_number ? t.businessActive : t.businessNoPhone} disabled />
-                  </div>
-                </form>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.businessDetailsAddress}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <div className="filter-field">
-                  <label>{t.generalInfo}</label>
-                  <textarea value={settingsGeneralInfo} onChange={(e) => setSettingsGeneralInfo(e.target.value)} rows={3}
-                    placeholder={t.generalInfoPlaceholder}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 80 }} />
-                </div>
-                <div className="filter-field">
-                  <label>{t.addressLine1}</label>
-                  <input value={settingsAddressLine1} onChange={(e) => setSettingsAddressLine1(e.target.value)} placeholder={t.addressLine1Placeholder} />
-                </div>
-                <div className="filter-field">
-                  <label>{t.addressLine2}</label>
-                  <input value={settingsAddressLine2} onChange={(e) => setSettingsAddressLine2(e.target.value)} placeholder={t.addressLine2Placeholder} />
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                  <div className="filter-field">
-                    <label>{t.city}</label>
-                    <input value={settingsCity} onChange={(e) => setSettingsCity(e.target.value)} placeholder={t.cityPlaceholder} />
-                  </div>
-                  <div className="filter-field">
-                    <label>{t.stateRegion}</label>
-                    <input value={settingsStateRegion} onChange={(e) => setSettingsStateRegion(e.target.value)} placeholder={t.stateRegionPlaceholder} />
-                  </div>
-                </div>
-                <div className="filter-field">
-                  <label>{t.postalCode}</label>
-                  <input value={settingsPostalCode} onChange={(e) => setSettingsPostalCode(e.target.value)} placeholder={t.postalCodePlaceholder} />
-                </div>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.aiReceptionistTitle}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <div className="filter-field">
-                  <label>{t.greetingMessage}</label>
-                  <textarea value={settingsGreeting} onChange={(e) => setSettingsGreeting(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
-                </div>
-                <div className="filter-field">
-                  <label>{t.businessHours}</label>
-                  <input value={settingsBusinessHours} onChange={(e) => setSettingsBusinessHours(e.target.value)} placeholder="Mon–Fri, 9:00 AM – 5:00 PM" disabled />
-                  <span className="field-hint">{t.businessHoursHint}</span>
-                </div>
-                <div className="filter-field">
-                  <label>{t.afterHoursBehaviour}</label>
-                  <select value={settingsAfterHoursMode} onChange={(e) => setSettingsAfterHoursMode(e.target.value)}>
-                    <option value="take-message">{t.takeMessage}</option>
-                    <option value="book-later">{t.bookLater}</option>
-                    <option value="book_appointment">{t.bookAppointment}</option>
-                  </select>
-                </div>
-                <div className="checkbox-list">
-                  <label className="checkbox-item">
-                    <input type="checkbox" checked={settingsAllowAppointments} onChange={(e) => setSettingsAllowAppointments(e.target.checked)} />
-                    <span>{t.allowAppointments}</span>
-                  </label>
-                  <label className="checkbox-item">
-                    <input type="checkbox" checked={settingsAllowCallbacks} onChange={(e) => setSettingsAllowCallbacks(e.target.checked)} />
-                    <span>{t.allowCallbacks}</span>
-                  </label>
-                  <label className="checkbox-item">
-                    <input type="checkbox" checked={settingsAllowMessages} onChange={(e) => setSettingsAllowMessages(e.target.checked)} />
-                    <span>{t.allowMessages}</span>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.callHandling}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <div className="filter-field">
-                  <label>{t.transferPolicy}</label>
-                  <select value={settingsTransferPolicy} onChange={(e) => setSettingsTransferPolicy(e.target.value)}>
-                    <option value="never">{t.neverTransfer}</option>
-                    <option value="always">{t.alwaysTransfer}</option>
-                    <option value="business_hours_only">{t.businessHoursOnly}</option>
-                  </select>
-                </div>
-                <div className="filter-field">
-                  <label>{t.transferPhone}</label>
-                  <input value={settingsTransferPhoneNumber} onChange={(e) => setSettingsTransferPhoneNumber(e.target.value)} placeholder="+447700900123" />
-                </div>
-                <div className="filter-field">
-                  <label>{t.emergencyMessage}</label>
-                  <textarea value={settingsEmergencyMessage} onChange={(e) => setSettingsEmergencyMessage(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
-                </div>
-                <div className="filter-field">
-                  <label>{t.fallbackInstructions}</label>
-                  <textarea value={settingsFallbackInstructions} onChange={(e) => setSettingsFallbackInstructions(e.target.value)} rows={4}
-                    style={{ width: "100%", padding: 14, borderRadius: 12, border: "1px solid var(--vetra-border-strong)", background: "var(--vetra-bg)", color: "var(--vetra-text)", outline: "none", fontSize: 14, resize: "vertical", minHeight: 110 }} />
-                </div>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.notifications}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <div className="filter-field">
-                  <label>{t.notificationEmail}</label>
-                  <input value={settingsNotificationEmail} onChange={(e) => setSettingsNotificationEmail(e.target.value)} placeholder="you@business.com" />
-                </div>
-                <div className="filter-field">
-                  <label>{t.notificationPhone}</label>
-                  <input value={settingsNotificationPhone} onChange={(e) => setSettingsNotificationPhone(e.target.value)} placeholder="+447700900123" />
-                </div>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header"><h2 className="panel-title">{t.calendarSync}</h2></div>
-              <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                <p className="field-hint" style={{ margin: 0 }}>{t.calendarSyncDescription}</p>
-                {calendarLoading ? (
-                  <span className="field-hint">{t.loadingCalls}</span>
-                ) : calendarConnected ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-                    <span className="field-hint" style={{ color: "#1f8a4c" }}>{t.calendarConnected}</span>
-                    <button
-                      type="button"
-                      className="dashboard-logout"
-                      style={{ fontSize: 13, height: 36, padding: "0 14px" }}
-                      disabled={calendarSyncing}
-                      onClick={async () => {
-                        setCalendarSyncing(true);
-                        try {
-                          const res = await api.post("/api/calendar/sync");
-                          setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
-                          setTimeout(() => setToast(null), 3000);
-                        } catch (err) {
-                          setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
-                          setTimeout(() => setToast(null), 3000);
-                        } finally {
-                          setCalendarSyncing(false);
-                        }
-                      }}
-                    >
-                      {calendarSyncing ? "Syncing…" : t.syncToCalendarNow}
-                    </button>
-                    <button
-                      type="button"
-                      className="dashboard-logout"
-                      style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(220,80,80,0.4)", color: "#b91c1c" }}
-                      onClick={async () => {
-                        try {
-                          await api.delete("/api/calendar/disconnect");
-                          setCalendarConnected(false);
-                          setToast({ type: "success", message: t.disconnectCalendar });
-                          setTimeout(() => setToast(null), 2000);
-                        } catch (err) {
-                          setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
-                          setTimeout(() => setToast(null), 2000);
-                        }
-                      }}
-                    >
-                      {t.disconnectCalendar}
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="landing-cta-primary"
-                    style={{ alignSelf: "flex-start" }}
-                    onClick={async () => {
-                      try {
-                        const res = await api.get("/api/calendar/auth-url");
-                        if (res.data?.url) window.location.href = res.data.url;
-                        else setToast({ type: "error", message: "Calendar not configured" });
-                      } catch (err) {
-                        setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
-                        setTimeout(() => setToast(null), 2000);
-                      }
-                    }}
-                  >
-                    {t.connectGoogleCalendar}
-                  </button>
-                )}
-              </div>
-            </section>
-
-            <section className="panel" style={{ gridColumn: "1 / -1" }}>
-              <div className="panel-header"><h2 className="panel-title">{t.saveSettings}</h2></div>
-              <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                <div style={{ display: "grid", gap: 8 }}>
-                  {settingsError ? (
-                    <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(220,80,80,0.3)", background: "rgba(220,80,80,0.06)", color: "#b91c1c", fontSize: 13 }}>
-                      {settingsError}
+              <section className="panel">
+                <div className="panel-header"><h2 className="panel-title">{t.calendarSync}</h2></div>
+                <div className="panel-body" style={{ display: "grid", gap: 14 }}>
+                  <p className="field-hint" style={{ margin: 0 }}>{t.calendarSyncDescription}</p>
+                  {calendarLoading ? (
+                    <span className="field-hint">{t.loadingCalls}</span>
+                  ) : calendarConnected ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                      <span className="field-hint" style={{ color: "#1f8a4c" }}>{t.calendarConnected}</span>
+                      <button
+                        type="button"
+                        className="dashboard-logout"
+                        style={{ fontSize: 13, height: 36, padding: "0 14px" }}
+                        disabled={calendarSyncing}
+                        onClick={async () => {
+                          setCalendarSyncing(true);
+                          try {
+                            const res = await api.post("/api/calendar/sync");
+                            setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
+                            setTimeout(() => setToast(null), 3000);
+                          } catch (err) {
+                            setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
+                            setTimeout(() => setToast(null), 3000);
+                          } finally {
+                            setCalendarSyncing(false);
+                          }
+                        }}
+                      >
+                        {calendarSyncing ? "Syncing…" : t.syncToCalendarNow}
+                      </button>
+                      <button
+                        type="button"
+                        className="dashboard-logout"
+                        style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(220,80,80,0.4)", color: "#b91c1c" }}
+                        onClick={async () => {
+                          try {
+                            await api.delete("/api/calendar/disconnect");
+                            setCalendarConnected(false);
+                            setToast({ type: "success", message: t.disconnectCalendar });
+                            setTimeout(() => setToast(null), 2000);
+                          } catch (err) {
+                            setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
+                            setTimeout(() => setToast(null), 2000);
+                          }
+                        }}
+                      >
+                        {t.disconnectCalendar}
+                      </button>
                     </div>
                   ) : (
-                    <div className="empty-note">{t.saveDescription}</div>
+                    <button
+                      type="button"
+                      className="landing-cta-primary"
+                      style={{ alignSelf: "flex-start" }}
+                      onClick={async () => {
+                        try {
+                          const res = await api.get("/api/calendar/auth-url");
+                          if (res.data?.url) window.location.href = res.data.url;
+                          else setToast({ type: "error", message: "Calendar not configured" });
+                        } catch (err) {
+                          setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
+                          setTimeout(() => setToast(null), 2000);
+                        }
+                      }}
+                    >
+                      {t.connectGoogleCalendar}
+                    </button>
                   )}
                 </div>
-                <button
-                  className="dashboard-logout dashboard-save-button"
-                  onClick={saveSettings}
-                  disabled={settingsSaving}
-                >
-                  {settingsSaving ? t.saving : t.saveSettings}
-                </button>
-              </div>
-            </section>
+              </section>
             </section>
           </>
         ) : (
