@@ -92,5 +92,5 @@ if (problems.length) {
   }
   process.exitCode = 1;
 } else {
-  console.log("All good — remove the UNVERIFIED header comment at the top of config/voices.js.");
+  console.log("All good — every catalog voice exists on this account.");
 }

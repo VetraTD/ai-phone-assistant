@@ -34,14 +34,14 @@ const VOICE_PROVIDERS = ["elevenlabs", "google"];
 // Source of truth: root repo config/voices.js VOICE_CATALOG[].elevenVoiceId.
 // Keep this list in sync when the catalog changes.
 const ELEVENLABS_VOICE_IDS = [
-  "21m00Tcm4TlvDq8ikWAM", // Rachel
-  "pNInz6obpgDQGcFmaJgB", // Adam
-  "ErXwobaYiN019PkySvjV", // Antoni
-  "EXAVITQu4vr4xnSDxMaL", // Bella
-  "MF3mGyEYCk7xN5WJycdo", // Elli
-  "TxGEqnHWrfWFTfGW9XjX", // Josh
-  "XB0fDUnXU5powFXDhCwa", // Charlotte
-  "IKne3meq5aSn9XLyUdCD", // Charlie
+  "hpp4J3VqNfWAUOO0d1Us", // Bella
+  "EXAVITQu4vr4xnSDxMaL", // Sarah
+  "XrExE9yKIg1WjnnlVkGX", // Matilda
+  "Xb7hH8MSUJpSbSDYk0k2", // Alice
+  "cjVigY5qzO86Huf0OWal", // Eric
+  "CwhRBWXzGAHq8TQ4Fs17", // Roger
+  "onwK4e9ZLuTAKqWW03F9", // Daniel
+  "SAz9YHcvj6GT2YYXdXww", // River
 ];
 
 // Source of truth: root repo services/notifications.js DEFAULT_SMS_TEMPLATES

@@ -40,7 +40,7 @@ describe("PUT /api/business/:id/settings", () => {
         allowed_tasks: ["book_appointment", "check_appointment"],
         languages_spoken: ["en", "es"],
         voice_provider: "elevenlabs",
-        voice_id: "21m00Tcm4TlvDq8ikWAM",
+        voice_id: "hpp4J3VqNfWAUOO0d1Us",
         notifications_enabled: true,
       });
 

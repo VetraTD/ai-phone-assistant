@@ -1,9 +1,8 @@
-// UNVERIFIED — ELEVENLABS_API_KEY is not present in this environment's .env,
-// so these voice IDs could not be checked against GET
-// https://api.elevenlabs.io/v1/voices before landing this catalog. The IDs
-// below are ElevenLabs' well-known classic premade voices (stable, widely
-// documented) but MUST be re-verified against /v1/voices before launch —
-// ElevenLabs occasionally retires/renames premade voices.
+// Verified against the live ElevenLabs account (GET /v1/voices) on
+// 2026-07-20. All 8 entries below exist on the account as of that date.
+// Re-check with: node --env-file=.env scripts/verify-voices.js
+// (ElevenLabs occasionally retires/renames premade voices, so re-run this
+// before relying on the catalog again if it's been a while.)
 
 /**
  * Curated ElevenLabs voice picker for the per-business voice-selection
@@ -18,7 +17,7 @@
  * @property {string} elevenVoiceId - ElevenLabs voice ID
  * @property {string} label
  * @property {string} description
- * @property {"male"|"female"} gender
+ * @property {"male"|"female"|"neutral"} gender
  * @property {string} accent
  * @property {string} previewText - receptionist-flavored sample line
  * @property {{stability: number, similarity_boost: number}} voiceSettings
@@ -27,83 +26,83 @@
 /** @type {VoiceCatalogEntry[]} */
 export const VOICE_CATALOG = [
   {
-    id: "rachel",
-    elevenVoiceId: "21m00Tcm4TlvDq8ikWAM",
-    label: "Rachel",
-    description: "Calm, professional US female voice.",
-    gender: "female",
-    accent: "US",
-    previewText: "Thanks for calling — how can I help you today?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
-  },
-  {
-    id: "adam",
-    elevenVoiceId: "pNInz6obpgDQGcFmaJgB",
-    label: "Adam",
-    description: "Deep, confident US male voice.",
-    gender: "male",
-    accent: "US",
-    previewText: "Hi there, thanks for calling. What can I do for you?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
-  },
-  {
-    id: "antoni",
-    elevenVoiceId: "ErXwobaYiN019PkySvjV",
-    label: "Antoni",
-    description: "Warm, friendly US male voice.",
-    gender: "male",
-    accent: "US",
-    previewText: "Hey! Thanks for giving us a call — how can I help?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
-  },
-  {
     id: "bella",
-    elevenVoiceId: "EXAVITQu4vr4xnSDxMaL",
+    elevenVoiceId: "hpp4J3VqNfWAUOO0d1Us",
     label: "Bella",
-    description: "Soft, approachable US female voice.",
+    description: "Warm and professional. A polished front-desk voice.",
     gender: "female",
-    accent: "US",
-    previewText: "Hi, thank you for calling! What can I help you with today?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
-  },
-  {
-    id: "elli",
-    elevenVoiceId: "MF3mGyEYCk7xN5WJycdo",
-    label: "Elli",
-    description: "Young, friendly US female voice.",
-    gender: "female",
-    accent: "US",
-    previewText: "Hi there! Thanks so much for calling — how can I help?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
-  },
-  {
-    id: "josh",
-    elevenVoiceId: "TxGEqnHWrfWFTfGW9XjX",
-    label: "Josh",
-    description: "Casual, easygoing US male voice.",
-    gender: "male",
-    accent: "US",
-    previewText: "Hey, thanks for calling — what can I do for you today?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
-  },
-  {
-    id: "charlotte",
-    elevenVoiceId: "XB0fDUnXU5powFXDhCwa",
-    label: "Charlotte",
-    description: "Polished UK female voice.",
-    gender: "female",
-    accent: "UK",
-    previewText: "Thanks for calling — how may I help you today?",
+    accent: "american",
+    previewText: "Thanks so much for calling — how can I help you today?",
     voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
   },
   {
-    id: "charlie",
-    elevenVoiceId: "IKne3meq5aSn9XLyUdCD",
-    label: "Charlie",
-    description: "Relaxed Australian male voice.",
+    id: "sarah",
+    elevenVoiceId: "EXAVITQu4vr4xnSDxMaL",
+    label: "Sarah",
+    description: "Bright and professional, with a youthful energy — great for busy front desks.",
+    gender: "female",
+    accent: "american",
+    previewText: "Hi there, thanks for calling! What can I help you with?",
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+  },
+  {
+    id: "matilda",
+    elevenVoiceId: "XrExE9yKIg1WjnnlVkGX",
+    label: "Matilda",
+    description: "Upbeat and energetic — a friendly voice that puts callers at ease.",
+    gender: "female",
+    accent: "american",
+    previewText: "Hey! Thanks for calling — how can I help you out today?",
+    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+  },
+  {
+    id: "alice",
+    elevenVoiceId: "Xb7hH8MSUJpSbSDYk0k2",
+    label: "Alice",
+    description: "Polished and professional, with a crisp British accent.",
+    gender: "female",
+    accent: "british",
+    previewText: "Good afternoon, thank you for calling — how may I help you?",
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+  },
+  {
+    id: "eric",
+    elevenVoiceId: "cjVigY5qzO86Huf0OWal",
+    label: "Eric",
+    description: "Smooth and classy — a confident voice for a professional front desk.",
     gender: "male",
-    accent: "AU",
-    previewText: "G'day, thanks for calling — how can I help you today?",
+    accent: "american",
+    previewText: "Thanks for calling — this is our assistant. How can I help you today?",
+    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+  },
+  {
+    id: "roger",
+    elevenVoiceId: "CwhRBWXzGAHq8TQ4Fs17",
+    label: "Roger",
+    description: "Warm and classy, with an easy confidence that puts callers at ease.",
+    gender: "male",
+    accent: "american",
+    previewText: "Hey there, thanks for giving us a call — what can I do for you?",
+    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+  },
+  {
+    id: "daniel",
+    elevenVoiceId: "onwK4e9ZLuTAKqWW03F9",
+    label: "Daniel",
+    description: "Formal and precise, with a distinguished British accent.",
+    gender: "male",
+    accent: "british",
+    previewText: "Good day, thank you for calling. How may I assist you?",
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+  },
+  {
+    id: "river",
+    elevenVoiceId: "SAz9YHcvj6GT2YYXdXww",
+    label: "River",
+    description: "Calm and steady — an easygoing voice that keeps callers relaxed.",
+    gender: "neutral",
+    accent: "american",
+    previewText: "Hi, thanks for calling — how can I help you today?",
     voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
   },
 ];

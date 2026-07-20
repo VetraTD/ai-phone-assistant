@@ -14,7 +14,7 @@ describe("config/voices.js — curated ElevenLabs voice catalog", () => {
       expect(entry.elevenVoiceId.length).toBeGreaterThan(0);
       expect(typeof entry.label).toBe("string");
       expect(typeof entry.description).toBe("string");
-      expect(["male", "female"]).toContain(entry.gender);
+      expect(["male", "female", "neutral"]).toContain(entry.gender);
       expect(typeof entry.accent).toBe("string");
       expect(typeof entry.previewText).toBe("string");
       expect(entry.previewText.length).toBeGreaterThan(0);

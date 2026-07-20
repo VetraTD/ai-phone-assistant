@@ -12,16 +12,16 @@ How to test the rebuilt AI receptionist against a **dev phone number** before to
 | `GEMINI_API_KEY` | existing | unchanged |
 | Twilio dev number | console.twilio.com → Phone Numbers → Buy | ~$1.15/mo, separate from production number |
 
-## 2. Verify the voice catalog (launch blocker)
+## 2. Verify the voice catalog
 
-`config/voices.js` ships with 8 curated voice IDs that were **never verified against a live account**. Before relying on the picker:
+`config/voices.js` ships with 8 curated voice IDs, verified against a live account on 2026-07-20. If it's been a while (ElevenLabs occasionally retires/renames premade voices), re-check before relying on the picker:
 
 ```bash
-curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" https://api.elevenlabs.io/v1/voices \
-  | grep -E '"(name|voice_id)"'
+node --env-file=.env scripts/verify-voices.js
+# add --preview to also write a sample mp3 per voice to ./voice-previews/
 ```
 
-Match each `elevenVoiceId` in `config/voices.js` to a real voice, fix mismatches, then delete the `// UNVERIFIED` header comment.
+Fix any `MISSING` entries it reports in `config/voices.js` (and mirror the change into `AI-phone-dashboard/backend/src/constants.js`'s `ELEVENLABS_VOICE_IDS` and `AI-phone-dashboard/backend/src/routes/settings.js`'s `VOICE_CATALOG` — all three must stay in sync).
 
 ## 3. Local server + tunnel
 
