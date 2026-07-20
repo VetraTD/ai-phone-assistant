@@ -52,7 +52,7 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     mockConnect.mockReset();
   });
 
-  it("1. passes the exact connection config to connect()", async () => {
+  it("1. passes the exact connection config to connect(), including the Authorization header", async () => {
     const fakeSocket = createFakeSocket();
     mockConnect.mockResolvedValue(fakeSocket);
 
@@ -73,6 +73,7 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
       endpointing: 300,
       utterance_end_ms: 1000,
       vad_events: true,
+      Authorization: "Token test-key",
     });
 
     handle.close();
@@ -134,13 +135,20 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     const fakeSocket2 = createFakeSocket();
     mockConnect.mockResolvedValueOnce(fakeSocket1).mockResolvedValueOnce(fakeSocket2);
     const onReconnect = vi.fn();
+    const onFinal = vi.fn();
+    const onInterim = vi.fn();
 
-    const handle = await createSttStream({ callSid: "CA5", onReconnect });
+    const handle = await createSttStream({ callSid: "CA5", onReconnect, onFinal, onInterim });
     expect(handle.isAlive()).toBe(true);
 
     // Unexpected close (not via handle.close())
     fakeSocket1.emit("close");
     expect(handle.isAlive()).toBe(false);
+
+    // The superseded socket must be torn down immediately (not left dangling
+    // with our handlers attached) so its own auto-reconnect can't silently
+    // resurrect it later and deliver duplicate events.
+    expect(fakeSocket1.close).toHaveBeenCalledTimes(1);
 
     // Audio sent while reconnecting should be buffered, not sent to any socket.
     const chunkA = Buffer.from("A".repeat(10));
@@ -165,6 +173,15 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     const chunkC = Buffer.from("C".repeat(10));
     handle.sendAudio(chunkC);
     expect(fakeSocket2.sendMedia).toHaveBeenLastCalledWith(chunkC);
+
+    // Events fired on the abandoned old socket after replacement (e.g. its
+    // own underlying auto-reconnect delivering a late message) must be
+    // ignored — our handlers were detached from it during teardown.
+    fakeSocket1.emit("message", resultsMsg({ transcript: "late", is_final: true, speech_final: true }));
+    fakeSocket1.emit("close");
+    expect(onFinal).not.toHaveBeenCalled();
+    expect(onInterim).not.toHaveBeenCalled();
+    expect(mockConnect).toHaveBeenCalledTimes(2); // no extra reconnect triggered by the stale socket
 
     handle.close();
   });
