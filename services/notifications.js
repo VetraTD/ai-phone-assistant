@@ -4,7 +4,6 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import * as db from "./supabase.js";
 
-const NOTIFICATIONS_ENABLED = process.env.NOTIFICATIONS_ENABLED === "true";
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
 const SMTP_SECURE = process.env.SMTP_SECURE === "true";
@@ -15,6 +14,20 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
 
+const HAS_EMAIL_CREDS = !!(SMTP_USER && SMTP_PASS);
+const HAS_SMS_CREDS = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_SMS_FROM);
+
+// Notifications are ON BY DEFAULT as soon as either delivery channel (SMTP
+// email or Twilio SMS) is configured — no opt-in env var required anymore.
+// Set NOTIFICATIONS_ENABLED=false to force notifications off regardless of
+// configured credentials (e.g. for local dev). Per-business
+// businesses.notifications_enabled (see loadBusinessNotificationConfig)
+// still gates delivery per tenant on top of this global switch. Exported
+// (read-only) so tests can assert the computed gate value directly across
+// env-var combinations without needing to observe side effects.
+export const NOTIFICATIONS_ENABLED =
+  process.env.NOTIFICATIONS_ENABLED !== "false" && (HAS_EMAIL_CREDS || HAS_SMS_CREDS);
+
 const RATE_LIMIT_PER_MINUTE = 15;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -23,7 +36,7 @@ let mailTransport = null;
 /** @type {ReturnType<typeof twilio> | null} */
 let twilioClient = null;
 
-if (SMTP_USER && SMTP_PASS) {
+if (HAS_EMAIL_CREDS) {
   mailTransport = nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
