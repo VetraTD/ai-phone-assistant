@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeAllowedTasks, CORE_TASKS, MODULE_TASKS } from "../services/supabase.js";
-import { buildCallTools } from "../services/gemini.js";
+import { buildCallTools, buildDbAppointmentTools } from "../services/gemini.js";
 
 // ---------------------------------------------------------------------------
 // taskModel.test.js — CORE (always-on) + MODULES (opt-in) task model.
@@ -109,5 +109,50 @@ describe("services/gemini.js — buildCallTools registration matrix", () => {
     expect(result).toEqual(
       expect.arrayContaining(["set_call_intent", "end_call", "book_appointment", "record_customer_request", "request_transfer"])
     );
+  });
+});
+
+describe("services/gemini.js — buildDbAppointmentTools (cancel/reschedule identity-guard name fallback)", () => {
+  it("registers cancel_appointment_db/reschedule_appointment_db when cancel_reschedule is allowed and there's no EHR", () => {
+    const config = { allowedTasks: [...CORE_TASKS, "cancel_reschedule"] };
+    const { functionDeclarations } = buildDbAppointmentTools(config, { integrations: [] });
+    const names = functionDeclarations.map((d) => d.name);
+    expect(names).toContain("cancel_appointment_db");
+    expect(names).toContain("reschedule_appointment_db");
+  });
+
+  it("registers when check_appointment is allowed (not just cancel_reschedule)", () => {
+    const config = { allowedTasks: [...CORE_TASKS, "check_appointment"] };
+    const { functionDeclarations } = buildDbAppointmentTools(config, { integrations: [] });
+    expect(functionDeclarations.map((d) => d.name)).toContain("cancel_appointment_db");
+  });
+
+  it("does not register when no appointment module is allowed", () => {
+    const config = { allowedTasks: [...CORE_TASKS] };
+    const { functionDeclarations } = buildDbAppointmentTools(config, { integrations: [] });
+    expect(functionDeclarations).toHaveLength(0);
+  });
+
+  it("does not register when an enabled athenahealth (EHR) integration is present", () => {
+    const config = { allowedTasks: [...CORE_TASKS, "cancel_reschedule"] };
+    const { functionDeclarations } = buildDbAppointmentTools(config, {
+      integrations: [{ provider: "athenahealth", enabled: true }],
+    });
+    expect(functionDeclarations).toHaveLength(0);
+  });
+
+  it("cancel_appointment_db and reschedule_appointment_db both expose an optional client_name param (activates the identity guard's name fallback)", () => {
+    const config = { allowedTasks: [...CORE_TASKS, "cancel_reschedule"] };
+    const { functionDeclarations } = buildDbAppointmentTools(config, { integrations: [] });
+
+    const cancelDecl = functionDeclarations.find((d) => d.name === "cancel_appointment_db");
+    expect(cancelDecl.parameters.properties.client_name).toBeDefined();
+    expect(cancelDecl.parameters.properties.client_name.type).toBe("string");
+    expect(cancelDecl.parameters.required).not.toContain("client_name"); // optional
+
+    const rescheduleDecl = functionDeclarations.find((d) => d.name === "reschedule_appointment_db");
+    expect(rescheduleDecl.parameters.properties.client_name).toBeDefined();
+    expect(rescheduleDecl.parameters.properties.client_name.type).toBe("string");
+    expect(rescheduleDecl.parameters.required).not.toContain("client_name"); // optional
   });
 });

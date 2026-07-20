@@ -431,13 +431,14 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(ws.closeCount).toBe(1);
   });
 
-  it("9. done event with transferRequested effect triggers the transfer flow (doTransfer)", async () => {
+  it("9a. done event with transferRequested effect triggers the transfer flow when the model produced no text of its own", async () => {
+    // No delta events — the model called request_transfer without saying
+    // anything of its own (e.g. very first token was the function call).
     H.llmFactory = () => makeGen([
-      { type: "delta", text: "Of course, transferring you now." },
       {
         type: "done",
         reply: {
-          text: "Of course, transferring you now.",
+          text: "",
           transferRequested: { reason: "caller asked for a person" },
           toolResults: [{ name: "request_transfer", success: true, message: "ok" }],
         },
@@ -459,12 +460,53 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush(); // doTransfer() is fire-and-forget from applyReply
 
     // doTransfer's own "Transferring you now. Please hold." line was spoken
-    // (a TTS turn distinct from the model's own reply turn).
+    // since the model didn't say anything of its own this turn.
     const wroteTransferLine = H.ttsTurns.some((t) =>
       t.write.mock.calls.some((c) => /Transferring you now/i.test(c[0] || ""))
     );
     expect(wroteTransferLine).toBe(true);
 
+    const state = callState.getState(sid);
+    expect(state.step).toBe("ending");
+  });
+
+  it("9b. transferRequested skips the redundant hardcoded announcement when the model already spoke this turn", async () => {
+    // Deliberately worded to NOT contain doTransfer's exact hardcoded line,
+    // so the assertion below can't accidentally match the model's own text.
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure, I'll get you connected with someone right away." },
+      {
+        type: "done",
+        reply: {
+          text: "Sure, I'll get you connected with someone right away.",
+          transferRequested: { reason: "caller asked for a person" },
+          toolResults: [{ name: "request_transfer", success: true, message: "ok" }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("quiero hablar con una persona");
+    await flush();
+    await flush();
+    await flush(); // doTransfer() is fire-and-forget from applyReply
+
+    // The model already announced the transfer itself (the delta above) —
+    // doTransfer must NOT speak its own redundant hardcoded "Transferring
+    // you now. Please hold." line on top of it.
+    const wroteRedundantLine = H.ttsTurns.some((t) =>
+      t.write.mock.calls.some((c) => c[0] === "Transferring you now. Please hold.")
+    );
+    expect(wroteRedundantLine).toBe(false);
+
+    // But the transfer still actually proceeds (step -> ending), it's only
+    // the extra spoken line that's skipped.
     const state = callState.getState(sid);
     expect(state.step).toBe("ending");
   });

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
-import { BUILTIN_TOOL_NAMES } from "./supabase.js";
+import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
 
 const MAX_FC_ROUNDS = 3;
@@ -35,7 +35,14 @@ const DEFAULT_CONFIG = {
   timezone: process.env.TIMEZONE || "America/Chicago",
   businessHours: null,
   transferPhoneNumber: null,
-  allowedTasks: ["book_appointment", "general_question"],
+  // allowedTasks is intentionally omitted here — computed lazily in
+  // getReplyStreaming via normalizeAllowedTasks(null), the same function
+  // loadConfig's own default goes through, so a getReplyStreaming call with
+  // no business config behaves identically to a business with no
+  // allowed_tasks set. Kept out of this static object (rather than calling
+  // normalizeAllowedTasks at module load) so importing gemini.js never
+  // requires services/supabase.js's mock to provide normalizeAllowedTasks
+  // unless this fallback path is actually exercised.
   mainPhone: null,
   generalInfo: null,
   afterHoursPolicy: "take_message",
@@ -317,6 +324,11 @@ const DB_APPOINTMENT_DECLARATIONS = [
       type: "object",
       properties: {
         appointment_id: { type: "string", description: "UUID of the appointment to cancel (optional if caller has one appointment)" },
+        client_name: {
+          type: "string",
+          description:
+            "The name the appointment is booked under, if the caller gave one. Used to verify the appointment belongs to them when they're calling from a different number.",
+        },
       },
       required: [],
     },
@@ -333,6 +345,11 @@ const DB_APPOINTMENT_DECLARATIONS = [
           type: "string",
           description: "New date and time in ISO 8601 format (e.g. 2026-04-15T10:00:00)",
         },
+        client_name: {
+          type: "string",
+          description:
+            "The name the appointment is booked under, if the caller gave one. Used to verify the appointment belongs to them when they're calling from a different number.",
+        },
       },
       required: ["new_scheduled_at"],
     },
@@ -344,7 +361,7 @@ const DB_APPOINTMENT_DECLARATIONS = [
  * @param {object} config - Per-business config (allowedTasks)
  * @param {object} extras - { integrations: Array }
  */
-function buildDbAppointmentTools(config, extras) {
+export function buildDbAppointmentTools(config, extras) {
   const integrations = Array.isArray(extras?.integrations) ? extras.integrations : [];
   const hasEhr = integrations.some(
     (i) => i.enabled && (i.provider === "athenahealth" /* future EHR */)
@@ -773,7 +790,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
-  const cfg = config || DEFAULT_CONFIG;
+  const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
   const builtInTools = buildCallTools(cfg.allowedTasks);
