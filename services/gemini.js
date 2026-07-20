@@ -381,20 +381,46 @@ export function buildDbAppointmentTools(config, extras) {
 // ---------------------------------------------------------------------------
 
 /**
- * Check whether the business is currently open.
- * @param {{ businessHours: {open_time:string,close_time:string}|null, timezone: string }} config
+ * Check whether the business is currently open. Supports both business_hours
+ * shapes: the legacy single-window `{open_time,close_time}` (applied every
+ * day) and the weekly shape from migration 014,
+ * `{"mon":{"open":"HH:MM","close":"HH:MM","closed":bool}, ..., "sun":{...}}`
+ * — detected by the presence of a `mon` key. See
+ * database/014_business_hours_weekly.sql.
+ * @param {{ businessHours: {open_time:string,close_time:string}|Record<string,{open:string,close:string,closed:boolean}>|null, timezone: string }} config
  * @returns {boolean}
  */
 export function isBusinessOpen(config) {
   if (!config.businessHours) return true; // null → always open
-  const { open_time, close_time } = config.businessHours;
-  if (!open_time || !close_time) return true;
 
   const now = new Date();
   const parts = now
     .toLocaleTimeString("en-GB", { timeZone: config.timezone, hour12: false })
     .split(":");
   const currentMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+
+  const hours = config.businessHours;
+
+  // Weekly shape: look up today's entry in the business's timezone.
+  if (hours.mon !== undefined) {
+    const shortWeekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: config.timezone,
+      weekday: "short",
+    })
+      .format(now)
+      .slice(0, 3)
+      .toLowerCase();
+    const today = hours[shortWeekday];
+    if (!today || today.closed) return false;
+    if (!today.open || !today.close) return true;
+    const [openH, openM] = today.open.split(":").map(Number);
+    const [closeH, closeM] = today.close.split(":").map(Number);
+    return currentMinutes >= openH * 60 + openM && currentMinutes < closeH * 60 + closeM;
+  }
+
+  // Legacy shape: single window applied every day.
+  const { open_time, close_time } = hours;
+  if (!open_time || !close_time) return true;
 
   const [openH, openM] = open_time.split(":").map(Number);
   const [closeH, closeM] = close_time.split(":").map(Number);
