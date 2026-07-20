@@ -156,7 +156,7 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
 
     res.json({ success: true, count: appts.length });
   } catch (err) {
-    console.error("appointments-email failed:", err.response?.data || err);
+    console.error("appointments-email failed:", err.response?.data ?? err.message);
     res.status(500).json({ error: "Failed to send appointments email" });
   }
 });

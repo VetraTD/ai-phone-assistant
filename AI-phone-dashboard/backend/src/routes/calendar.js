@@ -128,7 +128,7 @@ router.get("/api/calendar/callback", async (req, res) => {
     );
     res.redirect(`${frontendRedirect}?calendar=connected`);
   } catch (err) {
-    console.error("calendar callback error:", err?.response?.data || err);
+    console.error("calendar callback error:", err?.response?.data ?? err?.message);
     res.redirect(`${frontendRedirect}?calendar=error&message=${encodeURIComponent(err?.message || "callback_failed")}`);
   }
 });
@@ -239,7 +239,7 @@ router.post("/api/calendar/sync", authSensitiveLimiter, authenticate, async (req
     }
     res.json({ success: true, created, total: appts.length });
   } catch (err) {
-    console.error("calendar sync error:", err?.response?.data || err);
+    console.error("calendar sync error:", err?.response?.data ?? err?.message);
     res.status(500).json({ error: err?.response?.data?.error?.message || "Failed to sync to calendar" });
   }
 });

@@ -115,7 +115,7 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
-    console.error("contact form failed:", err.response?.data || err);
+    console.error("contact form failed:", err.response?.data ?? err.message);
     res.status(500).json({ error: "Failed to send message. Please try again or email us directly." });
   }
 });
@@ -147,7 +147,10 @@ app.use(require("./routes/knowledge"));
 // Note: keep this AFTER all route declarations
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
+  // Log the message/stack, never the error object: an AxiosError that reaches
+  // here carries the outbound request's headers and body on `err.config`
+  // (own enumerable props), so printing it dumps API keys into the logs.
+  console.error("Unhandled error:", err?.response?.data ?? err?.message, err?.stack);
   if (res.headersSent) {
     return;
   }
