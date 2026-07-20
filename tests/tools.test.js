@@ -202,19 +202,134 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(functionResponse.response).toEqual({ success: true, message: "That appointment has been cancelled." });
     });
 
-    it("cancel_appointment_db: allows when the model-supplied client_name matches (phone mismatch)", async () => {
+    it("cancel_appointment_db: allows on a name match ONLY when the caller also supplies the correct last 4 digits", async () => {
       mockGetAppointmentById.mockResolvedValue({
         id: "appt-1",
         client_phone: "+19995550000", // does not match ctx.callerPhone
         client_name: "Jane Doe",
       });
       mockUpdateAppointmentStatus.mockResolvedValue(true);
-      const fc = { id: "fc9b", name: "cancel_appointment_db", args: { appointment_id: "appt-1", client_name: "jane doe" } };
+      const fc = {
+        id: "fc9b",
+        name: "cancel_appointment_db",
+        args: { appointment_id: "appt-1", client_name: "jane doe", phone_last4: "0000" },
+      };
 
       const { functionResponse } = await executeToolCall(fc, baseCtx);
 
       expect(mockUpdateAppointmentStatus).toHaveBeenCalled();
       expect(functionResponse.response.success).toBe(true);
+    });
+
+    it("cancel_appointment_db: DENIES a name match with no last-4 second factor (knowing a name must not be enough)", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-1",
+        client_phone: "+19995550000",
+        client_name: "Jane Doe",
+      });
+      const fc = {
+        id: "fc9b1",
+        name: "cancel_appointment_db",
+        args: { appointment_id: "appt-1", client_name: "jane doe" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, baseCtx);
+
+      expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "I can only make changes to appointments booked under your number. Let me take a message instead.",
+      });
+    });
+
+    it("cancel_appointment_db: DENIES a name match with the WRONG last-4", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-1",
+        client_phone: "+19995550000",
+        client_name: "Jane Doe",
+      });
+      const fc = {
+        id: "fc9b2",
+        name: "cancel_appointment_db",
+        args: { appointment_id: "appt-1", client_name: "jane doe", phone_last4: "1234" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, baseCtx);
+
+      expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+      expect(functionResponse.response.success).toBe(false);
+    });
+
+    it("cancel_appointment_db: accepts a spoken last-4 with punctuation/spacing ('0-0-0-0')", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-1",
+        client_phone: "+19995550000",
+        client_name: "Jane Doe",
+      });
+      mockUpdateAppointmentStatus.mockResolvedValue(true);
+      const fc = {
+        id: "fc9b3",
+        name: "cancel_appointment_db",
+        args: { appointment_id: "appt-1", client_name: "jane doe", phone_last4: "0-0-0-0" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, baseCtx);
+
+      expect(functionResponse.response.success).toBe(true);
+    });
+
+    it("cancel_appointment_db: a last-4 alone (no name match) is NOT enough", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-1",
+        client_phone: "+19995550000",
+        client_name: "Jane Doe",
+      });
+      const fc = {
+        id: "fc9b4",
+        name: "cancel_appointment_db",
+        args: { appointment_id: "appt-1", client_name: "Somebody Else", phone_last4: "0000" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, baseCtx);
+
+      expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+      expect(functionResponse.response.success).toBe(false);
+    });
+
+    it("reschedule_appointment_db: same second-factor rule — name alone is denied, name + last-4 is allowed", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-2",
+        client_phone: "+19995551111",
+        client_name: "Jane Doe",
+      });
+      mockUpdateAppointment.mockResolvedValue(true);
+
+      const denied = await executeToolCall(
+        {
+          id: "fc10c",
+          name: "reschedule_appointment_db",
+          args: { appointment_id: "appt-2", new_scheduled_at: "2026-08-02T10:00:00Z", client_name: "Jane Doe" },
+        },
+        baseCtx
+      );
+      expect(mockUpdateAppointment).not.toHaveBeenCalled();
+      expect(denied.functionResponse.response.success).toBe(false);
+
+      const allowed = await executeToolCall(
+        {
+          id: "fc10d",
+          name: "reschedule_appointment_db",
+          args: {
+            appointment_id: "appt-2",
+            new_scheduled_at: "2026-08-02T10:00:00Z",
+            client_name: "Jane Doe",
+            phone_last4: "1111",
+          },
+        },
+        baseCtx
+      );
+      expect(mockUpdateAppointment).toHaveBeenCalled();
+      expect(allowed.functionResponse.response.success).toBe(true);
     });
 
     it("cancel_appointment_db: denies when neither phone nor name match — never calls updateAppointmentStatus", async () => {
@@ -275,6 +390,68 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         success: false,
         message: "I can only make changes to appointments booked under your number. Let me take a message instead.",
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tenant scoping. lib/voice/session.js logs "no_business_found" and carries
+  // on with state.businessId unset, so ctx.businessId can legitimately be
+  // null mid-call. Every appointment tool must refuse to run at all in that
+  // state — previously they passed `null` straight through to supabase.js,
+  // whose `if (businessId)` guards then issued the query UNSCOPED, across
+  // every tenant in the table.
+  // -------------------------------------------------------------------------
+  describe("appointment tools refuse to run without a business context", () => {
+    const NO_BUSINESS_MESSAGE =
+      "I'm not able to look that up right now. Let me take a message and someone will follow up.";
+    const noBizCtx = { ...baseCtx, businessId: null };
+
+    it("cancel_appointment_db: denies and never touches the DB", async () => {
+      const fc = { id: "fcNB1", name: "cancel_appointment_db", args: { appointment_id: "appt-1" } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, noBizCtx);
+
+      expect(functionResponse.response).toEqual({ success: false, message: NO_BUSINESS_MESSAGE });
+      expect(stateEffects.toolResult.success).toBe(false);
+      expect(mockGetAppointmentById).not.toHaveBeenCalled();
+      expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+    });
+
+    it("reschedule_appointment_db: denies and never touches the DB", async () => {
+      const fc = {
+        id: "fcNB2",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-1", new_scheduled_at: "2026-08-02T10:00:00Z" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, noBizCtx);
+
+      expect(functionResponse.response).toEqual({ success: false, message: NO_BUSINESS_MESSAGE });
+      expect(mockGetAppointmentById).not.toHaveBeenCalled();
+      expect(mockUpdateAppointment).not.toHaveBeenCalled();
+    });
+
+    it("get_caller_appointments_from_db: denies instead of silently returning an empty list", async () => {
+      const fc = { id: "fcNB3", name: "get_caller_appointments_from_db", args: {} };
+
+      const { functionResponse } = await executeToolCall(fc, noBizCtx);
+
+      expect(functionResponse.response).toEqual({ success: false, message: NO_BUSINESS_MESSAGE });
+      expect(mockListAppointmentsByCaller).not.toHaveBeenCalled();
+    });
+
+    it("book_appointment: denies instead of reporting a generic booking failure", async () => {
+      const fc = {
+        id: "fcNB4",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+      };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, noBizCtx);
+
+      expect(functionResponse.response).toEqual({ success: false, message: NO_BUSINESS_MESSAGE });
+      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
     });
   });
 

@@ -327,7 +327,12 @@ const DB_APPOINTMENT_DECLARATIONS = [
         client_name: {
           type: "string",
           description:
-            "The name the appointment is booked under, if the caller gave one. Used to verify the appointment belongs to them when they're calling from a different number.",
+            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the cancellation will be refused.",
         },
       },
       required: [],
@@ -348,7 +353,12 @@ const DB_APPOINTMENT_DECLARATIONS = [
         client_name: {
           type: "string",
           description:
-            "The name the appointment is booked under, if the caller gave one. Used to verify the appointment belongs to them when they're calling from a different number.",
+            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the reschedule will be refused.",
         },
       },
       required: ["new_scheduled_at"],
@@ -851,6 +861,9 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         return (
           `The caller wants to cancel or reschedule an appointment. ` +
           `If you have tools to look up their appointments by phone or name (get_caller_appointments_from_db), use those, then cancel_appointment_db or reschedule_appointment_db. ` +
+          `IDENTITY CHECK: if the lookup by their calling number finds nothing and you are going by the name they gave instead, you MUST also ask for the last 4 digits of the phone number the appointment is booked under, and pass them as phone_last4. ` +
+          `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — and never guess or invent those digits. ` +
+          `Without them the change will be refused, so do not claim it is done until the tool reports success. ` +
           `Otherwise collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
         );
       }

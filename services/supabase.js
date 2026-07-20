@@ -463,16 +463,22 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
  * cancel/reschedule — verifies the appointment actually belongs to the
  * caller before mutating it).
  * @param {string} appointmentId
- * @param {string} [businessId] - If provided, restricts the lookup to this business
+ * @param {string} businessId - REQUIRED. The tenant filter is unconditional:
+ *   an appointment UUID is not a secret, so a lookup without a business scope
+ *   would read across every tenant in the table. Missing => no query at all.
  * @returns {Promise<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}|null>}
  */
 export async function getAppointmentById(appointmentId, businessId) {
   if (!supabase || !appointmentId) return null;
-  let q = supabase
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "getAppointmentById", appointmentId });
+    return null;
+  }
+  const q = supabase
     .from("appointments")
     .select("id, client_name, client_phone, scheduled_at, status, notes")
-    .eq("id", appointmentId);
-  if (businessId) q = q.eq("business_id", businessId);
+    .eq("id", appointmentId)
+    .eq("business_id", businessId);
   const { data, error } = await q.maybeSingle();
   if (error) {
     log.error("db_error", { operation: "getAppointmentById", error: error.message });
@@ -485,13 +491,21 @@ export async function getAppointmentById(appointmentId, businessId) {
  * Update an appointment's status (e.g. cancel).
  * @param {string} appointmentId
  * @param {string} status - e.g. 'cancelled'
- * @param {string} [businessId] - If provided, restricts update to this business
+ * @param {string} businessId - REQUIRED; the tenant filter is unconditional
+ *   (see getAppointmentById). Missing => no query at all.
  * @returns {Promise<boolean>}
  */
 export async function updateAppointmentStatus(appointmentId, status, businessId) {
   if (!supabase || !appointmentId) return false;
-  let q = supabase.from("appointments").update({ status }).eq("id", appointmentId);
-  if (businessId) q = q.eq("business_id", businessId);
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "updateAppointmentStatus", appointmentId });
+    return false;
+  }
+  const q = supabase
+    .from("appointments")
+    .update({ status })
+    .eq("id", appointmentId)
+    .eq("business_id", businessId);
   const { data, error } = await q.select("id").maybeSingle();
   if (error) {
     log.error("db_error", { operation: "updateAppointmentStatus", error: error.message });
@@ -504,13 +518,21 @@ export async function updateAppointmentStatus(appointmentId, status, businessId)
  * Update an appointment (e.g. reschedule).
  * @param {string} appointmentId
  * @param {object} updates - e.g. { scheduled_at: "2026-04-15T10:00:00" }
- * @param {string} [businessId] - If provided, restricts update to this business
+ * @param {string} businessId - REQUIRED; the tenant filter is unconditional
+ *   (see getAppointmentById). Missing => no query at all.
  * @returns {Promise<boolean>}
  */
 export async function updateAppointment(appointmentId, updates, businessId) {
   if (!supabase || !appointmentId || !updates || typeof updates !== "object") return false;
-  let q = supabase.from("appointments").update(updates).eq("id", appointmentId);
-  if (businessId) q = q.eq("business_id", businessId);
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "updateAppointment", appointmentId });
+    return false;
+  }
+  const q = supabase
+    .from("appointments")
+    .update(updates)
+    .eq("id", appointmentId)
+    .eq("business_id", businessId);
   const { data, error } = await q.select("id").maybeSingle();
   if (error) {
     log.error("db_error", { operation: "updateAppointment", error: error.message });

@@ -28,46 +28,83 @@ const ATHENA_TOOL_NAMES = [
 const IDENTITY_MISMATCH_MESSAGE =
   "I can only make changes to appointments booked under your number. Let me take a message instead.";
 
+// Returned by every appointment tool when the call has no business context
+// (lib/voice/session.js logs "no_business_found" and continues with
+// state.businessId unset). Running these tools unscoped would query across
+// every tenant, so they refuse outright and steer the model to take a message.
+const NO_BUSINESS_MESSAGE =
+  "I'm not able to look that up right now. Let me take a message and someone will follow up.";
+
+/** Uniform "this tool cannot run without a tenant" result. */
+function noBusinessResult(fc) {
+  return {
+    functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: NO_BUSINESS_MESSAGE } },
+    stateEffects: {
+      ...(fc.name === "book_appointment" ? { appointmentArgs: null } : {}),
+      toolResult: { name: fc.name, success: false, message: NO_BUSINESS_MESSAGE },
+      toolCallEvent: { name: fc.name, args: fc.args ?? {} },
+    },
+  };
+}
+
 /**
  * Does the given appointment row belong to the current caller?
- * Matches on either the caller's verified phone number (last 10 digits,
- * from ctx.callerPhone — trusted call metadata, not model-supplied) OR a
- * case-insensitive exact match of the client_name on file against the
- * client_name argument the model supplies for this call.
+ *
+ * Two accepted proofs:
+ *  1. PHONE — the caller's verified number (last 10 digits, from
+ *     ctx.callerPhone: trusted Twilio call metadata, never model-supplied)
+ *     matches the appointment's client_phone. Sufficient on its own.
+ *  2. NAME + LAST-4 — the client_name on file matches the name the caller
+ *     gave AND the caller also states the last 4 digits of the phone number
+ *     the appointment is booked under. Both are model-supplied (i.e. relayed
+ *     from caller speech), so neither is sufficient alone: a name is public
+ *     information, and knowing it must not be enough to cancel a stranger's
+ *     appointment. The last-4 is the second factor.
+ *
  * @param {{client_phone?: string|null, client_name?: string|null}|null} appointment
  * @param {{callerPhone?: string|null}} ctx
  * @param {string|undefined} argsClientName
+ * @param {string|undefined} argsPhoneLast4 - last 4 digits as spoken by the
+ *   caller; non-digits are stripped so "0-0-0-0" / "0 0 0 0" work.
  * @returns {boolean}
  */
-function appointmentBelongsToCaller(appointment, ctx, argsClientName) {
+function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) {
   if (!appointment) return false;
 
   const callerDigits = String(ctx?.callerPhone || "").replace(/\D/g, "");
   const apptDigits = String(appointment.client_phone || "").replace(/\D/g, "");
   const phoneMatches =
     callerDigits.length >= 10 && apptDigits.length >= 10 && callerDigits.slice(-10) === apptDigits.slice(-10);
+  if (phoneMatches) return true;
 
   const nameArg = String(argsClientName || "").trim().toLowerCase();
   const apptName = String(appointment.client_name || "").trim().toLowerCase();
   const nameMatches = nameArg.length > 0 && apptName.length > 0 && nameArg === apptName;
+  if (!nameMatches) return false;
 
-  return phoneMatches || nameMatches;
+  // Second factor. Fails closed when the appointment on file has no usable
+  // phone number to check against — there is then nothing the caller could
+  // prove, so the name path is simply unavailable for that row.
+  const last4Arg = String(argsPhoneLast4 || "").replace(/\D/g, "");
+  if (last4Arg.length !== 4 || apptDigits.length < 4) return false;
+  return last4Arg === apptDigits.slice(-4);
 }
 
 /**
  * Fetch the target appointment and verify it belongs to the caller before
  * cancel/reschedule mutate it. Fails closed: a missing appointmentId, a row
- * that can't be found (wrong business, bad id), or no phone/name match all
- * return false.
+ * that can't be found (wrong business, bad id), or no phone / name+last-4
+ * match all return false.
  * @param {string|undefined} appointmentId
  * @param {object} ctx
  * @param {string|undefined} argsClientName
+ * @param {string|undefined} argsPhoneLast4
  * @returns {Promise<boolean>}
  */
-async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName) {
-  if (!appointmentId) return false;
-  const appointment = await getAppointmentById(appointmentId, ctx?.businessId || null);
-  return appointmentBelongsToCaller(appointment, ctx, argsClientName);
+async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
+  if (!appointmentId || !ctx?.businessId) return false;
+  const appointment = await getAppointmentById(appointmentId, ctx.businessId);
+  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
 }
 
 /**
@@ -115,14 +152,15 @@ export async function executeToolCall(fc, ctx) {
     }
 
     case "book_appointment": {
+      if (!ctx?.businessId) return noBusinessResult(fc);
       const args = fc.args ?? {};
-      const businessId = ctx?.businessId || null;
+      const businessId = ctx.businessId;
       const callerPhone = ctx?.callerPhone || null;
       const callId = ctx?.callId || null;
       let bookSuccess = false;
       let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
 
-      if (businessId && args.scheduled_at) {
+      if (args.scheduled_at) {
         const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
         try {
           const dbId = await createAppointment({ businessId, callId, clientName: args.client_name || null, clientPhone: callerPhone || null, scheduledAt: args.scheduled_at, notes });
@@ -189,11 +227,12 @@ export async function executeToolCall(fc, ctx) {
       // Use only the verified caller phone from call metadata (ctx.callerPhone)
       // — never a model-supplied phone number — so a caller can't fish for
       // another customer's appointments by asking about a different number.
+      if (!ctx?.businessId) return noBusinessResult(fc);
       const callerPhone = ctx?.callerPhone || null;
-      const businessId = ctx?.businessId || null;
+      const businessId = ctx.businessId;
       let appointments = [];
       let selectedAppointmentId;
-      if (callerPhone && businessId) {
+      if (callerPhone) {
         appointments = await listAppointmentsByCaller(businessId, { clientPhone: callerPhone });
         if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
       }
@@ -208,8 +247,9 @@ export async function executeToolCall(fc, ctx) {
     }
 
     case "cancel_appointment_db": {
+      if (!ctx?.businessId) return noBusinessResult(fc);
       const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
-      const businessId = ctx?.businessId || null;
+      const businessId = ctx.businessId;
       if (!appointmentId) {
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "Which appointment?" } },
@@ -219,7 +259,12 @@ export async function executeToolCall(fc, ctx) {
           },
         };
       }
-      const identityOk = await verifyAppointmentIdentity(appointmentId, ctx, fc.args?.client_name);
+      const identityOk = await verifyAppointmentIdentity(
+        appointmentId,
+        ctx,
+        fc.args?.client_name,
+        fc.args?.phone_last4
+      );
       if (!identityOk) {
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: IDENTITY_MISMATCH_MESSAGE } },
@@ -246,9 +291,10 @@ export async function executeToolCall(fc, ctx) {
     }
 
     case "reschedule_appointment_db": {
+      if (!ctx?.businessId) return noBusinessResult(fc);
       const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
       const newScheduledAt = fc.args?.new_scheduled_at;
-      const businessId = ctx?.businessId || null;
+      const businessId = ctx.businessId;
       if (!appointmentId || !newScheduledAt) {
         return {
           functionResponse: {
@@ -262,7 +308,12 @@ export async function executeToolCall(fc, ctx) {
           },
         };
       }
-      const identityOk = await verifyAppointmentIdentity(appointmentId, ctx, fc.args?.client_name);
+      const identityOk = await verifyAppointmentIdentity(
+        appointmentId,
+        ctx,
+        fc.args?.client_name,
+        fc.args?.phone_last4
+      );
       if (!identityOk) {
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: IDENTITY_MISMATCH_MESSAGE } },
