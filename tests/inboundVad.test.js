@@ -176,6 +176,15 @@ describe("inboundVad.js — createVad", () => {
       expect(vad.isActive(501)).toBe(false);
     });
 
+    it("treats the hangover boundary as exclusive: exactly lastVoiced + hangoverMs is already inactive", () => {
+      for (const atMs of [0, 50, 100, 150, 200]) {
+        vad.processFrame(loudFrame(8000), atMs);
+      }
+      // Last voiced frame at 200ms; hangoverMs default 300ms.
+      expect(vad.isActive(499)).toBe(true); // 299ms elapsed, still within hangover
+      expect(vad.isActive(500)).toBe(false); // exactly 300ms elapsed == hangoverMs -> inactive
+    });
+
     it("isActive() reflects hangover expiry even without a new processFrame call", () => {
       for (const atMs of [0, 50, 100, 150, 200]) {
         vad.processFrame(loudFrame(8000), atMs);

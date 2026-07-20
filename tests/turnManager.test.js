@@ -85,6 +85,27 @@ describe("turnManager.js — createTurnManager", () => {
       expect(deps.onInterrupt).not.toHaveBeenCalled();
     });
 
+    it("does not treat a substring match as a cue: 'I know' does not match the 'no' cue", () => {
+      // "know" contains "no" as a substring but must not whole-word match
+      // the "no" cue. 2 words, so also below the >=3-word auto-interrupt
+      // rule — isolates cue-matching correctness from the word-count rule.
+      const result = tm.handleInterim("I know");
+      expect(result).toEqual({ action: "defer" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+    });
+
+    it("does not treat a substring match as a cue: 'you know' does not match the 'no' cue", () => {
+      const result = tm.handleInterim("you know");
+      expect(result).toEqual({ action: "defer" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+    });
+
+    it("does match standalone 'no' as the interrupt cue it is", () => {
+      const result = tm.handleInterim("no");
+      expect(result).toEqual({ action: "interrupt" });
+      expect(deps.onInterrupt).toHaveBeenCalledWith("no");
+    });
+
     it("defers a short (1-2 word) non-backchannel, non-cue phrase like a name", () => {
       const result = tm.handleInterim("John Smith");
       expect(result).toEqual({ action: "defer" });
@@ -123,6 +144,16 @@ describe("turnManager.js — createTurnManager", () => {
     });
   });
 
+  describe("handleInterim() with empty/null text", () => {
+    it("ignores null/empty text with reason empty, without touching callbacks, even while speaking", () => {
+      expect(tm.handleInterim(null)).toEqual({ action: "ignore", reason: "empty" });
+      expect(tm.handleInterim("")).toEqual({ action: "ignore", reason: "empty" });
+      expect(tm.handleInterim("   ")).toEqual({ action: "ignore", reason: "empty" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+  });
+
   describe("handleFinal()", () => {
     it("while speaking, non-backchannel final triggers onInterrupt + onTurnEnd without requiring VAD", () => {
       deps.vad.isActive.mockReturnValue(false); // VAD not confirming — must not matter for finals
@@ -133,6 +164,27 @@ describe("turnManager.js — createTurnManager", () => {
 
     it("while speaking, a pure-backchannel final is ignored (no interrupt, no turn end)", () => {
       tm.handleFinal("okay");
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, a null final does not trigger a spurious interrupt (STT silence-timeout artifact)", () => {
+      const result = tm.handleFinal(null);
+      expect(result).toEqual({ action: "ignore", reason: "empty" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, an empty-string final does not trigger a spurious interrupt", () => {
+      const result = tm.handleFinal("");
+      expect(result).toEqual({ action: "ignore", reason: "empty" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, a whitespace/punctuation-only final is treated as empty", () => {
+      const result = tm.handleFinal("   ...  ");
+      expect(result).toEqual({ action: "ignore", reason: "empty" });
       expect(deps.onInterrupt).not.toHaveBeenCalled();
       expect(deps.onTurnEnd).not.toHaveBeenCalled();
     });
