@@ -18,6 +18,8 @@ import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
 import { getLatencyStats } from "./lib/voice/metrics.js";
+import * as voiceHealth from "./lib/voice/health.js";
+import { buildDegradedVoicemailTwiml } from "./lib/twiml.js";
 import {
   isValidUUID,
   isValidE164,
@@ -169,12 +171,26 @@ function twilioValidation(req, res, next) {
 // selected by PIPELINE_V2 in attachWebSocket below). The legacy TwiML
 // <Gather> conversation loop has been removed — DEEPGRAM_API_KEY is
 // required at boot (see above), so Media Streams is always available.
+//
+// Degraded mode: if lib/voice/health.js reports the pipeline's STT/TTS
+// dependencies are down, skip Media Streams entirely and fall back to a
+// voicemail-only TwiML response (see /twilio/voicemail below).
 // ---------------------------------------------------------------------------
 
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
 
   const callSid = req.body.CallSid;
+
+  if (voiceHealth.isDegraded()) {
+    log.error("degraded_mode_voicemail_fallback", {
+      callSid,
+      reason: voiceHealth.getDegradedReason(),
+      severity: "warn",
+    });
+    return res.send(buildDegradedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+  }
+
   const existingState = callState.getState(callSid);
   // Only connect the stream on the very first webhook hit (greeting step).
   if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
@@ -191,6 +207,62 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   // legacy TwiML fallback anymore. Nothing useful to do; hang up gracefully.
   log.error("twilio_voice_unexpected_rehit", { callSid, severity: "warn" });
   return res.send("<Response><Hangup/></Response>");
+});
+
+// ---------------------------------------------------------------------------
+// Degraded-mode voicemail recording callback
+//
+// Twilio POSTs here (recordingStatusCallback) once the <Record> from
+// buildDegradedVoicemailTwiml finishes. We can't rely on callState/DB call
+// rows here — degraded mode skips that setup entirely — so the business is
+// looked up fresh from the dialed (To) number.
+// ---------------------------------------------------------------------------
+
+app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
+  const callSid = req.body.CallSid;
+  const callerNumber = req.body.From || null;
+  const twilioNumber = req.body.To || "";
+  const recordingUrl = req.body.RecordingUrl || "";
+
+  log.info("degraded_voicemail_received", { callSid, callerNumber });
+
+  try {
+    const business = db.isEnabled() && twilioNumber
+      ? await db.lookupBusinessByPhone(twilioNumber)
+      : null;
+
+    if (business) {
+      const message = `Voicemail recording: ${recordingUrl}`;
+      const id = await db.createCustomerRequest({
+        businessId: business.id,
+        requestType: "message",
+        callbackNumber: callerNumber,
+        message,
+      });
+      if (id) {
+        notifications
+          .notifyCustomerRequest({
+            businessId: business.id,
+            customerRequest: {
+              request_type: "message",
+              caller_name: null,
+              callback_number: callerNumber,
+              message,
+              preferred_time: null,
+            },
+            call: { callerNumber },
+          })
+          .catch(() => {});
+      }
+    } else {
+      log.error("degraded_voicemail_no_business", { callSid, twilioNumber, severity: "warn" });
+    }
+  } catch (err) {
+    log.error("degraded_voicemail_failed", { callSid, message: err?.message });
+    captureException(err, { callSid });
+  }
+
+  res.status(200).end();
 });
 
 // ---------------------------------------------------------------------------
