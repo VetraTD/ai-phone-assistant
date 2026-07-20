@@ -115,7 +115,7 @@ export async function executeWebhook(integration, payload) {
 
     if (res.ok) {
       const message = data?.message ?? (typeof data?.success === "boolean" ? (data.success ? "Done." : data?.error ?? "Request failed") : "Done.");
-      log("integration_webhook", {
+      log.info("integration_webhook", {
         tool: integration.name,
         business_id: payload.business_id,
         status: res.status,
@@ -129,7 +129,7 @@ export async function executeWebhook(integration, payload) {
       };
     }
 
-    log("integration_webhook", {
+    log.info("integration_webhook", {
       tool: integration.name,
       business_id: payload.business_id,
       status: res.status,
@@ -143,7 +143,7 @@ export async function executeWebhook(integration, payload) {
   } catch (e) {
     const durationMs = Date.now() - start;
     const isTimeout = e?.name === "AbortError";
-    log("integration_webhook", {
+    log.info("integration_webhook", {
       tool: integration.name,
       business_id: payload.business_id,
       duration_ms: durationMs,

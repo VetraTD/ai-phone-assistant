@@ -1,6 +1,38 @@
 # ai-phone-assistant
 An intelligent AI-powered phone assistant designed to handle calls, take messages, and more using natural language processing.
 
+## PIPELINE_V2 — the two voice pipelines
+
+There are two live call pipelines behind `/twilio/media-stream`, selected per-connection by an env var (`server.js`'s `attachWebSocket`):
+
+- **`PIPELINE_V2=true`** → `lib/voice/session.js`, the rebuilt low-latency pipeline (streaming STT/LLM/TTS, barge-in, per-turn latency metrics). This is where new work happens.
+- unset / anything else (default) → `lib/mediaStream.js`, the original pipeline. Kept for parity/rollback; both get the same SMS/transfer/spam-detection wiring so switching between them mid-rollout doesn't lose features.
+
+**Required env vars** (both pipelines):
+
+| Var | Notes |
+|---|---|
+| `DEEPGRAM_API_KEY` | **Required at boot** — the server refuses to start without it (streaming STT has no legacy fallback). |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_DEFAULT_VOICE_ID` | TTS. Falls back to Google TTS per-turn if ElevenLabs fails (see `lib/voice/ttsStream.js`); a business can also be configured `voice_provider="google"` to skip ElevenLabs entirely. |
+| `GEMINI_API_KEY`, `BASE_URL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Existing, unchanged. |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Optional but effectively required for anything beyond a bare greeting — most routes no-op or 4xx without them. |
+| `NOTIFICATIONS_ENABLED` | **On by default** as soon as either SMTP or Twilio SMS creds are present (owner notifications: new appointment, new message, missed call). Set to `false` to force off (e.g. local dev). Caller-facing SMS follow-ups (`sendCallerSms` — appointment confirmation, message-received ack, missed-call text-back) are a separate, per-business opt-in (`businesses.sms_followup_enabled`), off by default regardless of this var. |
+| `DEBUG_ENDPOINTS=true` | Enables `GET /api/debug/latency` (per-turn voice-to-voice/STT/LLM/TTS latency stats). 404s otherwise. |
+
+**Local dev-number + ngrok testing**: see `docs/LOCAL_TESTING.md` for the full walkthrough (account setup, voice-catalog verification, `.env.dev`, ngrok, turn-taking/failure-path drills, production cutover). Short version:
+
+```bash
+npm install
+cp .env.example .env.dev   # fill in the keys above, plus PIPELINE_V2=true
+ngrok http 3000            # copy the https URL into BASE_URL, restart
+node --env-file=.env.dev server.js
+```
+Point a **dev** Twilio number's Voice webhook at `https://<ngrok>/twilio/voice` — never the production number, until the checks in `docs/LOCAL_TESTING.md` pass.
+
+**Single-instance constraint**: call state (`lib/callState.js`) lives entirely in process memory, keyed by Twilio `CallSid`. Running multiple server instances without sticky sessions (same instance for the whole life of a call) will corrupt or drop in-progress calls — there is no shared/external call-state store. Scale vertically, or add sticky routing before scaling horizontally.
+
+**Degraded mode** (`lib/voice/health.js`): when the pipeline's STT/TTS dependencies are known to be down, `/twilio/voice` skips Media Streams entirely and returns a voicemail-only TwiML response (apology + `<Record>`) instead of a call the AI can't actually converse on. The recording lands as a `customer_requests` row (via `/twilio/voicemail`) and, if the business has SMS follow-ups enabled, the caller gets a `message_received` text back. `setDegraded()`/`clearDegraded()` currently have no automatic trigger wired to the pipeline's own failure paths — that's a follow-up; today it's an independently-testable flag other code can call into.
+
 ## Testing
 
 Run the test suite (mocked by default; no real Twilio or Supabase required):

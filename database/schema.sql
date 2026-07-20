@@ -60,22 +60,18 @@ CREATE TABLE call_transcripts (
   created_at timestamptz DEFAULT now()
 );
 
--- 5. Services (service types a business offers)
-CREATE TABLE services (
-  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_id      uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-  name             text NOT NULL,
-  duration_minutes int DEFAULT 30,
-  active           boolean DEFAULT true,
-  created_at       timestamptz DEFAULT now()
-);
-
--- 6. Appointments
+-- 5. Appointments
+-- (service_id below is a plain nullable uuid with no FK — the "services"
+-- table this originally referenced was dropped, unused, in migration 018;
+-- see that file. The column itself is kept since services/supabase.js's
+-- createAppointment() still writes to it (always null in practice — no
+-- caller ever passes a serviceId; the service type is a free-text field
+-- folded into notes instead).)
 CREATE TABLE appointments (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id  uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   call_id      uuid REFERENCES calls(id) ON DELETE SET NULL,
-  service_id   uuid REFERENCES services(id) ON DELETE SET NULL,
+  service_id   uuid,
   client_name  text,
   client_phone text,
   scheduled_at timestamptz NOT NULL,
@@ -84,7 +80,7 @@ CREATE TABLE appointments (
   created_at   timestamptz DEFAULT now()
 );
 
--- 7. Customer requests (messages, callbacks, etc.)
+-- 6. Customer requests (messages, callbacks, etc.)
 CREATE TABLE customer_requests (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id     uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -98,7 +94,7 @@ CREATE TABLE customer_requests (
   created_at      timestamptz DEFAULT now()
 );
 
--- 8. Business knowledge (Q&A pairs injected into AI prompt)
+-- 7. Business knowledge (Q&A pairs injected into AI prompt)
 CREATE TABLE business_knowledge (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -110,7 +106,7 @@ CREATE TABLE business_knowledge (
   created_at  timestamptz DEFAULT now()
 );
 
--- 9. Integrations (per-business: webhooks, athenahealth, mcp)
+-- 8. Integrations (per-business: webhooks, athenahealth, mcp)
 CREATE TABLE integrations (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,

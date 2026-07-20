@@ -10,6 +10,20 @@ import {
   clearAthenaTokenCache,
 } from "../integrations/athenahealth.js";
 
+// A handful of tests below fix an appointment "date" fixture that the
+// production code filters as upcoming/not-yet-passed relative to the real
+// current date (see getCallerAppointments' `normalizeToISO(d) >= todayISO`
+// and findPatientAppointment's date-range query) — a hardcoded past date
+// literal here would eventually go stale and start failing for reasons
+// unrelated to the code under test. Compute a date N days out instead.
+function futureDateStr(daysFromNow) {
+  const d = new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${d.getFullYear()}`;
+}
+const FUTURE_DATE = futureDateStr(14);
+
 describe("athenahealth service", () => {
   const originalEnv = process.env;
 
@@ -158,7 +172,7 @@ describe("athenahealth service", () => {
           json: () => Promise.resolve({
             appointments: [{
               appointmentid: "100",
-              date: "04/10/2026",
+              date: FUTURE_DATE,
               starttime: "11:00",
               appointmenttype: "General",
               appointmentstatus: "f",
@@ -251,7 +265,7 @@ describe("athenahealth service", () => {
           json: () => Promise.resolve({
             appointments: [{
               appointmentid: "200",
-              date: "04/10/2026",
+              date: FUTURE_DATE,
               starttime: "11:00",
               appointmenttype: "General",
               appointmentstatus: "f",
@@ -264,7 +278,7 @@ describe("athenahealth service", () => {
       const result = await cancelAppointment("https://api.example.com", "195900", "token", {
         caller_name: "John Doe",
         caller_dob: "01/01/1990",
-        appointment_date: "04/10/2026",
+        appointment_date: FUTURE_DATE,
       });
       expect(result.success).toBe(true);
       expect(result.message).toMatch(/cancelled/i);
@@ -313,7 +327,7 @@ describe("athenahealth service", () => {
               appointments: [
                 {
                   appointmentid: "699420",
-                  appointmentdate: "04/24/2026",
+                  appointmentdate: FUTURE_DATE,
                   starttime: "10:00",
                   appointmenttypeid: "ECHO_TYPE",
                   providerid: "7",
@@ -333,7 +347,7 @@ describe("athenahealth service", () => {
                 // Mismatched type
                 {
                   appointmentid: "SLOT1",
-                  date: "04/24/2026",
+                  date: FUTURE_DATE,
                   starttime: "08:30",
                   appointmenttypeid: "OTHER_TYPE",
                   providerid: "7",
@@ -342,7 +356,7 @@ describe("athenahealth service", () => {
                 // Mismatched provider
                 {
                   appointmentid: "SLOT2",
-                  date: "04/24/2026",
+                  date: FUTURE_DATE,
                   starttime: "08:45",
                   appointmenttypeid: "ECHO_TYPE",
                   providerid: "20",
@@ -351,7 +365,7 @@ describe("athenahealth service", () => {
                 // Matching Echo slot for same provider/department
                 {
                   appointmentid: "SLOT_ECHO_MATCH",
-                  date: "04/24/2026",
+                  date: FUTURE_DATE,
                   starttime: "09:00",
                   appointmenttypeid: "ECHO_TYPE",
                   providerid: "7",
@@ -370,9 +384,9 @@ describe("athenahealth service", () => {
       const result = await rescheduleAppointment("https://api.example.com", "195900", "token", {
         caller_name: "Admin Test",
         caller_dob: "01/01/2000",
-        current_appointment_date: "04/24/2026",
+        current_appointment_date: FUTURE_DATE,
         current_appointment_time: "10:00",
-        new_date: "04/24/2026",
+        new_date: FUTURE_DATE,
         new_time: "09:00",
       });
 
