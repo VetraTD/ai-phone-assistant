@@ -76,6 +76,14 @@ describe("audioOut.js — createAudioOut", () => {
       expect(audioOut.aiAudioPlayingUntil()).toBe(1200);
     });
 
+    it("counts the padded (wire) byte length, not the raw input length, for a non-160-multiple buffer", () => {
+      clock.advanceTo(0);
+      // 250 bytes -> 2 frames on the wire (160 + 160, the second padded
+      // with 90 bytes of silence) = 320 wire bytes = 40ms, not 250/8=31.25ms.
+      audioOut.enqueue(Buffer.alloc(250, 0x01));
+      expect(audioOut.aiAudioPlayingUntil()).toBe(40);
+    });
+
     it("stacks successive enqueues (does not reset on each call)", () => {
       clock.advanceTo(0);
       audioOut.enqueue(Buffer.alloc(800, 0x01)); // +100ms -> playingUntil=100

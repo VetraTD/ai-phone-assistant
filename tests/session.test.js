@@ -214,6 +214,7 @@ import { handleVoiceSessionConnection } from "../lib/voice/session.js";
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
 import * as notifications from "../services/notifications.js";
+import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
@@ -379,6 +380,33 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(marks).toContain("llm_first_chunk");
     expect(marks.indexOf("llm_request")).toBeLessThan(marks.indexOf("llm_first_chunk"));
     expect(marks.indexOf("speech_end")).toBeLessThan(marks.indexOf("llm_request"));
+  });
+
+  it("3b. tts onDone({truncated: true}) logs tts_turn_truncated with callSid + turn index", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure, I can help." },
+      { type: "done", reply: { text: "Sure, I can help.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("I would like to book an appointment");
+    await flush();
+    await flush();
+
+    const turnTts = H.ttsTurns[H.ttsTurns.length - 1];
+    // Simulate ttsStream.js's finishDone() calling back with a truncated turn.
+    turnTts.opts.onDone({ truncated: true });
+
+    expect(log.error).toHaveBeenCalledWith(
+      "tts_turn_truncated",
+      expect.objectContaining({ callSid: sid })
+    );
   });
 
   it("4. barge-in: onInterrupt clears audio, aborts tts + llm generator, bumps epoch", async () => {

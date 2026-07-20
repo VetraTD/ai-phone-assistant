@@ -260,6 +260,48 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     }
   });
 
+  it("8b. ElevenLabs dying AFTER end() (mid-flush, before isFinal) with audio already played completes via onDone({truncated: true}), not silently", () => {
+    const onAudioChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const turn = createTtsTurn({ voiceId: "v1", callSid: "CA8b", epoch: 1, getEpoch: () => 1, onAudioChunk, onDone, onError });
+    turn.write("Hello there, here is the first part.");
+
+    const sock = instances[0];
+    sock._open();
+    sock._message({ audio: b64(Buffer.from([1, 2, 3])) }); // some audio already played
+    expect(onAudioChunk).toHaveBeenCalledTimes(1);
+
+    turn.end(); // flush sent, waiting on isFinal
+    expect(onDone).not.toHaveBeenCalled();
+
+    // ElevenLabs dies right here — no isFinal ever arrives.
+    sock._emit("error", new Error("socket died mid-flush"));
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledWith({ truncated: true });
+    expect(onError).not.toHaveBeenCalled(); // this is a truncation, not a hard failure — no Google resynthesis is attempted
+    expect(turn.getStatus()).toEqual({ truncated: true, elErrored: true, doneFired: true });
+  });
+
+  it("8c. ElevenLabs erroring before ANY audio played is a clean fallback, not truncated", async () => {
+    const onDone = vi.fn();
+    const fallbackBuf = Buffer.from([9, 9]);
+    mockSynthesizeMulaw.mockResolvedValueOnce(fallbackBuf);
+
+    const turn = createTtsTurn({ voiceId: "v1", callSid: "CA8c", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone, onError: vi.fn() });
+    turn.write("Hello there.");
+
+    const sock = instances[0];
+    sock._open();
+    sock._emit("error", new Error("connection reset")); // dies before any audio at all
+    turn.end();
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(onDone).toHaveBeenCalledWith({ truncated: false });
+    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there.", "en-GB-Chirp3-HD-Aoede", "CA8c");
+  });
+
   it("9. voiceSettings opt is passed through to the ElevenLabs handshake, merged over its defaults", () => {
     createTtsTurn({
       voiceId: "voice123",

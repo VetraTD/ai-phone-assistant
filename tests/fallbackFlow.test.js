@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createFallbackFlow } from "../lib/voice/fallbackFlow.js";
 
 function makeFlow(overrides = {}) {
@@ -268,6 +268,98 @@ describe("fallbackFlow — deterministic no-LLM take-message flow", () => {
       callerName: "Riley",
       callbackNumber: null,
       message: "just a quick question about billing",
+    });
+  });
+
+  describe("split-number hold: bounded timeout + restart detection", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("14. a held fragment with no continuation is flushed as its own attempt after the hold window (re-asks, doesn't strand)", () => {
+      const { flow, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Casey");
+
+      // Looks like a partial number — held silently, no immediate re-ask.
+      flow.handleInput("555123");
+      expect(flow.getState()).toBe("awaiting_number");
+      const sayCountAfterHold = said.length;
+
+      // No continuation ever arrives — advance past the hold window.
+      vi.advanceTimersByTime(1_001);
+
+      // The fragment ("555123", 6 digits) was processed standalone -> too
+      // short to be valid -> counted as a failed attempt -> re-ask.
+      expect(said.length).toBeGreaterThan(sayCountAfterHold);
+      expect(said[said.length - 1]).toBe(
+        "Sorry, I didn't catch the full number. Could you say it again, digit by digit?"
+      );
+      expect(flow.getState()).toBe("awaiting_number");
+    });
+
+    it("15. a continuation that arrives just before the hold window still combines normally (no double-processing)", () => {
+      const { flow, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Casey");
+      flow.handleInput("555123");
+
+      vi.advanceTimersByTime(900); // still within the hold window
+      flow.handleInput("4567");
+
+      expect(said[said.length - 1]).toBe("Got it — that's 555, 123, 4567. Is that right?");
+      expect(flow.getState()).toBe("confirming_number");
+
+      // The hold timer must have been cancelled — advancing well past the
+      // original window must not re-fire a stale flush.
+      const sayCountAfterCombine = said.length;
+      vi.advanceTimersByTime(5_000);
+      expect(said.length).toBe(sayCountAfterCombine);
+    });
+
+    it("16. a fresh, self-valid full number after a held fragment is treated as a new attempt, not concatenated", () => {
+      const { flow, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Casey");
+
+      // Partial recitation held...
+      flow.handleInput("555123");
+      expect(flow.getState()).toBe("awaiting_number");
+
+      // ...then the caller RESTARTS with the full number instead of
+      // continuing the fragment. Naive concatenation would produce
+      // "5551235551234567" (16 digits) and force a needless re-ask.
+      flow.handleInput("5551234567");
+
+      expect(said[said.length - 1]).toBe("Got it — that's 555, 123, 4567. Is that right?");
+      expect(flow.getState()).toBe("confirming_number");
+    });
+
+    it("17. the hold timer is cancelled when the flow completes before it fires (silence ends the call early)", () => {
+      const { flow, onComplete, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Casey");
+      flow.handleInput("555123"); // held, timer armed
+
+      // Caller goes silent — two consecutive empty finals end the flow
+      // (name was already captured, so this is a success, not a failure).
+      flow.handleInput("");
+      flow.handleInput("");
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      const sayCountAfterComplete = said.length;
+
+      // If the original hold timer were still live, advancing past its
+      // window would call flushHeldNumberFragment -> processNumberAttempt
+      // against an already-"done" (inactive) flow, re-triggering say()/
+      // state changes it has no business making anymore.
+      vi.advanceTimersByTime(5_000);
+      expect(said.length).toBe(sayCountAfterComplete);
+      expect(onComplete).toHaveBeenCalledTimes(1);
     });
   });
 });
