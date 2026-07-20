@@ -218,7 +218,10 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
     .from("call_transcripts")
     .insert({ call_id: callId, speaker, message, sequence });
   if (error) {
-    log.error("db_error", { callSid, operation: "addTranscriptEntry", error: error.message });
+    // callId (the DB call UUID) — NOT callSid: this function never receives a
+    // Twilio Call SID, and referencing one here threw a ReferenceError that
+    // replaced the real DB error before every call site's .catch() swallowed it.
+    log.error("db_error", { callId, operation: "addTranscriptEntry", error: error.message });
   }
 }
 
