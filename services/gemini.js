@@ -14,6 +14,25 @@ const TURN_TIMEOUT_MS = 10000;
 const MAX_FC_ROUNDS = 3;
 
 // ---------------------------------------------------------------------------
+// Singleton Gemini client — @google/genai's GoogleGenAI wraps a connection
+// pool; creating one per turn (as this file used to) throws that pool away
+// every call. Reuse a single lazily-created instance instead.
+// ---------------------------------------------------------------------------
+
+let geminiClient = null;
+
+/**
+ * Lazily create (once) and return the shared GoogleGenAI client.
+ * @returns {GoogleGenAI}
+ */
+export function getClient() {
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return geminiClient;
+}
+
+// ---------------------------------------------------------------------------
 // Default config (used when no business config is provided)
 // ---------------------------------------------------------------------------
 
@@ -680,7 +699,7 @@ export async function getReply(history, userMessage, step, intent, config, extra
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const cfg = config || DEFAULT_CONFIG;
-  const gemini = new GoogleGenAI({ apiKey });
+  const gemini = getClient();
   const timeoutPromise = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("TURN_TIMEOUT")), TURN_TIMEOUT_MS)
   );
@@ -711,6 +730,8 @@ export async function getReply(history, userMessage, step, intent, config, extra
         temperature: 0.4,
         systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
         tools: toolsConfig,
+        thinkingConfig: { thinkingBudget: 0 },
+        maxOutputTokens: 200,
       },
       history: trimmedHistory,
     });
@@ -996,6 +1017,13 @@ export async function getReply(history, userMessage, step, intent, config, extra
       response = await chat.sendMessage({ message: results });
     }
 
+    if (response?.usageMetadata) {
+      const { cachedContentTokenCount, thoughtsTokenCount } = response.usageMetadata;
+      if (cachedContentTokenCount !== undefined || thoughtsTokenCount !== undefined) {
+        log.debug("gemini_turn_usage", { step, cachedContentTokenCount, thoughtsTokenCount });
+      }
+    }
+
     let text =
       response?.text ??
       response?.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text ??
@@ -1043,14 +1071,16 @@ export async function getReply(history, userMessage, step, intent, config, extra
  * @param {string|null} intent
  * @param {object} [config]
  * @param {object} [extras]
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal] - aborts in-flight sendMessageStream calls
  * @yields {{ delta?: string, toolCall?: object, done?: boolean, reply?: object }}
  */
-export async function* getReplyStreaming(history, userMessage, step, intent, config, extras) {
+export async function* getReplyStreaming(history, userMessage, step, intent, config, extras, { signal } = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const cfg = config || DEFAULT_CONFIG;
-  const gemini = new GoogleGenAI({ apiKey });
+  const gemini = getClient();
 
   const builtInTools = buildCallTools(cfg.allowedTasks);
   const integrationTools = buildIntegrationTools(extras?.integrations || []);
@@ -1068,15 +1098,23 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     : history;
 
   const model = "gemini-2.5-flash";
+  // Kept in a local so per-request calls below can replicate it: the SDK's
+  // per-request `config` REPLACES (does not merge with) the chat-level
+  // config, so a bare `{ abortSignal }` per call would silently drop tools/
+  // systemInstruction/thinkingConfig/maxOutputTokens on that request.
+  const chatConfig = {
+    temperature: 0.4,
+    systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
+    tools: toolsConfig,
+    thinkingConfig: { thinkingBudget: 0 },
+    maxOutputTokens: 200,
+  };
   const chat = gemini.chats.create({
     model,
-    config: {
-      temperature: 0.4,
-      systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
-      tools: toolsConfig,
-    },
+    config: chatConfig,
     history: trimmedHistory,
   });
+  const perRequestConfig = { ...chatConfig, abortSignal: signal };
 
   let appointmentArgs = null;
   let intentArgs = null;
@@ -1088,7 +1126,8 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let round = 0;
 
   // First request — stream it
-  let streamResponse = await chat.sendMessageStream({ message: userMessage });
+  let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
+  let lastUsageMetadata = null;
 
   while (true) {
     // Drain the stream, yielding text deltas and collecting function calls
@@ -1104,6 +1143,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       // Function calls arrive (usually in the last chunk)
       if (chunk.functionCalls?.length) {
         functionCalls.push(...chunk.functionCalls);
+      }
+      if (chunk.usageMetadata) {
+        lastUsageMetadata = chunk.usageMetadata;
       }
     }
 
@@ -1237,7 +1279,14 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     }
 
     // Send function results back to chat and stream the follow-up
-    streamResponse = await chat.sendMessageStream({ message: results });
+    streamResponse = await chat.sendMessageStream({ message: results, config: perRequestConfig });
+  }
+
+  if (lastUsageMetadata) {
+    const { cachedContentTokenCount, thoughtsTokenCount } = lastUsageMetadata;
+    if (cachedContentTokenCount !== undefined || thoughtsTokenCount !== undefined) {
+      log.debug("gemini_turn_usage", { step, cachedContentTokenCount, thoughtsTokenCount });
+    }
   }
 
   // Fallback if model returned no text at all
