@@ -61,3 +61,28 @@ export function createTestApp() {
   const app = require("../server.js");
   return { app, poolQueryMock, authState };
 }
+
+/**
+ * Swap the real `axios` module for `fake` in Node's require cache, so route
+ * modules loaded afterwards (i.e. by a later `createTestApp()`) pick it up.
+ * Unlike the fakes above this touches a shared node_modules entry, so the
+ * returned restore function MUST be called (afterEach) to avoid leaking the
+ * fake into other suites in the same worker.
+ *
+ * @param {object} fake - stand-in axios (usually `{ post: vi.fn() }`)
+ * @returns {() => void} restore
+ */
+export function injectFakeAxios(fake) {
+  const resolved = require.resolve("axios");
+  const original = require.cache[resolved];
+  require.cache[resolved] = {
+    id: resolved,
+    filename: resolved,
+    loaded: true,
+    exports: fake,
+  };
+  return () => {
+    if (original) require.cache[resolved] = original;
+    else delete require.cache[resolved];
+  };
+}

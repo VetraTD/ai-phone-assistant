@@ -172,6 +172,20 @@ CREATE TABLE calendar_connections (
   UNIQUE (business_id, provider)
 );
 
+-- Migration 019: single-use server-side OAuth `state` nonces. The connect
+-- flow must never derive identity from the (unauthenticated) callback's
+-- request input — the authenticated initiate route records the business the
+-- nonce was issued for here, and the callback consumes the row and trusts
+-- only business_id below.
+CREATE TABLE oauth_states (
+  state       text PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  user_id     uuid,
+  provider    text NOT NULL,
+  created_at  timestamptz DEFAULT now(),
+  consumed_at timestamptz
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
@@ -186,6 +200,8 @@ CREATE INDEX idx_business_knowledge_business_enabled ON business_knowledge (busi
 CREATE INDEX idx_integrations_business ON integrations (business_id);
 CREATE INDEX idx_integrations_business_enabled ON integrations (business_id, enabled) WHERE enabled = true;
 CREATE INDEX idx_calendar_connections_business ON calendar_connections (business_id);
+-- Migration 019: supports periodic cleanup of expired/consumed OAuth nonces.
+CREATE INDEX idx_oauth_states_created_at ON oauth_states (created_at);
 
 -- Partial unique index (migration 009): a business cannot hold two
 -- 'scheduled' appointments at the same instant. Cancelled/completed rows do

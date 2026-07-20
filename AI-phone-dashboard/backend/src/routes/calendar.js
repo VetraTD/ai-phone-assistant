@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
+const crypto = require("crypto");
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
@@ -12,6 +13,29 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 const GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3";
+const OAUTH_PROVIDER = "google";
+
+/**
+ * Atomically redeem an OAuth `state` nonce and return the business it was
+ * issued for, or null if it is unknown, already redeemed or expired.
+ *
+ * The single UPDATE is the whole point: `consumed_at IS NULL` in the WHERE
+ * clause makes redemption a compare-and-set, so two concurrent callbacks
+ * carrying the same state cannot both come back with a business id. Zero rows
+ * returned means forged, replayed or stale — all rejected identically, and
+ * the caller must not fall back to anything from the request.
+ */
+async function consumeOAuthState(state) {
+  if (typeof state !== "string" || !state) return null;
+  const r = await pool.query(
+    `UPDATE oauth_states SET consumed_at = now()
+      WHERE state = $1 AND provider = $2 AND consumed_at IS NULL
+        AND created_at > now() - interval '10 minutes'
+      RETURNING business_id`,
+    [state, OAUTH_PROVIDER]
+  );
+  return r.rows[0]?.business_id || null;
+}
 
 function getCalendarRedirectUri() {
   let base = process.env.API_BASE_URL;
@@ -32,7 +56,14 @@ router.get("/api/calendar/auth-url", authenticate, async (req, res) => {
     if (!clientId || !redirectUri) {
       return res.status(503).json({ error: "Calendar integration is not configured" });
     }
-    const state = Buffer.from(JSON.stringify({ businessId: String(businessId) })).toString("base64url");
+    // `state` is an opaque single-use nonce, NOT an identity carrier: the
+    // callback below is unauthenticated, so anything encoded here would be
+    // attacker-forgeable. The business it was issued for lives server-side.
+    const state = crypto.randomBytes(32).toString("base64url");
+    await pool.query(
+      `INSERT INTO oauth_states (state, business_id, user_id, provider) VALUES ($1, $2, $3, $4)`,
+      [state, businessId, req.authUser.id, OAUTH_PROVIDER]
+    );
     const url = new URL(GOOGLE_AUTH_URL);
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -59,11 +90,11 @@ router.get("/api/calendar/callback", async (req, res) => {
     if (!code || !state) {
       return res.redirect(`${frontendRedirect}?calendar=error&message=missing_code_or_state`);
     }
-    let businessId;
-    try {
-      const decoded = JSON.parse(Buffer.from(state, "base64url").toString());
-      businessId = decoded.businessId;
-    } catch {
+    // Identity comes from the server-side nonce record only — never from the
+    // request. Redeem before exchanging the code so a forged/replayed state
+    // costs nothing.
+    const businessId = await consumeOAuthState(state);
+    if (!businessId) {
       return res.redirect(`${frontendRedirect}?calendar=error&message=invalid_state`);
     }
     const clientId = process.env.GOOGLE_CLIENT_ID;
