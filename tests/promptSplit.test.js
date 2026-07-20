@@ -38,6 +38,11 @@ describe("gemini.js — system prompt split (static prefix + dynamic tail)", () 
     expect(prefix).toContain("Do you take insurance?");
     expect(prefix).toContain("=== GUARDRAILS ===");
 
+    // Receptionist-craft prompt overhaul: message protocol + identity voice rules.
+    expect(prefix).toContain("=== MESSAGE PROTOCOL ===");
+    expect(prefix).toContain("digit by digit");
+    expect(prefix).toContain("1-2 short sentences");
+
     // Nothing time- or step-dependent belongs in the static prefix.
     expect(prefix).not.toContain("=== DATE AND TIME ===");
     expect(prefix).not.toContain("=== AFTER-HOURS BEHAVIOR ===");
