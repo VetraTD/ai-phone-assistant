@@ -7,6 +7,7 @@ export default {
       NODE_ENV: "test",
       GEMINI_API_KEY: "test-key",
       BASE_URL: "https://test.example.com",
+      DEEPGRAM_API_KEY: "test-key",
     },
   },
 };

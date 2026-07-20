@@ -5,29 +5,18 @@ import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
 import * as twilio from "twilio";
-import crypto from "crypto";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
-import * as googleTts from "./services/googleTts.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
-import {
-  buildGatherAndRedirect,
-  buildSayGatherRedirect,
-  buildSayAndHangup,
-  buildSayAndDial,
-  buildHoldAndRedirect,
-  buildMultiPlayGatherRedirect,
-  buildMultiPlayAndHangup,
-} from "./lib/twiml.js";
 import { WebSocketServer } from "ws";
 import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
-import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
+import { log } from "./lib/logger.js";
 import { getLatencyStats } from "./lib/voice/metrics.js";
 import {
   isValidUUID,
@@ -36,7 +25,6 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
-import { cleanTranscript, isIncomplete, extractFinalIntent } from "./lib/transcriptUtils.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +41,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BASE_URL = process.env.BASE_URL?.replace(/\/$/, "");
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_VALIDATE_SIGNATURE = process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 
 if (!GEMINI_API_KEY) {
   console.error("Missing required env: GEMINI_API_KEY");
@@ -69,10 +58,16 @@ if (BASE_URL.includes("example.ngrok") || BASE_URL === "https://example.ngrok.io
   );
   process.exit(1);
 }
+if (!DEEPGRAM_API_KEY) {
+  console.error(
+    "Missing required env: DEEPGRAM_API_KEY. The Media Streams voice pipeline " +
+      "requires Deepgram for real-time speech-to-text — there is no fallback mode."
+  );
+  process.exit(1);
+}
 
 const VOICE_URL = `${BASE_URL}/twilio/voice`;
 const STATUS_URL = `${BASE_URL}/twilio/status`;
-const IDEMPOTENCY_WINDOW_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Env — optional: transfer & time limit
@@ -81,141 +76,6 @@ const IDEMPOTENCY_WINDOW_MS = 15_000;
 const TRANSFER_NUMBER = process.env.TRANSFER_NUMBER || "";
 const CALL_MAX_DURATION_MS =
   (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
-// Hold audio URL — starts as the env-var typing sound, replaced on startup
-// with a pre-synthesized Google TTS phrase when Google TTS is configured.
-let HOLD_AUDIO_URL = process.env.TYPING_SOUND_URL || "";
-
-// ---------------------------------------------------------------------------
-// Sentence splitter — splits reply text for parallel TTS synthesis
-// ---------------------------------------------------------------------------
-
-/**
- * Split text into sentences for parallel TTS synthesis.
- * Masks common title abbreviations (Dr., Mr., etc.) before splitting so they
- * don't trigger false sentence boundaries.
- * @param {string} text
- * @returns {string[]}
- */
-function splitSentences(text) {
-  if (!text) return [text];
-  const SENTINEL = "\x01";
-  // Mask title abbreviations to prevent false splits on e.g. "Dr. Smith"
-  const masked = text.replace(
-    /\b(Dr|Mr|Mrs|Ms|St|Jr|Sr|Prof)\.\s+/g,
-    (m) => m.replace(/\.\s+/, SENTINEL)
-  );
-  const parts = masked.split(/(?<=[.!?])\s+(?=[A-Z"])/);
-  return parts
-    .map((s) => s.replace(new RegExp(SENTINEL, "g"), ". ").trim())
-    .filter(Boolean);
-}
-
-// ---------------------------------------------------------------------------
-// Escape-trigger detection (case-insensitive, word-boundary)
-// ---------------------------------------------------------------------------
-
-const TRANSFER_TRIGGERS =
-  /\b(representative|human|operator|real person|speak to someone|talk to someone|talk to a person|manager|supervisor)\b/i;
-
-function isTransferRequest(speech) {
-  return TRANSFER_TRIGGERS.test(speech);
-}
-
-// ---------------------------------------------------------------------------
-// Transfer policy resolver
-// ---------------------------------------------------------------------------
-
-/**
- * Determine if transfer is currently allowed based on config.transferPolicy
- * and business hours.
- * @param {object} config - normalised business config
- * @returns {boolean}
- */
-function resolveTransferAllowed(config) {
-  if (config.transferPolicy === "never") return false;
-  if (config.transferPolicy === "always") return true;
-  // "business_hours_only" — need to check if currently open
-  if (config.transferPolicy === "business_hours_only") {
-    return geminiService.isBusinessOpen(config);
-  }
-  return true; // default allow
-}
-
-// ---------------------------------------------------------------------------
-// Silence handling — TwiML webhook path
-//
-// The TwiML Gather `timeout` governs how long Twilio waits for the caller to
-// begin speaking each round-trip.  Silence is detected when the webhook fires
-// with an empty SpeechResult.  Cumulative wait before hangup ≈ 3 × timeout.
-//
-// Per-step timeouts (seconds):
-//  - identify_intent / greeting: 6 s → nudge1 ~6 s, nudge2 ~12 s, end ~18 s
-//  - gather_details: 10 s → nudge1 ~10 s, nudge2 ~20 s, end ~30 s
-//    (longer because callers may be recalling dates, phone numbers, etc.)
-//  - confirm: 8 s → nudge1 ~8 s, nudge2 ~16 s, end ~24 s
-//
-// Three stages: nudge1 (gentle acknowledgment), nudge2 (step-aware re-prompt),
-// then a graceful goodbye.  The old silent-re-listen first stage has been
-// removed — the first silence now immediately triggers a non-intrusive nudge.
-// ---------------------------------------------------------------------------
-const SILENCE_GATHER_TIMEOUT_BY_STEP = {
-  greeting:        6,
-  identify_intent: 6,
-  gather_details:  10,
-  confirm:         8,
-  _default:        7,
-};
-
-/**
- * Return the Gather timeout (seconds) appropriate for the current call step.
- * @param {string} step
- * @returns {number}
- */
-function getSilenceTimeout(step) {
-  return SILENCE_GATHER_TIMEOUT_BY_STEP[step] ?? SILENCE_GATHER_TIMEOUT_BY_STEP._default;
-}
-
-/**
- * Build the second silence nudge text for the TwiML path.
- * Stage 2 is step-aware: it restates what's needed more simply with a
- * concrete example, without repeating the AI's previous question verbatim.
- * @param {string} step - Current STEPS value
- * @param {string|null} intent - Current call intent
- * @returns {string}
- */
-function buildTwimlSilenceNudge(step, intent) {
-  switch (step) {
-    case STEPS.IDENTIFY_INTENT:
-    case STEPS.GREETING:
-      return "I'm here to help — are you calling to book an appointment, leave a message, or something else?";
-    case STEPS.GATHER_DETAILS:
-      if (intent === "book_appointment") {
-        return "Take your time — I just need something like a preferred date or time to get started.";
-      }
-      if (intent === "take_message" || intent === "callback_request") {
-        return "Whenever you're ready — I just need your name and a brief message.";
-      }
-      return "Take your time — just let me know what you need and I'll help.";
-    case STEPS.CONFIRM:
-      return "Just say yes to confirm, or let me know if anything needs to change.";
-    default:
-      return "I'm still here — feel free to continue whenever you're ready.";
-  }
-}
-
-/**
- * Build the goodbye message when ending a call due to extended silence.
- * Includes the business callback number when available.
- * @param {object|null} config - Business config
- * @returns {string}
- */
-function buildSilenceGoodbye(config) {
-  const phone = config?.transferPhoneNumber || config?.phone || "";
-  if (phone) {
-    return `It seems like you may have stepped away. Feel free to call us back at ${phone} anytime. Goodbye!`;
-  }
-  return "It seems like you may have stepped away. Feel free to call us back anytime. Goodbye!";
-}
 
 // ---------------------------------------------------------------------------
 // Middleware
@@ -280,18 +140,6 @@ app.get("/", (req, res) => {
   );
 });
 
-// --- Google TTS audio — one-time serve for Twilio <Play> ---
-// UUID-keyed, deleted immediately after first fetch. Not behind Twilio validation
-// because Twilio fetches <Play> URLs with a plain GET (no X-Twilio-Signature).
-app.get("/audio/:id", (req, res) => {
-  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(400).end();
-  const buffer = googleTts.consumeAudio(req.params.id);
-  if (!buffer) return res.status(404).end();
-  res.set("Content-Type", "audio/mpeg");
-  res.set("Cache-Control", "no-store");
-  res.send(buffer);
-});
-
 // --- Twilio signature validation ---
 function twilioValidation(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();
@@ -314,505 +162,36 @@ function twilioValidation(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: log a transcript pair (fire-and-forget)
-// ---------------------------------------------------------------------------
-
-function logTranscript(state, callerText, aiText) {
-  if (!state.dbCallId) return;
-  const seq = state.sequenceCounter;
-  state.sequenceCounter += 2;
-  db.addTranscriptEntry(state.dbCallId, "caller", callerText, seq).catch(() => {});
-  db.addTranscriptEntry(state.dbCallId, "ai", aiText, seq + 1).catch(() => {});
-}
-
-// ---------------------------------------------------------------------------
-// resolveVoiceOpts — build voiceOpts, optionally pre-synthesizing with Google TTS
-// ---------------------------------------------------------------------------
-
-/**
- * Build voiceOpts for a TwiML builder. When googleTtsVoice is configured and
- * Google TTS credentials are present, synthesizes the text to MP3, stores it
- * in the ephemeral audio store, and returns an audioUrl for Twilio <Play>.
- * Falls back silently to Twilio <Say> on any error or when not configured.
- *
- * @param {string} text - Text to synthesize
- * @param {object} config - Normalised business config
- * @returns {Promise<object>} voiceOpts (with optional audioUrl)
- */
-const POLLY_VOICE = "Polly.Joanna";
-const GOOGLE_TTS_VOICE = "en-GB-Chirp3-HD-Aoede";
-
-async function resolveVoiceOpts(text, config) {
-  const base = {
-    voice: POLLY_VOICE,
-    language: config.languagesSpoken,
-    bargeIn: false,
-  };
-
-  if (!googleTts.isConfigured()) {
-    return base;
-  }
-
-  try {
-    const audioId = await googleTts.synthesizeAndStore(text, GOOGLE_TTS_VOICE);
-    return { ...base, audioUrl: `${BASE_URL}/audio/${audioId}` };
-  } catch (err) {
-    console.error("Google TTS failed, falling back to Twilio Say:", err.message);
-    captureException(err, { context: "googleTts.synthesizeAndStore" });
-    return base;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Voice webhook
+//
+// The only remaining responsibility here is handing the call off to the
+// Media Streams pipeline (lib/mediaStream.js or lib/voice/session.js,
+// selected by PIPELINE_V2 in attachWebSocket below). The legacy TwiML
+// <Gather> conversation loop has been removed — DEEPGRAM_API_KEY is
+// required at boot (see above), so Media Streams is always available.
 // ---------------------------------------------------------------------------
 
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
 
-  // ---- Media Streams mode: first hit returns <Connect><Stream> ----
-  if (USE_MEDIA_STREAMS) {
-    const callSid = req.body.CallSid;
-    const existingState = callState.getState(callSid);
-    // Only connect the stream on the very first webhook hit (greeting step)
-    if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
-      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
-      log.info("media_stream_initiated", { callSid });
-      return res.send(
-        `<Response><Connect><Stream url="${wsUrl}">` +
-        `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
-        `<Parameter name="callerPhone" value="${req.body.From || ""}" />` +
-        `</Stream></Connect></Response>`
-      );
-    }
-    // If we get here on a media-stream call (e.g. redirect from transfer),
-    // fall through to TwiML logic as a fallback.
-  }
-
   const callSid = req.body.CallSid;
-  const requestId = createRequestId();
-  const speechResult =
-    typeof req.body.SpeechResult === "string" ? req.body.SpeechResult.trim() : "";
-
-  // ---- 1. Get or create state ----
-  const state = callState.getState(callSid);
-
-  // ---- 2. Load config, knowledge & create call row on first hit ----
-  if (!state.config) {
-    let business = null;
-    if (db.isEnabled()) {
-      const twilioNumber = req.body.To || "";
-      const callerNumber = req.body.From || "";
-      business = await db.lookupBusinessByPhone(twilioNumber);
-      if (business) {
-        const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
-        if (dbId) {
-          state.dbCallId = dbId;
-          state.businessId = business.id;
-          state.callerNumber = callerNumber;
-        }
-        // Load business knowledge, integrations, and caller context in parallel
-        const [knowledge, integrations, callerContext] = await Promise.all([
-          db.fetchBusinessKnowledge(business.id),
-          db.listIntegrationsForBusiness(business.id, { enabledOnly: true }),
-          callerNumber ? db.fetchCallerContext(business.id, callerNumber) : Promise.resolve(null),
-        ]);
-        state.knowledge = knowledge;
-        state.integrations = integrations;
-        state.callerContext = callerContext;
-      } else {
-        console.warn(
-          `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
-        );
-      }
-    }
-    state.config = db.loadConfig(business);
-    if (!state.knowledge) state.knowledge = [];
-    if (!state.integrations) state.integrations = [];
-  }
-
-  const config = state.config;
-  const voiceOpts = {
-    voice: POLLY_VOICE,
-    language: config.languagesSpoken,
-    bargeIn: false,
-  };
-
-  // ---- 3. Hard time-limit check ----
-  if (Date.now() - state.startedAt > CALL_MAX_DURATION_MS) {
-    const msg =
-      "I'm sorry, but we've reached the maximum call time. Please call back if you need further assistance. Goodbye!";
-    logTranscript(state, speechResult || "(time limit)", msg);
-    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 4. If a previous turn already set step to ENDING, hang up ----
-  if (state.step === STEPS.ENDING) {
-    const msg = "Thank you for calling. Goodbye!";
-    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 5. No speech: greeting, pending reply, or silence handling ----
-
-  // ---- 5a. Pending Gemini reply (returning from hold redirect) ----
-  if (speechResult === "" && state.pendingReply) {
-    const pendingReply = state.pendingReply;
-    const pendingSpeech = state.pendingSpeech;
-    const geminiStart = state.pendingGeminiStart;
-    const pendingRequestId = state.pendingRequestId || requestId;
-    // Clear pending state immediately to avoid re-processing on subsequent redirects
-    state.pendingReply = null;
-    state.pendingSpeech = null;
-    state.pendingGeminiStart = null;
-    state.pendingRequestId = null;
-
-    return processGeminiReply(
-      pendingReply, pendingSpeech, geminiStart, pendingRequestId,
-      state, config, callSid, req, res
+  const existingState = callState.getState(callSid);
+  // Only connect the stream on the very first webhook hit (greeting step).
+  if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
+    const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+    log.info("media_stream_initiated", { callSid });
+    return res.send(
+      `<Response><Connect><Stream url="${wsUrl}">` +
+      `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
+      `<Parameter name="callerPhone" value="${req.body.From || ""}" />` +
+      `</Stream></Connect></Response>`
     );
   }
-
-  if (speechResult === "") {
-    if (state.step === STEPS.GREETING) {
-      state.step = STEPS.IDENTIFY_INTENT;
-      log.info("call_started", { callSid, requestId });
-
-      // Build greeting with optional recording disclosure and time-of-day warmth
-      let greetingText = "";
-      if (config.recordingDisclosureEnabled) {
-        greetingText =
-          (config.recordingDisclosureText ||
-            "This call may be recorded for quality and training purposes.") + " ";
-      }
-
-      // Prepend time-of-day greeting unless the business set a custom greeting
-      const isDefaultGreeting = !config._hasCustomGreeting;
-      if (isDefaultGreeting) {
-        const tz = config.timezone || "America/Chicago";
-        const hour = parseInt(
-          new Date().toLocaleTimeString("en-GB", { timeZone: tz, hour12: false }).split(":")[0],
-          10
-        );
-        const tod = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-        greetingText += `${tod}! ${config.greeting}`;
-      } else {
-        greetingText += config.greeting;
-      }
-
-      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, await resolveVoiceOpts(greetingText, config)));
-    }
-
-    // ---- Progressive silence: nudge1 → nudge2 → graceful goodbye ----
-    // Step-aware timeout: gather_details gets more time (caller may be
-    // recalling info); identify_intent gets less (confusion → engage sooner).
-    const silenceTimeout = getSilenceTimeout(state.step);
-    state.silenceCount++;
-    log.debug("silence_event", { callSid, requestId, silenceCount: state.silenceCount, step: state.step, intent: state.intent });
-
-    if (state.silenceCount === 1) {
-      // First silence — gentle, non-intrusive acknowledgment.
-      // Does NOT repeat the previous question (sounds robotic if caller heard it fine).
-      const msg = "I'm still here whenever you're ready.";
-      log.info("silence_nudge", { callSid, requestId, stage: 1, step: state.step, intent: state.intent });
-      return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
-      );
-    }
-    if (state.silenceCount === 2) {
-      // Second silence — step-aware re-prompt. Simpler than original question,
-      // with a concrete example of what's needed.
-      const msg = buildTwimlSilenceNudge(state.step, state.intent);
-      log.info("silence_nudge", { callSid, requestId, stage: 2, step: state.step, intent: state.intent });
-      return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, silenceTimeout, "", await resolveVoiceOpts(msg, config))
-      );
-    }
-    // Third silence — caller has not responded after two nudges; end gracefully.
-    // Set step to ENDING and log so the business can follow up if needed.
-    log.info("silence_hangup", { callSid, requestId, step: state.step, intent: state.intent, totalNudges: 2 });
-    state.step = STEPS.ENDING;
-    const byeMsg = buildSilenceGoodbye(config);
-    return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
-  }
-
-  // ---- 6. Speech present — reset silence counter + transcript quality pipeline ----
-  state.silenceCount = 0;
-
-  // Stage 1: Strip filler words. Re-listen silently if nothing actionable remains.
-  const cleaned = cleanTranscript(speechResult);
-  if (!cleaned) {
-    log.debug("transcript_discarded", { callSid, requestId, reason: "filler_only", raw: speechResult.slice(0, 60) });
-    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
-  }
-  // Stage 2: Incomplete utterance — re-listen silently. Catches trailing
-  // conjunctions, partial phone numbers, and partial dates that Twilio's
-  // speechTimeout="auto" may not catch before firing the webhook.
-  if (isIncomplete(cleaned)) {
-    log.debug("transcript_held", { callSid, requestId, reason: "incomplete_utterance", text: cleaned.slice(0, 60) });
-    return res.send(buildGatherAndRedirect(VOICE_URL, "", undefined, voiceOpts));
-  }
-  // Stage 3: Self-correction — keep only the final intent after correction markers.
-  const processedSpeech = extractFinalIntent(cleaned);
-
-  // ---- 7. Escape-trigger check (before Gemini) ----
-  if (isTransferRequest(processedSpeech)) {
-    const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
-    const canTransfer = !!transferNumber && resolveTransferAllowed(config);
-    log.info("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
-
-    if (canTransfer) {
-      const msg = "Transferring you now. Please hold.";
-      logTranscript(state, processedSpeech, msg);
-      state.step = STEPS.ENDING;
-      return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
-    }
-    // Transfer not possible — use default escalation message
-    const msg = "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
-    logTranscript(state, processedSpeech, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 8. Idempotency check ----
-  const speechHash = crypto.createHash("sha256").update(processedSpeech).digest("hex");
-  const now = Date.now();
-  if (
-    state.lastProcessed &&
-    state.lastProcessed.speechHash === speechHash &&
-    now - state.lastProcessed.timestamp < IDEMPOTENCY_WINDOW_MS &&
-    state.lastProcessed.cachedTwiml
-  ) {
-    return res.send(state.lastProcessed.cachedTwiml);
-  }
-
-  // ---- 9. Fire Gemini in background and return hold audio ----
-  // Start the Gemini request immediately, store the promise in state,
-  // and return brief hold audio + redirect. The caller hears "One moment"
-  // (or a typing sound) while Gemini processes in parallel. When Twilio
-  // redirects back (step 5a above), we await the result.
-  const geminiStart = Date.now();
-  state.pendingReply = geminiService.getReply(
-    state.history, processedSpeech, state.step, state.intent, config, {
-      knowledge: state.knowledge || [],
-      transferAllowed: resolveTransferAllowed(config),
-      integrations: state.integrations || [],
-      businessId: state.businessId || null,
-      callerPhone: state.callerNumber || null,
-      callId: state.dbCallId || null,
-      selectedAppointmentId: state.selectedAppointmentId || null,
-      callerContext: state.callerContext || null,
-    }
-  );
-  state.pendingReply.catch(() => {}); // prevent unhandled rejection if redirect processes the error
-
-  // Pipeline: chain TTS synthesis onto Gemini promise so synthesis runs during
-  // hold-audio playback rather than after the redirect arrives.
-  // Splits reply into sentences and synthesizes all in parallel to minimise
-  // TTS latency — returns an ordered array of audio URLs.
-  if (googleTts.isConfigured()) {
-    state.pendingTts = state.pendingReply
-      .then(async (reply) => {
-        const sentences = splitSentences(reply.text);
-        const ids = await Promise.all(
-          sentences.map((s) => googleTts.synthesizeAndStore(s + " ", GOOGLE_TTS_VOICE))
-        );
-        return ids.map((id) => `${BASE_URL}/audio/${id}`);
-      })
-      .catch(() => null); // silent fallback — resolveVoiceOpts used instead
-  } else {
-    state.pendingTts = null;
-  }
-
-  state.pendingSpeech = processedSpeech;
-  state.pendingSpeechHash = speechHash;
-  state.pendingGeminiStart = geminiStart;
-  state.pendingRequestId = requestId;
-
-  return res.send(buildHoldAndRedirect(VOICE_URL, HOLD_AUDIO_URL, voiceOpts));
+  // Unexpected re-hit after the stream is already connected — there is no
+  // legacy TwiML fallback anymore. Nothing useful to do; hang up gracefully.
+  log.error("twilio_voice_unexpected_rehit", { callSid, severity: "warn" });
+  return res.send("<Response><Hangup/></Response>");
 });
-
-// ---------------------------------------------------------------------------
-// processGeminiReply — awaits a pending Gemini promise and handles the result
-// ---------------------------------------------------------------------------
-
-async function processGeminiReply(
-  replyPromise, speechResult, geminiStart, requestId,
-  state, config, callSid, req, res
-) {
-  try {
-    const reply = await replyPromise;
-    let {
-      text: replyText,
-      appointmentArgs,
-      intentArgs,
-      endCallArgs,
-      customerRequestArgs,
-      toolResults,
-      selectedAppointmentId,
-    } = reply;
-    const turnLatencyMs = Date.now() - geminiStart;
-
-    // -- Update conversation history --
-    state.history.push({ role: "user", parts: [{ text: speechResult }] });
-    state.history.push({ role: "model", parts: [{ text: replyText }] });
-
-    // -- Log tool call results --
-    if (toolResults && toolResults.length > 0) {
-      for (const tr of toolResults) {
-        log.info("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
-      }
-    }
-
-    // -- Update selected appointment when lookup returned exactly one --
-    if (selectedAppointmentId != null) {
-      state.selectedAppointmentId = selectedAppointmentId;
-    }
-    // Clear when cancel succeeded so we don't reuse a cancelled id
-    if (toolResults?.some((tr) => tr.name === "cancel_appointment_db" && tr.success)) {
-      state.selectedAppointmentId = null;
-    }
-
-    // -- Step transitions based on function calls --
-    if (intentArgs) {
-      const prevStep = state.step;
-      state.intent = intentArgs.intent;
-      if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
-        state.step = STEPS.GATHER_DETAILS;
-      }
-      log.info("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
-    }
-
-    // Booking DB write now happens inside getReply (gemini.js) so the model
-    // gets real success/failure. Here we just handle notifications and step transition.
-    if (appointmentArgs && state.businessId) {
-      state.step = STEPS.CONFIRM;
-      const notes =
-        [appointmentArgs.service_type, appointmentArgs.notes]
-          .filter(Boolean)
-          .join(" — ") || null;
-      const twilioNumber = req.body.To || "";
-      notifications
-        .notifyAppointmentBooked({
-          businessId: state.businessId,
-          appointment: {
-            scheduled_at: appointmentArgs.scheduled_at,
-            client_name: appointmentArgs.client_name || null,
-            client_phone: state.callerNumber || null,
-            notes,
-          },
-          call: { callerNumber: state.callerNumber, twilioNumber },
-        })
-        .catch(() => {});
-    }
-
-    if (endCallArgs) {
-      state.step = STEPS.ENDING;
-      log.info("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
-    }
-
-    if (customerRequestArgs && state.businessId) {
-      db.createCustomerRequest({
-        businessId: state.businessId,
-        callId: state.dbCallId || null,
-        requestType: customerRequestArgs.request_type || "message",
-        callerName: customerRequestArgs.caller_name || null,
-        callbackNumber: customerRequestArgs.callback_number || null,
-        message: customerRequestArgs.message || null,
-        preferredTime: customerRequestArgs.preferred_time || null,
-      })
-        .then((id) => {
-          if (id) {
-            notifications
-              .notifyCustomerRequest({
-                businessId: state.businessId,
-                customerRequest: {
-                  request_type: customerRequestArgs.request_type || "message",
-                  caller_name: customerRequestArgs.caller_name || null,
-                  callback_number: customerRequestArgs.callback_number || null,
-                  message: customerRequestArgs.message || null,
-                  preferred_time: customerRequestArgs.preferred_time || null,
-                },
-                call: { callerNumber: state.callerNumber },
-              })
-              .catch(() => {});
-          }
-        })
-        .catch((err) => {
-          log.error("createCustomerRequest_failed", {
-            callSid,
-            requestId,
-            message: "createCustomerRequest failed",
-            code: "db_customer_request",
-          });
-          captureException(err, { callSid, requestId });
-        });
-    }
-
-    // -- Persist transcript --
-    logTranscript(state, speechResult, replyText);
-
-    // -- Structured log: turn completed --
-    log.info("turn_completed", {
-      callSid,
-      requestId,
-      step: state.step,
-      intent: state.intent,
-      turn_latency_ms: turnLatencyMs,
-    });
-    recordTurnLatency(state.businessId, turnLatencyMs);
-
-    // -- Build TwiML response --
-    // Use pre-synthesized audio if TTS ran during hold-audio (pipeline optimization).
-    // pendingTts resolves to an ordered string[] of audio URLs (one per sentence),
-    // or null on failure — falls back to on-demand Twilio Polly via resolveVoiceOpts.
-    const prebuiltAudioUrls = state.pendingTts ? await state.pendingTts : null;
-    state.pendingTts = null;
-
-    if (state.step === STEPS.ENDING) {
-      if (prebuiltAudioUrls?.length > 0) {
-        return res.send(buildMultiPlayAndHangup(prebuiltAudioUrls));
-      }
-      return res.send(buildSayAndHangup(replyText, await resolveVoiceOpts(replyText, config)));
-    }
-
-    const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
-    state.pendingSpeechHash = null;
-
-    if (prebuiltAudioUrls?.length > 0) {
-      const twiml = buildMultiPlayGatherRedirect(VOICE_URL, prebuiltAudioUrls, config.languagesSpoken);
-      // Don't cache TwiML when Google TTS is active — <Play> URLs are one-time-use
-      state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: null };
-      return res.send(twiml);
-    }
-
-    const replyVoiceOpts = await resolveVoiceOpts(replyText, config);
-    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", replyVoiceOpts);
-    state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: twiml };
-    res.send(twiml);
-  } catch (err) {
-    const turnLatencyMs = Date.now() - geminiStart;
-    const isTimeout = err?.message === "TURN_TIMEOUT";
-
-    log.error("gemini_error", {
-      callSid,
-      requestId,
-      message: isTimeout ? "Gemini turn timeout" : err?.message,
-      code: isTimeout ? "gemini_timeout" : "gemini_error",
-      turn_latency_ms: turnLatencyMs,
-    });
-    captureException(err, { callSid, requestId });
-
-    if (isTimeout) {
-      const msg = "Sorry, I'm taking a bit longer. Please try again.";
-      return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, undefined, HOLD_AUDIO_URL, await resolveVoiceOpts(msg, config))
-      );
-    }
-    const msg = "Sorry, I'm having a technical issue. Please try again in a moment.";
-    res.send(
-      buildSayGatherRedirect(VOICE_URL, msg, undefined, HOLD_AUDIO_URL, await resolveVoiceOpts(msg, config))
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Status callback — update call record on terminal status
@@ -1068,9 +447,6 @@ function attachWebSocket(httpServer) {
   });
 }
 
-// Whether to use Media Streams (requires DEEPGRAM_API_KEY)
-const USE_MEDIA_STREAMS = !!process.env.DEEPGRAM_API_KEY;
-
 if (process.env.NODE_ENV !== "test") {
   const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
@@ -1078,12 +454,8 @@ if (process.env.NODE_ENV !== "test") {
     console.log(
       `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
     );
-    if (USE_MEDIA_STREAMS) {
-      const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
-      console.log(`Media Streams (WebSocket): ${wsUrl}`);
-    } else {
-      console.log("Media Streams disabled (no DEEPGRAM_API_KEY) — using TwiML webhook mode.");
-    }
+    const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+    console.log(`Media Streams (WebSocket): ${wsUrl}`);
     if (TRANSFER_NUMBER) {
       console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
     } else {
