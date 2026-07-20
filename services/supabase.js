@@ -376,6 +376,29 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
 }
 
 /**
+ * Fetch a single appointment by id (for the caller-identity guard before
+ * cancel/reschedule — verifies the appointment actually belongs to the
+ * caller before mutating it).
+ * @param {string} appointmentId
+ * @param {string} [businessId] - If provided, restricts the lookup to this business
+ * @returns {Promise<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}|null>}
+ */
+export async function getAppointmentById(appointmentId, businessId) {
+  if (!supabase || !appointmentId) return null;
+  let q = supabase
+    .from("appointments")
+    .select("id, client_name, client_phone, scheduled_at, status, notes")
+    .eq("id", appointmentId);
+  if (businessId) q = q.eq("business_id", businessId);
+  const { data, error } = await q.maybeSingle();
+  if (error) {
+    log.error("db_error", { operation: "getAppointmentById", error: error.message });
+    return null;
+  }
+  return data;
+}
+
+/**
  * Update an appointment's status (e.g. cancel).
  * @param {string} appointmentId
  * @param {string} status - e.g. 'cancelled'
