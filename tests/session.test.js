@@ -758,6 +758,42 @@ describe("session.js — v2 pipeline orchestrator", () => {
     );
   });
 
+  it("13. multilingual: languagesSpoken.length > 1 -> STT connects with language=multi + endpointing=100", async () => {
+    db.loadConfig.mockReturnValueOnce({
+      businessName: "Test Biz",
+      greeting: "Hello, thanks for calling Test Biz.",
+      _hasCustomGreeting: true,
+      languagesSpoken: ["en", "es"],
+      transferPolicy: "always",
+      transferPhoneNumber: "+15551234567",
+      recordingDisclosureEnabled: false,
+      timezone: "America/Chicago",
+      afterHoursPolicy: "none",
+      voiceProvider: "elevenlabs",
+      voiceId: null,
+    });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+
+    const stt = H.sttInstances[H.sttInstances.length - 1];
+    expect(stt.opts.language).toBe("multi");
+    expect(stt.opts.endpointing).toBe(100);
+  });
+
+  it("13b. single-language config keeps the current mapping (no endpointing override)", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+
+    const stt = H.sttInstances[H.sttInstances.length - 1];
+    expect(stt.opts.language).toBe("en-US");
+    expect(stt.opts.endpointing).toBeUndefined();
+  });
+
   describe("10. per-business voice resolution (config.voiceProvider/voiceId -> ttsTurn opts)", () => {
     it("10a. default (elevenlabs, no voiceId configured) falls back to ELEVENLABS_DEFAULT_VOICE_ID with no catalog voiceSettings", async () => {
       const ws = new FakeWs();

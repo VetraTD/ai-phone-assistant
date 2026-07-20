@@ -79,6 +79,19 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     handle.close();
   });
 
+  it("1b. language=multi + explicit endpointing override passes endpointing through to connect()", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({ language: "multi", endpointing: 100, callSid: "CA1b" });
+
+    const configArg = mockConnect.mock.calls[0][0];
+    expect(configArg.language).toBe("multi");
+    expect(configArg.endpointing).toBe(100);
+
+    handle.close();
+  });
+
   it("2. accumulates is_final fragments and fires onFinal on speech_final with joined text", async () => {
     const fakeSocket = createFakeSocket();
     mockConnect.mockResolvedValue(fakeSocket);

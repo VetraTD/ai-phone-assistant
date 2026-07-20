@@ -332,7 +332,17 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     if (dbCallId && status === "completed") {
       (async () => {
         const transcript = await db.fetchCallTranscript(dbCallId);
-        if (transcript.length > 0) {
+        const callerTurns = transcript.filter((t) => t.speaker === "caller");
+        // Spam/robocall detection (Part 3): the AI's own greeting is logged
+        // even when the caller never speaks at all, so "transcript.length
+        // === 0" wouldn't catch silent/robo calls — check for zero CALLER
+        // turns specifically, combined with a short duration (a caller who
+        // stays silent 8+ minutes without ever speaking is unusual but not
+        // necessarily spam, so don't tag it). Skips the Gemini summary call
+        // entirely in the spam case (saves cost).
+        if (callerTurns.length === 0 && duration != null && duration < 8) {
+          await db.updateCallSummary(callSid, "No caller speech (likely spam/robocall)", null, "spam");
+        } else if (transcript.length > 0) {
           const { summary, sentiment, outcome } =
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);

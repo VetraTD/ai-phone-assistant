@@ -135,9 +135,69 @@ describe("POST /twilio/status", () => {
     });
   });
 
-  // spam-likely detection tests — see the "spam-likely detection" describe
-  // block added back in the Part 3 commit (co-located with multilingual STT
-  // config), since that's where the server.js spam-detection code lands.
+  describe("spam-likely detection", () => {
+    it("tags outcome=spam and skips Gemini when there are zero caller transcript rows and duration < 8s", async () => {
+      mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
+      // The summary/spam path only runs when this call went through the
+      // pipeline far enough to get a DB call row (state.dbCallId) — set
+      // directly since this test posts straight to /twilio/status.
+      callState.getState("CA_spam_1").dbCallId = "call-db-1";
+
+      await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_spam_1", CallStatus: "completed", CallDuration: "3", To: "+15550001111", From: "+15559998888" });
+
+      await new Promise((r) => setImmediate(r));
+      expect(mockGenerateSummaryAndSentiment).not.toHaveBeenCalled();
+      expect(mockUpdateCallSummary).toHaveBeenCalledWith(
+        "CA_spam_1",
+        "No caller speech (likely spam/robocall)",
+        null,
+        "spam"
+      );
+    });
+
+    it("still runs the normal Gemini summary path when the caller did speak", async () => {
+      mockFetchCallTranscript.mockResolvedValue([
+        { speaker: "ai", message: "Hi!", sequence: 1 },
+        { speaker: "caller", message: "What are your hours?", sequence: 2 },
+      ]);
+      callState.getState("CA_spam_2").dbCallId = "call-db-2";
+
+      await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_spam_2", CallStatus: "completed", CallDuration: "3", To: "+15550001111", From: "+15559998888" });
+
+      await new Promise((r) => setImmediate(r));
+      expect(mockGenerateSummaryAndSentiment).toHaveBeenCalled();
+      expect(mockUpdateCallSummary).toHaveBeenCalledWith(
+        "CA_spam_2",
+        "Caller asked about hours.",
+        "neutral",
+        "general_inquiry"
+      );
+    });
+
+    it("does not tag spam when duration is >= 8s even with zero caller turns", async () => {
+      mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
+      callState.getState("CA_spam_3").dbCallId = "call-db-3";
+
+      await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_spam_3", CallStatus: "completed", CallDuration: "30", To: "+15550001111", From: "+15559998888" });
+
+      await new Promise((r) => setImmediate(r));
+      expect(mockUpdateCallSummary).not.toHaveBeenCalledWith(
+        "CA_spam_3",
+        "No caller speech (likely spam/robocall)",
+        null,
+        "spam"
+      );
+    });
+  });
 
   describe("latency rollup", () => {
     it("writes avg/p95 turn latency for a completed call when stats are available", async () => {
