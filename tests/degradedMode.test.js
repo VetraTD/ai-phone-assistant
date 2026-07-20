@@ -10,16 +10,19 @@ const mockIsEnabled = vi.fn(() => true);
 const mockLookupBusinessByPhone = vi.fn();
 const mockCreateCustomerRequest = vi.fn();
 const mockNotifyCustomerRequest = vi.fn(async () => {});
+const mockSendCallerSms = vi.fn(async () => {});
 
 vi.mock("../services/supabase.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   createCustomerRequest: (...args) => mockCreateCustomerRequest(...args),
+  loadConfig: (business) => (business ? { businessName: business.name || "Test Biz", smsFollowupEnabled: false, smsTemplates: {} } : null),
 }));
 
 vi.mock("../services/notifications.js", () => ({
   notifyCustomerRequest: (...args) => mockNotifyCustomerRequest(...args),
   notifyCallMissed: vi.fn(async () => {}),
+  sendCallerSms: (...args) => mockSendCallerSms(...args),
 }));
 
 import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";
@@ -142,6 +145,15 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
           callback_number: "+15559998888",
         }),
       })
+    );
+    // Caller SMS follow-up (Part 2) — gating itself is sendCallerSms's job
+    // (unit-tested in tests/notifications.sms.test.js); here just confirm
+    // the voicemail webhook wires it up with the right kind/number.
+    expect(mockSendCallerSms).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: "Test Biz" }),
+      "+15559998888",
+      "message_received",
+      expect.any(Object)
     );
   });
 

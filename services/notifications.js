@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
+import { isValidE164 } from "../lib/validate.js";
 import * as db from "./supabase.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -107,7 +108,7 @@ async function sendEmail({ to, subject, text, html }) {
       html: html || text.replace(/\n/g, "<br>\n"),
     });
   } catch (err) {
-    log("error", { message: err?.message, code: "notification_email" });
+    log.error("notification_email", { message: err?.message });
     captureException(err, { to, subject });
   }
 }
@@ -125,7 +126,7 @@ async function sendSms({ to, body }) {
       body,
     });
   } catch (err) {
-    log("error", { message: err?.message, code: "notification_sms" });
+    log.error("notification_sms", { message: err?.message });
     captureException(err, { to });
   }
 }
@@ -222,7 +223,7 @@ export async function notifyAppointmentBooked({ businessId, appointment, call })
     if (config.email) await sendEmail({ to: config.email, subject, text: body });
     if (config.phone) await sendSms({ to: config.phone, body: formatAppointmentSms(appointment, call) });
   } catch (err) {
-    log("error", { message: err?.message, code: "notify_appointment" });
+    log.error("notify_appointment", { message: err?.message });
     captureException(err, { businessId });
   }
 }
@@ -242,7 +243,7 @@ export async function notifyCustomerRequest({ businessId, customerRequest, call 
     if (config.email) await sendEmail({ to: config.email, subject, text: body });
     if (config.phone) await sendSms({ to: config.phone, body: formatCustomerRequestSms(customerRequest, call) });
   } catch (err) {
-    log("error", { message: err?.message, code: "notify_customer_request" });
+    log.error("notify_customer_request", { message: err?.message });
     captureException(err, { businessId });
   }
 }
@@ -262,8 +263,63 @@ export async function notifyCallMissed({ businessId, call, status }) {
     if (config.email) await sendEmail({ to: config.email, subject, text: body });
     if (config.phone) await sendSms({ to: config.phone, body: formatMissedCallSms(call, status) });
   } catch (err) {
-    log("error", { message: err?.message, code: "notify_call_missed" });
+    log.error("notify_call_missed", { message: err?.message });
     captureException(err, { businessId });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Caller-facing SMS follow-ups (Part 2) — distinct from the owner-facing
+// notifyXxx() functions above: these text the CALLER back, gated per
+// business on config.smsFollowupEnabled (see loadConfig in
+// services/supabase.js). Off by default.
+// ---------------------------------------------------------------------------
+
+/** Default caller SMS templates, keyed by kind. Overridable per business via
+ * businesses.sms_templates (loadConfig's config.smsTemplates). */
+export const DEFAULT_SMS_TEMPLATES = {
+  appointment_confirmation:
+    "Hi {name}, your appointment with {business} is confirmed for {datetime}. Reply to this number if you need to change it.",
+  message_received:
+    "Hi{name_part}, we got your message at {business} — someone will get back to you {sla}. Thanks for calling!",
+  missed_call:
+    "Sorry we missed your call at {business}! Reply here or call back anytime and we'll help you right away.",
+};
+
+/** Replace {key} placeholders in a template with vars[key] (blank if missing). */
+function interpolateTemplate(template, vars) {
+  return template.replace(/\{(\w+)\}/g, (_match, key) => {
+    const val = vars?.[key];
+    return val != null ? String(val) : "";
+  });
+}
+
+/**
+ * Text the CALLER (not the business owner) a follow-up SMS. Gated on
+ * businessConfig.smsFollowupEnabled and a valid, non-anonymous caller
+ * number — Twilio reports withheld/blocked caller IDs as non-E.164 strings
+ * (e.g. "anonymous"), which isValidE164 already rejects. Never throws.
+ *
+ * @param {object} businessConfig - loadConfig() output for the business
+ * @param {string} toNumber - caller's number (state.callerNumber / req.body.From)
+ * @param {"appointment_confirmation"|"message_received"|"missed_call"} kind
+ * @param {Record<string, string>} [vars] - template placeholder values
+ */
+export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
+  if (!businessConfig?.smsFollowupEnabled) return;
+  if (!isValidE164(toNumber)) return;
+  const template = DEFAULT_SMS_TEMPLATES[kind];
+  if (!template) {
+    log.error("sms_followup_unknown_kind", { message: `sendCallerSms: unknown kind "${kind}"` });
+    return;
+  }
+  try {
+    const overrides = businessConfig.smsTemplates || {};
+    const chosen = typeof overrides[kind] === "string" && overrides[kind].trim() ? overrides[kind] : template;
+    await sendSms({ to: toNumber, body: interpolateTemplate(chosen, vars) });
+  } catch (err) {
+    log.error("sms_followup_failed", { message: err?.message, kind });
+    captureException(err, { toNumber, kind });
   }
 }
 
@@ -282,7 +338,7 @@ export async function notifyCallCompleted({ businessId, call, summary, sentiment
     if (config.email) await sendEmail({ to: config.email, subject, text: body });
     if (config.phone) await sendSms({ to: config.phone, body: formatCallSummarySms(outcome) });
   } catch (err) {
-    log("error", { message: err?.message, code: "notify_call_completed" });
+    log.error("notify_call_completed", { message: err?.message });
     captureException(err, { businessId });
   }
 }

@@ -17,7 +17,7 @@ import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
-import { getLatencyStats } from "./lib/voice/metrics.js";
+import { getLatencyStats, getCallStats } from "./lib/voice/metrics.js";
 import * as voiceHealth from "./lib/voice/health.js";
 import { buildDegradedVoicemailTwiml } from "./lib/twiml.js";
 import {
@@ -253,6 +253,14 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
             call: { callerNumber },
           })
           .catch(() => {});
+        const config = db.loadConfig(business);
+        notifications
+          .sendCallerSms(config, callerNumber, "message_received", {
+            name_part: "",
+            business: config.businessName,
+            sla: "as soon as possible",
+          })
+          .catch((err) => log.error("sms_followup_failed", { callSid, kind: "message_received", reason: err?.message }));
       }
     } else {
       log.error("degraded_voicemail_no_business", { callSid, twilioNumber, severity: "warn" });
@@ -297,6 +305,29 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       notifications.notifyCallMissed({ businessId, call: callContext, status }).catch(() => {});
     }
 
+    // Missed-call caller text-back (Part 2). A call that never connected to
+    // the real-time pipeline never gets state.businessId/state.config set
+    // (lib/mediaStream.js and lib/voice/session.js both load those lazily
+    // once the WebSocket connects) — so look the business up fresh by the
+    // dialed number instead of depending on call state. "Missed" here is
+    // defined as: status is failed/busy/no-answer AND CallDuration is 0 (or
+    // absent) — Twilio reports a nonzero duration when the call leg was
+    // actually answered/connected before the failure, which we treat as
+    // "not a pure miss" and skip texting for.
+    if (["failed", "busy", "no-answer"].includes(status) && (duration == null || duration === 0)) {
+      (async () => {
+        if (!db.isEnabled() || !callContext.twilioNumber || !callContext.callerNumber) return;
+        const business = await db.lookupBusinessByPhone(callContext.twilioNumber);
+        if (!business) return;
+        const config = db.loadConfig(business);
+        await notifications.sendCallerSms(config, callContext.callerNumber, "missed_call", {
+          business: config.businessName,
+        });
+      })().catch((err) => {
+        log.error("missed_call_sms_failed", { callSid, message: err?.message });
+      });
+    }
+
     // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
       (async () => {
@@ -309,6 +340,22 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       })().catch((err) => {
         log.error("summary_generation_failed", { callSid, message: err?.message });
       });
+    }
+
+    // Per-call turn-latency rollup (Part 2) — fire-and-forget; skip silently
+    // if no turns were recorded for this call (e.g. degraded-mode voicemail
+    // calls that never went through the real-time pipeline).
+    if (status === "completed") {
+      try {
+        const stats = getCallStats(callSid);
+        if (stats) {
+          db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms).catch((err) => {
+            log.error("db_update_latency_failed", { callSid, message: err?.message });
+          });
+        }
+      } catch (err) {
+        log.error("latency_rollup_failed", { callSid, message: err?.message });
+      }
     }
 
     callState.remove(callSid);

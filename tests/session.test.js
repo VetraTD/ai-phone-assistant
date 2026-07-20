@@ -213,6 +213,7 @@ vi.mock("twilio", () => ({
 import { handleVoiceSessionConnection } from "../lib/voice/session.js";
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
+import * as notifications from "../services/notifications.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
@@ -691,6 +692,70 @@ describe("session.js — v2 pipeline orchestrator", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("12a. a booked appointment sends the caller an appointment_confirmation SMS", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "You're all set!" },
+      {
+        type: "done",
+        reply: {
+          text: "You're all set!",
+          appointmentArgs: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex", service_type: "Checkup" },
+          toolResults: [{ name: "book_appointment_db", success: true }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("book me an appointment");
+    await flush();
+    await flush();
+
+    expect(notifications.sendCallerSms).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: "Test Biz" }),
+      "+15559999999",
+      "appointment_confirmation",
+      expect.objectContaining({ name: "Alex" })
+    );
+  });
+
+  it("12b. a taken message sends the caller a message_received SMS once the customer request is saved", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Got it, we'll follow up." },
+      {
+        type: "done",
+        reply: {
+          text: "Got it, we'll follow up.",
+          customerRequestArgs: { request_type: "message", caller_name: "Sam", message: "Call me back" },
+          toolResults: [{ name: "take_message_db", success: true }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("please take a message");
+    await flush();
+    await flush();
+
+    expect(notifications.sendCallerSms).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: "Test Biz" }),
+      "+15559999999",
+      "message_received",
+      expect.objectContaining({ name_part: " Sam" })
+    );
   });
 
   describe("10. per-business voice resolution (config.voiceProvider/voiceId -> ttsTurn opts)", () => {

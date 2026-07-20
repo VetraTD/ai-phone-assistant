@@ -102,6 +102,8 @@ export function loadConfig(business) {
       customInstructions: null,
       voiceProvider: "elevenlabs",
       voiceId: null,
+      smsFollowupEnabled: false,
+      smsTemplates: {},
     };
   }
 
@@ -130,6 +132,8 @@ export function loadConfig(business) {
     customInstructions: business.custom_instructions || null,
     voiceProvider: business.voice_provider || "elevenlabs",
     voiceId: business.voice_id || null,
+    smsFollowupEnabled: !!business.sms_followup_enabled,
+    smsTemplates: (business.sms_templates && typeof business.sms_templates === "object") ? business.sms_templates : {},
   };
 }
 
@@ -352,6 +356,24 @@ export async function updateCallSummary(callSid, summary, sentiment, outcome) {
     .eq("twilio_call_sid", callSid);
   if (error) {
     log.error("db_error", { callSid, operation: "updateCallSummary", error: error.message });
+  }
+}
+
+/**
+ * Write the per-call turn-latency rollup (computed from the in-process
+ * metrics ring buffer — see lib/voice/metrics.js's getCallStats()).
+ * @param {string} callSid
+ * @param {number} avgMs
+ * @param {number} p95Ms
+ */
+export async function updateCallLatency(callSid, avgMs, p95Ms) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("calls")
+    .update({ avg_turn_latency_ms: avgMs, p95_turn_latency_ms: p95Ms })
+    .eq("twilio_call_sid", callSid);
+  if (error) {
+    log.error("db_error", { callSid, operation: "updateCallLatency", error: error.message });
   }
 }
 

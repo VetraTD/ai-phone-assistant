@@ -10,6 +10,7 @@ vi.mock("../lib/logger.js", () => ({
 import {
   createTurnMetrics,
   getLatencyStats,
+  getCallStats,
   clearStats,
   _ringBuffer,
 } from "../lib/voice/metrics.js";
@@ -222,6 +223,32 @@ describe("metrics.js — per-turn latency tracker", () => {
       const stats = getLatencyStats();
       expect(stats.count).toBe(0);
       expect(stats.recent).toEqual([]);
+    });
+  });
+
+  describe("getCallStats — per-call latency rollup", () => {
+    it("computes avg/p95 voice_to_voice_ms filtered to a single callSid", () => {
+      // 3 turns for CA-target: 100, 200, 300 -> avg 200
+      for (const ms of [100, 200, 300]) {
+        const tracker = createTurnMetrics("CA-target");
+        tracker.mark("speech_end", 0);
+        tracker.mark("first_audio_sent", ms);
+        tracker.finishTurn();
+      }
+      // A turn for a different call — must not leak into the stats above.
+      const other = createTurnMetrics("CA-other");
+      other.mark("speech_end", 0);
+      other.mark("first_audio_sent", 9999);
+      other.finishTurn();
+
+      const stats = getCallStats("CA-target");
+      expect(stats.count).toBe(3);
+      expect(stats.avgMs).toBe(200);
+      expect(stats.p95Ms).toBe(300);
+    });
+
+    it("returns null when no turns were recorded for the callSid", () => {
+      expect(getCallStats("CA-never-seen")).toBeNull();
     });
   });
 });
