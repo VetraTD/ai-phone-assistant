@@ -210,6 +210,129 @@ describe("PUT /api/business/:id/settings", () => {
     expect(res.status).toBe(200);
   });
 
+  // The caller-facing SMS follow-up feature (businesses.sms_followup_enabled /
+  // sms_templates, migration 017) shipped read-only: the columns existed and
+  // the voice server read them, but neither key was in this whitelist, so
+  // nothing could ever turn the feature on.
+  describe("caller SMS follow-ups", () => {
+    it("sms_followup_enabled: true persists", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_followup_enabled: true });
+
+      expect(res.status).toBe(200);
+      const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+      expect(updateCall[0]).toContain("sms_followup_enabled = $1");
+      expect(updateCall[1][0]).toBe(true);
+    });
+
+    it("sms_followup_enabled: a non-boolean -> 400", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_followup_enabled: "yes" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sms_followup_enabled/);
+    });
+
+    it("sms_templates: known kinds persist as jsonb", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { missed_call: "Sorry we missed you at {business}!" } });
+
+      expect(res.status).toBe(200);
+      const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+      expect(updateCall[0]).toContain("sms_templates = $1");
+      expect(updateCall[1][0]).toEqual({ missed_call: "Sorry we missed you at {business}!" });
+    });
+
+    it("sms_templates: an unknown template kind -> 400", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { not_a_kind: "hello" } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sms_templates/);
+      expect(res.body.error).toMatch(/not_a_kind/);
+    });
+
+    it("sms_templates: a template over 320 characters -> 400", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { missed_call: "x".repeat(321) } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sms_templates/);
+      expect(res.body.error).toMatch(/320/);
+    });
+
+    it("sms_templates: a non-string value -> 400", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { missed_call: 42 } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sms_templates/);
+    });
+
+    it("sms_templates: an array is rejected, not treated as an object -> 400", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: ["missed_call"] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("sms_templates: null clears all overrides back to {}", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: null });
+
+      expect(res.status).toBe(200);
+      const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+      expect(updateCall[1][0]).toEqual({});
+    });
+
+    it("sms_templates: a blank override is dropped rather than persisted as an empty string", async () => {
+      // sendCallerSms already falls back to the default template on a blank
+      // override; storing "" would just be dead data in the column.
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { missed_call: "   ", message_received: "Got it!" } });
+
+      expect(res.status).toBe(200);
+      const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+      expect(updateCall[1][0]).toEqual({ message_received: "Got it!" });
+    });
+  });
+
   it("forbids updating a business the authenticated user doesn't own", async () => {
     poolQueryMock.mockImplementation((sql) => {
       if (sql.includes("from users")) {

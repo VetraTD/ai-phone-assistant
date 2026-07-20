@@ -52,6 +52,35 @@ export const TRANSFER_POLICIES = [
 
 export const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+// Caller-facing SMS follow-up kinds. Mirrors the backend's
+// constants.js SMS_TEMPLATE_KINDS / SMS_TEMPLATE_MAX_LENGTH (itself mirrored
+// from the root repo's services/notifications.js DEFAULT_SMS_TEMPLATES) — a
+// kind not in the backend's list is rejected with a 400 on save.
+export const SMS_TEMPLATE_KINDS = ["appointment_confirmation", "message_received", "missed_call"];
+
+export const SMS_TEMPLATE_MAX_LENGTH = 320;
+
+export const SMS_TEMPLATE_META = {
+  appointment_confirmation: {
+    label: "Appointment confirmation",
+    hint: "Sent after the AI books an appointment. Placeholders: {name}, {business}, {datetime}.",
+    placeholder:
+      "Hi {name}, your appointment with {business} is confirmed for {datetime}. Reply to this number if you need to change it.",
+  },
+  message_received: {
+    label: "Message received",
+    hint: "Sent after the AI takes a message. Placeholders: {name_part}, {business}, {sla}.",
+    placeholder:
+      "Hi{name_part}, we got your message at {business} — someone will get back to you {sla}. Thanks for calling!",
+  },
+  missed_call: {
+    label: "Missed call",
+    hint: "Sent when a call goes unanswered. Placeholder: {business}.",
+    placeholder:
+      "Sorry we missed your call at {business}! Reply here or call back anytime and we'll help you right away.",
+  },
+};
+
 export const DAY_LABELS = {
   mon: "Monday",
   tue: "Tuesday",

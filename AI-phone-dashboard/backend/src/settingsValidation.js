@@ -15,6 +15,8 @@ const {
   TRANSFER_POLICIES,
   VOICE_PROVIDERS,
   ELEVENLABS_VOICE_IDS,
+  SMS_TEMPLATE_KINDS,
+  SMS_TEMPLATE_MAX_LENGTH,
   DAY_KEYS,
   ALLOWED_TIMEZONES,
 } = require("./constants");
@@ -147,6 +149,37 @@ function validateEmail(value) {
   return { value: sanitizeString(value, 254) };
 }
 
+// Per-business overrides for the caller-facing SMS follow-up copy
+// (root repo services/notifications.js sendCallerSms). Only the known
+// template kinds are accepted — any other key would be silently ignored by
+// the voice server, so it's rejected here rather than stored as dead data.
+// A blank override is dropped rather than persisted: sendCallerSms already
+// falls back to its built-in default for an empty string.
+function validateSmsTemplates(value) {
+  if (value === null) return { value: {} };
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: `must be an object keyed by template kind (${SMS_TEMPLATE_KINDS.join(", ")})` };
+  }
+  const unknownKeys = Object.keys(value).filter((k) => !SMS_TEMPLATE_KINDS.includes(k));
+  if (unknownKeys.length) {
+    return {
+      error: `has unknown template kinds: ${unknownKeys.join(", ")}. Valid: ${SMS_TEMPLATE_KINDS.join(", ")}`,
+    };
+  }
+  const out = {};
+  for (const kind of SMS_TEMPLATE_KINDS) {
+    const tpl = value[kind];
+    if (tpl === undefined || tpl === null) continue;
+    if (typeof tpl !== "string") return { error: `.${kind} must be a string` };
+    if (tpl.length > SMS_TEMPLATE_MAX_LENGTH) {
+      return { error: `.${kind} must be ${SMS_TEMPLATE_MAX_LENGTH} characters or fewer` };
+    }
+    const trimmed = tpl.trim();
+    if (trimmed) out[kind] = trimmed;
+  }
+  return { value: out };
+}
+
 // Key set = businesses table column names = the write whitelist for
 // PUT /api/business/:id/settings. Keep 1:1 with the columns.
 const SETTINGS_FIELD_VALIDATORS = {
@@ -169,6 +202,8 @@ const SETTINGS_FIELD_VALIDATORS = {
   notification_email: validateEmail,
   notification_phone: validatePhone,
   notifications_enabled: validateBoolean,
+  sms_followup_enabled: validateBoolean,
+  sms_templates: validateSmsTemplates,
 };
 
 module.exports = { SETTINGS_FIELD_VALIDATORS };

@@ -59,6 +59,16 @@ function snapshotFromBusiness(b) {
     notification_email: b?.notification_email || "",
     notification_phone: b?.notification_phone || "",
     notifications_enabled: b?.notifications_enabled !== false,
+    // Caller-facing SMS follow-ups (businesses.sms_followup_enabled /
+    // sms_templates). Both must be in this snapshot, not just in
+    // NotificationsSection's markup — diffSnapshots only ever sends keys that
+    // exist here, so a control editing a key absent from the snapshot would
+    // silently never be saved.
+    sms_followup_enabled: !!b?.sms_followup_enabled,
+    sms_templates:
+      b?.sms_templates && typeof b.sms_templates === "object" && !Array.isArray(b.sms_templates)
+        ? b.sms_templates
+        : {},
     languages_spoken: Array.isArray(b?.languages_spoken) && b.languages_spoken.length ? b.languages_spoken : ["en"],
     recording_disclosure_enabled: !!b?.recording_disclosure_enabled,
     recording_disclosure_text: b?.recording_disclosure_text || "",

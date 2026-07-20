@@ -44,6 +44,16 @@ const ELEVENLABS_VOICE_IDS = [
   "IKne3meq5aSn9XLyUdCD", // Charlie
 ];
 
+// Source of truth: root repo services/notifications.js DEFAULT_SMS_TEMPLATES
+// (and database/017_followups_and_metrics.sql's businesses.sms_templates
+// comment). A business may override the copy for any of these kinds; any
+// other key would be dead data the voice server never reads.
+const SMS_TEMPLATE_KINDS = ["appointment_confirmation", "message_received", "missed_call"];
+
+// A single SMS segment is 160 GSM-7 characters; 320 keeps an override to at
+// most two segments after placeholder interpolation is roughly accounted for.
+const SMS_TEMPLATE_MAX_LENGTH = 320;
+
 // Source of truth: database/014_business_hours_weekly.sql.
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -62,6 +72,8 @@ module.exports = {
   TRANSFER_POLICIES,
   VOICE_PROVIDERS,
   ELEVENLABS_VOICE_IDS,
+  SMS_TEMPLATE_KINDS,
+  SMS_TEMPLATE_MAX_LENGTH,
   DAY_KEYS,
   ALLOWED_TIMEZONES,
 };
