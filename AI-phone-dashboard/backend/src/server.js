@@ -10,29 +10,20 @@ const authenticate = require("./middleware/authMiddleware");
 // ✅ DB pool (make sure src/db/index.js exports the pool)
 const pool = require("./db");
 
+const {
+  getBusinessIdForUser,
+  sanitizeString,
+  isValidEmail,
+  rejectUnexpectedKeys,
+  buildUpdateFromWhitelist,
+} = require("./utils");
+const { ALLOWED_TIMEZONES } = require("./constants");
+const { SETTINGS_FIELD_VALIDATORS } = require("./settingsValidation");
+
 const app = express();
 
 // Behind Vercel/other proxies, trust the proxy so rate-limits and IP logging work correctly
 app.set("trust proxy", 1);
-
-// Helper: get the business_id for the authenticated user
-async function getBusinessIdForUser(userId) {
-  const r = await pool.query(
-    `select business_id from users where id = $1`,
-    [userId]
-  );
-  return r.rows[0]?.business_id || null;
-}
-
-// Security helpers -----------------------------------------------------------
-const ALLOWED_TIMEZONES = [
-  "America/Chicago",
-  "America/New_York",
-  "America/Los_Angeles",
-  "Europe/London",
-];
-
-const ALLOWED_LANGUAGES = ["en", "es", "fr"];
 
 function createRateLimitHandler() {
   return (req, res, next, options) => {
@@ -41,32 +32,6 @@ function createRateLimitHandler() {
       error: "Too many requests. Please slow down and try again shortly.",
     });
   };
-}
-
-function sanitizeString(value, maxLength) {
-  if (typeof value !== "string") return "";
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (maxLength && trimmed.length > maxLength) {
-    return trimmed.slice(0, maxLength);
-  }
-  return trimmed;
-}
-
-function isValidEmail(email) {
-  const v = sanitizeString(email, 254);
-  if (!v) return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-}
-
-function rejectUnexpectedKeys(obj, allowedKeys) {
-  if (!obj || typeof obj !== "object") return;
-  const extra = Object.keys(obj).filter((k) => !allowedKeys.includes(k));
-  if (extra.length) {
-    const err = new Error("Unexpected fields in request body");
-    err.statusCode = 400;
-    throw err;
-  }
 }
 
 // Basic security headers
@@ -1253,8 +1218,16 @@ await pool.query(
 
 
 
-//RECENTLY ADDED - UPDATE BUSINESS SETTINGS  TAKE OUT IF NOT NEEDED
-
+// Update business settings — dynamic UPDATE built only from whitelisted,
+// validated keys (see settingsValidation.js SETTINGS_FIELD_VALIDATORS).
+// Unknown/unexpected keys (e.g. the old frontend's `default_language` and
+// the address_line1/2, city, state_region, postal_code columns dropped by
+// migration 012) are ignored rather than rejected or 500ing — this keeps
+// the endpoint working for the pre-Phase-4B frontend. Column names in the
+// SET clause come only from SETTINGS_FIELD_VALIDATORS's own key set (never
+// from request input) and every value is bound as a parameter — never
+// string-interpolated — so this stays injection-safe even though the set of
+// columns updated varies per request.
 app.put("/api/business/:id/settings", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1266,86 +1239,28 @@ app.put("/api/business/:id/settings", authenticate, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const allowedKeys = [
-      "name",
-      "timezone",
-      "greeting_message",
-      "after_hours_policy",
-      "transfer_policy",
-      "transfer_phone_number",
-      "notification_email",
-      "notification_phone",
-      "default_language",
-      "general_info",
-      "address_line1",
-      "address_line2",
-      "city",
-      "state_region",
-      "postal_code",
-    ];
-    rejectUnexpectedKeys(req.body || {}, allowedKeys);
-
-    const name = sanitizeString(req.body?.name, 120);
-    const timezone = sanitizeString(req.body?.timezone, 64);
-    const greeting_message = sanitizeString(req.body?.greeting_message, 1000);
-    const after_hours_policy = sanitizeString(req.body?.after_hours_policy, 64);
-    const transfer_policy = sanitizeString(req.body?.transfer_policy, 64);
-    const transfer_phone_number = sanitizeString(req.body?.transfer_phone_number, 32);
-    const notification_email = sanitizeString(req.body?.notification_email, 254);
-    const notification_phone = sanitizeString(req.body?.notification_phone, 32);
-    const default_language = sanitizeString(req.body?.default_language, 8);
-    const general_info = sanitizeString(req.body?.general_info || "", 4000);
-    const address_line1 = sanitizeString(req.body?.address_line1 || "", 256);
-    const address_line2 = sanitizeString(req.body?.address_line2 || "", 256);
-    const city = sanitizeString(req.body?.city || "", 128);
-    const state_region = sanitizeString(req.body?.state_region || "", 128);
-    const postal_code = sanitizeString(req.body?.postal_code || "", 32);
-
-    if (timezone && !ALLOWED_TIMEZONES.includes(timezone)) {
-      return res.status(400).json({ error: "Timezone is not supported." });
-    }
-    if (default_language && !ALLOWED_LANGUAGES.includes(default_language)) {
-      return res.status(400).json({ error: "Language is not supported." });
+    const built = buildUpdateFromWhitelist(SETTINGS_FIELD_VALIDATORS, req.body);
+    if (built.error) {
+      return res.status(400).json({ error: built.error });
     }
 
-    const result = await pool.query(
-      `UPDATE businesses
-       SET name = $1,
-           timezone = $2,
-           greeting = $3,
-           after_hours_policy = $4,
-           transfer_policy = $5,
-           transfer_phone_number = $6,
-           notification_email = $7,
-           notification_phone = $8,
-           default_language = $9,
-           general_info = $10,
-           address_line1 = $11,
-           address_line2 = $12,
-           city = $13,
-           state_region = $14,
-           postal_code = $15
-       WHERE id = $16
-       RETURNING *`,
-      [
-        name,
-        timezone,
-        greeting_message,
-        after_hours_policy,
-        transfer_policy,
-        transfer_phone_number,
-        notification_email,
-        notification_phone,
-        default_language,
-        general_info ?? "",
-        address_line1 ?? "",
-        address_line2 ?? "",
-        city ?? "",
-        state_region ?? "",
-        postal_code ?? "",
-        id,
-      ]
-    );
+    if (built.unknownKeys.length) {
+      console.warn(
+        `settings update: ignoring unknown keys [${built.unknownKeys.join(", ")}] for business ${id}`
+      );
+    }
+
+    if (!built.setClauses.length) {
+      // Nothing recognized to update (e.g. request contained only unknown
+      // legacy keys) — return the current row unchanged rather than issuing
+      // a no-op UPDATE with an empty SET clause.
+      const current = await pool.query(`SELECT * FROM businesses WHERE id = $1`, [id]);
+      return res.json(current.rows[0] || null);
+    }
+
+    const params = [...built.params, id];
+    const sql = `UPDATE businesses SET ${built.setClauses.join(", ")} WHERE id = $${params.length} RETURNING *`;
+    const result = await pool.query(sql, params);
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -1484,8 +1399,14 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+// Only start listening when run directly (`node src/server.js` /
+// `nodemon src/server.js`) — not when required by a test harness, so
+// supertest can exercise `app` without binding a real port.
+if (require.main === module) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log("Dashboard backend running on port " + PORT);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log("Dashboard backend running on port " + PORT);
-});
+module.exports = app;

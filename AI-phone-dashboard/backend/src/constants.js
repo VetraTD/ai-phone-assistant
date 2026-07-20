@@ -1,0 +1,67 @@
+// Constants duplicated from the root voice-server repo (this dashboard
+// backend is a separate deployable app and cannot import across apps/
+// package boundaries — keep these in sync by hand when the source files
+// change).
+
+// Source of truth: root repo services/supabase.js (Phase 2A task model).
+// CORE tasks are always available on every call and are never stored in
+// businesses.allowed_tasks; MODULE tasks are the opt-in set a business can
+// enable, and are exactly what businesses.allowed_tasks stores.
+const CORE_TASKS = ["general_question", "take_message", "callback_request", "transfer_human"];
+const MODULE_TASKS = [
+  "book_appointment",
+  "check_appointment",
+  "cancel_reschedule",
+  "quote_request",
+  "directions_location",
+  "form_document_request",
+];
+
+// Source of truth: root repo services/supabase.js loadConfig() /
+// config.languagesSpoken consumers (services/gemini.js, lib/voice/session.js,
+// lib/mediaStream.js).
+const ALLOWED_LANGUAGES = ["en", "es", "fr"];
+
+// Source of truth: root repo services/supabase.js AFTER_HOURS_POLICIES /
+// TRANSFER_POLICIES.
+const AFTER_HOURS_POLICIES = ["take_message", "offer_callback", "book_later", "transfer_if_possible"];
+const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];
+
+// Source of truth: database/015_voice_settings.sql / root repo
+// lib/voice/session.js resolveVoice().
+const VOICE_PROVIDERS = ["elevenlabs", "google"];
+
+// Source of truth: root repo config/voices.js VOICE_CATALOG[].elevenVoiceId.
+// Keep this list in sync when the catalog changes.
+const ELEVENLABS_VOICE_IDS = [
+  "21m00Tcm4TlvDq8ikWAM", // Rachel
+  "pNInz6obpgDQGcFmaJgB", // Adam
+  "ErXwobaYiN019PkySvjV", // Antoni
+  "EXAVITQu4vr4xnSDxMaL", // Bella
+  "MF3mGyEYCk7xN5WJycdo", // Elli
+  "TxGEqnHWrfWFTfGW9XjX", // Josh
+  "XB0fDUnXU5powFXDhCwa", // Charlotte
+  "IKne3meq5aSn9XLyUdCD", // Charlie
+];
+
+// Source of truth: database/014_business_hours_weekly.sql.
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+const ALLOWED_TIMEZONES = [
+  "America/Chicago",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Europe/London",
+];
+
+module.exports = {
+  CORE_TASKS,
+  MODULE_TASKS,
+  ALLOWED_LANGUAGES,
+  AFTER_HOURS_POLICIES,
+  TRANSFER_POLICIES,
+  VOICE_PROVIDERS,
+  ELEVENLABS_VOICE_IDS,
+  DAY_KEYS,
+  ALLOWED_TIMEZONES,
+};
