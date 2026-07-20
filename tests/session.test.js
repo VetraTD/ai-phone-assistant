@@ -437,6 +437,59 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore);
   });
 
+  it("5c. race: a final delivered between the fallback flow's onComplete and its ENDING transition must not reach the LLM", async () => {
+    H.llmFactory = () => makeThrowingGen(Object.assign(new Error("down"), { code: "LLM_TIMEOUT" }));
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+
+    // Two failures -> enter the fallback flow.
+    tm.opts.onTurnEnd("first failing turn");
+    await flush();
+    await flush();
+    tm.opts.onTurnEnd("second failing turn");
+    await flush();
+    await flush();
+
+    expect(H.fallbackFlowInstances.length).toBe(1);
+    const flow = H.fallbackFlowInstances[0];
+
+    // Hold createCustomerRequest open so we can land a final while
+    // completeFallbackFlow is mid-await — i.e. after the flow itself has
+    // gone inactive (isActive() === false) but before state.step is set
+    // to ENDING.
+    let resolveCreate;
+    db.createCustomerRequest.mockImplementationOnce(
+      () => new Promise((r) => { resolveCreate = r; })
+    );
+
+    flow._active = false; // mirrors the real flow's finishSuccess() timing
+    flow.opts.onComplete({ callerName: "Sam", callbackNumber: "5551234567", message: "call me back" });
+    await flush();
+
+    // Still mid-await: not yet ENDING.
+    const state = callState.getState(sid);
+    expect(state.step).not.toBe("ending");
+
+    const llmCallsBefore = runLlmTurn.mock.calls.length;
+
+    // A caller final arrives in exactly this window.
+    tm.opts.onTurnEnd("hello, are you still there");
+    await flush();
+
+    // Must be routed to the (now-inactive, no-op) flow, never to the LLM.
+    expect(flow.handleInput).toHaveBeenCalledWith("hello, are you still there");
+    expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore);
+
+    resolveCreate?.("req-async");
+    await flush();
+  });
+
   it("6. STT terminal failure: apology spoken then graceful close", async () => {
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);

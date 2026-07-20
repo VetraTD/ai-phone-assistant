@@ -62,18 +62,21 @@ describe("fallbackFlow — deterministic no-LLM take-message flow", () => {
     });
   });
 
-  it("2. number re-ask then caller-ID fallback after a second bad number", () => {
+  it("2. number re-ask then caller-ID fallback after a second unusable number", () => {
     const { flow, said } = makeFlow();
     flow.start();
     flow.handleInput("Jane Doe");
 
-    flow.handleInput("123"); // too short
+    // Deliberately no digits at all (not a partial recitation — see test 11
+    // for that case) so this exercises the "genuinely bad answer" path
+    // rather than the isIncomplete hold-and-combine path.
+    flow.handleInput("I don't really know it offhand");
     expect(said[said.length - 1]).toBe(
       "Sorry, I didn't catch the full number. Could you say it again, digit by digit?"
     );
     expect(flow.getState()).toBe("awaiting_number");
 
-    flow.handleInput("456"); // still too short -> fall back to caller ID
+    flow.handleInput("I can't remember right now"); // still no digits -> fall back to caller ID
     expect(said).toContain("No problem — I'll use the number you're calling from.");
     expect(flow.getState()).toBe("confirming_number");
     // caller ID digits (+15559998888 -> 15559998888) were used and read back.
@@ -199,5 +202,72 @@ describe("fallbackFlow — deterministic no-LLM take-message flow", () => {
     expect(onComplete).not.toHaveBeenCalled();
     expect(onFail).not.toHaveBeenCalled();
     expect(flow.isActive()).toBe(false);
+  });
+
+  it("11. a number split across two finals by STT is held silently and combined into one", () => {
+    const { flow, said } = makeFlow();
+    flow.start();
+    flow.handleInput("Casey");
+    const sayCountBeforeHold = said.length;
+
+    // Looks like a partial number (6 trailing digits, <7) — held silently:
+    // no re-prompt, no failure counted, state unchanged.
+    flow.handleInput("555123");
+    expect(said.length).toBe(sayCountBeforeHold);
+    expect(flow.getState()).toBe("awaiting_number");
+
+    // Continuation arrives on the next final -> combined and accepted as one number.
+    flow.handleInput("4567");
+    expect(said[said.length - 1]).toBe("Got it — that's 555, 123, 4567. Is that right?");
+    expect(flow.getState()).toBe("confirming_number");
+  });
+
+  it("12. empty/missing callerPhone: number is skipped entirely instead of storing a blank number", () => {
+    const { flow, said, onComplete } = makeFlow({ callerPhone: "" });
+    flow.start();
+    flow.handleInput("Jordan");
+
+    flow.handleInput("I don't know it"); // no digits -> first failure -> re-ask
+    expect(flow.getState()).toBe("awaiting_number");
+
+    flow.handleInput("I still don't know it"); // no digits -> second failure -> callerPhone unusable -> skip
+    expect(said[said.length - 1]).toBe(
+      "No problem — let's move on. What's the message you'd like to leave?"
+    );
+    expect(flow.getState()).toBe("awaiting_message");
+
+    flow.handleInput("please call about my invoice");
+    flow.handleInput("no that's all");
+
+    expect(onComplete).toHaveBeenCalledWith({
+      callerName: "Jordan",
+      callbackNumber: null,
+      message: "please call about my invoice",
+    });
+  });
+
+  it("13. rejecting the caller-ID fallback number does not loop — moves on without a number", () => {
+    const { flow, said, onComplete } = makeFlow(); // default callerPhone "+15559998888"
+    flow.start();
+    flow.handleInput("Riley");
+    flow.handleInput("I don't know it"); // first failure
+    flow.handleInput("I still don't know it"); // second failure -> caller-ID number used
+    expect(flow.getState()).toBe("confirming_number");
+    expect(said).toContain("No problem — I'll use the number you're calling from.");
+
+    flow.handleInput("no that's wrong too"); // reject the caller-ID number itself -> must not loop
+    expect(said[said.length - 1]).toBe(
+      "No problem — let's move on. What's the message you'd like to leave?"
+    );
+    expect(flow.getState()).toBe("awaiting_message");
+
+    flow.handleInput("just a quick question about billing");
+    flow.handleInput("nope");
+
+    expect(onComplete).toHaveBeenCalledWith({
+      callerName: "Riley",
+      callbackNumber: null,
+      message: "just a quick question about billing",
+    });
   });
 });
