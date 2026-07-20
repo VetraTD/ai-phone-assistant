@@ -24,6 +24,7 @@ import {
 } from "./lib/twiml.js";
 import { WebSocketServer } from "ws";
 import { handleMediaStreamConnection } from "./lib/mediaStream.js";
+import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
@@ -1056,7 +1057,10 @@ function attachWebSocket(httpServer) {
     const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
     if (pathname === "/twilio/media-stream") {
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleMediaStreamConnection(ws, req);
+        const handler = process.env.PIPELINE_V2 === "true"
+          ? handleVoiceSessionConnection
+          : handleMediaStreamConnection;
+        handler(ws, req);
       });
     } else {
       socket.destroy();
