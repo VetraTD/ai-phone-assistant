@@ -18,6 +18,9 @@ const H = vi.hoisted(() => {
     turnManagerInstances: [],
     metricsInstances: [],
     fallbackFlowInstances: [],
+    // set once, at session.js module-load time (utteranceCache is a
+    // module-level singleton there) — see the utteranceCache.js mock below.
+    utteranceCacheInstance: null,
     // controllable runLlmTurn factory: () => async-iterable
     llmFactory: null,
     // spies for services
@@ -132,6 +135,22 @@ vi.mock("../lib/voice/fallbackFlow.js", () => ({
   }),
 }));
 
+// ---- lib/voice/utteranceCache.js --------------------------------------------
+// Mocked (not the real module) so cache hits/misses are fully controllable
+// per test and there's zero risk of cross-test cache-state bleed (the real
+// module's cache is intentionally module-wide/shared — see its own tests in
+// tests/utteranceCache.test.js for that behavior in isolation).
+vi.mock("../lib/voice/utteranceCache.js", () => ({
+  createUtteranceCache: vi.fn((opts) => {
+    H.utteranceCacheInstance = {
+      opts,
+      get: vi.fn(() => null),
+      warm: vi.fn(async () => {}),
+    };
+    return H.utteranceCacheInstance;
+  }),
+}));
+
 // ---- services --------------------------------------------------------------
 vi.mock("../services/supabase.js", () => ({
   isEnabled: vi.fn(() => true),
@@ -146,6 +165,8 @@ vi.mock("../services/supabase.js", () => ({
     recordingDisclosureEnabled: false,
     timezone: "America/Chicago",
     afterHoursPolicy: "none",
+    voiceProvider: "elevenlabs",
+    voiceId: null,
   })),
   createCall: vi.fn(async () => "call-db-1"),
   fetchBusinessKnowledge: vi.fn(async () => []),
@@ -181,6 +202,8 @@ import { handleVoiceSessionConnection } from "../lib/voice/session.js";
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
+import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
+import { VOICE_CATALOG } from "../config/voices.js";
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -300,7 +323,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(tm.handleAudioFrame.mock.calls[0][0]).toEqual(Buffer.from([9, 8, 7]));
   });
 
-  it("3. full happy turn: deltas -> tts.write, done -> tts.end, transcript rows + metrics marks in order", async () => {
+  it("3. full happy turn: deltas -> tts.write (sentence-batched + speakable-normalized), done -> tts.end, transcript rows + metrics marks in order", async () => {
     H.llmFactory = () => makeGen([
       { type: "delta", text: "Sure, " },
       { type: "delta", text: "I can help." },
@@ -320,9 +343,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     // The turn's TTS turn is the second one created (greeting was first).
+    // Deltas are sentence-batched before being written (see
+    // splitReadySentences/toSpeakable in session.js) — "Sure, " has no
+    // sentence-ending punctuation yet, so it's held back and merged with the
+    // next delta into a single write() once the sentence completes.
     const turnTts = H.ttsTurns[H.ttsTurns.length - 1];
-    expect(turnTts.write).toHaveBeenCalledWith("Sure, ");
-    expect(turnTts.write).toHaveBeenCalledWith("I can help.");
+    expect(turnTts.write).toHaveBeenCalledTimes(1);
+    expect(turnTts.write).toHaveBeenCalledWith("Sure, I can help.");
     expect(turnTts.end).toHaveBeenCalledTimes(1);
 
     // transcript rows: caller then ai
@@ -647,5 +674,145 @@ describe("session.js — v2 pipeline orchestrator", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("10. per-business voice resolution (config.voiceProvider/voiceId -> ttsTurn opts)", () => {
+    it("10a. default (elevenlabs, no voiceId configured) falls back to ELEVENLABS_DEFAULT_VOICE_ID with no catalog voiceSettings", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const greetingTurn = H.ttsTurns[0];
+      expect(greetingTurn.opts.voiceId).toBe("voice-xyz"); // process.env.ELEVENLABS_DEFAULT_VOICE_ID
+      expect(greetingTurn.opts.voiceSettings).toBeUndefined();
+      expect(greetingTurn.opts.forceFallback).toBe(false);
+    });
+
+    it("10b. config.voiceId matching a VOICE_CATALOG entry threads that entry's voiceSettings through", async () => {
+      const catalogVoice = VOICE_CATALOG[0];
+      db.loadConfig.mockReturnValueOnce({
+        businessName: "Test Biz",
+        greeting: "Hello, thanks for calling Test Biz.",
+        _hasCustomGreeting: true,
+        languagesSpoken: ["en-US"],
+        transferPolicy: "always",
+        transferPhoneNumber: "+15551234567",
+        recordingDisclosureEnabled: false,
+        timezone: "America/Chicago",
+        afterHoursPolicy: "none",
+        voiceProvider: "elevenlabs",
+        voiceId: catalogVoice.elevenVoiceId,
+      });
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const greetingTurn = H.ttsTurns[0];
+      expect(greetingTurn.opts.voiceId).toBe(catalogVoice.elevenVoiceId);
+      expect(greetingTurn.opts.voiceSettings).toEqual(catalogVoice.voiceSettings);
+      expect(greetingTurn.opts.forceFallback).toBe(false);
+    });
+
+    it("10c. voice_provider=google skips ElevenLabs entirely (forceFallback=true) regardless of voiceId", async () => {
+      db.loadConfig.mockReturnValueOnce({
+        businessName: "Test Biz",
+        greeting: "Hello, thanks for calling Test Biz.",
+        _hasCustomGreeting: true,
+        languagesSpoken: ["en-US"],
+        transferPolicy: "always",
+        transferPhoneNumber: "+15551234567",
+        recordingDisclosureEnabled: false,
+        timezone: "America/Chicago",
+        afterHoursPolicy: "none",
+        voiceProvider: "google",
+        voiceId: null,
+      });
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const greetingTurn = H.ttsTurns[0];
+      expect(greetingTurn.opts.forceFallback).toBe(true);
+    });
+  });
+
+  describe("11. pre-cached micro-utterances (lib/voice/utteranceCache.js wiring)", () => {
+    it("11a. warm() is kicked off in the background at call start (after the greeting cache check), never blocking pickup", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      // Greeting was spoken live (cache.get() returned null, the mock's
+      // default) — proves the get() check ran synchronously before pickup
+      // completed, i.e. before/independent of warm() settling.
+      expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
+      expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
+
+      // warm() was still kicked off (fire-and-forget) with this call's voice
+      // key and a non-empty set of entries (greeting/filler/nudges/goodbye).
+      expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
+      const [, entries] = H.utteranceCacheInstance.warm.mock.calls[0];
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries.some((e) => e.text === "Hello, thanks for calling Test Biz.")).toBe(true);
+      expect(entries.some((e) => e.text === "One moment.")).toBe(true);
+    });
+
+    it("11b. greeting: a cache hit (warmed by a previous call) plays the cached buffer directly — no TTS turn at all", async () => {
+      const cachedGreeting = Buffer.from([1, 2, 3, 4]);
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+
+      H.utteranceCacheInstance.get.mockImplementationOnce((voiceKey, kind, text) =>
+        text === "Hello, thanks for calling Test Biz." ? cachedGreeting : null
+      );
+
+      await startCall(ws, sid);
+
+      // No live TTS turn was created for the greeting.
+      expect(H.ttsTurns.length).toBe(0);
+      // The cached buffer was enqueued and the greeting mark sent directly.
+      const audioOut = H.audioOutInstances[0];
+      expect(audioOut.enqueue).toHaveBeenCalledWith(cachedGreeting);
+      expect(audioOut.sendMark).toHaveBeenCalledWith("greeting-done");
+    });
+
+    it("11c. filler: a cache hit for the exact filler text is used instead of a live googleTts.synthesizeMulaw call", async () => {
+      const cachedFiller = Buffer.from([9, 9]);
+      H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+        kind === "filler" && text === "One moment." ? cachedFiller : null
+      );
+
+      // "slow" fires before any delta text, triggering playFiller().
+      H.llmFactory = () => makeGen([
+        { type: "slow" },
+        { type: "delta", text: "Sure, I can help." },
+        { type: "done", reply: { text: "Sure, I can help.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const callsBefore = mockSynthesizeMulaw.mock.calls.length;
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const audioOut = H.audioOutInstances[0];
+      expect(audioOut.enqueue).toHaveBeenCalledWith(cachedFiller);
+      // No new live synthesis call for the filler — the cache hit was used.
+      expect(mockSynthesizeMulaw.mock.calls.length).toBe(callsBefore);
+    });
   });
 });
