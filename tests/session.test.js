@@ -215,7 +215,25 @@ vi.mock("twilio", () => ({
   })),
 }));
 
-import { handleVoiceSessionConnection } from "../lib/voice/session.js";
+import { handleVoiceSessionConnection, TRANSFER_TRIGGERS } from "../lib/voice/session.js";
+
+describe("TRANSFER_TRIGGERS regex", () => {
+  it("does not match identity questions", () => {
+    expect(TRANSFER_TRIGGERS.test("are you a real person or a robot")).toBe(false);
+    expect(TRANSFER_TRIGGERS.test("are you human")).toBe(false);
+    expect(TRANSFER_TRIGGERS.test("is this a real person")).toBe(false);
+    expect(TRANSFER_TRIGGERS.test("am I talking to a robot")).toBe(false);
+  });
+
+  it("matches explicit transfer requests", () => {
+    expect(TRANSFER_TRIGGERS.test("can I talk to a person")).toBe(true);
+    expect(TRANSFER_TRIGGERS.test("I want to speak to a human")).toBe(true);
+    expect(TRANSFER_TRIGGERS.test("let me speak to someone")).toBe(true);
+    expect(TRANSFER_TRIGGERS.test("get me a representative")).toBe(true);
+    expect(TRANSFER_TRIGGERS.test("transfer me please")).toBe(true);
+    expect(TRANSFER_TRIGGERS.test("I need the manager")).toBe(true);
+  });
+});
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
 import * as notifications from "../services/notifications.js";
@@ -771,7 +789,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     expect(mockTwilioCallsUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ twiml: expect.stringContaining("<Dial>+15551234567</Dial>") })
+      expect.objectContaining({
+        twiml: expect.stringMatching(
+          /<Dial ringTone="us" callerId="\+15559999999">\+15551234567<\/Dial>/
+        ),
+      })
     );
 
     // Real transferred status (Part 1) — the redial succeeded (mocked
@@ -950,6 +972,57 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
       // No nudge should have been spoken while audio is "playing".
       expect(H.ttsTurns.length).toBe(ttsCountBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("8b. silence timer recovers when the -done mark echoes while isPlaying() still reports true", async () => {
+    // audioOut.isPlaying() is an estimate: Twilio can echo the greeting mark
+    // while it still says "playing". The arm must retry, not orphan itself.
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({ event: "start", start: { callSid: sid, streamSid: "MZ8b", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } } });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const audioOut = H.audioOutInstances[0];
+      audioOut._playing = true; // estimate lags the mark
+      ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+
+      await vi.advanceTimersByTimeAsync(3000); // a retry window elapses
+      audioOut._playing = false; // estimate catches up
+
+      const ttsCountBefore = H.ttsTurns.length;
+      // Next retry (<=2s) re-arms, then identify_intent nudge1 (6s) fires.
+      await vi.advanceTimersByTimeAsync(2000 + 6000 + 100);
+      expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("8c. a barge-in followed by a filler-only final re-arms the silence timer (no permanent dead air)", async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({ event: "start", start: { callSid: sid, streamSid: "MZ8c", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } } });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const tm = H.turnManagerInstances[0];
+      // Caller barges in ("wait" cue) -> onInterrupt clears the silence timer...
+      tm.opts.onInterrupt("uh");
+      // ...and the final strips to nothing, so no turn starts.
+      tm.opts.onTurnEnd("uh");
+
+      const ttsCountBefore = H.ttsTurns.length;
+      // The discard path must have re-armed the ladder: nudge1 at 6s.
+      await vi.advanceTimersByTimeAsync(6000 + 2500);
+      expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
     } finally {
       vi.useRealTimers();
     }

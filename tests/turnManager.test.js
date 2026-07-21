@@ -18,6 +18,7 @@ describe("turnManager.js — constants", () => {
   it("exports the exact BACKCHANNELS list", () => {
     expect(BACKCHANNELS).toEqual([
       "yeah", "yes", "yep", "yup", "uh-huh", "uh huh", "mm-hmm", "mm hmm", "mhm",
+      "mm", "mmm", "hmm", "hm", "mhmm",
       "ok", "okay", "right", "sure", "got it", "gotcha", "alright", "all right",
       "i see", "cool",
     ]);
@@ -72,16 +73,22 @@ describe("turnManager.js — createTurnManager", () => {
       expect(deps.onInterrupt).not.toHaveBeenCalled();
     });
 
-    it("interrupts on >=3 words even without a cue, when VAD confirms voice", () => {
-      const result = tm.handleInterim("can you help");
+    it("interrupts on >=4 words even without a cue, when VAD confirms voice", () => {
+      const result = tm.handleInterim("can you help me");
       expect(result).toEqual({ action: "interrupt" });
-      expect(deps.onInterrupt).toHaveBeenCalledWith("can you help");
+      expect(deps.onInterrupt).toHaveBeenCalledWith("can you help me");
     });
 
-    it("does not interrupt on >=3 words when VAD does not confirm voice", () => {
+    it("does not interrupt on >=4 words when VAD does not confirm voice", () => {
       deps.vad.isActive.mockReturnValue(false);
-      const result = tm.handleInterim("can you help");
+      const result = tm.handleInterim("can you help me");
       expect(result).toEqual({ action: "ignore", reason: "no_vad" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+    });
+
+    it("defers a 3-word cue-less interim (likely echo or a thinking mutter)", () => {
+      const result = tm.handleInterim("can you help");
+      expect(result).toEqual({ action: "defer" });
       expect(deps.onInterrupt).not.toHaveBeenCalled();
     });
 
@@ -166,6 +173,41 @@ describe("turnManager.js — createTurnManager", () => {
       tm.handleFinal("okay");
       expect(deps.onInterrupt).not.toHaveBeenCalled();
       expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, Deepgram mm-hmm variants are ignored as backchannels", () => {
+      for (const t of ["mm", "mmm", "hmm", "hm.", "Mm-mm", "mhmm"]) {
+        expect(tm.handleFinal(t).action).toBe("ignore");
+      }
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, a filler-only final ('er', 'uh uh') is ignored even with VAD active", () => {
+      const result = tm.handleFinal("er, uh");
+      expect(result).toEqual({ action: "ignore", reason: "filler_only" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, a one-word cue-less final without VAD is ignored as an STT phantom", () => {
+      deps.vad.isActive.mockReturnValue(false);
+      const result = tm.handleFinal("Bob");
+      expect(result).toEqual({ action: "ignore", reason: "no_vad" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
+      expect(deps.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("while speaking, a one-word cue-less final WITH VAD still interrupts", () => {
+      tm.handleFinal("Bob");
+      expect(deps.onInterrupt).toHaveBeenCalledWith("Bob");
+      expect(deps.onTurnEnd).toHaveBeenCalledWith("Bob");
+    });
+
+    it("while speaking, a final containing a cue amid filler still interrupts", () => {
+      deps.vad.isActive.mockReturnValue(false);
+      tm.handleFinal("uh wait");
+      expect(deps.onInterrupt).toHaveBeenCalledWith("uh wait");
+      expect(deps.onTurnEnd).toHaveBeenCalledWith("uh wait");
     });
 
     it("while speaking, a null final does not trigger a spurious interrupt (STT silence-timeout artifact)", () => {
