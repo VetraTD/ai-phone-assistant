@@ -1013,6 +1013,39 @@ describe("session.js — v2 pipeline orchestrator", () => {
     }
   });
 
+  it("8d. a goodbye longer than CLOSE_FALLBACK_MS is not cut off — the backstop waits for playback to finish", async () => {
+    // The silence goodbye runs ~9.6s once it reads a phone number back, but
+    // the backstop fired at a flat 8s and hung up mid-sentence, which also
+    // meant the playback mark never arrived. It must re-arm while audio is
+    // still playing rather than guillotine the call.
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({ event: "start", start: { callSid: sid, streamSid: "MZ8d", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } } });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const audioOut = H.audioOutInstances[0];
+      ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+      // Run the full silence ladder out to the hangup goodbye.
+      await vi.advanceTimersByTimeAsync(21000);
+
+      // Goodbye audio is still playing well past the 8s backstop.
+      audioOut._playing = true;
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(ws.closeCount).toBe(0); // must NOT have been cut off
+
+      // Playback finishes and Twilio echoes the goodbye's mark.
+      audioOut._playing = false;
+      ws.emit({ event: "mark", mark: { name: "silence-goodbye-done" } });
+      await vi.advanceTimersByTimeAsync(1000); // hangup grace
+      expect(ws.closeCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("8b. silence timer recovers when the -done mark echoes while isPlaying() still reports true", async () => {
     // audioOut.isPlaying() is an estimate: Twilio can echo the greeting mark
     // while it still says "playing". The arm must retry, not orphan itself.
