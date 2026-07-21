@@ -312,6 +312,10 @@ class FakeWs {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+// The socket is closed HANGUP_GRACE_MS (800ms) after the goodbye's mark
+// echoes, so the line doesn't drop on the final syllable. Real-timer tests
+// have to outwait that grace before asserting the close.
+const afterHangupGrace = () => new Promise((r) => setTimeout(r, 900));
 
 let sidCounter = 0;
 function newSid() { return `CA-session-${++sidCounter}`; }
@@ -736,9 +740,9 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(wroteApology).toBe(true);
     expect(ws.closeCount).toBe(0);
 
-    // Twilio echoes the goodbye mark -> ws closes.
+    // Twilio echoes the goodbye mark -> ws closes after the hangup grace.
     ws.emit({ event: "mark", mark: { name: "stt-error-goodbye-done" } });
-    await flush();
+    await afterHangupGrace();
     expect(ws.closeCount).toBe(1);
   });
 
@@ -762,9 +766,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
     // Not closed yet — audio still needs to play out.
     expect(ws.closeCount).toBe(0);
 
-    // Twilio confirms the turn's done mark played.
+    // Twilio confirms the turn's done mark played. The close is deliberately
+    // held back briefly so the goodbye isn't clipped by the hangup.
     ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
     await flush();
+    expect(ws.closeCount).toBe(0);
+
+    await afterHangupGrace();
     expect(ws.closeCount).toBe(1);
   });
 
@@ -1578,7 +1586,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         try {
           // The business's own main_phone (+18175803291), spoken as digit
           // groups — NOT the transfer target (+15551234567) and not raw E.164.
-          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Goodbye!";
+          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Have a great day. Goodbye!";
           const cachedGoodbye = Buffer.from([5, 5]);
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
             text === goodbyeText ? cachedGoodbye : null
