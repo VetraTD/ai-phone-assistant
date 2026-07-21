@@ -3,6 +3,7 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
+import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
 
 const MAX_FC_ROUNDS = 3;
 
@@ -416,32 +417,20 @@ export function isBusinessOpen(config) {
     .split(":");
   const currentMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
 
-  const hours = config.businessHours;
+  const shortWeekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: config.timezone,
+    weekday: "short",
+  })
+    .format(now)
+    .slice(0, 3)
+    .toLowerCase();
 
-  // Weekly shape: look up today's entry in the business's timezone.
-  if (hours.mon !== undefined) {
-    const shortWeekday = new Intl.DateTimeFormat("en-US", {
-      timeZone: config.timezone,
-      weekday: "short",
-    })
-      .format(now)
-      .slice(0, 3)
-      .toLowerCase();
-    const today = hours[shortWeekday];
-    if (!today || today.closed) return false;
-    if (!today.open || !today.close) return true;
-    const [openH, openM] = today.open.split(":").map(Number);
-    const [closeH, closeM] = today.close.split(":").map(Number);
-    return currentMinutes >= openH * 60 + openM && currentMinutes < closeH * 60 + closeM;
-  }
+  const day = resolveDayHours(config.businessHours, shortWeekday);
+  if (day.closed) return false;
+  if (!day.open || !day.close) return true;
 
-  // Legacy shape: single window applied every day.
-  const { open_time, close_time } = hours;
-  if (!open_time || !close_time) return true;
-
-  const [openH, openM] = open_time.split(":").map(Number);
-  const [closeH, closeM] = close_time.split(":").map(Number);
-
+  const [openH, openM] = day.open.split(":").map(Number);
+  const [closeH, closeM] = day.close.split(":").map(Number);
   return currentMinutes >= openH * 60 + openM && currentMinutes < closeH * 60 + closeM;
 }
 
@@ -455,24 +444,6 @@ const WEEKDAY_LABELS = {
   sun: "Sunday",
 };
 const WEEKDAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-
-/**
- * "09:00" -> "9:00 AM", "17:00" -> "5:00 PM". Returns null for anything that
- * doesn't parse as HH:MM (never renders "undefined" into the prompt).
- * @param {string|null|undefined} hhmm
- * @returns {string|null}
- */
-function formatClockTime(hhmm) {
-  if (typeof hhmm !== "string") return null;
-  const parts = hhmm.split(":");
-  if (parts.length !== 2) return null;
-  const h = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  const period = h >= 12 ? "PM" : "AM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
-}
 
 /**
  * Resolve business_hours (either shape — see isBusinessOpen) into a shape

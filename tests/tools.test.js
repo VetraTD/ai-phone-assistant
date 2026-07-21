@@ -104,6 +104,208 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     expect(stateEffects.appointmentArgs).toEqual(args);
   });
 
+  describe("book_appointment: time validation + timezone anchoring (Fix 1)", () => {
+    const WEEKLY_MON_FRI = {
+      mon: { open: "09:00", close: "17:00", closed: false },
+      tue: { open: "09:00", close: "17:00", closed: false },
+      wed: { open: "09:00", close: "17:00", closed: false },
+      thu: { open: "09:00", close: "17:00", closed: false },
+      fri: { open: "09:00", close: "17:00", closed: false },
+      sat: { open: null, close: null, closed: true },
+      sun: { open: null, close: null, closed: true },
+    };
+
+    beforeEach(() => {
+      // 2026-07-20T15:00:00Z == Monday 10:00 America/Chicago (CDT, UTC-5).
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-20T15:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("future in-hours booking succeeds and stores an unambiguous UTC value", async () => {
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      // Tuesday 10:00 America/Chicago -> 15:00 UTC (CDT, UTC-5) -> future.
+      const fc = {
+        id: "fcA1",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).toHaveBeenCalledWith(
+        expect.objectContaining({ scheduledAt: "2026-07-21T15:00:00.000Z" })
+      );
+      expect(functionResponse.response.success).toBe(true);
+      expect(stateEffects.appointmentArgs.scheduled_at).toBe("2026-07-21T15:00:00.000Z");
+    });
+
+    it("winter date: same timezone anchors with the CST (UTC-6) offset, not a hardcoded CDT offset", async () => {
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      // "now" for this one test is mid-January so the January booking is future.
+      vi.setSystemTime(new Date("2027-01-04T15:00:00Z")); // Monday
+      // Tuesday 10:00 America/Chicago in January -> CST (UTC-6) -> 16:00 UTC.
+      const fc = {
+        id: "fcA1b",
+        name: "book_appointment",
+        args: { scheduled_at: "2027-01-05T10:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: null } };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).toHaveBeenCalledWith(
+        expect.objectContaining({ scheduledAt: "2027-01-05T16:00:00.000Z" })
+      );
+      expect(functionResponse.response.success).toBe(true);
+    });
+
+    it("past time is rejected with no insert", async () => {
+      // 9:00 America/Chicago is earlier the same day as "now" (10:00).
+      const fc = {
+        id: "fcA2",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-20T09:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "That time has already passed — what day and time works for you?",
+      });
+      expect(stateEffects.appointmentArgs).toBeNull();
+    });
+
+    it("unparseable datetime is rejected with no insert", async () => {
+      const fc = {
+        id: "fcA3",
+        name: "book_appointment",
+        args: { scheduled_at: "next Tuesday afternoon", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "I didn't catch a valid date and time — could you say the day and time again?",
+      });
+    });
+
+    it("closed Sunday is rejected with no insert", async () => {
+      // 2026-07-26 is the Sunday following the fake "now" Monday.
+      const fc = {
+        id: "fcA4",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-26T10:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "We're closed that day — would another time work?",
+      });
+    });
+
+    it("3am (outside hours, but an open day) is rejected with no insert", async () => {
+      const fc = {
+        id: "fcA5",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-21T03:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "We're not open then — our hours that day are 9:00 AM to 5:00 PM. Would another time work?",
+      });
+    });
+
+    it("legacy businessHours shape ({open_time,close_time}) is honored", async () => {
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      const ctx = {
+        ...baseCtx,
+        config: { timezone: "America/Chicago", businessHours: { open_time: "09:00", close_time: "17:00" } },
+      };
+
+      const inHours = await executeToolCall(
+        { id: "fcA6a", name: "book_appointment", args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane" } },
+        ctx
+      );
+      expect(inHours.functionResponse.response.success).toBe(true);
+
+      const outOfHours = await executeToolCall(
+        { id: "fcA6b", name: "book_appointment", args: { scheduled_at: "2026-07-21T03:00:00", client_name: "Jane" } },
+        ctx
+      );
+      expect(outOfHours.functionResponse.response.success).toBe(false);
+      expect(outOfHours.functionResponse.response.message).toContain("We're not open then");
+    });
+
+    it("null businessHours shape means no hours restriction (any future time is accepted)", async () => {
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: null } };
+
+      const { functionResponse } = await executeToolCall(
+        { id: "fcA7", name: "book_appointment", args: { scheduled_at: "2026-07-21T03:00:00", client_name: "Jane" } },
+        ctx
+      );
+      expect(functionResponse.response.success).toBe(true);
+    });
+
+    it("unique-slot 23505 still surfaces the 'no longer available' message for an otherwise-valid time", async () => {
+      mockCreateAppointment.mockRejectedValue(Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" }));
+      const fc = {
+        id: "fcA8",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).toHaveBeenCalled();
+      expect(functionResponse.response).toEqual({
+        success: false,
+        message: "That time slot is no longer available. Please ask the caller to pick a different time.",
+      });
+      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(mockCaptureException).toHaveBeenCalled();
+    });
+
+    it("an already offset-anchored scheduled_at (trailing Z) is validated but stored byte-for-byte, not reformatted", async () => {
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      // Same instant as the naive-Tuesday-10am-Chicago case above, spelled as UTC.
+      const fc = {
+        id: "fcA9",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-07-21T15:00:00Z", client_name: "Jane" },
+      };
+      const ctx = { ...baseCtx, config: { timezone: "America/Chicago", businessHours: WEEKLY_MON_FRI } };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).toHaveBeenCalledWith(
+        expect.objectContaining({ scheduledAt: "2026-07-21T15:00:00Z" })
+      );
+      expect(functionResponse.response.success).toBe(true);
+    });
+  });
+
   it("cancel_appointment_db: missing appointment id short-circuits with no toolCallEvent (bug preserved verbatim)", async () => {
     const fc = { id: "fc5", name: "cancel_appointment_db", args: {} };
     const ctx = { ...baseCtx, selectedAppointmentId: null };

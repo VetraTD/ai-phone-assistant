@@ -7,6 +7,7 @@ import {
   getAppointmentById,
 } from "./supabase.js";
 import { executeIntegration } from "./integrations.js";
+import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -90,6 +91,190 @@ function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneL
   return last4Arg === apptDigits.slice(-4);
 }
 
+// ---------------------------------------------------------------------------
+// Booking-time validation + timezone anchoring (book_appointment)
+//
+// The model sends scheduled_at as a naive "YYYY-MM-DDTHH:MM[:SS]" string
+// (per the tool's JSON schema — see services/gemini.js buildCallTools) with
+// no timezone info at all. Historically that string went straight to
+// createAppointment: no future/past check, no business-hours check, and no
+// timezone anchoring — a "10:00" booking for an America/Chicago business was
+// stored as if it were 10:00 UTC, six hours off from what the caller agreed
+// to.
+//
+// validateBookingTime interprets the naive datetime in ctx.config.timezone
+// and converts it to an unambiguous UTC ISO string using Intl.DateTimeFormat
+// offset math only (no timezone-database dependency) — the same technique
+// services/gemini.js's isBusinessOpen/resolveBusinessHoursForPrompt already
+// use to read "now" in a business's timezone. If the caller already supplied
+// an offset-anchored value (trailing "Z" or "+HH:MM"/"-HH:MM"), it is
+// already unambiguous and is stored byte-for-byte rather than reformatted.
+// ---------------------------------------------------------------------------
+
+const INVALID_DATETIME_MESSAGE =
+  "I didn't catch a valid date and time — could you say the day and time again?";
+const PAST_DATETIME_MESSAGE = "That time has already passed — what day and time works for you?";
+const CLOSED_DAY_MESSAGE = "We're closed that day — would another time work?";
+
+// Small grace window so a booking for "right now" (model latency, clock
+// skew) isn't rejected as already in the past.
+const BOOKING_PAST_GRACE_MS = 60_000;
+
+const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+const HAS_OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/**
+ * Parse a strict naive "YYYY-MM-DDTHH:MM[:SS]" datetime (no offset/Z) into
+ * numeric components, rejecting out-of-range or calendar-impossible dates
+ * (month 13, Feb 30, ...).
+ * @param {string} str
+ * @returns {{year:number,month:number,day:number,hour:number,minute:number,second:number}|null}
+ */
+function parseNaiveDateTime(str) {
+  const m = NAIVE_DATETIME_RE.exec(str);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = m[6] ? Number(m[6]) : 0;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  // Round-trip through Date.UTC to reject calendar-impossible dates (e.g.
+  // Feb 30 rolls over to Mar 2 and would silently mismatch).
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
+    return null;
+  }
+  return { year, month, day, hour, minute, second };
+}
+
+/**
+ * Offset (ms) such that: (wall-clock reading of `date` in `timeZone`) ===
+ * date.getTime() + offset. E.g. for America/Chicago in summer (UTC-5), the
+ * offset is roughly -5*3600*1000.
+ * @param {Date} date
+ * @param {string} timeZone
+ * @returns {number}
+ */
+function getTzOffsetMs(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = {};
+  for (const { type, value } of dtf.formatToParts(date)) {
+    if (type !== "literal") parts[type] = value;
+  }
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  return asUtc - date.getTime();
+}
+
+/**
+ * Convert naive local wall-clock components, interpreted in `timeZone`, into
+ * the absolute UTC instant (ms since epoch) they represent. Standard
+ * "guess against the offset at the guessed instant, then refine once against
+ * the offset actually at the guessed UTC instant" approach so a
+ * DST-transition day doesn't throw the result off by an hour. No timezone
+ * database is used — only Intl.DateTimeFormat's own timeZone resolution.
+ * @param {{year:number,month:number,day:number,hour:number,minute:number,second:number}} components
+ * @param {string} timeZone
+ * @returns {number} ms since epoch
+ */
+function zonedComponentsToUtcMs({ year, month, day, hour, minute, second }, timeZone) {
+  const guessMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offset1 = getTzOffsetMs(new Date(guessMs), timeZone);
+  let utcMs = guessMs - offset1;
+  const offset2 = getTzOffsetMs(new Date(utcMs), timeZone);
+  if (offset2 !== offset1) utcMs = guessMs - offset2;
+  return utcMs;
+}
+
+/**
+ * Validate and timezone-anchor a `book_appointment` scheduled_at value
+ * before it reaches createAppointment.
+ * @param {unknown} rawScheduledAt
+ * @param {{timezone?: string, businessHours?: object|null}} config
+ * @returns {{ok: true, scheduledAt: string} | {ok: false, message: string}}
+ */
+function validateBookingTime(rawScheduledAt, config) {
+  if (typeof rawScheduledAt !== "string" || !rawScheduledAt.trim()) {
+    return { ok: false, message: INVALID_DATETIME_MESSAGE };
+  }
+  const trimmed = rawScheduledAt.trim();
+  const timezone = config?.timezone || "America/Chicago";
+
+  let targetMs;
+  let storedValue;
+
+  if (HAS_OFFSET_RE.test(trimmed)) {
+    // Already unambiguous (explicit Z/offset) — validate and store verbatim,
+    // no reformatting.
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    targetMs = d.getTime();
+    storedValue = trimmed;
+  } else {
+    const parsed = parseNaiveDateTime(trimmed);
+    if (!parsed) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    targetMs = zonedComponentsToUtcMs(parsed, timezone);
+    if (!Number.isFinite(targetMs)) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    storedValue = new Date(targetMs).toISOString();
+  }
+
+  if (targetMs < Date.now() - BOOKING_PAST_GRACE_MS) {
+    return { ok: false, message: PAST_DATETIME_MESSAGE };
+  }
+
+  // Business-hours check — read the resolved instant's wall-clock
+  // weekday/time-of-day in the business's timezone (mirrors how
+  // isBusinessOpen reads "now" in that timezone) and reuse resolveDayHours'
+  // weekly/legacy/null shape handling rather than reinventing it.
+  const zoned = new Date(targetMs);
+  const shortWeekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" })
+    .format(zoned)
+    .slice(0, 3)
+    .toLowerCase();
+  const timeParts = zoned.toLocaleTimeString("en-GB", { timeZone: timezone, hour12: false }).split(":");
+  const minutesOfDay = parseInt(timeParts[0], 10) * 60 + parseInt(timeParts[1], 10);
+
+  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
+  if (day.closed) {
+    return { ok: false, message: CLOSED_DAY_MESSAGE };
+  }
+  if (day.open && day.close) {
+    const [openH, openM] = day.open.split(":").map(Number);
+    const [closeH, closeM] = day.close.split(":").map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+    if (minutesOfDay < openMinutes || minutesOfDay >= closeMinutes) {
+      const openLabel = formatClockTime(day.open) || day.open;
+      const closeLabel = formatClockTime(day.close) || day.close;
+      return {
+        ok: false,
+        message: `We're not open then — our hours that day are ${openLabel} to ${closeLabel}. Would another time work?`,
+      };
+    }
+  }
+
+  return { ok: true, scheduledAt: storedValue };
+}
+
 /**
  * Fetch the target appointment and verify it belongs to the caller before
  * cancel/reschedule mutate it. Fails closed: a missing appointmentId, a row
@@ -120,9 +305,9 @@ async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, arg
  * @param {string|null} [ctx.selectedAppointmentId]
  * @param {string} [ctx.step] - current call step (e.g. "confirm", "ending") — gates end_call
  * @param {boolean} [ctx.transferAllowed] - gates request_transfer
- * @param {object} [ctx.config] - normalised business config (unused by the current
- *   switch cases, but carried through for parity with the non-streaming getReply
- *   variant and for future tool implementations)
+ * @param {object} [ctx.config] - normalised business config; book_appointment reads
+ *   ctx.config.timezone/businessHours to validate + timezone-anchor scheduled_at
+ *   (see validateBookingTime above)
  * @returns {Promise<{
  *   functionResponse: {id: string, name: string, response: object},
  *   stateEffects: {
@@ -157,23 +342,38 @@ export async function executeToolCall(fc, ctx) {
       const businessId = ctx.businessId;
       const callerPhone = ctx?.callerPhone || null;
       const callId = ctx?.callId || null;
+      const config = ctx?.config || {};
       let bookSuccess = false;
       let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+      let anchoredScheduledAt = null;
 
       if (args.scheduled_at) {
-        const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
-        try {
-          const dbId = await createAppointment({ businessId, callId, clientName: args.client_name || null, clientPhone: callerPhone || null, scheduledAt: args.scheduled_at, notes });
-          if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
-        } catch (err) {
-          const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
-          bookMessage = isSlotTaken
-            ? "That time slot is no longer available. Please ask the caller to pick a different time."
-            : "There was an error booking the appointment. Please take the caller's details for follow-up.";
-          captureException(err);
+        const validated = validateBookingTime(args.scheduled_at, config);
+        if (!validated.ok) {
+          bookMessage = validated.message;
+        } else {
+          anchoredScheduledAt = validated.scheduledAt;
+          const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+          try {
+            const dbId = await createAppointment({
+              businessId,
+              callId,
+              clientName: args.client_name || null,
+              clientPhone: callerPhone || null,
+              scheduledAt: anchoredScheduledAt,
+              notes,
+            });
+            if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
+          } catch (err) {
+            const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+            bookMessage = isSlotTaken
+              ? "That time slot is no longer available. Please ask the caller to pick a different time."
+              : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+            captureException(err);
+          }
         }
       }
-      const appointmentArgs = bookSuccess ? args : null;
+      const appointmentArgs = bookSuccess ? { ...args, scheduled_at: anchoredScheduledAt } : null;
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: bookSuccess, message: bookMessage } },
         stateEffects: {
