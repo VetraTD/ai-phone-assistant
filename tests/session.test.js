@@ -324,6 +324,49 @@ describe("session.js — v2 pipeline orchestrator", () => {
     resolveKnowledge?.([]);
   });
 
+  it("1b. default greeting (Fix 2): a single natural line with the business name, no stacked 'Good afternoon! Hi' double-greeting", async () => {
+    db.loadConfig.mockReturnValueOnce({
+      businessName: "Acme Dental",
+      greeting: "Hi, how can I help you today?",
+      _hasCustomGreeting: false,
+      languagesSpoken: ["en-US"],
+      transferPolicy: "always",
+      transferPhoneNumber: "+15551234567",
+      recordingDisclosureEnabled: false,
+      timezone: "America/Chicago",
+      afterHoursPolicy: "none",
+      voiceProvider: "elevenlabs",
+      voiceId: null,
+    });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+
+    expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
+    const greetingText = H.ttsTurns[0].write.mock.calls[0][0];
+
+    // Business name present, single natural sentence — not the old
+    // "Good afternoon! Hi, how can I help you today?" stack.
+    expect(greetingText).toContain("Acme Dental");
+    expect(greetingText).not.toContain("! Hi, how can I help you today?");
+    expect(greetingText).toMatch(/^(Good morning|Good afternoon|Good evening), thanks for calling Acme Dental\./);
+  });
+
+  it("1c. custom greeting (Fix 2 regression guard): still plays exactly as written, no time-of-day prefix", async () => {
+    // Default mocked loadConfig already has _hasCustomGreeting: true and a
+    // custom greeting string — this is the existing/unchanged behavior.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+
+    const greetingText = H.ttsTurns[0].write.mock.calls[0][0];
+    expect(greetingText).toBe("Hello, thanks for calling Test Biz.");
+    expect(greetingText).not.toMatch(/^(Good morning|Good afternoon|Good evening)/);
+  });
+
   it("2. media frames fan out to stt.sendAudio and turnManager.handleAudioFrame", async () => {
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);
