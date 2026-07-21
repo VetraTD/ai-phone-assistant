@@ -1132,7 +1132,21 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedGreeting);
     });
 
-    it("11c. filler: a cache hit for the exact filler text is used instead of a live googleTts.synthesizeMulaw call", async () => {
+    it("11c. filler: a Google-provider business uses a cache hit for the exact filler text instead of a live googleTts.synthesizeMulaw call", async () => {
+      db.loadConfig.mockReturnValueOnce({
+        businessName: "Test Biz",
+        greeting: "Hello, thanks for calling Test Biz.",
+        _hasCustomGreeting: true,
+        languagesSpoken: ["en-US"],
+        transferPolicy: "always",
+        transferPhoneNumber: "+15551234567",
+        recordingDisclosureEnabled: false,
+        timezone: "America/Chicago",
+        afterHoursPolicy: "none",
+        voiceProvider: "google",
+        voiceId: null,
+      });
+
       const cachedFiller = Buffer.from([9, 9]);
       H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
         kind === "filler" && text === "One moment." ? cachedFiller : null
@@ -1162,6 +1176,152 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(audioOut.enqueue).toHaveBeenCalledWith(cachedFiller);
       // No new live synthesis call for the filler — the cache hit was used.
       expect(mockSynthesizeMulaw.mock.calls.length).toBe(callsBefore);
+    });
+
+    describe("Fix 3 — mid-call voice consistency for cached micro-utterances", () => {
+      it("filler: an ElevenLabs business bypasses the Google-voiced cache and speaks the filler through the live per-business TTS turn instead", async () => {
+        // Default mocked loadConfig is voiceProvider: "elevenlabs".
+        const cachedFiller = Buffer.from([9, 9]);
+        H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+          kind === "filler" && text === "One moment." ? cachedFiller : null
+        );
+
+        H.llmFactory = () => makeGen([
+          { type: "slow" },
+          { type: "delta", text: "Sure, I can help." },
+          { type: "done", reply: { text: "Sure, I can help.", toolResults: [] } },
+        ]);
+
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = newSid();
+        await startCall(ws, sid);
+        await flush();
+
+        const callsBefore = mockSynthesizeMulaw.mock.calls.length;
+
+        const tm = H.turnManagerInstances[0];
+        tm.opts.onTurnEnd("what are your hours");
+        await flush();
+        await flush();
+
+        const audioOut = H.audioOutInstances[0];
+        // The Google-cached buffer must never be used for an ElevenLabs business.
+        expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedFiller);
+        expect(mockSynthesizeMulaw.mock.calls.length).toBe(callsBefore);
+        // Instead, the filler text was written into the SAME (business-voiced)
+        // TTS turn as the reply itself — proving it plays in the business voice.
+        const turnTts = H.ttsTurns.find((t) =>
+          t.write.mock.calls.some(([txt]) => txt === "One moment.")
+        );
+        expect(turnTts).toBeTruthy();
+        expect(turnTts.write.mock.calls.some(([txt]) => txt === "Sure, I can help.")).toBe(true);
+      });
+
+      it("silence nudge: an ElevenLabs business speaks the nudge live (business voice), bypassing a Google cache hit", async () => {
+        vi.useFakeTimers();
+        try {
+          const cachedNudge = Buffer.from([7, 7]);
+          H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+            text === "I'm still here whenever you're ready." ? cachedNudge : null
+          );
+
+          const ws = new FakeWs();
+          handleVoiceSessionConnection(ws);
+          const sid = `CA-session-fake-${++sidCounter}`;
+          ws.emit({
+            event: "start",
+            start: { callSid: sid, streamSid: "MZv1", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+          });
+          await vi.advanceTimersByTimeAsync(1);
+
+          const ttsCountBefore = H.ttsTurns.length;
+          ws.emit({ event: "mark", mark: { name: "greeting-done" } }); // arms the silence timer
+          await vi.advanceTimersByTimeAsync(6000); // identify_intent nudge1 threshold
+
+          const audioOut = H.audioOutInstances[0];
+          expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedNudge);
+          expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
+          const nudgeTurn = H.ttsTurns[H.ttsTurns.length - 1];
+          expect(nudgeTurn.write).toHaveBeenCalledWith("I'm still here whenever you're ready.");
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("silence nudge: a Google-provider business still uses the Google-voiced cache", async () => {
+        db.loadConfig.mockReturnValueOnce({
+          businessName: "Test Biz",
+          greeting: "Hello, thanks for calling Test Biz.",
+          _hasCustomGreeting: true,
+          languagesSpoken: ["en-US"],
+          transferPolicy: "always",
+          transferPhoneNumber: "+15551234567",
+          recordingDisclosureEnabled: false,
+          timezone: "America/Chicago",
+          afterHoursPolicy: "none",
+          voiceProvider: "google",
+          voiceId: null,
+        });
+
+        vi.useFakeTimers();
+        try {
+          const cachedNudge = Buffer.from([7, 7]);
+          H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+            text === "I'm still here whenever you're ready." ? cachedNudge : null
+          );
+
+          const ws = new FakeWs();
+          handleVoiceSessionConnection(ws);
+          const sid = `CA-session-fake-${++sidCounter}`;
+          ws.emit({
+            event: "start",
+            start: { callSid: sid, streamSid: "MZv2", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+          });
+          await vi.advanceTimersByTimeAsync(1);
+
+          ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+          await vi.advanceTimersByTimeAsync(6000);
+
+          const audioOut = H.audioOutInstances[0];
+          expect(audioOut.enqueue).toHaveBeenCalledWith(cachedNudge);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("silence goodbye: an ElevenLabs business speaks the hangup goodbye live, bypassing a Google cache hit", async () => {
+        vi.useFakeTimers();
+        try {
+          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at +15551234567 anytime. Goodbye!";
+          const cachedGoodbye = Buffer.from([5, 5]);
+          H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+            text === goodbyeText ? cachedGoodbye : null
+          );
+
+          const ws = new FakeWs();
+          handleVoiceSessionConnection(ws);
+          const sid = `CA-session-fake-${++sidCounter}`;
+          ws.emit({
+            event: "start",
+            start: { callSid: sid, streamSid: "MZv3", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+          });
+          await vi.advanceTimersByTimeAsync(1);
+
+          ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+          // identify_intent thresholds: nudge1=6000, nudge2=12000, hangup=20000.
+          await vi.advanceTimersByTimeAsync(21000);
+
+          const audioOut = H.audioOutInstances[0];
+          expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedGoodbye);
+          const goodbyeTurn = H.ttsTurns.find((t) =>
+            t.write.mock.calls.some(([txt]) => txt === goodbyeText)
+          );
+          expect(goodbyeTurn).toBeTruthy();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
   });
 });
