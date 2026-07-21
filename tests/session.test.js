@@ -1116,6 +1116,78 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(note.parts[0].text).toMatch(/book_appointment succeeded.*Do not book it again/);
   });
 
+  it("11d. a successful cancel clears the booking idempotency anchor", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Cancelled." },
+      {
+        type: "done",
+        reply: {
+          text: "Cancelled.",
+          toolResults: [{ name: "cancel_appointment_db", success: true, message: "Cancelled.", appointmentId: "appt-1" }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const state = callState.getState(sid);
+    state.lastBookedAppointment = { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" };
+
+    H.turnManagerInstances[0].opts.onTurnEnd("cancel my appointment please");
+    await flush();
+    await flush();
+
+    expect(state.lastBookedAppointment).toBeNull();
+  });
+
+  it("11e. a turn that dies before its done event still salvages a completed booking (state, note, SMS)", async () => {
+    // The FC loop booked successfully, then the generator ended without a
+    // done event (models a barge/timeout after the insert). The DB write is
+    // real — its effects must survive.
+    H.llmFactory = () => makeGen([
+      {
+        type: "toolEffect",
+        effect: {
+          name: "book_appointment",
+          success: true,
+          appointmentArgs: { scheduled_at: "2026-08-02T15:00:00.000Z", client_name: "Sam" },
+        },
+      },
+      // no done event
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("yes book it please");
+    await flush();
+    await flush();
+
+    const state = callState.getState(sid);
+    expect(state.lastBookedAppointment).toEqual({
+      scheduled_at: "2026-08-02T15:00:00.000Z",
+      client_name: "Sam",
+    });
+    expect(state.step).toBe("confirm");
+    const note = state.history.find((h) => /\[system note/.test(h.parts?.[0]?.text || ""));
+    expect(note.parts[0].text).toMatch(/book_appointment succeeded.*Do not book it again/);
+
+    const notifications = await import("../services/notifications.js");
+    expect(notifications.sendCallerSms).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "appointment_confirmation",
+      expect.objectContaining({ name: "Sam" })
+    );
+  });
+
   it("12a. a booked appointment sends the caller an appointment_confirmation SMS", async () => {
     H.llmFactory = () => makeGen([
       { type: "delta", text: "You're all set!" },

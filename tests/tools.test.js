@@ -715,6 +715,26 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(functionResponse.response.message).toMatch(/error booking/i);
     });
 
+    it("idempotency compares instants, not strings (naive-normalized vs offset-verbatim forms)", async () => {
+      // Anchor stored as normalized UTC; the model re-sends the same moment
+      // as an offset-bearing string (stored verbatim by validateBookingTime).
+      const ctx = {
+        ...baseCtx,
+        lastBookedAppointment: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Jane" },
+      };
+      const fc = {
+        id: "fcD4",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-08-01T10:00:00-05:00", client_name: "Jane" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response.success).toBe(true);
+      expect(functionResponse.response.message).toMatch(/already booked/i);
+    });
+
     it("re-booking the slot already booked this call short-circuits to success without inserting", async () => {
       const ctx = {
         ...baseCtx,

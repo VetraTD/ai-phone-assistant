@@ -365,7 +365,11 @@ export async function executeToolCall(fc, ctx) {
           // successful booking into a spurious "slot taken" error — so treat
           // it as the success it already is, without a second insert or a
           // second confirmation SMS.
-          if (ctx?.lastBookedAppointment?.scheduled_at === anchoredScheduledAt) {
+          // Instant comparison, not string equality: the anchor may be a
+          // verbatim offset-bearing ISO while this round's value is a
+          // normalized UTC string (or vice versa) for the same moment.
+          const lastBookedMs = Date.parse(ctx?.lastBookedAppointment?.scheduled_at ?? "");
+          if (Number.isFinite(lastBookedMs) && lastBookedMs === Date.parse(anchoredScheduledAt)) {
             alreadyBooked = true;
             bookSuccess = true;
             bookMessage =

@@ -442,4 +442,45 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
 
     expect(chunks).toEqual(["one", "two", "three"]); // strict order preserved
   });
+
+  it("14. a later sentence rejecting while an earlier one is still pending does not raise an unhandled rejection", async () => {
+    let resolveFirst;
+    mockSynthesizeMulaw.mockImplementation((sentence) => {
+      if (sentence === "One.") return new Promise((res) => { resolveFirst = res; });
+      return Promise.reject(new Error("google down"));
+    });
+
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const onError = vi.fn();
+      const chunks = [];
+      const turn = createTtsTurn({
+        voiceId: "voice123",
+        callSid: "CA14",
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: (buf) => chunks.push(buf.toString()),
+        onDone: vi.fn(),
+        onError,
+        forceFallback: true,
+      });
+      turn.write("One. Two.");
+      turn.end();
+
+      // Sentence 2 rejects immediately while the consumer is still awaiting
+      // sentence 1 — the rejection must already be observed (handled).
+      await new Promise((res) => setImmediate(res));
+      await new Promise((res) => setImmediate(res));
+
+      resolveFirst(Buffer.from("one"));
+      await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+
+      expect(chunks).toEqual(["one"]); // sentence 1 still played
+      expect(unhandled).toEqual([]); // no process-killing unhandled rejection
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });

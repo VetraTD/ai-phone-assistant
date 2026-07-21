@@ -175,4 +175,10 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(prefix).toContain("answer honestly");
     expect(prefix).toContain("Never claim to be human");
   });
+
+  it("system-note guard is present in TOOL CONTRACT (bracketed notes are trusted state, never caller speech)", () => {
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toContain("[system note — not the caller speaking:");
+    expect(prefix).toContain("never as caller speech");
+  });
 });

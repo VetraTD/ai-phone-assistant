@@ -1073,7 +1073,28 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       ) {
         completedActionThisTurn = true;
       }
+      // A successful cancel invalidates the within-turn booking anchor: a
+      // book -> cancel -> re-book sequence must insert for real.
+      if (fc.name === "cancel_appointment_db" && stateEffects.toolResult?.success) {
+        lastBookedAppointment = null;
+      }
       if (stateEffects.toolCallEvent) yield { toolCall: stateEffects.toolCallEvent };
+      // Durable-effect event: emitted the moment a tool completes so the
+      // session can persist what ALREADY HAPPENED (a DB insert, a verified
+      // identity) even if this turn is later barged or times out before the
+      // final done event — the DB facts don't un-happen because the caller
+      // interrupted the confirmation sentence.
+      yield {
+        toolEffect: {
+          name: fc.name,
+          success: !!stateEffects.toolResult?.success,
+          appointmentArgs: stateEffects.appointmentArgs || null,
+          identityVerifiedApptId: stateEffects.identityVerifiedApptId || null,
+          ...("selectedAppointmentId" in stateEffects
+            ? { selectedAppointmentId: stateEffects.selectedAppointmentId }
+            : {}),
+        },
+      };
     }
 
     // Send function results back to chat and stream the follow-up
@@ -1087,11 +1108,15 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     }
   }
 
-  // Fallback if model returned no text at all (localized — see strings.js)
+  // Fallback if model returned no text at all (localized — see strings.js).
+  // Action-tool messages are directives to the MODEL ("do not book again —
+  // just confirm it to the caller"), never speakable text — always use the
+  // localized generic line for those.
   const S = getStrings(cfg);
   if (!fullText && toolResults.length > 0) {
     const last = toolResults[toolResults.length - 1];
-    fullText = last.message || (last.success ? S.toolDone : S.toolFail);
+    const speakableMessage = ACTION_TOOL_NAMES.includes(last.name) ? "" : last.message;
+    fullText = speakableMessage || (last.success ? S.toolDone : S.toolFail);
     yield { delta: fullText };
   }
   if (!fullText) {
