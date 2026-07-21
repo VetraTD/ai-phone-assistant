@@ -1013,6 +1013,41 @@ describe("session.js — v2 pipeline orchestrator", () => {
     }
   });
 
+  it("8e. a barged turn's stale playback mark does not close out the successor turn's metrics", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Our hours are nine to five." },
+      { type: "done", reply: { text: "Our hours are nine to five.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours");
+    await flush();
+    await flush();
+
+    const metrics = H.metricsInstances[0];
+    // Caller barges in: onInterrupt closes this turn's metrics as barged.
+    tm.opts.onInterrupt("wait");
+    await flush();
+    const finishCallsAfterBarge = metrics.finishTurn.mock.calls.length;
+
+    // A successor turn starts, then Twilio echoes the BARGED turn's mark —
+    // audio that was already queued when the interrupt landed.
+    tm.opts.onTurnEnd("wait");
+    await flush();
+    ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+    await flush();
+
+    // The stale mark must be ignored: no extra finishTurn, so the live turn's
+    // marks survive instead of being emitted as a junk row.
+    expect(metrics.finishTurn.mock.calls.length).toBe(finishCallsAfterBarge);
+  });
+
   it("8d. a goodbye longer than CLOSE_FALLBACK_MS is not cut off — the backstop waits for playback to finish", async () => {
     // The silence goodbye runs ~9.6s once it reads a phone number back, but
     // the backstop fired at a flat 8s and hung up mid-sentence, which also
