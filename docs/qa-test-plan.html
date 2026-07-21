@@ -151,6 +151,10 @@
 </header>
 
 <main class="wrap">
+  <div class="intro" style="border-left:3px solid var(--accent)">
+    <p style="color:var(--ink)"><strong>Superseded in places — read this first.</strong> This plan was written <em>before</em> the 2026-07-21 voice fixes (commits <code style="font-family:var(--mono)">768e0d4 … 43b4988</code>). Several <span class="tag code">code</span> notes below describe weaknesses that no longer exist — booking now validates the time, anchors the timezone, refuses past dates and closed days; identity is no longer challenged when the caller ID already matches; the scripted lines now exist in Spanish; and the post-greeting silence nudges fire at <strong>6s / 12s / 20s</strong>, not 8/15/24.</p>
+    <p style="margin-bottom:0">For verifying that round of fixes, work through <strong>voice-fix-verification.html</strong> instead. Come back here for the broader coverage this plan still holds alone: honesty and hallucination, prompt injection, compliance, emergencies, and voice quality.</p>
+  </div>
   <div class="intro">
     <p><strong>How to read a test.</strong> The <span style="font-family:var(--mono);color:var(--accent)">mono line</span> is what you say or do on the call. <span class="tag pass">Pass</span> is what a correct receptionist does. The grey line is why it matters or what typically breaks. A <span class="tag code">code</span> tag means I already know this is a specific weak point in <em>your</em> build — those are the highest-value ones to confirm.</p>
     <p><strong>Method.</strong> Short calls beat one marathon — easier to isolate what failed. Keep the server window visible; the <code style="font-family:var(--mono)">turn_latency</code> lines and any red errors are half the signal. Test on a real cell <em>and</em> on speakerphone — echo behaves completely differently and speakerphone is where barge-in breaks. When you finish a batch, I pull the transcripts and message rows from your database so we compare what it <em>heard</em> against what you <em>said</em>.</p>
