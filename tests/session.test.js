@@ -624,6 +624,52 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
   });
 
+  it("5d. Fix 4: silence while the fallback flow is active routes to flow.handleInput(''), not the generic step nudge", async () => {
+    H.llmFactory = () => makeThrowingGen(Object.assign(new Error("down"), { code: "LLM_TIMEOUT" }));
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: { callSid: sid, streamSid: "MZv4", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("first failing turn");
+      await vi.advanceTimersByTimeAsync(1);
+      tm.opts.onTurnEnd("second failing turn");
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(H.fallbackFlowInstances.length).toBe(1);
+      const flow = H.fallbackFlowInstances[0];
+
+      // Simulate the (real) flow speaking its first prompt — drives
+      // session.js's own onSay -> speakText -> mark, which is what actually
+      // arms the silence timer for the rest of the call.
+      flow.opts.onSay("Can I get your name, please?");
+      const promptMark = `fallback-${callState.getState(sid).turnId}-done`;
+      ws.emit({ event: "mark", mark: { name: promptMark } });
+
+      const ttsCountBefore = H.ttsTurns.length;
+      await vi.advanceTimersByTimeAsync(30000); // well past every silence threshold
+
+      // Routed to the flow...
+      expect(flow.handleInput).toHaveBeenCalledWith("");
+      // ...never the generic step-based nudge ladder.
+      const wroteGenericNudge = H.ttsTurns.slice(ttsCountBefore).some((t) =>
+        t.write.mock.calls.some(([txt]) =>
+          /still here whenever you're ready|calling to book an appointment, leave a message/i.test(txt || "")
+        )
+      );
+      expect(wroteGenericNudge).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("6. STT terminal failure: apology spoken then graceful close", async () => {
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);
