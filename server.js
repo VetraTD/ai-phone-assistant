@@ -547,11 +547,12 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
 // Dev-only: per-turn voice pipeline latency stats (Phase 0 instrumentation)
 // ---------------------------------------------------------------------------
 
-app.get("/api/debug/latency", (req, res) => {
+app.get("/api/debug/latency", async (req, res) => {
   if (process.env.DEBUG_ENDPOINTS !== "true") {
     return res.status(404).end();
   }
-  res.json(getLatencyStats());
+  const { ttsHealth } = await import("./lib/voice/ttsHealth.js");
+  res.json({ ...getLatencyStats(), elBreaker: ttsHealth.getState() });
 });
 
 // ---------------------------------------------------------------------------

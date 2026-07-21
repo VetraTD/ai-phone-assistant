@@ -66,6 +66,7 @@ vi.mock("../lib/logger.js", () => ({
 }));
 
 import { createTtsTurn } from "../lib/voice/ttsStream.js";
+import { ttsHealth } from "../lib/voice/ttsHealth.js";
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -76,6 +77,9 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     instances.length = 0;
     mockSynthesizeMulaw.mockReset();
     process.env.ELEVENLABS_API_KEY = "test-xi-key";
+    // The circuit breaker is a process-wide singleton — EL failures triggered
+    // by earlier tests must not leak "breaker open" into later ones.
+    ttsHealth.recordSuccess();
   });
 
   it("1. opens the correct WS URL with model_id/ulaw_8000/auto_mode, sends xi-api-key header, and sends the handshake frame on open", () => {
@@ -224,8 +228,8 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
       await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
 
       expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(2);
-      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(1, "Hello there.", "en-GB-Chirp3-HD-Aoede", "CA7");
-      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(2, "How are you?", "en-GB-Chirp3-HD-Aoede", "CA7");
+      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(1, "Hello there.", "en-US-Chirp3-HD-Aoede", "CA7");
+      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(2, "How are you?", "en-US-Chirp3-HD-Aoede", "CA7");
       expect(onAudioChunk).toHaveBeenCalledWith(fallbackBuf1);
       expect(onAudioChunk).toHaveBeenCalledWith(fallbackBuf2);
       expect(onError).not.toHaveBeenCalled();
@@ -299,7 +303,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
 
     await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
     expect(onDone).toHaveBeenCalledWith({ truncated: false });
-    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there.", "en-GB-Chirp3-HD-Aoede", "CA8c");
+    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there.", "en-US-Chirp3-HD-Aoede", "CA8c");
   });
 
   it("9. voiceSettings opt is passed through to the ElevenLabs handshake, merged over its defaults", () => {
@@ -372,5 +376,70 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     turn.write("Hello");
     expect(() => turn.abort()).not.toThrow();
     expect(instances).toHaveLength(0);
+  });
+
+  it("12. breaker open -> no ElevenLabs connection is attempted; turn goes straight to Google", async () => {
+    // Two consecutive EL failures open the breaker (transient policy).
+    const err = new Error("socket error");
+    ttsHealth.recordFailure(err);
+    ttsHealth.recordFailure(err);
+    expect(ttsHealth.isHealthy()).toBe(false);
+
+    mockSynthesizeMulaw.mockResolvedValue(Buffer.from([1]));
+    const onAudioChunk = vi.fn();
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA12",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk,
+      onDone,
+      onError: vi.fn(),
+    });
+    turn.write("Hello there.");
+    turn.end();
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+    expect(instances).toHaveLength(0); // EL never attempted
+    expect(mockSynthesizeMulaw).toHaveBeenCalled();
+    expect(onAudioChunk).toHaveBeenCalled();
+  });
+
+  it("13. fallback synthesizes sentences concurrently but emits audio strictly in order", async () => {
+    const resolvers = [];
+    mockSynthesizeMulaw.mockImplementation(
+      (sentence) => new Promise((resolve) => resolvers.push({ sentence, resolve }))
+    );
+
+    const chunks = [];
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA13",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: (buf) => chunks.push(buf.toString()),
+      onDone,
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write("One. Two. Three.");
+    turn.end();
+
+    // All three synth calls were fired up-front (concurrency 3), before any
+    // has resolved — the old serial loop would have fired only the first.
+    await vi.waitFor(() => expect(resolvers).toHaveLength(3));
+
+    // Resolve out of order: 3rd, then 1st, then 2nd.
+    resolvers[2].resolve(Buffer.from("three"));
+    await Promise.resolve();
+    expect(chunks).toEqual([]); // sentence 1 not ready — nothing emitted yet
+
+    resolvers[0].resolve(Buffer.from("one"));
+    resolvers[1].resolve(Buffer.from("two"));
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+    expect(chunks).toEqual(["one", "two", "three"]); // strict order preserved
   });
 });

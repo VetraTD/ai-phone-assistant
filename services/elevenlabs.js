@@ -146,14 +146,20 @@ export function createTtsConnection({
     onError?.(err);
   });
 
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
     clearConnectTimer();
     open = false;
     if (closed) return; // already handled (intentional close, connect timeout, or prior error)
     closed = true;
-    const err = new Error("ElevenLabs TTS connection closed unexpectedly");
+    const reasonText = reason?.toString?.() || "";
+    const err = new Error(
+      `ElevenLabs TTS connection closed unexpectedly${reasonText ? ` (${reasonText})` : ""}`
+    );
     err.code = "TTS_CONNECTION_CLOSED";
-    log.error("tts_el_unexpected_close", { voiceId });
+    // WS close code (1008 = policy violation, ElevenLabs's quota/auth
+    // signature) — consumed by lib/voice/ttsHealth.js's circuit breaker.
+    err.closeCode = code;
+    log.error("tts_el_unexpected_close", { voiceId, closeCode: code, reason: reasonText });
     onError?.(err);
   });
 
