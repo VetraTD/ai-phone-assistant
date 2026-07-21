@@ -221,7 +221,25 @@ vi.mock("twilio", () => ({
   })),
 }));
 
-import { handleVoiceSessionConnection, TRANSFER_TRIGGERS } from "../lib/voice/session.js";
+import { handleVoiceSessionConnection, TRANSFER_TRIGGERS, mapLanguage } from "../lib/voice/session.js";
+
+describe("mapLanguage — Deepgram nova-3 language codes", () => {
+  it("maps bare ISO codes to valid nova-3 codes", () => {
+    expect(mapLanguage({ languagesSpoken: ["en"] })).toBe("en-US");
+    expect(mapLanguage({ languagesSpoken: ["es"] })).toBe("es"); // not the invalid "es-US"
+    expect(mapLanguage({ languagesSpoken: ["fr"] })).toBe("fr");
+  });
+
+  it("multi-language configs use nova-3 code-switching", () => {
+    expect(mapLanguage({ languagesSpoken: ["en", "es"] })).toBe("multi");
+  });
+
+  it("passes through full BCP-47 codes and defaults to en-US", () => {
+    expect(mapLanguage({ languagesSpoken: ["es-419"] })).toBe("es-419");
+    expect(mapLanguage({})).toBe("en-US");
+    expect(mapLanguage({ languagesSpoken: ["xx"] })).toBe("en-US");
+  });
+});
 
 describe("TRANSFER_TRIGGERS regex", () => {
   it("does not match identity questions", () => {

@@ -156,4 +156,23 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(tail).toContain("Status: CLOSED.");
     expect(tail).not.toContain("undefined");
   });
+
+  it("language rules: multi-language configs demand replying in the caller's language; single non-English speaks it by default", () => {
+    const multi = buildStaticSystemPrefix({ ...config, languagesSpoken: ["en", "es"] }, extras);
+    expect(multi).toContain("You can speak: en, es");
+    expect(multi).toContain("language of the caller's most recent message");
+
+    const esOnly = buildStaticSystemPrefix({ ...config, languagesSpoken: ["es"] }, extras);
+    expect(esOnly).toContain("Speak es by default");
+    expect(esOnly).toContain("If the caller speaks English, switch to English");
+
+    const enOnly = buildStaticSystemPrefix({ ...config, languagesSpoken: ["en"] }, extras);
+    expect(enOnly).not.toContain("Speak en by default");
+  });
+
+  it("AI disclosure rule is present in IDENTITY", () => {
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toContain("answer honestly");
+    expect(prefix).toContain("Never claim to be human");
+  });
 });

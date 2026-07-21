@@ -4,6 +4,7 @@ import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
 import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 const MAX_FC_ROUNDS = 3;
 
@@ -542,8 +543,11 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   identity += `- One question at a time. Never stack questions.\n`;
   identity += `- Acknowledge briefly ("Of course.", "Sure thing.") before answering — but don't overdo it.`;
 
-  if (config.languagesSpoken && config.languagesSpoken.length > 1) {
-    identity += `\nYou can speak: ${config.languagesSpoken.join(", ")}. Match the caller's language when possible.`;
+  const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
+  if (langs.length > 1) {
+    identity += `\nYou can speak: ${langs.join(", ")}. ALWAYS reply in the language of the caller's most recent message — if they speak Spanish, reply in Spanish. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
+  } else if (langs.length === 1 && langs[0] !== "en") {
+    identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   }
   sections.push(identity);
 
@@ -1083,16 +1087,15 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     }
   }
 
-  // Fallback if model returned no text at all
+  // Fallback if model returned no text at all (localized — see strings.js)
+  const S = getStrings(cfg);
   if (!fullText && toolResults.length > 0) {
     const last = toolResults[toolResults.length - 1];
-    fullText = last.message || (last.success
-      ? "Done. Is there anything else I can help you with?"
-      : "I'm sorry, I wasn't able to complete that. Let me take your details so someone can follow up.");
+    fullText = last.message || (last.success ? S.toolDone : S.toolFail);
     yield { delta: fullText };
   }
   if (!fullText) {
-    fullText = "I'm sorry, could you say that again?";
+    fullText = S.sayAgain;
     yield { delta: fullText };
   }
 
