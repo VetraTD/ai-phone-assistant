@@ -339,27 +339,86 @@ describe("fallbackFlow — deterministic no-LLM take-message flow", () => {
       expect(flow.getState()).toBe("confirming_number");
     });
 
-    it("17. the hold timer is cancelled when the flow completes before it fires (silence ends the call early)", () => {
+    it("17. a held fragment followed by silence is flushed and re-asked immediately (never silently discarded), and the hold timer is cancelled so it can't double-fire", () => {
       const { flow, onComplete, said } = makeFlow();
       flow.start();
       flow.handleInput("Casey");
       flow.handleInput("555123"); // held, timer armed
+      const sayCountBeforeEmpty = said.length;
 
-      // Caller goes silent — two consecutive empty finals end the flow
-      // (name was already captured, so this is a success, not a failure).
+      // Caller goes silent on the very next final. Fix 5(a): the held
+      // fragment must be flushed (and re-asked on) right here — NOT silently
+      // dropped by the emptyStreak "wrap the call up" logic.
+      flow.handleInput("");
+      expect(said.length).toBeGreaterThan(sayCountBeforeEmpty);
+      expect(said[said.length - 1]).toBe(
+        "Sorry, I didn't catch the full number. Could you say it again, digit by digit?"
+      );
+      expect(flow.getState()).toBe("awaiting_number");
+      expect(onComplete).not.toHaveBeenCalled();
+
+      // Continued silence after the re-ask still salvages the call
+      // successfully (name was captured) — proves flushing the fragment
+      // didn't corrupt the ordinary two-consecutive-empties wrap-up path.
       flow.handleInput("");
       flow.handleInput("");
-
       expect(onComplete).toHaveBeenCalledTimes(1);
-      const sayCountAfterComplete = said.length;
+      expect(onComplete).toHaveBeenCalledWith({
+        callerName: "Casey",
+        callbackNumber: null,
+        message: "(caller did not leave details)",
+      });
 
-      // If the original hold timer were still live, advancing past its
-      // window would call flushHeldNumberFragment -> processNumberAttempt
-      // against an already-"done" (inactive) flow, re-triggering say()/
-      // state changes it has no business making anymore.
+      const sayCountAfterComplete = said.length;
+      // The original hold timer must not still be live — advancing past its
+      // window must not re-fire a stale flush against the now-inactive flow.
       vi.advanceTimersByTime(5_000);
       expect(said.length).toBe(sayCountAfterComplete);
       expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("18. a held fragment followed by unrelated gibberish does not silently vanish — combined, fails validation, and re-asks", () => {
+      const { flow, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Jamie");
+      flow.handleInput("555123"); // held
+      const sayCountBeforeGibberish = said.length;
+
+      flow.handleInput("sorry what was the question");
+      expect(said.length).toBeGreaterThan(sayCountBeforeGibberish);
+      expect(said[said.length - 1]).toBe(
+        "Sorry, I didn't catch the full number. Could you say it again, digit by digit?"
+      );
+      expect(flow.getState()).toBe("awaiting_number");
+    });
+
+    it("19. split recitation with a literal space ('555 123' then '4567') still combines to one number", () => {
+      const { flow, said } = makeFlow();
+      flow.start();
+      flow.handleInput("Robin");
+      const sayCountBeforeHold = said.length;
+
+      flow.handleInput("555 123"); // partial, space-separated — held silently
+      expect(said.length).toBe(sayCountBeforeHold);
+      expect(flow.getState()).toBe("awaiting_number");
+
+      flow.handleInput("4567");
+      expect(said[said.length - 1]).toBe("Got it — that's 555, 123, 4567. Is that right?");
+      expect(flow.getState()).toBe("confirming_number");
+    });
+
+    it("20. a held fragment flushed by an empty final still falls back to caller ID after a second failed attempt", () => {
+      const { flow, said } = makeFlow(); // default callerPhone "+15559998888"
+      flow.start();
+      flow.handleInput("Riley");
+      flow.handleInput("555123"); // held
+
+      flow.handleInput(""); // flush -> invalid (6 digits) -> re-ask (attempt #1)
+      expect(flow.getState()).toBe("awaiting_number");
+
+      flow.handleInput("still don't know it"); // attempt #2 -> caller-ID fallback
+      expect(said).toContain("No problem — I'll use the number you're calling from.");
+      expect(flow.getState()).toBe("confirming_number");
     });
   });
 });
