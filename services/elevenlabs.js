@@ -169,8 +169,25 @@ export function createTtsConnection({
     enqueueOrSend({ text: payload });
   }
 
+  /**
+   * Signal end-of-input for this turn and ask the server to finish generating.
+   *
+   * This sends the empty-text frame, NOT `{flush: true}`. With
+   * `auto_mode=true` the server already generates as text arrives, and a
+   * `{flush:true}` frame streams the remaining audio but never replies with
+   * `{"isFinal":true}` — verified against the live API: identical audio, no
+   * isFinal, socket then idles until the server times it out after 20s with
+   * close code 1008. Because the turn's completion mark is only emitted on
+   * isFinal, that made every mark arrive ~20 seconds late (dead air after
+   * the greeting, silence nudges armed far too late) and made a healthy
+   * connection look like a failure to the circuit breaker.
+   *
+   * The empty-text frame is the documented end-of-input signal and returns
+   * isFinal in ~280ms. One connection per turn, so end-of-input is exactly
+   * the right semantic here.
+   */
   function flush() {
-    enqueueOrSend({ text: "", flush: true });
+    enqueueOrSend({ text: "" });
   }
 
   function close() {

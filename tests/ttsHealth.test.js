@@ -67,6 +67,33 @@ describe("ttsHealth.js — ElevenLabs circuit breaker", () => {
     expect(h.isHealthy()).toBe(true);
   });
 
+  it("an idle-socket close (1008) is NOT treated as quota — it must never open the breaker", () => {
+    const h = createTtsHealth({ now: makeClock().now });
+    const idle = new Error(
+      "ElevenLabs TTS connection closed unexpectedly (Have not received a new text input within the timeout of 20 seconds. Streaming input terminated.)"
+    );
+    idle.code = "TTS_CONNECTION_CLOSED";
+    idle.closeCode = 1008; // same code the API uses for a real quota rejection
+
+    h.recordFailure(idle);
+    h.recordFailure(idle);
+    h.recordFailure(idle);
+
+    expect(h.isHealthy()).toBe(true);
+    expect(h.getState().consecutiveFailures).toBe(0);
+  });
+
+  it("an idle close does not reset a genuine failure streak", () => {
+    const h = createTtsHealth({ now: makeClock().now });
+    const real = new Error("socket error");
+    const idle = Object.assign(new Error("Have not received a new text input"), { closeCode: 1008 });
+
+    h.recordFailure(real);
+    h.recordFailure(idle); // benign — ignored entirely
+    h.recordFailure(real); // second REAL failure => breaker opens
+    expect(h.isHealthy()).toBe(false);
+  });
+
   it("a quota-message failure opens immediately even without a close code", () => {
     const h = createTtsHealth({ now: makeClock().now });
     h.recordFailure(new Error("quota exceeded for this billing period"));

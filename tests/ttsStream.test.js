@@ -147,7 +147,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(onFirstAudio).toHaveBeenCalledTimes(1);
   });
 
-  it("4. end() sends a flush frame, then isFinal triggers onDone", () => {
+  it("4. end() sends the end-of-input frame, then isFinal triggers onDone", () => {
     const onDone = vi.fn();
     const turn = createTtsTurn({ voiceId: "v1", callSid: "CA4", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone, onError: vi.fn() });
     turn.write("Hello there");
@@ -157,7 +157,11 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     turn.end();
 
     const msgs = sock.sentMessages();
-    expect(msgs[msgs.length - 1]).toEqual({ text: "", flush: true });
+    // Empty text, NOT {flush:true} — with auto_mode the server answers a
+    // flush frame with audio but never isFinal, which stalled every turn's
+    // completion mark until the 20s server-side idle timeout.
+    expect(msgs[msgs.length - 1]).toEqual({ text: "" });
+    expect(msgs.some((m) => m.flush)).toBe(false);
     expect(onDone).not.toHaveBeenCalled();
 
     sock._message({ isFinal: true });
