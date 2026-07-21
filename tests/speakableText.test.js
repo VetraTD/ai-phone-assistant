@@ -30,8 +30,18 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     it("groups a dotted 10-digit number as 3-3-4", () => {
       expect(toSpeakable("Call us at 555.123.4567.")).toBe("Call us at 555 123 4567.");
     });
-    it("groups an 11-digit number by 3s (general grouping, not the 10-digit 3-3-4 special case)", () => {
-      expect(toSpeakable("Dial 15551234567 to reach us.")).toBe("Dial 155 512 345 67 to reach us.");
+    it("drops the US country code from an 11-digit number and groups 3-3-4", () => {
+      // Previously grouped blindly by 3s into "155 512 345 67", which a TTS
+      // engine reads as an unintelligible mumble instead of a phone number.
+      expect(toSpeakable("Dial 15551234567 to reach us.")).toBe("Dial 555 123 4567 to reach us.");
+    });
+    it("handles the E.164 form stored in the database, consuming the plus", () => {
+      expect(toSpeakable("Call us back at +18175803291 anytime.")).toBe(
+        "Call us back at 817 580 3291 anytime."
+      );
+    });
+    it("groups an 11-digit number NOT starting with 1 by 3s (no country code to strip)", () => {
+      expect(toSpeakable("Dial 25551234567 now.")).toBe("Dial 255 512 345 67 now.");
     });
     it("leaves short digit runs (under 10) untouched", () => {
       expect(toSpeakable("It costs 12345 dollars.")).toBe("It costs 12345 dollars.");

@@ -164,6 +164,10 @@ vi.mock("../services/supabase.js", () => ({
     languagesSpoken: ["en-US"],
     transferPolicy: "always",
     transferPhoneNumber: "+15551234567",
+    // Deliberately different from transferPhoneNumber: the callback number a
+    // caller is given must be the business's own line, never the internal
+    // forwarding target.
+    mainPhone: "+18175803291",
     recordingDisclosureEnabled: false,
     timezone: "America/Chicago",
     afterHoursPolicy: "none",
@@ -1572,7 +1576,9 @@ describe("session.js — v2 pipeline orchestrator", () => {
       it("silence goodbye: an ElevenLabs business speaks the hangup goodbye live, bypassing a Google cache hit", async () => {
         vi.useFakeTimers();
         try {
-          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at +15551234567 anytime. Goodbye!";
+          // The business's own main_phone (+18175803291), spoken as digit
+          // groups — NOT the transfer target (+15551234567) and not raw E.164.
+          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Goodbye!";
           const cachedGoodbye = Buffer.from([5, 5]);
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
             text === goodbyeText ? cachedGoodbye : null
