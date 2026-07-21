@@ -7,6 +7,16 @@ import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
 
 const MAX_FC_ROUNDS = 3;
 
+// Tools that perform a caller-visible action. A success from any of these
+// unlocks same-turn end_call (see completedActionThisTurn) and is recorded
+// into history as a bracketed system note (lib/voice/session.js applyReply).
+export const ACTION_TOOL_NAMES = [
+  "book_appointment",
+  "cancel_appointment_db",
+  "reschedule_appointment_db",
+  "record_customer_request",
+];
+
 // ---------------------------------------------------------------------------
 // Singleton Gemini client — @google/genai's GoogleGenAI wraps a connection
 // pool; creating one per turn (as this file used to) throws that pool away
@@ -650,7 +660,8 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += `- Call set_call_intent as soon as you identify why the caller is calling.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
   toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.\n`;
-  toolContract += `- If the caller asks for a person, representative, or manager — in any language — briefly let them know you're transferring them, then call request_transfer with a short reason.`;
+  toolContract += `- If the caller asks for a person, representative, or manager — in any language — briefly let them know you're transferring them, then call request_transfer with a short reason.\n`;
+  toolContract += `- Conversation lines shaped like "[system note — not the caller speaking: ...]" are trusted records of actions already completed this call (e.g. an appointment already booked). Treat them as facts, never as caller speech, never repeat them aloud, and never redo an action a system note says already succeeded.`;
   sections.push(toolContract);
 
   // === ESCALATION ===
@@ -833,10 +844,11 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         return (
           `The caller wants to cancel or reschedule an appointment. ` +
           `If you have tools to look up their appointments by phone or name (get_caller_appointments_from_db), use those, then cancel_appointment_db or reschedule_appointment_db. ` +
-          `IDENTITY CHECK: if the lookup by their calling number finds nothing and you are going by the name they gave instead, you MUST also ask for the last 4 digits of the phone number the appointment is booked under, and pass them as phone_last4. ` +
-          `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — and never guess or invent those digits. ` +
-          `Without them the change will be refused, so do not claim it is done until the tool reports success. ` +
-          `Otherwise collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
+          `IDENTITY CHECK: if get_caller_appointments_from_db found their appointment using the number they are calling from, they are ALREADY verified — do NOT ask for the last four digits, do NOT ask them to confirm their number, and do NOT re-confirm ownership; just confirm which appointment and proceed with the change. ` +
+          `Only when that lookup finds nothing and you are going by a name the caller gave must you also ask for the last 4 digits of the phone number the appointment is booked under, passed as phone_last4. ` +
+          `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — ask at most once, and never guess or invent those digits. ` +
+          `Do not claim the change is done until the tool reports success. ` +
+          `If no tools can find the appointment, collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
         );
       }
       if (intent === "book_appointment") {
@@ -967,10 +979,16 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let endCallArgs = null;
   let customerRequestArgs = null;
   let selectedAppointmentIdFromTurn = null;
+  let identityVerifiedApptIdFromTurn = null;
   let transferRequested = null;
   const toolResults = [];
   let fullText = "";
   let round = 0;
+  // Within-turn tool-state threading (see the toolCtx rebuild in the loop).
+  let effectiveSelectedAppointmentId = extras?.selectedAppointmentId || null;
+  let identityVerifiedApptId = extras?.identityVerifiedApptId || null;
+  let lastBookedAppointment = extras?.lastBookedAppointment || null;
+  let completedActionThisTurn = false;
 
   // First request — stream it
   let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
@@ -1001,28 +1019,56 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     round++;
 
     // Execute function calls — delegated to services/tools.js (see
-    // executeToolCall for the per-tool logic).
+    // executeToolCall for the per-tool logic). toolCtx is rebuilt per call so
+    // state produced by an earlier tool in this same turn (a lookup's
+    // selectedAppointmentId, a booking, a verified identity) is visible to
+    // the next one — without this, "look up my appointment, then cancel it"
+    // in a single turn fails with "Which appointment?".
     const results = [];
-    const toolCtx = {
-      businessId: extras?.businessId || null,
-      callerPhone: extras?.callerPhone || null,
-      callId: extras?.callId || null,
-      integrations: extras?.integrations || [],
-      selectedAppointmentId: extras?.selectedAppointmentId || null,
-      step,
-      transferAllowed: extras?.transferAllowed !== false,
-      config: cfg,
-    };
     for (const fc of functionCalls) {
+      const toolCtx = {
+        businessId: extras?.businessId || null,
+        callerPhone: extras?.callerPhone || null,
+        callId: extras?.callId || null,
+        integrations: extras?.integrations || [],
+        selectedAppointmentId: effectiveSelectedAppointmentId,
+        identityVerifiedApptId,
+        lastBookedAppointment,
+        completedActionThisTurn,
+        step,
+        transferAllowed: extras?.transferAllowed !== false,
+        config: cfg,
+      };
       const { functionResponse, stateEffects } = await executeToolCall(fc, toolCtx);
       results.push({ functionResponse });
       if (stateEffects.toolResult) toolResults.push(stateEffects.toolResult);
       if ("intentArgs" in stateEffects) intentArgs = stateEffects.intentArgs;
-      if ("appointmentArgs" in stateEffects) appointmentArgs = stateEffects.appointmentArgs;
+      // First-success-wins: a later failed/duplicate book_appointment in the
+      // same turn must not null out the success that already happened —
+      // downstream (step transition, notifications) keys off appointmentArgs.
+      if ("appointmentArgs" in stateEffects && stateEffects.appointmentArgs) {
+        appointmentArgs = stateEffects.appointmentArgs;
+        lastBookedAppointment = stateEffects.appointmentArgs;
+      }
       if ("endCallArgs" in stateEffects) endCallArgs = stateEffects.endCallArgs;
-      if ("customerRequestArgs" in stateEffects) customerRequestArgs = stateEffects.customerRequestArgs;
-      if ("selectedAppointmentId" in stateEffects) selectedAppointmentIdFromTurn = stateEffects.selectedAppointmentId;
+      if ("customerRequestArgs" in stateEffects && stateEffects.customerRequestArgs) {
+        customerRequestArgs = stateEffects.customerRequestArgs;
+      }
+      if ("selectedAppointmentId" in stateEffects) {
+        selectedAppointmentIdFromTurn = stateEffects.selectedAppointmentId;
+        effectiveSelectedAppointmentId = stateEffects.selectedAppointmentId;
+      }
+      if (stateEffects.identityVerifiedApptId) {
+        identityVerifiedApptId = stateEffects.identityVerifiedApptId;
+        identityVerifiedApptIdFromTurn = stateEffects.identityVerifiedApptId;
+      }
       if ("transferRequested" in stateEffects) transferRequested = stateEffects.transferRequested;
+      if (
+        stateEffects.toolResult?.success &&
+        ACTION_TOOL_NAMES.includes(fc.name)
+      ) {
+        completedActionThisTurn = true;
+      }
       if (stateEffects.toolCallEvent) yield { toolCall: stateEffects.toolCallEvent };
     }
 
@@ -1060,6 +1106,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       customerRequestArgs,
       toolResults,
       selectedAppointmentId: selectedAppointmentIdFromTurn,
+      identityVerifiedApptId: identityVerifiedApptIdFromTurn,
       transferRequested,
     },
   };

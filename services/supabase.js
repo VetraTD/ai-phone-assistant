@@ -415,9 +415,14 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     .select("id")
     .single();
   if (error) {
-    log.error("db_error", { operation: "createAppointment", error: error.message });
+    log.error("db_error", { operation: "createAppointment", error: error.message, code: error.code });
     captureException(new Error(error.message), { table: "appointments", op: "insert" });
-    return null;
+    // Surface the failure (with the Postgres code) so the tool layer can
+    // distinguish "slot already taken" (23505 unique violation) from a
+    // generic write error. A silent null made both look identical.
+    const e = new Error(error.message);
+    e.code = error.code;
+    throw e;
   }
   return data.id;
 }

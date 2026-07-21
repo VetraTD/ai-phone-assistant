@@ -682,4 +682,109 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(stateEffects.transferRequested).toBeUndefined();
     });
   });
+
+  describe("book_appointment: duplicate handling (Phase 2)", () => {
+    it("a 23505 unique violation reports 'slot no longer available', not a generic error", async () => {
+      const err = new Error("duplicate key value violates unique constraint");
+      err.code = "23505";
+      mockCreateAppointment.mockRejectedValue(err);
+      const fc = {
+        id: "fcD1",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+      };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, baseCtx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(functionResponse.response.message).toMatch(/no longer available/i);
+      expect(stateEffects.appointmentArgs).toBeNull();
+    });
+
+    it("a generic DB error reports the follow-up message", async () => {
+      mockCreateAppointment.mockRejectedValue(new Error("connection reset"));
+      const fc = {
+        id: "fcD2",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, baseCtx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(functionResponse.response.message).toMatch(/error booking/i);
+    });
+
+    it("re-booking the slot already booked this call short-circuits to success without inserting", async () => {
+      const ctx = {
+        ...baseCtx,
+        lastBookedAppointment: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+      };
+      const fc = {
+        id: "fcD3",
+        name: "book_appointment",
+        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+      };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(functionResponse.response.success).toBe(true);
+      expect(functionResponse.response.message).toMatch(/already booked/i);
+      // No appointmentArgs: the original booking already fired the step
+      // transition + notifications; the short-circuit must not re-fire them.
+      expect(stateEffects.appointmentArgs).toBeNull();
+    });
+  });
+
+  describe("identity persistence + end_call gating (Phase 2)", () => {
+    it("cancel: ctx.identityVerifiedApptId skips the DB identity lookup", async () => {
+      mockUpdateAppointmentStatus.mockResolvedValue(true);
+      const ctx = { ...baseCtx, selectedAppointmentId: "appt-9", identityVerifiedApptId: "appt-9" };
+      const fc = { id: "fcI1", name: "cancel_appointment_db", args: {} };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(mockGetAppointmentById).not.toHaveBeenCalled();
+      expect(functionResponse.response.success).toBe(true);
+      expect(stateEffects.identityVerifiedApptId).toBe("appt-9");
+      expect(stateEffects.toolResult.appointmentId).toBe("appt-9");
+    });
+
+    it("cancel: success records identityVerifiedApptId even when verified via caller-ID match", async () => {
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-7",
+        client_phone: "+15551234567",
+        client_name: "Jane",
+      });
+      mockUpdateAppointmentStatus.mockResolvedValue(true);
+      const ctx = { ...baseCtx, selectedAppointmentId: "appt-7" };
+      const fc = { id: "fcI2", name: "cancel_appointment_db", args: {} };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(stateEffects.identityVerifiedApptId).toBe("appt-7");
+    });
+
+    it("end_call: allowed outside confirm/ending when an action already completed this turn", async () => {
+      const ctx = { ...baseCtx, step: "gather_details", completedActionThisTurn: true };
+      const fc = { id: "fcI3", name: "end_call", args: { reason: "done" } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(stateEffects.endCallArgs).toEqual({ reason: "done" });
+    });
+
+    it("end_call: still refused in gather_details with no completed action", async () => {
+      const ctx = { ...baseCtx, step: "gather_details", completedActionThisTurn: false };
+      const fc = { id: "fcI4", name: "end_call", args: { reason: "done" } };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(stateEffects.endCallArgs).toBeUndefined();
+    });
+  });
 });

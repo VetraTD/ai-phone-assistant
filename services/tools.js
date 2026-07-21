@@ -288,6 +288,10 @@ function validateBookingTime(rawScheduledAt, config) {
  */
 async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
   if (!appointmentId || !ctx?.businessId) return false;
+  // Identity already proven for this appointment earlier in the call (e.g. a
+  // cancel verified it, then the caller asks to reschedule the same one) —
+  // don't make the caller prove themselves again.
+  if (ctx?.identityVerifiedApptId && appointmentId === ctx.identityVerifiedApptId) return true;
   const appointment = await getAppointmentById(appointmentId, ctx.businessId);
   return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
 }
@@ -347,33 +351,52 @@ export async function executeToolCall(fc, ctx) {
       let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
       let anchoredScheduledAt = null;
 
+      let alreadyBooked = false;
+
       if (args.scheduled_at) {
         const validated = validateBookingTime(args.scheduled_at, config);
         if (!validated.ok) {
           bookMessage = validated.message;
         } else {
           anchoredScheduledAt = validated.scheduledAt;
-          const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
-          try {
-            const dbId = await createAppointment({
-              businessId,
-              callId,
-              clientName: args.client_name || null,
-              clientPhone: callerPhone || null,
-              scheduledAt: anchoredScheduledAt,
-              notes,
-            });
-            if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
-          } catch (err) {
-            const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
-            bookMessage = isSlotTaken
-              ? "That time slot is no longer available. Please ask the caller to pick a different time."
-              : "There was an error booking the appointment. Please take the caller's details for follow-up.";
-            captureException(err);
+          // Idempotency guard: the model sometimes re-issues book_appointment
+          // for a slot this very call already booked (a second FC round, or a
+          // later turn). Re-inserting would hit the unique index and turn a
+          // successful booking into a spurious "slot taken" error — so treat
+          // it as the success it already is, without a second insert or a
+          // second confirmation SMS.
+          if (ctx?.lastBookedAppointment?.scheduled_at === anchoredScheduledAt) {
+            alreadyBooked = true;
+            bookSuccess = true;
+            bookMessage =
+              "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
+          } else {
+            const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+            try {
+              const dbId = await createAppointment({
+                businessId,
+                callId,
+                clientName: args.client_name || null,
+                clientPhone: callerPhone || null,
+                scheduledAt: anchoredScheduledAt,
+                notes,
+              });
+              if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
+            } catch (err) {
+              const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+              bookMessage = isSlotTaken
+                ? "That time slot is no longer available. Please ask the caller to pick a different time."
+                : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+              captureException(err);
+            }
           }
         }
       }
-      const appointmentArgs = bookSuccess ? { ...args, scheduled_at: anchoredScheduledAt } : null;
+      // A fresh booking carries appointmentArgs downstream (step transition,
+      // owner notification, confirmation SMS). The already-booked short-
+      // circuit must NOT re-fire those side effects.
+      const appointmentArgs =
+        bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: bookSuccess, message: bookMessage } },
         stateEffects: {
@@ -401,7 +424,11 @@ export async function executeToolCall(fc, ctx) {
       // makes it much less likely to hang up before the caller has a chance
       // to say they don't need anything else. Ported from the legacy
       // (pre-streaming) getReply's end_call gating.
-      if (ctx?.step === "confirm" || ctx?.step === "ending") {
+      // completedActionThisTurn: an earlier FC round of this same turn
+      // already booked/cancelled/rescheduled/recorded — the step machine only
+      // advances to "confirm" after the whole turn, so without this the model
+      // could never wrap up cleanly in the same turn as the action.
+      if (ctx?.step === "confirm" || ctx?.step === "ending" || ctx?.completedActionThisTurn) {
         const endCallArgs = fc.args ?? {};
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
@@ -484,7 +511,10 @@ export async function executeToolCall(fc, ctx) {
             : { success: false, message: "I couldn't cancel that appointment." },
         },
         stateEffects: {
-          toolResult: { name: fc.name, success: ok, message: ok ? "Cancelled." : "Couldn't cancel." },
+          // Identity passed above regardless of the write outcome — remember
+          // it so a retry (or a follow-up reschedule) doesn't re-challenge.
+          identityVerifiedApptId: appointmentId,
+          toolResult: { name: fc.name, success: ok, message: ok ? "Cancelled." : "Couldn't cancel.", appointmentId },
           toolCallEvent: { name: fc.name, args: fc.args },
         },
       };
@@ -533,7 +563,8 @@ export async function executeToolCall(fc, ctx) {
             : { success: false, message: "Couldn't reschedule." },
         },
         stateEffects: {
-          toolResult: { name: fc.name, success: ok, message: ok ? "Rescheduled." : "Couldn't reschedule." },
+          identityVerifiedApptId: appointmentId,
+          toolResult: { name: fc.name, success: ok, message: ok ? "Rescheduled." : "Couldn't reschedule.", appointmentId },
           toolCallEvent: { name: fc.name, args: fc.args },
         },
       };

@@ -189,6 +189,12 @@ vi.mock("../services/notifications.js", () => ({
 
 vi.mock("../services/gemini.js", () => ({
   isBusinessOpen: vi.fn(() => true),
+  ACTION_TOOL_NAMES: [
+    "book_appointment",
+    "cancel_appointment_db",
+    "reschedule_appointment_db",
+    "record_customer_request",
+  ],
 }));
 
 vi.mock("../services/googleTts.js", () => ({
@@ -1026,6 +1032,70 @@ describe("session.js — v2 pipeline orchestrator", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("11b. a successful cancel moves the step to confirm, persists identity, and records a system note", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Your appointment is cancelled." },
+      {
+        type: "done",
+        reply: {
+          text: "Your appointment is cancelled.",
+          toolResults: [{ name: "cancel_appointment_db", success: true, message: "Cancelled.", appointmentId: "appt-1" }],
+          identityVerifiedApptId: "appt-1",
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("cancel my appointment please");
+    await flush();
+    await flush();
+
+    const state = callState.getState(sid);
+    expect(state.step).toBe("confirm");
+    expect(state.identityVerifiedApptId).toBe("appt-1");
+    const note = state.history.find((h) => /\[system note/.test(h.parts?.[0]?.text || ""));
+    expect(note).toBeTruthy();
+    expect(note.parts[0].text).toMatch(/cancel_appointment_db succeeded/);
+  });
+
+  it("11c. a booked appointment stores the cross-turn idempotency anchor", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Booked!" },
+      {
+        type: "done",
+        reply: {
+          text: "Booked!",
+          appointmentArgs: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" },
+          toolResults: [{ name: "book_appointment", success: true, message: "Appointment booked successfully." }],
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("book me an appointment");
+    await flush();
+    await flush();
+
+    const state = callState.getState(sid);
+    expect(state.lastBookedAppointment).toEqual({
+      scheduled_at: "2026-08-01T15:00:00.000Z",
+      client_name: "Alex",
+    });
+    const note = state.history.find((h) => /\[system note/.test(h.parts?.[0]?.text || ""));
+    expect(note.parts[0].text).toMatch(/book_appointment succeeded.*Do not book it again/);
   });
 
   it("12a. a booked appointment sends the caller an appointment_confirmation SMS", async () => {
