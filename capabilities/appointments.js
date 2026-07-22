@@ -12,7 +12,14 @@
  * Requirements and execution move here in the following commits.
  */
 
-import { resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
+import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
+import {
+  HAS_OFFSET_RE,
+  parseNaiveDateTime,
+  zonedComponentsToUtcMs,
+  zonedWeekdayAndMinutes,
+} from "../lib/capabilities/datetime.js";
+import { noBusinessResult, unknownToolResult } from "../lib/capabilities/results.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -321,6 +328,161 @@ function cancelRescheduleGuidance(hasEhr) {
  * book_appointment; Step B promotes it to the `confirmBeforeWrite` requirement
  * kind so it is enforced at the tool layer instead of merely requested.
  */
+// ---------------------------------------------------------------------------
+// Identity
+//
+// Hand-rolled here for one capability. Step B lifts this into the generic
+// `identity` requirement kind so every capability inherits it, and so a clinic
+// can add its own proof ("dental number") as configuration rather than code.
+// ---------------------------------------------------------------------------
+
+const IDENTITY_MISMATCH_MESSAGE =
+  "I can only make changes to appointments booked under your number. Let me take a message instead.";
+
+/**
+ * Does the given appointment row belong to the current caller?
+ *
+ * Two accepted proofs:
+ *  1. PHONE — the caller's verified number (last 10 digits, from
+ *     ctx.callerPhone: trusted Twilio call metadata, never model-supplied)
+ *     matches the appointment's client_phone. Sufficient on its own.
+ *  2. NAME + LAST-4 — the client_name on file matches the name the caller
+ *     gave AND the caller also states the last 4 digits of the phone number
+ *     the appointment is booked under. Both are model-supplied (i.e. relayed
+ *     from caller speech), so neither is sufficient alone: a name is public
+ *     information, and knowing it must not be enough to cancel a stranger's
+ *     appointment. The last-4 is the second factor.
+ *
+ * @param {{client_phone?: string|null, client_name?: string|null}|null} appointment
+ * @param {{callerPhone?: string|null}} ctx
+ * @param {string|undefined} argsClientName
+ * @param {string|undefined} argsPhoneLast4 - last 4 digits as spoken by the
+ *   caller; non-digits are stripped so "0-0-0-0" / "0 0 0 0" work.
+ * @returns {boolean}
+ */
+function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) {
+  if (!appointment) return false;
+
+  const callerDigits = String(ctx?.callerPhone || "").replace(/\D/g, "");
+  const apptDigits = String(appointment.client_phone || "").replace(/\D/g, "");
+  const phoneMatches =
+    callerDigits.length >= 10 && apptDigits.length >= 10 && callerDigits.slice(-10) === apptDigits.slice(-10);
+  if (phoneMatches) return true;
+
+  const nameArg = String(argsClientName || "").trim().toLowerCase();
+  const apptName = String(appointment.client_name || "").trim().toLowerCase();
+  const nameMatches = nameArg.length > 0 && apptName.length > 0 && nameArg === apptName;
+  if (!nameMatches) return false;
+
+  // Second factor. Fails closed when the appointment on file has no usable
+  // phone number to check against — there is then nothing the caller could
+  // prove, so the name path is simply unavailable for that row.
+  const last4Arg = String(argsPhoneLast4 || "").replace(/\D/g, "");
+  if (last4Arg.length !== 4 || apptDigits.length < 4) return false;
+  return last4Arg === apptDigits.slice(-4);
+}
+
+/**
+ * Fetch the target appointment and verify it belongs to the caller before
+ * cancel/reschedule mutate it. Fails closed: a missing appointmentId, a row
+ * that can't be found (wrong business, bad id), or no phone / name+last-4
+ * match all return false.
+ * @returns {Promise<boolean>}
+ */
+async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
+  if (!appointmentId || !ctx?.businessId) return false;
+  // Identity already proven for this appointment earlier in the call (e.g. a
+  // cancel verified it, then the caller asks to reschedule the same one) —
+  // don't make the caller prove themselves again.
+  if (ctx?.identityVerifiedApptId && appointmentId === ctx.identityVerifiedApptId) return true;
+  const appointment = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
+  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
+}
+
+// ---------------------------------------------------------------------------
+// Booking-time validation + timezone anchoring
+//
+// The model sends scheduled_at as a naive "YYYY-MM-DDTHH:MM[:SS]" string with
+// no timezone information at all. Historically that string went straight to the
+// database: no future/past check, no business-hours check, and no timezone
+// anchoring — a "10:00" booking for an America/Chicago business was stored as
+// if it were 10:00 UTC, six hours off from what the caller agreed to.
+//
+// The business-hours half of this becomes the generic `businessHoursOnly`
+// requirement kind in Step B.
+// ---------------------------------------------------------------------------
+
+const INVALID_DATETIME_MESSAGE =
+  "I didn't catch a valid date and time — could you say the day and time again?";
+const PAST_DATETIME_MESSAGE = "That time has already passed — what day and time works for you?";
+const CLOSED_DAY_MESSAGE = "We're closed that day — would another time work?";
+
+// Small grace window so a booking for "right now" (model latency, clock
+// skew) isn't rejected as already in the past.
+const BOOKING_PAST_GRACE_MS = 60_000;
+
+/**
+ * Validate and timezone-anchor a `book_appointment` scheduled_at value.
+ * @param {unknown} rawScheduledAt
+ * @param {{timezone?: string, businessHours?: object|null}} config
+ * @returns {{ok: true, scheduledAt: string} | {ok: false, message: string}}
+ */
+function validateBookingTime(rawScheduledAt, config) {
+  if (typeof rawScheduledAt !== "string" || !rawScheduledAt.trim()) {
+    return { ok: false, message: INVALID_DATETIME_MESSAGE };
+  }
+  const trimmed = rawScheduledAt.trim();
+  const timezone = config?.timezone || "America/Chicago";
+
+  let targetMs;
+  let storedValue;
+
+  if (HAS_OFFSET_RE.test(trimmed)) {
+    // Already unambiguous (explicit Z/offset) — validate and store verbatim,
+    // no reformatting.
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    targetMs = d.getTime();
+    storedValue = trimmed;
+  } else {
+    const parsed = parseNaiveDateTime(trimmed);
+    if (!parsed) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    targetMs = zonedComponentsToUtcMs(parsed, timezone);
+    if (!Number.isFinite(targetMs)) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    storedValue = new Date(targetMs).toISOString();
+  }
+
+  if (targetMs < Date.now() - BOOKING_PAST_GRACE_MS) {
+    return { ok: false, message: PAST_DATETIME_MESSAGE };
+  }
+
+  // Business-hours check — read the resolved instant's wall-clock weekday and
+  // time-of-day in the business's timezone, and reuse resolveDayHours'
+  // weekly/legacy/null shape handling rather than reinventing it.
+  const { shortWeekday, minutesOfDay } = zonedWeekdayAndMinutes(targetMs, timezone);
+
+  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
+  if (day.closed) {
+    return { ok: false, message: CLOSED_DAY_MESSAGE };
+  }
+  if (day.open && day.close) {
+    const [openH, openM] = day.open.split(":").map(Number);
+    const [closeH, closeM] = day.close.split(":").map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+    if (minutesOfDay < openMinutes || minutesOfDay >= closeMinutes) {
+      const openLabel = formatClockTime(day.open) || day.open;
+      const closeLabel = formatClockTime(day.close) || day.close;
+      return {
+        ok: false,
+        message: `We're not open then — our hours that day are ${openLabel} to ${closeLabel}. Would another time work?`,
+      };
+    }
+  }
+
+  return { ok: true, scheduledAt: storedValue };
+}
+
 const BOOKING_CONFIRMATION_GUARDRAIL =
   `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good"). If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
 
@@ -405,4 +567,309 @@ export default {
       },
     };
   },
+
+  /**
+   * @param {{id?: string, name: string, args?: object}} fc
+   * @param {object} ctx - turn context; ctx.deps carries the injected data
+   *   surface (see services/tools.js). Packs take no service imports of their
+   *   own: services/supabase.js imports the registry for its reserved-name
+   *   list, so a pack importing it back would be a load-order-dependent cycle.
+   *   Injection also means these paths can be tested without module mocks.
+   */
+  async execute(fc, ctx = {}) {
+    switch (fc.name) {
+      case "book_appointment":
+        return bookAppointment(fc, ctx);
+      case "get_caller_appointments_from_db":
+        return lookupCallerAppointments(fc, ctx);
+      case "cancel_appointment_db":
+        return cancelAppointment(fc, ctx);
+      case "reschedule_appointment_db":
+        return rescheduleAppointment(fc, ctx);
+      default:
+        // The EHR tools. They are declared by this pack but executed by the
+        // integration layer, which owns the athenahealth client.
+        return executeViaEhr(fc, ctx);
+    }
+  },
 };
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+async function bookAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc, { appointmentArgs: null });
+
+  const args = fc.args ?? {};
+  const config = ctx.config || {};
+  let bookSuccess = false;
+  let bookMessage =
+    "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+  let anchoredScheduledAt = null;
+  let alreadyBooked = false;
+
+  if (args.scheduled_at) {
+    const validated = validateBookingTime(args.scheduled_at, config);
+    if (!validated.ok) {
+      bookMessage = validated.message;
+    } else {
+      anchoredScheduledAt = validated.scheduledAt;
+      // Idempotency guard: the model sometimes re-issues book_appointment for a
+      // slot this very call already booked (a second FC round, or a later
+      // turn). Re-inserting would hit the unique index and turn a successful
+      // booking into a spurious "slot taken" error — so treat it as the success
+      // it already is, without a second insert or a second confirmation SMS.
+      //
+      // Instant comparison, not string equality: the anchor may be a verbatim
+      // offset-bearing ISO while this round's value is a normalized UTC string
+      // (or vice versa) for the same moment.
+      const lastBookedMs = Date.parse(ctx?.lastBookedAppointment?.scheduled_at ?? "");
+      if (Number.isFinite(lastBookedMs) && lastBookedMs === Date.parse(anchoredScheduledAt)) {
+        alreadyBooked = true;
+        bookSuccess = true;
+        bookMessage =
+          "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
+      } else {
+        const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+        try {
+          const dbId = await ctx.deps.createAppointment({
+            businessId: ctx.businessId,
+            callId: ctx.callId || null,
+            clientName: args.client_name || null,
+            clientPhone: ctx.callerPhone || null,
+            scheduledAt: anchoredScheduledAt,
+            notes,
+          });
+          if (dbId) {
+            bookSuccess = true;
+            bookMessage = "Appointment booked successfully.";
+          }
+        } catch (err) {
+          const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+          bookMessage = isSlotTaken
+            ? "That time slot is no longer available. Please ask the caller to pick a different time."
+            : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+          ctx.deps.captureException(err);
+        }
+      }
+    }
+  }
+
+  // A fresh booking carries appointmentArgs downstream (step transition, owner
+  // notification, confirmation SMS). The already-booked short-circuit must NOT
+  // re-fire those side effects.
+  const appointmentArgs =
+    bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: bookSuccess, message: bookMessage },
+    },
+    stateEffects: {
+      appointmentArgs,
+      toolResult: { name: fc.name, success: bookSuccess, message: bookMessage },
+      toolCallEvent: { name: fc.name, args },
+    },
+  };
+}
+
+async function lookupCallerAppointments(fc, ctx) {
+  // Uses ONLY the verified caller phone from call metadata (ctx.callerPhone),
+  // never a model-supplied number, so a caller cannot fish for someone else's
+  // appointments by asking about a different number.
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const callerPhone = ctx.callerPhone || null;
+  let appointments = [];
+  let selectedAppointmentId;
+
+  if (callerPhone) {
+    appointments = await ctx.deps.listAppointmentsByCaller(ctx.businessId, {
+      clientPhone: callerPhone,
+    });
+    if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
+  }
+
+  return {
+    functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } },
+    stateEffects: {
+      ...(selectedAppointmentId !== undefined ? { selectedAppointmentId } : {}),
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: `Found ${appointments.length} appointments.`,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+/** Shared refusal for a change tool that cannot prove who is calling. */
+function identityMismatchResult(fc) {
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: false, message: IDENTITY_MISMATCH_MESSAGE },
+    },
+    stateEffects: {
+      toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+async function cancelAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
+  if (!appointmentId) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: { success: false, message: "Which appointment?" },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "I need to look up your appointment first.",
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    fc.args?.client_name,
+    fc.args?.phone_last4
+  );
+  if (!identityOk) return identityMismatchResult(fc);
+
+  const ok = await ctx.deps.updateAppointmentStatus(appointmentId, "cancelled", ctx.businessId);
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: ok
+        ? { success: true, message: "That appointment has been cancelled." }
+        : { success: false, message: "I couldn't cancel that appointment." },
+    },
+    stateEffects: {
+      // Identity passed above regardless of the write outcome — remember it so
+      // a retry (or a follow-up reschedule) doesn't re-challenge the caller.
+      identityVerifiedApptId: appointmentId,
+      toolResult: {
+        name: fc.name,
+        success: ok,
+        message: ok ? "Cancelled." : "Couldn't cancel.",
+        appointmentId,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+async function rescheduleAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
+  const newScheduledAt = fc.args?.new_scheduled_at;
+
+  if (!appointmentId || !newScheduledAt) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message: !appointmentId ? "Which appointment?" : "New date/time required.",
+        },
+      },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message: "Missing info." },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    fc.args?.client_name,
+    fc.args?.phone_last4
+  );
+  if (!identityOk) return identityMismatchResult(fc);
+
+  const ok = await ctx.deps.updateAppointment(
+    appointmentId,
+    { scheduled_at: newScheduledAt },
+    ctx.businessId
+  );
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: ok
+        ? { success: true, message: "Rescheduled." }
+        : { success: false, message: "Couldn't reschedule." },
+    },
+    stateEffects: {
+      identityVerifiedApptId: appointmentId,
+      toolResult: {
+        name: fc.name,
+        success: ok,
+        message: ok ? "Rescheduled." : "Couldn't reschedule.",
+        appointmentId,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+/**
+ * Route an EHR-shaped tool to the integration that backs it. Falls through to
+ * "unknown function" when the business has no enabled EHR — which is the
+ * pre-existing behavior for a model that calls a tool it was never offered.
+ */
+async function executeViaEhr(fc, ctx) {
+  const integrations = ctx?.integrations || [];
+  const integration = integrations.find((i) => i.provider === "athenahealth" && i.enabled);
+
+  if (!integration) return unknownToolResult(fc);
+
+  const execResult = await ctx.deps.executeIntegration(integration, {
+    tool: fc.name,
+    arguments: fc.args || {},
+    business_id: ctx.businessId || null,
+    call_id: ctx.callId || null,
+    caller_phone: ctx.callerPhone || null,
+  });
+  const success = execResult.success === true;
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: success
+        ? { success: true, message: execResult.message }
+        : { success: false, error: execResult.error },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success,
+        message: success ? execResult.message : execResult.error || "Something went wrong.",
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}

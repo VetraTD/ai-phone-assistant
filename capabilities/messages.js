@@ -112,4 +112,27 @@ export default {
       },
     };
   },
+
+  /**
+   * Recording is optimistic on purpose: it reports success to the model
+   * immediately and hands the arguments to the engine, which persists the row
+   * and fires the owner notification (lib/voice/session.js applyReply).
+   *
+   * The alternative — awaiting the write here — would make the caller wait on a
+   * database round trip mid-sentence for a message that the fallback flow can
+   * re-record anyway. Message-taking is the safety net beneath every other
+   * capability, so it must never be the thing that stalls a call.
+   */
+  async execute(fc) {
+    const args = fc.args ?? {};
+    const message = "I'll make sure they get your message.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+      stateEffects: {
+        customerRequestArgs: args,
+        toolResult: { name: fc.name, success: true, message },
+        toolCallEvent: { name: fc.name, args },
+      },
+    };
+  },
 };

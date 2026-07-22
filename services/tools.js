@@ -7,220 +7,70 @@ import {
   getAppointmentById,
 } from "./supabase.js";
 import { executeIntegration } from "./integrations.js";
-import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
-import {
-  HAS_OFFSET_RE,
-  parseNaiveDateTime,
-  zonedComponentsToUtcMs,
-  zonedWeekdayAndMinutes,
-} from "../lib/capabilities/datetime.js";
+import { packForTool } from "../capabilities/index.js";
+import { unknownToolResult } from "../lib/capabilities/results.js";
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
 //
-// Originally extracted verbatim (pure move, no behavior change) from
-// services/gemini.js getReplyStreaming's function-call switch. The
-// phase2 fixes (caller-identity guard, end_call step-gating, the
-// get_caller_appointments_from_db lookup-arg bug) now live here.
-// ---------------------------------------------------------------------------
-
-const ATHENA_TOOL_NAMES = [
-  "get_caller_appointments",
-  "get_available_slots",
-  "book_appointment_in_ehr",
-  "cancel_appointment",
-  "reschedule_appointment",
-];
-
-const IDENTITY_MISMATCH_MESSAGE =
-  "I can only make changes to appointments booked under your number. Let me take a message instead.";
-
-// Returned by every appointment tool when the call has no business context
-// (lib/voice/session.js logs "no_business_found" and continues with
-// state.businessId unset). Running these tools unscoped would query across
-// every tenant, so they refuse outright and steer the model to take a message.
-const NO_BUSINESS_MESSAGE =
-  "I'm not able to look that up right now. Let me take a message and someone will follow up.";
-
-/** Uniform "this tool cannot run without a tenant" result. */
-function noBusinessResult(fc) {
-  return {
-    functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: NO_BUSINESS_MESSAGE } },
-    stateEffects: {
-      ...(fc.name === "book_appointment" ? { appointmentArgs: null } : {}),
-      toolResult: { name: fc.name, success: false, message: NO_BUSINESS_MESSAGE },
-      toolCallEvent: { name: fc.name, args: fc.args ?? {} },
-    },
-  };
-}
-
-/**
- * Does the given appointment row belong to the current caller?
- *
- * Two accepted proofs:
- *  1. PHONE — the caller's verified number (last 10 digits, from
- *     ctx.callerPhone: trusted Twilio call metadata, never model-supplied)
- *     matches the appointment's client_phone. Sufficient on its own.
- *  2. NAME + LAST-4 — the client_name on file matches the name the caller
- *     gave AND the caller also states the last 4 digits of the phone number
- *     the appointment is booked under. Both are model-supplied (i.e. relayed
- *     from caller speech), so neither is sufficient alone: a name is public
- *     information, and knowing it must not be enough to cancel a stranger's
- *     appointment. The last-4 is the second factor.
- *
- * @param {{client_phone?: string|null, client_name?: string|null}|null} appointment
- * @param {{callerPhone?: string|null}} ctx
- * @param {string|undefined} argsClientName
- * @param {string|undefined} argsPhoneLast4 - last 4 digits as spoken by the
- *   caller; non-digits are stripped so "0-0-0-0" / "0 0 0 0" work.
- * @returns {boolean}
- */
-function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) {
-  if (!appointment) return false;
-
-  const callerDigits = String(ctx?.callerPhone || "").replace(/\D/g, "");
-  const apptDigits = String(appointment.client_phone || "").replace(/\D/g, "");
-  const phoneMatches =
-    callerDigits.length >= 10 && apptDigits.length >= 10 && callerDigits.slice(-10) === apptDigits.slice(-10);
-  if (phoneMatches) return true;
-
-  const nameArg = String(argsClientName || "").trim().toLowerCase();
-  const apptName = String(appointment.client_name || "").trim().toLowerCase();
-  const nameMatches = nameArg.length > 0 && apptName.length > 0 && nameArg === apptName;
-  if (!nameMatches) return false;
-
-  // Second factor. Fails closed when the appointment on file has no usable
-  // phone number to check against — there is then nothing the caller could
-  // prove, so the name path is simply unavailable for that row.
-  const last4Arg = String(argsPhoneLast4 || "").replace(/\D/g, "");
-  if (last4Arg.length !== 4 || apptDigits.length < 4) return false;
-  return last4Arg === apptDigits.slice(-4);
-}
-
-// ---------------------------------------------------------------------------
-// Booking-time validation + timezone anchoring (book_appointment)
+// Two tools are engine-owned and handled here: set_call_intent and end_call
+// drive the step machine itself rather than doing anything for a business, so
+// they exist on every call regardless of configuration.
 //
-// The model sends scheduled_at as a naive "YYYY-MM-DDTHH:MM[:SS]" string
-// (per the tool's JSON schema — see services/gemini.js buildCallTools) with
-// no timezone info at all. Historically that string went straight to
-// createAppointment: no future/past check, no business-hours check, and no
-// timezone anchoring — a "10:00" booking for an America/Chicago business was
-// stored as if it were 10:00 UTC, six hours off from what the caller agreed
-// to.
+// Everything else dispatches to the capability pack that owns the tool name
+// (capabilities/index.js), falling back to the business's own webhook
+// integrations for names no pack claims.
 //
-// validateBookingTime interprets the naive datetime in ctx.config.timezone
-// and converts it to an unambiguous UTC ISO string using Intl.DateTimeFormat
-// offset math only (no timezone-database dependency) — the same technique
-// services/gemini.js's isBusinessOpen/resolveBusinessHoursForPrompt already
-// use to read "now" in a business's timezone. If the caller already supplied
-// an offset-anchored value (trailing "Z" or "+HH:MM"/"-HH:MM"), it is
-// already unambiguous and is stored byte-for-byte rather than reformatted.
+// Packs deliberately import nothing from services/. They receive their data
+// surface through ctx.deps, assembled below. Two reasons: services/supabase.js
+// imports the capability registry for its reserved-name list, so a pack
+// importing supabase back would be a load-order-dependent cycle; and injection
+// lets a pack's execution paths be tested without mocking modules.
 // ---------------------------------------------------------------------------
 
-const INVALID_DATETIME_MESSAGE =
-  "I didn't catch a valid date and time — could you say the day and time again?";
-const PAST_DATETIME_MESSAGE = "That time has already passed — what day and time works for you?";
-const CLOSED_DAY_MESSAGE = "We're closed that day — would another time work?";
-
-// Small grace window so a booking for "right now" (model latency, clock
-// skew) isn't rejected as already in the past.
-const BOOKING_PAST_GRACE_MS = 60_000;
-
-// Datetime parsing/anchoring primitives live in lib/capabilities/datetime.js —
-// they are general utilities, not appointment logic, and any capability that
-// accepts a wall-clock time from the model needs them.
-
 /**
- * Validate and timezone-anchor a `book_appointment` scheduled_at value
- * before it reaches createAppointment.
- * @param {unknown} rawScheduledAt
- * @param {{timezone?: string, businessHours?: object|null}} config
- * @returns {{ok: true, scheduledAt: string} | {ok: false, message: string}}
+ * The data surface handed to capability packs. Kept explicit — a pack can only
+ * reach what is listed here, so widening a capability's blast radius is a
+ * visible edit rather than a new import inside a pack.
+ *
+ * Exposed as getters, not plain properties, so each binding is resolved when a
+ * pack actually uses it. A plain object literal would resolve all of them while
+ * this module is evaluated, which breaks every test that partially mocks
+ * services/supabase.js: vitest's mock throws on access to an export the mock
+ * does not define, so a suite that never books an appointment would still fail
+ * at import time on createAppointment. Lazy access mirrors the original switch,
+ * where each branch referenced only what that branch needed.
  */
-function validateBookingTime(rawScheduledAt, config) {
-  if (typeof rawScheduledAt !== "string" || !rawScheduledAt.trim()) {
-    return { ok: false, message: INVALID_DATETIME_MESSAGE };
-  }
-  const trimmed = rawScheduledAt.trim();
-  const timezone = config?.timezone || "America/Chicago";
-
-  let targetMs;
-  let storedValue;
-
-  if (HAS_OFFSET_RE.test(trimmed)) {
-    // Already unambiguous (explicit Z/offset) — validate and store verbatim,
-    // no reformatting.
-    const d = new Date(trimmed);
-    if (Number.isNaN(d.getTime())) return { ok: false, message: INVALID_DATETIME_MESSAGE };
-    targetMs = d.getTime();
-    storedValue = trimmed;
-  } else {
-    const parsed = parseNaiveDateTime(trimmed);
-    if (!parsed) return { ok: false, message: INVALID_DATETIME_MESSAGE };
-    targetMs = zonedComponentsToUtcMs(parsed, timezone);
-    if (!Number.isFinite(targetMs)) return { ok: false, message: INVALID_DATETIME_MESSAGE };
-    storedValue = new Date(targetMs).toISOString();
-  }
-
-  if (targetMs < Date.now() - BOOKING_PAST_GRACE_MS) {
-    return { ok: false, message: PAST_DATETIME_MESSAGE };
-  }
-
-  // Business-hours check — read the resolved instant's wall-clock
-  // weekday/time-of-day in the business's timezone (mirrors how
-  // isBusinessOpen reads "now" in that timezone) and reuse resolveDayHours'
-  // weekly/legacy/null shape handling rather than reinventing it.
-  const { shortWeekday, minutesOfDay } = zonedWeekdayAndMinutes(targetMs, timezone);
-
-  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
-  if (day.closed) {
-    return { ok: false, message: CLOSED_DAY_MESSAGE };
-  }
-  if (day.open && day.close) {
-    const [openH, openM] = day.open.split(":").map(Number);
-    const [closeH, closeM] = day.close.split(":").map(Number);
-    const openMinutes = openH * 60 + openM;
-    const closeMinutes = closeH * 60 + closeM;
-    if (minutesOfDay < openMinutes || minutesOfDay >= closeMinutes) {
-      const openLabel = formatClockTime(day.open) || day.open;
-      const closeLabel = formatClockTime(day.close) || day.close;
-      return {
-        ok: false,
-        message: `We're not open then — our hours that day are ${openLabel} to ${closeLabel}. Would another time work?`,
-      };
-    }
-  }
-
-  return { ok: true, scheduledAt: storedValue };
-}
-
-/**
- * Fetch the target appointment and verify it belongs to the caller before
- * cancel/reschedule mutate it. Fails closed: a missing appointmentId, a row
- * that can't be found (wrong business, bad id), or no phone / name+last-4
- * match all return false.
- * @param {string|undefined} appointmentId
- * @param {object} ctx
- * @param {string|undefined} argsClientName
- * @param {string|undefined} argsPhoneLast4
- * @returns {Promise<boolean>}
- */
-async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
-  if (!appointmentId || !ctx?.businessId) return false;
-  // Identity already proven for this appointment earlier in the call (e.g. a
-  // cancel verified it, then the caller asks to reschedule the same one) —
-  // don't make the caller prove themselves again.
-  if (ctx?.identityVerifiedApptId && appointmentId === ctx.identityVerifiedApptId) return true;
-  const appointment = await getAppointmentById(appointmentId, ctx.businessId);
-  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
-}
+const CAPABILITY_DEPS = {
+  get createAppointment() {
+    return createAppointment;
+  },
+  get listAppointmentsByCaller() {
+    return listAppointmentsByCaller;
+  },
+  get getAppointmentById() {
+    return getAppointmentById;
+  },
+  get updateAppointmentStatus() {
+    return updateAppointmentStatus;
+  },
+  get updateAppointment() {
+    return updateAppointment;
+  },
+  get executeIntegration() {
+    return executeIntegration;
+  },
+  get captureException() {
+    return captureException;
+  },
+};
 
 /**
  * Execute a single Gemini function call and report the state effects the
  * caller (getReplyStreaming) should apply to its turn accumulators.
  *
  * @param {{id: string, name: string, args: object}} fc - one entry from response.functionCalls
- * @param {object} ctx - turn/call context the switch reads
+ * @param {object} ctx - turn/call context
  * @param {string|null} [ctx.businessId]
  * @param {string|null} [ctx.callerPhone]
  * @param {string|null} [ctx.callId]
@@ -228,9 +78,7 @@ async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, arg
  * @param {string|null} [ctx.selectedAppointmentId]
  * @param {string} [ctx.step] - current call step (e.g. "confirm", "ending") — gates end_call
  * @param {boolean} [ctx.transferAllowed] - gates request_transfer
- * @param {object} [ctx.config] - normalised business config; book_appointment reads
- *   ctx.config.timezone/businessHours to validate + timezone-anchor scheduled_at
- *   (see validateBookingTime above)
+ * @param {object} [ctx.config] - normalised business config
  * @returns {Promise<{
  *   functionResponse: {id: string, name: string, response: object},
  *   stateEffects: {
@@ -259,98 +107,15 @@ export async function executeToolCall(fc, ctx) {
       };
     }
 
-    case "book_appointment": {
-      if (!ctx?.businessId) return noBusinessResult(fc);
-      const args = fc.args ?? {};
-      const businessId = ctx.businessId;
-      const callerPhone = ctx?.callerPhone || null;
-      const callId = ctx?.callId || null;
-      const config = ctx?.config || {};
-      let bookSuccess = false;
-      let bookMessage = "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
-      let anchoredScheduledAt = null;
-
-      let alreadyBooked = false;
-
-      if (args.scheduled_at) {
-        const validated = validateBookingTime(args.scheduled_at, config);
-        if (!validated.ok) {
-          bookMessage = validated.message;
-        } else {
-          anchoredScheduledAt = validated.scheduledAt;
-          // Idempotency guard: the model sometimes re-issues book_appointment
-          // for a slot this very call already booked (a second FC round, or a
-          // later turn). Re-inserting would hit the unique index and turn a
-          // successful booking into a spurious "slot taken" error — so treat
-          // it as the success it already is, without a second insert or a
-          // second confirmation SMS.
-          // Instant comparison, not string equality: the anchor may be a
-          // verbatim offset-bearing ISO while this round's value is a
-          // normalized UTC string (or vice versa) for the same moment.
-          const lastBookedMs = Date.parse(ctx?.lastBookedAppointment?.scheduled_at ?? "");
-          if (Number.isFinite(lastBookedMs) && lastBookedMs === Date.parse(anchoredScheduledAt)) {
-            alreadyBooked = true;
-            bookSuccess = true;
-            bookMessage =
-              "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
-          } else {
-            const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
-            try {
-              const dbId = await createAppointment({
-                businessId,
-                callId,
-                clientName: args.client_name || null,
-                clientPhone: callerPhone || null,
-                scheduledAt: anchoredScheduledAt,
-                notes,
-              });
-              if (dbId) { bookSuccess = true; bookMessage = "Appointment booked successfully."; }
-            } catch (err) {
-              const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
-              bookMessage = isSlotTaken
-                ? "That time slot is no longer available. Please ask the caller to pick a different time."
-                : "There was an error booking the appointment. Please take the caller's details for follow-up.";
-              captureException(err);
-            }
-          }
-        }
-      }
-      // A fresh booking carries appointmentArgs downstream (step transition,
-      // owner notification, confirmation SMS). The already-booked short-
-      // circuit must NOT re-fire those side effects.
-      const appointmentArgs =
-        bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: bookSuccess, message: bookMessage } },
-        stateEffects: {
-          appointmentArgs,
-          toolResult: { name: fc.name, success: bookSuccess, message: bookMessage },
-          toolCallEvent: { name: fc.name, args },
-        },
-      };
-    }
-
-    case "record_customer_request": {
-      const args = fc.args ?? {};
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: true, message: "I'll make sure they get your message." } },
-        stateEffects: {
-          customerRequestArgs: args,
-          toolResult: { name: fc.name, success: true, message: "I'll make sure they get your message." },
-          toolCallEvent: { name: fc.name, args },
-        },
-      };
-    }
-
     case "end_call": {
       // Only allow ending the call during the confirm or ending steps. This
       // makes it much less likely to hang up before the caller has a chance
-      // to say they don't need anything else. Ported from the legacy
-      // (pre-streaming) getReply's end_call gating.
-      // completedActionThisTurn: an earlier FC round of this same turn
-      // already booked/cancelled/rescheduled/recorded — the step machine only
-      // advances to "confirm" after the whole turn, so without this the model
-      // could never wrap up cleanly in the same turn as the action.
+      // to say they don't need anything else.
+      //
+      // completedActionThisTurn: an earlier FC round of this same turn already
+      // booked/cancelled/rescheduled/recorded — the step machine only advances
+      // to "confirm" after the whole turn, so without this the model could
+      // never wrap up cleanly in the same turn as the action.
       if (ctx?.step === "confirm" || ctx?.step === "ending" || ctx?.completedActionThisTurn) {
         const endCallArgs = fc.args ?? {};
         return {
@@ -367,190 +132,61 @@ export async function executeToolCall(fc, ctx) {
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {
-          toolResult: { name: fc.name, success: false, message: "Is there anything else I can help you with?" },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
-    }
-
-    case "get_caller_appointments_from_db": {
-      // Use only the verified caller phone from call metadata (ctx.callerPhone)
-      // — never a model-supplied phone number — so a caller can't fish for
-      // another customer's appointments by asking about a different number.
-      if (!ctx?.businessId) return noBusinessResult(fc);
-      const callerPhone = ctx?.callerPhone || null;
-      const businessId = ctx.businessId;
-      let appointments = [];
-      let selectedAppointmentId;
-      if (callerPhone) {
-        appointments = await listAppointmentsByCaller(businessId, { clientPhone: callerPhone });
-        if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
-      }
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } },
-        stateEffects: {
-          ...(selectedAppointmentId !== undefined ? { selectedAppointmentId } : {}),
-          toolResult: { name: fc.name, success: true, message: `Found ${appointments.length} appointments.` },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
-    }
-
-    case "cancel_appointment_db": {
-      if (!ctx?.businessId) return noBusinessResult(fc);
-      const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
-      const businessId = ctx.businessId;
-      if (!appointmentId) {
-        return {
-          functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "Which appointment?" } },
-          stateEffects: {
-            toolResult: { name: fc.name, success: false, message: "I need to look up your appointment first." },
-            toolCallEvent: null,
-          },
-        };
-      }
-      const identityOk = await verifyAppointmentIdentity(
-        appointmentId,
-        ctx,
-        fc.args?.client_name,
-        fc.args?.phone_last4
-      );
-      if (!identityOk) {
-        return {
-          functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: IDENTITY_MISMATCH_MESSAGE } },
-          stateEffects: {
-            toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE },
-            toolCallEvent: { name: fc.name, args: fc.args },
-          },
-        };
-      }
-      const ok = await updateAppointmentStatus(appointmentId, "cancelled", businessId);
-      return {
-        functionResponse: {
-          id: fc.id,
-          name: fc.name,
-          response: ok
-            ? { success: true, message: "That appointment has been cancelled." }
-            : { success: false, message: "I couldn't cancel that appointment." },
-        },
-        stateEffects: {
-          // Identity passed above regardless of the write outcome — remember
-          // it so a retry (or a follow-up reschedule) doesn't re-challenge.
-          identityVerifiedApptId: appointmentId,
-          toolResult: { name: fc.name, success: ok, message: ok ? "Cancelled." : "Couldn't cancel.", appointmentId },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
-    }
-
-    case "reschedule_appointment_db": {
-      if (!ctx?.businessId) return noBusinessResult(fc);
-      const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
-      const newScheduledAt = fc.args?.new_scheduled_at;
-      const businessId = ctx.businessId;
-      if (!appointmentId || !newScheduledAt) {
-        return {
-          functionResponse: {
-            id: fc.id,
+          toolResult: {
             name: fc.name,
-            response: { success: false, message: !appointmentId ? "Which appointment?" : "New date/time required." },
+            success: false,
+            message: "Is there anything else I can help you with?",
           },
-          stateEffects: {
-            toolResult: { name: fc.name, success: false, message: "Missing info." },
-            toolCallEvent: null,
-          },
-        };
-      }
-      const identityOk = await verifyAppointmentIdentity(
-        appointmentId,
-        ctx,
-        fc.args?.client_name,
-        fc.args?.phone_last4
-      );
-      if (!identityOk) {
-        return {
-          functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: IDENTITY_MISMATCH_MESSAGE } },
-          stateEffects: {
-            toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE },
-            toolCallEvent: { name: fc.name, args: fc.args },
-          },
-        };
-      }
-      const ok = await updateAppointment(appointmentId, { scheduled_at: newScheduledAt }, businessId);
-      return {
-        functionResponse: {
-          id: fc.id,
-          name: fc.name,
-          response: ok
-            ? { success: true, message: "Rescheduled." }
-            : { success: false, message: "Couldn't reschedule." },
-        },
-        stateEffects: {
-          identityVerifiedApptId: appointmentId,
-          toolResult: { name: fc.name, success: ok, message: ok ? "Rescheduled." : "Couldn't reschedule.", appointmentId },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
-    }
-
-    case "request_transfer": {
-      const reason = fc.args?.reason || null;
-      if (!ctx?.transferAllowed) {
-        const message = "Transfer is not available right now. Offer to take a message instead.";
-        return {
-          functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
-          stateEffects: {
-            toolResult: { name: fc.name, success: false, message },
-            toolCallEvent: { name: fc.name, args: fc.args },
-          },
-        };
-      }
-      const message = "Let the caller know you are transferring them now, briefly.";
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
-        stateEffects: {
-          transferRequested: { reason },
-          toolResult: { name: fc.name, success: true, message },
           toolCallEvent: { name: fc.name, args: fc.args },
         },
       };
     }
 
     default: {
-      // Dynamic integration tools (webhook, athenahealth)
-      const integrations = ctx?.integrations || [];
-      const businessId = ctx?.businessId || null;
-      const callerPhone = ctx?.callerPhone || null;
-      const callId = ctx?.callId || null;
-      const isAthenaTool = ATHENA_TOOL_NAMES.includes(fc.name);
-      const integration = isAthenaTool
-        ? integrations.find((i) => i.provider === "athenahealth" && i.enabled)
-        : integrations.find((i) => i.name === fc.name);
-
-      if (integration && integration.enabled) {
-        const execResult = await executeIntegration(integration, { tool: fc.name, arguments: fc.args || {}, business_id: businessId, call_id: callId, caller_phone: callerPhone });
-        const success = execResult.success === true;
-        return {
-          functionResponse: {
-            id: fc.id,
-            name: fc.name,
-            response: success
-              ? { success: true, message: execResult.message }
-              : { success: false, error: execResult.error },
-          },
-          stateEffects: {
-            toolResult: { name: fc.name, success, message: success ? execResult.message : (execResult.error || "Something went wrong.") },
-            toolCallEvent: { name: fc.name, args: fc.args },
-          },
-        };
+      const pack = packForTool(fc.name);
+      if (pack && typeof pack.execute === "function") {
+        return pack.execute(fc, { ...ctx, deps: CAPABILITY_DEPS });
       }
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { error: "Unknown function" } },
-        stateEffects: {
-          toolResult: { name: fc.name, success: false, message: "I'm sorry, I wasn't able to do that." },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
+      return executeWebhookTool(fc, ctx);
     }
   }
+}
+
+/**
+ * A tool no capability claims: the business defined it itself as a webhook
+ * integration. This is the generic escape hatch — the long tail no capability
+ * will ever anticipate — so it is engine-owned rather than pack-owned.
+ */
+async function executeWebhookTool(fc, ctx) {
+  const integrations = ctx?.integrations || [];
+  const integration = integrations.find((i) => i.name === fc.name);
+
+  if (!integration || !integration.enabled) return unknownToolResult(fc);
+
+  const execResult = await executeIntegration(integration, {
+    tool: fc.name,
+    arguments: fc.args || {},
+    business_id: ctx?.businessId || null,
+    call_id: ctx?.callId || null,
+    caller_phone: ctx?.callerPhone || null,
+  });
+  const success = execResult.success === true;
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: success
+        ? { success: true, message: execResult.message }
+        : { success: false, error: execResult.error },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success,
+        message: success ? execResult.message : execResult.error || "Something went wrong.",
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
 }

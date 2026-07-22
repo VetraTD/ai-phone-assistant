@@ -68,4 +68,37 @@ export default {
       },
     };
   },
+
+  /**
+   * The gate that makes always-registering safe: the tool exists on every call,
+   * but actually transferring is refused here when the business has no transfer
+   * number, has transfer_policy "never", or is outside the hours its policy
+   * allows. Refusing at execution rather than at registration is what lets a
+   * caller ask for a person in any language and still get a coherent answer
+   * instead of the model improvising around a missing tool.
+   */
+  async execute(fc, ctx = {}) {
+    const reason = fc.args?.reason || null;
+
+    if (!ctx.transferAllowed) {
+      const message = "Transfer is not available right now. Offer to take a message instead.";
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+        stateEffects: {
+          toolResult: { name: fc.name, success: false, message },
+          toolCallEvent: { name: fc.name, args: fc.args },
+        },
+      };
+    }
+
+    const message = "Let the caller know you are transferring them now, briefly.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+      stateEffects: {
+        transferRequested: { reason },
+        toolResult: { name: fc.name, success: true, message },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  },
 };
