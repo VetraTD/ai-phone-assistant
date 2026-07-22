@@ -16,7 +16,7 @@ import {
 } from "../lib/capabilities/effects.js";
 
 function makeEngine() {
-  const log = { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
+  const log = { error: vi.fn(), info: vi.fn(), debug: vi.fn() };
   const captureException = vi.fn();
   return {
     engine: { STEPS: { CONFIRM: "confirm" }, deps: { log, captureException } },
@@ -127,9 +127,10 @@ describe("dispatchCapabilityEffects", () => {
     expect(() =>
       dispatchCapabilityEffects([{ capability: "no_such_pack", type: "x" }], engine)
     ).not.toThrow();
-    expect(log.warn).toHaveBeenCalledWith(
+    // lib/logger.js has no warn level; the convention is error + severity.
+    expect(log.error).toHaveBeenCalledWith(
       "capability_effect_unhandled",
-      expect.objectContaining({ capability: "no_such_pack" })
+      expect.objectContaining({ capability: "no_such_pack", severity: "warn" })
     );
   });
 

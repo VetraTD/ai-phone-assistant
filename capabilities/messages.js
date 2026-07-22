@@ -97,6 +97,22 @@ export default {
   adapterKind: null,
 
   toolNames: [RECORD_CUSTOMER_REQUEST_DECLARATION.name],
+  configSchema: {
+    require: {
+      identity: {
+        type: "identityFields",
+        label: "What must the caller provide before we take a message?",
+        builtinOptions: ["name", "callback_number"],
+        allowCustom: true,
+      },
+    },
+    notes: {
+      type: "longtext",
+      label: "Anything specific about how you take messages?",
+      placeholder: "e.g. Always ask which department the message is for",
+    },
+  },
+
 
   actionTools: ["record_customer_request"],
 

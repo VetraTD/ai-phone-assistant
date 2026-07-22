@@ -85,6 +85,28 @@ export default {
   adapterKind: null,
 
   toolNames: [RECORD_QUOTE_REQUEST_DECLARATION.name],
+  configSchema: {
+    adapter: {
+      type: "choice",
+      label: "Where should quote requests go?",
+      options: ["internal", "webhook"],
+      default: "internal",
+    },
+    require: {
+      identity: {
+        type: "identityFields",
+        label: "What must the caller provide before we log a quote request?",
+        builtinOptions: ["name", "callback_number"],
+        allowCustom: true,
+      },
+    },
+    notes: {
+      type: "longtext",
+      label: "Anything specific about how you quote?",
+      placeholder: "e.g. Always ask whether it's an emergency. Never quote a price on the phone.",
+    },
+  },
+
 
   // Caller-visible completion: recording the request is the thing the caller
   // called to do, so a success may wrap up the call in the same turn.

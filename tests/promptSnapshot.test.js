@@ -111,22 +111,14 @@ const FIXTURES = {
     },
   },
 
-  // Intended as "core tasks only, no modules". It is NOT — and the snapshot
-  // records that faithfully rather than hiding it.
+  // Core tasks only, no modules — and now it genuinely is.
   //
-  // KNOWN DEFECT (pre-existing, captured deliberately): normalizeAllowedTasks
-  // (services/supabase.js:61) treats an empty array and an unset value
-  // identically, both falling back to DEFAULT_MODULE_TASKS = ["book_appointment"].
-  // So this fixture still registers book_appointment, and there is currently NO
-  // representable state meaning "this business does not do appointments" —
-  // a blocker for any non-appointment SMB. migration 013 sets the column
-  // default to '["book_appointment"]' as well.
-  //
-  // Not fixed here: Step A of the refactor is byte-identical behavior, so the
-  // snapshot must capture today's output, defect included. Step B's explicit
-  // per-capability `enabled` rows (database/020_business_capabilities.sql)
-  // dissolve the unset-vs-empty ambiguity; this snapshot is expected to change
-  // at that point, and that change is the fix landing.
+  // This fixture used to register book_appointment despite asking for nothing:
+  // normalizeAllowedTasks treated an empty array and an unset value alike, both
+  // defaulting to ["book_appointment"], so a business that does not do
+  // appointments was unrepresentable. The snapshot captured that faithfully
+  // rather than hiding it, and its change when the fix landed IS the evidence
+  // the fix works: no appointment tool, no appointment clause in CAPABILITIES.
   "messages-only": {
     config: {
       businessName: "Dave's Plumbing",

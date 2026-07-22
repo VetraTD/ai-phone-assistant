@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
-import { allCapabilityToolNames } from "../capabilities/index.js";
+import { allCapabilityToolNames, getPack } from "../capabilities/index.js";
+import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -60,8 +61,19 @@ const APPOINTMENTS_EXPAND = ["book_appointment", "check_appointment", "cancel_re
  * @returns {Array<string>}
  */
 export function normalizeAllowedTasks(raw) {
-  if (!Array.isArray(raw) || raw.length === 0) {
+  // UNSET (null/undefined) means "never configured" -> sensible default.
+  // An EMPTY ARRAY means "explicitly no modules", which used to be
+  // indistinguishable from unset: both fell through to ["book_appointment"],
+  // so there was no way to express a business that does not do appointments at
+  // all. Every non-appointment business was literally unrepresentable.
+  if (raw === null || raw === undefined) {
     return [...CORE_TASKS, ...DEFAULT_MODULE_TASKS];
+  }
+  if (!Array.isArray(raw)) {
+    return [...CORE_TASKS, ...DEFAULT_MODULE_TASKS];
+  }
+  if (raw.length === 0) {
+    return [...CORE_TASKS];
   }
   const expanded = raw.includes("appointments")
     ? [...raw.filter((t) => t !== "appointments"), ...APPOINTMENTS_EXPAND]
@@ -83,7 +95,98 @@ const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];
  * @param {object|null} business - Row from the businesses table (via select("*"))
  * @returns {object} Normalised config with all fields defaulted
  */
-export function loadConfig(business) {
+/**
+ * Which module tasks each capability owns. Used to switch a capability off
+ * wholesale when its business_capabilities row says enabled = false.
+ */
+const CAPABILITY_MODULE_TASKS = {
+  appointments: ["book_appointment", "check_appointment", "cancel_reschedule"],
+  quotes: ["quote_request"],
+  directions: ["directions_location"],
+  forms: ["form_document_request"],
+  general_question: ["general_question"],
+};
+
+/**
+ * Fetch a business's capability rows.
+ *
+ * Returns [] when the table is missing or the business has none, which is what
+ * makes the dual-read safe: no rows means fall back to allowed_tasks, so new
+ * code against an un-migrated database still works rather than silently
+ * disabling every capability mid-call.
+ *
+ * @param {string} businessId
+ * @returns {Promise<Array<object>>}
+ */
+export async function fetchBusinessCapabilities(businessId) {
+  if (!supabase || !businessId) return [];
+  const { data, error } = await supabase
+    .from("business_capabilities")
+    .select("*")
+    .eq("business_id", businessId);
+  if (error) {
+    log.error("db_error", { operation: "fetchBusinessCapabilities", error: error.message });
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Build the per-capability config map, and apply any explicit disables.
+ *
+ * @param {Array<object>} rows - business_capabilities rows
+ * @param {string[]} allowedTasks - module tasks from the legacy column
+ * @param {string} businessId
+ * @returns {{capabilities: object, allowedTasks: string[]}}
+ */
+function applyCapabilityRows(rows, allowedTasks, businessId) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { capabilities: {}, allowedTasks };
+  }
+
+  const capabilities = {};
+  let tasks = [...allowedTasks];
+
+  for (const row of rows) {
+    const pack = getPack(row.capability_id);
+    if (!pack) {
+      // A row for a capability this build does not have. Expected during a
+      // rollback; ignore it rather than failing the call.
+      log.error("capability_row_unknown", {
+        businessId,
+        capability: row.capability_id,
+        severity: "warn",
+      });
+      continue;
+    }
+
+    if (row.enabled === false) {
+      // The explicit "off" that allowed_tasks could never express.
+      const owned = CAPABILITY_MODULE_TASKS[row.capability_id] || [];
+      tasks = tasks.filter((t) => !owned.includes(t));
+      continue;
+    }
+
+    capabilities[row.capability_id] = {
+      enabled: true,
+      ...(row.adapter ? { adapter: row.adapter } : {}),
+      ...(row.adapter_config && typeof row.adapter_config === "object"
+        ? { adapterConfig: row.adapter_config }
+        : {}),
+      ...validateCapabilityConfig(row.config, pack, businessId),
+    };
+  }
+
+  return { capabilities, allowedTasks: tasks };
+}
+
+/**
+ * @param {object|null} business - row from the businesses table
+ * @param {Array<object>} [capabilityRows] - rows from business_capabilities.
+ *   Optional: a caller without them gets today's behavior (no requirements
+ *   configured), which is what keeps the dual-read honest.
+ */
+export function loadConfig(business, capabilityRows = null) {
   if (!business) {
     return {
       businessName: "our office",
@@ -93,6 +196,7 @@ export function loadConfig(business) {
       businessHours: null,
       transferPhoneNumber: null,
       allowedTasks: normalizeAllowedTasks(null),
+      capabilities: {},
       mainPhone: null,
       generalInfo: null,
       recordingDisclosureEnabled: false,
@@ -115,6 +219,12 @@ export function loadConfig(business) {
     ? business.transfer_policy
     : "always";
 
+  const baseTasks = normalizeAllowedTasks(business.allowed_tasks);
+  // Rows arrive embedded on the business row (see lookupBusinessByPhone); an
+  // explicit argument overrides, which is what the tests and the dashboard use.
+  const rows = capabilityRows ?? business.business_capabilities ?? [];
+  const { capabilities, allowedTasks } = applyCapabilityRows(rows, baseTasks, business.id);
+
   return {
     businessName: business.name || "our office",
     greeting: business.greeting || DEFAULT_GREETING,
@@ -122,7 +232,8 @@ export function loadConfig(business) {
     timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
     businessHours: business.business_hours || null,
     transferPhoneNumber: business.transfer_phone_number || null,
-    allowedTasks: normalizeAllowedTasks(business.allowed_tasks),
+    allowedTasks,
+    capabilities,
     mainPhone: business.main_phone || null,
     generalInfo: business.general_info || null,
     recordingDisclosureEnabled: !!business.recording_disclosure_enabled,
@@ -165,15 +276,38 @@ export async function fetchBusinessById(businessId) {
  */
 export async function lookupBusinessByPhone(twilioNumber) {
   if (!supabase) return null;
+
+  // Capability rows come back embedded in the SAME round trip. They are needed
+  // before the first turn, because they decide which tools exist and which
+  // requirements are enforced — fetching them in the background alongside
+  // knowledge and integrations would leave a caller who speaks immediately
+  // running turn one with no requirements applied, which for an identity check
+  // is not an acceptable race. Embedding avoids paying a second round trip on
+  // the pickup path, which is latency-critical.
   const { data, error } = await supabase
     .from("businesses")
-    .select("*")
+    .select("*, business_capabilities(*)")
     .eq("phone_number", twilioNumber)
     .limit(1)
     .maybeSingle();
+
   if (error) {
+    // An un-migrated database has no business_capabilities table, and the
+    // embed makes the whole query fail rather than returning the business
+    // without it. Falling back to the plain select keeps calls answerable
+    // during a partial deploy — the dual-read then uses allowed_tasks.
     log.error("db_error", { operation: "lookupBusinessByPhone", error: error.message });
-    return null;
+    const plain = await supabase
+      .from("businesses")
+      .select("*")
+      .eq("phone_number", twilioNumber)
+      .limit(1)
+      .maybeSingle();
+    if (plain.error) {
+      log.error("db_error", { operation: "lookupBusinessByPhone_fallback", error: plain.error.message });
+      return null;
+    }
+    return plain.data;
   }
   return data;
 }

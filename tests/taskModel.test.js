@@ -17,10 +17,23 @@ describe("services/supabase.js — normalizeAllowedTasks", () => {
     expect(result).toHaveLength(CORE_TASKS.length + 1);
   });
 
-  it("default (empty array raw) returns CORE + book_appointment", () => {
+  it("UNSET (null/undefined) returns CORE + the default module", () => {
+    // Never configured -> a sensible default.
+    for (const raw of [null, undefined]) {
+      const result = normalizeAllowedTasks(raw);
+      expect(result).toEqual(expect.arrayContaining([...CORE_TASKS, "book_appointment"]));
+      expect(result).toHaveLength(CORE_TASKS.length + 1);
+    }
+  });
+
+  it("an EMPTY ARRAY returns CORE only — explicitly no modules", () => {
+    // Empty and unset used to be indistinguishable, both defaulting to
+    // ["book_appointment"], so there was no way to express a business that does
+    // not do appointments. Every non-appointment business — a plumber, a law
+    // firm — was literally unrepresentable.
     const result = normalizeAllowedTasks([]);
-    expect(result).toEqual(expect.arrayContaining([...CORE_TASKS, "book_appointment"]));
-    expect(result).toHaveLength(CORE_TASKS.length + 1);
+    expect(result).toEqual([...CORE_TASKS]);
+    expect(result).not.toContain("book_appointment");
   });
 
   it("expands legacy 'appointments' bundle into the three appointment modules", () => {

@@ -186,6 +186,23 @@ CREATE TABLE oauth_states (
   consumed_at timestamptz
 );
 
+-- Migration 020: per-business capability configuration. Replaces
+-- businesses.allowed_tasks as the source of truth for what a business can do
+-- and how it does it — allowed_tasks could say THAT a business books
+-- appointments, never HOW, and could not express "does not do appointments"
+-- at all.
+CREATE TABLE business_capabilities (
+  business_id    uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  capability_id  text NOT NULL,
+  enabled        boolean NOT NULL DEFAULT true,
+  adapter        text,
+  adapter_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  config         jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (business_id, capability_id)
+);
+
 -- ============================================================
 -- Indexes
 -- ============================================================
@@ -202,6 +219,8 @@ CREATE INDEX idx_integrations_business_enabled ON integrations (business_id, ena
 CREATE INDEX idx_calendar_connections_business ON calendar_connections (business_id);
 -- Migration 019: supports periodic cleanup of expired/consumed OAuth nonces.
 CREATE INDEX idx_oauth_states_created_at ON oauth_states (created_at);
+-- Migration 020: capability lookup is on the hot path — every call loads it.
+CREATE INDEX idx_business_capabilities_business ON business_capabilities (business_id);
 
 -- Partial unique index (migration 009): a business cannot hold two
 -- 'scheduled' appointments at the same instant. Cancelled/completed rows do

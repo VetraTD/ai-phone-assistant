@@ -11,8 +11,7 @@
             "general_question",
             "take_message",
             "callback_request",
-            "transfer_human",
-            "book_appointment"
+            "transfer_human"
           ],
           "description": "The caller's primary intent"
         }
@@ -35,34 +34,6 @@
       },
       "required": [
         "reason"
-      ]
-    }
-  },
-  {
-    "name": "book_appointment",
-    "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "client_name": {
-          "type": "string",
-          "description": "Full name of the client"
-        },
-        "scheduled_at": {
-          "type": "string",
-          "description": "ISO 8601 datetime for the appointment (e.g. 2025-03-15T10:00:00)"
-        },
-        "service_type": {
-          "type": "string",
-          "description": "Type of service or consultation requested"
-        },
-        "notes": {
-          "type": "string",
-          "description": "Any additional notes about the appointment or client needs"
-        }
-      },
-      "required": [
-        "scheduled_at"
       ]
     }
   },

@@ -517,6 +517,43 @@ export default {
   core: false,
   adapterKind: "scheduling",
 
+  /**
+   * What an operator may configure. Also what a dashboard renders to draw this
+   * capability's settings card, so a new capability's screen appears without
+   * anyone hand-writing a component.
+   */
+  configSchema: {
+    adapter: {
+      type: "choice",
+      label: "Where do appointments live?",
+      options: ["internal", "athenahealth", "webhook"],
+      default: "internal",
+    },
+    require: {
+      identity: {
+        type: "identityFields",
+        label: "What must the caller provide before we look up or change an appointment?",
+        builtinOptions: ["name", "dob", "phone_on_file"],
+        allowCustom: true,
+      },
+      confirmBeforeWrite: {
+        type: "toggle",
+        label: "Read details back and require a clear yes before booking",
+        default: false,
+      },
+      businessHoursOnly: {
+        type: "toggle",
+        label: "Only allow booking changes during opening hours",
+        default: false,
+      },
+    },
+    notes: {
+      type: "longtext",
+      label: "Anything specific about how you book?",
+      placeholder: "e.g. Ask if they're a new or existing patient first",
+    },
+  },
+
   /** Every tool this pack can own, for registry dispatch. */
   toolNames: [
     BOOK_APPOINTMENT_DECLARATION.name,
