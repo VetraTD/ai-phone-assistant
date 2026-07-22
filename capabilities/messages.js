@@ -47,6 +47,42 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
   },
 };
 
+/**
+ * The message-taking protocol — its own prompt section, not a bullet, because
+ * it is a procedure the model must follow in order rather than a rule it must
+ * respect. The read-back in step 5 is what stops the receptionist recording a
+ * misheard callback number, which is the single most damaging failure mode for
+ * this capability: the caller believes they will hear back, and never does.
+ */
+const MESSAGE_PROTOCOL_SECTION =
+  `=== MESSAGE PROTOCOL ===\n` +
+  `TAKING A MESSAGE — follow this exactly:\n` +
+  `1. Name: ask for it. If it's unusual or you're unsure of spelling, confirm: "Could you spell that for me?"\n` +
+  `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
+  `3. Reason: ask briefly what the call is regarding.\n` +
+  `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
+  `5. Read the full message back once: name, number, reason. Correct anything they change.\n` +
+  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."\n` +
+  `Record it with record_customer_request only AFTER the read-back is confirmed.`;
+
+/**
+ * Step guidance for the two message intents. Callbacks additionally collect a
+ * preferred time; everything else is shared.
+ * @param {"take_message"|"callback_request"} intent
+ */
+function messageGuidance(intent) {
+  return (
+    `Your task: Follow the message protocol, one question at a time: ` +
+    `(1) ask for their name; (2) ask for the best callback number and read it back digit by digit to confirm; ` +
+    `(3) ask briefly what the call is regarding` +
+    (intent === "callback_request" ? ` and their preferred callback time` : ``) +
+    `; (4) ask if it's urgent or if the next business day is fine; ` +
+    `(5) read the full message back once — name, number, reason — and correct anything they change; ` +
+    `(6) promise the callback. ` +
+    `Only call record_customer_request after the read-back is confirmed.`
+  );
+}
+
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "messages",
@@ -60,5 +96,20 @@ export default {
   tools() {
     // Core: registered on every call regardless of configuration.
     return [RECORD_CUSTOMER_REQUEST_DECLARATION];
+  },
+
+  prompt() {
+    return {
+      static: {
+        capabilities: ["take messages and schedule callbacks for follow-up"],
+        protocols: [MESSAGE_PROTOCOL_SECTION],
+      },
+      dynamic: {
+        stepGuidance: {
+          take_message: messageGuidance("take_message"),
+          callback_request: messageGuidance("callback_request"),
+        },
+      },
+    };
   },
 };

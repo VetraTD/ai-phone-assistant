@@ -8,18 +8,37 @@ import {
   collectAdapterTools,
   actionToolNames,
 } from "../capabilities/index.js";
+import { collectStaticFragments, collectStepGuidance } from "../lib/capabilities/promptAssembler.js";
 import { ACTION_TOOL_NAMES, buildCallTools } from "../services/gemini.js";
 import { BUILTIN_TOOL_NAMES, CORE_TASKS } from "../services/supabase.js";
 
 describe("capability registry — pack contract", () => {
-  it("every pack declares an id, toolNames, and at least one tool source", () => {
+  it("every pack declares an id, toolNames, and contributes something", () => {
     for (const pack of listPacks()) {
       expect(typeof pack.id, JSON.stringify(pack.id)).toBe("string");
       expect(pack.id.length).toBeGreaterThan(0);
       expect(Array.isArray(pack.toolNames), `${pack.id}.toolNames`).toBe(true);
-      const hasSource =
+
+      // A pack need not have tools — general_question, quotes, directions and
+      // forms contribute only a CAPABILITIES clause, and a contract that
+      // required tools would have been an appointment framework in disguise.
+      // It must contribute SOMETHING, though: a pack that supplies neither
+      // tools nor prompt text is registered for no reason.
+      const contributes =
+        typeof pack.tools === "function" ||
+        typeof pack.adapterTools === "function" ||
+        typeof pack.prompt === "function";
+      expect(contributes, `${pack.id} contributes neither tools nor prompt text`).toBe(true);
+    }
+  });
+
+  it("a pack with no tools declares no tool names", () => {
+    for (const pack of listPacks()) {
+      const hasToolFns =
         typeof pack.tools === "function" || typeof pack.adapterTools === "function";
-      expect(hasSource, `${pack.id} contributes no tools`).toBe(true);
+      if (!hasToolFns) {
+        expect(pack.toolNames, `${pack.id} declares names it cannot emit`).toEqual([]);
+      }
     }
   });
 
@@ -155,6 +174,82 @@ describe("capability registry — reserved tool names", () => {
       const isPackTool = packForTool(name) !== null;
       expect(isEngineTool || isPackTool, `${name} is reserved but nothing owns it`).toBe(true);
     }
+  });
+});
+
+describe("prompt assembler", () => {
+  const config = {
+    allowedTasks: [...CORE_TASKS, "book_appointment", "cancel_reschedule", "quote_request"],
+    businessHours: null,
+    timezone: "UTC",
+  };
+
+  it("capability clauses come from packs in registry order", () => {
+    const { capabilities } = collectStaticFragments(config, {
+      integrations: [],
+      transferAllowed: true,
+    });
+
+    // appointments -> general_question(off) -> messages -> quotes -> transfer
+    const apptIdx = capabilities.findIndex((c) => c.includes("appointments"));
+    const msgIdx = capabilities.findIndex((c) => c.includes("take messages"));
+    const quoteIdx = capabilities.findIndex((c) => c.includes("pricing/quotes"));
+    const transferIdx = capabilities.findIndex((c) => c.includes("transfer the caller"));
+
+    expect(apptIdx).toBeGreaterThanOrEqual(0);
+    expect(apptIdx).toBeLessThan(msgIdx);
+    expect(msgIdx).toBeLessThan(quoteIdx);
+    expect(quoteIdx).toBeLessThan(transferIdx);
+  });
+
+  it("a disabled module contributes no clause", () => {
+    const { capabilities } = collectStaticFragments(
+      { ...config, allowedTasks: [...CORE_TASKS] },
+      { integrations: [], transferAllowed: true }
+    );
+    expect(capabilities.join(" ")).not.toContain("appointments");
+    expect(capabilities.join(" ")).not.toContain("pricing/quotes");
+    // Core packs still contribute.
+    expect(capabilities.join(" ")).toContain("take messages");
+  });
+
+  it("transferAllowed=false removes the transfer clause but not the tool", () => {
+    // The receptionist must never promise a transfer the business cannot take,
+    // yet the tool stays registered so a caller asking for a person in any
+    // language still reaches a code path that can refuse gracefully.
+    const { capabilities } = collectStaticFragments(config, {
+      integrations: [],
+      transferAllowed: false,
+    });
+    expect(capabilities.join(" ")).not.toContain("transfer the caller");
+    expect(collectTools(config).map((d) => d.name)).toContain("request_transfer");
+  });
+
+  it("each intent has exactly one owning pack", () => {
+    // collectStepGuidance throws on a collision. Two packs claiming an intent
+    // would make the model's instructions depend on registry order, which is
+    // invisible to whoever wrote the pack.
+    expect(() => collectStepGuidance(config, { integrations: [], now: new Date() })).not.toThrow();
+
+    const guidance = collectStepGuidance(config, { integrations: [], now: new Date() });
+    expect(Object.keys(guidance).sort()).toEqual([
+      "book_appointment",
+      "callback_request",
+      "cancel_reschedule",
+      "take_message",
+    ]);
+  });
+
+  it("EHR presence changes the cancel/reschedule flow", () => {
+    const withEhr = collectStepGuidance(config, {
+      integrations: [{ enabled: true, provider: "athenahealth" }],
+      now: new Date(),
+    });
+    const withoutEhr = collectStepGuidance(config, { integrations: [], now: new Date() });
+
+    expect(withEhr.cancel_reschedule).toContain("date of birth");
+    expect(withoutEhr.cancel_reschedule).toContain("phone_last4");
+    expect(withEhr.cancel_reschedule).not.toBe(withoutEhr.cancel_reschedule);
   });
 });
 

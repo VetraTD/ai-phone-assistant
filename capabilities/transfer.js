@@ -28,6 +28,16 @@ const REQUEST_TRANSFER_DECLARATION = {
   },
 };
 
+/**
+ * Escalation etiquette. The fallback clause matters as much as the transfer
+ * itself: when no human is reachable, the caller must still leave with
+ * something, which is why this hands off to the message protocol rather than
+ * apologising and ending.
+ */
+const ESCALATION_SECTION =
+  `=== ESCALATION ===\n` +
+  `When transferring: tell the caller briefly why and to whom ("Let me get you over to someone who can help with that — one moment."), then use request_transfer. If transfer is unavailable or fails, say so honestly and offer to take a message using the message protocol.`;
+
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "transfer",
@@ -42,5 +52,20 @@ export default {
 
   tools() {
     return [REQUEST_TRANSFER_DECLARATION];
+  },
+
+  prompt(config, ctx = {}) {
+    // The tool is always registered, but the CAPABILITIES line must not promise
+    // a transfer the business cannot actually take — transferAllowed folds in
+    // the transfer_policy (never / business_hours_only) and whether a transfer
+    // number is even configured.
+    const transferAllowed = ctx.transferAllowed !== false;
+
+    return {
+      static: {
+        capabilities: transferAllowed ? ["transfer the caller to a person when needed"] : [],
+        escalation: [ESCALATION_SECTION],
+      },
+    };
   },
 };

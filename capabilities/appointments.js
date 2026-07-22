@@ -5,12 +5,14 @@
  * one the whole abstraction was extracted from: stateful, identity-strict, and
  * backed by an external system.
  *
- * Step A status: tool declarations only. They are moved VERBATIM out of
- * services/gemini.js — every description string is byte-identical, because
- * tests/promptSnapshot.test.js asserts the merged tool list has not changed by
- * a single character. Prompt fragments, requirements and execution move here in
- * the following commits.
+ * Step A status: tool declarations and prompt fragments. Both are moved VERBATIM
+ * out of services/gemini.js — every description and instruction string is
+ * byte-identical, because tests/promptSnapshot.test.js asserts neither the
+ * merged tool list nor the prompt has changed by a single character.
+ * Requirements and execution move here in the following commits.
  */
+
+import { resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -211,6 +213,117 @@ function hasEhrIntegration(integrations) {
   return list.some((i) => i.enabled && i.provider === "athenahealth" /* future EHRs */);
 }
 
+// ---------------------------------------------------------------------------
+// Prompt fragments
+//
+// This is the part the whole refactor exists for. The booking flow below used
+// to be a hardcoded `if (intent === "book_appointment")` branch inside
+// services/gemini.js, which meant every business on the platform booked
+// appointments the same way and changing that for one of them meant editing
+// the engine.
+//
+// It is still hardcoded here — Step A only moves it. What changes is that it
+// now has ONE owner, so Step B can layer per-business config on top: an
+// enforced `require` block for the things that must be guaranteed, and a prose
+// `notes` field for the endless small variations ("ask morning or afternoon
+// first", "never offer Friday afternoon"). Neither is wired up yet; adding
+// unreachable config plumbing before the data exists would be untested code.
+// ---------------------------------------------------------------------------
+
+/** The what-you-can-do clauses for the CAPABILITIES line. */
+function capabilityClauses(allowed) {
+  const hasAll =
+    allowed.includes("book_appointment") &&
+    allowed.includes("check_appointment") &&
+    allowed.includes("cancel_reschedule");
+
+  if (hasAll) {
+    return [
+      "book, check, cancel, and reschedule appointments (using scheduling tools when available, or take details for follow-up)",
+    ];
+  }
+
+  const clauses = [];
+  if (allowed.includes("book_appointment")) clauses.push("book appointments");
+  if (allowed.includes("check_appointment")) {
+    clauses.push(
+      "help with appointment inquiries (you cannot access the schedule directly — take details for follow-up)"
+    );
+  }
+  if (allowed.includes("cancel_reschedule")) {
+    clauses.push(
+      "help with cancelling or rescheduling appointments (using scheduling tools when available, or by taking detailed information for follow-up)"
+    );
+  }
+  return clauses;
+}
+
+/**
+ * The booking flow. Renders today's hours inline so the model suggests times
+ * the business is actually open for, which is why this is DYNAMIC guidance and
+ * must never be cached into the static prefix.
+ */
+function bookingGuidance(config, now) {
+  const resolvedHours = resolveBusinessHoursForPrompt(config, now);
+  let businessHoursStr = "business hours";
+  if (resolvedHours) {
+    if (resolvedHours.weekly) {
+      businessHoursStr = resolvedHours.closedToday
+        ? `closed today (${resolvedHours.todayLabel})`
+        : resolvedHours.rangeText
+        ? `today's hours, ${resolvedHours.rangeText}`
+        : "business hours";
+    } else if (resolvedHours.rangeText) {
+      businessHoursStr = resolvedHours.rangeText;
+    }
+  }
+
+  return (
+    `Your task: Help the caller find a good appointment time and collect their details. ` +
+    `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
+    `1. Ask whether they prefer mornings or afternoons.\n` +
+    `2. Ask if any specific days of the week don't work for them.\n` +
+    `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). If the name is unusual, uncommon, or you're not sure you heard it correctly, ask them to spell it once and read the spelling back. Do not ask common, clearly-heard names to be spelled. Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
+    `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
+    `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
+  );
+}
+
+/**
+ * Cancel/reschedule. Forks on which backend owns the appointment book, because
+ * the identity proof available differs: an EHR can match on name plus date of
+ * birth, whereas the internal DB can only match on the phone number the
+ * appointment was booked under.
+ *
+ * The non-EHR branch's IDENTITY CHECK paragraph exists because the model kept
+ * re-verifying callers it had already verified, sending the conversation in
+ * circles. Step B replaces it with the generic `identity` requirement kind,
+ * enforced in code rather than requested in prose.
+ */
+function cancelRescheduleGuidance(hasEhr) {
+  if (hasEhr) {
+    return "Reschedule flow, one question at a time: (1) Ask for their name. (2) Ask for their date of birth. (3) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (4) Ask when they'd like to move it. (5) Ask whether morning or afternoon works better. (6) Call get_available_slots; offer 2–3 options. (7) Call reschedule_appointment with name, DOB, current date/time, new date/time. (8) Confirm new details and ask if anything else.";
+  }
+  return (
+    `The caller wants to cancel or reschedule an appointment. ` +
+    `If you have tools to look up their appointments by phone or name (get_caller_appointments_from_db), use those, then cancel_appointment_db or reschedule_appointment_db. ` +
+    `IDENTITY CHECK: if get_caller_appointments_from_db found their appointment using the number they are calling from, they are ALREADY verified — do NOT ask for the last four digits, do NOT ask them to confirm their number, and do NOT re-confirm ownership; just confirm which appointment and proceed with the change. ` +
+    `Only when that lookup finds nothing and you are going by a name the caller gave must you also ask for the last 4 digits of the phone number the appointment is booked under, passed as phone_last4. ` +
+    `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — ask at most once, and never guess or invent those digits. ` +
+    `Do not claim the change is done until the tool reports success. ` +
+    `If no tools can find the appointment, collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
+  );
+}
+
+/**
+ * Prompt-level confirmation gate. Belongs to this pack because it names
+ * book_appointment; Step B promotes it to the `confirmBeforeWrite` requirement
+ * kind so it is enforced at the tool layer instead of merely requested.
+ */
+const BOOKING_CONFIRMATION_GUARDRAIL =
+  `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good"). If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
+
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "appointments",
@@ -259,5 +372,37 @@ export default {
    */
   ehrTools(integrations) {
     return hasEhrIntegration(integrations) ? [...EHR_APPOINTMENT_DECLARATIONS] : [];
+  },
+
+  prompt(config, ctx = {}) {
+    const allowed = config?.allowedTasks || [];
+    const hasEhr =
+      ctx.hasEhrIntegration === true || hasEhrIntegration(ctx.integrations);
+    const now = ctx.now instanceof Date ? ctx.now : new Date();
+
+    return {
+      static: {
+        // The CAPABILITIES line IS module-gated — it always was.
+        capabilities: capabilityClauses(allowed),
+
+        // The confirmation guardrail is NOT gated, faithfully reproducing
+        // today's behavior: it is emitted even for a business with no
+        // appointment module, where book_appointment is not registered at all.
+        // That is arguably wrong — dead instructions about a tool the model
+        // cannot call — but changing it is a behavior change, so it waits for
+        // Step B, where confirmBeforeWrite becomes an enforced requirement kind
+        // and naturally only applies where the capability is enabled.
+        guardrails: [BOOKING_CONFIRMATION_GUARDRAIL],
+      },
+      dynamic: {
+        // Also ungated, matching buildStepGuidance's original behavior: it
+        // switched purely on the intent the model reported, never on whether
+        // the business had the module enabled.
+        stepGuidance: {
+          book_appointment: bookingGuidance(config, now),
+          cancel_reschedule: cancelRescheduleGuidance(hasEhr),
+        },
+      },
+    };
   },
 };

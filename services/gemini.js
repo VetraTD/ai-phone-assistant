@@ -3,9 +3,10 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
-import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
+import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
+import { collectStaticFragments, collectStepGuidance } from "../lib/capabilities/promptAssembler.js";
 
 const MAX_FC_ROUNDS = 3;
 
@@ -244,65 +245,10 @@ export function isBusinessOpen(config) {
   return currentMinutes >= openH * 60 + openM && currentMinutes < closeH * 60 + closeM;
 }
 
-const WEEKDAY_LABELS = {
-  mon: "Monday",
-  tue: "Tuesday",
-  wed: "Wednesday",
-  thu: "Thursday",
-  fri: "Friday",
-  sat: "Saturday",
-  sun: "Sunday",
-};
-const WEEKDAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-
-/**
- * Resolve business_hours (either shape — see isBusinessOpen) into a shape
- * convenient for prompt rendering: today's hours plus which days are fully
- * closed. Shared by buildDynamicTail's DATE/TIME section and the
- * book_appointment step guidance so both stay in sync.
- *
- * Same midnight-spanning limitation as isBusinessOpen (see its docstring) —
- * rangeText is rendered literally even if close < open.
- *
- * @param {object} config - loadConfig() output
- * @param {Date} now
- * @returns {null | { weekly: boolean, todayLabel: string|null, closedToday: boolean, rangeText: string|null, closedDays: string[] }}
- */
-function resolveBusinessHoursForPrompt(config, now) {
-  const hours = config.businessHours;
-  if (!hours) return null;
-
-  if (hours.mon !== undefined) {
-    // Weekly shape (migration 014-plus; also the default for every new
-    // business via the businesses.business_hours column default).
-    const todayLabel = new Intl.DateTimeFormat("en-US", {
-      timeZone: config.timezone,
-      weekday: "long",
-    }).format(now);
-    const shortWeekday = todayLabel.slice(0, 3).toLowerCase();
-    const today = hours[shortWeekday];
-    const closedDays = WEEKDAY_ORDER.filter((d) => hours[d]?.closed).map((d) => WEEKDAY_LABELS[d]);
-
-    if (!today || today.closed) {
-      return { weekly: true, todayLabel, closedToday: true, rangeText: null, closedDays };
-    }
-    const openText = formatClockTime(today.open);
-    const closeText = formatClockTime(today.close);
-    return {
-      weekly: true,
-      todayLabel,
-      closedToday: false,
-      rangeText: openText && closeText ? `${openText} – ${closeText}` : null,
-      closedDays,
-    };
-  }
-
-  // Legacy shape: single window applied every day.
-  if (hours.open_time && hours.close_time) {
-    return { weekly: false, todayLabel: null, closedToday: false, rangeText: `${hours.open_time} – ${hours.close_time}`, closedDays: [] };
-  }
-  return null;
-}
+// Business-hours prompt rendering lives in lib/businessHours.js alongside the
+// other hours helpers, so capability packs can render hours in their own flow
+// guidance without importing from services/gemini.js (which imports the
+// capability registry — the reverse edge would be a cycle).
 
 // ---------------------------------------------------------------------------
 // System instruction builder — structured sections
@@ -407,52 +353,22 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   }
 
   // === CAPABILITIES ===
+  //
+  // Every clause comes from a capability pack, in registry order. The engine no
+  // longer knows what an appointment or a message is — it only knows how to
+  // join clauses into a sentence.
   const transferAllowed = extras.transferAllowed !== false;
-  const caps = [];
-  const hasAllAppointmentTasks =
-    config.allowedTasks.includes("book_appointment") &&
-    config.allowedTasks.includes("check_appointment") &&
-    config.allowedTasks.includes("cancel_reschedule");
-  if (hasAllAppointmentTasks) {
-    caps.push(
-      "book, check, cancel, and reschedule appointments (using scheduling tools when available, or take details for follow-up)"
-    );
-  } else {
-    if (config.allowedTasks.includes("book_appointment")) caps.push("book appointments");
-    if (config.allowedTasks.includes("check_appointment"))
-      caps.push("help with appointment inquiries (you cannot access the schedule directly — take details for follow-up)");
-    if (config.allowedTasks.includes("cancel_reschedule"))
-      caps.push(
-        "help with cancelling or rescheduling appointments (using scheduling tools when available, or by taking detailed information for follow-up)"
-      );
-  }
-  if (config.allowedTasks.includes("general_question"))
-    caps.push("answer general questions about the business");
-  // take_message / callback_request are CORE — always available, not gated
-  // on allowedTasks.
-  caps.push("take messages and schedule callbacks for follow-up");
-  if (config.allowedTasks.includes("quote_request"))
-    caps.push("discuss pricing/quotes (take details for follow-up, no commitments)");
-  if (config.allowedTasks.includes("directions_location")) caps.push("provide address and directions");
-  if (config.allowedTasks.includes("form_document_request"))
-    caps.push("explain how to get forms or documents");
-  if (transferAllowed) caps.push("transfer the caller to a person when needed");
-  if (caps.length > 0) {
-    sections.push(`=== CAPABILITIES ===\nYou can: ${caps.join(", ")}.`);
+  const fragments = collectStaticFragments(config, { ...extras, transferAllowed });
+
+  if (fragments.capabilities.length > 0) {
+    sections.push(`=== CAPABILITIES ===\nYou can: ${fragments.capabilities.join(", ")}.`);
   }
 
-  // === MESSAGE PROTOCOL ===
-  sections.push(
-    `=== MESSAGE PROTOCOL ===\n` +
-    `TAKING A MESSAGE — follow this exactly:\n` +
-    `1. Name: ask for it. If it's unusual or you're unsure of spelling, confirm: "Could you spell that for me?"\n` +
-    `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
-    `3. Reason: ask briefly what the call is regarding.\n` +
-    `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
-    `5. Read the full message back once: name, number, reason. Correct anything they change.\n` +
-    `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."\n` +
-    `Record it with record_customer_request only AFTER the read-back is confirmed.`
-  );
+  // === CAPABILITY PROTOCOLS ===
+  // Whole sections a pack owns outright (today: the message protocol).
+  for (const protocol of fragments.protocols) {
+    sections.push(protocol);
+  }
 
   // === TOOL CONTRACT ===
   let toolContract = `=== TOOL CONTRACT ===\n`;
@@ -468,10 +384,10 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   sections.push(toolContract);
 
   // === ESCALATION ===
-  sections.push(
-    `=== ESCALATION ===\n` +
-    `When transferring: tell the caller briefly why and to whom ("Let me get you over to someone who can help with that — one moment."), then use request_transfer. If transfer is unavailable or fails, say so honestly and offer to take a message using the message protocol.`
-  );
+  // Owned by the transfer pack.
+  for (const escalation of fragments.escalation) {
+    sections.push(escalation);
+  }
 
   // === CUSTOM BUSINESS RULES ===
   if (config.customInstructions) {
@@ -505,8 +421,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   guardrails += `- Never comment on, repeat, acknowledge, or ask about filler words, stutters, or speech disfluencies. If the caller says "uh, I'd like to, um, book an appointment", respond as though they said "I'd like to book an appointment" cleanly.\n`;
   guardrails += `- If the caller self-corrects ("actually", "I mean", "wait, no", "scratch that"), always use the most recent version of the information they gave. Discard the earlier version entirely — do not acknowledge or comment on the correction.\n`;
   guardrails += `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?". Example: "Are you looking to book a new appointment, or reschedule an existing one?"\n`;
-  // Booking confirmation gate — prompt-level enforcement before tool execution
-  guardrails += `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good"). If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
+  // Capability-contributed guardrails, spliced in at the position the booking
+  // confirmation gate has always occupied so the bullet order is unchanged.
+  // These are still only PROMPT-level requests; Step B promotes the ones that
+  // matter into requirement kinds the tool layer actually enforces.
+  for (const bullet of fragments.guardrails) {
+    guardrails += bullet;
+  }
   // Receptionist-craft guardrails — graceful unknowns and transfer/message etiquette.
   guardrails += `- If you don't know something or aren't sure, NEVER guess or make something up. Say: "I don't want to give you the wrong information — let me take a message and have someone get back to you with the right answer." Then follow the message protocol.\n`;
   guardrails += `- If the caller is frustrated, upset, or asks for a human at any point, offer the transfer (if available) or a message — never argue and never trap them in the conversation.`;
@@ -639,62 +560,23 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         `Acknowledge the caller's request and ask the first relevant question.`
       );
 
-    case "gather_details":
-      if (intent === "cancel_reschedule") {
-        if (hasEhrIntegration) {
-          return "Reschedule flow, one question at a time: (1) Ask for their name. (2) Ask for their date of birth. (3) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (4) Ask when they'd like to move it. (5) Ask whether morning or afternoon works better. (6) Call get_available_slots; offer 2–3 options. (7) Call reschedule_appointment with name, DOB, current date/time, new date/time. (8) Confirm new details and ask if anything else.";
-        }
-        return (
-          `The caller wants to cancel or reschedule an appointment. ` +
-          `If you have tools to look up their appointments by phone or name (get_caller_appointments_from_db), use those, then cancel_appointment_db or reschedule_appointment_db. ` +
-          `IDENTITY CHECK: if get_caller_appointments_from_db found their appointment using the number they are calling from, they are ALREADY verified — do NOT ask for the last four digits, do NOT ask them to confirm their number, and do NOT re-confirm ownership; just confirm which appointment and proceed with the change. ` +
-          `Only when that lookup finds nothing and you are going by a name the caller gave must you also ask for the last 4 digits of the phone number the appointment is booked under, passed as phone_last4. ` +
-          `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — ask at most once, and never guess or invent those digits. ` +
-          `Do not claim the change is done until the tool reports success. ` +
-          `If no tools can find the appointment, collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
-        );
-      }
-      if (intent === "book_appointment") {
-        const resolvedHours = resolveBusinessHoursForPrompt(config, now);
-        let businessHoursStr = "business hours";
-        if (resolvedHours) {
-          if (resolvedHours.weekly) {
-            businessHoursStr = resolvedHours.closedToday
-              ? `closed today (${resolvedHours.todayLabel})`
-              : resolvedHours.rangeText
-              ? `today's hours, ${resolvedHours.rangeText}`
-              : "business hours";
-          } else if (resolvedHours.rangeText) {
-            businessHoursStr = resolvedHours.rangeText;
-          }
-        }
-        let guide =
-          `Your task: Help the caller find a good appointment time and collect their details. ` +
-          `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
-          `1. Ask whether they prefer mornings or afternoons.\n` +
-          `2. Ask if any specific days of the week don't work for them.\n` +
-          `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-          `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). If the name is unusual, uncommon, or you're not sure you heard it correctly, ask them to spell it once and read the spelling back. Do not ask common, clearly-heard names to be spelled. Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
-          `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
-          `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`;
-        return guide;
-      }
-      if (intent === "take_message" || intent === "callback_request") {
-        return (
-          `Your task: Follow the message protocol, one question at a time: ` +
-          `(1) ask for their name; (2) ask for the best callback number and read it back digit by digit to confirm; ` +
-          `(3) ask briefly what the call is regarding` +
-          (intent === "callback_request" ? ` and their preferred callback time` : ``) +
-          `; (4) ask if it's urgent or if the next business day is fine; ` +
-          `(5) read the full message back once — name, number, reason — and correct anything they change; ` +
-          `(6) promise the callback. ` +
-          `Only call record_customer_request after the read-back is confirmed.`
-        );
-      }
+    case "gather_details": {
+      // Which capability owns this intent is the pack's business, not the
+      // engine's. A pack that claims an intent supplies its whole flow; the
+      // fallback below covers intents no pack claims (general questions, and
+      // anything the model reports that we have no specific procedure for).
+      const owned = collectStepGuidance(config, {
+        ...stepExtras,
+        hasEhrIntegration,
+        now,
+      })[intent];
+      if (owned) return owned;
+
       return (
         `Your task: Help the caller with their question. Be concise and accurate. ` +
         `When you've answered, ask if there's anything else you can help with.`
       );
+    }
 
     case "confirm":
       return (

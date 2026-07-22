@@ -25,9 +25,20 @@
 import appointments from "./appointments.js";
 import messages from "./messages.js";
 import transfer from "./transfer.js";
+import { generalQuestion, quotes, directions, forms } from "./infoOnly.js";
 
-/** @type {import("./_contract.js").CapabilityPack[]} */
-const PACKS = [appointments, messages, transfer];
+/**
+ * Registry order. Governs two things at once:
+ *
+ *  - the order tool declarations reach the model (the prompt-only packs
+ *    contribute none, so this is still book -> record -> request_transfer)
+ *  - the order clauses appear in the CAPABILITIES line
+ *
+ * Both are asserted byte-for-byte by tests/promptSnapshot.test.js.
+ *
+ * @type {import("./_contract.js").CapabilityPack[]}
+ */
+const PACKS = [appointments, generalQuestion, messages, quotes, directions, forms, transfer];
 
 const BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 
