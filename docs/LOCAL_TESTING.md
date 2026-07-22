@@ -66,9 +66,31 @@ curl -s localhost:3000/api/debug/latency | jq
 Targets: `voice_to_voice_ms` p50 ≤ 800ms (ideal 500), `llm_ttfb_ms` and `tts_ttfb_ms` each a few hundred ms. Watch the `turn_latency` log lines live during a call.
 
 **Turn-taking drills**
-- Interrupt mid-sentence with "wait" → AI should stop within roughly half a second.
-- Say "uh-huh" / "yeah" while it talks → it should **keep talking** (backchannel, not interruption).
-- Pause mid-sentence while speaking → it should wait, not cut in.
+
+Run these with the live monitor attached — it renders the ladder/hold/barge-in
+decisions, which are otherwise invisible in raw logs (the important case is a
+nudge that correctly *didn't* fire):
+
+```bash
+LOG_LEVEL=DEBUG node --env-file=.env.dev server.js | node scripts/watch-call.js --passthrough
+```
+
+| Drill | Expected |
+|---|---|
+| Talk continuously for 30+ seconds | Zero nudges, no hangup. Monitor shows `🎙 caller speaking` then `⏸ ladder held off`. |
+| Leave a TV/radio playing, say nothing | Suppression caps at 30s (`⚠ suppression capped`), then the ladder escalates and ends the call. |
+| "I need to book an appointment for…", pause ~2.5s, finish | `⋯ holding` → one combined turn, not two. Repeat mid-phone-number and mid-date. |
+| "and… and… and…" | Flushes at the 3s ceiling (`→ flushed … (hit ceiling)`), not held forever. |
+| Same mid-sentence pause in Spanish | Same behaviour. Harder case: `endpointing` is 100ms for Spanish, so fragments are more frequent. |
+| Interrupt mid-sentence with "wait" | AI stops within roughly half a second and **tapers** rather than chopping (`✂ barge-in — faded 40ms`). Listen for a click. |
+| Say "uh-huh" / "yeah" while it talks | It should **keep talking** (backchannel, not interruption). |
+
+Tuning knobs, all env-overridable without a code change:
+`VOICE_LOOKAHEAD_MS` (100), `VOICE_BARGE_FADE_MS` (40), `VOICE_PACED_PLAYOUT=false`
+to restore the old instant-blast playout, `STT_ENDPOINTING_MS` (300).
+
+Counters for a batch of calls: `curl -s localhost:3000/api/debug/latency | jq .turnTaking`
+— `nudges_fired`, `nudges_suppressed`, `holds_started`, `holds_capped`, `barge_ins`.
 
 **Conversation**
 - Ask something the knowledge base can't answer → it should offer to take a message, never invent an answer.
