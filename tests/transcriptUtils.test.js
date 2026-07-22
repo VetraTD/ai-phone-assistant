@@ -4,6 +4,8 @@ import {
   cleanTranscript,
   isIncomplete,
   extractFinalIntent,
+  holdDurationFor,
+  classifyHold,
 } from "../lib/transcriptUtils.js";
 
 describe("stripFillers()", () => {
@@ -94,5 +96,89 @@ describe("extractFinalIntent() — unchanged behavior", () => {
 
   it("returns original text without a correction marker", () => {
     expect(extractFinalIntent("book me for Friday")).toBe("book me for Friday");
+  });
+});
+
+describe("isIncomplete() — Spanish parity", () => {
+  it.each([
+    ["necesito una cita para", "trailing preposition"],
+    ["quiero reservar y", "trailing conjunction"],
+    ["no puedo ir porque", "trailing subordinator"],
+    ["mi nombre es", "trailing lead-in"],
+    ["me llamo", "trailing lead-in"],
+    ["llamo para", "trailing lead-in"],
+  ])("holds %s (%s)", (text) => {
+    expect(isIncomplete(text)).toBe(true);
+  });
+
+  it("does not hold a finished Spanish sentence", () => {
+    expect(isIncomplete("Quiero reservar una cita para el martes.")).toBe(false);
+  });
+
+  it("does not match a conjunction inside a longer word", () => {
+    // "para" must not fire on "reparar"; the \b anchors carry this.
+    expect(isIncomplete("necesito reparar")).toBe(false);
+  });
+});
+
+describe("isIncomplete() — added English lead-ins", () => {
+  it.each(["can I", "do you", "is there", "the reason", "we need"])(
+    "holds a final ending in %s",
+    (text) => {
+      expect(isIncomplete(text)).toBe(true);
+    }
+  );
+});
+
+describe("holdDurationFor()", () => {
+  it("gives the longest window to a trailing conjunction — the clearest mid-sentence cue", () => {
+    expect(holdDurationFor("I need to book an appointment for")).toBe(2_000);
+    expect(holdDurationFor("my name is")).toBe(2_000);
+  });
+
+  it("waits on a partially dictated number", () => {
+    expect(holdDurationFor("my number is 555 12")).toBe(1_500);
+  });
+
+  it("does not hold a sentence STT closed with terminal punctuation", () => {
+    expect(holdDurationFor("I'd like to book an appointment.")).toBe(0);
+    expect(holdDurationFor("Are you open on Saturday?")).toBe(0);
+  });
+
+  it("holds briefly when there is no terminal punctuation at all", () => {
+    expect(holdDurationFor("I'd like to book an appointment")).toBe(1_500);
+  });
+
+  it("returns 0 for empty input rather than starting a pointless hold", () => {
+    expect(holdDurationFor("")).toBe(0);
+    expect(holdDurationFor("   ")).toBe(0);
+    expect(holdDurationFor(null)).toBe(0);
+  });
+
+  it("reports which rule fired, so a too-eager hold can be diagnosed", () => {
+    expect(classifyHold("book an appointment for")).toEqual({
+      holdMs: 2_000,
+      rule: "trailing_conjunction",
+    });
+    expect(classifyHold("my name is")).toEqual({ holdMs: 2_000, rule: "trailing_lead_in" });
+    expect(classifyHold("my number is 555 12")).toEqual({
+      holdMs: 1_500,
+      rule: "partial_digits",
+    });
+    expect(classifyHold("Book me for Friday.")).toEqual({
+      holdMs: 0,
+      rule: "terminal_punctuation",
+    });
+    expect(classifyHold("book me for Friday")).toEqual({
+      holdMs: 1_500,
+      rule: "no_terminal_punctuation",
+    });
+    expect(classifyHold("")).toEqual({ holdMs: 0, rule: "empty" });
+  });
+
+  it("never asks for a hold longer than the pipeline's 3s chain ceiling", () => {
+    for (const t of ["for", "and", "555 12", "no punctuation here", "done."]) {
+      expect(holdDurationFor(t)).toBeLessThanOrEqual(3_000);
+    }
   });
 });
