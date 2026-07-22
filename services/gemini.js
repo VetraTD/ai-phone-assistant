@@ -77,9 +77,21 @@ const DEFAULT_CONFIG = {
  * other declarations come from the capability registry, in registry order —
  * see capabilities/index.js for why that order is load-bearing.
  *
- * @param {string[]} allowedTasks
+ * Accepts either the full business config or a bare allowedTasks array. The
+ * array form is the original signature and several tests still use it, but it
+ * is LOSSY: packs cannot see `config.capabilities`, so a business's configured
+ * requirements never become tool parameters. The live path must pass the whole
+ * config — otherwise the tool layer enforces a field the model was never given
+ * anywhere to put, and the call deadlocks on a refusal it cannot satisfy.
+ *
+ * @param {object|string[]} configOrTasks
  */
-export function buildCallTools(allowedTasks) {
+export function buildCallTools(configOrTasks) {
+  const config = Array.isArray(configOrTasks)
+    ? { allowedTasks: configOrTasks }
+    : configOrTasks || {};
+  const allowedTasks = config.allowedTasks || [];
+
   const intents = Array.isArray(allowedTasks) && allowedTasks.length > 0
     ? allowedTasks
     : ["general_question"];
@@ -128,7 +140,7 @@ export function buildCallTools(allowedTasks) {
   // Both CORE tools being unconditional is what closed the phantom-tool bug:
   // the prompt's ESCALATION section could previously instruct the model to call
   // record_customer_request when no allowedTasks entry had registered it.
-  declarations.push(...collectTools({ allowedTasks }));
+  declarations.push(...collectTools(config));
 
   return { functionDeclarations: declarations };
 }
@@ -624,7 +636,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
-  const builtInTools = buildCallTools(cfg.allowedTasks);
+  // Full config, not just the task list: packs need config.capabilities to
+  // turn a business's configured requirements into tool parameters.
+  const builtInTools = buildCallTools(cfg);
   const integrationTools = buildIntegrationTools(extras?.integrations || []);
   const dbAppointmentTools = buildDbAppointmentTools(cfg, extras);
   const allDeclarations = [

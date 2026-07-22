@@ -21,6 +21,8 @@ import {
   CONFIRMATION_ARG,
 } from "../lib/capabilities/requirements.js";
 import { executeToolCall } from "../services/tools.js";
+import { buildCallTools } from "../services/gemini.js";
+import { CORE_TASKS } from "../services/supabase.js";
 
 const DENTAL = {
   key: "dental_number",
@@ -184,6 +186,34 @@ describe("no configuration means no change", () => {
     // unconfigured business must see exactly the tools it saw before.
     const decl = { name: "x", description: "d", parameters: { type: "object", properties: {} } };
     expect(withRequirements(decl, {})).toBe(decl);
+  });
+});
+
+describe("the configured field reaches the model", () => {
+  // The bug this locks: buildCallTools used to take only allowedTasks, so packs
+  // could not see config.capabilities and the requirement never became a tool
+  // parameter. The tool layer still REFUSED without it, so the model was told
+  // to supply a field its schema had nowhere to put — a call that deadlocks on
+  // a refusal it cannot satisfy. Enforcement and collectability have to ship
+  // together, which is why this asserts the whole path rather than the check.
+  const config = {
+    allowedTasks: [...CORE_TASKS, "book_appointment"],
+    capabilities: { appointments: CFG_DENTAL },
+  };
+
+  it("buildCallTools given the full config adds the parameter", () => {
+    const decl = buildCallTools(config).functionDeclarations.find((d) => d.name === "book_appointment");
+    expect(decl.parameters.properties).toHaveProperty("identity_dental_number");
+    expect(decl.parameters.required).toContain("identity_dental_number");
+  });
+
+  it("the legacy array form is accepted but cannot carry requirements", () => {
+    // Kept working for existing callers; documented as lossy so nobody wires
+    // the live path through it again.
+    const decl = buildCallTools(config.allowedTasks).functionDeclarations.find(
+      (d) => d.name === "book_appointment"
+    );
+    expect(decl.parameters.properties).not.toHaveProperty("identity_dental_number");
   });
 });
 
