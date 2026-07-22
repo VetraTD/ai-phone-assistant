@@ -29,9 +29,11 @@
  * @param {string} moduleTask - the allowed_tasks entry that enables it
  * @param {string} clause - its CAPABILITIES clause
  */
-function infoOnlyPack(id, moduleTask, clause) {
+function infoOnlyPack(id, moduleTask, clause, label, description) {
   return {
     id,
+    label,
+    description,
     core: false,
     adapterKind: null,
     toolNames: [],
@@ -51,17 +53,23 @@ function infoOnlyPack(id, moduleTask, clause) {
 export const generalQuestion = infoOnlyPack(
   "general_question",
   "general_question",
-  "answer general questions about the business"
+  "answer general questions about the business",
+  "General questions",
+  "Answer questions from your knowledge base."
 );
 
 export const directions = infoOnlyPack(
   "directions",
   "directions_location",
-  "provide address and directions"
+  "provide address and directions",
+  "Directions & location",
+  "Give your address and directions."
 );
 
 export const forms = infoOnlyPack(
   "forms",
   "form_document_request",
-  "explain how to get forms or documents"
+  "explain how to get forms or documents",
+  "Forms & documents",
+  "Explain how to get forms or paperwork."
 );

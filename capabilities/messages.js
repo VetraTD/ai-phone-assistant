@@ -93,6 +93,8 @@ function messageGuidance(intent) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "messages",
+  label: "Messages & callbacks",
+  description: "Take messages and callback requests. Core receptionist behaviour.",
   core: true,
   adapterKind: null,
 

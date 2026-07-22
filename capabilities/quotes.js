@@ -81,6 +81,8 @@ const QUOTE_GUIDANCE =
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "quotes",
+  label: "Quote requests",
+  description: "Collect pricing enquiries and pass them to your team.",
   core: false,
   adapterKind: null,
 

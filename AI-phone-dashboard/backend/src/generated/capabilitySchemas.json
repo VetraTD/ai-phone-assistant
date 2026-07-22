@@ -1,0 +1,169 @@
+{
+  "capabilities": [
+    {
+      "id": "appointments",
+      "label": "Appointments",
+      "description": "Book, check, cancel and reschedule appointments.",
+      "core": false,
+      "adapterKind": "scheduling",
+      "configSchema": {
+        "adapter": {
+          "type": "choice",
+          "label": "Where do appointments live?",
+          "options": [
+            "internal",
+            "athenahealth",
+            "webhook"
+          ],
+          "default": "internal"
+        },
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we look up or change an appointment?",
+            "builtinOptions": [
+              "name",
+              "dob",
+              "phone_on_file"
+            ],
+            "allowCustom": true
+          },
+          "confirmBeforeWrite": {
+            "type": "toggle",
+            "label": "Read details back and require a clear yes before booking",
+            "default": false
+          },
+          "businessHoursOnly": {
+            "type": "toggle",
+            "label": "Only allow booking changes during opening hours",
+            "default": false
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you book?",
+          "placeholder": "e.g. Ask if they're a new or existing patient first"
+        }
+      }
+    },
+    {
+      "id": "general_question",
+      "label": "General questions",
+      "description": "Answer questions from your knowledge base.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "messages",
+      "label": "Messages & callbacks",
+      "description": "Take messages and callback requests. Core receptionist behaviour.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": {
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we take a message?",
+            "builtinOptions": [
+              "name",
+              "callback_number"
+            ],
+            "allowCustom": true
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you take messages?",
+          "placeholder": "e.g. Always ask which department the message is for"
+        }
+      }
+    },
+    {
+      "id": "quotes",
+      "label": "Quote requests",
+      "description": "Collect pricing enquiries and pass them to your team.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": {
+        "adapter": {
+          "type": "choice",
+          "label": "Where should quote requests go?",
+          "options": [
+            "internal",
+            "webhook"
+          ],
+          "default": "internal"
+        },
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we log a quote request?",
+            "builtinOptions": [
+              "name",
+              "callback_number"
+            ],
+            "allowCustom": true
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you quote?",
+          "placeholder": "e.g. Always ask whether it's an emergency. Never quote a price on the phone."
+        }
+      }
+    },
+    {
+      "id": "directions",
+      "label": "Directions & location",
+      "description": "Give your address and directions.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "forms",
+      "label": "Forms & documents",
+      "description": "Explain how to get forms or paperwork.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "transfer",
+      "label": "Transfer to a person",
+      "description": "Hand the caller to a human when they ask or when we cannot help.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": null
+    }
+  ],
+  "adapters": {
+    "scheduling": [
+      {
+        "id": "internal",
+        "label": "Our built-in calendar",
+        "verifiableFields": [
+          "phone_on_file",
+          "phone_last4"
+        ]
+      },
+      {
+        "id": "athenahealth",
+        "label": "athenahealth",
+        "verifiableFields": [
+          "name",
+          "dob",
+          "phone_on_file",
+          "patient_id",
+          "customfields.*"
+        ]
+      },
+      {
+        "id": "webhook",
+        "label": "Send to my own system",
+        "verifiableFields": []
+      }
+    ]
+  }
+}

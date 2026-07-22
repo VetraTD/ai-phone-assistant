@@ -41,6 +41,8 @@ const ESCALATION_SECTION =
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "transfer",
+  label: "Transfer to a person",
+  description: "Hand the caller to a human when they ask or when we cannot help.",
   core: true,
   adapterKind: null,
 

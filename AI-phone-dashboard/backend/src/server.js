@@ -142,6 +142,7 @@ app.use(require("./routes/calendar"));
 app.use(require("./routes/onboarding"));
 app.use(require("./routes/settings"));
 app.use(require("./routes/knowledge"));
+app.use(require("./routes/capabilities"));
 
 // Centralized error handler – avoid leaking stack traces in production
 // Note: keep this AFTER all route declarations

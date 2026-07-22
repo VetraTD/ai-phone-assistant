@@ -51,6 +51,29 @@ describe("loadConfig — dual read", () => {
     expect(config.capabilities.appointments).toBeUndefined();
   });
 
+  it("enabling a capability the business lacked ADDS its module tasks", () => {
+    // Without this, switching a capability on in the dashboard stores
+    // enabled=true and still registers no tools — a setting that looks like it
+    // worked and does nothing.
+    const plumber = { id: "biz-2", name: "Dave's Plumbing", allowed_tasks: [] };
+    const config = loadConfig(plumber, [
+      { capability_id: "quotes", enabled: true, config: {} },
+    ]);
+    expect(config.allowedTasks).toContain("quote_request");
+  });
+
+  it("enabling does not widen a finer-grained choice the business already made", () => {
+    // A business that opted into booking but NOT cancelling expressed a real
+    // preference at a finer grain than one capability row can carry. Enabling
+    // the capability must not silently grant the rest.
+    const config = loadConfig(
+      { id: "biz-3", name: "Acme", allowed_tasks: ["book_appointment"] },
+      [{ capability_id: "appointments", enabled: true, config: {} }]
+    );
+    expect(config.allowedTasks).toContain("book_appointment");
+    expect(config.allowedTasks).not.toContain("cancel_reschedule");
+  });
+
   it("ignores a row for a capability this build does not have", () => {
     // Expected during a rollback: newer config, older code. Ignore it rather
     // than failing the call.

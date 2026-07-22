@@ -530,6 +530,8 @@ const BOOKING_CONFIRMATION_GUARDRAIL =
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "appointments",
+  label: "Appointments",
+  description: "Book, check, cancel and reschedule appointments.",
   core: false,
   adapterKind: "scheduling",
 

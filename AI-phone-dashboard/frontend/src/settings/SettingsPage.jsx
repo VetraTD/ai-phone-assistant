@@ -3,7 +3,7 @@ import { api } from "../api";
 import BusinessInfoSection from "./BusinessInfoSection";
 import BusinessHoursEditor from "./BusinessHoursEditor";
 import AIBehaviorSection from "./AIBehaviorSection";
-import TasksSection from "./TasksSection";
+import CapabilitiesSection from "./CapabilitiesSection";
 import TransferRulesSection from "./TransferRulesSection";
 import AfterHoursSection from "./AfterHoursSection";
 import KnowledgeBaseEditor from "./KnowledgeBaseEditor";
@@ -157,12 +157,21 @@ export default function SettingsPage({ business, businessId, onBusinessUpdate, o
         <BusinessInfoSection value={draft} onChange={patch} phoneNumber={business?.phone_number} />
         <BusinessHoursEditor value={draft} onChange={patch} />
         <AIBehaviorSection value={draft} onChange={patch} />
-        <TasksSection value={draft} onChange={patch} />
         <TransferRulesSection value={draft} onChange={patch} />
         <AfterHoursSection value={draft} onChange={patch} />
         <VoicePickerSection value={draft} onChange={patch} />
         <NotificationsSection value={draft} onChange={patch} />
         <LanguagesSection value={draft} onChange={patch} />
+      </section>
+
+      {/* Capability settings live in their own table (business_capabilities),
+          not on the businesses row, so this section loads and saves itself
+          rather than joining the draft/diff flow above. Each card saves
+          independently: a validation error in one must not discard edits in
+          another. It replaces the old Tasks checkboxes, which could say THAT a
+          business books appointments but never HOW. */}
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
+        <CapabilitiesSection businessId={businessId} />
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>

@@ -160,11 +160,24 @@ function applyCapabilityRows(rows, allowedTasks, businessId) {
       continue;
     }
 
+    const owned = CAPABILITY_MODULE_TASKS[row.capability_id] || [];
+
     if (row.enabled === false) {
       // The explicit "off" that allowed_tasks could never express.
-      const owned = CAPABILITY_MODULE_TASKS[row.capability_id] || [];
       tasks = tasks.filter((t) => !owned.includes(t));
       continue;
+    }
+
+    // Enabling has to ADD the capability's module tasks, or switching one on in
+    // the dashboard would store enabled=true and still register no tools —
+    // a setting that appears to work and does nothing.
+    //
+    // Only when the business has none of them already. A business that opted
+    // into booking but not cancelling has expressed a real preference at a
+    // finer grain than a single capability row can, and enabling must not
+    // silently widen it.
+    if (owned.length > 0 && !owned.some((t) => tasks.includes(t))) {
+      tasks = [...tasks, ...owned];
     }
 
     capabilities[row.capability_id] = {
