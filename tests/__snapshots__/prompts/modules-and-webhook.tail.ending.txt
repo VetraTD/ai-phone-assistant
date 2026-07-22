@@ -1,0 +1,6 @@
+=== DATE AND TIME ===
+Current: Monday, July 20, 2026, 8:00 AM (America/Los_Angeles).
+When scheduling, always calculate from this real date. Never invent dates.
+
+=== CURRENT TASK AND STATE ===
+Step: ending
