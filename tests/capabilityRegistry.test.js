@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
   listPacks,
@@ -144,28 +145,53 @@ describe("capability registry — engine wiring", () => {
 });
 
 describe("capability registry — reserved tool names", () => {
-  it("KNOWN GAP: BUILTIN_TOOL_NAMES does not reserve every capability tool name", () => {
-    // services/supabase.js createOrUpdateIntegration rejects a webhook whose
-    // name collides with a builtin, but the reserved list was hand-maintained
-    // and never grew past the original four. A business can therefore create a
-    // webhook named request_transfer, cancel_appointment_db or
-    // get_caller_appointments and have it silently shadowed: the declaration
-    // reaches Gemini twice, and services/tools.js dispatches the builtin, so
-    // the operator's webhook never runs and never errors.
+  it("every capability tool name is reserved against integration collisions", () => {
+    // The reserved list used to be hand-maintained at four names while packs
+    // declared twelve, so a business could create a webhook called
+    // request_transfer or cancel_appointment_db and have it silently shadowed:
+    // the declaration reached Gemini twice and services/tools.js dispatched the
+    // builtin, so the operator's webhook never ran and never errored.
     //
-    // tests/gemini-integrations.test.js:19 uses "get_caller_appointments" as a
-    // webhook name, which is exactly the collision, so this is reachable today.
-    //
-    // NOT fixed in Step A: widening the list rejects integration names that are
-    // currently accepted, which is a behavior change. Step B makes the registry
-    // the single source of reserved names — at which point this test flips to
-    // asserting full coverage.
+    // Deriving the list from the registry is what makes this stay true as packs
+    // are added — which is the whole reason to assert it here rather than
+    // re-listing the names.
     const unreserved = allCapabilityToolNames().filter((n) => !BUILTIN_TOOL_NAMES.includes(n));
+    expect(unreserved, `unreserved capability tools: ${unreserved.join(", ")}`).toEqual([]);
+  });
 
-    expect(unreserved.length).toBeGreaterThan(0);
-    expect(unreserved).toContain("request_transfer");
-    expect(unreserved).toContain("cancel_appointment_db");
-    expect(unreserved).toContain("get_caller_appointments");
+  it("reserves the engine-owned tools too", () => {
+    expect(BUILTIN_TOOL_NAMES).toContain("set_call_intent");
+    expect(BUILTIN_TOOL_NAMES).toContain("end_call");
+  });
+
+  it("the previously-unprotected names are now reserved", () => {
+    // Regression lock on the specific collisions that were reachable.
+    for (const name of ["request_transfer", "cancel_appointment_db", "get_caller_appointments"]) {
+      expect(BUILTIN_TOOL_NAMES, name).toContain(name);
+    }
+  });
+
+  it("the dashboard's mirrored list has not drifted from the registry", () => {
+    // The dashboard is a separate CJS app that cannot import the ESM registry,
+    // so it duplicates this list by hand — and it is a second write path to the
+    // integrations table. A name rejected by the main app but accepted there
+    // still produces the shadowing bug, so the copy is verified rather than
+    // trusted. Read as text: importing a CJS Express route into this suite
+    // would drag in the whole dashboard server.
+    const source = readFileSync(
+      new URL("../AI-phone-dashboard/backend/src/routes/settings.js", import.meta.url),
+      "utf8"
+    );
+    const block = source.match(/const BUILTIN_TOOL_NAMES = \[([\s\S]*?)\];/);
+    expect(block, "BUILTIN_TOOL_NAMES not found in the dashboard route").not.toBeNull();
+
+    const mirrored = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    const missing = BUILTIN_TOOL_NAMES.filter((n) => !mirrored.includes(n));
+
+    expect(
+      missing,
+      `AI-phone-dashboard/backend/src/routes/settings.js is missing: ${missing.join(", ")}`
+    ).toEqual([]);
   });
 
   it("the names BUILTIN_TOOL_NAMES does reserve are all real", () => {

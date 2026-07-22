@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
+import { allCapabilityToolNames } from "../capabilities/index.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -658,13 +659,23 @@ export async function fetchBusinessKnowledge(businessId, limit = 15) {
 // Integrations (per-business: webhooks, athenahealth, mcp)
 // ---------------------------------------------------------------------------
 
-/** Built-in tool names — integration names must not collide with these. */
-export const BUILTIN_TOOL_NAMES = [
-  "set_call_intent",
-  "end_call",
-  "book_appointment",
-  "record_customer_request",
-];
+/**
+ * Tool names an integration may not claim.
+ *
+ * Derived from the capability registry rather than hand-listed. The hand-listed
+ * version reserved four names while capability packs declared twelve, so a
+ * business could create a webhook called request_transfer, cancel_appointment_db
+ * or get_caller_appointments and have it silently shadowed: the declaration
+ * reached Gemini twice and services/tools.js dispatched the builtin, so the
+ * operator's webhook never ran and never errored.
+ *
+ * Deriving it means the reservation list can no longer drift behind the packs —
+ * a new capability's tools are protected the moment the pack is registered.
+ *
+ * set_call_intent and end_call are engine-owned (they drive the step machine
+ * itself, not any capability) so they are named explicitly.
+ */
+export const BUILTIN_TOOL_NAMES = ["set_call_intent", "end_call", ...allCapabilityToolNames()];
 
 /**
  * List all integrations for a business.

@@ -145,7 +145,41 @@ const INTEGRATION_DEFINITIONS = [
   },
 ];
 
-const BUILTIN_TOOL_NAMES = ["set_call_intent", "end_call", "book_appointment", "record_customer_request"];
+/**
+ * Tool names an integration may not claim.
+ *
+ * MIRROR of services/supabase.js BUILTIN_TOOL_NAMES in the main app, which
+ * derives this from the capability registry (capabilities/index.js). This
+ * dashboard is a separate CJS app with its own package.json and cannot import
+ * that ESM module, so the list is duplicated by hand.
+ *
+ * KEEP IN SYNC. Both are write paths for the integrations table: a name
+ * rejected by one but accepted by the other still produces the bug this list
+ * exists to prevent — a webhook whose declaration reaches Gemini alongside an
+ * identically-named builtin, where the builtin wins and the operator's webhook
+ * silently never runs.
+ *
+ * Adding a capability pack means adding its tool names here.
+ */
+const BUILTIN_TOOL_NAMES = [
+  // engine-owned
+  "set_call_intent",
+  "end_call",
+  // appointments pack
+  "book_appointment",
+  "get_caller_appointments",
+  "get_available_slots",
+  "book_appointment_in_ehr",
+  "cancel_appointment",
+  "reschedule_appointment",
+  "get_caller_appointments_from_db",
+  "cancel_appointment_db",
+  "reschedule_appointment_db",
+  // messages pack
+  "record_customer_request",
+  // transfer pack
+  "request_transfer",
+];
 
 router.get("/api/integrations/definitions", (req, res) => {
   res.json(INTEGRATION_DEFINITIONS);
