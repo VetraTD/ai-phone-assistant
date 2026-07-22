@@ -97,17 +97,29 @@ describe("capability registry — pack contract", () => {
 });
 
 describe("capability registry — engine wiring", () => {
-  it("ACTION_TOOL_NAMES is derived from packs and still matches the legacy list", () => {
-    // Regression lock for the Step A "no behavior change" rule: this list used
-    // to be hardcoded in services/gemini.js. Order matters only for readability,
-    // membership is what gates same-turn end_call.
-    expect(ACTION_TOOL_NAMES).toEqual([
+  it("ACTION_TOOL_NAMES is derived from packs and still covers the legacy list", () => {
+    // This list used to be hardcoded in services/gemini.js. Every name it held
+    // must still be there — dropping one would silently stop that tool from
+    // unlocking same-turn end_call, stranding the caller after a completed
+    // action. Growing it is expected: that is a new capability being picked up
+    // without an engine edit, which is the point.
+    for (const name of [
       "book_appointment",
       "cancel_appointment_db",
       "reschedule_appointment_db",
       "record_customer_request",
-    ]);
+    ]) {
+      expect(ACTION_TOOL_NAMES, name).toContain(name);
+    }
     expect(actionToolNames()).toEqual(ACTION_TOOL_NAMES);
+  });
+
+  it("the quotes capability was picked up without an engine edit", () => {
+    // quotes was written after the engine was carved up, touching only
+    // capabilities/. Its action tool reaching ACTION_TOOL_NAMES, and its tool
+    // reaching the model, is the evidence the seam holds.
+    expect(ACTION_TOOL_NAMES).toContain("record_quote_request");
+    expect(packForTool("record_quote_request")?.id).toBe("quotes");
   });
 
   it("every action tool is a real, declared tool", () => {
@@ -262,6 +274,7 @@ describe("prompt assembler", () => {
       "book_appointment",
       "callback_request",
       "cancel_reschedule",
+      "quote_request",
       "take_message",
     ]);
   });

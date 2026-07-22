@@ -77,6 +77,38 @@
     }
   },
   {
+    "name": "record_quote_request",
+    "description": "Record a pricing enquiry after collecting what the caller wants a price for, their name, and a callback number. Call this once you have those details. Never quote a price yourself — the team follows up with real pricing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "service_description": {
+          "type": "string",
+          "description": "What the caller wants priced, in their own words"
+        },
+        "caller_name": {
+          "type": "string",
+          "description": "Caller's name"
+        },
+        "callback_number": {
+          "type": "string",
+          "description": "Phone number to call back with the quote"
+        },
+        "service_address": {
+          "type": "string",
+          "description": "Where the work would happen, if the caller gives it (optional)"
+        },
+        "urgency": {
+          "type": "string",
+          "description": "How soon they need it, if mentioned (optional)"
+        }
+      },
+      "required": [
+        "service_description"
+      ]
+    }
+  },
+  {
     "name": "request_transfer",
     "description": "Transfer the caller to a human. Use when the caller asks for a person/representative/manager in any language, or when you cannot help and transfer is appropriate.",
     "parameters": {

@@ -203,6 +203,7 @@ const STEP_INTENTS = [
   ["gather_details", "cancel_reschedule"],
   ["gather_details", "take_message"],
   ["gather_details", "callback_request"],
+  ["gather_details", "quote_request"],
   ["gather_details", "general_question"],
   ["confirm", null],
   ["ending", null],

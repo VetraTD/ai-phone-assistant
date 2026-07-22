@@ -54,16 +54,6 @@ export const generalQuestion = infoOnlyPack(
   "answer general questions about the business"
 );
 
-/**
- * Pricing enquiries. Deliberately makes no commitment — a receptionist quoting
- * a price the business will not honor is worse than one who takes a message.
- */
-export const quotes = infoOnlyPack(
-  "quotes",
-  "quote_request",
-  "discuss pricing/quotes (take details for follow-up, no commitments)"
-);
-
 export const directions = infoOnlyPack(
   "directions",
   "directions_location",

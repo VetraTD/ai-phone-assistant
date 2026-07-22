@@ -25,7 +25,8 @@
 import appointments from "./appointments.js";
 import messages from "./messages.js";
 import transfer from "./transfer.js";
-import { generalQuestion, quotes, directions, forms } from "./infoOnly.js";
+import quotes from "./quotes.js";
+import { generalQuestion, directions, forms } from "./infoOnly.js";
 
 /**
  * Registry order. Governs two things at once:

@@ -177,6 +177,8 @@ const BUILTIN_TOOL_NAMES = [
   "reschedule_appointment_db",
   // messages pack
   "record_customer_request",
+  // quotes pack
+  "record_quote_request",
   // transfer pack
   "request_transfer",
 ];
