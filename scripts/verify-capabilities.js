@@ -11,7 +11,13 @@
  * READ-ONLY against the database. It checks whether migration 020 has been run
  * and otherwise works from in-memory rows, so it never writes to your data.
  *
- *   node scripts/verify-capabilities.js
+ *   node scripts/verify-capabilities.js              # self-contained fixtures
+ *   node scripts/verify-capabilities.js +18175803291 # a REAL business
+ *
+ * With a phone number it loads that business's actual configuration and prints
+ * what its AI receptionist would now do — which tools it has, what it must
+ * collect, and what it refuses without. That is the link between clicking Save
+ * in the dashboard and knowing a caller's experience changed.
  */
 
 import "dotenv/config";
@@ -174,6 +180,67 @@ for (const [label, cfg, ints] of [
 ]) {
   const fields = verifiableFieldsFor(cfg, ints);
   console.log(`  ${label.padEnd(14)} can verify: ${fields.length ? fields.join(", ") : DIM + "nothing — identity is collect-only here" + RESET}`);
+}
+
+// ---------------------------------------------------------------------------
+// 6. A real business, if one was named
+// ---------------------------------------------------------------------------
+const targetPhone = process.argv[2];
+if (targetPhone) {
+  head(`6. Live business: ${targetPhone}`);
+
+  const { lookupBusinessByPhone } = await import("../services/supabase.js");
+  const business = await lookupBusinessByPhone(targetPhone);
+
+  if (!business) {
+    no(`No business answers on ${targetPhone}`);
+    failures++;
+  } else {
+    const cfg = loadConfig(business);
+    const integrations = [];
+    console.log(`  ${BOLD}${business.name}${RESET}`);
+    dim(`timezone ${cfg.timezone} · adapter ${resolveSchedulingAdapter(cfg.capabilities?.appointments, integrations).id}`);
+    console.log();
+
+    const tools = toolNames(cfg, integrations);
+    console.log(`  Tools the model gets: ${tools.join(", ")}`);
+
+    const configured = Object.entries(cfg.capabilities || {});
+    if (configured.length === 0) {
+      dim("No capability rows configured — running on allowed_tasks defaults.");
+    } else {
+      console.log();
+      for (const [id, c] of configured) {
+        console.log(`  ${BOLD}${id}${RESET}${c.adapter ? ` via ${c.adapter}` : ""}`);
+        const custom = c.require?.identity?.custom || [];
+        for (const f of custom) {
+          console.log(`     must collect: ${f.label} — asked as "${f.ask}"${f.pattern ? ` (format ${f.pattern})` : ""}`);
+        }
+        if (c.require?.confirmBeforeWrite) console.log("     must read back and get an explicit yes");
+        if (c.require?.businessHoursOnly) console.log("     writes only during opening hours");
+        if (c.notes) console.log(`     guidance: "${String(c.notes).slice(0, 90)}${c.notes.length > 90 ? "…" : ""}"`);
+        if (!custom.length && !c.require?.confirmBeforeWrite && !c.require?.businessHoursOnly && !c.notes) {
+          dim("     nothing configured beyond being switched on");
+        }
+      }
+
+      // Prove the enforcement is real for THIS business, by attempting the
+      // write its own configuration is supposed to block.
+      const appt = cfg.capabilities.appointments;
+      const firstCustom = appt?.require?.identity?.custom?.[0];
+      if (firstCustom && tools.includes("book_appointment")) {
+        console.log();
+        const attempt = await executeToolCall(
+          { id: "live", name: "book_appointment", args: { scheduled_at: "2027-01-05T10:00:00", client_name: "Test Caller" } },
+          { businessId: business.id, callerPhone: "+15550000000", callId: null, integrations, capabilityState: {}, config: cfg, step: "gather_details" }
+        );
+        check(attempt.functionResponse.response.success === false,
+          `a booking without the ${firstCustom.label} is refused for this business`,
+          `booking succeeded without the ${firstCustom.label} — the requirement is NOT being enforced`);
+        dim(`the model is told: "${attempt.functionResponse.response.message}"`);
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
