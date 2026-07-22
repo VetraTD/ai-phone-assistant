@@ -675,6 +675,38 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let lastBookedAppointment = extras?.lastBookedAppointment || null;
   let completedActionThisTurn = false;
 
+  // ---------------------------------------------------------------------
+  // Generic capability channels.
+  //
+  // The named accumulators above (appointmentArgs, customerRequestArgs, and
+  // the appointment scratchpad) are capability-specific fields the engine
+  // should not know about. These two channels are their replacement:
+  //
+  //   capabilityEffects — deferred side effects, applied after the turn by
+  //     the owning pack's onEffect (lib/voice/session.js). This is how a new
+  //     capability causes a step transition, a notification or a history note
+  //     without an engine edit.
+  //   capabilityState — scratchpad merged immediately, per capability, and
+  //     threaded back into the next tool call in the same turn. Durable: a
+  //     later barge-in cannot un-happen a write that already occurred.
+  //
+  // BOTH MECHANISMS COEXIST ON PURPOSE, for now. Migrating booking and
+  // message-taking onto this channel means moving the idempotency anchor, the
+  // owner notification, the confirmation SMS and the barge-in salvage path all
+  // at once — onto an abstraction nothing has exercised yet. That is backwards.
+  // Step C builds the quotes capability on these channels first; the delicate
+  // paths migrate afterwards, onto something already proven.
+  //
+  // There is also an ordering quirk to preserve when that migration happens: in
+  // applyReply a completed cancel sets step CONFIRM *before* intentArgs is
+  // handled, while a completed booking sets it *after*. In a turn containing
+  // both an intent change and a completed action, the two therefore disagree
+  // about which wins. Dispatching every effect at a single point would silently
+  // change that.
+  // ---------------------------------------------------------------------
+  const capabilityEffects = [];
+  let capabilityState = { ...(extras?.capabilityState || {}) };
+
   // First request — stream it
   let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
   let lastUsageMetadata = null;
@@ -723,6 +755,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,
+        // Per-capability scratchpad, carrying both what earlier turns left
+        // behind and what earlier tools in THIS turn produced.
+        capabilityState,
       };
       const { functionResponse, stateEffects } = await executeToolCall(fc, toolCtx);
       results.push({ functionResponse });
@@ -748,6 +783,17 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         identityVerifiedApptIdFromTurn = stateEffects.identityVerifiedApptId;
       }
       if ("transferRequested" in stateEffects) transferRequested = stateEffects.transferRequested;
+
+      // Generic capability channels. Appended/merged rather than overwritten:
+      // a turn can contain several tool calls from the same capability, and
+      // each one's outcome is real.
+      if (Array.isArray(stateEffects.capabilityEffects)) {
+        capabilityEffects.push(...stateEffects.capabilityEffects);
+      }
+      if (stateEffects.capabilityState) {
+        capabilityState = mergeCapabilityState(capabilityState, stateEffects.capabilityState);
+      }
+
       if (
         stateEffects.toolResult?.success &&
         ACTION_TOOL_NAMES.includes(fc.name)
@@ -774,6 +820,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
           ...("selectedAppointmentId" in stateEffects
             ? { selectedAppointmentId: stateEffects.selectedAppointmentId }
             : {}),
+          // Carried so the salvage path can replay a capability's effects
+          // when the turn dies before its final reply.
+          capabilityEffects: stateEffects.capabilityEffects || null,
+          capabilityState: stateEffects.capabilityState || null,
         },
       };
     }
@@ -817,8 +867,34 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       selectedAppointmentId: selectedAppointmentIdFromTurn,
       identityVerifiedApptId: identityVerifiedApptIdFromTurn,
       transferRequested,
+      capabilityEffects,
+      capabilityState,
     },
   };
+}
+
+/**
+ * Merge a per-capability scratchpad patch.
+ *
+ * Shallow per capability: `{appointments: {a: 1}}` merged with
+ * `{appointments: {b: 2}}` yields `{appointments: {a: 1, b: 2}}`, so two tools
+ * from the same capability in one turn both contribute. A patch value of null
+ * clears that capability's slot outright, which is how a cancel invalidates a
+ * booking anchor.
+ *
+ * @param {Record<string, object>} current
+ * @param {Record<string, object|null>} patch
+ */
+function mergeCapabilityState(current, patch) {
+  const next = { ...current };
+  for (const [capability, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete next[capability];
+    } else {
+      next[capability] = { ...(next[capability] || {}), ...value };
+    }
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------
