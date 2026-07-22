@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createAudioOut } from "../lib/voice/audioOut.js";
+import { decodeMulaw } from "../lib/voice/mulaw.js";
 
 const STREAM_SID = "MZtestsid123";
 
@@ -220,6 +221,106 @@ describe("audioOut.js — createAudioOut", () => {
     it("handles a null/undefined buffer gracefully", () => {
       expect(() => audioOut.enqueue(null)).not.toThrow();
       expect(() => audioOut.enqueue(undefined)).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Paced playout + tapered barge-in
+  //
+  // The clock is frozen in these tests, so the pump can only ever emit the
+  // lookahead's worth of frames — which is exactly the property under test.
+  // -------------------------------------------------------------------------
+  describe("paced playout", () => {
+    const LOOKAHEAD_FRAMES = 5; // LOOKAHEAD_MS (100) / 20ms per frame
+
+    function mediaFrames() {
+      return sendFrame.mock.calls
+        .filter(([msg]) => msg.event === "media")
+        .map(([msg]) => Buffer.from(msg.media.payload, "base64"));
+    }
+
+    it("holds audio locally instead of dumping a whole utterance into Twilio", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01)); // 20 frames = 400ms
+      expect(mediaFrames().length).toBe(LOOKAHEAD_FRAMES);
+      expect(audioOut._queuedFrames()).toBe(20 - LOOKAHEAD_FRAMES);
+    });
+
+    it("still reports isPlaying() for the WHOLE utterance, not just what Twilio holds", () => {
+      // Load-bearing: isPlaying() drives armSilenceTimer, armCloseFallback and
+      // turnManager's AI-speaking window. Pacing must not shorten it.
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01));
+      expect(audioOut.aiAudioPlayingUntil()).toBe(400);
+      clock.advanceTo(399);
+      expect(audioOut.isPlaying(0)).toBe(true);
+    });
+
+    it("keeps a mark queued behind the audio it was submitted with", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01), "turn-1-done");
+      const markCalls = sendFrame.mock.calls.filter(([m]) => m.event === "mark");
+      expect(markCalls.length).toBe(0); // still behind 15 unsent frames
+      expect(audioOut.hasOutstandingMarks()).toBe(true); // but tracked immediately
+    });
+
+    it("sends a mark immediately when no audio is queued ahead of it", () => {
+      audioOut.sendMark("standalone");
+      expect(sendFrame).toHaveBeenCalledWith({
+        event: "mark",
+        streamSid: STREAM_SID,
+        mark: { name: "standalone" },
+      });
+    });
+  });
+
+  describe("tapered clear() — barge-in", () => {
+    function mediaFrames() {
+      return sendFrame.mock.calls
+        .filter(([msg]) => msg.event === "media")
+        .map(([msg]) => Buffer.from(msg.media.payload, "base64"));
+    }
+
+    /** Mean absolute PCM amplitude of a mu-law frame. */
+    function level(frame) {
+      let sum = 0;
+      for (const s of decodeMulaw(frame)) sum += Math.abs(s);
+      return sum / frame.length;
+    }
+
+    it("does NOT send Twilio's all-or-nothing clear (that is what chops mid-word)", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01));
+      audioOut.clear({ fadeMs: 40 });
+      expect(sendFrame.mock.calls.filter(([m]) => m.event === "clear").length).toBe(0);
+    });
+
+    it("appends a fade whose amplitude decreases to silence, and drops the rest", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01));
+      const before = mediaFrames().length;
+
+      const result = audioOut.clear({ fadeMs: 40 });
+
+      expect(result.fadedMs).toBe(40);
+      expect(result.droppedFrames).toBe(15);
+      expect(audioOut._queuedFrames()).toBe(0);
+
+      const fade = mediaFrames().slice(before);
+      expect(fade.length).toBe(2);
+      expect(level(fade[0])).toBeGreaterThan(level(fade[1]));
+      expect(level(fade[1])).toBeLessThan(level(fade[0]) / 2);
+    });
+
+    it("lets Twilio's remaining buffer finish when there is nothing left to ramp", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 2, 0x01)); // fits inside the lookahead
+      const before = mediaFrames().length;
+      const result = audioOut.clear({ fadeMs: 40 });
+      expect(result.fadedMs).toBe(0);
+      expect(mediaFrames().length).toBe(before); // no new audio, no hard clear
+      expect(sendFrame.mock.calls.filter(([m]) => m.event === "clear").length).toBe(0);
+    });
+
+    it("clear() with no options is still a hard, immediate stop (teardown path)", () => {
+      audioOut.enqueue(Buffer.alloc(160 * 20, 0x01));
+      audioOut.clear();
+      expect(sendFrame).toHaveBeenCalledWith({ event: "clear", streamSid: STREAM_SID });
+      expect(audioOut._queuedFrames()).toBe(0);
     });
   });
 });
