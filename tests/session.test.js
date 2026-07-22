@@ -72,6 +72,8 @@ vi.mock("../lib/voice/audioOut.js", () => ({
       isPlaying: vi.fn(function () { return inst._playing; }),
       hasOutstandingMarks: vi.fn(() => false),
       reset: vi.fn(),
+      stop: vi.fn(),
+      _queuedFrames: vi.fn(() => 0),
     };
     H.audioOutInstances.push(inst);
     return inst;
@@ -109,7 +111,8 @@ vi.mock("../lib/voice/metrics.js", () => ({
     H.metricsInstances.push(inst);
     return inst;
   }),
-  getLatencyStats: vi.fn(() => ({ count: 0, byStage: {}, recent: [] })),
+  getLatencyStats: vi.fn(() => ({ count: 0, byStage: {}, turnTaking: {}, recent: [] })),
+  bumpCounter: vi.fn(),
 }));
 
 // ---- lib/voice/llmTurn.js --------------------------------------------------
@@ -312,6 +315,23 @@ class FakeWs {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/**
+ * Flush the macrotask queue until `predicate()` is true, or give up.
+ *
+ * Several paths under test are fire-and-forget (doTransfer from applyReply,
+ * the deferred redial on a playback mark), so the number of ticks needed to
+ * settle them isn't fixed — it varies with how loaded the machine is. A
+ * hardcoded run of `await flush()` calls passes alone and fails
+ * intermittently in a full-suite run. Polling removes that race without
+ * making a passing test any slower.
+ */
+async function flushUntil(predicate, maxTicks = 50) {
+  for (let i = 0; i < maxTicks; i++) {
+    if (predicate()) return;
+    await flush();
+  }
+}
 // The socket is closed HANGUP_GRACE_MS (800ms) after the goodbye's mark
 // echoes, so the line doesn't drop on the final syllable. Real-timer tests
 // have to outwait that grace before asserting the close.
@@ -821,8 +841,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     // Twilio echoes the announcement's playback mark -> now we redial.
     ws.emit({ event: "mark", mark: { name: "transfer-done" } });
-    await flush();
-    await flush();
+    // Poll rather than a fixed tick count: the redial is fire-and-forget, so
+    // under load it can land after the test ends — which then broke the NEXT
+    // transfer test's "must not have redialled" assertion.
+    await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0);
 
     expect(mockTwilioCallsUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -929,7 +951,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
     await flush();
-    await flush();
+    await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0);
 
     expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
     expect(ws.closeCount).toBe(0); // the Twilio redial tears the stream down, not us
@@ -1130,6 +1152,291 @@ describe("session.js — v2 pipeline orchestrator", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Caller-speech suppression of the silence ladder.
+  //
+  // Regression cover for the bug this was built for: a caller with a long
+  // request ran past the identify_intent nudge1 threshold (6s) and got
+  // interrupted with "still there?" — and, if they kept going, hung up on at
+  // 20s. The ladder is armed off the AI's playback mark and, before this,
+  // had no input at all representing "the caller is talking right now".
+  // -------------------------------------------------------------------------
+  describe("8d. silence ladder vs. a caller who is still speaking", () => {
+    async function startCall(streamSid) {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: {
+          callSid: sid,
+          streamSid,
+          customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      // The ladder is armed off a playback mark, so without this the tests
+      // below would pass vacuously — nothing would ever have been scheduled.
+      ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+      await vi.advanceTimersByTimeAsync(1);
+      return ws;
+    }
+
+    it("never nudges during a 30s monologue (interim transcripts keep arriving)", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8d1");
+        const stt = H.sttInstances[0];
+        const ttsBefore = H.ttsTurns.length;
+
+        // 30 seconds of continuous speech: an interim every second, well
+        // past nudge1 (6s), nudge2 (12s) and the 20s hangup for this step.
+        for (let i = 0; i < 30; i++) {
+          stt.opts.onInterim("I need to book an appointment for my daughter next");
+          await vi.advanceTimersByTimeAsync(1_000);
+        }
+
+        expect(H.ttsTurns.length).toBe(ttsBefore); // not one nudge, no goodbye
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("resumes the ladder once the caller actually stops", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8d2");
+        const stt = H.sttInstances[0];
+
+        for (let i = 0; i < 10; i++) {
+          stt.opts.onInterim("still talking");
+          await vi.advanceTimersByTimeAsync(1_000);
+        }
+        const ttsBefore = H.ttsTurns.length;
+
+        // Silence: the grace window lapses, then nudge1 (6s) fires. The
+        // ladder re-checks every SILENCE_RETRY_MS, hence the slack.
+        await vi.advanceTimersByTimeAsync(2_000 + 6_000 + 2_500);
+        expect(H.ttsTurns.length).toBeGreaterThan(ttsBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still escalates on a permanently noisy line (suppression is capped)", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8d3");
+        const stt = H.sttInstances[0];
+        const ttsBefore = H.ttsTurns.length;
+
+        // A TV in the background renews the window forever. Past
+        // MAX_SUPPRESSION_MS (30s) the ladder must run anyway, or the call
+        // could never reach its goodbye.
+        for (let i = 0; i < 45; i++) {
+          stt.opts.onInterim("background chatter");
+          await vi.advanceTimersByTimeAsync(1_000);
+        }
+
+        expect(H.ttsTurns.length).toBeGreaterThan(ttsBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("ignores interims while the AI is speaking (no AEC — that is echo, not the caller)", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8d4");
+        const stt = H.sttInstances[0];
+        const audioOut = H.audioOutInstances[0];
+
+        // The AI's own audio bleeding back must not be able to suppress the
+        // ladder, or a stuck playback estimate would silence it for good.
+        audioOut._playing = true;
+        for (let i = 0; i < 5; i++) {
+          stt.opts.onInterim("echo of the assistant");
+          await vi.advanceTimersByTimeAsync(1_000);
+        }
+        audioOut._playing = false;
+
+        const ttsBefore = H.ttsTurns.length;
+        await vi.advanceTimersByTimeAsync(6_000 + 2_500);
+        expect(H.ttsTurns.length).toBeGreaterThan(ttsBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Incomplete-final holds
+  // -------------------------------------------------------------------------
+  describe("8e. mid-sentence pauses are waited out", () => {
+    async function startCall(streamSid) {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: {
+          callSid: sid,
+          streamSid,
+          customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      return ws;
+    }
+
+    it("combines a trailing-off final with its continuation into ONE turn", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8e1");
+        const tm = H.turnManagerInstances[0];
+        const llmCallsBefore = runLlmTurn.mock.calls.length;
+
+        tm.opts.onTurnEnd("I need to book an appointment for");
+        await vi.advanceTimersByTimeAsync(1_200); // inside the 2s hold
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore); // still waiting
+
+        tm.opts.onTurnEnd("next Tuesday afternoon.");
+        await vi.advanceTimersByTimeAsync(50);
+
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore + 1);
+        const text = runLlmTurn.mock.calls.at(-1)[0].userText;
+        expect(text).toContain("book an appointment for");
+        expect(text).toContain("next Tuesday");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("extends the hold when the caller resumes, even if only Deepgram noticed", async () => {
+      // Reproduces an observed live call: the caller resumed 200ms before
+      // the hold expired, but the only evidence was Deepgram's SpeechStarted
+      // — the local energy VAD's hangover had already lapsed. The hold
+      // flushed anyway and the continuation arrived as a SEPARATE turn that
+      // barged into the reply to the first half. vad.isActive() alone is not
+      // a sufficient "still talking" signal at hold-expiry time.
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8e4");
+        const tm = H.turnManagerInstances[0];
+        const stt = H.sttInstances[0];
+        const llmCallsBefore = runLlmTurn.mock.calls.length;
+
+        tm.opts.onTurnEnd("I need to book an appointment for");
+
+        // Caller makes a sound 100ms into the hold. The mocked VAD reports
+        // isActive() === false, so a bare VAD check cannot see this.
+        await vi.advanceTimersByTimeAsync(100);
+        stt.opts.onSpeechStarted();
+
+        // ...then Deepgram's UtteranceEnd lands ~1s later (utterance_end_ms
+        // is 1000) and clears the ladder's "talking right now" flag. This is
+        // what made the extension unfirable on real calls: by the time the
+        // hold expires that flag is always gone.
+        await vi.advanceTimersByTimeAsync(1_000);
+        stt.opts.onUtteranceEnd();
+
+        await vi.advanceTimersByTimeAsync(1_100); // past the 2s base hold
+
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore); // extended, not flushed
+
+        tm.opts.onTurnEnd("next Tuesday afternoon.");
+        await vi.advanceTimersByTimeAsync(50);
+
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore + 1); // ONE merged turn
+        expect(runLlmTurn.mock.calls.at(-1)[0].userText).toContain("next Tuesday");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("makes each extension earn itself — one old sound cannot ride to the ceiling", async () => {
+      // Observed live: a single speech signal at 14724ms produced extensions
+      // at 16326, 16828 and 17341ms with nothing new in between, because the
+      // check compared against holdStartedAt (which never changes during a
+      // chain) and so latched true. The caller waited 6.7s voice-to-voice
+      // and the turn split anyway.
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8e5");
+        const tm = H.turnManagerInstances[0];
+        const stt = H.sttInstances[0];
+        const llmCallsBefore = runLlmTurn.mock.calls.length;
+
+        tm.opts.onTurnEnd("I need to book an appointment for");
+
+        // ONE sound early in the hold, then nothing further.
+        await vi.advanceTimersByTimeAsync(100);
+        stt.opts.onSpeechStarted();
+
+        // It buys a single 500ms extension past the 2s base...
+        await vi.advanceTimersByTimeAsync(2_100);
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore);
+
+        // ...and then must give up, rather than extending again on the same
+        // stale signal all the way to MAX_TOTAL_HOLD_MS.
+        await vi.advanceTimersByTimeAsync(600);
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("charges the hold to latency instead of hiding it (speech_end predates the flush)", async () => {
+      // Regression cover: speech_end used to be stamped on entry to
+      // startTurn, i.e. AFTER the hold, so a turn the caller waited 2s
+      // extra for reported the same voice_to_voice_ms as one they didn't.
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8e3");
+        const tm = H.turnManagerInstances[0];
+        const metrics = H.metricsInstances[0];
+
+        tm.opts.onTurnEnd("I need to book an appointment for");
+        await vi.advanceTimersByTimeAsync(2_100); // hold expires, turn starts
+
+        const speechEnd = metrics.mark.mock.calls.find(([n]) => n === "speech_end");
+        const sttFinal = metrics.mark.mock.calls.find(([n]) => n === "stt_final");
+        expect(speechEnd).toBeTruthy();
+        // Stamped explicitly from when the final arrived...
+        expect(typeof speechEnd[1]).toBe("number");
+        // ...and stt_final is left to default to "now", so the gap between
+        // them is the hold. They must not be the same instant any more.
+        expect(sttFinal[1]).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("flushes at the ceiling rather than holding a rambling caller forever", async () => {
+      vi.useFakeTimers();
+      try {
+        await startCall("MZ8e2");
+        const tm = H.turnManagerInstances[0];
+        const llmCallsBefore = runLlmTurn.mock.calls.length;
+
+        // Each continuation is itself incomplete and would individually ask
+        // for a fresh 3s hold, so without a ceiling on the CHAIN this would
+        // renew indefinitely. Four finals 700ms apart = 2.8s of chain; the
+        // ceiling must force a flush at 4.5s, not at 4 x 3s.
+        for (let i = 0; i < 4; i++) {
+          tm.opts.onTurnEnd("and");
+          await vi.advanceTimersByTimeAsync(700);
+        }
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore); // still held at 2.8s
+
+        await vi.advanceTimersByTimeAsync(2_000); // crosses the 4.5s ceiling
+        expect(runLlmTurn.mock.calls.length).toBe(llmCallsBefore + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("11b. a successful cancel moves the step to confirm, persists identity, and records a system note", async () => {
