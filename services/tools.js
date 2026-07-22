@@ -8,6 +8,12 @@ import {
 } from "./supabase.js";
 import { executeIntegration } from "./integrations.js";
 import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
+import {
+  HAS_OFFSET_RE,
+  parseNaiveDateTime,
+  zonedComponentsToUtcMs,
+  zonedWeekdayAndMinutes,
+} from "../lib/capabilities/datetime.js";
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -120,90 +126,9 @@ const CLOSED_DAY_MESSAGE = "We're closed that day — would another time work?";
 // skew) isn't rejected as already in the past.
 const BOOKING_PAST_GRACE_MS = 60_000;
 
-const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
-const HAS_OFFSET_RE = /(?:Z|[+-]\d{2}:\d{2})$/i;
-
-/**
- * Parse a strict naive "YYYY-MM-DDTHH:MM[:SS]" datetime (no offset/Z) into
- * numeric components, rejecting out-of-range or calendar-impossible dates
- * (month 13, Feb 30, ...).
- * @param {string} str
- * @returns {{year:number,month:number,day:number,hour:number,minute:number,second:number}|null}
- */
-function parseNaiveDateTime(str) {
-  const m = NAIVE_DATETIME_RE.exec(str);
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  const hour = Number(m[4]);
-  const minute = Number(m[5]);
-  const second = m[6] ? Number(m[6]) : 0;
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
-    return null;
-  }
-  // Round-trip through Date.UTC to reject calendar-impossible dates (e.g.
-  // Feb 30 rolls over to Mar 2 and would silently mismatch).
-  const check = new Date(Date.UTC(year, month - 1, day));
-  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
-    return null;
-  }
-  return { year, month, day, hour, minute, second };
-}
-
-/**
- * Offset (ms) such that: (wall-clock reading of `date` in `timeZone`) ===
- * date.getTime() + offset. E.g. for America/Chicago in summer (UTC-5), the
- * offset is roughly -5*3600*1000.
- * @param {Date} date
- * @param {string} timeZone
- * @returns {number}
- */
-function getTzOffsetMs(date, timeZone) {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = {};
-  for (const { type, value } of dtf.formatToParts(date)) {
-    if (type !== "literal") parts[type] = value;
-  }
-  const asUtc = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second)
-  );
-  return asUtc - date.getTime();
-}
-
-/**
- * Convert naive local wall-clock components, interpreted in `timeZone`, into
- * the absolute UTC instant (ms since epoch) they represent. Standard
- * "guess against the offset at the guessed instant, then refine once against
- * the offset actually at the guessed UTC instant" approach so a
- * DST-transition day doesn't throw the result off by an hour. No timezone
- * database is used — only Intl.DateTimeFormat's own timeZone resolution.
- * @param {{year:number,month:number,day:number,hour:number,minute:number,second:number}} components
- * @param {string} timeZone
- * @returns {number} ms since epoch
- */
-function zonedComponentsToUtcMs({ year, month, day, hour, minute, second }, timeZone) {
-  const guessMs = Date.UTC(year, month - 1, day, hour, minute, second);
-  const offset1 = getTzOffsetMs(new Date(guessMs), timeZone);
-  let utcMs = guessMs - offset1;
-  const offset2 = getTzOffsetMs(new Date(utcMs), timeZone);
-  if (offset2 !== offset1) utcMs = guessMs - offset2;
-  return utcMs;
-}
+// Datetime parsing/anchoring primitives live in lib/capabilities/datetime.js —
+// they are general utilities, not appointment logic, and any capability that
+// accepts a wall-clock time from the model needs them.
 
 /**
  * Validate and timezone-anchor a `book_appointment` scheduled_at value
@@ -245,13 +170,7 @@ function validateBookingTime(rawScheduledAt, config) {
   // weekday/time-of-day in the business's timezone (mirrors how
   // isBusinessOpen reads "now" in that timezone) and reuse resolveDayHours'
   // weekly/legacy/null shape handling rather than reinventing it.
-  const zoned = new Date(targetMs);
-  const shortWeekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" })
-    .format(zoned)
-    .slice(0, 3)
-    .toLowerCase();
-  const timeParts = zoned.toLocaleTimeString("en-GB", { timeZone: timezone, hour12: false }).split(":");
-  const minutesOfDay = parseInt(timeParts[0], 10) * 60 + parseInt(timeParts[1], 10);
+  const { shortWeekday, minutesOfDay } = zonedWeekdayAndMinutes(targetMs, timezone);
 
   const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
   if (day.closed) {

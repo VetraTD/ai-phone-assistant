@@ -5,18 +5,18 @@ import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
 import { resolveDayHours, formatClockTime } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
 
 const MAX_FC_ROUNDS = 3;
 
 // Tools that perform a caller-visible action. A success from any of these
 // unlocks same-turn end_call (see completedActionThisTurn) and is recorded
 // into history as a bracketed system note (lib/voice/session.js applyReply).
-export const ACTION_TOOL_NAMES = [
-  "book_appointment",
-  "cancel_appointment_db",
-  "reschedule_appointment_db",
-  "record_customer_request",
-];
+//
+// Derived from the capability registry rather than hardcoded: a new pack's
+// action tool is picked up automatically, so adding a capability never means
+// remembering to edit a list in the engine.
+export const ACTION_TOOL_NAMES = actionToolNames();
 
 // ---------------------------------------------------------------------------
 // Singleton Gemini client — @google/genai's GoogleGenAI wraps a connection
@@ -67,6 +67,17 @@ const DEFAULT_CONFIG = {
 // Tool builder — creates function declarations from allowedTasks
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the tool declarations for a call.
+ *
+ * Two tools are ENGINE-owned and defined here rather than in a capability pack:
+ * set_call_intent and end_call are how the engine drives its own step machine,
+ * so they exist on every call no matter which capabilities a business has. All
+ * other declarations come from the capability registry, in registry order —
+ * see capabilities/index.js for why that order is load-bearing.
+ *
+ * @param {string[]} allowedTasks
+ */
 export function buildCallTools(allowedTasks) {
   const intents = Array.isArray(allowedTasks) && allowedTasks.length > 0
     ? allowedTasks
@@ -106,85 +117,17 @@ export function buildCallTools(allowedTasks) {
     },
   ];
 
-  if (allowedTasks.includes("book_appointment")) {
-    declarations.push({
-      name: "book_appointment",
-      description:
-        "Book an appointment after the caller has confirmed the details " +
-        "(name, date/time, service type). Call this only after confirmation.",
-      parameters: {
-        type: "object",
-        properties: {
-          client_name: { type: "string", description: "Full name of the client" },
-          scheduled_at: {
-            type: "string",
-            description:
-              "ISO 8601 datetime for the appointment (e.g. 2025-03-15T10:00:00)",
-          },
-          service_type: {
-            type: "string",
-            description: "Type of service or consultation requested",
-          },
-          notes: {
-            type: "string",
-            description: "Any additional notes about the appointment or client needs",
-          },
-        },
-        required: ["scheduled_at"],
-      },
-    });
-  }
-
-  // record_customer_request is CORE (message-taking is always-on, not
-  // module-gated) — always registered. Previously gated on
-  // take_message/callback_request being in allowedTasks, which meant the
-  // prompt's ESCALATION section could tell the model to call a tool that
-  // wasn't actually registered (phantom-tool bug) whenever a business had
-  // neither task enabled.
-  declarations.push({
-    name: "record_customer_request",
-    description:
-      "Record a message or callback request after collecting the caller's name, " +
-      "callback number, and message (and preferred callback time for callbacks). " +
-      "Call this when the caller wants to leave a message or have someone call them back.",
-    parameters: {
-      type: "object",
-      properties: {
-        request_type: {
-          type: "string",
-          enum: ["message", "callback"],
-          description: "Whether this is a message to pass along or a request for a callback",
-        },
-        caller_name: { type: "string", description: "Caller's name" },
-        callback_number: { type: "string", description: "Phone number to call back" },
-        message: { type: "string", description: "The message or reason for callback" },
-        preferred_time: {
-          type: "string",
-          description: "When they prefer to be called back (for callback type)",
-        },
-      },
-      required: ["request_type"],
-    },
-  });
-
-  // request_transfer is CORE (transfer-to-human is always-on) — always
-  // registered, gated at execution time (see tools.js) on ctx.transferAllowed
-  // rather than on allowedTasks, so it's available in any language the
-  // caller asks in, not just via the English regex fast-path.
-  declarations.push({
-    name: "request_transfer",
-    description:
-      "Transfer the caller to a human. Use when the caller asks for a person/" +
-      "representative/manager in any language, or when you cannot help and " +
-      "transfer is appropriate.",
-    parameters: {
-      type: "object",
-      properties: {
-        reason: { type: "string", description: "Brief reason for the transfer" },
-      },
-      required: ["reason"],
-    },
-  });
+  // Capability contributions, in registry order:
+  //   appointments -> book_appointment (module-gated on allowedTasks)
+  //   messages     -> record_customer_request (CORE, always registered)
+  //   transfer     -> request_transfer (CORE, always registered; refused at
+  //                   execution time on ctx.transferAllowed so a caller can ask
+  //                   for a person in any language)
+  //
+  // Both CORE tools being unconditional is what closed the phantom-tool bug:
+  // the prompt's ESCALATION section could previously instruct the model to call
+  // record_customer_request when no allowedTasks entry had registered it.
+  declarations.push(...collectTools({ allowedTasks }));
 
   return { functionDeclarations: declarations };
 }
@@ -197,89 +140,25 @@ export function buildCallTools(allowedTasks) {
 const TOOL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
 /**
- * Build Gemini function declarations from business integrations (webhooks and athenahealth).
+ * Build tool declarations contributed by a business's integrations.
+ *
+ * Two different things flow through here, and they are not the same kind of
+ * thing:
+ *
+ *  - WEBHOOK tools are the generic escape hatch. The business supplies a name,
+ *    a description and a params_schema, and gets a live tool. This is
+ *    engine-owned: it is not a capability, it is the mechanism for the long
+ *    tail no capability will ever anticipate.
+ *
+ *  - EHR tools belong to the appointments capability and are sourced from that
+ *    pack. They are emitted here rather than from collectAdapterTools purely to
+ *    preserve this function's directly-tested contract
+ *    (tests/gemini-integrations.test.js) and the order the model has always
+ *    seen. Step B dissolves the split when adapters own backend selection.
+ *
  * @param {Array<{ provider: string, name: string, enabled: boolean, config: object }>} businessIntegrations
  * @returns {{ functionDeclarations: Array }}
  */
-/** Fixed athena tool declarations (when business has athenahealth integration). */
-const ATHENA_FUNCTION_DECLARATIONS = [
-  {
-    name: "get_caller_appointments",
-    description: "Look up the caller's upcoming appointments in the EHR.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_name: { type: "string", description: "Caller's full name" },
-        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
-        caller_phone: { type: "string", description: "Caller's phone number" },
-      },
-      required: ["caller_name"],
-    },
-  },
-  {
-    name: "get_available_slots",
-    description: "Get available appointment slots for a given date and optional service type.",
-    parameters: {
-      type: "object",
-      properties: {
-        date: { type: "string", description: "Date to check (YYYY-MM-DD)" },
-        service_type: { type: "string", description: "Type of appointment (optional)" },
-      },
-      required: ["date"],
-    },
-  },
-  {
-    name: "book_appointment_in_ehr",
-    description: "Book an appointment in the EHR for the caller.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_name: { type: "string", description: "Caller's full name" },
-        caller_phone: { type: "string", description: "Caller's phone number" },
-        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
-        scheduled_at: { type: "string", description: "Appointment date and time (ISO 8601)" },
-        service_type: { type: "string", description: "Type of appointment" },
-        notes: { type: "string", description: "Optional notes" },
-      },
-      required: ["caller_name", "caller_dob", "scheduled_at"],
-    },
-  },
-  {
-    name: "cancel_appointment",
-    description: "Cancel an existing appointment for the caller. Requires their name and date of birth to verify identity, plus the date of the appointment to cancel.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_name: { type: "string", description: "Caller's full name" },
-        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
-        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
-        appointment_date: { type: "string", description: "Date of the appointment to cancel (YYYY-MM-DD)" },
-        appointment_time: { type: "string", description: "Time of the appointment to cancel (HH:MM, optional)" },
-        reason: { type: "string", description: "Reason for cancellation (optional)" },
-      },
-      required: ["caller_name", "caller_dob"],
-    },
-  },
-  {
-    name: "reschedule_appointment",
-    description: "Reschedule an existing appointment to a new date and time. Requires the caller's name and date of birth, the current appointment date, and the desired new date.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_name: { type: "string", description: "Caller's full name" },
-        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
-        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
-        current_appointment_date: { type: "string", description: "Date of the existing appointment (YYYY-MM-DD)" },
-        current_appointment_time: { type: "string", description: "Time of the existing appointment (HH:MM, optional)" },
-        new_date: { type: "string", description: "Desired new date (YYYY-MM-DD)" },
-        new_time: { type: "string", description: "Desired new time (HH:MM, optional)" },
-        service_type: { type: "string", description: "Type of appointment (optional)" },
-      },
-      required: ["caller_name", "caller_dob", "new_date"],
-    },
-  },
-];
-
 export function buildIntegrationTools(businessIntegrations) {
   const declarations = [];
   const integrations = Array.isArray(businessIntegrations) ? businessIntegrations : [];
@@ -299,103 +178,23 @@ export function buildIntegrationTools(businessIntegrations) {
     }
   }
 
-  const hasAthena = integrations.some((i) => i.enabled && i.provider === "athenahealth");
-  if (hasAthena) {
-    declarations.push(...ATHENA_FUNCTION_DECLARATIONS);
-  }
+  declarations.push(...getPack("appointments").ehrTools(integrations));
 
   return { functionDeclarations: declarations };
 }
 
-/** DB appointment tool names (used when no EHR; executed in getReply). */
-const DB_APPOINTMENT_TOOL_NAMES = [
-  "get_caller_appointments_from_db",
-  "cancel_appointment_db",
-  "reschedule_appointment_db",
-];
-
-const DB_APPOINTMENT_DECLARATIONS = [
-  {
-    name: "get_caller_appointments_from_db",
-    description:
-      "Look up the caller's scheduled appointments in our database by their phone or name. Use when the business does not have an EHR integration.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_phone: { type: "string", description: "Caller's phone number" },
-        caller_name: { type: "string", description: "Caller's full name (optional)" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "cancel_appointment_db",
-    description:
-      "Cancel an appointment in our database. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment (we use the one we looked up).",
-    parameters: {
-      type: "object",
-      properties: {
-        appointment_id: { type: "string", description: "UUID of the appointment to cancel (optional if caller has one appointment)" },
-        client_name: {
-          type: "string",
-          description:
-            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
-        },
-        phone_last4: {
-          type: "string",
-          description:
-            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the cancellation will be refused.",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "reschedule_appointment_db",
-    description:
-      "Reschedule an appointment in our database to a new date/time. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment.",
-    parameters: {
-      type: "object",
-      properties: {
-        appointment_id: { type: "string", description: "UUID of the appointment (optional if caller has one appointment)" },
-        new_scheduled_at: {
-          type: "string",
-          description: "New date and time in ISO 8601 format (e.g. 2026-04-15T10:00:00)",
-        },
-        client_name: {
-          type: "string",
-          description:
-            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
-        },
-        phone_last4: {
-          type: "string",
-          description:
-            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the reschedule will be refused.",
-        },
-      },
-      required: ["new_scheduled_at"],
-    },
-  },
-];
-
 /**
- * Build DB appointment tool declarations when business has no EHR but allows cancel/reschedule.
+ * Backend-shaped tool declarations — today, the internal-database appointment
+ * tools that stand in when a business has no EHR.
+ *
+ * The declarations themselves now live in capabilities/appointments.js; this
+ * stays as a thin, directly-tested entry point (tests/taskModel.test.js).
+ *
  * @param {object} config - Per-business config (allowedTasks)
  * @param {object} extras - { integrations: Array }
  */
 export function buildDbAppointmentTools(config, extras) {
-  const integrations = Array.isArray(extras?.integrations) ? extras.integrations : [];
-  const hasEhr = integrations.some(
-    (i) => i.enabled && (i.provider === "athenahealth" /* future EHR */)
-  );
-  const allowed = config?.allowedTasks || [];
-  // "appointments" is a legacy bundle name — normalizeAllowedTasks always
-  // expands it to the three appointment MODULE_TASKS before config reaches
-  // here, so gating is purely module-name-based now.
-  const hasAppointmentTask =
-    allowed.includes("cancel_reschedule") || allowed.includes("check_appointment");
-  if (hasEhr || !hasAppointmentTask) return { functionDeclarations: [] };
-  return { functionDeclarations: [...DB_APPOINTMENT_DECLARATIONS] };
+  return { functionDeclarations: collectAdapterTools(config, extras || {}) };
 }
 
 // ---------------------------------------------------------------------------
