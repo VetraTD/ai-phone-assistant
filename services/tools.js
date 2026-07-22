@@ -75,7 +75,7 @@ const CAPABILITY_DEPS = {
  * @param {string|null} [ctx.callerPhone]
  * @param {string|null} [ctx.callId]
  * @param {Array} [ctx.integrations]
- * @param {string|null} [ctx.selectedAppointmentId]
+ * @param {object} [ctx.capabilityState] - per-capability scratchpad, keyed by pack id
  * @param {string} [ctx.step] - current call step (e.g. "confirm", "ending") — gates end_call
  * @param {boolean} [ctx.transferAllowed] - gates request_transfer
  * @param {object} [ctx.config] - normalised business config
@@ -83,13 +83,12 @@ const CAPABILITY_DEPS = {
  *   functionResponse: {id: string, name: string, response: object},
  *   stateEffects: {
  *     intentArgs?: object|null,
- *     appointmentArgs?: object|null,
  *     endCallArgs?: object|null,
- *     customerRequestArgs?: object|null,
- *     selectedAppointmentId?: string|null,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
  *     toolCallEvent?: {name: string, args: object}|null,
+ *     capabilityEffects?: Array<{capability: string, type: string, data?: object}>,
+ *     capabilityState?: Record<string, object|null>,
  *   }
  * }>}
  */

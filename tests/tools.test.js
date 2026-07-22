@@ -31,7 +31,7 @@ const baseCtx = {
   callerPhone: "+15551234567",
   callId: "call-1",
   integrations: [],
-  selectedAppointmentId: null,
+  capabilityState: {},
   config: {},
 };
 
@@ -61,7 +61,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     });
   });
 
-  it("record_customer_request: response shape and customerRequestArgs state effect", async () => {
+  it("record_customer_request: response shape and recorded capability effect", async () => {
     const args = { request_type: "message", caller_name: "Jane", message: "Call me back" };
     const fc = { id: "fc2", name: "record_customer_request", args };
     const { functionResponse, stateEffects } = await executeToolCall(fc, baseCtx);
@@ -70,7 +70,13 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       success: true,
       message: "I'll make sure they get your message.",
     });
-    expect(stateEffects.customerRequestArgs).toEqual(args);
+    // Reports through the generic channel rather than a customerRequestArgs
+    // field the engine knows by name. The persist and the owner notification
+    // now live in the messages pack's onEffect.
+    expect(stateEffects.capabilityEffects).toEqual([
+      { capability: "messages", type: "recorded", data: args },
+    ]);
+    expect(stateEffects.customerRequestArgs).toBeUndefined();
     expect(stateEffects.toolResult.success).toBe(true);
   });
 
@@ -90,7 +96,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     expect(stateEffects.toolCallEvent).toEqual({ name: "some_unregistered_tool", args: {} });
   });
 
-  it("book_appointment: success path calls createAppointment and sets appointmentArgs", async () => {
+  it("book_appointment: success path calls createAppointment and emits a booked effect", async () => {
     mockCreateAppointment.mockResolvedValue("appt-1");
     const args = { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane", service_type: "cleaning" };
     const fc = { id: "fc4", name: "book_appointment", args };
@@ -101,7 +107,9 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect.objectContaining({ businessId: "biz-1", callId: "call-1", scheduledAt: args.scheduled_at })
     );
     expect(functionResponse.response.success).toBe(true);
-    expect(stateEffects.appointmentArgs).toEqual(args);
+    expect(stateEffects.capabilityEffects).toEqual([
+      { capability: "appointments", type: "booked", data: args },
+    ]);
   });
 
   describe("book_appointment: time validation + timezone anchoring (Fix 1)", () => {
@@ -141,7 +149,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         expect.objectContaining({ scheduledAt: "2026-07-21T15:00:00.000Z" })
       );
       expect(functionResponse.response.success).toBe(true);
-      expect(stateEffects.appointmentArgs.scheduled_at).toBe("2026-07-21T15:00:00.000Z");
+      expect(stateEffects.capabilityEffects[0].data.scheduled_at).toBe("2026-07-21T15:00:00.000Z");
     });
 
     it("winter date: same timezone anchors with the CST (UTC-6) offset, not a hardcoded CDT offset", async () => {
@@ -180,7 +188,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         success: false,
         message: "That time has already passed — what day and time works for you?",
       });
-      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(stateEffects.capabilityEffects).toBeUndefined();
     });
 
     it("unparseable datetime is rejected with no insert", async () => {
@@ -283,7 +291,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         success: false,
         message: "That time slot is no longer available. Please ask the caller to pick a different time.",
       });
-      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(stateEffects.capabilityEffects).toBeUndefined();
       expect(mockCaptureException).toHaveBeenCalled();
     });
 
@@ -308,7 +316,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
   it("cancel_appointment_db: missing appointment id short-circuits with no toolCallEvent (bug preserved verbatim)", async () => {
     const fc = { id: "fc5", name: "cancel_appointment_db", args: {} };
-    const ctx = { ...baseCtx, selectedAppointmentId: null };
+    const ctx = { ...baseCtx, capabilityState: {} };
 
     const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
 
@@ -330,7 +338,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     // arg silently disabled the phone filter inside listAppointmentsByCaller,
     // leaking every business's appointments to any caller.
     expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
-    expect(stateEffects.selectedAppointmentId).toBe("appt-9");
+    expect(stateEffects.capabilityState.appointments.selectedAppointmentId).toBe("appt-9");
   });
 
   it("get_caller_appointments_from_db: ignores a model-supplied caller_phone arg — never trusts it over ctx.callerPhone", async () => {
@@ -652,7 +660,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const { functionResponse, stateEffects } = await executeToolCall(fc, noBizCtx);
 
       expect(functionResponse.response).toEqual({ success: false, message: NO_BUSINESS_MESSAGE });
-      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(stateEffects.capabilityEffects).toBeUndefined();
       expect(mockCreateAppointment).not.toHaveBeenCalled();
     });
   });
@@ -698,7 +706,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       expect(functionResponse.response.success).toBe(false);
       expect(functionResponse.response.message).toMatch(/no longer available/i);
-      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(stateEffects.capabilityEffects).toBeUndefined();
     });
 
     it("a generic DB error reports the follow-up message", async () => {
@@ -720,7 +728,11 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       // as an offset-bearing string (stored verbatim by validateBookingTime).
       const ctx = {
         ...baseCtx,
-        lastBookedAppointment: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Jane" },
+        capabilityState: {
+          appointments: {
+            lastBooked: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Jane" },
+          },
+        },
       };
       const fc = {
         id: "fcD4",
@@ -738,7 +750,11 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     it("re-booking the slot already booked this call short-circuits to success without inserting", async () => {
       const ctx = {
         ...baseCtx,
-        lastBookedAppointment: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+        capabilityState: {
+          appointments: {
+            lastBooked: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+          },
+        },
       };
       const fc = {
         id: "fcD3",
@@ -751,23 +767,28 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(mockCreateAppointment).not.toHaveBeenCalled();
       expect(functionResponse.response.success).toBe(true);
       expect(functionResponse.response.message).toMatch(/already booked/i);
-      // No appointmentArgs: the original booking already fired the step
+      // No booked effect: the original booking already fired the step
       // transition + notifications; the short-circuit must not re-fire them.
-      expect(stateEffects.appointmentArgs).toBeNull();
+      expect(stateEffects.capabilityEffects).toBeUndefined();
     });
   });
 
   describe("identity persistence + end_call gating (Phase 2)", () => {
-    it("cancel: ctx.identityVerifiedApptId skips the DB identity lookup", async () => {
+    it("cancel: a previously verified appointment skips the DB identity lookup", async () => {
       mockUpdateAppointmentStatus.mockResolvedValue(true);
-      const ctx = { ...baseCtx, selectedAppointmentId: "appt-9", identityVerifiedApptId: "appt-9" };
+      const ctx = {
+        ...baseCtx,
+        capabilityState: {
+          appointments: { selectedAppointmentId: "appt-9", identityVerifiedApptId: "appt-9" },
+        },
+      };
       const fc = { id: "fcI1", name: "cancel_appointment_db", args: {} };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
 
       expect(mockGetAppointmentById).not.toHaveBeenCalled();
       expect(functionResponse.response.success).toBe(true);
-      expect(stateEffects.identityVerifiedApptId).toBe("appt-9");
+      expect(stateEffects.capabilityState.appointments.identityVerifiedApptId).toBe("appt-9");
       expect(stateEffects.toolResult.appointmentId).toBe("appt-9");
     });
 
@@ -778,13 +799,13 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         client_name: "Jane",
       });
       mockUpdateAppointmentStatus.mockResolvedValue(true);
-      const ctx = { ...baseCtx, selectedAppointmentId: "appt-7" };
+      const ctx = { ...baseCtx, capabilityState: { appointments: { selectedAppointmentId: "appt-7" } } };
       const fc = { id: "fcI2", name: "cancel_appointment_db", args: {} };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
 
       expect(functionResponse.response.success).toBe(true);
-      expect(stateEffects.identityVerifiedApptId).toBe("appt-7");
+      expect(stateEffects.capabilityState.appointments.identityVerifiedApptId).toBe("appt-7");
     });
 
     it("end_call: allowed outside confirm/ending when an action already completed this turn", async () => {

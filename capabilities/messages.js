@@ -115,13 +115,12 @@ export default {
 
   /**
    * Recording is optimistic on purpose: it reports success to the model
-   * immediately and hands the arguments to the engine, which persists the row
-   * and fires the owner notification (lib/voice/session.js applyReply).
+   * immediately and defers the write to onEffect.
    *
-   * The alternative — awaiting the write here — would make the caller wait on a
-   * database round trip mid-sentence for a message that the fallback flow can
-   * re-record anyway. Message-taking is the safety net beneath every other
-   * capability, so it must never be the thing that stalls a call.
+   * Awaiting the write here would make the caller wait on a database round trip
+   * mid-sentence, for a message the fallback flow can re-record anyway.
+   * Message-taking is the safety net beneath every other capability, so it must
+   * never be the thing that stalls a call.
    */
   async execute(fc) {
     const args = fc.args ?? {};
@@ -129,10 +128,61 @@ export default {
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {
-        customerRequestArgs: args,
         toolResult: { name: fc.name, success: true, message },
         toolCallEvent: { name: fc.name, args },
+        capabilityEffects: [{ capability: "messages", type: "recorded", data: args }],
       },
     };
+  },
+
+  /**
+   * Persist the message and tell the business about it.
+   *
+   * Notification is gated on the row actually being written: promising the
+   * caller a callback and storing nothing is the worst outcome this capability
+   * has, because nobody finds out until the caller gives up waiting.
+   */
+  onEffect(effect, engine) {
+    if (effect.type !== "recorded") return;
+
+    const { callSid, businessId, callId, callerNumber, config } = engine.call;
+    if (!businessId) return;
+
+    const args = effect.data || {};
+    const { db, notifications, log, captureException } = engine.deps;
+
+    db.createCustomerRequest({
+      businessId,
+      callId,
+      requestType: args.request_type || "message",
+      callerName: args.caller_name || null,
+      callbackNumber: args.callback_number || null,
+      message: args.message || null,
+      preferredTime: args.preferred_time || null,
+    })
+      .then((id) => {
+        if (!id) return;
+        notifications
+          .notifyCustomerRequest({
+            businessId,
+            customerRequest: args,
+            call: { callerNumber },
+          })
+          .catch((err) => log.error("notify_request_failed", { callSid, reason: err?.message }));
+        notifications
+          .sendCallerSms(config, callerNumber, "message_received", {
+            name_part: args.caller_name ? ` ${args.caller_name}` : "",
+            business: config?.businessName,
+            sla: notifications.MESSAGE_SLA_TEXT,
+          })
+          .catch((err) =>
+            log.error("sms_followup_failed", {
+              callSid,
+              kind: "message_received",
+              reason: err?.message,
+            })
+          );
+      })
+      .catch((err) => captureException(err, { callSid }));
   },
 };

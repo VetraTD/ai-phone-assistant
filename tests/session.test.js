@@ -1447,7 +1447,20 @@ describe("session.js — v2 pipeline orchestrator", () => {
         reply: {
           text: "Your appointment is cancelled.",
           toolResults: [{ name: "cancel_appointment_db", success: true, message: "Cancelled.", appointmentId: "appt-1" }],
-          identityVerifiedApptId: "appt-1",
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "changed",
+              data: { tool: "cancel_appointment_db" },
+            },
+          ],
+          capabilityState: {
+            appointments: {
+              identityVerifiedApptId: "appt-1",
+              selectedAppointmentId: null,
+              lastBooked: null,
+            },
+          },
         },
       },
     ]);
@@ -1465,7 +1478,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     const state = callState.getState(sid);
     expect(state.step).toBe("confirm");
-    expect(state.identityVerifiedApptId).toBe("appt-1");
+    expect(state.capabilityState.appointments.identityVerifiedApptId).toBe("appt-1");
     const note = state.history.find((h) => /\[system note/.test(h.parts?.[0]?.text || ""));
     expect(note).toBeTruthy();
     expect(note.parts[0].text).toMatch(/cancel_appointment_db succeeded/);
@@ -1478,7 +1491,16 @@ describe("session.js — v2 pipeline orchestrator", () => {
         type: "done",
         reply: {
           text: "Booked!",
-          appointmentArgs: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" },
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "booked",
+              data: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" },
+            },
+          ],
+          capabilityState: {
+            appointments: { lastBooked: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" } },
+          },
           toolResults: [{ name: "book_appointment", success: true, message: "Appointment booked successfully." }],
         },
       },
@@ -1495,7 +1517,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const state = callState.getState(sid);
-    expect(state.lastBookedAppointment).toEqual({
+    expect(state.capabilityState.appointments.lastBooked).toEqual({
       scheduled_at: "2026-08-01T15:00:00.000Z",
       client_name: "Alex",
     });
@@ -1511,6 +1533,14 @@ describe("session.js — v2 pipeline orchestrator", () => {
         reply: {
           text: "Cancelled.",
           toolResults: [{ name: "cancel_appointment_db", success: true, message: "Cancelled.", appointmentId: "appt-1" }],
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "changed",
+              data: { tool: "cancel_appointment_db" },
+            },
+          ],
+          capabilityState: { appointments: { lastBooked: null, selectedAppointmentId: null } },
         },
       },
     ]);
@@ -1522,13 +1552,15 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const state = callState.getState(sid);
-    state.lastBookedAppointment = { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" };
+    state.capabilityState.appointments = {
+      lastBooked: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" },
+    };
 
     H.turnManagerInstances[0].opts.onTurnEnd("cancel my appointment please");
     await flush();
     await flush();
 
-    expect(state.lastBookedAppointment).toBeNull();
+    expect(state.capabilityState.appointments.lastBooked).toBeNull();
   });
 
   it("11e. a turn that dies before its done event still salvages a completed booking (state, note, SMS)", async () => {
@@ -1541,7 +1573,18 @@ describe("session.js — v2 pipeline orchestrator", () => {
         effect: {
           name: "book_appointment",
           success: true,
-          appointmentArgs: { scheduled_at: "2026-08-02T15:00:00.000Z", client_name: "Sam" },
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "booked",
+              data: { scheduled_at: "2026-08-02T15:00:00.000Z", client_name: "Sam" },
+            },
+          ],
+          capabilityState: {
+            appointments: {
+              lastBooked: { scheduled_at: "2026-08-02T15:00:00.000Z", client_name: "Sam" },
+            },
+          },
         },
       },
       // no done event
@@ -1558,7 +1601,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const state = callState.getState(sid);
-    expect(state.lastBookedAppointment).toEqual({
+    expect(state.capabilityState.appointments.lastBooked).toEqual({
       scheduled_at: "2026-08-02T15:00:00.000Z",
       client_name: "Sam",
     });
@@ -1582,7 +1625,17 @@ describe("session.js — v2 pipeline orchestrator", () => {
         type: "done",
         reply: {
           text: "You're all set!",
-          appointmentArgs: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex", service_type: "Checkup" },
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "booked",
+              data: {
+                scheduled_at: "2026-08-01T15:00:00.000Z",
+                client_name: "Alex",
+                service_type: "Checkup",
+              },
+            },
+          ],
           toolResults: [{ name: "book_appointment_db", success: true }],
         },
       },
@@ -1614,7 +1667,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
         type: "done",
         reply: {
           text: "Got it, we'll follow up.",
-          customerRequestArgs: { request_type: "message", caller_name: "Sam", message: "Call me back" },
+          capabilityEffects: [
+            {
+              capability: "messages",
+              type: "recorded",
+              data: { request_type: "message", caller_name: "Sam", message: "Call me back" },
+            },
+          ],
           toolResults: [{ name: "take_message_db", success: true }],
         },
       },

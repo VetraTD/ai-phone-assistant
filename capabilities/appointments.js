@@ -5,11 +5,20 @@
  * one the whole abstraction was extracted from: stateful, identity-strict, and
  * backed by an external system.
  *
- * Step A status: tool declarations and prompt fragments. Both are moved VERBATIM
- * out of services/gemini.js — every description and instruction string is
+ * This pack now owns the capability end to end: tool declarations, prompt
+ * fragments, execution, the identity checks, the per-call scratchpad, and the
+ * side effects of a completed booking or change. Nothing about appointments
+ * lives in services/gemini.js, services/tools.js or lib/voice/session.js any
+ * more.
+ *
+ * All of it was moved VERBATIM — every description and instruction string is
  * byte-identical, because tests/promptSnapshot.test.js asserts neither the
- * merged tool list nor the prompt has changed by a single character.
- * Requirements and execution move here in the following commits.
+ * merged tool list nor the prompt changed by a single character.
+ *
+ * Still to come (Step B): the hand-rolled identity check below becomes the
+ * generic `identity` requirement kind, and the athena-shaped EHR tools become
+ * adapter-shaped so a clinic can move to another system without the prompt
+ * changing.
  */
 
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
@@ -394,9 +403,20 @@ async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, arg
   // Identity already proven for this appointment earlier in the call (e.g. a
   // cancel verified it, then the caller asks to reschedule the same one) —
   // don't make the caller prove themselves again.
-  if (ctx?.identityVerifiedApptId && appointmentId === ctx.identityVerifiedApptId) return true;
+  if (scratch(ctx).identityVerifiedApptId === appointmentId) return true;
   const appointment = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
   return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
+}
+
+/**
+ * This capability's slice of the per-call scratchpad.
+ *
+ * Holds what earlier turns (and earlier tools in this turn) established:
+ * which appointment is being discussed, whose identity has already been
+ * proven, and what was booked — the cross-turn idempotency anchor.
+ */
+function scratch(ctx) {
+  return ctx?.capabilityState?.appointments || {};
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +612,74 @@ export default {
         return executeViaEhr(fc, ctx);
     }
   },
+
+  /**
+   * Apply what a completed appointment action means for the call.
+   *
+   * Runs from applyReply on a normal turn, or from the barge-in salvage path
+   * when the caller talks over the confirmation — exactly once either way, and
+   * that matters here more than anywhere else in the system: firing twice means
+   * the owner gets two booking alerts and the caller gets two confirmation
+   * texts for one appointment.
+   */
+  onEffect(effect, engine) {
+    if (effect.type === "changed") {
+      // A completed cancel or reschedule. Leaving the step at gather_details
+      // would re-inject the cancel-flow identity guidance every turn, which is
+      // what previously sent the model in circles re-verifying a caller it had
+      // already verified.
+      engine.setStep(engine.STEPS.CONFIRM, effect.data?.tool || "appointment_changed");
+      engine.addHistoryNote(`${effect.data?.tool} succeeded`);
+      return;
+    }
+
+    if (effect.type !== "booked") return;
+
+    const data = effect.data || {};
+    const { callSid, businessId, callerNumber, twilioNumber, config } = engine.call;
+    if (!businessId) return;
+
+    engine.setStep(engine.STEPS.CONFIRM, "book_appointment");
+
+    // The model does not see tool results on later turns, only text — without
+    // this note it can re-book or deny a booking it just made.
+    const who = data.client_name ? ` for client ${data.client_name}` : "";
+    engine.addHistoryNote(
+      `book_appointment succeeded${who} at ${data.scheduled_at}. Do not book it again`
+    );
+
+    const { notifications, log } = engine.deps;
+    const notes = [data.service_type, data.notes].filter(Boolean).join(" — ") || null;
+
+    notifications
+      .notifyAppointmentBooked({
+        businessId,
+        appointment: {
+          scheduled_at: data.scheduled_at,
+          client_name: data.client_name || null,
+          client_phone: callerNumber || null,
+          notes,
+        },
+        call: { callerNumber, twilioNumber },
+      })
+      .catch((err) => log.error("notify_appointment_failed", { callSid, reason: err?.message }));
+
+    notifications
+      .sendCallerSms(config, callerNumber, "appointment_confirmation", {
+        name: data.client_name || "there",
+        business: config?.businessName,
+        datetime: data.scheduled_at
+          ? new Date(data.scheduled_at).toLocaleString()
+          : "your requested time",
+      })
+      .catch((err) =>
+        log.error("sms_followup_failed", {
+          callSid,
+          kind: "appointment_confirmation",
+          reason: err?.message,
+        })
+      );
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -599,7 +687,7 @@ export default {
 // ---------------------------------------------------------------------------
 
 async function bookAppointment(fc, ctx) {
-  if (!ctx?.businessId) return noBusinessResult(fc, { appointmentArgs: null });
+  if (!ctx?.businessId) return noBusinessResult(fc);
 
   const args = fc.args ?? {};
   const config = ctx.config || {};
@@ -624,7 +712,7 @@ async function bookAppointment(fc, ctx) {
       // Instant comparison, not string equality: the anchor may be a verbatim
       // offset-bearing ISO while this round's value is a normalized UTC string
       // (or vice versa) for the same moment.
-      const lastBookedMs = Date.parse(ctx?.lastBookedAppointment?.scheduled_at ?? "");
+      const lastBookedMs = Date.parse(scratch(ctx).lastBooked?.scheduled_at ?? "");
       if (Number.isFinite(lastBookedMs) && lastBookedMs === Date.parse(anchoredScheduledAt)) {
         alreadyBooked = true;
         bookSuccess = true;
@@ -656,10 +744,11 @@ async function bookAppointment(fc, ctx) {
     }
   }
 
-  // A fresh booking carries appointmentArgs downstream (step transition, owner
-  // notification, confirmation SMS). The already-booked short-circuit must NOT
-  // re-fire those side effects.
-  const appointmentArgs =
+  // Only a FRESH booking carries downstream effects (step transition, owner
+  // notification, confirmation SMS, history note). The already-booked
+  // short-circuit must not re-fire any of them — that is the entire point of
+  // the anchor.
+  const booked =
     bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
 
   return {
@@ -669,9 +758,24 @@ async function bookAppointment(fc, ctx) {
       response: { success: bookSuccess, message: bookMessage },
     },
     stateEffects: {
-      appointmentArgs,
       toolResult: { name: fc.name, success: bookSuccess, message: bookMessage },
       toolCallEvent: { name: fc.name, args },
+      ...(booked
+        ? {
+            capabilityEffects: [{ capability: "appointments", type: "booked", data: booked }],
+            // Cross-turn anchor, written immediately so it survives a barge-in:
+            // the insert already happened, and a re-book on a later turn must
+            // short-circuit rather than hit the unique index.
+            capabilityState: {
+              appointments: {
+                lastBooked: {
+                  scheduled_at: booked.scheduled_at,
+                  client_name: booked.client_name || null,
+                },
+              },
+            },
+          }
+        : {}),
     },
   };
 }
@@ -696,7 +800,9 @@ async function lookupCallerAppointments(fc, ctx) {
   return {
     functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } },
     stateEffects: {
-      ...(selectedAppointmentId !== undefined ? { selectedAppointmentId } : {}),
+      ...(selectedAppointmentId !== undefined
+        ? { capabilityState: { appointments: { selectedAppointmentId } } }
+        : {}),
       toolResult: {
         name: fc.name,
         success: true,
@@ -725,7 +831,7 @@ function identityMismatchResult(fc) {
 async function cancelAppointment(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
-  const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
+  const appointmentId = fc.args?.appointment_id || scratch(ctx).selectedAppointmentId;
   if (!appointmentId) {
     return {
       functionResponse: {
@@ -763,9 +869,6 @@ async function cancelAppointment(fc, ctx) {
         : { success: false, message: "I couldn't cancel that appointment." },
     },
     stateEffects: {
-      // Identity passed above regardless of the write outcome — remember it so
-      // a retry (or a follow-up reschedule) doesn't re-challenge the caller.
-      identityVerifiedApptId: appointmentId,
       toolResult: {
         name: fc.name,
         success: ok,
@@ -773,6 +876,24 @@ async function cancelAppointment(fc, ctx) {
         appointmentId,
       },
       toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityState: {
+        appointments: {
+          // Identity passed above regardless of the write outcome — remember it
+          // so a retry (or a follow-up reschedule) doesn't re-challenge.
+          identityVerifiedApptId: appointmentId,
+          // A cancelled appointment is no longer the one under discussion, and
+          // the booking anchor must die with it: "cancel that, actually put me
+          // back in at the same time" has to perform a real insert.
+          ...(ok ? { selectedAppointmentId: null, lastBooked: null } : {}),
+        },
+      },
+      ...(ok
+        ? {
+            capabilityEffects: [
+              { capability: "appointments", type: "changed", data: { tool: fc.name } },
+            ],
+          }
+        : {}),
     },
   };
 }
@@ -780,7 +901,7 @@ async function cancelAppointment(fc, ctx) {
 async function rescheduleAppointment(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
-  const appointmentId = fc.args?.appointment_id || ctx?.selectedAppointmentId;
+  const appointmentId = fc.args?.appointment_id || scratch(ctx).selectedAppointmentId;
   const newScheduledAt = fc.args?.new_scheduled_at;
 
   if (!appointmentId || !newScheduledAt) {
@@ -823,7 +944,6 @@ async function rescheduleAppointment(fc, ctx) {
         : { success: false, message: "Couldn't reschedule." },
     },
     stateEffects: {
-      identityVerifiedApptId: appointmentId,
       toolResult: {
         name: fc.name,
         success: ok,
@@ -831,6 +951,14 @@ async function rescheduleAppointment(fc, ctx) {
         appointmentId,
       },
       toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityState: { appointments: { identityVerifiedApptId: appointmentId } },
+      ...(ok
+        ? {
+            capabilityEffects: [
+              { capability: "appointments", type: "changed", data: { tool: fc.name } },
+            ],
+          }
+        : {}),
     },
   };
 }

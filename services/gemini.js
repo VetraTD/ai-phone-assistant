@@ -659,28 +659,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   });
   const perRequestConfig = { ...chatConfig, abortSignal: signal };
 
-  let appointmentArgs = null;
   let intentArgs = null;
   let endCallArgs = null;
-  let customerRequestArgs = null;
-  let selectedAppointmentIdFromTurn = null;
-  let identityVerifiedApptIdFromTurn = null;
   let transferRequested = null;
   const toolResults = [];
   let fullText = "";
   let round = 0;
-  // Within-turn tool-state threading (see the toolCtx rebuild in the loop).
-  let effectiveSelectedAppointmentId = extras?.selectedAppointmentId || null;
-  let identityVerifiedApptId = extras?.identityVerifiedApptId || null;
-  let lastBookedAppointment = extras?.lastBookedAppointment || null;
   let completedActionThisTurn = false;
 
   // ---------------------------------------------------------------------
   // Generic capability channels.
   //
-  // The named accumulators above (appointmentArgs, customerRequestArgs, and
-  // the appointment scratchpad) are capability-specific fields the engine
-  // should not know about. These two channels are their replacement:
+  // How a capability reports what happened. The engine holds no
+  // capability-specific fields of its own:
   //
   //   capabilityEffects — deferred side effects, applied after the turn by
   //     the owning pack's onEffect (lib/voice/session.js). This is how a new
@@ -748,9 +739,6 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         callerPhone: extras?.callerPhone || null,
         callId: extras?.callId || null,
         integrations: extras?.integrations || [],
-        selectedAppointmentId: effectiveSelectedAppointmentId,
-        identityVerifiedApptId,
-        lastBookedAppointment,
         completedActionThisTurn,
         step,
         transferAllowed: extras?.transferAllowed !== false,
@@ -763,25 +751,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       results.push({ functionResponse });
       if (stateEffects.toolResult) toolResults.push(stateEffects.toolResult);
       if ("intentArgs" in stateEffects) intentArgs = stateEffects.intentArgs;
-      // First-success-wins: a later failed/duplicate book_appointment in the
-      // same turn must not null out the success that already happened —
-      // downstream (step transition, notifications) keys off appointmentArgs.
-      if ("appointmentArgs" in stateEffects && stateEffects.appointmentArgs) {
-        appointmentArgs = stateEffects.appointmentArgs;
-        lastBookedAppointment = stateEffects.appointmentArgs;
-      }
       if ("endCallArgs" in stateEffects) endCallArgs = stateEffects.endCallArgs;
-      if ("customerRequestArgs" in stateEffects && stateEffects.customerRequestArgs) {
-        customerRequestArgs = stateEffects.customerRequestArgs;
-      }
-      if ("selectedAppointmentId" in stateEffects) {
-        selectedAppointmentIdFromTurn = stateEffects.selectedAppointmentId;
-        effectiveSelectedAppointmentId = stateEffects.selectedAppointmentId;
-      }
-      if (stateEffects.identityVerifiedApptId) {
-        identityVerifiedApptId = stateEffects.identityVerifiedApptId;
-        identityVerifiedApptIdFromTurn = stateEffects.identityVerifiedApptId;
-      }
       if ("transferRequested" in stateEffects) transferRequested = stateEffects.transferRequested;
 
       // Generic capability channels. Appended/merged rather than overwritten:
@@ -800,11 +770,6 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       ) {
         completedActionThisTurn = true;
       }
-      // A successful cancel invalidates the within-turn booking anchor: a
-      // book -> cancel -> re-book sequence must insert for real.
-      if (fc.name === "cancel_appointment_db" && stateEffects.toolResult?.success) {
-        lastBookedAppointment = null;
-      }
       if (stateEffects.toolCallEvent) yield { toolCall: stateEffects.toolCallEvent };
       // Durable-effect event: emitted the moment a tool completes so the
       // session can persist what ALREADY HAPPENED (a DB insert, a verified
@@ -815,11 +780,6 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         toolEffect: {
           name: fc.name,
           success: !!stateEffects.toolResult?.success,
-          appointmentArgs: stateEffects.appointmentArgs || null,
-          identityVerifiedApptId: stateEffects.identityVerifiedApptId || null,
-          ...("selectedAppointmentId" in stateEffects
-            ? { selectedAppointmentId: stateEffects.selectedAppointmentId }
-            : {}),
           // Carried so the salvage path can replay a capability's effects
           // when the turn dies before its final reply.
           capabilityEffects: stateEffects.capabilityEffects || null,
@@ -859,13 +819,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     done: true,
     reply: {
       text: fullText,
-      appointmentArgs,
       intentArgs,
       endCallArgs,
-      customerRequestArgs,
       toolResults,
-      selectedAppointmentId: selectedAppointmentIdFromTurn,
-      identityVerifiedApptId: identityVerifiedApptIdFromTurn,
       transferRequested,
       capabilityEffects,
       capabilityState,
