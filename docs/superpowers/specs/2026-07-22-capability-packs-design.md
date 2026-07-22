@@ -1,6 +1,6 @@
 # Capability Packs — generalizing the AI receptionist across businesses
 
-**Status:** approved 2026-07-22
+**Status:** implemented 2026-07-22
 **Branch:** `feat/voice-v2` → to be executed after merge to `main`
 **Supersedes:** the task-module model documented in `database/013_task_modules.sql`
 
@@ -236,6 +236,46 @@ fixed — which is the entire point, and costs three days here instead of three 
 
 ---
 
+## 4b. What shipped, and what changed along the way
+
+All of the above is implemented. Four things diverged from the plan, each for a
+reason worth recording.
+
+**Step C was pulled ahead of Step B.** Migrating the booking path — idempotency
+anchor, owner notification, confirmation SMS, barge-in salvage — onto an
+abstraction nothing had exercised is backwards. `capabilities/quotes.js` was
+built on the new effect channel first, proving it, and the delicate paths
+migrated onto something already working. Step C's falsifiable test passed: zero
+changes to `services/gemini.js`, `services/tools.js` or `lib/voice/session.js`.
+
+**`lib/mediaStream.js` is not dead.** `server.js` selects it when
+`PIPELINE_V2=false`, and it held its own duplicate of every appointment side
+effect. Migrating only the v2 pipeline would have left the documented rollback
+path silently not notifying owners about bookings and not persisting messages at
+all. Both pipelines now share `lib/capabilities/effects.js`; the duplication was
+what made the trap possible. That pipeline still has no test harness of its own.
+
+**Packs may not import the registry either.** The original rule was "packs take
+no service imports". It is stronger: `capabilities/index.js` imports every pack,
+so a pack importing it back is a cycle whose failure depends on load order —
+importing a pack directly (as its unit test does) evaluated the registry while
+that pack was still in flight. `capabilityConfig` therefore lives in the leaf
+requirements module.
+
+**A deliberate behaviour change.** A completed action now wins the step over a
+same-turn intent change. Previously a cancel lost and a booking won, purely from
+where each sat in `applyReply`.
+
+Defects found and fixed on the way, each caught by a test rather than by review:
+
+| Defect | Consequence had it shipped |
+|---|---|
+| `BUILTIN_TOOL_NAMES` reserved 4 names while packs declared 13 | a webhook named `request_transfer` silently never runs |
+| `normalizeAllowedTasks` treated `[]` and unset alike | no business could say "we do not do appointments" |
+| `log.warn` does not exist in `lib/logger.js` | throws exactly when a config is invalid |
+| `stepExtras` dropped `integrations` after adapter routing | an EHR clinic told to call a tool it does not have |
+| `flushUntil` bounded by tick count, not wall time | intermittent CI failures with no defect behind them |
+
 ## 5. Verification
 
 1. `npx vitest run` — 523 existing tests green, unmodified, plus new suites.
@@ -255,9 +295,23 @@ fixed — which is the entire point, and costs three days here instead of three 
 
 ## 6. Deferred
 
-- Schema-driven dashboard UI — build at 3-4 customers, once schemas have stabilized.
-  Until then concierge onboarding writes JSON directly.
-- `verify_against` real identity verification — needs athena production access.
-- Billing and insurance capabilities — build on the proven pattern afterward.
-- Treating the `notes` prose box as a feature-request funnel: themes that recur across
-  customers get promoted from prose to enforced kinds.
+- **Schema-driven dashboard UI.** Every pack declares a `configSchema` and the
+  vocabulary is renderable; nothing consumes it yet. Build at 3-4 customers, once
+  the schemas have stopped moving. Until then concierge onboarding writes rows
+  directly.
+- **`verify_against`.** The config field exists and each adapter already
+  publishes `verifiableFields`, so upgrading one field is a config change rather
+  than a refactor. Needs athena production access to test against.
+- **A test harness for `lib/mediaStream.js`**, or a decision to delete it. Its
+  effect wiring is verified by inspection and a module-load check only. Given v2
+  carries ~40 commits of turn-taking fixes it lacks, the rollback may already be
+  a trap for unrelated reasons.
+- **Dropping `businesses.allowed_tasks`.** The dual-read exists so a partial
+  deploy cannot disable a tenant's capabilities mid-call. Drop it once every
+  environment is on migration 020.
+- **The dashboard's mirrored reserved-name list.** A separate CJS app that cannot
+  import the ESM registry, so the list is duplicated by hand. A test fails when
+  the two diverge, but it is still a hand-maintained copy.
+- Billing and insurance capabilities — build on the proven pattern.
+- Treating the `notes` prose box as a feature-request funnel: themes that recur
+  across customers get promoted from prose to enforced kinds.

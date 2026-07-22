@@ -321,16 +321,23 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
  *
  * Several paths under test are fire-and-forget (doTransfer from applyReply,
  * the deferred redial on a playback mark), so the number of ticks needed to
- * settle them isn't fixed — it varies with how loaded the machine is. A
- * hardcoded run of `await flush()` calls passes alone and fails
- * intermittently in a full-suite run. Polling removes that race without
- * making a passing test any slower.
+ * settle them isn't fixed — it varies with how loaded the machine is.
+ *
+ * Bounded by WALL TIME, not tick count. A tick budget looks generous and is
+ * not: doTransfer dynamically imports "twilio", and module resolution takes
+ * real milliseconds, while 50 rounds of setTimeout(0) can elapse in under
+ * five of them on a loaded machine. That is precisely why the transfer tests
+ * passed alone and failed intermittently in a full-suite run — the budget
+ * measured the wrong thing.
  */
-async function flushUntil(predicate, maxTicks = 50) {
-  for (let i = 0; i < maxTicks; i++) {
+async function flushUntil(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await flush();
   }
+  // Fall through rather than throwing: the assertion that follows reports the
+  // real expectation far more usefully than a generic timeout would.
 }
 // The socket is closed HANGUP_GRACE_MS (800ms) after the goodbye's mark
 // echoes, so the line doesn't drop on the final syllable. Real-timer tests
@@ -893,10 +900,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
       // redialForTransfer dynamically imports "twilio"; module resolution
       // needs real ticks, which advanceTimersByTimeAsync (microtasks only)
-      // cannot provide — hand the clock back before asserting.
+      // cannot provide — hand the clock back before asserting, then poll
+      // rather than guessing how many ticks the import will take.
       vi.useRealTimers();
-      await flush();
-      await flush();
+      await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0);
 
       expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
     } finally {
