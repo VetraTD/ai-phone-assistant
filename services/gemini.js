@@ -512,15 +512,17 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   }
 
   // === CURRENT TASK AND STATE ===
-  const integrations = Array.isArray(extras?.integrations) ? extras.integrations : [];
-  const hasEhrIntegration = integrations.some(
-    (i) => i.enabled && (i.provider === "athenahealth" /* future: || i.provider === "other_ehr" */)
-  );
+  // The whole extras bag is forwarded, integrations included, because a
+  // capability decides its own flow from its own backend. The engine used to
+  // sniff `provider === "athenahealth"` here and hand down a boolean, which is
+  // why adding a second EHR meant editing the engine — and why forgetting to
+  // forward integrations silently gave an EHR-backed clinic the internal-database
+  // flow, telling it to call a tool it does not have.
   let taskState = `=== CURRENT TASK AND STATE ===\n`;
   taskState += `Step: ${step}`;
   if (intent) taskState += ` | Intent: ${intent}`;
   taskState += `\n`;
-  taskState += buildStepGuidance(step, intent, config, { hasEhrIntegration, now });
+  taskState += buildStepGuidance(step, intent, config, { ...extras, now });
   sections.push(taskState);
 
   return sections.join("\n\n");
@@ -545,10 +547,11 @@ export function buildSystemInstruction(step, intent, config, extras = {}) {
 
 /**
  * Build step-specific guidance text.
- * @param {object} [stepExtras] - { hasEhrIntegration: boolean, now: Date } for EHR-gated flows / hours rendering
+ * @param {object} [stepExtras] - the extras bag (integrations, transferAllowed,
+ *   ...) plus `now`. Forwarded wholesale to the capability packs: which backend
+ *   a flow targets is the pack's decision, not the engine's.
  */
 function buildStepGuidance(step, intent, config, stepExtras = {}) {
-  const hasEhrIntegration = stepExtras.hasEhrIntegration === true;
   const now = stepExtras.now instanceof Date ? stepExtras.now : new Date();
 
   switch (step) {
@@ -565,11 +568,7 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
       // engine's. A pack that claims an intent supplies its whole flow; the
       // fallback below covers intents no pack claims (general questions, and
       // anything the model reports that we have no specific procedure for).
-      const owned = collectStepGuidance(config, {
-        ...stepExtras,
-        hasEhrIntegration,
-        now,
-      })[intent];
+      const owned = collectStepGuidance(config, { ...stepExtras, now })[intent];
       if (owned) return owned;
 
       return (

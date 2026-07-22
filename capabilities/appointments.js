@@ -34,6 +34,7 @@ import {
   requirementPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
+import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -224,14 +225,29 @@ const DB_APPOINTMENT_DECLARATIONS = [
 ];
 
 /**
- * Does this business have a scheduling backend that owns the appointment book?
- * When it does, the internal-DB tools are suppressed so the model cannot write
- * appointments to two places.
- * @param {Array<{enabled?: boolean, provider?: string}>} integrations
+ * Which backend owns this business's appointment book.
+ *
+ * Config decides; an enabled EHR integration is honoured as the legacy routing
+ * for a business not yet configured. This replaced two hardcoded
+ * `provider === "athenahealth"` comparisons — adding a second EHR used to mean
+ * editing the engine in three places.
+ *
+ * @param {object} config - normalised business config
+ * @param {Array} integrations
  */
-function hasEhrIntegration(integrations) {
-  const list = Array.isArray(integrations) ? integrations : [];
-  return list.some((i) => i.enabled && i.provider === "athenahealth" /* future EHRs */);
+function schedulingAdapter(config, integrations) {
+  return resolveSchedulingAdapter(capabilityConfig(config, "appointments"), integrations);
+}
+
+/**
+ * Does an external system own the appointment book?
+ *
+ * When one does, the internal-DB tools are suppressed: two systems of record
+ * for one appointment is a data-integrity bug, not a preference, and the model
+ * must not be able to write to both.
+ */
+function hasExternalBook(config, integrations) {
+  return schedulingAdapter(config, integrations).id !== "internal";
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +601,7 @@ export default {
     const wantsLookupOrChange =
       allowed.includes("cancel_reschedule") || allowed.includes("check_appointment");
 
-    if (hasEhrIntegration(integrations)) return [];
+    if (hasExternalBook(config, integrations)) return [];
     if (!wantsLookupOrChange) return [];
     const cfg = capabilityConfig(config, "appointments");
     // Only the two CHANGE tools take requirements; the lookup is a read and
@@ -604,13 +620,16 @@ export default {
    * @param {Array} integrations
    */
   ehrTools(integrations) {
-    return hasEhrIntegration(integrations) ? [...EHR_APPOINTMENT_DECLARATIONS] : [];
+    // No business config here: this is called from buildIntegrationTools, whose
+    // directly-tested contract takes only the integration list. Adapter
+    // selection still applies for every other decision.
+    const adapter = resolveSchedulingAdapter(null, integrations);
+    return adapter.id === "athenahealth" ? [...EHR_APPOINTMENT_DECLARATIONS] : [];
   },
 
   prompt(config, ctx = {}) {
     const allowed = config?.allowedTasks || [];
-    const hasEhr =
-      ctx.hasEhrIntegration === true || hasEhrIntegration(ctx.integrations);
+    const hasEhr = hasExternalBook(config, ctx.integrations);
     const now = ctx.now instanceof Date ? ctx.now : new Date();
 
     return {
@@ -776,9 +795,8 @@ async function bookAppointment(fc, ctx) {
       } else {
         const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
         try {
-          const dbId = await ctx.deps.createAppointment({
-            businessId: ctx.businessId,
-            callId: ctx.callId || null,
+          const adapter = schedulingAdapter(ctx.config, ctx.integrations);
+          const { id: dbId } = await adapter.book(ctx, {
             clientName: args.client_name || null,
             clientPhone: ctx.callerPhone || null,
             scheduledAt: anchoredScheduledAt,
@@ -846,9 +864,7 @@ async function lookupCallerAppointments(fc, ctx) {
   let selectedAppointmentId;
 
   if (callerPhone) {
-    appointments = await ctx.deps.listAppointmentsByCaller(ctx.businessId, {
-      clientPhone: callerPhone,
-    });
+    appointments = await schedulingAdapter(ctx.config, ctx.integrations).lookupByCaller(ctx);
     if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
   }
 
@@ -913,7 +929,9 @@ async function cancelAppointment(fc, ctx) {
   );
   if (!identityOk) return identityMismatchResult(fc);
 
-  const ok = await ctx.deps.updateAppointmentStatus(appointmentId, "cancelled", ctx.businessId);
+  const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
+    appointmentId,
+  });
 
   return {
     functionResponse: {
@@ -984,11 +1002,10 @@ async function rescheduleAppointment(fc, ctx) {
   );
   if (!identityOk) return identityMismatchResult(fc);
 
-  const ok = await ctx.deps.updateAppointment(
+  const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
     appointmentId,
-    { scheduled_at: newScheduledAt },
-    ctx.businessId
-  );
+    newScheduledAt,
+  });
 
   return {
     functionResponse: {
@@ -1025,8 +1042,10 @@ async function rescheduleAppointment(fc, ctx) {
  */
 async function executeViaEhr(fc, ctx) {
   const integrations = ctx?.integrations || [];
-  const integration = integrations.find((i) => i.provider === "athenahealth" && i.enabled);
+  const adapter = schedulingAdapter(ctx?.config, integrations);
+  const integration = adapter.integrationFor?.(integrations) || null;
 
+  // No external book configured: the model called a tool it was never offered.
   if (!integration) return unknownToolResult(fc);
 
   const execResult = await ctx.deps.executeIntegration(integration, {
