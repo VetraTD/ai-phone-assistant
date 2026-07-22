@@ -14,6 +14,13 @@
  * Step A status: tool declaration only, moved verbatim from services/gemini.js.
  */
 
+import {
+  withRequirements,
+  requirementPromptLines,
+  capabilityConfig,
+} from "../lib/capabilities/requirements.js";
+
+
 /**
  * Previously registered unconditionally at services/gemini.js:144. It used to
  * be gated on take_message/callback_request appearing in allowedTasks, which
@@ -93,16 +100,18 @@ export default {
 
   actionTools: ["record_customer_request"],
 
-  tools() {
+  tools(config) {
     // Core: registered on every call regardless of configuration.
-    return [RECORD_CUSTOMER_REQUEST_DECLARATION];
+    return [withRequirements(RECORD_CUSTOMER_REQUEST_DECLARATION, capabilityConfig(config, "messages"))];
   },
 
-  prompt() {
+  prompt(config) {
     return {
       static: {
         capabilities: ["take messages and schedule callbacks for follow-up"],
         protocols: [MESSAGE_PROTOCOL_SECTION],
+        guardrails: requirementPromptLines(capabilityConfig(config, "messages")).map((l) => `${l}
+`),
       },
       dynamic: {
         stepGuidance: {

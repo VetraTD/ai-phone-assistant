@@ -9,6 +9,7 @@ import {
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
+import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -144,6 +145,31 @@ export async function executeToolCall(fc, ctx) {
     default: {
       const pack = packForTool(fc.name);
       if (pack && typeof pack.execute === "function") {
+        // Configured requirements are enforced HERE, before the pack runs, so
+        // every capability inherits them and no pack author can forget to
+        // check. A refusal is returned to the model as an instruction; the
+        // action does not happen.
+        //
+        // Only caller-visible writes are gated. Gating a lookup would stop the
+        // receptionist finding the record it needs in order to ask the caller
+        // about it — locking the door and the key inside.
+        if ((pack.actionTools || []).includes(fc.name)) {
+          const cfg = capabilityConfig(ctx?.config, pack.id);
+          const check = checkRequirements(cfg, fc.args || {}, ctx);
+          if (!check.ok) {
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: { success: false, message: check.message },
+              },
+              stateEffects: {
+                toolResult: { name: fc.name, success: false, message: check.message },
+                toolCallEvent: { name: fc.name, args: fc.args },
+              },
+            };
+          }
+        }
         return pack.execute(fc, { ...ctx, deps: CAPABILITY_DEPS });
       }
       return executeWebhookTool(fc, ctx);

@@ -29,6 +29,11 @@ import {
   zonedWeekdayAndMinutes,
 } from "../lib/capabilities/datetime.js";
 import { noBusinessResult, unknownToolResult } from "../lib/capabilities/results.js";
+import {
+  withRequirements,
+  requirementPromptLines,
+  capabilityConfig,
+} from "../lib/capabilities/requirements.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -527,7 +532,10 @@ export default {
 
   tools(config) {
     const allowed = config?.allowedTasks || [];
-    return allowed.includes("book_appointment") ? [BOOK_APPOINTMENT_DECLARATION] : [];
+    if (!allowed.includes("book_appointment")) return [];
+    // Configured requirements become real tool parameters, which is what turns
+    // a config entry into something the model is actually asked for.
+    return [withRequirements(BOOK_APPOINTMENT_DECLARATION, capabilityConfig(config, "appointments"))];
   },
 
   adapterTools(config, ctx = {}) {
@@ -542,7 +550,13 @@ export default {
 
     if (hasEhrIntegration(integrations)) return [];
     if (!wantsLookupOrChange) return [];
-    return [...DB_APPOINTMENT_DECLARATIONS];
+    const cfg = capabilityConfig(config, "appointments");
+    // Only the two CHANGE tools take requirements; the lookup is a read and
+    // gating it would stop the receptionist finding the appointment it needs
+    // in order to ask about it.
+    return DB_APPOINTMENT_DECLARATIONS.map((d) =>
+      d.name === "get_caller_appointments_from_db" ? d : withRequirements(d, cfg)
+    );
   },
 
   /**
@@ -574,7 +588,11 @@ export default {
         // cannot call — but changing it is a behavior change, so it waits for
         // Step B, where confirmBeforeWrite becomes an enforced requirement kind
         // and naturally only applies where the capability is enabled.
-        guardrails: [BOOKING_CONFIRMATION_GUARDRAIL],
+        guardrails: [
+          BOOKING_CONFIRMATION_GUARDRAIL,
+          ...requirementPromptLines(capabilityConfig(config, "appointments")).map((l) => `${l}
+`),
+        ],
       },
       dynamic: {
         // Also ungated, matching buildStepGuidance's original behavior: it

@@ -28,6 +28,13 @@
  * needed to call back with a real answer.
  */
 
+import {
+  withRequirements,
+  requirementPromptLines,
+  capabilityConfig,
+} from "../lib/capabilities/requirements.js";
+
+
 const RECORD_QUOTE_REQUEST_DECLARATION = {
   name: "record_quote_request",
   description:
@@ -85,7 +92,8 @@ export default {
 
   tools(config) {
     const allowed = config?.allowedTasks || [];
-    return allowed.includes("quote_request") ? [RECORD_QUOTE_REQUEST_DECLARATION] : [];
+    if (!allowed.includes("quote_request")) return [];
+    return [withRequirements(RECORD_QUOTE_REQUEST_DECLARATION, capabilityConfig(config, "quotes"))];
   },
 
   prompt(config) {
@@ -95,6 +103,10 @@ export default {
       static: {
         capabilities: enabled
           ? ["discuss pricing/quotes (take details for follow-up, no commitments)"]
+          : [],
+        guardrails: enabled
+          ? requirementPromptLines(capabilityConfig(config, "quotes")).map((l) => `${l}
+`)
           : [],
       },
       dynamic: {
