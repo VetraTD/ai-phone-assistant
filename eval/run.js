@@ -80,6 +80,26 @@ async function withSdkWarnFilter(fn) {
 }
 
 // ---------------------------------------------------------------------------
+// Truncation telemetry (Task 11 / plan 2.5)
+//
+// Two signals per turn:
+//   - finishReason === "MAX_TOKENS": authoritative — the model hit the output
+//     cap. Counted as `truncatedTurns`.
+//   - suspectTruncation: a cheap ADVISORY regex — a non-empty reply that does
+//     not end on sentence-final punctuation. Catches replies cut mid-thought
+//     when finishReason is unavailable; never gates anything.
+// ---------------------------------------------------------------------------
+
+// Ends on . ! ? or … possibly followed by a closing quote/bracket.
+const SENTENCE_FINAL = /[.!?…]["'”’)\]]*\s*$/;
+
+function looksSuspectTruncated(text) {
+  const t = (text || "").trim();
+  if (!t) return false; // an empty reply is a different failure mode, not truncation
+  return !SENTENCE_FINAL.test(t);
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -156,6 +176,8 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     judgePass: false,
     turns: [],
     latency: { firstEventMs: [], totalMs: [] },
+    // Truncation telemetry, accumulated across this scenario's turns.
+    truncation: { truncatedTurns: 0, suspectTurns: 0, outputTokens: [] },
   };
 
   try {
@@ -175,6 +197,11 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     const allToolResults = [];
 
     const record = (callerText, out) => {
+      const finishReason = out.finishReason ?? null;
+      const outputTokens = out.usage?.outputTokens ?? null;
+      const truncated = finishReason === "MAX_TOKENS";
+      const suspectTruncation = !truncated && looksSuspectTruncated(out.text);
+
       turns.push({
         caller: callerText,
         reply: out.text,
@@ -183,11 +210,18 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
         timings: out.timings,
         state: out.state,
         notes: out.notes,
+        usage: out.usage ?? null,
+        finishReason,
+        truncated,
+        suspectTruncation,
       });
       allToolCalls.push(...out.toolCalls);
       allToolResults.push(...out.toolResults);
       if (out.timings?.firstEventMs != null) base.latency.firstEventMs.push(out.timings.firstEventMs);
       if (out.timings?.totalMs != null) base.latency.totalMs.push(out.timings.totalMs);
+      if (truncated) base.truncation.truncatedTurns += 1;
+      if (suspectTruncation) base.truncation.suspectTurns += 1;
+      if (outputTokens != null) base.truncation.outputTokens.push(outputTokens);
     };
 
     if (scenario.caller.mode === "scripted") {
@@ -226,6 +260,10 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
       reply: t.reply,
       toolCalls: t.toolCalls,
       timings: t.timings,
+      usage: t.usage,
+      finishReason: t.finishReason,
+      truncated: t.truncated,
+      suspectTruncation: t.suspectTruncation,
     }));
 
     base.hardResults = (scenario.hard || []).map((fn) => {
@@ -330,7 +368,81 @@ function printReport(results) {
   console.log(
     `total-turn latency:  p50 ${fmtMs(percentile(allTotal, 50))}  p95 ${fmtMs(percentile(allTotal, 95))}`
   );
+
+  printTruncationReport(results);
 }
+
+/**
+ * Truncation telemetry summary (Task 11 / plan 2.5). Prints the suite totals
+ * the controller needs to decide the output cap — total turns, MAX_TOKENS
+ * count, advisory suspect count, and outputTokens p50/p95 — plus a per-scenario
+ * breakdown for the scenarios that showed any truncation.
+ */
+function printTruncationReport(results) {
+  const summary = summarizeTruncation(results);
+
+  console.log("\n=== TRUNCATION (output-cap telemetry) ===");
+  console.log(`total turns:        ${summary.totalTurns}`);
+  console.log(
+    `MAX_TOKENS turns:   ${summary.truncatedTurns} (${pct(summary.truncatedTurns, summary.totalTurns)})`
+  );
+  console.log(
+    `suspect (advisory): ${summary.suspectTurns} (${pct(summary.suspectTurns, summary.totalTurns)})`
+  );
+  console.log(
+    `outputTokens:       p50 ${fmtTok(summary.outputTokensP50)}  p95 ${fmtTok(summary.outputTokensP95)}  ` +
+      `(max ${fmtTok(summary.outputTokensMax)}, n=${summary.outputTokensCount})`
+  );
+
+  const perScenario = results
+    .map((r) => ({
+      name: r.name,
+      truncated: r.truncation?.truncatedTurns || 0,
+      suspect: r.truncation?.suspectTurns || 0,
+      turns: r.turns?.length || 0,
+    }))
+    .filter((r) => r.truncated > 0 || r.suspect > 0);
+
+  if (perScenario.length) {
+    console.log("\nper-scenario (only scenarios with any truncation):");
+    console.log(`${pad("scenario", 34)} ${pad("MAX_TOKENS", 12)} ${pad("suspect", 9)} ${pad("turns", 6)}`);
+    console.log("-".repeat(63));
+    for (const s of perScenario) {
+      console.log(`${pad(s.name, 34)} ${pad(s.truncated, 12)} ${pad(s.suspect, 9)} ${pad(s.turns, 6)}`);
+    }
+  } else {
+    console.log("\nper-scenario: no scenario produced a MAX_TOKENS or suspect turn.");
+  }
+}
+
+/**
+ * Pool the per-scenario truncation accumulators into the suite-level numbers.
+ * Pure so it can feed both the printed report and the persisted JSON payload.
+ *
+ * @param {Array<object>} results - runScenario() return values
+ */
+function summarizeTruncation(results) {
+  const list = results || [];
+  const outputTokens = list.flatMap((r) => r.truncation?.outputTokens || []);
+  return {
+    totalTurns: list.reduce((sum, r) => sum + (r.turns?.length || 0), 0),
+    truncatedTurns: list.reduce((sum, r) => sum + (r.truncation?.truncatedTurns || 0), 0),
+    suspectTurns: list.reduce((sum, r) => sum + (r.truncation?.suspectTurns || 0), 0),
+    outputTokensCount: outputTokens.length,
+    outputTokensP50: percentile(outputTokens, 50),
+    outputTokensP95: percentile(outputTokens, 95),
+    outputTokensMax: outputTokens.length ? Math.max(...outputTokens) : null,
+    perScenario: list.map((r) => ({
+      name: r.name,
+      turns: r.turns?.length || 0,
+      truncatedTurns: r.truncation?.truncatedTurns || 0,
+      suspectTurns: r.truncation?.suspectTurns || 0,
+    })),
+  };
+}
+
+const fmtTok = (v) => (v == null ? "—" : String(v));
+const pct = (n, d) => (d ? `${((100 * n) / d).toFixed(1)}%` : "—");
 
 const fmtMs = (v) => (v == null ? "—" : `${v}ms`);
 
@@ -588,6 +700,7 @@ async function main() {
     model: resolved,
     concurrency: opts.concurrency,
     elapsedMs,
+    truncation: summarizeTruncation(results),
     results,
   };
   const defaultPath = path.join(RESULTS_DIR, `${ts}.json`);

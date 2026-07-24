@@ -173,3 +173,166 @@ describe("llmTurn.js — runLlmTurn timeout/abort wrapper", () => {
     expect(vi.getTimerCount()).toBe(0); // no leaked timers
   });
 });
+
+describe("llmTurn.js — single pre-stream transient retry", () => {
+  beforeEach(() => {
+    mockGetReplyStreaming.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A retriable, network-ish/5xx error. */
+  const transient = (msg = "503 Service Unavailable") =>
+    Object.assign(new Error(msg), { status: 503 });
+
+  /** Drive a runLlmTurn generator to completion, collecting its events. */
+  async function drain(gen, sink = []) {
+    for await (const evt of gen) sink.push(evt);
+    return sink;
+  }
+
+  it("B1. transient error BEFORE the first chunk → recreates the iterator once → events flow", async () => {
+    let calls = 0;
+    mockGetReplyStreaming.mockImplementation(() => {
+      calls++;
+      if (calls === 1) {
+        return (async function* () {
+          throw transient();
+        })();
+      }
+      return (async function* () {
+        yield { delta: "Hi" };
+        yield { done: true, reply: { text: "Hi" } };
+      })();
+    });
+
+    const events = await drain(
+      runLlmTurn({ history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {} })
+    );
+
+    expect(calls).toBe(2); // exactly one retry
+    expect(events).toEqual([
+      { type: "delta", text: "Hi" },
+      { type: "done", done: true, reply: { text: "Hi" }, retried: true },
+    ]);
+  });
+
+  it("B2. transient error AFTER a delta was yielded → NO retry, error propagates", async () => {
+    let calls = 0;
+    mockGetReplyStreaming.mockImplementation(() => {
+      calls++;
+      return (async function* () {
+        yield { delta: "Hi" };
+        throw transient();
+      })();
+    });
+
+    const events = [];
+    await expect(
+      drain(
+        runLlmTurn({ history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {} }),
+        events
+      )
+    ).rejects.toThrow("503");
+
+    expect(calls).toBe(1); // never recreated after a chunk was consumed
+    expect(events).toEqual([{ type: "delta", text: "Hi" }]);
+  });
+
+  it("B3. non-transient error (HTTP 400) before the first chunk → NO retry", async () => {
+    let calls = 0;
+    mockGetReplyStreaming.mockImplementation(() => {
+      calls++;
+      return (async function* () {
+        throw Object.assign(new Error("400 Bad Request"), { status: 400 });
+      })();
+    });
+
+    await expect(
+      drain(runLlmTurn({ history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {} }))
+    ).rejects.toThrow("400");
+    expect(calls).toBe(1);
+  });
+
+  it("B4. transient error with <3s remaining in the total budget → NO retry", async () => {
+    let calls = 0;
+    mockGetReplyStreaming.mockImplementation(() => {
+      calls++;
+      return (async function* () {
+        throw transient();
+      })();
+    });
+
+    await expect(
+      drain(
+        runLlmTurn({
+          history: [],
+          userText: "hi",
+          step: "gather_details",
+          intent: null,
+          config: {},
+          extras: {},
+          totalTimeoutMs: 2000, // <3000ms remaining from the very start
+        })
+      )
+    ).rejects.toThrow("503");
+    expect(calls).toBe(1);
+  });
+
+  it("B5. two transient failures → the SECOND error propagates (retry happens at most once)", async () => {
+    let calls = 0;
+    mockGetReplyStreaming.mockImplementation(() => {
+      calls++;
+      return (async function* () {
+        throw transient(calls === 1 ? "503 first" : "503 second");
+      })();
+    });
+
+    await expect(
+      drain(runLlmTurn({ history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {} }))
+    ).rejects.toThrow("503 second");
+    expect(calls).toBe(2);
+  });
+
+  it("B6. barge-in after a retry still aborts the signal and leaves no dangling timers", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    let capturedSignal = null;
+    mockGetReplyStreaming.mockImplementation((history, userText, step, intent, config, extras, opts) => {
+      calls++;
+      if (calls === 1) {
+        return (async function* () {
+          throw transient();
+        })();
+      }
+      capturedSignal = opts.signal;
+      return (async function* () {
+        yield { delta: "Hello" };
+        yield { delta: "World" };
+      })();
+    });
+
+    const gen = runLlmTurn({
+      history: [],
+      userText: "hi",
+      step: "gather_details",
+      intent: null,
+      config: {},
+      extras: {},
+      firstChunkTimeoutMs: 2500,
+      totalTimeoutMs: 8000,
+    });
+
+    const r1 = await gen.next();
+    expect(r1.value).toEqual({ type: "delta", text: "Hello" }); // retry succeeded, first delta flowed
+    expect(calls).toBe(2);
+    expect(vi.getTimerCount()).toBeGreaterThan(0); // slow + total timers armed
+
+    await gen.return();
+
+    expect(capturedSignal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0); // no leaked timers after a retry+barge-in
+  });
+});

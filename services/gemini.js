@@ -963,6 +963,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // First request — stream it
   let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
   let lastUsageMetadata = null;
+  // Truncation telemetry (Task 11 / plan 2.5): the finishReason of the FINAL
+  // text round is what tells us whether maxOutputTokens cut the reply off
+  // ("MAX_TOKENS"). It arrives on the last chunk of a round; we keep the most
+  // recent non-empty value so, across tool-calling rounds, we end up holding
+  // the reason for the round that produced the spoken reply.
+  let lastFinishReason = null;
 
   while (true) {
     // Drain the stream, yielding text deltas and collecting function calls
@@ -981,6 +987,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       }
       if (chunk.usageMetadata) {
         lastUsageMetadata = chunk.usageMetadata;
+      }
+      const finishReason = chunk.candidates?.[0]?.finishReason;
+      if (finishReason) {
+        lastFinishReason = finishReason;
       }
     }
 
@@ -1084,6 +1094,21 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     yield { delta: fullText };
   }
 
+  // Additive truncation telemetry — usage tokens and the final finishReason.
+  // Never load-bearing for behavior; consumed by the harness/eval report to
+  // measure how often the output cap truncates a reply (plan step 2.5). Shaped
+  // {promptTokens, outputTokens, thoughtsTokens?} so it does not leak the SDK's
+  // field names to callers.
+  const usage = lastUsageMetadata
+    ? {
+        promptTokens: lastUsageMetadata.promptTokenCount ?? null,
+        outputTokens: lastUsageMetadata.candidatesTokenCount ?? null,
+        ...(lastUsageMetadata.thoughtsTokenCount != null
+          ? { thoughtsTokens: lastUsageMetadata.thoughtsTokenCount }
+          : {}),
+      }
+    : null;
+
   yield {
     done: true,
     reply: {
@@ -1095,6 +1120,8 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       transferRequested,
       capabilityEffects,
       capabilityState,
+      usage,
+      finishReason: lastFinishReason,
     },
   };
 }
