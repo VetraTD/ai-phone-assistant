@@ -5,6 +5,7 @@ import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { trimHistory } from "../lib/voice/historyTrim.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
 import { collectStaticFragments, collectStepGuidance } from "../lib/capabilities/promptAssembler.js";
 
@@ -694,6 +695,24 @@ const GENERATION_CONFIG_DEFAULTS = {
   maxOutputTokens: 200,
 };
 
+// How many whole turns of history to send Gemini. 20 turns ≈ the old 40-entry
+// window for plain (user+model) turns — deliberately the same effective size.
+const HISTORY_MAX_TURNS_DEFAULT = 20;
+
+/**
+ * Resolve the history turn-window, env-overridable at call time (so tests can
+ * set it without a module reload), with the same NaN/empty guard as
+ * resolveGenerationConfig: an unset/empty/non-numeric or non-positive
+ * GEMINI_HISTORY_MAX_TURNS falls back to the default.
+ *
+ * @returns {number}
+ */
+export function resolveHistoryMaxTurns() {
+  const env = parseInt(process.env.GEMINI_HISTORY_MAX_TURNS, 10);
+  if (!Number.isNaN(env) && env > 0) return env;
+  return HISTORY_MAX_TURNS_DEFAULT;
+}
+
 /**
  * Resolve the model + generation knobs for a single getReplyStreaming call.
  *
@@ -781,10 +800,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   ];
   const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
 
-  const MAX_HISTORY_TURNS = 40;
-  const trimmedHistory = history.length > MAX_HISTORY_TURNS
-    ? history.slice(-MAX_HISTORY_TURNS)
-    : history;
+  // Turn-aware history bound (lib/voice/historyTrim.js): keeps whole turns from
+  // the end so a user/model pair is never split, and hoists any evicted
+  // completed-action system notes into one leading entry so the model never
+  // forgets it already booked/cancelled. 20 turns ≈ the old 40-entry window for
+  // plain turns — the effective window size is unchanged, only its integrity.
+  const trimmedHistory = trimHistory(history, { maxTurns: resolveHistoryMaxTurns() });
 
   const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
   const model = generationConfig.model;
