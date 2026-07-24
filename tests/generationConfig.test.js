@@ -29,7 +29,7 @@ describe("services/gemini.js — resolveGenerationConfig", () => {
 
   it("returns hardcoded defaults when nothing is set", () => {
     expect(resolveGenerationConfig()).toEqual({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       temperature: 0.4,
       thinkingBudget: 0,
       maxOutputTokens: 200,
@@ -71,7 +71,7 @@ describe("services/gemini.js — resolveGenerationConfig", () => {
     process.env.GEMINI_MAX_OUTPUT_TOKENS = "";
 
     expect(resolveGenerationConfig()).toEqual({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       temperature: 0.4,
       thinkingBudget: 0,
       maxOutputTokens: 200,
@@ -84,7 +84,7 @@ describe("services/gemini.js — resolveGenerationConfig", () => {
     process.env.GEMINI_THINKING_BUDGET = "nope";
 
     expect(resolveGenerationConfig()).toEqual({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       temperature: 0.4,
       thinkingBudget: 0,
       maxOutputTokens: 200,
@@ -102,7 +102,7 @@ describe("services/gemini.js — resolveGenerationConfig", () => {
     });
 
     expect(result).toEqual({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       temperature: 0.9,
       thinkingBudget: 0,
       maxOutputTokens: 200,

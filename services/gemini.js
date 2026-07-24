@@ -823,7 +823,10 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 // ---------------------------------------------------------------------------
 
 const GENERATION_CONFIG_DEFAULTS = {
-  model: "gemini-2.5-flash",
+  // gemini-3.6-flash won the 2026-07-24 eval matrix (19/20 hard vs 17-18 for
+  // 2.5-flash; thinking variants scored worse) and the 2.5 family retires
+  // 2026-10-16. Override per-env with GEMINI_MODEL.
+  model: "gemini-3.6-flash",
   temperature: 0.4,
   thinkingBudget: 0,
   maxOutputTokens: 200,
@@ -1304,7 +1307,7 @@ export async function generateSummaryAndSentiment(transcript) {
   try {
     const gemini = new GoogleGenAI({ apiKey });
     const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       contents:
         `Analyze this phone call transcript. Respond with ONLY valid JSON, no markdown, no extra text.\n` +
         `Format: {"summary":"1-2 sentence summary","sentiment":"positive|neutral|negative","outcome":"<outcome>"}\n` +
