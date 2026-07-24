@@ -829,6 +829,67 @@ const GENERATION_CONFIG_DEFAULTS = {
   maxOutputTokens: 200,
 };
 
+/**
+ * Build the `thinkingConfig` object for a chat/generateContent request,
+ * translating our one engine-wide semantic (`thinkingBudget`, a token count —
+ * 0 meaning "no thinking, minimize latency") into whatever shape the target
+ * model generation actually accepts.
+ *
+ * VERIFIED CONTRACT (Task 20 — see services/gemini.js git history / task
+ * brief for the WebFetch+SDK-typings research this came from):
+ *
+ *  - gemini-2.x (and anything else that isn't gemini-3.x): unchanged legacy
+ *    shape, `{ thinkingBudget }`. This is what every gemini-2.5-* deployment
+ *    has always received — byte-identical, per the task constraint.
+ *
+ *  - gemini-3.x (`gemini-3-*`, `gemini-3.6-*`, ... — matched by a `gemini-3`
+ *    prefix so a future 3.x point release needs no code change): the
+ *    `thinkingBudget` field is REJECTED. Gemini 3 replaced budget-based
+ *    control with a `thinkingLevel` enum (`"minimal" | "low" | "medium" |
+ *    "high"`, ai.google.dev/gemini-api/docs/gemini-3). The docs state
+ *    plainly that mixing `thinking_level` and the legacy `thinking_budget` in
+ *    one request 400s; empirically (Task 6's live matrix run) sending
+ *    `thinkingBudget` ALONE — with tool declarations present — also 400s
+ *    INVALID_ARGUMENT for gemini-3.6-flash, so gemini-3.x never gets a
+ *    `thinkingBudget` key at all, only `thinkingLevel`. The @google/genai
+ *    1.42.0 typings (node_modules/@google/genai/dist/genai.d.ts) confirm
+ *    `ThinkingConfig.thinkingLevel` as a first-class sibling of
+ *    `thinkingBudget`, and its `ThinkingLevel` enum uses these same
+ *    upper-case string values ("MINIMAL"/"LOW"/"MEDIUM"/"HIGH"), which the
+ *    REST API accepts case-insensitively as plain strings — so a lower-case
+ *    literal here is deliberate and matches the docs' own JSON examples, not
+ *    a typo of the SDK enum.
+ *
+ *    Our budget→level mapping (nullish/0 → our own "no thinking" default,
+ *    matching GENERATION_CONFIG_DEFAULTS.thinkingBudget):
+ *      thinkingBudget <= 0          -> "minimal" (lowest latency, our default)
+ *      1   <= thinkingBudget <= 256 -> "low"
+ *      257 <= thinkingBudget <= 1024-> "medium"
+ *      thinkingBudget > 1024        -> "high"
+ *    There's no documented budget->level conversion table, so these
+ *    boundaries are ours: they exist only so an explicit override (e.g.
+ *    `GEMINI_THINKING_BUDGET=512` or an eval matrix entry) degrades to a
+ *    directionally-sensible level instead of erroring or silently no-op'ing.
+ *
+ * @param {string} model - resolved model id (e.g. "gemini-2.5-flash", "gemini-3.6-flash")
+ * @param {number|undefined|null} thinkingBudget - our budget semantic; nullish treated as 0
+ * @returns {{thinkingBudget: number}|{thinkingLevel: string}}
+ */
+export function buildThinkingConfig(model, thinkingBudget) {
+  const budget = typeof thinkingBudget === "number" && !Number.isNaN(thinkingBudget) ? thinkingBudget : 0;
+
+  if (typeof model === "string" && model.startsWith("gemini-3")) {
+    let level;
+    if (budget <= 0) level = "minimal";
+    else if (budget <= 256) level = "low";
+    else if (budget <= 1024) level = "medium";
+    else level = "high";
+    return { thinkingLevel: level };
+  }
+
+  return { thinkingBudget: budget };
+}
+
 // How many whole turns of history to send Gemini. 20 turns ≈ the old 40-entry
 // window for plain (user+model) turns — deliberately the same effective size.
 const HISTORY_MAX_TURNS_DEFAULT = 20;
@@ -951,7 +1012,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     temperature: generationConfig.temperature,
     systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
     tools: toolsConfig,
-    thinkingConfig: { thinkingBudget: generationConfig.thinkingBudget },
+    thinkingConfig: buildThinkingConfig(model, generationConfig.thinkingBudget),
     maxOutputTokens: generationConfig.maxOutputTokens,
   };
   const chat = gemini.chats.create({
