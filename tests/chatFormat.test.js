@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseArgs,
   defaultFixtureName,
+  summarizeFixture,
   truncateValue,
   formatArgs,
   formatToolCallLine,
@@ -51,11 +52,37 @@ describe("parseArgs", () => {
   it("ignores unknown flags", () => {
     expect(parseArgs(["--bogus", "x", "--fixture", "messages-only"]).fixture).toBe("messages-only");
   });
+
+  it("leaves fixture null when --fixture is the last token (dangling value)", () => {
+    expect(parseArgs(["--fixture"]).fixture).toBe(null);
+  });
+
+  it("leaves fixture null when a dangling --fixture is followed by another flag consuming nothing", () => {
+    const opts = parseArgs(["--list-fixtures", "--fixture"]);
+    expect(opts.fixture).toBe(null);
+    expect(opts.listFixtures).toBe(true);
+  });
 });
 
 describe("defaultFixtureName", () => {
   it("picks the first fixture whose allowedTasks include book_appointment", () => {
     expect(defaultFixtureName(FIXTURES)).toBe("clinic-athena");
+  });
+});
+
+describe("summarizeFixture", () => {
+  it("joins the business name and comma-separated allowed tasks", () => {
+    const fixture = { config: { businessName: "Acme Clinic", allowedTasks: ["book_appointment", "cancel_reschedule"] } };
+    expect(summarizeFixture("acme", fixture)).toBe("Acme Clinic — book_appointment, cancel_reschedule");
+  });
+
+  it("falls back to '?' and '(none)' when businessName/allowedTasks are missing", () => {
+    expect(summarizeFixture("x", {})).toBe("? — (none)");
+  });
+
+  it("matches the real fixtures' shape", () => {
+    const [name, fixture] = Object.entries(FIXTURES)[0];
+    expect(summarizeFixture(name, fixture)).toContain(fixture.config.businessName);
   });
 });
 

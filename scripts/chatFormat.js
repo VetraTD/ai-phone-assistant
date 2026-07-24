@@ -40,7 +40,10 @@ export function parseArgs(argv) {
       opts.seedAppointments = Number.isFinite(value) ? value : 0;
     } else if (MODEL_OVERRIDE_KEYS.has(key)) {
       if (typeof value === "string" || Number.isFinite(value)) opts.modelOverrides[key] = value;
-    } else {
+    } else if (raw !== undefined) {
+      // Dangling `--fixture` as the last argv token (no value follows) leaves
+      // `raw` undefined — keep the documented `fixture: string|null` shape
+      // instead of assigning `undefined`.
       opts.fixture = value;
     }
   }
