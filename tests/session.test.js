@@ -228,7 +228,73 @@ vi.mock("twilio", () => ({
   })),
 }));
 
-import { handleVoiceSessionConnection, TRANSFER_TRIGGERS, mapLanguage } from "../lib/voice/session.js";
+import {
+  handleVoiceSessionConnection,
+  TRANSFER_TRIGGERS,
+  mapLanguage,
+  keytermsFromConfig,
+} from "../lib/voice/session.js";
+
+describe("keytermsFromConfig — business STT keyterm sourcing", () => {
+  it("sources the business name", () => {
+    expect(keytermsFromConfig({ businessName: "Brightwork Dental" })).toEqual(["Brightwork Dental"]);
+  });
+
+  it("skips the generic 'our office' placeholder and empty configs", () => {
+    expect(keytermsFromConfig({ businessName: "our office" })).toEqual([]);
+    expect(keytermsFromConfig(null)).toEqual([]);
+    expect(keytermsFromConfig({})).toEqual([]);
+  });
+
+  it("sources custom identity labels across capabilities", () => {
+    const config = {
+      businessName: "Acme Clinic",
+      capabilities: {
+        appointments: {
+          require: { identity: { custom: [{ key: "policy", label: "Policy number" }] } },
+        },
+        messages: {
+          require: { identity: { custom: [{ key: "member", label: "Membership ID" }] } },
+        },
+      },
+    };
+    expect(keytermsFromConfig(config)).toEqual(["Acme Clinic", "Policy number", "Membership ID"]);
+  });
+
+  it("dedupes case-insensitively and drops blanks", () => {
+    const config = {
+      businessName: "Acme",
+      capabilities: {
+        a: { require: { identity: { custom: [{ key: "x", label: "acme" }, { key: "y", label: "  " }] } } },
+      },
+    };
+    expect(keytermsFromConfig(config)).toEqual(["Acme"]);
+  });
+
+  it("drops terms longer than five words (keyterm prompting favors short terms)", () => {
+    const config = {
+      businessName: "Short Name Co",
+      capabilities: {
+        a: {
+          require: {
+            identity: { custom: [{ key: "x", label: "this label has way too many words to keep" }] },
+          },
+        },
+      },
+    };
+    expect(keytermsFromConfig(config)).toEqual(["Short Name Co"]);
+  });
+
+  it("caps the list at 20 terms", () => {
+    const custom = Array.from({ length: 30 }, (_, i) => ({ key: `k${i}`, label: `term${i}` }));
+    const config = {
+      businessName: "Biz",
+      capabilities: { a: { require: { identity: { custom } } } },
+    };
+    expect(keytermsFromConfig(config)).toHaveLength(20);
+    expect(keytermsFromConfig(config)[0]).toBe("Biz");
+  });
+});
 
 describe("mapLanguage — Deepgram nova-3 language codes", () => {
   it("maps bare ISO codes to valid nova-3 codes", () => {

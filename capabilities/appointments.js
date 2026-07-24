@@ -377,7 +377,7 @@ function bookingGuidance(config, now, canCheck) {
     `1. Ask whether they prefer mornings or afternoons.\n` +
     `2. Ask if any specific days of the week don't work for them.\n` +
     `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). If the name is unusual, uncommon, or you're not sure you heard it correctly, ask them to spell it once and read the spelling back. Do not ask common, clearly-heard names to be spelled. Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Unless you already did so earlier in this call, confirm its spelling once ("could you spell that for me?"). Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
     `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
     `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
   );
@@ -582,10 +582,14 @@ function validateBookingTime(rawScheduledAt, config) {
 
 // The read-back-and-confirm requirement itself now lives in NON-NEGOTIABLE RULE
 // 3 (services/gemini.js), so this pack bullet keeps only its non-duplicated
-// tail: the spelling-confirmation detail specific to booking. Task 16
-// strengthens this later.
+// tail: the spelling-confirmation detail specific to booking. Task 16 made it
+// UNCONDITIONAL and once-per-call — the old "only if the name is unusual"
+// wording let a confidently-misheard common name ("Scripps" for "Smith") be
+// written into a booking without ever being checked. Spelling is now confirmed
+// exactly once before the first name-bearing booking read-back, and the caller
+// is never asked to spell again for the rest of the call.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
+  `- Before the first read-back of a booking that includes the caller's name, confirm the spelling of their name once: ask them to spell it — e.g. "Just to make sure I have it right, could you spell your last name?" — and read the letters back to confirm you have it right. Treat that confirmed spelling (or the name as you heard it, if they'd rather not spell it) as correct, and do not ask them to spell it again for the rest of the call.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
