@@ -2,6 +2,43 @@ import { describe, it, expect } from "vitest";
 import { toSpeakable, expandAbbreviations } from "../lib/voice/speakableText.js";
 import { buildSayContent } from "../lib/twiml.js";
 
+// Every input string used anywhere in the describe blocks below (all rules,
+// not just the newest ones), collected in one module-level list so the
+// idempotence suite runs over the complete set — see the "idempotence"
+// describe block further down.
+const IDEMPOTENCE_INPUTS = [
+  "The appointment is at 3:00 PM.",
+  "We open again at 15:00.",
+  "The bus leaves at 15:30.",
+  "We close at 3:30 PM.",
+  "Our hours are 9:00 to 5:00.",
+  "Let's schedule you for 7/30.",
+  "Your appointment is 07/30/2026.",
+  "See you on July 30th.",
+  "Please see Dr. Lee at 2 PM.",
+  "St. Mary is around the corner.",
+  "We're on Main St. Suite 5.",
+  "We're open 9-5 Monday through Friday.",
+  "Hours: 9–5 daily.",
+  "It usually takes 10-15 minutes.",
+  "Roughly 20-30 people attended.",
+  "It's three o’clock now.",
+  "It's three oclock now.",
+  "Call us at 555-123-4567 about your 3:00 PM with Dr. Lee on 7/30.",
+  // Shared-meridiem time ranges (fix for the review finding).
+  "Open from 3:00-5:00 PM daily.",
+  "Open 9:00-5:00 PM Monday through Friday.",
+  "We are open 3:00 to 5:00 PM.",
+  "Open from 3:00–5:00 PM daily.",
+  "The clinic is open 3:30-5:00 PM.",
+  // Regression: short phone numbers and 24h guards.
+  "Call 555-0100 for details.",
+  "Doors open at 00:30.",
+  "The meeting starts at 12:00.",
+  "Ops resume at 24:00.",
+  "The timer reads 90:00.",
+];
+
 describe("lib/voice/speakableText.js — toSpeakable", () => {
   describe("1. markdown stripping", () => {
     it("strips **bold**", () => {
@@ -184,6 +221,47 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     });
   });
 
+  describe("11. time ranges — shared meridiem", () => {
+    it("collapses a shared-meridiem PM range with a hyphen, dropping the dangling :00 on both sides", () => {
+      expect(toSpeakable("Open from 3:00-5:00 PM daily.")).toBe("Open from 3 to 5 PM daily.");
+    });
+    it("collapses a shared-meridiem PM range spanning a full workday", () => {
+      expect(toSpeakable("Open 9:00-5:00 PM Monday through Friday.")).toBe(
+        "Open 9 to 5 PM Monday through Friday."
+      );
+    });
+    it("collapses a worded 'to' shared-meridiem range", () => {
+      expect(toSpeakable("We are open 3:00 to 5:00 PM.")).toBe("We are open 3 to 5 PM.");
+    });
+    it("collapses an en-dash shared-meridiem range", () => {
+      expect(toSpeakable("Open from 3:00–5:00 PM daily.")).toBe("Open from 3 to 5 PM daily.");
+    });
+    it("preserves non-zero minutes on the side that has them (mixed-minutes range)", () => {
+      expect(toSpeakable("The clinic is open 3:30-5:00 PM.")).toBe("The clinic is open 3:30 to 5 PM.");
+    });
+    it("does NOT touch a range with no meridiem at all — ambiguous, restraint (unchanged from before this fix)", () => {
+      expect(toSpeakable("Our hours are 9:00 to 5:00.")).toBe("Our hours are 9:00 to 5:00.");
+    });
+  });
+
+  describe("12. regression — short phone numbers and 24h guards stay untouched by the range/time rules", () => {
+    it("never turns a short local phone number into a spoken range", () => {
+      expect(toSpeakable("Call 555-0100 for details.")).toBe("Call 555-0100 for details.");
+    });
+    it("converts 00:30 (midnight-hour 24h notation) to 12:30 AM", () => {
+      expect(toSpeakable("Doors open at 00:30.")).toBe("Doors open at 12:30 AM.");
+    });
+    it("does NOT touch 12:00 — ambiguous bare 12-hour time, no marker", () => {
+      expect(toSpeakable("The meeting starts at 12:00.")).toBe("The meeting starts at 12:00.");
+    });
+    it("does NOT touch 24:00 — not a valid 24h hour", () => {
+      expect(toSpeakable("Ops resume at 24:00.")).toBe("Ops resume at 24:00.");
+    });
+    it("does NOT touch 90:00 — not a valid 24h hour", () => {
+      expect(toSpeakable("The timer reads 90:00.")).toBe("The timer reads 90:00.");
+    });
+  });
+
   describe("10. o'clock glyph normalization", () => {
     it("normalizes a typographic apostrophe in o'clock to ASCII, keeping the word", () => {
       expect(toSpeakable("It's three o’clock now.")).toBe("It's three o'clock now.");
@@ -200,27 +278,13 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
   });
 
   describe("idempotence — toSpeakable(toSpeakable(x)) === toSpeakable(x)", () => {
-    const inputs = [
-      "The appointment is at 3:00 PM.",
-      "We open again at 15:00.",
-      "The bus leaves at 15:30.",
-      "We close at 3:30 PM.",
-      "Our hours are 9:00 to 5:00.",
-      "Let's schedule you for 7/30.",
-      "Your appointment is 07/30/2026.",
-      "See you on July 30th.",
-      "Please see Dr. Lee at 2 PM.",
-      "St. Mary is around the corner.",
-      "We're on Main St. Suite 5.",
-      "We're open 9-5 Monday through Friday.",
-      "Hours: 9–5 daily.",
-      "It usually takes 10-15 minutes.",
-      "Roughly 20-30 people attended.",
-      "It's three o’clock now.",
-      "It's three oclock now.",
-      "Call us at 555-123-4567 about your 3:00 PM with Dr. Lee on 7/30.",
-    ];
-    it.each(inputs)("is idempotent for: %s", (input) => {
+    // Every input string exercised by ANY describe block above (including
+    // the shared-meridiem time-range rule and its regression tests added to
+    // fix the review finding where "3:00-5:00 PM" corrupted into
+    // "3:00-5 PM") is collected here in one place, so this it.each covers
+    // the complete set rather than a hand-picked subset that can silently
+    // drift out of sync with the describe blocks above.
+    it.each(IDEMPOTENCE_INPUTS)("is idempotent for: %s", (input) => {
       const once = toSpeakable(input);
       expect(toSpeakable(once)).toBe(once);
     });
