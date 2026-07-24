@@ -20,7 +20,8 @@ export default {
       "unless truly necessary. You are friendly and cooperative but a little chatty about small things first.",
     goal:
       `First make some small talk (ask if they're having a good day), THEN book a checkup for ` +
-      `${spokenSlot(SLOT, TZ)}. You already gave your name at the start — do not volunteer it again. Confirm when asked.`,
+      `${spokenSlot(SLOT, TZ)}. You already gave your name at the start — do not volunteer it again. Confirm when asked. ` +
+      `Do NOT end the call until the receptionist has explicitly confirmed the appointment is actually booked.`,
     maxTurns: 8,
   },
   hard: [
