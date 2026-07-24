@@ -23,6 +23,12 @@
  * @property {{stability: number, similarity_boost: number}} voiceSettings
  */
 
+// Task 13 prosody pass: every entry's stability is now >= 0.6. A per-turn
+// ElevenLabs socket carries no cross-turn prosody state, so lower stability
+// let expression swing audibly between utterances; these are damped to a
+// consistent floor pending the owner's own listening test (scripts/voice-ab.js).
+// Do NOT lower any of these below 0.6 without re-running that listening pass.
+
 /** @type {VoiceCatalogEntry[]} */
 export const VOICE_CATALOG = [
   {
@@ -53,7 +59,7 @@ export const VOICE_CATALOG = [
     gender: "female",
     accent: "american",
     previewText: "Hey! Thanks for calling — how can I help you out today?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
   },
   {
     id: "alice",
@@ -73,7 +79,7 @@ export const VOICE_CATALOG = [
     gender: "male",
     accent: "american",
     previewText: "Thanks for calling — this is our assistant. How can I help you today?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
   },
   {
     id: "roger",
@@ -83,7 +89,7 @@ export const VOICE_CATALOG = [
     gender: "male",
     accent: "american",
     previewText: "Hey there, thanks for giving us a call — what can I do for you?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
   },
   {
     id: "daniel",
@@ -103,6 +109,6 @@ export const VOICE_CATALOG = [
     gender: "neutral",
     accent: "american",
     previewText: "Hi, thanks for calling — how can I help you today?",
-    voiceSettings: { stability: 0.5, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
   },
 ];

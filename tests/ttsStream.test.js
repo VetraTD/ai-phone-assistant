@@ -67,6 +67,7 @@ vi.mock("../lib/logger.js", () => ({
 
 import { createTtsTurn } from "../lib/voice/ttsStream.js";
 import { ttsHealth } from "../lib/voice/ttsHealth.js";
+import { trimPreviousText } from "../services/elevenlabs.js";
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -77,6 +78,9 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     instances.length = 0;
     mockSynthesizeMulaw.mockReset();
     process.env.ELEVENLABS_API_KEY = "test-xi-key";
+    // ELEVENLABS_MODEL is an optional A/B knob — a value leaked from one test
+    // must not change the default model URL asserted by the others.
+    delete process.env.ELEVENLABS_MODEL;
     // The circuit breaker is a process-wide singleton — EL failures triggered
     // by earlier tests must not leak "breaker open" into later ones.
     ttsHealth.recordSuccess();
@@ -99,7 +103,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(sock.sentMessages()).toEqual([
       {
         text: " ",
-        voice_settings: { stability: 0.5, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
+        voice_settings: { stability: 0.65, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
       },
     ]);
   });
@@ -445,6 +449,115 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 
     expect(chunks).toEqual(["one", "two", "three"]); // strict order preserved
+  });
+
+  it("15. previousText opt is sent as previous_text on the handshake frame (prosody continuity) when non-empty", () => {
+    createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA15",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      previousText: "Thanks so much for calling. This is the front desk.",
+    });
+
+    const sock = instances[0];
+    sock._open();
+
+    const handshake = sock.sentMessages()[0];
+    expect(handshake.text).toBe(" ");
+    expect(handshake.previous_text).toBe("Thanks so much for calling. This is the front desk.");
+    expect(handshake.voice_settings).toMatchObject({ stability: 0.65, similarity_boost: 0.8 });
+  });
+
+  it("16. previousText that is empty/whitespace/undefined omits the previous_text field entirely", () => {
+    for (const [i, prev] of [undefined, "", "   "].entries()) {
+      instances.length = 0;
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: `CA16-${i}`,
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: prev,
+      });
+      const sock = instances[0];
+      sock._open();
+      const handshake = sock.sentMessages()[0];
+      expect(handshake).not.toHaveProperty("previous_text");
+    }
+  });
+
+  it("17. a long previousText is trimmed to the last ~300 chars at a word boundary before sending", () => {
+    // 40 words * ~10 chars each = ~400 chars, well over the 300 cap.
+    const long = Array.from({ length: 40 }, (_, i) => `word${String(i).padStart(4, "0")}`).join(" ");
+    createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA17",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      previousText: long,
+    });
+    const sock = instances[0];
+    sock._open();
+    const sent = sock.sentMessages()[0].previous_text;
+    expect(sent.length).toBeLessThanOrEqual(300);
+    expect(long.endsWith(sent)).toBe(true); // it is a suffix of the original
+    expect(sent).toMatch(/^word\d{4}/); // starts cleanly on a whole word, not mid-token
+  });
+
+  it("18. ELEVENLABS_MODEL env overrides the model_id in the connection URL; unset/empty falls back to eleven_flash_v2_5", () => {
+    process.env.ELEVENLABS_MODEL = "eleven_turbo_v2_5";
+    createTtsTurn({ voiceId: "v1", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() });
+    expect(instances[0].url).toContain("model_id=eleven_turbo_v2_5");
+
+    // Empty string is treated as unset.
+    instances.length = 0;
+    process.env.ELEVENLABS_MODEL = "   ";
+    createTtsTurn({ voiceId: "v1", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() });
+    expect(instances[0].url).toContain("model_id=eleven_flash_v2_5");
+  });
+
+  describe("trimPreviousText helper", () => {
+    it("returns '' for empty, whitespace, or non-string input", () => {
+      expect(trimPreviousText("")).toBe("");
+      expect(trimPreviousText("   ")).toBe("");
+      expect(trimPreviousText(undefined)).toBe("");
+      expect(trimPreviousText(null)).toBe("");
+      expect(trimPreviousText(123)).toBe("");
+    });
+
+    it("returns short text unchanged (trimmed)", () => {
+      expect(trimPreviousText("  Hello there.  ")).toBe("Hello there.");
+    });
+
+    it("keeps the last <=maxChars, starting on a word boundary", () => {
+      const out = trimPreviousText("alpha beta gamma delta epsilon", 12);
+      expect(out.length).toBeLessThanOrEqual(12);
+      expect("alpha beta gamma delta epsilon".endsWith(out)).toBe(true);
+      expect(out.startsWith(" ")).toBe(false);
+      // Must not begin mid-word: the char before `out` in the source is a space.
+      const idx = "alpha beta gamma delta epsilon".lastIndexOf(out);
+      expect("alpha beta gamma delta epsilon"[idx - 1]).toBe(" ");
+    });
+
+    it("never splits a UTF-16 surrogate pair at the cut point", () => {
+      // A run of emoji (each a surrogate pair) with no spaces.
+      const emoji = "😀".repeat(50); // 100 UTF-16 code units
+      const out = trimPreviousText(emoji, 15);
+      // No lone surrogate at either end.
+      const first = out.charCodeAt(0);
+      const last = out.charCodeAt(out.length - 1);
+      expect(first >= 0xdc00 && first <= 0xdfff).toBe(false); // not a lone low surrogate
+      expect(last >= 0xd800 && last <= 0xdbff).toBe(false); // not a lone high surrogate
+    });
   });
 
   it("14. a later sentence rejecting while an earlier one is still pending does not raise an unhandled rejection", async () => {
