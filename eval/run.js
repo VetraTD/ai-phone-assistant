@@ -6,6 +6,8 @@
  *   npm run eval -- --filter availability
  *   npm run eval -- --tag memory --concurrency 3
  *   npm run eval -- --model gemini-2.5-pro --temperature 0
+ *   npm run eval -- --matrix --filter availability-before-book
+ *   npm run eval -- --matrix --matrix-file ./my-configs.json --tag booking
  *
  * Drives each scenario's simulated caller against the REAL receptionist brain
  * (via lib/harness/textSession.js — same prompt assembly, tool dispatch and
@@ -17,21 +19,38 @@
  * Task 6 seam: `runScenario(scenario, { modelOverrides }) → result` is the
  * single unit of work and is importable, so a model-matrix benchmark can call
  * it across models without going through this CLI.
+ *
+ * --matrix runs the (filtered) suite once per candidate model config —
+ * configs sequential, scenarios within a config at --concurrency — after a
+ * one-call servability preflight per config (skips a dead/inaccessible model
+ * instead of burning the suite on it). --matrix-file <path> overrides the
+ * built-in default config list (DEFAULT_MATRIX below) with a JSON array of
+ * `{label, model, temperature?, thinkingBudget?, maxOutputTokens?}` objects.
+ * The judge always stays on its own pinned model (eval/judge.js) regardless
+ * of the matrix — it scores, it isn't scored. Full per-config results land in
+ * one `eval/results/matrix-<ts>.json`; a comparison table prints at the end.
  */
 
 import "dotenv/config";
 import { readdirSync } from "node:fs";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 import { createTextSession } from "../lib/harness/textSession.js";
 import { makeFakeDeps, makeFakeEffectsDeps } from "../lib/harness/fakeDeps.js";
-import { resolveGenerationConfig } from "../services/gemini.js";
+import { resolveGenerationConfig, getClient } from "../services/gemini.js";
 import { STEPS } from "../lib/callState.js";
 import { FIXTURES } from "../tests/fixtures/businessConfigs.js";
 import { createSimCaller, isEndCall } from "./simCaller.js";
 import { judgeConversation } from "./judge.js";
+import {
+  percentile,
+  median,
+  summarizeConfigResults,
+  buildComparisonRows,
+  formatComparisonTable,
+} from "./matrixAggregate.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = path.join(HERE, "scenarios");
@@ -71,6 +90,8 @@ function parseArgs(argv) {
     concurrency: 2,
     modelOverrides: {},
     json: null,
+    matrix: false,
+    matrixFile: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -83,6 +104,8 @@ function parseArgs(argv) {
       case "--model": opts.modelOverrides.model = next(); break;
       case "--thinking-budget": opts.modelOverrides.thinkingBudget = parseInt(next(), 10); break;
       case "--json": opts.json = next(); break;
+      case "--matrix": opts.matrix = true; break;
+      case "--matrix-file": opts.matrixFile = next(); break;
       default:
         console.error(`Unknown flag: ${a}`);
         process.exitCode = 1;
@@ -247,17 +270,6 @@ async function runPool(items, concurrency, worker) {
 // Reporting
 // ---------------------------------------------------------------------------
 
-function percentile(values, p) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[idx];
-}
-
-function median(values) {
-  return percentile(values, 50);
-}
-
 const pad = (s, n) => String(s).padEnd(n);
 const padStart = (s, n) => String(s).padStart(n);
 
@@ -323,6 +335,156 @@ function printReport(results) {
 const fmtMs = (v) => (v == null ? "—" : `${v}ms`);
 
 // ---------------------------------------------------------------------------
+// Matrix mode (Task 6 / plan step 1.5)
+//
+// Runs the (filtered) scenario suite once per candidate model config, model
+// configs SEQUENTIALLY (so latency numbers reflect one config at a time, not
+// contention across configs), scenarios within a config at the runner's usual
+// --concurrency. Before spending the suite on a config, a one-call
+// servability preflight ("Say OK") skips it cleanly if the model 404s/denies
+// — this is what makes --matrix safe to point at a not-yet-GA model name.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_MATRIX = [
+  { label: "2.5-flash (baseline)", model: "gemini-2.5-flash" },
+  { label: "2.5-flash +think128", model: "gemini-2.5-flash", thinkingBudget: 128 },
+  { label: "2.5-flash +think512", model: "gemini-2.5-flash", thinkingBudget: 512 },
+  { label: "3.6-flash", model: "gemini-3.6-flash" },
+  { label: "3-flash-preview", model: "gemini-3-flash-preview" },
+];
+
+/**
+ * Load the matrix config list: the built-in default, or a JSON array from
+ * --matrix-file. Validation only (each entry needs a string `label`) — the
+ * rest of the object is forwarded verbatim as `modelOverrides`.
+ *
+ * @param {string|null} matrixFilePath
+ * @returns {Promise<Array<{label: string, model?: string, temperature?: number, thinkingBudget?: number, maxOutputTokens?: number}>>}
+ */
+export async function loadMatrixConfigs(matrixFilePath) {
+  if (!matrixFilePath) return DEFAULT_MATRIX;
+  const raw = await readFile(path.resolve(matrixFilePath), "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`--matrix-file ${matrixFilePath} is not valid JSON: ${err.message}`);
+  }
+  if (!Array.isArray(parsed) || !parsed.length) {
+    throw new Error(`--matrix-file ${matrixFilePath} must contain a non-empty JSON array of override objects`);
+  }
+  for (const cfg of parsed) {
+    if (!cfg || typeof cfg.label !== "string" || !cfg.label) {
+      throw new Error(`--matrix-file ${matrixFilePath}: every entry needs a non-empty string "label"`);
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Servability preflight: one minimal generateContent call. Cheap and
+ * sufficient to distinguish "model doesn't exist / no access" (404,
+ * permission-denied) from "model exists" — the two failure modes a candidate
+ * model name (e.g. a preview alias) can hit before ever reaching the suite.
+ *
+ * @param {string} model
+ * @returns {Promise<{available: boolean, error: string|null}>}
+ */
+export async function probeServability(model) {
+  try {
+    const client = getClient();
+    await client.models.generateContent({
+      model,
+      contents: "Say OK",
+      config: { temperature: 0, maxOutputTokens: 10 },
+    });
+    return { available: true, error: null };
+  } catch (err) {
+    return { available: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Run the full matrix: probe → (run suite | skip) → aggregate, per config,
+ * sequentially. Prints the cross-config comparison table and returns the
+ * full payload for persistence.
+ *
+ * @param {Array<object>} scenarios - already filtered by --filter/--tag
+ * @param {object} opts - parsed CLI opts (concurrency, matrixFile)
+ */
+async function runMatrixMode(scenarios, opts) {
+  const matrixConfigs = await loadMatrixConfigs(opts.matrixFile);
+  console.log(
+    `\nMatrix mode: ${matrixConfigs.length} config(s) × ${scenarios.length} scenario(s), ` +
+      `configs run sequentially, concurrency ${opts.concurrency} within each.`
+  );
+
+  const configEntries = [];
+  for (const cfg of matrixConfigs) {
+    const { label, ...modelOverrides } = cfg;
+    console.log(`\n--- ${label} (${JSON.stringify(modelOverrides)}) ---`);
+
+    const probe = await probeServability(modelOverrides.model);
+    if (!probe.available) {
+      console.log(`  SKIPPED — servability probe failed: ${probe.error}`);
+      configEntries.push({
+        label,
+        modelOverrides,
+        probe,
+        elapsedMs: 0,
+        results: [],
+        summary: summarizeConfigResults([]),
+      });
+      continue;
+    }
+
+    const startedAt = Date.now();
+    const results = await runPool(scenarios, opts.concurrency, (scenario) =>
+      runScenario(scenario, { modelOverrides })
+    );
+    const elapsedMs = Date.now() - startedAt;
+    const summary = summarizeConfigResults(results);
+    console.log(
+      `  hard ${summary.hardPassCount}/${scenarios.length}  judge ${summary.judgePassCount}/${scenarios.length}  ` +
+        `(${(elapsedMs / 1000).toFixed(1)}s)`
+    );
+
+    configEntries.push({ label, modelOverrides, probe, elapsedMs, results, summary });
+  }
+
+  const rows = buildComparisonRows(
+    configEntries.map((c) => ({
+      label: c.label,
+      available: c.probe.available,
+      scenarioCount: scenarios.length,
+      summary: c.summary,
+    }))
+  );
+  console.log("\n=== MATRIX COMPARISON ===\n");
+  console.log(formatComparisonTable(rows));
+
+  await mkdir(RESULTS_DIR, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const payload = {
+    ranAt: new Date().toISOString(),
+    scenarioCount: scenarios.length,
+    scenarioNames: scenarios.map((s) => s.name),
+    concurrency: opts.concurrency,
+    configs: configEntries,
+  };
+  const defaultPath = path.join(RESULTS_DIR, `matrix-${ts}.json`);
+  await writeFile(defaultPath, JSON.stringify(payload, null, 2));
+  console.log(`\nFull matrix report: ${defaultPath}`);
+  if (opts.json) {
+    await writeFile(opts.json, JSON.stringify(payload, null, 2));
+    console.log(`Also written: ${opts.json}`);
+  }
+
+  const anyHardFail = configEntries.some((c) => c.results.some((r) => !r.hardPass));
+  process.exitCode = anyHardFail ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -343,6 +505,17 @@ async function main() {
   if (!scenarios.length) {
     console.error("No scenarios matched the given --filter/--tag.");
     process.exitCode = 1;
+    return;
+  }
+
+  if (opts.matrix) {
+    if (modelOverrides) {
+      console.log(
+        "Note: --model/--temperature/--thinking-budget are ignored in --matrix mode " +
+          "(each matrix config supplies its own)."
+      );
+    }
+    await runMatrixMode(scenarios, opts);
     return;
   }
 
