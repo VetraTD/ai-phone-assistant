@@ -70,26 +70,35 @@ const fmtMs = (v) => (v == null ? "—" : `${v}ms`);
  * @returns {Array<object>} formatted row objects, one per entry, same order
  */
 export function buildComparisonRows(entries) {
-  return (entries || []).map(({ label, available, scenarioCount, summary }) => ({
-    label,
-    available: available ? "yes" : "no (skipped)",
-    hard: `${summary.hardPassCount}/${scenarioCount}`,
-    judge: `${summary.judgePassCount}/${scenarioCount}`,
-    firstP50: fmtMs(summary.latency.firstEvent.p50),
-    firstP95: fmtMs(summary.latency.firstEvent.p95),
-    totalP50: fmtMs(summary.latency.total.p50),
-    totalP95: fmtMs(summary.latency.total.p95),
-    turns: summary.totalTurns,
-    errors: summary.errorCount,
-  }));
+  return (entries || []).map(({ label, available, scenarioCount, summary }) => {
+    const errorCount = summary.errorCount || 0;
+    const hardFraction = `${summary.hardPassCount}/${scenarioCount}`;
+    // Distinguish "the model answered and failed an assertion" from "the
+    // scenario never finished (crashed/errored)" — the two look identical as
+    // a bare N/M fraction otherwise, and a skimmed table reads a 400-crash as
+    // "model failed the scenario" (see Task 6 review). Any errorCount > 0
+    // gets an explicit ERR(n) marker appended to the hard cell so a crash is
+    // never mistaken for a clean hard-assertion failure.
+    const hard = errorCount > 0 ? `${hardFraction} ERR(${errorCount})` : hardFraction;
+    return {
+      label,
+      available: available ? "yes" : "no (skipped)",
+      hard,
+      judge: `${summary.judgePassCount}/${scenarioCount}`,
+      firstP50: fmtMs(summary.latency.firstEvent.p50),
+      firstP95: fmtMs(summary.latency.firstEvent.p95),
+      totalP50: fmtMs(summary.latency.total.p50),
+      totalP95: fmtMs(summary.latency.total.p95),
+      turns: summary.totalTurns,
+      errors: errorCount,
+    };
+  });
 }
-
-const pad = (s, n) => String(s).padEnd(n);
 
 const COLUMNS = [
   { key: "label", header: "config", width: 26 },
   { key: "available", header: "servable", width: 12 },
-  { key: "hard", header: "hard", width: 8 },
+  { key: "hard", header: "hard", width: 14 },
   { key: "judge", header: "judge", width: 8 },
   { key: "firstP50", header: "first p50", width: 10 },
   { key: "firstP95", header: "first p95", width: 10 },
@@ -100,6 +109,22 @@ const COLUMNS = [
 ];
 
 /**
+ * Pad `s` to exactly `n` characters, clipping with a trailing ellipsis if it
+ * doesn't fit. Keeps every column a fixed width regardless of how long a
+ * value is — in particular an arbitrary user-supplied `--matrix-file` label,
+ * which would otherwise blow past its column and misalign every row after it.
+ *
+ * @param {*} s
+ * @param {number} n
+ */
+function padClip(s, n) {
+  const str = String(s);
+  if (str.length <= n) return str.padEnd(n);
+  if (n <= 1) return str.slice(0, n);
+  return `${str.slice(0, n - 1)}…`;
+}
+
+/**
  * Render the cross-config comparison table as plain text (one row per
  * config, in the order given). Pure string shaping — printing it is the
  * caller's job.
@@ -108,11 +133,11 @@ const COLUMNS = [
  * @returns {string}
  */
 export function formatComparisonTable(rows) {
-  const header = COLUMNS.map((c) => pad(c.header, c.width)).join(" ");
+  const header = COLUMNS.map((c) => padClip(c.header, c.width)).join(" ");
   const separator = "-".repeat(header.length);
   if (!rows || !rows.length) {
     return [header, separator, "(no configs)"].join("\n");
   }
-  const lines = rows.map((r) => COLUMNS.map((c) => pad(r[c.key], c.width)).join(" "));
+  const lines = rows.map((r) => COLUMNS.map((c) => padClip(r[c.key], c.width)).join(" "));
   return [header, separator, ...lines].join("\n");
 }

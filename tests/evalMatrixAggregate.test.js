@@ -174,4 +174,64 @@ describe("formatComparisonTable", () => {
     expect(() => formatComparisonTable([])).not.toThrow();
     expect(formatComparisonTable([])).toEqual(expect.any(String));
   });
+
+  it("clips a long --matrix-file label to the column width with an ellipsis, preserving alignment", () => {
+    const longLabel = "this-is-a-very-long-custom-matrix-file-label-that-would-otherwise-blow-past-the-column";
+    const rows = buildComparisonRows([
+      { label: longLabel, available: true, scenarioCount: 1, summary: summarizeConfigResults([makeResult()]) },
+      { label: "short", available: true, scenarioCount: 1, summary: summarizeConfigResults([makeResult()]) },
+    ]);
+    const table = formatComparisonTable(rows);
+    const lines = table.split("\n");
+    // header + separator + 2 rows, and every line has the same length (fixed columns => alignment preserved)
+    expect(lines.length).toBe(4);
+    const lineLengths = new Set(lines.map((l) => l.length));
+    expect(lineLengths.size).toBe(1);
+
+    expect(table).not.toContain(longLabel);
+    const dataLine = lines[2];
+    expect(dataLine).toContain("…");
+    expect(dataLine.startsWith(longLabel.slice(0, 10))).toBe(true);
+  });
+});
+
+describe("buildComparisonRows — crash vs hard-assertion-failure rendering", () => {
+  it("marks a config with scenario-level errors distinctly from a plain hard-assertion failure", () => {
+    const crashedEntry = {
+      label: "crashed-config",
+      available: true,
+      scenarioCount: 1,
+      summary: summarizeConfigResults([makeResult({ hardPass: false, error: "400 INVALID_ARGUMENT" })]),
+    };
+    const failedEntry = {
+      label: "failed-config",
+      available: true,
+      scenarioCount: 1,
+      summary: summarizeConfigResults([makeResult({ hardPass: false })]),
+    };
+    const rows = buildComparisonRows([crashedEntry, failedEntry]);
+
+    // Both show 0/1, but the crashed config's hard cell must be visibly
+    // distinguishable from the clean hard-assertion failure.
+    expect(rows[0].hard).toContain("0/1");
+    expect(rows[0].hard).toMatch(/ERR\(1\)/);
+    expect(rows[1].hard).toBe("0/1");
+    expect(rows[1].hard).not.toMatch(/ERR/);
+    expect(rows[0].hard).not.toBe(rows[1].hard);
+  });
+
+  it("marks a partially-crashed config (some scenarios errored, others just failed) distinctly too", () => {
+    const entry = {
+      label: "mixed-config",
+      available: true,
+      scenarioCount: 3,
+      summary: summarizeConfigResults([
+        makeResult({ hardPass: false, error: "boom" }),
+        makeResult({ hardPass: false }),
+        makeResult({ hardPass: true }),
+      ]),
+    };
+    const [row] = buildComparisonRows([entry]);
+    expect(row.hard).toBe("1/3 ERR(1)");
+  });
 });

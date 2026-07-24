@@ -355,11 +355,14 @@ const DEFAULT_MATRIX = [
 
 /**
  * Load the matrix config list: the built-in default, or a JSON array from
- * --matrix-file. Validation only (each entry needs a string `label`) — the
- * rest of the object is forwarded verbatim as `modelOverrides`.
+ * --matrix-file. Validation only (each entry needs a non-empty string
+ * `label` AND a non-empty string `model` — a missing model would otherwise
+ * reach `probeServability(undefined)` and fail with a confusing SDK error
+ * far from the actual mistake) — the rest of the object is forwarded
+ * verbatim as `modelOverrides`.
  *
  * @param {string|null} matrixFilePath
- * @returns {Promise<Array<{label: string, model?: string, temperature?: number, thinkingBudget?: number, maxOutputTokens?: number}>>}
+ * @returns {Promise<Array<{label: string, model: string, temperature?: number, thinkingBudget?: number, maxOutputTokens?: number}>>}
  */
 export async function loadMatrixConfigs(matrixFilePath) {
   if (!matrixFilePath) return DEFAULT_MATRIX;
@@ -373,11 +376,14 @@ export async function loadMatrixConfigs(matrixFilePath) {
   if (!Array.isArray(parsed) || !parsed.length) {
     throw new Error(`--matrix-file ${matrixFilePath} must contain a non-empty JSON array of override objects`);
   }
-  for (const cfg of parsed) {
+  parsed.forEach((cfg, i) => {
     if (!cfg || typeof cfg.label !== "string" || !cfg.label) {
-      throw new Error(`--matrix-file ${matrixFilePath}: every entry needs a non-empty string "label"`);
+      throw new Error(`--matrix-file ${matrixFilePath}: entry ${i} needs a non-empty string "label"`);
     }
-  }
+    if (typeof cfg.model !== "string" || !cfg.model) {
+      throw new Error(`--matrix-file ${matrixFilePath}: entry ${i} missing model — needs a non-empty string "model"`);
+    }
+  });
   return parsed;
 }
 
@@ -402,6 +408,43 @@ export async function probeServability(model) {
   } catch (err) {
     return { available: false, error: err?.message || String(err) };
   }
+}
+
+/**
+ * Decide the --matrix exit code from the per-config results. Pure/testable
+ * on purpose — no fs, no process — so the decision can be unit tested without
+ * driving the whole CLI.
+ *
+ * Exit-code contract (the ONLY two things that make this process exit
+ * nonzero):
+ *   1. Any hard-assertion failure in any servable (probe-available) config
+ *      — i.e. some config actually ran a scenario and failed a deterministic
+ *      check.
+ *   2. Every config was unavailable (servability probe failed for all of
+ *      them), so zero scenarios actually ran anywhere — without this guard,
+ *      an all-unavailable matrix run would silently exit 0 ("success")
+ *      despite having tested nothing (mirrors the non-matrix zero-scenario
+ *      guard above, adapted to matrix mode's "probe skipped every config"
+ *      failure shape).
+ * Nothing else affects it — in particular the advisory judge
+ * (judgePassCount) NEVER factors into the exit code, matrix or not.
+ *
+ * @param {Array<{results: Array<{hardPass: boolean}>}>} configEntries
+ * @returns {{exitCode: number, message: string|null}}
+ */
+export function computeMatrixExitCode(configEntries) {
+  const list = configEntries || [];
+  const ranAnyScenario = list.some((c) => (c.results || []).length > 0);
+  if (!ranAnyScenario) {
+    return {
+      exitCode: 1,
+      message:
+        "All matrix configs were unavailable (servability probe failed for every config) — " +
+        "no scenario data was collected, nothing to compare.",
+    };
+  }
+  const anyHardFail = list.some((c) => (c.results || []).some((r) => !r.hardPass));
+  return { exitCode: anyHardFail ? 1 : 0, message: null };
 }
 
 /**
@@ -480,8 +523,10 @@ async function runMatrixMode(scenarios, opts) {
     console.log(`Also written: ${opts.json}`);
   }
 
-  const anyHardFail = configEntries.some((c) => c.results.some((r) => !r.hardPass));
-  process.exitCode = anyHardFail ? 1 : 0;
+  // See computeMatrixExitCode's docstring for the exact exit-code contract.
+  const { exitCode, message } = computeMatrixExitCode(configEntries);
+  if (message) console.error(message);
+  process.exitCode = exitCode;
 }
 
 // ---------------------------------------------------------------------------
