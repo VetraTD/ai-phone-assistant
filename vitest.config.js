@@ -9,7 +9,12 @@ export default {
     // package.json, vitest.config.js, and test suite (run via `npm test`
     // from that directory) — without this, root `vitest run` sweeps its
     // tests in too, since vitest's default excludes don't know about it.
-    exclude: [...defaultExclude, "**/AI-phone-dashboard/**"],
+    // eval/ is the live conversation suite (run via `npm run eval`), not unit
+    // tests — it makes real Gemini calls and has no *.test.js files, so vitest's
+    // default globs already skip it; excluded explicitly so a future scenario
+    // helper named *.test.js can't be swept into the unit run by accident. The
+    // eval helpers' OWN unit tests live in tests/ and still run.
+    exclude: [...defaultExclude, "**/AI-phone-dashboard/**", "eval/**"],
     // The default 5s is not enough for the FIRST test in a file under full-suite
     // parallelism: cold module import (supabase + twilio + the genai SDK) is
     // billed to test #1, which measures ~1.9s alone and multiplies under
