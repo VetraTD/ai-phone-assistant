@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:appointments": "node scripts/test-appointments.js",
-    "test:athena-token": "node scripts/test-athena-token.js"
+    "test:athena-token": "node scripts/test-athena-token.js",
+    "chat": "node scripts/chat.js"
   },
   "repository": {
     "type": "git",
