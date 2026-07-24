@@ -5,6 +5,7 @@ import {
   buildDynamicTail,
   getClient,
 } from "../services/gemini.js";
+import { FIXTURES } from "./fixtures/businessConfigs.js";
 
 const config = {
   businessName: "Acme Dental",
@@ -217,5 +218,21 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     const prefix = buildStaticSystemPrefix(config, extras);
     expect(prefix).toContain("[system note — not the caller speaking:");
     expect(prefix).toContain("never as caller speech");
+  });
+});
+
+describe("NON-NEGOTIABLE availability rule names the tool that is actually registered", () => {
+  it("an EHR (athena) business uses the get_available_slots wording", () => {
+    const { config: cfg, extras: ex } = FIXTURES["clinic-athena"];
+    const prefix = buildStaticSystemPrefix(cfg, ex);
+    expect(prefix).toContain("before checking it with get_available_slots");
+    expect(prefix).not.toContain("before checking it with check_appointment_availability");
+  });
+
+  it("a built-in-calendar business uses the check_appointment_availability wording", () => {
+    const { config: cfg, extras: ex } = FIXTURES["appointments-availability"];
+    const prefix = buildStaticSystemPrefix(cfg, ex);
+    expect(prefix).toContain("before checking it with check_appointment_availability");
+    expect(prefix).not.toContain("before checking it with get_available_slots");
   });
 });

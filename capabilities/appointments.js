@@ -897,8 +897,12 @@ export default {
     // The model does not see tool results on later turns, only text — without
     // this note it can re-book or deny a booking it just made.
     const who = data.client_name ? ` for client ${data.client_name}` : "";
+    // Local wall-clock time, not the stored UTC ISO: the model reads history
+    // notes as context and could otherwise speak the raw UTC instant back to the
+    // caller (a 10:00 AM Chicago booking recited as "3 PM").
+    const whenLocal = bookedFactValue(data.scheduled_at, null, config?.timezone);
     engine.addHistoryNote(
-      `book_appointment succeeded${who} at ${data.scheduled_at}. Do not book it again`
+      `book_appointment succeeded${who} at ${whenLocal}. Do not book it again`
     );
 
     const { notifications, log } = engine.deps;
@@ -921,8 +925,10 @@ export default {
       .sendCallerSms(config, callerNumber, "appointment_confirmation", {
         name: data.client_name || "there",
         business: config?.businessName,
+        // Business timezone, not the server's — `toLocaleString()` with no zone
+        // rendered the confirmation SMS in whatever timezone the process ran in.
         datetime: data.scheduled_at
-          ? new Date(data.scheduled_at).toLocaleString()
+          ? speakableDateTime(data.scheduled_at, config?.timezone)
           : "your requested time",
       })
       .catch((err) =>
@@ -955,29 +961,58 @@ export default {
 // booking through validateBookingTime — which independently calls
 // zonedWeekdayAndMinutes on the same config.timezone and would itself throw
 // on a genuinely invalid IANA zone before execution ever reached here.
-export function bookedFactValue(scheduledAtISO, serviceType, timezone) {
+/**
+ * Timezone-safe core for every "speak this UTC instant as a local wall-clock
+ * time" need in this pack — the single source of truth for turning a stored UTC
+ * ISO string into human text the model will read aloud. Fails safe: a bad ISO
+ * or an invalid-but-truthy timezone (typo in config) returns the raw string
+ * rather than throwing on a live call, where a nice datetime is never worth
+ * failing the turn over.
+ * @param {string} iso - a UTC ISO instant
+ * @param {string|undefined} timezone - IANA zone; defaults to America/Chicago
+ * @param {Intl.DateTimeFormatOptions} options
+ * @returns {string}
+ */
+function formatLocalDateTime(iso, timezone, options) {
   const tz = timezone || "America/Chicago";
-  const ms = Date.parse(scheduledAtISO);
-  let when;
-  if (Number.isFinite(ms)) {
-    try {
-      when = new Date(ms).toLocaleString("en-US", {
-        timeZone: tz,
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    } catch {
-      // An invalid-but-truthy timezone (bad config, typo) must not throw on
-      // the booking-success path — a caller fact is a nicety, not something
-      // worth failing the confirmation over. Fall back to the raw ISO string.
-      when = String(scheduledAtISO);
-    }
-  } else {
-    when = String(scheduledAtISO);
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return String(iso);
+  try {
+    return new Date(ms).toLocaleString("en-US", { timeZone: tz, ...options });
+  } catch {
+    return String(iso);
   }
+}
+
+/**
+ * A fully spoken local datetime for an instant the model must say aloud —
+ * e.g. "Thursday, July 30 at 2:00 PM" in the business timezone. Used for the
+ * availability alternatives the model offers, which were previously joined as
+ * raw UTC ISO strings and then mis-spoken as if local (a 2 PM Chicago slot read
+ * back as "7 PM"). Same tz-safe fallback as bookedFactValue.
+ * @param {string} iso - a UTC ISO instant
+ * @param {string|undefined} timezone
+ * @returns {string}
+ */
+function speakableDateTime(iso, timezone) {
+  if (!Number.isFinite(Date.parse(iso))) return String(iso);
+  const date = formatLocalDateTime(iso, timezone, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const time = formatLocalDateTime(iso, timezone, { hour: "numeric", minute: "2-digit" });
+  return `${date} at ${time}`;
+}
+
+export function bookedFactValue(scheduledAtISO, serviceType, timezone) {
+  const when = formatLocalDateTime(scheduledAtISO, timezone, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   const svc = typeof serviceType === "string" && serviceType.trim() ? ` (${serviceType.trim()})` : "";
   return `${when}${svc}`;
 }
@@ -1080,12 +1115,17 @@ async function checkAvailabilityTool(fc, ctx) {
     }
   }
 
+  // The `alternatives` field stays raw UTC ISO (machine-readable, unchanged);
+  // only the natural-language message is localized, because the model SPEAKS the
+  // message and would otherwise read a UTC ISO back as if it were local time.
+  const spokenAlternatives = alternatives.map((a) => speakableDateTime(a, config.timezone));
+
   return respond({
     success: true,
     available: false,
     alternatives,
     message: alternatives.length
-      ? `That time is taken. Offer these open times instead: ${alternatives.join(", ")}.`
+      ? `That time is taken. Offer these open times instead: ${spokenAlternatives.join(", ")}.`
       : "That time is taken and nothing else is open that day. Ask the caller about another day.",
   });
 }
@@ -1244,8 +1284,31 @@ async function lookupCallerAppointments(fc, ctx) {
     if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
   }
 
+  // The `appointments` array keeps its raw UTC scheduled_at (machine-readable,
+  // unchanged). But the model SPEAKS these times, and reading a stored UTC ISO
+  // aloud makes a 2:00 PM America/Chicago appointment come out as "7 PM". So
+  // hand it a natural-language listing in local time to read from — the same
+  // truthful-spoken-time fix as the availability alternatives.
+  const spokenListing = appointments.length
+    ? "Read these back in local time: " +
+      appointments
+        .map((a) => {
+          const who = a.client_name ? `${a.client_name}, ` : "";
+          const when = a.scheduled_at
+            ? speakableDateTime(a.scheduled_at, ctx.config?.timezone)
+            : "an unspecified time";
+          return `${who}${when}`;
+        })
+        .join("; ") +
+      "."
+    : "No upcoming appointments found for this caller.";
+
   return {
-    functionResponse: { id: fc.id, name: fc.name, response: { success: true, appointments } },
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: true, appointments, message: spokenListing },
+    },
     stateEffects: {
       ...(selectedAppointmentId !== undefined
         ? { capabilityState: { appointments: { selectedAppointmentId } } }

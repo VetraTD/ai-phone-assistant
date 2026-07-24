@@ -117,6 +117,30 @@ describe("check_appointment_availability tool", () => {
     expect(res.functionResponse.response.alternatives).not.toContain(REQUESTED_UTC);
   });
 
+  it("speaks the alternatives as local times, keeping the raw ISO in the machine field", async () => {
+    // 15:00Z is taken; the model must SPEAK plausible local (America/Chicago)
+    // times, never the raw UTC ISO it would otherwise read as "3 PM" wrong.
+    const deps = makeDeps({
+      countScheduledOverlapping: vi.fn().mockResolvedValue(1),
+      listScheduledBetween: vi.fn().mockResolvedValue([{ scheduled_at: REQUESTED_UTC }]),
+    });
+    const res = await appointments.execute(
+      { id: "1", name: "check_appointment_availability", args: { requested_at: REQUESTED } },
+      ctxFor(deps)
+    );
+    const { message, alternatives } = res.functionResponse.response;
+
+    // The machine-readable alternatives field stays raw UTC ISO (unchanged contract).
+    expect(alternatives.length).toBeGreaterThan(0);
+    expect(alternatives.every((a) => /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(a))).toBe(true);
+
+    // The spoken message carries NO raw ISO fragment and DOES carry human times.
+    expect(message).not.toMatch(/T\d{2}:\d{2}/);
+    expect(message).not.toMatch(/\dZ/);
+    expect(message).toMatch(/\d{1,2}:\d{2}\s?[AP]M/);
+    expect(message).toMatch(/July/); // long month name, i.e. localized date
+  });
+
   it("rejects a past/closed time with the booking-validation message", async () => {
     const deps = makeDeps();
     const res = await appointments.execute(

@@ -367,6 +367,29 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
   });
 
+  it("get_caller_appointments_from_db: message lists times in LOCAL time, not raw UTC (spoken-time fix)", async () => {
+    // 19:00Z is 2:00 PM America/Chicago — the model reads the message aloud, so
+    // it must not surface the raw UTC instant (which would be spoken as 7 PM).
+    mockListAppointmentsByCaller.mockResolvedValue([
+      { id: "appt-9", client_name: "Priya Nair", scheduled_at: "2026-07-29T19:00:00.000Z" },
+    ]);
+    const fc = { id: "fc6c", name: "get_caller_appointments_from_db", args: {} };
+
+    const { functionResponse } = await executeToolCall(fc, {
+      ...baseCtx,
+      config: { timezone: "America/Chicago" },
+    });
+    const { message, appointments } = functionResponse.response;
+
+    // Machine-readable rows keep the raw UTC ISO, unchanged.
+    expect(appointments[0].scheduled_at).toBe("2026-07-29T19:00:00.000Z");
+    // The spoken listing is localized: local time present, no raw ISO / UTC hour.
+    expect(message).toMatch(/2:00\s?PM/);
+    expect(message).toMatch(/July 29/);
+    expect(message).not.toMatch(/T\d{2}:\d{2}/);
+    expect(message).not.toMatch(/7:00\s?PM/);
+  });
+
   describe("end_call step-gating", () => {
     it("honors end_call during the confirm step", async () => {
       const fc = { id: "fc7", name: "end_call", args: { reason: "done" } };

@@ -170,21 +170,37 @@ function hasAppointments(config) {
 }
 
 /**
- * Whether the built-in availability-check tool is registered for this business.
- * Reuses the appointments pack's own registration decision (adapterTools) rather
- * than re-deriving it, so this can never drift from where the tool is actually
- * offered. Gates non-negotiable rule 4 — the rule that names
- * check_appointment_availability appears only when that tool exists (an EHR
- * clinic, which checks slots with get_available_slots, omits it and renumbers).
+ * The name of the availability-check tool registered for this business, or null
+ * when none is. Reuses the appointments pack's own registration decisions
+ * (adapterTools for the built-in calendar's check_appointment_availability;
+ * ehrTools for an EHR's get_available_slots) rather than re-deriving them, so
+ * this can never drift from where a tool is actually offered. Gates the
+ * availability non-negotiable rule and supplies the tool name it must cite, so
+ * an EHR clinic gets the discipline naming its real tool rather than no rule.
  * Business-stable (config + integrations only), so it is safe in the static
  * prefix that must not vary across step/intent.
  * @param {object} config
  * @param {object} [extras] - carries integrations
+ * @returns {string|null}
  */
-function availabilityCheckRegistered(config, extras = {}) {
-  return collectAdapterTools(config, extras || {}).some(
-    (d) => d.name === "check_appointment_availability"
-  );
+function availabilityCheckToolName(config, extras = {}) {
+  // The built-in calendar registers check_appointment_availability via the
+  // pack's adapterTools; an EHR (athena) registers get_available_slots via the
+  // pack's ehrTools instead. Detect whichever is actually offered so the rule
+  // can name the real tool — an EHR clinic would otherwise get no availability
+  // rule at all, or one naming a tool it does not have.
+  if (
+    collectAdapterTools(config, extras || {}).some(
+      (d) => d.name === "check_appointment_availability"
+    )
+  ) {
+    return "check_appointment_availability";
+  }
+  const integrations = Array.isArray(extras?.integrations) ? extras.integrations : [];
+  if (getPack("appointments").ehrTools(integrations, config).some((d) => d.name === "get_available_slots")) {
+    return "get_available_slots";
+  }
+  return null;
 }
 
 /**
@@ -378,9 +394,10 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     `Never claim an action happened unless the tool returned success=true.`,
     `Before writing or changing anything (booking, cancellation, message), read the details back and get a clear "yes" from the caller first.`,
   ];
-  if (availabilityCheckRegistered(config, extras)) {
+  const availabilityToolName = availabilityCheckToolName(config, extras);
+  if (availabilityToolName) {
     nnrRules.push(
-      `Never offer or promise a specific appointment time before checking it with check_appointment_availability.`
+      `Never offer or promise a specific appointment time before checking it with ${availabilityToolName}.`
     );
   }
   nnrRules.push(
