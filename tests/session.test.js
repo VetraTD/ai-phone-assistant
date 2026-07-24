@@ -2016,12 +2016,16 @@ describe("session.js — v2 pipeline orchestrator", () => {
         expect(turnTts.write.mock.calls.some(([txt]) => txt === "Sure, I can help.")).toBe(true);
       });
 
-      it("silence nudge: an ElevenLabs business speaks the nudge live (business voice), bypassing a Google cache hit", async () => {
+      it("silence nudge: an ElevenLabs business with only a Google-voiced cache entry speaks the nudge live (business voice), never that Google buffer", async () => {
         vi.useFakeTimers();
         try {
           const cachedNudge = Buffer.from([7, 7]);
+          // A Google-voiced entry exists (keyed by the Google fallback voice),
+          // but this EL business looks the nudge up under its EL voiceId
+          // ("voice-xyz") — a warm-EL miss — so it must speak LIVE, never play
+          // the Google-voiced buffer.
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
-            text === "I'm still here whenever you're ready." ? cachedNudge : null
+            voiceKey !== "voice-xyz" && text === "I'm still here whenever you're ready." ? cachedNudge : null
           );
 
           const ws = new FakeWs();
@@ -2095,8 +2099,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
           // groups — NOT the transfer target (+15551234567) and not raw E.164.
           const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Have a great day. Goodbye!";
           const cachedGoodbye = Buffer.from([5, 5]);
+          // Google-voiced entry present, but the EL business looks it up under
+          // its EL voiceId — a warm-EL miss — so the goodbye is spoken live in
+          // the business voice, never the Google buffer.
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
-            text === goodbyeText ? cachedGoodbye : null
+            voiceKey !== "voice-xyz" && text === goodbyeText ? cachedGoodbye : null
           );
 
           const ws = new FakeWs();
@@ -2349,6 +2356,145 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
       expect(turn2Tts).not.toBe(turn1Tts);
       expect(turn2Tts.opts.previousText).toBe("Sure, I can help");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // 15. Task 17 — mid-call voice consistency.
+  //   A) micro-utterances warmed/played in the business's own EL voice
+  //   B) sticky-Google after a REAL full-turn fallback (no engine ping-pong)
+  // ---------------------------------------------------------------------
+  describe("15. mid-call voice consistency (warm EL cache + sticky-Google)", () => {
+    it("15A-a. warms the business's ElevenLabs voice (voiceId) with an EL synthesize override", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+
+      expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
+      const [voiceKey, entries, opts] = H.utteranceCacheInstance.warm.mock.calls[0];
+      // EL business warms under its EL voiceId, not the Google voice.
+      expect(voiceKey).toBe("voice-xyz");
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries.some((e) => e.text === "One moment.")).toBe(true);
+      // With a per-call EL synthesizer so the warmed audio is EL-voiced.
+      expect(typeof opts?.synthesize).toBe("function");
+    });
+
+    it("15A-b. a Google-provider business warms the Google voice with the DEFAULT backend (no EL override)", async () => {
+      db.loadConfig.mockReturnValueOnce({
+        businessName: "Test Biz",
+        greeting: "Hello, thanks for calling Test Biz.",
+        _hasCustomGreeting: true,
+        languagesSpoken: ["en-US"],
+        transferPolicy: "always",
+        transferPhoneNumber: "+15551234567",
+        recordingDisclosureEnabled: false,
+        timezone: "America/Chicago",
+        afterHoursPolicy: "none",
+        voiceProvider: "google",
+        voiceId: null,
+      });
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+
+      expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
+      const call = H.utteranceCacheInstance.warm.mock.calls[0];
+      expect(call[0]).toBe("en-US-Chirp3-HD-Aoede"); // locale-matched Google voice
+      expect(call[2]).toBeUndefined(); // no synthesize override — default (Google) backend
+    });
+
+    it("15A-c. a warm-EL cache HIT plays the pre-warmed EL buffer for a nudge — no live TTS turn", async () => {
+      vi.useFakeTimers();
+      try {
+        const warmEl = Buffer.from([4, 2]);
+        // Hit ONLY under the EL voiceId — the business's own warmed voice.
+        H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
+          voiceKey === "voice-xyz" && text === "I'm still here whenever you're ready." ? warmEl : null
+        );
+
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: { callSid: sid, streamSid: "MZ15a", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        const ttsCountBefore = H.ttsTurns.length;
+        ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+        await vi.advanceTimersByTimeAsync(6000); // identify_intent nudge1
+
+        const audioOut = H.audioOutInstances[0];
+        // The warm EL buffer was played directly — zero-latency, no live turn.
+        expect(audioOut.enqueue).toHaveBeenCalledWith(warmEl);
+        expect(H.ttsTurns.length).toBe(ttsCountBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("15B-a. a REAL full-turn Google fallback makes the call sticky-Google — the next turn skips ElevenLabs", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Sure." },
+        { type: "done", reply: { text: "Sure.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1 = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn1.opts.forceFallback).toBe(false); // EL attempted for turn 1
+
+      // This turn actually played a full-turn Google fallback.
+      turn1.opts.onDone({ usedFallback: true });
+
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "We open at nine." },
+        { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("what time do you open");
+      await flush();
+      await flush();
+
+      const turn2 = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn2).not.toBe(turn1);
+      // Sticky-Google engaged — no ElevenLabs attempt on the later turn.
+      expect(turn2.opts.forceFallback).toBe(true);
+    });
+
+    it("15B-b. an isTurn=false utterance (greeting/nudge) reporting a fallback does NOT make the call sticky", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Sure." },
+        { type: "done", reply: { text: "Sure.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+
+      // The greeting (a fixed, isTurn=false utterance, like a silence nudge)
+      // fell back to Google — but a micro-utterance fallback must NOT stick.
+      const greetingTurn = H.ttsTurns[0];
+      greetingTurn.opts.onDone({ usedFallback: true });
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("hello");
+      await flush();
+      await flush();
+
+      const realTurn = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(realTurn).not.toBe(greetingTurn);
+      // ElevenLabs still attempted — the call did not go sticky-Google.
+      expect(realTurn.opts.forceFallback).toBe(false);
     });
   });
 });

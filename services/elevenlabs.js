@@ -276,3 +276,58 @@ export function createTtsConnection({
 
   return { sendText, flush, close, isOpen };
 }
+
+/**
+ * Synthesize ONE fixed phrase in a business's ElevenLabs voice and resolve the
+ * concatenated raw mulaw 8kHz buffer — a one-shot over the same streaming
+ * WS client, used to pre-warm a call's micro-utterance cache (silence nudges,
+ * goodbye, filler) in the SAME voice every LLM turn uses, so those lines never
+ * flip to the Google fallback voice mid-call (see lib/voice/utteranceCache.js
+ * and lib/voice/session.js). This is a warm-up path only: it is never on the
+ * caller-latency-critical path (fire-and-forget at call start), so paying one
+ * connect + generate round-trip for a whole buffer is fine.
+ *
+ * Rejects on connect timeout / socket error / unexpected close (the caller —
+ * warm() — swallows per-entry failures, so a warm miss simply falls back to
+ * live synthesis at playback time). Resolves an empty buffer for empty text.
+ *
+ * @param {object} opts
+ * @param {string} opts.voiceId
+ * @param {string} opts.text
+ * @param {object} [opts.voiceSettings]
+ * @param {string} [opts.modelId]
+ * @param {string} [opts.apiKey]
+ * @returns {Promise<Buffer>}
+ */
+export function synthesizeMulawOnce({ voiceId, text, voiceSettings, modelId, apiKey } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!text) {
+      resolve(Buffer.alloc(0));
+      return;
+    }
+    const chunks = [];
+    let settled = false;
+    const conn = createTtsConnection({
+      voiceId,
+      apiKey,
+      modelId,
+      voiceSettings,
+      onAudio: (buf) => chunks.push(buf),
+      onFinal: () => {
+        if (settled) return;
+        settled = true;
+        const out = Buffer.concat(chunks);
+        try { conn.close(); } catch { /* already closing */ }
+        resolve(out);
+      },
+      onError: (err) => {
+        if (settled) return;
+        settled = true;
+        try { conn.close(); } catch { /* already gone */ }
+        reject(err);
+      },
+    });
+    conn.sendText(text);
+    conn.flush();
+  });
+}

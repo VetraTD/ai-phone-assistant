@@ -114,4 +114,27 @@ describe("lib/voice/utteranceCache.js — pre-cached micro-utterances", () => {
     await expect(cache.warm("voiceA", null)).resolves.not.toThrow();
     expect(cache.get("voiceA", null, "x")).toBeNull();
   });
+
+  it("11. warm() accepts a per-call synthesize override, keying the result under that voice", async () => {
+    const defaultSynth = vi.fn(async () => Buffer.from([1]));
+    const elSynth = vi.fn(async () => Buffer.from([2]));
+    const cache = createUtteranceCache({ synthesize: defaultSynth });
+
+    // A Google business warms its Google voice with the default backend.
+    await cache.warm("google-voice", [{ text: "One moment." }]);
+    // An ElevenLabs business warms its EL voice with an EL backend override —
+    // the SAME shared LRU, distinct key.
+    await cache.warm("el-voice-id", [{ text: "One moment." }], { synthesize: elSynth });
+
+    expect(defaultSynth).toHaveBeenCalledWith("One moment.", "google-voice");
+    expect(elSynth).toHaveBeenCalledWith("One moment.", "el-voice-id");
+    expect(cache.get("google-voice", null, "One moment.")).toEqual(Buffer.from([1]));
+    expect(cache.get("el-voice-id", null, "One moment.")).toEqual(Buffer.from([2]));
+  });
+
+  it("12. warm() does not cache an empty/zero-length synthesis result", async () => {
+    const cache = createUtteranceCache({ synthesize: vi.fn(async () => Buffer.alloc(0)) });
+    await cache.warm("voiceA", [{ text: "silent" }]);
+    expect(cache.get("voiceA", null, "silent")).toBeNull();
+  });
 });
