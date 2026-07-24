@@ -216,6 +216,43 @@ describe("validateCapabilityConfig", () => {
     expect(out.notes).toHaveLength(2000);
   });
 
+  it("bounds a custom identity label so it cannot bloat guardrails and tool params", () => {
+    // label flows into guardrail bullets AND tool param descriptions — unbounded
+    // it would push the cacheable prefix around on every call.
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", label: "L".repeat(500) }] } },
+    });
+    expect(out.require.identity.custom[0].label).toHaveLength(100);
+  });
+
+  it("bounds a custom identity ask — it is spoken verbatim", () => {
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", ask: "A".repeat(1000) }] } },
+    });
+    expect(out.require.identity.custom[0].ask).toHaveLength(300);
+  });
+
+  it("rejects an overlong pattern rather than slicing it (slicing could corrupt a regex)", () => {
+    // A valid-but-huge regex: slicing mid-escape would produce a different or
+    // broken regex, so the whole pattern is dropped and the field kept unchecked.
+    const out = validate({
+      require: {
+        identity: { custom: [{ key: "x", pattern: `^(?:${"a".repeat(300)})$` }] },
+      },
+    });
+    expect(out.require.identity.custom).toHaveLength(1);
+    expect(out.require.identity.custom[0].pattern).toBeUndefined();
+  });
+
+  it("keeps a pattern at the 200-char boundary", () => {
+    const pattern = `^${"a".repeat(198)}$`; // exactly 200 chars, valid regex
+    expect(pattern).toHaveLength(200);
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", pattern }] } },
+    });
+    expect(out.require.identity.custom[0].pattern).toBe(pattern);
+  });
+
   it("never throws on hostile input", () => {
     for (const raw of [null, undefined, "string", 42, [], { require: "nope" }]) {
       expect(() => validate(raw)).not.toThrow();

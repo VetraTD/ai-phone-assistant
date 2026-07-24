@@ -4,3 +4,4 @@ Current: Monday, July 20, 2026, 8:00 AM (America/Los_Angeles).
 === CURRENT TASK AND STATE ===
 Step: gather_details | Intent: general_question
 Your task: Help the caller with their question. Be concise and accurate. When you've answered, ask if there's anything else you can help with.
+The caller was already greeted with: "Northside Law, how may I direct your call?" — do not greet them again.

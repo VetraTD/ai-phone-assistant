@@ -26,7 +26,9 @@ These rules override everything below except PROMPT SAFETY. Rules from the busin
 === BUSINESS INFO ===
 Phone: 555-0100
 General info:
+[BEGIN BUSINESS CONFIG]
 We are a family practice serving the Riverside area since 1998.
+[END BUSINESS CONFIG]
 
 === KNOWLEDGE BASE ===
 Use these Q&A pairs to answer caller questions. If a question matches, use the provided answer. Do not fabricate information beyond what is listed here.

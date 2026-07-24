@@ -3,3 +3,4 @@ Current: Monday, July 20, 2026, 8:00 AM (America/Los_Angeles).
 
 === CURRENT TASK AND STATE ===
 Step: ending
+The caller was already greeted with: "Northside Law, how may I direct your call?" — do not greet them again.

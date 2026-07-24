@@ -11,6 +11,7 @@ import {
   collectStaticFragments,
   collectStepGuidance,
   collectCallerFacts,
+  sanitizeFact,
 } from "../lib/capabilities/promptAssembler.js";
 
 const MAX_FC_ROUNDS = 3;
@@ -246,10 +247,24 @@ export function buildIntegrationTools(businessIntegrations, config = null) {
       const name = String(int.name || "").trim();
       if (!name || !TOOL_NAME_REGEX.test(name)) continue;
       const config = int.config || {};
-      const description = config.description || `Call the ${name} integration.`;
+      // Operator free-text going verbatim into the tool declaration — bound it
+      // so a runaway description cannot bloat the tool schema on every call.
+      const description = String(config.description || `Call the ${name} integration.`).slice(0, 500);
       let paramsSchema = config.params_schema;
       if (!paramsSchema || typeof paramsSchema !== "object") {
         paramsSchema = { type: "object", additionalProperties: true };
+      } else {
+        // Structural JSON — pass it through unchanged (slicing would corrupt the
+        // schema), but a pathologically large one is worth a breadcrumb. Warn and
+        // still pass: no behavioral change.
+        try {
+          const size = JSON.stringify(paramsSchema).length;
+          if (size > 4000) {
+            log.error("webhook_params_schema_large", { name, size, severity: "warn" });
+          }
+        } catch {
+          // Non-serializable (e.g. a cycle) — leave it to the SDK to reject.
+        }
       }
       declarations.push({ name, description, parameters: paramsSchema });
     }
@@ -414,7 +429,12 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   const infoLines = [];
   if (config.mainPhone) infoLines.push(`Phone: ${config.mainPhone}`);
   if (config.generalInfo) {
-    infoLines.push(`General info:\n${config.generalInfo}`);
+    // Operator free-text: wrapped in the BUSINESS CONFIG delimiters (same
+    // prompt-injection treatment as KNOWLEDGE BASE / CUSTOM BUSINESS RULES) and
+    // sliced at injection so a paste cannot bloat the cacheable prefix.
+    infoLines.push(
+      `General info:\n[BEGIN BUSINESS CONFIG]\n${String(config.generalInfo).slice(0, 2000)}\n[END BUSINESS CONFIG]`
+    );
   }
   if (infoLines.length > 0) {
     sections.push(`=== BUSINESS INFO ===\n${infoLines.join("\n")}`);
@@ -688,6 +708,19 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   if (intent) taskState += ` | Intent: ${intent}`;
   taskState += `\n`;
   taskState += buildStepGuidance(step, intent, config, { ...extras, now });
+  // The greeting is TTS-only — the model never sees what was already spoken and
+  // will otherwise re-greet or contradict it. Surface it here (dynamic tail, not
+  // the cacheable prefix — greeting is business-stable, but this line lives
+  // beside the step state it complements). Reuse the caller-fact sanitizer:
+  // collapse whitespace, strip ===/[BEGIN/[END structure tokens, cap length —
+  // greeting is operator free-text and must not be able to inject prompt framing.
+  if (typeof config.greeting === "string" && config.greeting.trim()) {
+    const greeting = sanitizeFact(config.greeting, 300);
+    if (greeting) {
+      taskState = `${taskState.replace(/\n+$/, "")}\n` +
+        `The caller was already greeted with: "${greeting}" — do not greet them again.`;
+    }
+  }
   sections.push(taskState);
 
   // === KNOWN CALLER FACTS ===

@@ -5,3 +5,4 @@ Business hours: 09:00 – 17:00. Status: OPEN.
 
 === CURRENT TASK AND STATE ===
 Step: ending
+The caller was already greeted with: "Thanks for calling Acme Dental." — do not greet them again.

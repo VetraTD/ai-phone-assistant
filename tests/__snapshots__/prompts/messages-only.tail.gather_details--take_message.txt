@@ -5,3 +5,4 @@ Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Sta
 === CURRENT TASK AND STATE ===
 Step: gather_details | Intent: take_message
 Your task: Follow the message protocol, one question at a time: (1) ask for their name; (2) ask for the best callback number and read it back digit by digit to confirm; (3) ask briefly what the call is regarding; (4) ask if it's urgent or if the next business day is fine; (5) read the full message back once — name, number, reason — and correct anything they change; (6) promise the callback. Only call record_customer_request after the read-back is confirmed.
+The caller was already greeted with: "Dave's Plumbing, how can I help?" — do not greet them again.
