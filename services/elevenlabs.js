@@ -29,6 +29,19 @@ const DEFAULT_MODEL_ID = "eleven_flash_v2_5";
 // bloating the handshake.
 const PREVIOUS_TEXT_MAX_CHARS = 300;
 
+/**
+ * Kill-switch for `previous_text`: cheap insurance in case ElevenLabs
+ * tightens handshake validation around this (currently undocumented) field
+ * in a way that starts rejecting connections. Set
+ * ELEVENLABS_DISABLE_PREVIOUS_TEXT=true (or "1") to omit the field entirely,
+ * with no code change or redeploy of the calling logic needed. Read at
+ * call-time (not module load) so tests can flip it per-case.
+ */
+function previousTextDisabled() {
+  const v = process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+  return v === "true" || v === "1";
+}
+
 const DEFAULT_VOICE_SETTINGS = {
   // Raised 0.5 -> 0.65 (Task 13): one WS per turn means the model has no
   // cross-turn prosody state, so a low stability let expression swing audibly
@@ -77,7 +90,7 @@ export function trimPreviousText(text, maxChars = PREVIOUS_TEXT_MAX_CHARS) {
  * @param {string} [opts.apiKey=process.env.ELEVENLABS_API_KEY]
  * @param {string} [opts.modelId] - defaults to ELEVENLABS_MODEL env, else "eleven_flash_v2_5" (enables an eleven_turbo_v2_5 A/B by env with no code edit)
  * @param {object} [opts.voiceSettings] - merged over the defaults, sent in the handshake
- * @param {string} [opts.previousText] - the previously-spoken text this utterance continues from; when non-empty it is trimmed (trimPreviousText) and sent as `previous_text` on the handshake so the model matches prior prosody/cadence. Undocumented on the stream-input schema but accepted on the wire (verified live 2026-07-24) — silently ignored if unsupported, so it is safe to always send.
+ * @param {string} [opts.previousText] - the previously-spoken text this utterance continues from; when non-empty it is trimmed (trimPreviousText) and sent as `previous_text` on the handshake so the model matches prior prosody/cadence. Undocumented on the stream-input schema but accepted on the wire (verified live 2026-07-24) — silently ignored if unsupported, so it is safe to always send. Omitted entirely when ELEVENLABS_DISABLE_PREVIOUS_TEXT=true|1 (see previousTextDisabled()).
  * @param {function} [opts.onAudio] - (buf: Buffer) => void — raw mulaw 8kHz, no container
  * @param {function} [opts.onFinal] - () => void — fired on {"isFinal":true}
  * @param {function} [opts.onError] - (err: Error) => void — socket error, unexpected close, or connect timeout
@@ -153,7 +166,7 @@ export function createTtsConnection({
 
     const settings = { ...DEFAULT_VOICE_SETTINGS, ...voiceSettings };
     const initFrame = { text: " ", voice_settings: settings };
-    const prev = trimPreviousText(previousText);
+    const prev = previousTextDisabled() ? "" : trimPreviousText(previousText);
     if (prev) initFrame.previous_text = prev;
     rawSend(initFrame);
     handshakeSent = true;

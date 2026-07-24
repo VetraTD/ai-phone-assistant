@@ -2058,4 +2058,187 @@ describe("session.js — v2 pipeline orchestrator", () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------
+  // 14. TTS previous_text prosody continuity — session-level wiring
+  // (Task 13 review fix round 1). The unit-level ElevenLabs handshake
+  // behavior (trimming, omission on empty, the kill-switch) is covered in
+  // tests/ttsStream.test.js and services/elevenlabs.js's own tests; these
+  // cover the ORCHESTRATION session.js does around lastSpokenText: the
+  // greeting anchors turn 1, each turn anchors the next, and a barge-in
+  // (of either the greeting or a turn) must not leave a stale/partial
+  // anchor for whatever speaks next.
+  // ---------------------------------------------------------------------
+  describe("14. previous_text prosody-continuity wiring (greeting -> turn -> turn, barge-in guards)", () => {
+    it("14a. turn-to-turn: turn 2's TTS connection receives turn 1's actually-spoken text as previousText", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Sure, I can help." },
+        { type: "done", reply: { text: "Sure, I can help.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn1Tts.write).toHaveBeenCalledWith("Sure, I can help.");
+
+      // Turn 2 — a different reply — must continue from turn 1's spoken text,
+      // not the greeting and not empty.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "We open at nine." },
+        { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("what time do you open");
+      await flush();
+      await flush();
+
+      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn2Tts).not.toBe(turn1Tts);
+      expect(turn2Tts.opts.previousText).toBe("Sure, I can help.");
+      expect(turn2Tts.write).toHaveBeenCalledWith("We open at nine.");
+    });
+
+    it("14b. greeting is turn 1's prosody anchor once it finishes without a barge-in", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Our hours are nine to five." },
+        { type: "done", reply: { text: "Our hours are nine to five.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const greetingTurn = H.ttsTurns[0];
+      // Simulate the greeting's TTS turn completing normally — the same
+      // shape ttsStream.js's finishDone() calls onDone with (see
+      // tests/ttsStream.test.js #4).
+      greetingTurn.opts.onDone({});
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn1Tts.opts.previousText).toBe("Hello, thanks for calling Test Biz.");
+    });
+
+    it("14c. a barged greeting must NOT become turn 1's previous_text anchor", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Our hours are nine to five." },
+        { type: "done", reply: { text: "Our hours are nine to five.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const tm = H.turnManagerInstances[0];
+      // Caller barges in mid-greeting: onInterrupt bumps state.speakEpoch and
+      // aborts the greeting's activeTts. In production the aborted
+      // connection never confirms isFinal, so onDone never fires — modeled
+      // here by simply never calling greetingTurn.opts.onDone.
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      // Must stay at its initial empty value — NOT the full greeting text
+      // (the bug this fix closes) and not any other stale value.
+      expect(turn1Tts.opts.previousText).toBe("");
+    });
+
+    /**
+     * A next()-suspendable fake generator, local to this describe block: the
+     * initial scripted events resolve immediately, then next() returns a
+     * promise that stays pending until either onInterrupt's
+     * activeGenerator.return() settles it (simulating a real async
+     * generator's cancellation unblocking a suspended consumer) or the test
+     * settles it directly. Needed only for 14d, which must interleave a
+     * barge-in BETWEEN a turn having already spoken some text and that
+     * turn's generator loop actually observing the epoch bump — makeGen's
+     * hang:true (used by test "4.") resolves its pending next() never, which
+     * would leave the for-await loop (and this test) stuck forever.
+     */
+    function makeSuspendableGen(initialEvents) {
+      let resolveNext = null;
+      let idx = 0;
+      return {
+        [Symbol.asyncIterator]() { return this; },
+        next() {
+          if (idx < initialEvents.length) {
+            return Promise.resolve({ value: initialEvents[idx++], done: false });
+          }
+          return new Promise((res) => { resolveNext = res; });
+        },
+        return(v) {
+          resolveNext?.({ value: undefined, done: true });
+          resolveNext = null;
+          return Promise.resolve({ value: v, done: true });
+        },
+      };
+    }
+
+    it("14d. a barged turn's own (partial) spoken text must not contaminate the NEXT turn's anchor", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Our hours are nine to five." },
+        { type: "done", reply: { text: "Our hours are nine to five.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const greetingTurn = H.ttsTurns[0];
+      greetingTurn.opts.onDone({}); // greeting settles -> anchor = greeting text
+
+      const tm = H.turnManagerInstances[0];
+
+      // Turn 1 speaks a full sentence (so it DOES write to tts, proving there
+      // really is partial spoken text at risk of being committed), then its
+      // generator suspends instead of reaching "done" — the barge-in happens
+      // while it is still the current turn.
+      H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Let me check that for you. " }]);
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn1Tts.write).toHaveBeenCalledWith("Let me check that for you.");
+
+      // Caller barges in before turn 1 ever reaches its "done" event. This
+      // resolves the suspended generator's pending next() (via return()),
+      // letting the for-await loop's post-loop epoch check run and bail out
+      // WITHOUT committing turn 1's partial text as the new anchor.
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      // Turn 2 begins.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "We're open every day." },
+        { type: "done", reply: { text: "We're open every day.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("what are your hours today");
+      await flush();
+      await flush();
+
+      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn2Tts).not.toBe(turn1Tts);
+      // Still the greeting — turn 1's barged partial text never overwrote it.
+      expect(turn2Tts.opts.previousText).toBe("Hello, thanks for calling Test Biz.");
+    });
+  });
 });

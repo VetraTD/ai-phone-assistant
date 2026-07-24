@@ -525,6 +525,65 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(instances[0].url).toContain("model_id=eleven_flash_v2_5");
   });
 
+  it("19. ELEVENLABS_DISABLE_PREVIOUS_TEXT=true (or \"1\") omits previous_text even when previousText is set; unset sends it normally", () => {
+    const prevEnv = process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+    try {
+      for (const [i, killSwitch] of ["true", "1"].entries()) {
+        instances.length = 0;
+        process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = killSwitch;
+        createTtsTurn({
+          voiceId: "voice123",
+          callSid: `CA19-${i}`,
+          epoch: 1,
+          getEpoch: () => 1,
+          onAudioChunk: vi.fn(),
+          onDone: vi.fn(),
+          onError: vi.fn(),
+          previousText: "Thanks so much for calling. This is the front desk.",
+        });
+        const sock = instances[0];
+        sock._open();
+        expect(sock.sentMessages()[0]).not.toHaveProperty("previous_text");
+      }
+
+      // Unset (and any other value, e.g. "false") restores normal behavior.
+      instances.length = 0;
+      delete process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: "CA19-unset",
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: "Thanks so much for calling. This is the front desk.",
+      });
+      let sock = instances[0];
+      sock._open();
+      expect(sock.sentMessages()[0].previous_text).toBe("Thanks so much for calling. This is the front desk.");
+
+      instances.length = 0;
+      process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = "false";
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: "CA19-false",
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: "Thanks so much for calling. This is the front desk.",
+      });
+      sock = instances[0];
+      sock._open();
+      expect(sock.sentMessages()[0].previous_text).toBe("Thanks so much for calling. This is the front desk.");
+    } finally {
+      if (prevEnv === undefined) delete process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+      else process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = prevEnv;
+    }
+  });
+
   describe("trimPreviousText helper", () => {
     it("returns '' for empty, whitespace, or non-string input", () => {
       expect(trimPreviousText("")).toBe("");
