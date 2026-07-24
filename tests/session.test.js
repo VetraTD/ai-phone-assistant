@@ -2240,5 +2240,49 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // Still the greeting — turn 1's barged partial text never overwrote it.
       expect(turn2Tts.opts.previousText).toBe("Hello, thanks for calling Test Biz.");
     });
+
+    it("14e. a truncated turn anchors the NEXT turn to what was actually voiced (spokenText), not the full reply", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Sure, I can help with that." },
+        { type: "done", reply: { text: "Sure, I can help with that.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn1Tts.write).toHaveBeenCalledWith("Sure, I can help with that.");
+
+      // ElevenLabs died mid-turn; ttsStream repaired part of it but a barge
+      // during the repair meant only "Sure, I can help" was actually voiced.
+      // finishDone reports that via spokenText — the anchor must narrow to it,
+      // NOT the full reply the caller never fully heard.
+      turn1Tts.opts.onDone({
+        truncated: true,
+        repairedFrom: "duration",
+        remainderChars: 11,
+        spokenText: "Sure, I can help",
+      });
+
+      // Turn 2 must continue from the actually-voiced text.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "We open at nine." },
+        { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("what time do you open");
+      await flush();
+      await flush();
+
+      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      expect(turn2Tts).not.toBe(turn1Tts);
+      expect(turn2Tts.opts.previousText).toBe("Sure, I can help");
+    });
   });
 });
