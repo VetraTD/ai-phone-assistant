@@ -935,6 +935,34 @@ export default {
 // Execution
 // ---------------------------------------------------------------------------
 
+/**
+ * Human-readable "Booked this call" fact value: the appointment's local
+ * wall-clock time in the business timezone, with the service appended when the
+ * caller named one — e.g. "Tue, Jul 21, 10:00 AM (consultation)". This is a
+ * caller FACT the model reads verbatim in the dynamic tail, so it must be plain
+ * English, not the stored UTC ISO string.
+ * @param {string} scheduledAtISO - the anchored UTC ISO instant that was booked
+ * @param {unknown} serviceType
+ * @param {string|undefined} timezone
+ * @returns {string}
+ */
+function bookedFactValue(scheduledAtISO, serviceType, timezone) {
+  const tz = timezone || "America/Chicago";
+  const ms = Date.parse(scheduledAtISO);
+  const when = Number.isFinite(ms)
+    ? new Date(ms).toLocaleString("en-US", {
+        timeZone: tz,
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : String(scheduledAtISO);
+  const svc = typeof serviceType === "string" && serviceType.trim() ? ` (${serviceType.trim()})` : "";
+  return `${when}${svc}`;
+}
+
 /** The `n` free slots nearest a requested instant, as ISO strings. */
 function nearestSlots(free, requestedISO, n) {
   const target = Date.parse(requestedISO);
@@ -1112,6 +1140,18 @@ async function bookAppointment(fc, ctx) {
   const booked =
     bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
 
+  // Caller facts for the dynamic tail (plan step 2.2): the model re-reads these
+  // every turn, so it confirms this booking from memory instead of re-asking or
+  // re-booking. Name is omitted when the caller gave none rather than shown as
+  // "null". Merged (not clobbering lastBooked) by the per-capability shallow
+  // merge in lib/capabilities/effects.js.
+  const callerFacts = booked
+    ? {
+        ...(booked.client_name ? { Name: booked.client_name } : {}),
+        "Booked this call": bookedFactValue(booked.scheduled_at, booked.service_type, config.timezone),
+      }
+    : null;
+
   return {
     functionResponse: {
       id: fc.id,
@@ -1133,6 +1173,7 @@ async function bookAppointment(fc, ctx) {
                   scheduled_at: booked.scheduled_at,
                   client_name: booked.client_name || null,
                 },
+                callerFacts,
               },
             },
           }

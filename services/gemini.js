@@ -7,7 +7,11 @@ import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from 
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
-import { collectStaticFragments, collectStepGuidance } from "../lib/capabilities/promptAssembler.js";
+import {
+  collectStaticFragments,
+  collectStepGuidance,
+  collectCallerFacts,
+} from "../lib/capabilities/promptAssembler.js";
 
 const MAX_FC_ROUNDS = 3;
 
@@ -617,6 +621,22 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   taskState += `\n`;
   taskState += buildStepGuidance(step, intent, config, { ...extras, now });
   sections.push(taskState);
+
+  // === KNOWN CALLER FACTS ===
+  // Facts the call has already established (a confirmed name, a booking made
+  // this call) — surfaced every turn so the model stops re-asking and stops
+  // contradicting completed actions. Packs write them into capabilityState under
+  // the reserved `callerFacts` key; collectCallerFacts gathers them in registry
+  // order. Emitting NOTHING when there are zero facts is load-bearing: every
+  // existing tail snapshot has no capabilityState, so this keeps them
+  // byte-identical (the empty-case contract).
+  const callerFacts = collectCallerFacts(extras?.capabilityState);
+  if (callerFacts.length > 0) {
+    let factsSection =
+      `=== KNOWN CALLER FACTS (already established this call — do not re-ask) ===\n`;
+    factsSection += callerFacts.map((f) => `- ${f.label}: ${f.value}`).join("\n");
+    sections.push(factsSection);
+  }
 
   return sections.join("\n\n");
 }
