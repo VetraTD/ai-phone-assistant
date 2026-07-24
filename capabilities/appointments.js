@@ -580,8 +580,12 @@ function validateBookingTime(rawScheduledAt, config) {
   return { ok: true, scheduledAt: storedValue };
 }
 
+// The read-back-and-confirm requirement itself now lives in NON-NEGOTIABLE RULE
+// 3 (services/gemini.js), so this pack bullet keeps only its non-duplicated
+// tail: the spelling-confirmation detail specific to booking. Task 16
+// strengthens this later.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good"). If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
+  `- If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
