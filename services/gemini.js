@@ -44,6 +44,33 @@ export function getClient() {
   return geminiClient;
 }
 
+/**
+ * Extract spoken text from a streamed chunk WITHOUT going through the SDK's
+ * `chunk.text` getter. That getter logs `there are non-text parts ... in the
+ * response` to console.warn on every tool-call turn (function-call parts sit
+ * alongside text), which floods production logs. This replicates the getter's
+ * text accumulation exactly — concatenate `part.text` for every part, skipping
+ * thought parts — but stays silent. Byte-identical to `chunk.text ?? ""` for
+ * text output; returns "" when there are no text parts.
+ *
+ * @param {object} chunk
+ * @returns {string}
+ */
+function textFromChunk(chunk) {
+  const parts = chunk?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  let text = "";
+  for (const part of parts) {
+    if (typeof part.text === "string") {
+      // Thought parts carry reasoning, not spoken text — the SDK getter skips
+      // them too (`part.thought === true`).
+      if (part.thought === true) continue;
+      text += part.text;
+    }
+  }
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // Default config (used when no business config is provided)
 // ---------------------------------------------------------------------------
@@ -1085,8 +1112,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     let functionCalls = [];
 
     for await (const chunk of streamResponse) {
-      // Text delta
-      const delta = chunk.text ?? "";
+      // Text delta — extracted from parts directly (see textFromChunk) rather
+      // than chunk.text, whose getter warns on every tool-call turn.
+      const delta = textFromChunk(chunk);
       if (delta) {
         fullText += delta;
         yield { delta };
@@ -1284,6 +1312,10 @@ const OUTCOME_PROMPT =
   "general_inquiry=info only; appointment=book/confirm/reschedule/cancel; sales=quote/pricing/new service; support=complaint or issue; " +
   "message=leave a message; callback=request callback; after_hours=call when closed; emergency=urgent/crisis; transfer=transferred to human; spam=wrong number/spam; unknown=unclear.";
 
+// Post-call extractor model. Same family as the live chat default; kept as a
+// named const so the model string and its thinkingConfig stay in sync.
+const SUMMARY_MODEL = "gemini-3.6-flash";
+
 /**
  * Generate summary, sentiment, and outcome for a completed call transcript.
  * @param {Array<{speaker: string, message: string}>} transcript
@@ -1305,14 +1337,24 @@ export async function generateSummaryAndSentiment(transcript) {
   }
 
   try {
-    const gemini = new GoogleGenAI({ apiKey });
+    // Reuse the shared client (getClient reads GEMINI_API_KEY at creation);
+    // the apiKey guard above preserves the "no key -> fallback" behavior so we
+    // never construct a client without a key on this path.
+    const gemini = getClient();
     const response = await gemini.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: SUMMARY_MODEL,
       contents:
         `Analyze this phone call transcript. Respond with ONLY valid JSON, no markdown, no extra text.\n` +
         `Format: {"summary":"1-2 sentence summary","sentiment":"positive|neutral|negative","outcome":"<outcome>"}\n` +
         `${OUTCOME_PROMPT}\n\nTranscript:\n${transcriptText}`,
-      config: { temperature: 0.1, maxOutputTokens: 512 },
+      // gemini-3.x thinks by default; without pinning it off, thought tokens
+      // eat into maxOutputTokens (512) and can truncate the JSON, silently
+      // degrading to the null fallback. Force thinking off for this extractor.
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 512,
+        thinkingConfig: buildThinkingConfig(SUMMARY_MODEL, 0),
+      },
     });
 
     const raw = (response?.text ?? "")
