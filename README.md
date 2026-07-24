@@ -51,3 +51,15 @@ npm run test:watch
 
 - **twilioNumbers** (search/purchase with mocked Twilio), **updateBusinessPhoneNumber** (mocked Supabase), and **phone-numbers API** routes (GET available, POST buy) with mocked dependencies.
 - **Real Twilio search:** If `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set (e.g. in `.env`), the integration tests in `tests/twilioNumbers.integration.test.js` run and call the real Twilio API for **search only** (no numbers are purchased). If either env var is missing, those tests are skipped. Buy is always mocked everywhere; no test ever purchases a real number.
+
+### Conversation quality harness
+
+`npm test` covers the deterministic units. Conversational *behavior* — does the receptionist check availability before booking, honor a capability's free-text note, verify identity before a change — is exercised by a separate **eval suite** that drives the real brain with a simulated caller (no audio/Twilio/Supabase). It needs `GEMINI_API_KEY` and makes live model calls (a few cents per full run), so it's not part of `npm test`.
+
+```bash
+npm run eval                    # all scenarios
+npm run eval -- --tag freetext  # just the free-text/regression scenarios
+npm run chat                    # interactive REPL against the same brain
+```
+
+Every operator-authored free-text field that reaches the model must be delimiter-wrapped at injection (`tests/promptFreeText.test.js`), length-bounded, and covered by a `freetext`-tagged scenario. See **`eval/README.md`** for the full guide (scenario shape, assert helpers, `--filter`/`--tag`/`--matrix` usage, cost, and env knobs).
