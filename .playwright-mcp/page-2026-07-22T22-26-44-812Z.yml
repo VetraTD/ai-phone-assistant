@@ -1,0 +1,203 @@
+- generic [ref=f6e5]:
+  - banner [ref=f6e6]:
+    - generic [ref=f6e7]:
+      - generic [ref=f6e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f6e9]
+      - paragraph [ref=f6e10]: Your calls at a glance for today
+      - generic [ref=f6e11]:
+        - generic [ref=f6e12]: "+18175803291"
+        - generic [ref=f6e13]: America/Chicago
+    - generic [ref=f6e14]:
+      - button "🌐 EN" [ref=f6e16] [cursor=pointer]:
+        - generic [ref=f6e17]: 🌐
+        - generic [ref=f6e18]: EN
+      - generic [ref=f6e19]:
+        - button "Dashboard" [ref=f6e20] [cursor=pointer]
+        - button "Analytics" [ref=f6e21] [cursor=pointer]
+        - button "Appointments" [ref=f6e22] [cursor=pointer]
+        - button "Settings" [ref=f6e23] [cursor=pointer]
+        - button "Guide" [ref=f6e24] [cursor=pointer]
+      - button "Logout" [ref=f6e25] [cursor=pointer]
+  - main [ref=f6e26]:
+    - generic [ref=f6e27]:
+      - generic [ref=f6e28]:
+        - heading "Settings" [level=2] [ref=f6e30]
+        - generic [ref=f6e31]:
+          - status [ref=f6e32]: All changes saved
+          - generic [ref=f6e614]: Everything is saved
+          - button "Save changes" [disabled] [ref=f6e35]
+      - generic [ref=f6e36]:
+        - tablist "Settings sections" [ref=f6e37]:
+          - tab "General" [ref=f6e853] [cursor=pointer]
+          - tab "Voice & Language" [ref=f6e854] [cursor=pointer]
+          - tab "Capabilities" [selected] [ref=f6e855] [cursor=pointer]
+          - tab "Knowledge Base" [ref=f6e856] [cursor=pointer]
+          - tab "Notifications" [ref=f6e857] [cursor=pointer]
+          - tab "Billing & Integrations" [ref=f6e858] [cursor=pointer]
+        - tabpanel "Capabilities" [active] [ref=f6e860]:
+          - generic [ref=f6e86]:
+            - heading "Capabilities" [level=2] [ref=f6e861]
+            - paragraph [ref=f6e88]: What your receptionist is allowed to do on a call, and what it must ask for before doing it.
+          - generic [ref=f6e862]:
+            - generic [ref=f6e863]:
+              - generic [ref=f6e864]:
+                - heading "Messages & callbacks" [level=3] [ref=f6e865]
+                - paragraph [ref=f6e866]: Take messages and callback requests. Core receptionist behaviour.
+              - generic [ref=f6e867]: Always on
+            - generic [ref=f6e869]:
+              - generic [ref=f6e870]:
+                - group "What must the caller provide before we take a message?" [ref=f6e871]:
+                  - generic [ref=f6e873]:
+                    - generic [ref=f6e874] [cursor=pointer]:
+                      - checkbox "Full name" [ref=f6e875]
+                      - generic [ref=f6e876]: Full name
+                    - generic [ref=f6e877] [cursor=pointer]:
+                      - checkbox "A callback number" [ref=f6e878]
+                      - generic [ref=f6e879]: A callback number
+                - button "Add something else we must ask for" [ref=f6e881] [cursor=pointer]
+              - generic [ref=f6e883]:
+                - generic [ref=f6e884]: Anything specific about how you take messages?optional
+                - textbox "Anything specific about how you take messages?optional" [ref=f6e885]:
+                  - /placeholder: e.g. Always ask which department the message is for
+                - paragraph [ref=f6e886]: Guidance, not a rule — your receptionist follows this closely but it isn't enforced. Anything that must always happen belongs in the checkboxes above.
+            - button "Save" [disabled] [ref=f6e888]
+          - generic [ref=f6e889]:
+            - generic [ref=f6e890]:
+              - generic [ref=f6e891]:
+                - heading "Transfer to a person" [level=3] [ref=f6e892]
+                - paragraph [ref=f6e893]: Hand the caller to a human when they ask or when we cannot help.
+              - generic [ref=f6e894]: Always on
+            - generic [ref=f6e896]:
+              - paragraph [ref=f6e897]:
+                - generic [ref=f6e900]: This card is always on because a caller can always ask for a person. These two settings decide when we actually put them through. They save with the rest of the page.
+              - generic [ref=f6e901]:
+                - generic [ref=f6e902]: When may we transfer a caller?
+                - combobox "When may we transfer a caller?" [ref=f6e903]:
+                  - option "Always transfer" [selected]
+                  - option "Business hours only"
+                  - option "Never transfer"
+              - generic [ref=f6e904]:
+                - generic [ref=f6e905]: Ring this number
+                - textbox "Ring this number" [ref=f6e906]:
+                  - /placeholder: "+447700900123"
+                  - text: "+18008659408"
+                - paragraph [ref=f6e907]: The phone we put callers through to. Include the country code.
+          - generic [ref=f6e908]:
+            - generic [ref=f6e909]:
+              - generic [ref=f6e910]:
+                - heading "Appointments" [level=3] [ref=f6e911]
+                - paragraph [ref=f6e912]: Book, check, cancel and reschedule appointments.
+              - generic [ref=f6e913]: "On"
+            - generic [ref=f6e915]:
+              - generic [ref=f6e916] [cursor=pointer]:
+                - checkbox "Turn this on for my business" [checked] [ref=f6e917]
+                - generic [ref=f6e918]: Turn this on for my business
+              - generic [ref=f6e919]:
+                - group "Where do appointments live?" [ref=f6e920]:
+                  - generic [ref=f6e922]:
+                    - generic [ref=f6e923] [cursor=pointer]:
+                      - radio "Our built-in calendar We can check phone_on_file, phone_last4." [checked] [ref=f6e924]
+                      - generic [ref=f6e925]: Our built-in calendar
+                      - generic [ref=f6e926]: We can check phone_on_file, phone_last4.
+                    - generic [ref=f6e927] [cursor=pointer]:
+                      - radio "athenahealth We can check name, dob, phone_on_file, patient_id." [ref=f6e928]
+                      - generic [ref=f6e929]: athenahealth
+                      - generic [ref=f6e930]: We can check name, dob, phone_on_file, patient_id.
+                    - generic [ref=f6e931] [cursor=pointer]:
+                      - radio "Send to my own system We can't read this one back." [ref=f6e932]
+                      - generic [ref=f6e933]: Send to my own system
+                      - generic [ref=f6e934]: We can't read this one back.
+                - paragraph [ref=f6e935]: "We can check a caller against: phone_on_file, phone_last4."
+              - generic [ref=f6e936]:
+                - group "What must the caller provide before we look up or change an appointment?" [ref=f6e937]:
+                  - generic [ref=f6e939]:
+                    - generic [ref=f6e940] [cursor=pointer]:
+                      - checkbox "Full name" [ref=f6e941]
+                      - generic [ref=f6e942]: Full name
+                    - generic [ref=f6e943] [cursor=pointer]:
+                      - checkbox "Date of birth" [ref=f6e944]
+                      - generic [ref=f6e945]: Date of birth
+                    - generic [ref=f6e946] [cursor=pointer]:
+                      - checkbox "Calling from the number on file" [ref=f6e947]
+                      - generic [ref=f6e948]: Calling from the number on file
+                - generic [ref=f6e949]:
+                  - generic [ref=f6e950]:
+                    - generic [ref=f6e951]:
+                      - generic [ref=f6e952]: What you call it
+                      - textbox "What you call it" [ref=f6e953]:
+                        - /placeholder: e.g. Dental number
+                        - text: Dental number
+                      - paragraph [ref=f6e954]: Shown to you, not read out to callers.
+                    - generic [ref=f6e955]:
+                      - generic [ref=f6e956]: How we ask for it
+                      - textbox "How we ask for it" [ref=f6e957]:
+                        - /placeholder: e.g. "And your dental number, the six digits on your card?"
+                        - text: And your dental number, the six digits on your card?
+                      - paragraph [ref=f6e958]: Your own words. This is spoken to the caller exactly as written.
+                    - generic [ref=f6e959]:
+                      - generic [ref=f6e960]: Expected formatoptional
+                      - textbox "Expected formatoptional" [ref=f6e961]:
+                        - /placeholder: "^[0-9]{6}$"
+                        - text: "^[0-9]{6}$"
+                      - paragraph [ref=f6e962]: "Leave blank to accept anything. ^[0-9]{6}$ means exactly six digits."
+                    - generic [ref=f6e963]:
+                      - generic [ref=f6e964]: Try a value
+                      - textbox "Try a value" [ref=f6e965]:
+                        - /placeholder: Type an example
+                      - paragraph [ref=f6e966]: Just to check the format does what you expect. Nothing is saved.
+                    - paragraph [ref=f6e967]: Collected before any change is made. We don't yet check it against your system — that's coming.
+                    - button "Remove" [ref=f6e968] [cursor=pointer]
+                  - button "Add something else we must ask for" [ref=f6e972] [cursor=pointer]
+              - generic [ref=f6e974] [cursor=pointer]:
+                - checkbox "Read details back and require a clear yes before booking" [ref=f6e975]
+                - generic [ref=f6e976]: Read details back and require a clear yes before booking
+              - generic [ref=f6e977] [cursor=pointer]:
+                - checkbox "Only allow booking changes during opening hours" [ref=f6e978]
+                - generic [ref=f6e979]: Only allow booking changes during opening hours
+              - generic [ref=f6e980]:
+                - generic [ref=f6e981]: Anything specific about how you book?optional
+                - textbox "Anything specific about how you book?optional" [ref=f6e982]:
+                  - /placeholder: e.g. Ask if they're a new or existing patient first
+                - paragraph [ref=f6e983]: Guidance, not a rule — your receptionist follows this closely but it isn't enforced. Anything that must always happen belongs in the checkboxes above.
+            - button "Save" [disabled] [ref=f6e985]
+          - generic [ref=f6e986]:
+            - generic [ref=f6e987]:
+              - generic [ref=f6e988]:
+                - heading "General questions" [level=3] [ref=f6e989]
+                - paragraph [ref=f6e990]: Answer questions from your knowledge base.
+              - generic [ref=f6e991]: "Off"
+            - generic [ref=f6e994] [cursor=pointer]:
+              - checkbox "Turn this on for my business" [ref=f6e995]
+              - generic [ref=f6e996]: Turn this on for my business
+            - button "Save" [disabled] [ref=f6e998]
+          - generic [ref=f6e999]:
+            - generic [ref=f6e1000]:
+              - generic [ref=f6e1001]:
+                - heading "Quote requests" [level=3] [ref=f6e1002]
+                - paragraph [ref=f6e1003]: Collect pricing enquiries and pass them to your team.
+              - generic [ref=f6e1004]: "Off"
+            - generic [ref=f6e1007] [cursor=pointer]:
+              - checkbox "Turn this on for my business" [ref=f6e1008]
+              - generic [ref=f6e1009]: Turn this on for my business
+            - button "Save" [disabled] [ref=f6e1011]
+          - generic [ref=f6e1012]:
+            - generic [ref=f6e1013]:
+              - generic [ref=f6e1014]:
+                - heading "Directions & location" [level=3] [ref=f6e1015]
+                - paragraph [ref=f6e1016]: Give your address and directions.
+              - generic [ref=f6e1017]: "Off"
+            - generic [ref=f6e1020] [cursor=pointer]:
+              - checkbox "Turn this on for my business" [ref=f6e1021]
+              - generic [ref=f6e1022]: Turn this on for my business
+            - button "Save" [disabled] [ref=f6e1024]
+          - generic [ref=f6e1025]:
+            - generic [ref=f6e1026]:
+              - generic [ref=f6e1027]:
+                - heading "Forms & documents" [level=3] [ref=f6e1028]
+                - paragraph [ref=f6e1029]: Explain how to get forms or paperwork.
+              - generic [ref=f6e1030]: "Off"
+            - generic [ref=f6e1033] [cursor=pointer]:
+              - checkbox "Turn this on for my business" [ref=f6e1034]
+              - generic [ref=f6e1035]: Turn this on for my business
+            - button "Save" [disabled] [ref=f6e1037]
+  - contentinfo [ref=f6e265]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

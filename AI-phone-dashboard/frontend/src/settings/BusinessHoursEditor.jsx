@@ -1,4 +1,4 @@
-import SectionCard from "./SectionCard";
+import Panel from "./Panel";
 import { DAY_KEYS, DAY_LABELS } from "./constants";
 
 // Weekly business_hours editor. Backend validateBusinessHours
@@ -39,29 +39,27 @@ export default function BusinessHoursEditor({ value, onChange }) {
     updateDay(day, { [field]: rawValue || current[field] || (field === "open" ? FALLBACK_OPEN : FALLBACK_CLOSE) });
   };
 
+  const openDays = DAY_KEYS.filter((day) => !hours[day]?.closed).length;
+
   return (
-    <SectionCard title="Business hours" description="Applies in your business timezone.">
-      <div style={{ display: "grid", gap: 10 }}>
+    <Panel
+      title="Opening hours"
+      description="Read in your business timezone."
+      badge={
+        <span className="set-pill">
+          {openDays === 7 ? "Open every day" : `Open ${openDays} ${openDays === 1 ? "day" : "days"} a week`}
+        </span>
+      }
+    >
+      <div className="set-stack">
         {DAY_KEYS.map((day) => {
           const d = hours[day] || { open: null, close: null, closed: true };
           return (
-            <div
-              key={day}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "100px auto 1fr 1fr",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
-              <span style={{ fontWeight: 600, fontSize: 14 }}>{DAY_LABELS[day]}</span>
-              <label className="checkbox-item" style={{ fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={!!d.closed}
-                  onChange={(e) => setClosed(day, e.target.checked)}
-                />
-                <span>Closed</span>
+            <div key={day} className="set-day">
+              <span className="set-day-name">{DAY_LABELS[day]}</span>
+              <label className="set-check">
+                <input type="checkbox" checked={!!d.closed} onChange={(e) => setClosed(day, e.target.checked)} />
+                <span className="set-check-text">Closed</span>
               </label>
               <input
                 type="time"
@@ -70,6 +68,9 @@ export default function BusinessHoursEditor({ value, onChange }) {
                 disabled={!!d.closed}
                 onChange={(e) => setTime(day, "open", e.target.value)}
               />
+              <span className="set-day-dash" aria-hidden="true">
+                –
+              </span>
               <input
                 type="time"
                 aria-label={`${DAY_LABELS[day]} closing time`}
@@ -81,6 +82,6 @@ export default function BusinessHoursEditor({ value, onChange }) {
           );
         })}
       </div>
-    </SectionCard>
+    </Panel>
   );
 }

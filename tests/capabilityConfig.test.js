@@ -104,6 +104,29 @@ describe("normalizeAllowedTasks — empty vs unset", () => {
 describe("validateCapabilityConfig", () => {
   const validate = (raw) => validateCapabilityConfig(raw, appointments, "biz-1");
 
+  it("keeps well-formed availability numbers (no on/off flag — the calendar always checks)", () => {
+    // A stray `enabled` from an older shape is ignored, not stored.
+    const out = validate({ availability: { enabled: true, length: 45, capacity: 2 } });
+    expect(out.availability).toEqual({ length: 45, capacity: 2 });
+  });
+
+  it("drops an out-of-range number but keeps the valid one", () => {
+    const out = validate({ availability: { length: 4, capacity: 2 } });
+    // length (below 5) dropped; capacity kept.
+    expect(out.availability).toEqual({ capacity: 2 });
+  });
+
+  it("never injects availability defaults — absence stays absence (snapshot safety)", () => {
+    expect(validate({}).availability).toBeUndefined();
+    expect(validate({ availability: {} }).availability).toBeUndefined();
+    expect(validate({ availability: { enabled: true } }).availability).toBeUndefined();
+  });
+
+  it("keeps a builtin identity array", () => {
+    const out = validate({ require: { identity: { builtin: ["name", "dob", "phone_on_file"] } } });
+    expect(out.require.identity.builtin).toEqual(["name", "dob", "phone_on_file"]);
+  });
+
   it("keeps a well-formed custom identity field", () => {
     const out = validate({
       require: {

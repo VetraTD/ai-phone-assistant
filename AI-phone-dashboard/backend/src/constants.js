@@ -13,8 +13,6 @@ const MODULE_TASKS = [
   "check_appointment",
   "cancel_reschedule",
   "quote_request",
-  "directions_location",
-  "form_document_request",
 ];
 
 // Source of truth: root repo services/supabase.js loadConfig() /

@@ -7,6 +7,7 @@ const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
 const { getBusinessIdForUser } = require("../utils");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
+const calendarSync = require("../services/calendarSync");
 
 // ─── Google Calendar OAuth & sync ───────────────────────────────────────────
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -151,94 +152,28 @@ router.get("/api/calendar/status", authenticate, async (req, res) => {
   }
 });
 
-// Refresh Google access token if expired
-async function getValidCalendarTokens(businessId) {
-  const r = await pool.query(
-    `SELECT access_token, refresh_token, expires_at FROM calendar_connections WHERE business_id = $1 AND provider = 'google' AND enabled = true`,
-    [businessId]
-  );
-  const row = r.rows[0];
-  if (!row || !row.refresh_token) return null;
-  let { access_token, refresh_token, expires_at } = row;
-  const expiresAt = expires_at ? new Date(expires_at).getTime() : 0;
-  if (Date.now() >= expiresAt - 60 * 1000) {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) return null;
-    const tokenRes = await axios.post(
-      GOOGLE_TOKEN_URL,
-      new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token,
-        grant_type: "refresh_token",
-      }).toString(),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-    access_token = tokenRes.data.access_token;
-    const newExpires = tokenRes.data.expires_in
-      ? new Date(Date.now() + tokenRes.data.expires_in * 1000).toISOString()
-      : null;
-    await pool.query(
-      `UPDATE calendar_connections SET access_token = $1, expires_at = $2, updated_at = now() WHERE business_id = $3 AND provider = 'google'`,
-      [access_token, newExpires, businessId]
-    );
-  }
-  return access_token;
-}
-
-// POST /api/calendar/sync — create Google Calendar events for upcoming appointments (authenticated)
+// POST /api/calendar/sync — push not-yet-synced upcoming appointments to Google
+// (authenticated). Shares calendarSync with the background worker, so the manual
+// button is idempotent too: it only creates events for appointments that don't
+// already have a google_event_id, and records the id — no more duplicates on
+// repeated clicks (the previous inline version re-POSTed every upcoming
+// appointment every time, since Google does not dedupe by content).
 router.post("/api/calendar/sync", authSensitiveLimiter, authenticate, async (req, res) => {
   try {
     const businessId = await getBusinessIdForUser(req.authUser.id);
     if (!businessId) {
       return res.status(403).json({ error: "No business linked to this user" });
     }
-    const accessToken = await getValidCalendarTokens(businessId);
-    if (!accessToken) {
+    const { created, connected } = await calendarSync.syncAppointmentsForBusiness(businessId);
+    if (!connected) {
       return res.status(400).json({ error: "Google Calendar is not connected. Connect it in Settings first." });
     }
-    const bizRes = await pool.query(
-      `SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`,
-      [businessId]
-    );
-    const businessTimezone = bizRes.rows[0]?.timezone || "UTC";
-    const apptsRes = await pool.query(
-      `SELECT id, client_name, client_phone, scheduled_at, status, notes, call_id
-       FROM appointments WHERE business_id = $1 AND scheduled_at >= now() ORDER BY scheduled_at ASC LIMIT 100`,
-      [businessId]
-    );
-    const appts = apptsRes.rows;
-    const calendarId = "primary";
-    let created = 0;
-    for (const a of appts) {
-      const start = new Date(a.scheduled_at);
-      const end = new Date(start.getTime() + 30 * 60 * 1000); // 30 min default
-      const summary = a.client_name ? `Vetra: ${a.client_name}` : "Vetra appointment";
-      const description = [
-        a.client_phone ? `Phone: ${a.client_phone}` : "",
-        a.notes ? `Notes: ${a.notes}` : "",
-        a.call_id ? `Call ID: ${a.call_id}` : "",
-      ].filter(Boolean).join("\n");
-      try {
-        await axios.post(
-          `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events`,
-          {
-            summary,
-            description: description || undefined,
-            start: { dateTime: start.toISOString(), timeZone: businessTimezone },
-            end: { dateTime: end.toISOString(), timeZone: businessTimezone },
-          },
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        created++;
-      } catch (eventErr) {
-        if (eventErr.response?.status === 409) continue; // already exists / duplicate
-        console.error("calendar create event error:", eventErr.response?.data || eventErr.message);
-      }
-    }
-    res.json({ success: true, created, total: appts.length });
+    res.json({ success: true, created });
   } catch (err) {
+    if (calendarSync.isMissingSyncColumns(err)) {
+      console.error("calendar sync: appointments.google_event_id missing — apply migration 021");
+      return res.status(503).json({ error: "Calendar sync isn't set up on the server yet." });
+    }
     console.error("calendar sync error:", err?.response?.data ?? err?.message);
     res.status(500).json({ error: err?.response?.data?.error?.message || "Failed to sync to calendar" });
   }

@@ -14,6 +14,7 @@ import {
   checkRequirements,
   requirementParams,
   requirementPromptLines,
+  notesPromptLines,
   withRequirements,
   collectedIdentity,
   capabilityConfig,
@@ -262,5 +263,72 @@ describe("enforcement is wired into tool dispatch", () => {
       readCtx
     );
     expect(functionResponse.response.success).toBe(true);
+  });
+});
+
+describe("built-in identity fields (name / dob / phone_on_file)", () => {
+  // A tool that already collects the value (book_appointment has client_name)…
+  const BOOK_DECL = {
+    name: "book_appointment",
+    parameters: {
+      type: "object",
+      properties: { client_name: { type: "string" }, scheduled_at: { type: "string" } },
+      required: ["scheduled_at"],
+    },
+  };
+
+  it("reuses an existing param for name and ADDS a param for dob", () => {
+    const cfg = { require: { identity: { builtin: ["name", "dob"] } } };
+    const out = withRequirements(BOOK_DECL, cfg);
+    // name reuses client_name (no identity_name added), dob has no home so it adds one
+    expect(out.parameters.properties).not.toHaveProperty("identity_name");
+    expect(out.parameters.properties).toHaveProperty("identity_dob");
+    expect(out.parameters.required).toEqual(
+      expect.arrayContaining(["scheduled_at", "client_name", "identity_dob"])
+    );
+    // no duplicate client_name from the reuse
+    expect(out.parameters.required.filter((r) => r === "client_name")).toHaveLength(1);
+  });
+
+  it("phone_on_file adds no parameter", () => {
+    const out = withRequirements(BOOK_DECL, { require: { identity: { builtin: ["phone_on_file"] } } });
+    expect(out.parameters.properties).toEqual(BOOK_DECL.parameters.properties);
+  });
+
+  it("an unconfigured builtin array leaves the declaration byte-identical", () => {
+    const decl = { name: "x", parameters: { type: "object", properties: {} } };
+    expect(withRequirements(decl, { require: { identity: { builtin: [] } } })).toBe(decl);
+  });
+
+  it("checkRequirements refuses a missing dob and accepts either arg name", () => {
+    const cfg = { require: { identity: { builtin: ["dob"] } } };
+    expect(checkRequirements(cfg, {}).ok).toBe(false);
+    expect(checkRequirements(cfg, { identity_dob: "1990-01-01" }).ok).toBe(true);
+    expect(checkRequirements(cfg, { caller_dob: "1990-01-01" }).ok).toBe(true);
+  });
+
+  it("phone_on_file: self-verified on the internal change tools, soft on booking", () => {
+    const cfg = { require: { identity: { builtin: ["phone_on_file"] } } };
+    // change tools prove ownership in code, so the check is skipped there
+    expect(checkRequirements(cfg, {}, { toolName: "cancel_appointment_db" }).ok).toBe(true);
+    // on booking it is satisfied by the trusted calling number…
+    expect(checkRequirements(cfg, {}, { toolName: "book_appointment", callerPhone: "+15551234567" }).ok).toBe(true);
+    // …and refused when there is neither a caller number nor a callback number
+    expect(checkRequirements(cfg, {}, { toolName: "book_appointment" }).ok).toBe(false);
+  });
+
+  it("emits builtin prompt lines the model can follow", () => {
+    const lines = requirementPromptLines({ require: { identity: { builtin: ["dob", "phone_on_file"] } } });
+    expect(lines.some((l) => /date of birth/i.test(l))).toBe(true);
+    expect(lines.some((l) => /number the caller is calling from/i.test(l))).toBe(true);
+  });
+});
+
+describe("notesPromptLines", () => {
+  it("returns the trimmed note, or nothing when absent/blank", () => {
+    expect(notesPromptLines({ notes: "  Ask about donuts.  " })).toEqual(["Ask about donuts."]);
+    expect(notesPromptLines({ notes: "   " })).toEqual([]);
+    expect(notesPromptLines({})).toEqual([]);
+    expect(notesPromptLines(undefined)).toEqual([]);
   });
 });

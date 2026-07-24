@@ -167,6 +167,7 @@ const BUILTIN_TOOL_NAMES = [
   "end_call",
   // appointments pack
   "book_appointment",
+  "check_appointment_availability",
   "get_caller_appointments",
   "get_available_slots",
   "book_appointment_in_ehr",

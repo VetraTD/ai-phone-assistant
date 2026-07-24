@@ -74,6 +74,9 @@ function expectedFromMigrations() {
     for (const i of sql.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
       indexes.add(i[1].toLowerCase());
     }
+    for (const i of sql.matchAll(/DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
+      indexes.delete(i[1].toLowerCase());
+    }
   }
 
   return { columns, tables, indexes, droppedTables };
@@ -135,12 +138,13 @@ describe("database/schema.sql represents the fully-migrated state", () => {
     }
   });
 
-  it("keeps the double-booking guard: a partial unique index on (business_id, scheduled_at) WHERE status = 'scheduled'", () => {
-    // services/tools.js book_appointment relies on Postgres 23505 from this
-    // index to tell the caller a slot is taken.
-    expect(stripComments(schemaSql)).toMatch(
-      /CREATE\s+UNIQUE\s+INDEX\s+uniq_appointments_business_scheduled_at_active[\s\S]*?ON\s+appointments\s*\(business_id,\s*scheduled_at\)[\s\S]*?WHERE\s+status\s*=\s*'scheduled'/i
-    );
+  it("keeps the double-booking guard as the create_appointment_if_available function (migration 022 replaced 009's index)", () => {
+    // The partial unique index couldn't express per-business capacity/length, so
+    // enforcement moved into an advisory-locked function every booking calls.
+    const stripped = stripComments(schemaSql);
+    expect(stripped).not.toMatch(/CREATE\s+UNIQUE\s+INDEX\s+uniq_appointments_business_scheduled_at_active/i);
+    expect(stripped).toMatch(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+create_appointment_if_available/i);
+    expect(stripped).toMatch(/pg_advisory_xact_lock/i);
   });
 
   it("defaults allowed_tasks to the post-013 modules-only shape and business_hours to the post-014 weekly shape", () => {

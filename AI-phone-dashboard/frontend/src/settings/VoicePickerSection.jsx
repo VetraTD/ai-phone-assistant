@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { api } from "../api";
-import SectionCard from "./SectionCard";
+import Panel from "./Panel";
+import ChoiceCards from "./ChoiceCards";
 
 // Cards driven by GET /api/voices (added in this task, mirrors root repo
 // config/voices.js — see routes/settings.js). Selecting a card sets
@@ -10,6 +12,13 @@ import SectionCard from "./SectionCard";
 // (skips ElevenLabs entirely). Audio preview is out of scope — there's no
 // synth endpoint yet (Phase 5 candidate per the brief) — so cards show
 // descriptive text instead.
+//
+// The cards used to be `<div role="button" tabIndex={0}>`, which is not a way
+// to pick one of eight things: no aria-checked, no arrow keys, and a screen
+// reader announcing nine unrelated buttons. ChoiceCards renders real radios in
+// a real fieldset. The two emitted fields are unchanged.
+const GOOGLE_VALUE = "google";
+
 export default function VoicePickerSection({ value, onChange }) {
   const [catalog, setCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,68 +32,53 @@ export default function VoicePickerSection({ value, onChange }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const provider = value.voice_provider;
+  const selected = value.voice_provider === "google" ? GOOGLE_VALUE : value.voice_id || GOOGLE_VALUE;
 
-  const cardStyle = (active) => ({
-    cursor: "pointer",
-    borderColor: active ? "var(--vetra-blue)" : undefined,
-    boxShadow: active ? "0 0 0 2px rgba(58,143,242,0.18)" : undefined,
-  });
+  const options = [
+    // Natural (ElevenLabs) voices first — these are what almost everyone wants.
+    ...catalog.map((voice) => ({
+      value: voice.voiceId,
+      title: voice.label,
+      desc: voice.description,
+      tags: [voice.gender, voice.accent].filter(Boolean),
+    })),
+    // The plain fallback goes last, framed honestly as the basic option.
+    {
+      value: GOOGLE_VALUE,
+      title: "Basic voice",
+      desc: "A plainer, less lifelike fallback. Fine in a pinch, but most businesses pick one of the natural voices above.",
+    },
+  ];
+
+  const handleChange = (next) => {
+    if (next === GOOGLE_VALUE) onChange({ voice_provider: "google", voice_id: "" });
+    else onChange({ voice_provider: "elevenlabs", voice_id: next });
+  };
+
+  const selectedLabel = options.find((o) => o.value === selected)?.title;
 
   return (
-    <SectionCard
+    <Panel
       title="Voice"
-      description="Choose the voice callers hear. Audio preview isn't available yet — descriptions below give a sense of tone."
+      description="The voice callers hear. There's no audio preview yet, so the descriptions are your guide."
+      badge={selectedLabel ? <span className="set-pill">{selectedLabel}</span> : null}
     >
-      <div
-        className="sub-card"
-        style={cardStyle(provider === "google")}
-        role="button"
-        tabIndex={0}
-        onClick={() => onChange({ voice_provider: "google", voice_id: "" })}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") onChange({ voice_provider: "google", voice_id: "" });
-        }}
-      >
-        <div className="sub-card-title">Default (Google) {provider === "google" ? "· Selected" : ""}</div>
-        <div className="detail-block-text">Standard neutral voice — no ElevenLabs voice selected.</div>
-      </div>
-
       {loading ? (
-        <div className="empty-note">Loading voices…</div>
+        <p className="set-hint">Loading voices…</p>
       ) : error ? (
-        <div className="empty-note">{error}</div>
+        <p className="set-alert set-alert-error" role="alert">
+          <TriangleAlert className="set-alert-icon" size={16} aria-hidden="true" />
+          <span>{error}</span>
+        </p>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-          {catalog.map((voice) => {
-            const active = provider === "elevenlabs" && value.voice_id === voice.voiceId;
-            return (
-              <div
-                key={voice.id}
-                className="sub-card"
-                style={cardStyle(active)}
-                role="button"
-                tabIndex={0}
-                onClick={() => onChange({ voice_provider: "elevenlabs", voice_id: voice.voiceId })}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    onChange({ voice_provider: "elevenlabs", voice_id: voice.voiceId });
-                  }
-                }}
-              >
-                <div className="sub-card-title">
-                  {voice.label} {active ? "· Selected" : ""}
-                </div>
-                <div className="detail-block-text">{voice.description}</div>
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <span className="call-pill">{voice.gender}</span>
-                  <span className="call-pill">{voice.accent}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <ChoiceCards
+          legend="Choose a voice"
+          name="voice"
+          options={options}
+          value={selected}
+          onChange={handleChange}
+        />
       )}
-    </SectionCard>
+    </Panel>
   );
 }

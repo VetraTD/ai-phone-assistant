@@ -32,9 +32,12 @@ import { noBusinessResult, unknownToolResult } from "../lib/capabilities/results
 import {
   withRequirements,
   requirementPromptLines,
+  notesPromptLines,
   capabilityConfig,
+  isClosedNow,
 } from "../lib/capabilities/requirements.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
+import { declineGuardrail } from "../lib/capabilities/decline.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -154,6 +157,13 @@ const EHR_APPOINTMENT_DECLARATIONS = [
   },
 ];
 
+/** EHR tools that WRITE — these take configured requirements and are gated. */
+const EHR_WRITE_TOOLS = new Set([
+  "book_appointment_in_ehr",
+  "cancel_appointment",
+  "reschedule_appointment",
+]);
+
 /**
  * Internal-database appointment tools — the no-EHR path.
  *
@@ -267,6 +277,26 @@ function hasExternalBook(config, integrations) {
 // unreachable config plumbing before the data exists would be untested code.
 // ---------------------------------------------------------------------------
 
+/** The module tasks this capability owns — presence of any means "enabled". */
+const APPOINTMENT_MODULE_TASKS = ["book_appointment", "check_appointment", "cancel_reschedule"];
+
+/**
+ * Read the availability settings, defaulting at read-time so a business that
+ * never touched them still books into 30-minute, single-capacity slots.
+ * WHETHER availability is checked is not a per-business flag — it is inherent to
+ * the built-in calendar (any adapter exposing `checkAvailability`). These are
+ * only the numbers that define a slot.
+ * @param {object} cfg - appointments capability config
+ * @returns {{length: number, capacity: number}}
+ */
+function availabilitySettings(cfg) {
+  const a = cfg?.availability || {};
+  return {
+    length: Number.isInteger(a.length) ? a.length : 30,
+    capacity: Number.isInteger(a.capacity) ? a.capacity : 1,
+  };
+}
+
 /** The what-you-can-do clauses for the CAPABILITIES line. */
 function capabilityClauses(allowed) {
   const hasAll =
@@ -300,7 +330,19 @@ function capabilityClauses(allowed) {
  * the business is actually open for, which is why this is DYNAMIC guidance and
  * must never be cached into the static prefix.
  */
-function bookingGuidance(config, now) {
+/**
+ * Steer the model to decline booking/changes while the office is closed, when
+ * the business set businessHoursOnly. This is the up-front counterpart to the
+ * checkRequirements refusal, so the caller is never walked through a flow that
+ * cannot complete.
+ */
+const CLOSED_BOOKING_DECLINE =
+  "The office is closed right now, and this business only books, cancels, or reschedules " +
+  "appointments during opening hours. Do NOT check availability, suggest times, or collect any " +
+  "details. Tell the caller you can't book or change an appointment while the office is closed, " +
+  "and offer to take a message so the team can call them back when they reopen.";
+
+function bookingGuidance(config, now, canCheck) {
   const resolvedHours = resolveBusinessHoursForPrompt(config, now);
   let businessHoursStr = "business hours";
   if (resolvedHours) {
@@ -313,6 +355,20 @@ function bookingGuidance(config, now) {
     } else if (resolvedHours.rangeText) {
       businessHoursStr = resolvedHours.rangeText;
     }
+  }
+
+  // Built-in calendar: check the calendar BEFORE collecting anything, so a full
+  // slot never costs the caller the whole flow. (An EHR uses its own get_available_slots.)
+  if (canCheck) {
+    return (
+      `Your task: Help the caller book, checking the calendar before you collect any details. ` +
+      `One question at a time:\n` +
+      `1. Ask whether they prefer mornings or afternoons, and if any days don't work (business hours: ${businessHoursStr}).\n` +
+      `2. As soon as the caller names a specific time, say something like "one moment while I check that" and call check_appointment_availability with that time IN THE SAME response.\n` +
+      `3. If it comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
+      `4. Only once a free time is agreed, collect the caller's details (their name, and anything else you're required to ask for), then read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
+      `5. Do NOT call book_appointment until the caller clearly confirms. The system re-checks availability at booking time; if it reports the slot is full, call check_appointment_availability again and offer another time.`
+    );
   }
 
   return (
@@ -527,6 +583,30 @@ function validateBookingTime(rawScheduledAt, config) {
 const BOOKING_CONFIRMATION_GUARDRAIL =
   `- For appointment bookings: before calling book_appointment, you MUST read back the caller's name, date, time, and service type, then ask a clear yes/no confirmation question. Only call book_appointment after the caller responds with an affirmative ("yes", "correct", "that's right", "go ahead", "sounds good"). If the caller's name is unusual or you're unsure you heard it right, confirm its spelling once before the final read-back.\n`;
 
+/**
+ * Availability check — a READ (like get_available_slots), registered only when a
+ * business turns on the built-in calendar's availability check. The model calls
+ * it the moment a time is named, before collecting details, so a full slot never
+ * costs the caller a whole booking flow.
+ */
+const CHECK_AVAILABILITY_DECLARATION = {
+  name: "check_appointment_availability",
+  description:
+    "Check whether a specific date and time is open BEFORE collecting the caller's details. " +
+    "Call this as soon as the caller names a time. If available is false, offer the returned " +
+    "alternatives instead of collecting details.",
+  parameters: {
+    type: "object",
+    properties: {
+      requested_at: {
+        type: "string",
+        description: "The date and time the caller asked for, as ISO 8601 (e.g. 2026-03-15T10:00:00)",
+      },
+    },
+    required: ["requested_at"],
+  },
+};
+
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "appointments",
@@ -544,6 +624,14 @@ export default {
     adapter: {
       type: "choice",
       label: "Where do appointments live?",
+      // All three stay VALID in the engine's config loader — a clinic
+      // configured to athenahealth directly must keep working. Which of them
+      // the dashboard offers as a self-serve choice is decided separately, by
+      // each adapter's `selfServe` flag (adapters/scheduling/*), not by pruning
+      // this list. athenahealth (owner-managed) and webhook (a non-functional
+      // stub whose book() is null) are marked selfServe:false, so the picker
+      // shows only the built-in calendar. Google Calendar is reached via the
+      // built-in calendar plus Calendar sync.
       options: ["internal", "athenahealth", "webhook"],
       default: "internal",
     },
@@ -565,6 +653,28 @@ export default {
         default: false,
       },
     },
+    // The built-in calendar ALWAYS checks availability before booking — a
+    // receptionist does not double-book. These two numbers define what "free"
+    // means; an external backend (athena) owns its own free/busy and ignores
+    // them. Defaults: 30-minute slots, one appointment at a time.
+    availability: {
+      length: {
+        type: "number",
+        label: "Appointment length (minutes)",
+        default: 30,
+        min: 5,
+        max: 480,
+        step: 5,
+      },
+      capacity: {
+        type: "number",
+        label: "How many appointments can share one time slot",
+        default: 1,
+        min: 1,
+        max: 100,
+        step: 1,
+      },
+    },
     notes: {
       type: "longtext",
       label: "Anything specific about how you book?",
@@ -575,6 +685,7 @@ export default {
   /** Every tool this pack can own, for registry dispatch. */
   toolNames: [
     BOOK_APPOINTMENT_DECLARATION.name,
+    CHECK_AVAILABILITY_DECLARATION.name,
     ...EHR_APPOINTMENT_DECLARATIONS.map((d) => d.name),
     ...DB_APPOINTMENT_DECLARATIONS.map((d) => d.name),
   ],
@@ -583,7 +694,16 @@ export default {
    * Tools whose success is caller-visible, unlocking same-turn end_call.
    * Previously the hardcoded ACTION_TOOL_NAMES array in services/gemini.js:14.
    */
-  actionTools: ["book_appointment", "cancel_appointment_db", "reschedule_appointment_db"],
+  actionTools: [
+    "book_appointment",
+    "cancel_appointment_db",
+    "reschedule_appointment_db",
+    // EHR write tools — listed here so executeToolCall runs checkRequirements
+    // (identity / confirmBeforeWrite / businessHoursOnly) on athena clinics too.
+    "book_appointment_in_ehr",
+    "cancel_appointment",
+    "reschedule_appointment",
+  ],
 
   tools(config) {
     const allowed = config?.allowedTasks || [];
@@ -597,21 +717,35 @@ export default {
     const integrations = Array.isArray(ctx.integrations) ? ctx.integrations : [];
     const allowed = config?.allowedTasks || [];
 
+    if (hasExternalBook(config, integrations)) return []; // an EHR owns the book
+
+    const cfg = capabilityConfig(config, "appointments");
+    const out = [];
+
+    // Availability check whenever the backend can do one (the built-in calendar
+    // always can; an EHR is handled above). No per-business flag — a
+    // receptionist always checks before booking.
+    if (allowed.includes("book_appointment")) {
+      const adapter = schedulingAdapter(config, integrations);
+      if (typeof adapter.checkAvailability === "function") out.push(CHECK_AVAILABILITY_DECLARATION);
+    }
+
     // "appointments" is a legacy bundle name — normalizeAllowedTasks always
     // expands it to the three appointment MODULE_TASKS before config reaches
     // here, so gating is purely module-name-based.
     const wantsLookupOrChange =
       allowed.includes("cancel_reschedule") || allowed.includes("check_appointment");
-
-    if (hasExternalBook(config, integrations)) return [];
-    if (!wantsLookupOrChange) return [];
-    const cfg = capabilityConfig(config, "appointments");
-    // Only the two CHANGE tools take requirements; the lookup is a read and
-    // gating it would stop the receptionist finding the appointment it needs
-    // in order to ask about it.
-    return DB_APPOINTMENT_DECLARATIONS.map((d) =>
-      d.name === "get_caller_appointments_from_db" ? d : withRequirements(d, cfg)
-    );
+    if (wantsLookupOrChange) {
+      // Only the two CHANGE tools take requirements; the lookup is a read and
+      // gating it would stop the receptionist finding the appointment it needs
+      // in order to ask about it.
+      out.push(
+        ...DB_APPOINTMENT_DECLARATIONS.map((d) =>
+          d.name === "get_caller_appointments_from_db" ? d : withRequirements(d, cfg)
+        )
+      );
+    }
+    return out;
   },
 
   /**
@@ -621,44 +755,81 @@ export default {
    * adapters own backend selection.
    * @param {Array} integrations
    */
-  ehrTools(integrations) {
-    // No business config here: this is called from buildIntegrationTools, whose
-    // directly-tested contract takes only the integration list. Adapter
-    // selection still applies for every other decision.
+  ehrTools(integrations, config = null) {
+    // Adapter selection decides WHICH backend; the capability's enabled state
+    // decides WHETHER the tools exist at all. Without the config gate, disabling
+    // appointments left the EHR booking tools registered (they keyed only off the
+    // integration list), so an athena clinic's "off" toggle did nothing on calls.
     const adapter = resolveSchedulingAdapter(null, integrations);
-    return adapter.id === "athenahealth" ? [...EHR_APPOINTMENT_DECLARATIONS] : [];
+    if (adapter.id !== "athenahealth") return [];
+    // config is optional so older/tested callers that pass only integrations keep
+    // today's behavior; the live path always passes it, which is what closes the
+    // bypass.
+    if (config) {
+      const allowed = config.allowedTasks || [];
+      if (!allowed.some((t) => APPOINTMENT_MODULE_TASKS.includes(t))) return [];
+    }
+    // Wrap the WRITE tools with the configured requirements so identity /
+    // confirmBeforeWrite become real parameters (builtin name/dob reuse the
+    // existing caller_name/caller_dob — no duplication). The read tools
+    // (get_caller_appointments, get_available_slots) are left untouched. When no
+    // requirements are configured, withRequirements returns the same object, so
+    // an unconfigured clinic is byte-identical.
+    const cfg = config ? capabilityConfig(config, "appointments") : {};
+    return EHR_APPOINTMENT_DECLARATIONS.map((d) =>
+      EHR_WRITE_TOOLS.has(d.name) ? withRequirements(d, cfg) : d
+    );
   },
 
   prompt(config, ctx = {}) {
     const allowed = config?.allowedTasks || [];
     const hasEhr = hasExternalBook(config, ctx.integrations);
     const now = ctx.now instanceof Date ? ctx.now : new Date();
+    // The built-in calendar can check availability; an EHR uses its own slots.
+    // Also require that this business actually books, so a non-appointment
+    // business's (dead) booking guidance stays unchanged.
+    const canCheckAvail =
+      allowed.includes("book_appointment") &&
+      typeof schedulingAdapter(config, ctx.integrations).checkAvailability === "function";
+
+    // businessHoursOnly is enforced at the tool (checkRequirements), but that
+    // only refuses at the END — the model would still run the whole booking flow
+    // while closed. When it's on AND the office is closed right now, steer the
+    // model to decline up front so it never collects details or checks slots.
+    const bhBlocked =
+      capabilityConfig(config, "appointments").require?.businessHoursOnly === true &&
+      isClosedNow(config, now.getTime());
+
+    // Enabled = the business opted into any appointment module. capabilityClauses
+    // already gates the CAPABILITIES line on this; the guardrails now gate on it
+    // too, instead of leaking booking instructions into a business that cannot
+    // book. When OFF, the model is told to decline booking cleanly rather than
+    // advertise a tool it was never given.
+    const enabled = allowed.some((t) => APPOINTMENT_MODULE_TASKS.includes(t));
 
     return {
       static: {
         // The CAPABILITIES line IS module-gated — it always was.
         capabilities: capabilityClauses(allowed),
 
-        // The confirmation guardrail is NOT gated, faithfully reproducing
-        // today's behavior: it is emitted even for a business with no
-        // appointment module, where book_appointment is not registered at all.
-        // That is arguably wrong — dead instructions about a tool the model
-        // cannot call — but changing it is a behavior change, so it waits for
-        // Step B, where confirmBeforeWrite becomes an enforced requirement kind
-        // and naturally only applies where the capability is enabled.
-        guardrails: [
-          BOOKING_CONFIRMATION_GUARDRAIL,
-          ...requirementPromptLines(capabilityConfig(config, "appointments")).map((l) => `${l}
+        guardrails: enabled
+          ? [
+              BOOKING_CONFIRMATION_GUARDRAIL,
+              ...requirementPromptLines(capabilityConfig(config, "appointments")).map((l) => `${l}
 `),
-        ],
+            ]
+          : [declineGuardrail("book, check, cancel, or reschedule appointments")],
+        capabilityNotes: enabled
+          ? notesPromptLines(capabilityConfig(config, "appointments"))
+          : [],
       },
       dynamic: {
         // Also ungated, matching buildStepGuidance's original behavior: it
         // switched purely on the intent the model reported, never on whether
         // the business had the module enabled.
         stepGuidance: {
-          book_appointment: bookingGuidance(config, now),
-          cancel_reschedule: cancelRescheduleGuidance(hasEhr),
+          book_appointment: bhBlocked ? CLOSED_BOOKING_DECLINE : bookingGuidance(config, now, canCheckAvail),
+          cancel_reschedule: bhBlocked ? CLOSED_BOOKING_DECLINE : cancelRescheduleGuidance(hasEhr),
         },
       },
     };
@@ -676,6 +847,8 @@ export default {
     switch (fc.name) {
       case "book_appointment":
         return bookAppointment(fc, ctx);
+      case "check_appointment_availability":
+        return checkAvailabilityTool(fc, ctx);
       case "get_caller_appointments_from_db":
         return lookupCallerAppointments(fc, ctx);
       case "cancel_appointment_db":
@@ -762,11 +935,92 @@ export default {
 // Execution
 // ---------------------------------------------------------------------------
 
+/** The `n` free slots nearest a requested instant, as ISO strings. */
+function nearestSlots(free, requestedISO, n) {
+  const target = Date.parse(requestedISO);
+  return (free || [])
+    .map((s) => s.start)
+    .filter((s) => Number.isFinite(Date.parse(s)))
+    .sort((a, b) => Math.abs(Date.parse(a) - target) - Math.abs(Date.parse(b) - target))
+    .slice(0, n);
+}
+
+/**
+ * check_appointment_availability — a READ the model calls before collecting
+ * details. Reuses validateBookingTime so a past/closed/out-of-hours request is
+ * rejected with the same wording as booking, then asks the adapter whether the
+ * slot is open and, if not, offers the nearest free times that day.
+ */
+async function checkAvailabilityTool(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+  const config = ctx.config || {};
+  const avail = availabilitySettings(capabilityConfig(config, "appointments"));
+  const adapter = schedulingAdapter(config, ctx.integrations);
+
+  const respond = (response) => ({
+    functionResponse: { id: fc.id, name: fc.name, response },
+    stateEffects: {
+      toolResult: { name: fc.name, success: true, message: response.message },
+      toolCallEvent: { name: fc.name, args: fc.args || {} },
+    },
+  });
+
+  const validated = validateBookingTime(fc.args?.requested_at, config);
+  if (!validated.ok) {
+    return respond({ success: true, available: false, message: validated.message });
+  }
+  const startISO = validated.scheduledAt;
+
+  let available = true;
+  if (typeof adapter.checkAvailability === "function") {
+    try {
+      const res = await adapter.checkAvailability(ctx, {
+        startISO,
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+      });
+      available = !!res.available;
+    } catch (err) {
+      ctx.deps.captureException(err); // fail-open
+    }
+  }
+
+  if (available) {
+    return respond({ success: true, available: true, message: "That time is available." });
+  }
+
+  let alternatives = [];
+  if (typeof adapter.findSlots === "function") {
+    try {
+      const free = await adapter.findSlots(ctx, {
+        dateISO: startISO,
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+        businessHours: config.businessHours ?? null,
+        timezone: config.timezone,
+      });
+      alternatives = nearestSlots(free, startISO, 3);
+    } catch (err) {
+      ctx.deps.captureException(err);
+    }
+  }
+
+  return respond({
+    success: true,
+    available: false,
+    alternatives,
+    message: alternatives.length
+      ? `That time is taken. Offer these open times instead: ${alternatives.join(", ")}.`
+      : "That time is taken and nothing else is open that day. Ask the caller about another day.",
+  });
+}
+
 async function bookAppointment(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
   const args = fc.args ?? {};
   const config = ctx.config || {};
+  const avail = availabilitySettings(capabilityConfig(config, "appointments"));
   let bookSuccess = false;
   let bookMessage =
     "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
@@ -796,24 +1050,56 @@ async function bookAppointment(fc, ctx) {
           "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
       } else {
         const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
-        try {
-          const adapter = schedulingAdapter(ctx.config, ctx.integrations);
-          const { id: dbId } = await adapter.book(ctx, {
-            clientName: args.client_name || null,
-            clientPhone: ctx.callerPhone || null,
-            scheduledAt: anchoredScheduledAt,
-            notes,
-          });
-          if (dbId) {
-            bookSuccess = true;
-            bookMessage = "Appointment booked successfully.";
+        const adapter = schedulingAdapter(ctx.config, ctx.integrations);
+        const canCheck = typeof adapter.checkAvailability === "function";
+
+        // Pre-check on any backend that can: refuse a full slot before the write
+        // so the model gets "offer another time", not a raw error. Fail-open on a
+        // check error — the atomic book() below is the real guard.
+        let slotFull = false;
+        if (canCheck) {
+          try {
+            const { available } = await adapter.checkAvailability(ctx, {
+              startISO: anchoredScheduledAt,
+              lengthMinutes: avail.length,
+              capacity: avail.capacity,
+            });
+            slotFull = !available;
+          } catch (err) {
+            ctx.deps.captureException(err);
           }
-        } catch (err) {
-          const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
-          bookMessage = isSlotTaken
-            ? "That time slot is no longer available. Please ask the caller to pick a different time."
-            : "There was an error booking the appointment. Please take the caller's details for follow-up.";
-          ctx.deps.captureException(err);
+        }
+
+        const fullMessage = canCheck
+          ? "That time is fully booked. Offer the caller a different time — call " +
+            "check_appointment_availability to find open slots."
+          : "That time slot is no longer available. Please ask the caller to pick a different time.";
+
+        if (slotFull) {
+          bookMessage = fullMessage;
+        } else {
+          try {
+            const { id: dbId, full } = await adapter.book(ctx, {
+              clientName: args.client_name || null,
+              clientPhone: ctx.callerPhone || null,
+              scheduledAt: anchoredScheduledAt,
+              notes,
+              lengthMinutes: avail.length,
+              capacity: avail.capacity,
+            });
+            if (full) {
+              bookMessage = fullMessage;
+            } else if (dbId) {
+              bookSuccess = true;
+              bookMessage = "Appointment booked successfully.";
+            }
+          } catch (err) {
+            const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+            bookMessage = isSlotTaken
+              ? "That time slot is no longer available. Please ask the caller to pick a different time."
+              : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+            ctx.deps.captureException(err);
+          }
         }
       }
     }

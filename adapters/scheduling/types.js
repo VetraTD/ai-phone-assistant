@@ -22,7 +22,11 @@
  * @property {((ctx: object, args: object) => Promise<{ok: boolean, id?: string}>)|null} book
  * @property {((ctx: object, args: object) => Promise<{ok: boolean}>)|null} cancel
  * @property {((ctx: object, args: object) => Promise<{ok: boolean}>)|null} reschedule
- * @property {((ctx: object, args: object) => Promise<Array>)|null} findSlots
+ * @property {((ctx: object, args: {startISO: string, lengthMinutes: number, capacity: number}) => Promise<{available: boolean, remaining: number}>)|null} checkAvailability
+ *   Point check: does this exact start still have capacity? null = this backend
+ *   has no availability model (the capability then falls back to book-and-recover).
+ * @property {((ctx: object, args: {dateISO: string, lengthMinutes: number, capacity: number, businessHours: object|null, timezone: string}) => Promise<Array<{start: string}>>)|null} findSlots
+ *   Enumerate free start times on a day, for offering alternatives.
  */
 
 export {};

@@ -4,6 +4,9 @@ import {
   updateAppointmentStatus,
   updateAppointment,
   createAppointment,
+  createAppointmentIfAvailable,
+  countScheduledOverlapping,
+  listScheduledBetween,
   getAppointmentById,
 } from "./supabase.js";
 import { executeIntegration } from "./integrations.js";
@@ -45,6 +48,15 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 const CAPABILITY_DEPS = {
   get createAppointment() {
     return createAppointment;
+  },
+  get createAppointmentIfAvailable() {
+    return createAppointmentIfAvailable;
+  },
+  get countScheduledOverlapping() {
+    return countScheduledOverlapping;
+  },
+  get listScheduledBetween() {
+    return listScheduledBetween;
   },
   get listAppointmentsByCaller() {
     return listAppointmentsByCaller;
@@ -155,7 +167,7 @@ export async function executeToolCall(fc, ctx) {
         // about it — locking the door and the key inside.
         if ((pack.actionTools || []).includes(fc.name)) {
           const cfg = capabilityConfig(ctx?.config, pack.id);
-          const check = checkRequirements(cfg, fc.args || {}, ctx);
+          const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {
             return {
               functionResponse: {

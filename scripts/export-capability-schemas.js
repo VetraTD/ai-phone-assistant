@@ -48,6 +48,10 @@ export function buildSchemaExport() {
       scheduling: listSchedulingAdapters().map((a) => ({
         id: a.id,
         label: a.label,
+        // Whether the dashboard offers this adapter as a self-serve choice.
+        // false = valid in the engine but hidden from the picker (athenahealth
+        // is owner-managed; webhook is an unwired stub). Absent means true.
+        selfServe: a.selfServe !== false,
         // What this backend can actually prove a caller against. The UI uses it
         // to decide which identity checks it may offer as verified rather than
         // merely collected — and to explain why, when it cannot.

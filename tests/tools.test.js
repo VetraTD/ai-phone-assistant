@@ -7,9 +7,22 @@ const mockUpdateAppointment = vi.fn();
 const mockGetAppointmentById = vi.fn();
 const mockExecuteIntegration = vi.fn();
 const mockCaptureException = vi.fn();
+const mockCountScheduledOverlapping = vi.fn().mockResolvedValue(0);
+const mockListScheduledBetween = vi.fn().mockResolvedValue([]);
 
 vi.mock("../services/supabase.js", () => ({
   createAppointment: (...args) => mockCreateAppointment(...args),
+  // Internal booking now goes through the availability-aware RPC. For the tool
+  // layer these tests exercise, the DB either accepts the booking (returns an
+  // id) or the slot is full (returns null) — modelled here by delegating to the
+  // same createAppointment mock, so a resolved id books and a rejection still
+  // surfaces the "slot taken" path.
+  createAppointmentIfAvailable: async (params) => {
+    const id = await mockCreateAppointment(params);
+    return id ? { id } : { full: true };
+  },
+  countScheduledOverlapping: (...args) => mockCountScheduledOverlapping(...args),
+  listScheduledBetween: (...args) => mockListScheduledBetween(...args),
   listAppointmentsByCaller: (...args) => mockListAppointmentsByCaller(...args),
   updateAppointmentStatus: (...args) => mockUpdateAppointmentStatus(...args),
   updateAppointment: (...args) => mockUpdateAppointment(...args),

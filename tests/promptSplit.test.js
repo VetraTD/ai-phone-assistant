@@ -170,6 +170,43 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(enOnly).not.toContain("Speak en by default");
   });
 
+  // Guard added when the dashboard stopped offering "book for later" to
+  // non-appointment businesses: a stored book_later policy must not still
+  // instruct the model to call book_appointment when that tool was never
+  // registered (allowedTasks lacks it). It falls back to take-a-message.
+  const closedSaturday = {
+    ...config,
+    timezone: "UTC",
+    afterHoursPolicy: "book_later",
+    businessHours: {
+      mon: { open: "09:00", close: "17:00", closed: false },
+      sat: { open: null, close: null, closed: true },
+      sun: { open: null, close: null, closed: true },
+    },
+  };
+
+  it("after-hours book_later WITH book_appointment enabled instructs the model to book", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const tail = buildDynamicTail("gather_details", null, closedSaturday, extras);
+
+    expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
+    expect(tail).toContain("book appointments for future business hours using book_appointment");
+  });
+
+  it("after-hours book_later WITHOUT book_appointment falls back to take-a-message (no phantom tool)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const noBooking = { ...closedSaturday, allowedTasks: ["general_question", "take_message"] };
+    const tail = buildDynamicTail("gather_details", null, noBooking, extras);
+
+    expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
+    // The dead instruction is gone…
+    expect(tail).not.toContain("using book_appointment");
+    // …replaced by the take-a-message guidance.
+    expect(tail).toContain('record_customer_request with request_type "message"');
+  });
+
   it("AI disclosure rule is present in IDENTITY", () => {
     const prefix = buildStaticSystemPrefix(config, extras);
     expect(prefix).toContain("answer honestly");

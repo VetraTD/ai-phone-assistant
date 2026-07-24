@@ -17,6 +17,7 @@
 import {
   withRequirements,
   requirementPromptLines,
+  notesPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 
@@ -94,7 +95,8 @@ function messageGuidance(intent) {
 export default {
   id: "messages",
   label: "Messages & callbacks",
-  description: "Take messages and callback requests. Core receptionist behaviour.",
+  description:
+    "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
   core: true,
   adapterKind: null,
 
@@ -130,6 +132,7 @@ export default {
         protocols: [MESSAGE_PROTOCOL_SECTION],
         guardrails: requirementPromptLines(capabilityConfig(config, "messages")).map((l) => `${l}
 `),
+        capabilityNotes: notesPromptLines(capabilityConfig(config, "messages")),
       },
       dynamic: {
         stepGuidance: {

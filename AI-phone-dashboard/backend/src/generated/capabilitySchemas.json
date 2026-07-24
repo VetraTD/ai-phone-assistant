@@ -39,6 +39,24 @@
             "default": false
           }
         },
+        "availability": {
+          "length": {
+            "type": "number",
+            "label": "Appointment length (minutes)",
+            "default": 30,
+            "min": 5,
+            "max": 480,
+            "step": 5
+          },
+          "capacity": {
+            "type": "number",
+            "label": "How many appointments can share one time slot",
+            "default": 1,
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        },
         "notes": {
           "type": "longtext",
           "label": "Anything specific about how you book?",
@@ -47,17 +65,9 @@
       }
     },
     {
-      "id": "general_question",
-      "label": "General questions",
-      "description": "Answer questions from your knowledge base.",
-      "core": false,
-      "adapterKind": null,
-      "configSchema": null
-    },
-    {
       "id": "messages",
       "label": "Messages & callbacks",
-      "description": "Take messages and callback requests. Core receptionist behaviour.",
+      "description": "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
       "core": true,
       "adapterKind": null,
       "configSchema": {
@@ -86,15 +96,6 @@
       "core": false,
       "adapterKind": null,
       "configSchema": {
-        "adapter": {
-          "type": "choice",
-          "label": "Where should quote requests go?",
-          "options": [
-            "internal",
-            "webhook"
-          ],
-          "default": "internal"
-        },
         "require": {
           "identity": {
             "type": "identityFields",
@@ -114,22 +115,6 @@
       }
     },
     {
-      "id": "directions",
-      "label": "Directions & location",
-      "description": "Give your address and directions.",
-      "core": false,
-      "adapterKind": null,
-      "configSchema": null
-    },
-    {
-      "id": "forms",
-      "label": "Forms & documents",
-      "description": "Explain how to get forms or paperwork.",
-      "core": false,
-      "adapterKind": null,
-      "configSchema": null
-    },
-    {
       "id": "transfer",
       "label": "Transfer to a person",
       "description": "Hand the caller to a human when they ask or when we cannot help.",
@@ -143,6 +128,7 @@
       {
         "id": "internal",
         "label": "Our built-in calendar",
+        "selfServe": true,
         "verifiableFields": [
           "phone_on_file",
           "phone_last4"
@@ -151,6 +137,7 @@
       {
         "id": "athenahealth",
         "label": "athenahealth",
+        "selfServe": false,
         "verifiableFields": [
           "name",
           "dob",
@@ -162,6 +149,7 @@
       {
         "id": "webhook",
         "label": "Send to my own system",
+        "selfServe": false,
         "verifiableFields": []
       }
     ]

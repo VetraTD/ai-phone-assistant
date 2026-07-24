@@ -142,6 +142,41 @@ const FIXTURES = {
     },
   },
 
+  // Appointments with availability ON, a built-in DOB requirement, and an
+  // operator note — locks the check-first booking guidance, the
+  // check_appointment_availability tool, and the CAPABILITY NOTES section.
+  "appointments-availability": {
+    config: {
+      businessName: "Brightwork Family Dental",
+      greeting: "Thanks for calling Brightwork Family Dental.",
+      timezone: "America/Chicago",
+      businessHours: WEEKLY_HOURS,
+      transferPhoneNumber: "+15551230000",
+      allowedTasks: normalizeAllowedTasks(["book_appointment", "check_appointment", "cancel_reschedule"]),
+      mainPhone: "555-0100",
+      generalInfo: null,
+      afterHoursPolicy: "take_message",
+      transferPolicy: "always",
+      languagesSpoken: ["en"],
+      customInstructions: null,
+      capabilities: {
+        appointments: {
+          enabled: true,
+          adapter: "internal",
+          availability: { length: 30, capacity: 1 },
+          require: { identity: { builtin: ["name", "dob"] } },
+          notes: "Ask whether they are a new or existing patient first.",
+        },
+      },
+    },
+    extras: {
+      knowledge: [],
+      callerContext: null,
+      transferAllowed: true,
+      integrations: [],
+    },
+  },
+
   // The non-appointment modules plus a custom webhook tool — exercises the
   // remaining CAPABILITIES branches and buildIntegrationTools' webhook path.
   "modules-and-webhook": {
@@ -151,11 +186,7 @@ const FIXTURES = {
       timezone: "America/Los_Angeles",
       businessHours: null,
       transferPhoneNumber: "+15557778888",
-      allowedTasks: normalizeAllowedTasks([
-        "quote_request",
-        "directions_location",
-        "form_document_request",
-      ]),
+      allowedTasks: normalizeAllowedTasks(["quote_request"]),
       mainPhone: "555-4321",
       generalInfo: null,
       afterHoursPolicy: "book_later",
@@ -234,7 +265,7 @@ describe("golden prompt snapshots — must not move during the capability-packs 
         // so the snapshot covers the real merged tool list, not the pieces.
         const declarations = [
           ...(buildCallTools(config.allowedTasks).functionDeclarations || []),
-          ...(buildIntegrationTools(extras.integrations).functionDeclarations || []),
+          ...(buildIntegrationTools(extras.integrations, config).functionDeclarations || []),
           ...(buildDbAppointmentTools(config, extras).functionDeclarations || []),
         ];
         await expect(JSON.stringify(declarations, null, 2)).toMatchFileSnapshot(
@@ -302,7 +333,7 @@ describe("prompt structure invariants the refactor must preserve", () => {
     for (const [name, fx] of Object.entries(FIXTURES)) {
       const declarations = [
         ...(buildCallTools(fx.config.allowedTasks).functionDeclarations || []),
-        ...(buildIntegrationTools(fx.extras.integrations).functionDeclarations || []),
+        ...(buildIntegrationTools(fx.extras.integrations, fx.config).functionDeclarations || []),
         ...(buildDbAppointmentTools(fx.config, fx.extras).functionDeclarations || []),
       ];
       const names = declarations.map((d) => d.name);

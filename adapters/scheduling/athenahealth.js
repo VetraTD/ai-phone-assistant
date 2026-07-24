@@ -15,6 +15,12 @@ export default {
   id: "athenahealth",
   label: "athenahealth",
 
+  // Not a self-serve dashboard choice: EHR onboarding is a partner process the
+  // operator sets up out of band. Stays a fully valid adapter in the engine so
+  // a clinic configured to it directly keeps working — it is just not offered
+  // in the settings picker.
+  selfServe: false,
+
   // An EHR holds the patient record, so it can genuinely check a caller
   // against name + date of birth — the same pair a human receptionist uses.
   // customfields.* is where a practice-specific identifier like a "dental
@@ -47,5 +53,6 @@ export default {
   book: null,
   cancel: null,
   reschedule: null,
+  checkAvailability: null,
   findSlots: null,
 };

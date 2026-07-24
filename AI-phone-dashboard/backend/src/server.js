@@ -161,6 +161,46 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Background calendar sync: push newly-booked appointments into connected
+// Google Calendars automatically, so the owner never has to click "Sync now".
+// A ~90s timer is the trigger today; post-GCP the same syncPendingAppointments
+// function can be driven by Cloud Scheduler instead (swap the trigger, keep the
+// work). Guarded so it only runs with real server credentials and never during
+// tests, and it self-disables (rather than spamming logs) if migration 021
+// hasn't been applied yet.
+function startCalendarSyncWorker() {
+  if (process.env.NODE_ENV === "test") return;
+  if (!process.env.GOOGLE_CLIENT_ID) return; // no Google config → nothing to sync
+  if (process.env.CALENDAR_AUTOSYNC_ENABLED === "false") return;
+
+  const calendarSync = require("./services/calendarSync");
+  const INTERVAL_MS = 90 * 1000;
+  let running = false;
+
+  const tick = async () => {
+    if (running) return; // never overlap slow cycles
+    running = true;
+    try {
+      const { created } = await calendarSync.syncPendingAppointments();
+      if (created > 0) console.log(`calendar auto-sync: pushed ${created} appointment(s)`);
+    } catch (err) {
+      if (calendarSync.isMissingSyncColumns(err)) {
+        console.error("calendar auto-sync disabled: apply migration 021 (appointments.google_event_id)");
+        clearInterval(handle);
+        return;
+      }
+      console.error("calendar auto-sync cycle failed:", err?.message);
+    } finally {
+      running = false;
+    }
+  };
+
+  const handle = setInterval(tick, INTERVAL_MS);
+  handle.unref?.(); // never keep the process alive just for the timer
+  // A short first pass so a fresh boot doesn't wait a full interval.
+  setTimeout(tick, 5000).unref?.();
+}
+
 // Only start listening when run directly (`node src/server.js` /
 // `nodemon src/server.js`) — not when required by a test harness, so
 // supertest can exercise `app` without binding a real port.
@@ -169,6 +209,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log("Dashboard backend running on port " + PORT);
   });
+  startCalendarSyncWorker();
 }
 
 module.exports = app;

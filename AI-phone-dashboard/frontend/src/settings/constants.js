@@ -27,8 +27,6 @@ export const MODULE_TASKS = [
   { key: "check_appointment", label: "Check appointments" },
   { key: "cancel_reschedule", label: "Cancel / reschedule" },
   { key: "quote_request", label: "Quotes" },
-  { key: "directions_location", label: "Directions" },
-  { key: "form_document_request", label: "Forms" },
 ];
 
 export const LANGUAGES = [
