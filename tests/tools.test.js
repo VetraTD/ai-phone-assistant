@@ -786,6 +786,32 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     });
   });
 
+  describe("ctx.depsOverride — capability deps injectability seam", () => {
+    it("when present, pack.execute receives ctx.depsOverride as deps instead of the real CAPABILITY_DEPS", async () => {
+      const fakeListAppointmentsByCaller = vi.fn().mockResolvedValue([{ id: "fake-appt" }]);
+      const fc = { id: "fcDep1", name: "get_caller_appointments_from_db", args: {} };
+      const ctx = {
+        ...baseCtx,
+        depsOverride: { listAppointmentsByCaller: fakeListAppointmentsByCaller },
+      };
+
+      const { stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(fakeListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+      expect(mockListAppointmentsByCaller).not.toHaveBeenCalled();
+      expect(stateEffects.capabilityState.appointments.selectedAppointmentId).toBe("fake-appt");
+    });
+
+    it("when absent, pack.execute receives the real CAPABILITY_DEPS", async () => {
+      mockListAppointmentsByCaller.mockResolvedValue([{ id: "appt-9" }]);
+      const fc = { id: "fcDep2", name: "get_caller_appointments_from_db", args: {} };
+
+      await executeToolCall(fc, baseCtx);
+
+      expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+    });
+  });
+
   describe("identity persistence + end_call gating (Phase 2)", () => {
     it("cancel: a previously verified appointment skips the DB identity lookup", async () => {
       mockUpdateAppointmentStatus.mockResolvedValue(true);

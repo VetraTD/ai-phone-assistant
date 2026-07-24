@@ -684,6 +684,59 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Generation config resolution — model + the numeric chatConfig knobs
+// ---------------------------------------------------------------------------
+
+const GENERATION_CONFIG_DEFAULTS = {
+  model: "gemini-2.5-flash",
+  temperature: 0.4,
+  thinkingBudget: 0,
+  maxOutputTokens: 200,
+};
+
+/**
+ * Resolve the model + generation knobs for a single getReplyStreaming call.
+ *
+ * Precedence (lowest to highest): hardcoded defaults, env vars (read here, at
+ * call time, so tests can set them without a module reload), then `overrides`.
+ * This is what lets an eval/benchmark harness swap models per-call via
+ * `extras.modelOverrides` without touching production behavior when nothing
+ * is set — the same call with no env vars and no overrides returns exactly
+ * the hardcoded defaults.
+ *
+ * Guard rails, applied per key: an empty-string env var is ignored; a numeric
+ * env var that fails to parse (NaN) is ignored; an override value of
+ * `undefined`/`null` is ignored. Any ignored value falls through to the next
+ * lower-precedence source.
+ *
+ * @param {object} [overrides]
+ * @param {string} [overrides.model]
+ * @param {number} [overrides.temperature]
+ * @param {number} [overrides.thinkingBudget]
+ * @param {number} [overrides.maxOutputTokens]
+ * @returns {{ model: string, temperature: number, thinkingBudget: number, maxOutputTokens: number }}
+ */
+export function resolveGenerationConfig(overrides) {
+  const envModel = process.env.GEMINI_MODEL;
+  const envTemperature = parseFloat(process.env.GEMINI_TEMPERATURE);
+  const envThinkingBudget = parseInt(process.env.GEMINI_THINKING_BUDGET, 10);
+  const envMaxOutputTokens = parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS, 10);
+
+  const pick = (override, envValue, fallback) => {
+    if (override !== undefined && override !== null) return override;
+    if (envValue !== undefined && envValue !== "" && !Number.isNaN(envValue)) return envValue;
+    return fallback;
+  };
+
+  return {
+    model: pick(overrides?.model, envModel, GENERATION_CONFIG_DEFAULTS.model),
+    temperature: pick(overrides?.temperature, envTemperature, GENERATION_CONFIG_DEFAULTS.temperature),
+    thinkingBudget: pick(overrides?.thinkingBudget, envThinkingBudget, GENERATION_CONFIG_DEFAULTS.thinkingBudget),
+    maxOutputTokens: pick(overrides?.maxOutputTokens, envMaxOutputTokens, GENERATION_CONFIG_DEFAULTS.maxOutputTokens),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Streaming variant — yields text deltas for real-time TTS (Media Streams)
 // ---------------------------------------------------------------------------
 
@@ -733,17 +786,18 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     ? history.slice(-MAX_HISTORY_TURNS)
     : history;
 
-  const model = "gemini-2.5-flash";
+  const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
+  const model = generationConfig.model;
   // Kept in a local so per-request calls below can replicate it: the SDK's
   // per-request `config` REPLACES (does not merge with) the chat-level
   // config, so a bare `{ abortSignal }` per call would silently drop tools/
   // systemInstruction/thinkingConfig/maxOutputTokens on that request.
   const chatConfig = {
-    temperature: 0.4,
+    temperature: generationConfig.temperature,
     systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
     tools: toolsConfig,
-    thinkingConfig: { thinkingBudget: 0 },
-    maxOutputTokens: 200,
+    thinkingConfig: { thinkingBudget: generationConfig.thinkingBudget },
+    maxOutputTokens: generationConfig.maxOutputTokens,
   };
   const chat = gemini.chats.create({
     model,
@@ -839,6 +893,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Per-capability scratchpad, carrying both what earlier turns left
         // behind and what earlier tools in THIS turn produced.
         capabilityState,
+        // Eval/benchmark harness seam: when set, services/tools.js hands this
+        // to a capability pack's execute in place of the real CAPABILITY_DEPS.
+        // undefined in production, where the real deps are always used.
+        depsOverride: extras?.capabilityDeps,
       };
       const { functionResponse, stateEffects } = await executeToolCall(fc, toolCtx);
       results.push({ functionResponse });
