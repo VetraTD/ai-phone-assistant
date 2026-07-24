@@ -21,6 +21,7 @@ import {
   toolBefore,
   toolSucceeded,
   replySomewhereMatches,
+  replyMatchesBeforeTool,
   replyNeverMatches,
   turnsAtMost,
   toolNotCalledBeforeTurn,
@@ -152,6 +153,33 @@ describe("replySomewhereMatches / replyNeverMatches", () => {
   it("replyNeverMatches is the inverse", () => {
     expect(replyNeverMatches(makeCtx(), /oak street/i).pass).toBe(true);
     expect(replyNeverMatches(makeCtx(), /booked/i).pass).toBe(false);
+  });
+});
+
+describe("replyMatchesBeforeTool", () => {
+  // A ctx where the receptionist asks for DOB in turn 0, then cancels in turn 1.
+  const askThenCancel = {
+    turns: [
+      { caller: "cancel my appointment", reply: "Sure — can I get your date of birth to verify?", toolCalls: [{ name: "get_caller_appointments_from_db", args: {} }] },
+      { caller: "March 3 1980", reply: "Done, that's cancelled.", toolCalls: [{ name: "cancel_appointment_db", args: {} }] },
+    ],
+  };
+  // A ctx where the model cancels in turn 0 (before any identity ask).
+  const cancelFirst = {
+    turns: [
+      { caller: "cancel my appointment", reply: "One moment.", toolCalls: [{ name: "cancel_appointment_db", args: {} }] },
+      { caller: "March 3 1980", reply: "What's your date of birth?", toolCalls: [{ name: "cancel_appointment_db", args: {} }] },
+    ],
+  };
+
+  it("passes when an asking reply precedes the tool-call turn", () => {
+    expect(replyMatchesBeforeTool(askThenCancel, /date of birth|dob/i, "cancel_appointment_db").pass).toBe(true);
+  });
+  it("fails when the tool is called before any asking reply", () => {
+    expect(replyMatchesBeforeTool(cancelFirst, /date of birth|dob/i, "cancel_appointment_db").pass).toBe(false);
+  });
+  it("passes vacuously when the tool was never called", () => {
+    expect(replyMatchesBeforeTool(askThenCancel, /nomatch/i, "reschedule_appointment_db").pass).toBe(true);
   });
 });
 

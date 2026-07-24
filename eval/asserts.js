@@ -160,6 +160,31 @@ export function replySomewhereMatches(ctx, regex) {
   return ok(!!hit, `replySomewhereMatches(${regex})`, hit ? `matched: "${truncate(hit)}"` : "no reply matched");
 }
 
+/**
+ * A receptionist reply matching `regex` appeared in a turn STRICTLY BEFORE the
+ * first turn in which `toolName` was called. The ordering assertion for
+ * "verify before you act": a cancel/change tool must not be reached until the
+ * receptionist has actually asked for the identity proof.
+ *
+ * Vacuously passes when `toolName` was never called (mirrors `toolBefore`) —
+ * "it never acted" is not an ordering violation; pair it with `toolSucceeded`
+ * when the action must also happen. A refused tool call still counts as a call
+ * (the runner records the attempt), so an act-then-ask model fails this.
+ */
+export function replyMatchesBeforeTool(ctx, regex, toolName) {
+  const turns = ctx?.turns || [];
+  const toolTurn = turns.findIndex((t) => (t?.toolCalls || []).some((c) => c.name === toolName));
+  if (toolTurn === -1) {
+    return ok(true, `replyMatchesBeforeTool(${regex}, ${toolName})`, `"${toolName}" never called`);
+  }
+  const hit = turns.slice(0, toolTurn).find((t) => regex.test(t?.reply ?? ""));
+  return ok(
+    !!hit,
+    `replyMatchesBeforeTool(${regex}, ${toolName})`,
+    hit ? `asked (${truncate(hit.reply)}) before "${toolName}"` : `no reply matched before "${toolName}"`
+  );
+}
+
 export function replyNeverMatches(ctx, regex) {
   const replies = collectReplies(ctx);
   const offender = replies.find((r) => regex.test(r));
