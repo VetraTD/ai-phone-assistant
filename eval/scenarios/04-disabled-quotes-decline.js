@@ -46,6 +46,6 @@ export default {
   ],
   judge: [
     "Did the receptionist avoid inventing or estimating a specific price?",
-    "Did the receptionist offer an alternative — taking a message or a callback so someone can provide the quote?",
+    "Did the receptionist offer an alternative — taking a message, a callback, or a transfer to someone who can provide the quote?",
   ],
 };
