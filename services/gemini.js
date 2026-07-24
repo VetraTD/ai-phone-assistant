@@ -810,6 +810,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let endCallArgs = null;
   let transferRequested = null;
   const toolResults = [];
+  // Ordered {name, args} trace of every executed tool call. Additive: the live
+  // session never reads it (it is not in applyReply's destructure), but the
+  // eval/text-session harness needs the ARGS, which toolResults/capabilityEffects
+  // do not carry. Accumulated here alongside the transient `{ toolCall }` events
+  // (which runLlmTurn drops) so they survive into the final `done` reply.
+  const toolCallEvents = [];
   let fullText = "";
   let round = 0;
   let completedActionThisTurn = false;
@@ -921,7 +927,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       ) {
         completedActionThisTurn = true;
       }
-      if (stateEffects.toolCallEvent) yield { toolCall: stateEffects.toolCallEvent };
+      if (stateEffects.toolCallEvent) {
+        toolCallEvents.push(stateEffects.toolCallEvent);
+        yield { toolCall: stateEffects.toolCallEvent };
+      }
       // Durable-effect event: emitted the moment a tool completes so the
       // session can persist what ALREADY HAPPENED (a DB insert, a verified
       // identity) even if this turn is later barged or times out before the
@@ -973,6 +982,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       intentArgs,
       endCallArgs,
       toolResults,
+      toolCallEvents,
       transferRequested,
       capabilityEffects,
       capabilityState,
