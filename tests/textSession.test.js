@@ -159,6 +159,37 @@ describe("createTextSession — sendTurn", () => {
     expect(runLlmTurn.mock.calls[0][0].step).toBe("identify_intent");
   });
 
+  it("threads accumulated capabilityState into extras on the NEXT turn (the KNOWN CALLER FACTS seam)", async () => {
+    // Turn 1: the LLM "books" — the reply carries a capabilityState patch with
+    // callerFacts, exactly like appointments.js's bookAppointment tool result.
+    runLlmTurn.mockImplementationOnce(
+      scriptTurn([
+        doneEvent({
+          text: "You're booked.",
+          capabilityState: {
+            appointments: {
+              callerFacts: { Name: "Jane", "Booked this call": "Thu Jul 30, 2:00 PM (checkup)" },
+            },
+          },
+        }),
+      ])
+    );
+    // Turn 2: a plain reply — what matters is what extras THIS call received.
+    runLlmTurn.mockImplementationOnce(scriptTurn([doneEvent({ text: "Anything else?" })]));
+
+    const { session } = newSession();
+    await session.sendTurn("book me for Thursday at 2");
+    await session.sendTurn("that's all");
+
+    expect(runLlmTurn.mock.calls).toHaveLength(2);
+    const secondTurnExtras = runLlmTurn.mock.calls[1][0].extras;
+    expect(secondTurnExtras.capabilityState).toEqual({
+      appointments: {
+        callerFacts: { Name: "Jane", "Booked this call": "Thu Jul 30, 2:00 PM (checkup)" },
+      },
+    });
+  });
+
   it("counts slow events and reports timings without mutating state", async () => {
     runLlmTurn.mockImplementation(
       scriptTurn([{ type: "slow" }, { type: "delta", text: "hi" }, doneEvent({ text: "hi" })])

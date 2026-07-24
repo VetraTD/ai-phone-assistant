@@ -946,21 +946,64 @@ export default {
  * @param {string|undefined} timezone
  * @returns {string}
  */
-function bookedFactValue(scheduledAtISO, serviceType, timezone) {
+// Exported (alongside the pack's default export) purely so tests can exercise
+// the timezone-fallback behavior directly, without needing to route a whole
+// booking through validateBookingTime — which independently calls
+// zonedWeekdayAndMinutes on the same config.timezone and would itself throw
+// on a genuinely invalid IANA zone before execution ever reached here.
+export function bookedFactValue(scheduledAtISO, serviceType, timezone) {
   const tz = timezone || "America/Chicago";
   const ms = Date.parse(scheduledAtISO);
-  const when = Number.isFinite(ms)
-    ? new Date(ms).toLocaleString("en-US", {
+  let when;
+  if (Number.isFinite(ms)) {
+    try {
+      when = new Date(ms).toLocaleString("en-US", {
         timeZone: tz,
         weekday: "short",
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
-      })
-    : String(scheduledAtISO);
+      });
+    } catch {
+      // An invalid-but-truthy timezone (bad config, typo) must not throw on
+      // the booking-success path — a caller fact is a nicety, not something
+      // worth failing the confirmation over. Fall back to the raw ISO string.
+      when = String(scheduledAtISO);
+    }
+  } else {
+    when = String(scheduledAtISO);
+  }
   const svc = typeof serviceType === "string" && serviceType.trim() ? ` (${serviceType.trim()})` : "";
   return `${when}${svc}`;
+}
+
+/** Reserved callerFacts label for the "a booking exists this call" fact. */
+const BOOKED_FACT_LABEL = "Booked this call";
+
+/**
+ * The current callerFacts map with the booked-appointment fact removed (when
+ * `bookedValue` is null/undefined, e.g. a successful cancel) or replaced with
+ * a new value (e.g. a successful reschedule), other facts (Name, etc.) intact.
+ *
+ * Per-capability merge (lib/capabilities/effects.js mergeCapabilityState) is
+ * shallow AT THE CAPABILITY LEVEL: writing `callerFacts` in a patch replaces
+ * the whole map rather than deep-merging into it. So the only way to drop or
+ * update just the booked-fact key while keeping siblings is to read the
+ * CURRENT map off ctx and write back a full replacement — a partial patch
+ * like `{ callerFacts: { [BOOKED_FACT_LABEL]: null } }` would not remove
+ * anything; it would just merge a null-valued key into the existing object on
+ * the next read (collectCallerFacts already skips non-string values, but the
+ * stale string would still be there until overwritten).
+ *
+ * @param {object} ctx
+ * @param {string|null|undefined} bookedValue
+ * @returns {Record<string,string>}
+ */
+function nextCallerFacts(ctx, bookedValue) {
+  const current = scratch(ctx).callerFacts || {};
+  const { [BOOKED_FACT_LABEL]: _drop, ...rest } = current;
+  return bookedValue ? { ...rest, [BOOKED_FACT_LABEL]: bookedValue } : rest;
 }
 
 /** The `n` free slots nearest a requested instant, as ISO strings. */
@@ -1148,7 +1191,7 @@ async function bookAppointment(fc, ctx) {
   const callerFacts = booked
     ? {
         ...(booked.client_name ? { Name: booked.client_name } : {}),
-        "Booked this call": bookedFactValue(booked.scheduled_at, booked.service_type, config.timezone),
+        [BOOKED_FACT_LABEL]: bookedFactValue(booked.scheduled_at, booked.service_type, config.timezone),
       }
     : null;
 
@@ -1285,8 +1328,17 @@ async function cancelAppointment(fc, ctx) {
           identityVerifiedApptId: appointmentId,
           // A cancelled appointment is no longer the one under discussion, and
           // the booking anchor must die with it: "cancel that, actually put me
-          // back in at the same time" has to perform a real insert.
-          ...(ok ? { selectedAppointmentId: null, lastBooked: null } : {}),
+          // back in at the same time" has to perform a real insert. The
+          // "Booked this call" caller fact must die with it too, or the tail
+          // keeps telling the model a cancelled booking still stands — other
+          // facts (e.g. Name) survive via nextCallerFacts.
+          ...(ok
+            ? {
+                selectedAppointmentId: null,
+                lastBooked: null,
+                callerFacts: nextCallerFacts(ctx, null),
+              }
+            : {}),
         },
       },
       ...(ok
@@ -1352,7 +1404,23 @@ async function rescheduleAppointment(fc, ctx) {
         appointmentId,
       },
       toolCallEvent: { name: fc.name, args: fc.args },
-      capabilityState: { appointments: { identityVerifiedApptId: appointmentId } },
+      capabilityState: {
+        appointments: {
+          identityVerifiedApptId: appointmentId,
+          // A successful reschedule moved the appointment to a new time — the
+          // "Booked this call" fact must reflect that new time, or the tail
+          // keeps asserting the OLD one every turn. Other facts (e.g. Name)
+          // survive via nextCallerFacts.
+          ...(ok
+            ? {
+                callerFacts: nextCallerFacts(
+                  ctx,
+                  bookedFactValue(newScheduledAt, fc.args?.service_type, (ctx.config || {}).timezone)
+                ),
+              }
+            : {}),
+        },
+      },
       ...(ok
         ? {
             capabilityEffects: [
