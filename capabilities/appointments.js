@@ -589,7 +589,7 @@ function validateBookingTime(rawScheduledAt, config) {
 // exactly once before the first name-bearing booking read-back, and the caller
 // is never asked to spell again for the rest of the call.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- Before the first read-back of a booking that includes the caller's name, confirm the spelling of their name once: ask them to spell it — e.g. "Just to make sure I have it right, could you spell your last name?" — and read the letters back to confirm you have it right. Treat that confirmed spelling (or the name as you heard it, if they'd rather not spell it) as correct, and do not ask them to spell it again for the rest of the call.\n`;
+  `- Before the first read-back of a booking that includes the caller's name, confirm the spelling of their name once: ask them to spell it — e.g. "Just to make sure I have it right, could you spell your last name?" — and read the letters back to confirm you have it right. Ask this at most once. If the caller spells it, use that spelling; if they decline, ignore the request, or just answer with something else, proceed with the name exactly as you heard it — never ask them to spell it a second time. Once you have moved past this step, treat the name as settled and do not raise spelling again for the rest of the call.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
