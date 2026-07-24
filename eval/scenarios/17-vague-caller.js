@@ -19,6 +19,11 @@ export default {
       "options do you settle on booking a new appointment.",
     maxTurns: 6,
   },
+  // FLOOR (safety property): this gate passes even if the model does nothing
+  // at all (never books). It exists to catch a concrete failure mode (booking
+  // on a guess before intent is clear), not to prove the happy path — the
+  // judge questions below carry the happy-path signal (asks a clarifying
+  // question with concrete options).
   hard: [
     // Must not book before the caller's intent is even established (first turn).
     (ctx) => A.toolNotCalledBeforeTurn(ctx, "book_appointment", 1),

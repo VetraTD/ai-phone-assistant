@@ -171,4 +171,33 @@ describe("toolNotCalledBeforeTurn", () => {
     // book_appointment appears in turn index 1, which is before turn index 2.
     expect(toolNotCalledBeforeTurn(makeCtx(), "book_appointment", 2).pass).toBe(false);
   });
+
+  describe("regression: truncated-run shape from scenarios/05-end-call-gating", () => {
+    // run.js breaks its scripted-turn loop as soon as end_call fires
+    // (callerEndedByReceptionist), so a receptionist that hangs up on turn 0
+    // of a 3-line script produces a ctx.turns of length 1 — the run never
+    // reaches turns 1 and 2 to record them. This reproduces exactly that
+    // truncated shape: a 3-line script, end_call fired on turn 0.
+    const SCRIPT_LENGTH = 3;
+    const truncatedCtx = {
+      turns: [{ caller: "Hi there, I'd like to book an appointment.", toolCalls: [{ name: "end_call", args: {} }] }],
+    };
+
+    it("the vacuous formula (derived from ctx.turns.length) never catches the early end_call", () => {
+      // This is the ORIGINAL bug: Math.max(0, ctx.turns.length - 1) shrinks to
+      // match wherever the run got cut short, so the loop in
+      // toolNotCalledBeforeTurn never even inspects turn 0.
+      const vacuousThreshold = Math.max(0, truncatedCtx.turns.length - 1); // = 0
+      expect(toolNotCalledBeforeTurn(truncatedCtx, "end_call", vacuousThreshold).pass).toBe(true);
+    });
+
+    it("the fixed formula (derived from the scripted turn count) correctly fails it", () => {
+      // The fix: anchor the threshold to the SCRIPTED turn list length, not
+      // the (possibly truncated) recorded ctx.turns length.
+      const fixedThreshold = SCRIPT_LENGTH - 1; // = 2, regardless of truncation
+      const result = toolNotCalledBeforeTurn(truncatedCtx, "end_call", fixedThreshold);
+      expect(result.pass).toBe(false);
+      expect(result.detail).toMatch(/called in turn 0/);
+    });
+  });
 });

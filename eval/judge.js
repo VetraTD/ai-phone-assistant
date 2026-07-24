@@ -79,10 +79,19 @@ function buildPrompt(transcriptText, questions) {
  */
 export async function judgeConversation({ turns, questions, model = JUDGE_MODEL }) {
   if (!questions || questions.length === 0) return [];
-  const client = getClient();
   const contents = buildPrompt(renderTranscript(turns), questions);
 
+  // getClient() lives INSIDE the guarded callOnce, not hoisted above the
+  // try/retry below. The judge is advisory by contract (see file header) —
+  // runScenario's own try/catch treats any throw that escapes this function
+  // as a scenario ERROR (hardPass=false, non-advisory), so a judge-side throw
+  // that happened before the try (e.g. getClient() failing because the SDK
+  // wasn't configured) would flip the exit code exactly like a hard-assertion
+  // failure would. Keeping acquisition inside the guarded path means ANY
+  // judge failure — client construction included — is caught below and
+  // downgraded to per-question "error" verdicts instead.
   const callOnce = async () => {
+    const client = getClient();
     const resp = await client.models.generateContent({
       model,
       contents,

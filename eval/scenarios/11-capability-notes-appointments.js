@@ -33,6 +33,11 @@ export default {
       `Friday isn't available for new patients and offers Monday, accept the Monday they propose and confirm.`,
     maxTurns: 8,
   },
+  // FLOOR (safety property): this gate passes even if the model does nothing
+  // at all (never books at all, Friday or otherwise). It exists to catch a
+  // concrete failure mode (booking the new patient on a Friday against
+  // policy), not to prove the happy path — the judge questions below carry
+  // the happy-path signal (declines Friday, offers Monday).
   hard: [
     (ctx) =>
       A.toolNotCalledWith(

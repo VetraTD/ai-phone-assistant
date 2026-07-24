@@ -32,6 +32,11 @@ export default {
       "Oh okay. What can we do then?",
     ],
   },
+  // FLOOR (safety property): this gate passes even if the model does nothing
+  // at all (never books). It exists to catch a concrete failure mode (quietly
+  // booking outside business hours), not to prove the happy path — the judge
+  // questions below carry the happy-path signal (says it's closed, offers a
+  // message).
   hard: [(ctx) => A.toolNotCalled(ctx, "book_appointment")],
   judge: [
     "Did the receptionist make clear it cannot book an appointment right now because the office is closed, rather than proceeding to collect booking details?",
