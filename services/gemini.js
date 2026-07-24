@@ -714,11 +714,24 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // beside the step state it complements). Reuse the caller-fact sanitizer:
   // collapse whitespace, strip ===/[BEGIN/[END structure tokens, cap length —
   // greeting is operator free-text and must not be able to inject prompt framing.
+  //
+  // Quoting is gated on config._hasCustomGreeting: lib/voice/session.js
+  // buildGreeting only ever speaks config.greeting verbatim when that flag is
+  // true. Otherwise (services/supabase.js loadConfig's default state) it
+  // synthesizes a time-of-day + business-name line the caller actually heard,
+  // and config.greeting still holds the generic DEFAULT_GREETING text — quoting
+  // that would tell the model the caller heard words they never did. Fall back
+  // to a content-free directive that still stops the re-greet.
   if (typeof config.greeting === "string" && config.greeting.trim()) {
-    const greeting = sanitizeFact(config.greeting, 300);
-    if (greeting) {
+    if (config._hasCustomGreeting === true) {
+      const greeting = sanitizeFact(config.greeting, 300);
+      if (greeting) {
+        taskState = `${taskState.replace(/\n+$/, "")}\n` +
+          `The caller was already greeted with: "${greeting}" — do not greet them again.`;
+      }
+    } else {
       taskState = `${taskState.replace(/\n+$/, "")}\n` +
-        `The caller was already greeted with: "${greeting}" — do not greet them again.`;
+        `The caller was already greeted — do not greet them again.`;
     }
   }
   sections.push(taskState);

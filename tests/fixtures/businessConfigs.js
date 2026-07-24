@@ -34,6 +34,7 @@ export const FIXTURES = {
     config: {
       businessName: "Riverside Family Clinic",
       greeting: "Thanks for calling Riverside Family Clinic.",
+      _hasCustomGreeting: true,
       timezone: "America/Chicago",
       businessHours: WEEKLY_HOURS,
       transferPhoneNumber: "+15551230000",
@@ -72,6 +73,7 @@ export const FIXTURES = {
     config: {
       businessName: "Acme Dental",
       greeting: "Thanks for calling Acme Dental.",
+      _hasCustomGreeting: true,
       timezone: "America/Chicago",
       businessHours: { open_time: "09:00", close_time: "17:00" },
       transferPhoneNumber: null,
@@ -103,6 +105,7 @@ export const FIXTURES = {
     config: {
       businessName: "Dave's Plumbing",
       greeting: "Dave's Plumbing, how can I help?",
+      _hasCustomGreeting: true,
       timezone: "America/New_York",
       businessHours: WEEKLY_HOURS,
       transferPhoneNumber: "+15559990000",
@@ -129,6 +132,7 @@ export const FIXTURES = {
     config: {
       businessName: "Brightwork Family Dental",
       greeting: "Thanks for calling Brightwork Family Dental.",
+      _hasCustomGreeting: true,
       timezone: "America/Chicago",
       businessHours: WEEKLY_HOURS,
       transferPhoneNumber: "+15551230000",
@@ -163,6 +167,7 @@ export const FIXTURES = {
     config: {
       businessName: "Northside Law",
       greeting: "Northside Law, how may I direct your call?",
+      _hasCustomGreeting: true,
       timezone: "America/Los_Angeles",
       businessHours: null,
       transferPhoneNumber: "+15557778888",

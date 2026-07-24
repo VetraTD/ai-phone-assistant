@@ -39,6 +39,7 @@ const M = {
 const CONFIG = {
   businessName: "Marker Test Clinic",
   greeting: M.greeting,
+  _hasCustomGreeting: true,
   timezone: "America/Chicago",
   businessHours: null,
   transferPhoneNumber: "+15551230000",

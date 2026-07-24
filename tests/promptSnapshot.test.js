@@ -155,3 +155,44 @@ describe("prompt structure invariants the refactor must preserve", () => {
     }
   });
 });
+
+describe("greeting-context tail line only quotes what the caller actually heard", () => {
+  // lib/voice/session.js buildGreeting speaks config.greeting verbatim ONLY when
+  // config._hasCustomGreeting is true; otherwise it synthesizes a time-of-day +
+  // business-name line and config.greeting still holds the generic
+  // DEFAULT_GREETING (services/supabase.js loadConfig). The tail line must not
+  // quote text the caller never heard.
+  const { config: base, extras } = FIXTURES["appointments-db"];
+
+  it("custom greeting (_hasCustomGreeting: true) -> quoted line naming the greeting", () => {
+    const config = { ...base, greeting: "Thanks for calling Acme Dental.", _hasCustomGreeting: true };
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain(
+      'The caller was already greeted with: "Thanks for calling Acme Dental." — do not greet them again.'
+    );
+  });
+
+  it("greeting present but _hasCustomGreeting falsy -> generic line, nothing quoted", () => {
+    const config = { ...base, greeting: "Hi, how can I help you today?", _hasCustomGreeting: false };
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain("The caller was already greeted — do not greet them again.");
+    expect(tail).not.toContain("already greeted with:");
+    expect(tail).not.toContain("Hi, how can I help you today?");
+  });
+
+  it("greeting present but _hasCustomGreeting absent (unset) -> same generic fallback", () => {
+    const config = { ...base, greeting: "Hi, how can I help you today?" };
+    delete config._hasCustomGreeting;
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain("The caller was already greeted — do not greet them again.");
+    expect(tail).not.toContain("already greeted with:");
+  });
+
+  it("no greeting at all -> no re-greet line of either form", () => {
+    const config = { ...base };
+    delete config.greeting;
+    delete config._hasCustomGreeting;
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).not.toContain("already greeted");
+  });
+});
