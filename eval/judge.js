@@ -18,7 +18,9 @@
 import { Type } from "@google/genai";
 import { getClient } from "../services/gemini.js";
 
-const JUDGE_MODEL = "gemini-2.5-flash";
+// 2.5-flash retires 2026-10-16 — bump this default before then. Override the
+// judge model per-run with EVAL_JUDGE_MODEL (string only; empty falls through).
+const JUDGE_MODEL = process.env.EVAL_JUDGE_MODEL || "gemini-2.5-flash";
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,

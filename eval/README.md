@@ -146,6 +146,8 @@ CLI flags take precedence over env, env over the built-in defaults.
 | `GEMINI_THINKING_BUDGET` | `0` | Thinking-token budget; `0` = no thinking, minimize latency. `--thinking-budget` overrides. |
 | `GEMINI_MAX_OUTPUT_TOKENS` | `200` | Output cap per turn. Truncation telemetry (`MAX_TOKENS` turns) in the report tracks how often this bites. |
 | `GEMINI_HISTORY_MAX_TURNS` | `20` | How many prior turns are replayed into the prompt. |
+| `EVAL_JUDGE_MODEL` | `gemini-2.5-flash` | Model for the advisory LLM judge. 2.5-flash retires 2026-10-16 — bump this default before then. |
+| `EVAL_SIMCALLER_MODEL` | `gemini-2.5-flash` | Model for the simulated caller in `mode: "sim"` scenarios. 2.5-flash retires 2026-10-16 — bump this default before then. |
 | `ELEVENLABS_MODEL` | — | TTS model id (live pipeline only; inert in the text harness). |
 | `ELEVENLABS_DISABLE_PREVIOUS_TEXT` | — | Drops the prior-text continuity hint sent to ElevenLabs (live pipeline only). |
 | `STT_ENDPOINTING_MS` | — | Deepgram end-of-speech silence window (live pipeline only). |

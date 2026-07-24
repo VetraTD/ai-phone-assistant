@@ -34,7 +34,15 @@ const CALLER_RULES = [
  * @param {number} [params.temperature]
  * @returns {{ next: (receptionistReply: string) => Promise<string> }}
  */
-export function createSimCaller({ persona, goal, model = "gemini-2.5-flash", temperature = 0.7 }) {
+// EVAL_SIMCALLER_MODEL overrides the default simulated-caller model per-run
+// (string only; empty falls through). 2.5-flash retires 2026-10-16 — bump this
+// default before then.
+export function createSimCaller({
+  persona,
+  goal,
+  model = process.env.EVAL_SIMCALLER_MODEL || "gemini-2.5-flash",
+  temperature = 0.7,
+}) {
   const client = getClient();
   const systemInstruction =
     `${CALLER_RULES}\n\n` +
