@@ -2,8 +2,11 @@
  * FREETEXT: a business-defined WEBHOOK integration whose free-text `description`
  * tells the model when to use it. buildIntegrationTools (services/gemini.js)
  * turns the integration into a tool named after `name`, with the operator's
- * `description` verbatim (bounded to 500 chars) as the tool description — so the
- * description is the only thing steering the model to reach for it. A caller asks
+ * `description` verbatim (bounded to 500 chars) as the tool description. Caveat:
+ * the tool NAME (`check_order_status`) is itself a strong signal to a tool-calling
+ * model, so this scenario proves the webhook integration mechanism end-to-end and
+ * that the description is honored — it does NOT isolate the description's
+ * contribution from the name's. A caller asks
  * about an existing order; a correct receptionist calls the tool with the order
  * number rather than guessing a status.
  *
