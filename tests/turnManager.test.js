@@ -281,4 +281,114 @@ describe("turnManager.js — createTurnManager", () => {
       expect(() => tm.handleFinal(null)).not.toThrow();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Self-echo suppression (lib/voice/echoGuard.js)
+  //
+  // On a speakerphone the AI's own voice comes back through the caller's mic
+  // with real energy behind it, so neither the VAD nor the playback window can
+  // tell it from caller speech. Only content can.
+  // ---------------------------------------------------------------------------
+  describe("echo suppression", () => {
+    /** A guard that calls exactly the listed texts echo, and nothing else. */
+    function echoGuardFor(...echoTexts) {
+      return {
+        classify: vi.fn((text) =>
+          echoTexts.includes(text)
+            ? { isEcho: true, reason: "echo", ratio: 1, novel: 0 }
+            : { isEcho: false, reason: "low_overlap", ratio: 0, novel: 9 }
+        ),
+      };
+    }
+
+    it("an echo interim does NOT interrupt, even with VAD confirming voice", () => {
+      // The speakerphone reproduction condition: echo is loud, so the VAD
+      // says yes. Before the guard existed, this is the call cutting itself
+      // off mid-sentence.
+      const d = makeDeps({ speaking: true, vadActive: true });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: echoGuardFor("We're open Monday through Friday"),
+        now: () => 1000,
+      });
+
+      const r = t.handleInterim("We're open Monday through Friday");
+      expect(r).toEqual({ action: "ignore", reason: "echo" });
+      expect(d.onInterrupt).not.toHaveBeenCalled();
+    });
+
+    it("an echo final while the AI is still audible neither interrupts NOR ends the turn", () => {
+      const d = makeDeps({ speaking: true, vadActive: true });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: echoGuardFor("We're open Monday through Friday"),
+        now: () => 1000,
+      });
+
+      const r = t.handleFinal("We're open Monday through Friday");
+      expect(r).toEqual({ action: "ignore", reason: "echo" });
+      expect(d.onInterrupt).not.toHaveBeenCalled();
+      expect(d.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("an echo final arriving after the AI went quiet also does not end the turn", () => {
+      // This is the one that fed the AI its own sentence as caller input. The
+      // quiet branch reaches endTurn directly, so a check placed only in the
+      // speaking branch would miss it.
+      const d = makeDeps({ speaking: false, vadActive: false });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: echoGuardFor("We're open Monday through Friday"),
+        now: () => 1000,
+      });
+
+      const r = t.handleFinal("We're open Monday through Friday");
+      expect(r).toEqual({ action: "ignore", reason: "echo" });
+      expect(d.onTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it("a non-echo final still ends the turn normally while the guard is installed", () => {
+      const d = makeDeps({ speaking: false, vadActive: false });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: echoGuardFor("We're open Monday through Friday"),
+        now: () => 1000,
+      });
+
+      const r = t.handleFinal("I need to cancel my appointment");
+      expect(r).toEqual({ action: "turn_end" });
+      expect(d.onTurnEnd).toHaveBeenCalledWith("I need to cancel my appointment");
+    });
+
+    it("a real interruption still interrupts while the guard is installed", () => {
+      const d = makeDeps({ speaking: true, vadActive: true });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: echoGuardFor("something else entirely"),
+        now: () => 1000,
+      });
+
+      const r = t.handleInterim("wait");
+      expect(r).toEqual({ action: "interrupt" });
+      expect(d.onInterrupt).toHaveBeenCalled();
+    });
+
+    it("a guard that throws is treated as 'not echo', never as a reason to drop caller speech", () => {
+      const d = makeDeps({ speaking: false, vadActive: false });
+      const t = createTurnManager({
+        ...d,
+        echoGuard: { classify: () => { throw new Error("boom"); } },
+        now: () => 1000,
+      });
+
+      expect(t.handleFinal("I need to cancel my appointment")).toEqual({ action: "turn_end" });
+      expect(d.onTurnEnd).toHaveBeenCalled();
+    });
+
+    it("with NO guard injected, behavior is exactly as before", () => {
+      const d = makeDeps({ speaking: true, vadActive: true });
+      const t = createTurnManager({ ...d, now: () => 1000 });
+      expect(t.handleInterim("we are open monday through friday")).toEqual({ action: "interrupt" });
+    });
+  });
 });

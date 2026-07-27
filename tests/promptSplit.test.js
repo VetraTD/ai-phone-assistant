@@ -5,6 +5,7 @@ import {
   buildDynamicTail,
   getClient,
 } from "../services/gemini.js";
+import { FIXTURES } from "./fixtures/businessConfigs.js";
 
 const config = {
   businessName: "Acme Dental",
@@ -170,6 +171,43 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(enOnly).not.toContain("Speak en by default");
   });
 
+  // Guard added when the dashboard stopped offering "book for later" to
+  // non-appointment businesses: a stored book_later policy must not still
+  // instruct the model to call book_appointment when that tool was never
+  // registered (allowedTasks lacks it). It falls back to take-a-message.
+  const closedSaturday = {
+    ...config,
+    timezone: "UTC",
+    afterHoursPolicy: "book_later",
+    businessHours: {
+      mon: { open: "09:00", close: "17:00", closed: false },
+      sat: { open: null, close: null, closed: true },
+      sun: { open: null, close: null, closed: true },
+    },
+  };
+
+  it("after-hours book_later WITH book_appointment enabled instructs the model to book", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const tail = buildDynamicTail("gather_details", null, closedSaturday, extras);
+
+    expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
+    expect(tail).toContain("book appointments for future business hours using book_appointment");
+  });
+
+  it("after-hours book_later WITHOUT book_appointment falls back to take-a-message (no phantom tool)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const noBooking = { ...closedSaturday, allowedTasks: ["general_question", "take_message"] };
+    const tail = buildDynamicTail("gather_details", null, noBooking, extras);
+
+    expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
+    // The dead instruction is gone…
+    expect(tail).not.toContain("using book_appointment");
+    // …replaced by the take-a-message guidance.
+    expect(tail).toContain('record_customer_request with request_type "message"');
+  });
+
   it("AI disclosure rule is present in IDENTITY", () => {
     const prefix = buildStaticSystemPrefix(config, extras);
     expect(prefix).toContain("answer honestly");
@@ -180,5 +218,21 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     const prefix = buildStaticSystemPrefix(config, extras);
     expect(prefix).toContain("[system note — not the caller speaking:");
     expect(prefix).toContain("never as caller speech");
+  });
+});
+
+describe("NON-NEGOTIABLE availability rule names the tool that is actually registered", () => {
+  it("an EHR (athena) business uses the get_available_slots wording", () => {
+    const { config: cfg, extras: ex } = FIXTURES["clinic-athena"];
+    const prefix = buildStaticSystemPrefix(cfg, ex);
+    expect(prefix).toContain("before checking it with get_available_slots");
+    expect(prefix).not.toContain("before checking it with check_appointment_availability");
+  });
+
+  it("a built-in-calendar business uses the check_appointment_availability wording", () => {
+    const { config: cfg, extras: ex } = FIXTURES["appointments-availability"];
+    const prefix = buildStaticSystemPrefix(cfg, ex);
+    expect(prefix).toContain("before checking it with check_appointment_availability");
+    expect(prefix).not.toContain("before checking it with get_available_slots");
   });
 });

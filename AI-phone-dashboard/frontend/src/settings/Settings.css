@@ -1,0 +1,916 @@
+/*
+ * Settings page visual system.
+ *
+ * Everything here is namespaced under .set-* and scoped inside .set-root, so
+ * it cannot leak into Dashboard.css's surfaces (which the Dashboard, Analytics,
+ * Appointments and Guide pages all still depend on). The settings sections used
+ * to borrow .panel / .filter-field / .dashboard-logout from there, which is how
+ * a *logout* button ended up styling the page's primary Save action and how
+ * `.filter-field input { width: 100%; height: 46px }` ended up stretching every
+ * checkbox in the page to 584x46 pixels.
+ */
+
+.set-root {
+  /* Status colours. Previously these were loose hex literals inline in six
+     different components (#1f8a4c, #b91c1c, rgba(220,80,80,.3)) with no shared
+     meaning. Each foreground here clears 4.5:1 on its own background. */
+  --set-success: #0f7040;
+  --set-success-bg: #e9f6ef;
+  --set-success-border: rgba(15, 112, 64, 0.24);
+  --set-warn: #8a4b04;
+  --set-warn-bg: #fdf3e4;
+  --set-warn-border: rgba(138, 75, 4, 0.26);
+  --set-danger: #b3231b;
+  --set-danger-bg: #fdecea;
+  --set-danger-border: rgba(179, 35, 27, 0.26);
+
+  --set-radius-control: 10px;
+  --set-radius-panel: 16px;
+  --set-elevation: 0 1px 2px rgba(20, 48, 82, 0.06), 0 8px 24px rgba(20, 48, 82, 0.06);
+  --set-rail-width: 244px;
+  /* The save bar is sticky; the rail sticks below it. One number so the two
+     can never drift apart. */
+  --set-savebar-height: 68px;
+
+  display: grid;
+  gap: 18px;
+}
+
+/* Visible to assistive tech, not to the eye. Used wherever a visual cue (a
+   dot, a colour, an icon) needs a word behind it. */
+.set-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─────────────────────────────  Save bar  ───────────────────────────── */
+
+.set-savebar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-height: var(--set-savebar-height);
+  padding: 12px 20px;
+  border-radius: var(--set-radius-panel);
+  border: 1px solid var(--vetra-border);
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--set-elevation);
+}
+
+.set-savebar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.set-savebar-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vetra-text);
+}
+
+.set-savebar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The status word carries the state; the dot only reinforces it, so the
+   information survives for anyone who cannot separate the two colours. */
+.set-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vetra-muted);
+}
+
+.set-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.set-status-dirty { color: var(--set-warn); }
+.set-status-saved { color: var(--set-success); }
+.set-status-error { color: var(--set-danger); }
+
+/* Changed-settings disclosure */
+
+.set-changes {
+  position: relative;
+}
+
+.set-changes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--set-warn-border);
+  background: var(--set-warn-bg);
+  color: var(--set-warn);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.set-changes-toggle:hover { background: #fbecd6; }
+
+.set-changes-chevron {
+  transition: transform 0.18s ease;
+}
+
+.set-changes-toggle[aria-expanded="true"] .set-changes-chevron {
+  transform: rotate(180deg);
+}
+
+.set-changes-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 280px;
+  max-width: min(360px, calc(100vw - 48px));
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-card);
+  box-shadow: 0 18px 44px var(--vetra-shadow-strong);
+}
+
+.set-changes-menu-title {
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vetra-muted-soft);
+}
+
+.set-changes-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--vetra-text);
+  cursor: pointer;
+}
+
+.set-changes-item:hover { background: var(--vetra-bg-2); }
+
+.set-changes-item-group {
+  font-size: 12px;
+  color: var(--vetra-muted-soft);
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────  Layout  ───────────────────────────── */
+
+.set-body {
+  display: grid;
+  grid-template-columns: var(--set-rail-width) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.set-rail {
+  position: sticky;
+  top: calc(var(--set-savebar-height) + 18px);
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--set-radius-panel);
+  border: 1px solid var(--vetra-border);
+  background: var(--vetra-card);
+  box-shadow: var(--set-elevation);
+}
+
+.set-rail-tab {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  min-height: 52px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  text-align: left;
+  color: var(--vetra-muted);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.set-rail-tab:hover {
+  background: var(--vetra-bg-2);
+  color: var(--vetra-text);
+}
+
+.set-rail-tab.is-active {
+  background: linear-gradient(135deg, rgba(58, 143, 242, 0.12), rgba(53, 215, 210, 0.12));
+  border-color: rgba(58, 143, 242, 0.28);
+  color: var(--vetra-text);
+}
+
+.set-rail-icon {
+  display: grid;
+  place-items: center;
+  color: var(--vetra-muted-soft);
+}
+
+.set-rail-tab.is-active .set-rail-icon { color: var(--vetra-blue); }
+
+.set-rail-text { min-width: 0; }
+
+.set-rail-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.set-rail-caption {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--vetra-muted-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-rail-tab.is-active .set-rail-caption { color: var(--vetra-muted); }
+
+.set-rail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--set-warn);
+  flex: none;
+}
+
+/* ─────────────────────────────  Group  ───────────────────────────── */
+
+.set-group { display: grid; gap: 16px; }
+
+.set-group:focus-visible { outline: none; }
+
+.set-group-head { display: grid; gap: 4px; padding: 2px 2px 0; }
+
+.set-group-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vetra-text);
+}
+
+.set-group-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--vetra-muted);
+  max-width: 68ch;
+}
+
+/* Two columns only where panels are genuinely short. Panels opt in. */
+.set-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+/* ─────────────────────────────  Panel  ───────────────────────────── */
+
+.set-panel {
+  display: grid;
+  gap: 0;
+  border-radius: var(--set-radius-panel);
+  border: 1px solid var(--vetra-border);
+  background: var(--vetra-card);
+  box-shadow: var(--set-elevation);
+  overflow: hidden;
+}
+
+.set-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 18px 20px 0;
+}
+
+.set-panel-headings { display: grid; gap: 4px; min-width: 0; }
+
+.set-panel-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--vetra-text);
+}
+
+.set-panel-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--vetra-muted);
+  max-width: 62ch;
+}
+
+.set-panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.set-panel-body {
+  display: grid;
+  gap: 18px;
+  padding: 18px 20px 20px;
+}
+
+.set-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  border-top: 1px solid var(--vetra-border);
+  background: var(--vetra-bg);
+}
+
+.set-panel.is-muted { opacity: 0.72; }
+
+/* A connector line for two panels that must be read together — the transfer
+   capability and its rules, the hours and what happens outside them. */
+.set-note {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(58, 143, 242, 0.22);
+  background: rgba(58, 143, 242, 0.06);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--vetra-text);
+}
+
+.set-note-icon { color: var(--vetra-blue); flex: none; margin-top: 1px; }
+
+/* ─────────────────────────────  Pills  ───────────────────────────── */
+
+.set-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--vetra-muted);
+  white-space: nowrap;
+}
+
+.set-pill-on {
+  border-color: var(--set-success-border);
+  background: var(--set-success-bg);
+  color: var(--set-success);
+}
+
+.set-pill-locked {
+  border-color: rgba(58, 143, 242, 0.28);
+  background: rgba(58, 143, 242, 0.08);
+  color: #1a5fb4;
+}
+
+.set-pill-unsaved {
+  border-color: var(--set-warn-border);
+  background: var(--set-warn-bg);
+  color: var(--set-warn);
+}
+
+/* ─────────────────────────────  Fields  ───────────────────────────── */
+
+.set-field { display: grid; gap: 7px; }
+
+.set-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vetra-text);
+}
+
+.set-optional {
+  margin-left: 6px;
+  font-weight: 500;
+  color: var(--vetra-muted-soft);
+}
+
+.set-recommended {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(58, 143, 242, 0.3);
+  background: rgba(58, 143, 242, 0.08);
+  color: #1a5fb4;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  vertical-align: middle;
+}
+
+.set-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vetra-muted);
+  max-width: 62ch;
+}
+
+.set-field-error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--set-danger);
+}
+
+.set-count {
+  font-size: 12px;
+  color: var(--vetra-muted-soft);
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+}
+
+/* Type selectors, not a bare `input`, so a checkbox or radio can never inherit
+   text-input geometry. That is the exact bug this file replaces. */
+.set-root input[type="text"],
+.set-root input[type="email"],
+.set-root input[type="tel"],
+.set-root input[type="number"],
+.set-root input[type="time"],
+.set-root input:not([type]),
+.set-root select,
+.set-root textarea {
+  width: 100%;
+  padding: 0 14px;
+  border-radius: var(--set-radius-control);
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  color: var(--vetra-text);
+  outline: none;
+  /* 16px, not 14px — below 16px iOS Safari zooms the page on focus. */
+  font-size: 16px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.set-root input[type="text"],
+.set-root input[type="email"],
+.set-root input[type="tel"],
+.set-root input[type="number"],
+.set-root input[type="time"],
+.set-root input:not([type]),
+.set-root select {
+  height: 46px;
+}
+
+.set-root textarea {
+  padding: 12px 14px;
+  min-height: 96px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.set-root input::placeholder,
+.set-root textarea::placeholder { color: var(--vetra-muted-soft); }
+
+.set-root input:focus-visible,
+.set-root select:focus-visible,
+.set-root textarea:focus-visible {
+  border-color: var(--vetra-blue);
+  box-shadow: 0 0 0 4px rgba(58, 143, 242, 0.16);
+  background: var(--vetra-card);
+}
+
+.set-root input:disabled,
+.set-root select:disabled,
+.set-root textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* One focus treatment for everything that is not a text box. */
+.set-root button:focus-visible,
+.set-root [role="tab"]:focus-visible,
+.set-root input[type="checkbox"]:focus-visible,
+.set-root input[type="radio"]:focus-visible,
+.set-root a:focus-visible {
+  outline: 2px solid var(--vetra-blue);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ─────────────────────  Checkboxes and radios  ───────────────────── */
+
+.set-check {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 9px 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--vetra-text);
+  cursor: pointer;
+  /* 44px tall including padding, so it is a real touch target */
+  min-height: 44px;
+  align-content: center;
+}
+
+.set-check input[type="checkbox"],
+.set-check input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--vetra-blue);
+  cursor: pointer;
+  flex: none;
+}
+
+.set-check-text { min-width: 0; }
+
+.set-check-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--vetra-muted);
+}
+
+.set-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 2px 18px;
+}
+
+/* A fieldset that looks like nothing, so grouping is announced without
+   dragging the browser's default legend/border chrome into the design. */
+.set-fieldset {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.set-legend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vetra-text);
+}
+
+/* ─────────────────────────  Choice cards  ───────────────────────── */
+
+.set-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.set-choice {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.set-choice:hover { border-color: rgba(58, 143, 242, 0.5); }
+
+.set-choice.is-selected {
+  border-color: var(--vetra-blue);
+  background: var(--vetra-card);
+  box-shadow: 0 0 0 3px rgba(58, 143, 242, 0.16);
+}
+
+/* The radio stays a real focusable radio; it is only visually collapsed onto
+   the card so arrow-key selection and :checked keep working. */
+.set-choice input[type="radio"] {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--vetra-blue);
+}
+
+.set-choice-title {
+  padding-right: 24px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--vetra-text);
+}
+
+.set-choice-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vetra-muted);
+}
+
+.set-choice-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+
+.set-tag {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(14, 28, 44, 0.06);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vetra-muted);
+}
+
+/* ─────────────────────────────  Buttons  ───────────────────────────── */
+
+.set-btn,
+.set-btn-primary,
+.set-btn-ghost,
+.set-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: var(--set-radius-control);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease,
+    transform 0.12s ease, opacity 0.18s ease;
+}
+
+.set-btn-primary {
+  border: 1px solid transparent;
+  background: var(--vetra-gradient);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(58, 143, 242, 0.28);
+}
+
+.set-btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+
+.set-btn {
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-card);
+  color: var(--vetra-text);
+}
+
+.set-btn:hover:not(:disabled) {
+  border-color: var(--vetra-blue);
+  color: var(--vetra-blue);
+}
+
+.set-btn-ghost {
+  border: 1px dashed var(--vetra-border-strong);
+  background: none;
+  color: var(--vetra-muted);
+}
+
+.set-btn-ghost:hover:not(:disabled) {
+  border-color: var(--vetra-blue);
+  color: var(--vetra-blue);
+}
+
+.set-btn-danger {
+  border: 1px solid var(--set-danger-border);
+  background: var(--set-danger-bg);
+  color: var(--set-danger);
+}
+
+.set-btn-danger:hover:not(:disabled) { background: #fbdcd9; }
+
+.set-btn-sm { height: 36px; padding: 0 14px; font-size: 13px; }
+
+.set-btn:disabled,
+.set-btn-primary:disabled,
+.set-btn-ghost:disabled,
+.set-btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ─────────────────────  Messages, empties, misc  ───────────────────── */
+
+.set-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.set-alert-icon { flex: none; margin-top: 1px; }
+
+.set-alert-error {
+  border: 1px solid var(--set-danger-border);
+  background: var(--set-danger-bg);
+  color: var(--set-danger);
+}
+
+.set-alert-info {
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  color: var(--vetra-muted);
+}
+
+.set-empty {
+  padding: 22px;
+  border-radius: 12px;
+  border: 1px dashed var(--vetra-border-strong);
+  background: var(--vetra-bg);
+  text-align: center;
+  font-size: 14px;
+  color: var(--vetra-muted);
+}
+
+.set-saved-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--set-success);
+}
+
+.set-stat-row { display: flex; gap: 28px; flex-wrap: wrap; }
+
+.set-stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vetra-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-stat-label {
+  font-size: 13px;
+  color: var(--vetra-muted);
+}
+
+.set-defs {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 10px 18px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.set-defs dt { color: var(--vetra-muted); }
+.set-defs dd { margin: 0; color: var(--vetra-text); font-weight: 600; }
+
+/* Sub-cards: hours rows, knowledge entries, custom identity fields */
+.set-subcard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--vetra-border-strong);
+  background: var(--vetra-bg);
+}
+
+.set-stack { display: grid; gap: 10px; }
+.set-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.set-row-between {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Weekly hours */
+.set-day {
+  display: grid;
+  grid-template-columns: 112px 118px minmax(0, 1fr) 12px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.set-day-name { font-size: 14px; font-weight: 600; color: var(--vetra-text); }
+.set-day-dash { text-align: center; color: var(--vetra-muted-soft); }
+
+.set-day .set-check { padding: 0; min-height: 0; }
+
+/* ─────────────────────────────  Responsive  ───────────────────────────── */
+
+@media (max-width: 1200px) {
+  .set-root { --set-rail-width: 208px; }
+  .set-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .set-body { grid-template-columns: minmax(0, 1fr); }
+
+  /* The rail becomes a scrollable chip row pinned under the save bar. */
+  .set-rail {
+    position: sticky;
+    top: calc(var(--set-savebar-height) + 8px);
+    z-index: 20;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 8px;
+    scrollbar-width: none;
+  }
+
+  .set-rail::-webkit-scrollbar { display: none; }
+
+  .set-rail-tab {
+    grid-template-columns: 18px auto auto;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border-radius: 999px;
+  }
+
+  .set-rail-caption { display: none; }
+
+  .set-savebar { padding: 10px 14px; }
+  .set-savebar-title { font-size: 18px; }
+
+  .set-day {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--vetra-border);
+  }
+
+  .set-day-name { grid-column: 1 / -1; }
+  .set-day .set-check { grid-column: 1 / -1; min-height: 44px; }
+  .set-day-dash { display: none; }
+}
+
+@media (max-width: 560px) {
+  .set-panel-head { padding: 16px 16px 0; }
+  .set-panel-body { padding: 16px; gap: 16px; }
+  .set-panel-foot { padding: 12px 16px; }
+  .set-savebar-right { width: 100%; }
+  .set-savebar-right .set-btn-primary { flex: 1; }
+  .set-changes-menu { right: auto; left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .set-root *,
+  .set-root *::before,
+  .set-root *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .set-btn-primary:hover:not(:disabled) { transform: none; }
+}

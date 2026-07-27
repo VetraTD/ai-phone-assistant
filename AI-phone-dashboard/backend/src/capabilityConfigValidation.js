@@ -67,7 +67,39 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
     }
   }
 
+  const availability = validateAvailability(raw.availability, errors);
+  if (availability) config.availability = availability;
+
   return { config, errors };
+}
+
+/**
+ * Slot availability: appointment length and slot capacity (the built-in calendar
+ * always checks — there is no on/off flag). Rejects (and names) bad values; the
+ * engine loader's bounds (5–480 minutes, 1–100 per slot) must accept exactly
+ * what passes here. A stray `enabled` from an older shape is ignored.
+ */
+function validateAvailability(raw, errors) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("Availability must be an object");
+    return null;
+  }
+
+  const out = {};
+  const num = (key, min, max, label) => {
+    if (raw[key] === undefined) return;
+    const v = raw[key];
+    if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) {
+      errors.push(`${label} must be a whole number between ${min} and ${max}`);
+    } else {
+      out[key] = v;
+    }
+  };
+  num("length", 5, 480, "Appointment length");
+  num("capacity", 1, 100, "Slot capacity");
+
+  return Object.keys(out).length ? out : null;
 }
 
 function validateIdentity(raw, schema, errors) {

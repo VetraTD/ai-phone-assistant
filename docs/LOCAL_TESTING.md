@@ -85,12 +85,46 @@ LOG_LEVEL=DEBUG node --env-file=.env.dev server.js | node scripts/watch-call.js 
 | Interrupt mid-sentence with "wait" | AI stops within roughly half a second and **tapers** rather than chopping (`✂ barge-in — faded 40ms`). Listen for a click. |
 | Say "uh-huh" / "yeah" while it talks | It should **keep talking** (backchannel, not interruption). |
 
+**Speakerphone drills — do these on a real handset AND on speakerphone.** Echo is
+the enemy, and every row here is a failure that was observed live.
+
+| Drill | Expected |
+|---|---|
+| **Interrupt, pause ~1s, then finish the thought** | The AI waits through the pause (`⏳ settling after barge`) and answers the WHOLE thing once. It must not reply into the pause and then get cut off again. |
+| **Speakerphone, max volume, say nothing while it talks** | `barge_ins` stays flat and `🛡 echo suppressed` lines appear. The AI must never interrupt itself or answer its own words. |
+| **Interrupt, then keep talking each time it restarts** | The loop must break on its own within an exchange or two — WITHOUT you going silent. Going quiet is what ended it before the fix, so "it stopped" is not evidence. |
+| **Right after it offers a slot, repeat it back ("Thursday at three?")** | Treated as your speech, not as echo. Short confirmations are deliberately never suppressed. |
+| **Ask something needing a lookup** | The model's own "one moment while I check" plays, then `⏳ model stalled` + "Still working on that." if the tool runs long. Never both at once, never overlapping. |
+| **Interrupt, then ask a follow-up about what it was saying** | It knows what it had already told you and does not repeat it — the interrupted turn is recorded in history (`📝 recorded interrupted turn`). |
+
+If `🛑 LOOP BREAKER` ever appears, that is a bug report, not normal operation: the
+echo guard and the settle window let a runaway through. Capture the log.
+
 Tuning knobs, all env-overridable without a code change:
-`VOICE_LOOKAHEAD_MS` (100), `VOICE_BARGE_FADE_MS` (40), `VOICE_PACED_PLAYOUT=false`
-to restore the old instant-blast playout, `STT_ENDPOINTING_MS` (300).
+
+| Knob | Default | What it does |
+|---|---|---|
+| `VOICE_LOOKAHEAD_MS` | 100 | Unplayed audio held inside Twilio |
+| `VOICE_BARGE_FADE_MS` | 40 | Length of the barge-in taper |
+| `VOICE_PACED_PLAYOUT` | on | `=false` restores the old instant-blast playout |
+| `STT_ENDPOINTING_MS` | 300 | Deepgram silence before a final |
+| `VOICE_POST_BARGE_SETTLE_MS` | 700 | Silence required after a barge before replying. **`=0` reverts** |
+| `VOICE_POST_BARGE_MAX_HOLD_MS` | 3000 | Ceiling on that wait |
+| `VOICE_ECHO_GUARD` | on | `=false` disables self-echo suppression entirely |
+| `VOICE_ECHO_TAIL_MS` | 1200 | How long after playback a transcript can still be echo |
+| `VOICE_ECHO_MIN_RATIO` | 0.6 | Word-pair overlap needed to call something echo |
+| `VOICE_ECHO_MIN_TOKENS` | 4 | Shorter transcripts are never suppressed |
+| `VOICE_LOOP_BREAKER_BARGES` | 3 | Barge-ins that trip the backstop. **`=0` disables** |
+| `VOICE_LOOP_BREAKER_WINDOW_MS` | 6000 | Window they must fall inside |
+| `VOICE_LLM_STALL_MS` | 2500 | Mid-turn silence before a hold line. **`=0` disables** |
+| `VOICE_LLM_TOOL_GRACE_MS` | 4000 | Extra turn budget per tool round. **`=0` reverts to a flat 8s** |
+| `VOICE_LLM_HARD_TIMEOUT_MS` | 20000 | Ceiling no extension may pass |
+| `WEBHOOK_TIMEOUT_MS` / `ATHENA_TIMEOUT_MS` | 6000 | Must stay inside the turn budget |
 
 Counters for a batch of calls: `curl -s localhost:3000/api/debug/latency | jq .turnTaking`
-— `nudges_fired`, `nudges_suppressed`, `holds_started`, `holds_capped`, `barge_ins`.
+— `nudges_fired`, `nudges_suppressed`, `holds_started`, `holds_capped`, `barge_ins`,
+`barge_settles`, `echo_suppressed_interim`, `echo_suppressed_final`,
+`loop_breaker_trips` (must be 0), `llm_stalls`.
 
 **Conversation**
 - Ask something the knowledge base can't answer → it should offer to take a message, never invent an answer.

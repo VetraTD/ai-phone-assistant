@@ -92,6 +92,69 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     handle.close();
   });
 
+  it("1c. English + keyterms passes repeated keyterm query params via the queryParams passthrough", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({
+      language: "en-US",
+      keyterms: ["Brightwork Dental", "John Smith"],
+      callSid: "CA1c",
+    });
+
+    const configArg = mockConnect.mock.calls[0][0];
+    // Passed through `queryParams` (NOT the top-level `keyterm` option): the
+    // SDK JSON-encodes a top-level array into a single param, whereas the
+    // passthrough is serialized by the ws layer with arrayFormat:"repeat" into
+    // the repeated keyterm=A&keyterm=B params Deepgram's API actually wants.
+    expect(configArg.queryParams).toEqual({ keyterm: ["Brightwork Dental", "John Smith"] });
+    expect(configArg.keyterm).toBeUndefined();
+
+    handle.close();
+  });
+
+  it("1d. no keyterms leaves the connect options byte-identical (no queryParams key)", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({ language: "en-US", keyterms: [], callSid: "CA1d" });
+
+    expect(mockConnect.mock.calls[0][0]).not.toHaveProperty("queryParams");
+
+    handle.close();
+  });
+
+  it("1e. skips keyterms entirely for language=multi (nova-3 keyterm is English-only)", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({
+      language: "multi",
+      endpointing: 100,
+      keyterms: ["Brightwork Dental"],
+      callSid: "CA1e",
+    });
+
+    expect(mockConnect.mock.calls[0][0]).not.toHaveProperty("queryParams");
+
+    handle.close();
+  });
+
+  it("1f. skips keyterms for a non-English single language (e.g. es)", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({
+      language: "es",
+      keyterms: ["Brightwork Dental"],
+      callSid: "CA1f",
+    });
+
+    expect(mockConnect.mock.calls[0][0]).not.toHaveProperty("queryParams");
+
+    handle.close();
+  });
+
   it("2. accumulates is_final fragments and fires onFinal on speech_final with joined text", async () => {
     const fakeSocket = createFakeSocket();
     mockConnect.mockResolvedValue(fakeSocket);

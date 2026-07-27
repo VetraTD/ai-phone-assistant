@@ -17,6 +17,7 @@
 import {
   withRequirements,
   requirementPromptLines,
+  notesPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 
@@ -64,7 +65,7 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
 const MESSAGE_PROTOCOL_SECTION =
   `=== MESSAGE PROTOCOL ===\n` +
   `TAKING A MESSAGE — follow this exactly:\n` +
-  `1. Name: ask for it. If it's unusual or you're unsure of spelling, confirm: "Could you spell that for me?"\n` +
+  `1. Name: ask for it, then confirm the spelling once — "Could you spell that for me?" — unless you already confirmed it earlier in this call.\n` +
   `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
   `3. Reason: ask briefly what the call is regarding.\n` +
   `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
@@ -94,7 +95,8 @@ function messageGuidance(intent) {
 export default {
   id: "messages",
   label: "Messages & callbacks",
-  description: "Take messages and callback requests. Core receptionist behaviour.",
+  description:
+    "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
   core: true,
   adapterKind: null,
 
@@ -130,6 +132,7 @@ export default {
         protocols: [MESSAGE_PROTOCOL_SECTION],
         guardrails: requirementPromptLines(capabilityConfig(config, "messages")).map((l) => `${l}
 `),
+        capabilityNotes: notesPromptLines(capabilityConfig(config, "messages")),
       },
       dynamic: {
         stepGuidance: {

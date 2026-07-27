@@ -30,7 +30,13 @@ function isPrivateIP(ip) {
   return false;
 }
 
-const WEBHOOK_TIMEOUT_MS = 10_000;
+// Must stay comfortably inside the LLM turn budget that wraps it
+// (lib/voice/llmTurn.js: 8s base, extended per tool round). At the old 10s a
+// slow endpoint blew the whole turn before its own timeout could fire, so the
+// caller heard "Sorry, I'm taking a bit longer. Could you repeat that?"
+// instead of the answer — a worse outcome than a clean tool failure, which
+// the model can at least explain. Env-overridable for a slow integration.
+const WEBHOOK_TIMEOUT_MS = Number.parseInt(process.env.WEBHOOK_TIMEOUT_MS, 10) || 6_000;
 const ALLOWED_METHODS = ["POST", "PUT"];
 
 /**

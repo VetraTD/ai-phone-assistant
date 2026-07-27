@@ -90,7 +90,8 @@ describe("capability settings", () => {
         .set("Authorization", "Bearer test-token");
 
       expect(res.status).toBe(200);
-      expect(res.body.capabilities.length).toBeGreaterThan(5);
+      // appointments, messages, quotes, transfer (the info-only packs were removed).
+      expect(res.body.capabilities.length).toBe(4);
       expect(res.body.capabilities.every((c) => c.configured === false)).toBe(true);
     });
 
@@ -246,6 +247,41 @@ describe("capability settings", () => {
       mockOwnership();
       const res = await put("appointments", { enabled: true, config: { notes: "x".repeat(5000) } });
       expect(res.status).toBe(400);
+    });
+
+    it("saves well-formed availability numbers (no on/off flag)", async () => {
+      mockOwnership();
+      const res = await put("appointments", {
+        enabled: true,
+        adapter: "internal",
+        config: { availability: { length: 45, capacity: 2 } },
+      });
+      expect(res.status).toBe(200);
+      const insert = poolQueryMock.mock.calls.find(([sql]) =>
+        sql.includes("insert into business_capabilities")
+      );
+      const stored = JSON.parse(insert[1][5]);
+      expect(stored.availability).toEqual({ length: 45, capacity: 2 });
+    });
+
+    it("rejects an availability length that is out of range, naming it", async () => {
+      mockOwnership();
+      const res = await put("appointments", {
+        enabled: true,
+        config: { availability: { enabled: true, length: 4 } },
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/length/i);
+    });
+
+    it("rejects a non-integer slot capacity", async () => {
+      mockOwnership();
+      const res = await put("appointments", {
+        enabled: true,
+        config: { availability: { enabled: true, capacity: 2.5 } },
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/capacity/i);
     });
 
     it("turning a capability off stores the row rather than deleting it", async () => {

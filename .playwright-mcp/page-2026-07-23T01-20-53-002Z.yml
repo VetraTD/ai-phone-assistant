@@ -1,0 +1,85 @@
+- generic [ref=f8e5]:
+  - banner [ref=f8e6]:
+    - generic [ref=f8e7]:
+      - generic [ref=f8e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f8e9]
+      - paragraph [ref=f8e10]: Your calls at a glance for today
+      - generic [ref=f8e11]:
+        - generic [ref=f8e12]: "+18175803291"
+        - generic [ref=f8e13]: America/Chicago
+    - generic [ref=f8e14]:
+      - button "🌐 EN" [ref=f8e16] [cursor=pointer]:
+        - generic [ref=f8e17]: 🌐
+        - generic [ref=f8e18]: EN
+      - generic [ref=f8e19]:
+        - button "Dashboard" [ref=f8e20] [cursor=pointer]
+        - button "Analytics" [ref=f8e21] [cursor=pointer]
+        - button "Appointments" [ref=f8e22] [cursor=pointer]
+        - button "Settings" [active] [ref=f8e23] [cursor=pointer]
+        - button "Guide" [ref=f8e24] [cursor=pointer]
+      - button "Logout" [ref=f8e25] [cursor=pointer]
+  - main [ref=f8e26]:
+    - generic [ref=f8e27]:
+      - generic [ref=f8e28]:
+        - heading "Settings" [level=2] [ref=f8e30]
+        - generic [ref=f8e31]:
+          - status [ref=f8e32]: All changes saved
+          - generic [ref=f8e33]: Everything is saved
+          - button "Save changes" [disabled] [ref=f8e35]
+      - generic [ref=f8e36]:
+        - tablist "Settings sections" [ref=f8e37]:
+          - tab "General Name, hours, timezone" [ref=f8e38] [cursor=pointer]:
+            - generic [ref=f8e44]:
+              - generic [ref=f8e45]: General
+              - generic [ref=f8e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language" [ref=f8e47] [cursor=pointer]:
+            - generic [ref=f8e52]:
+              - generic [ref=f8e53]: Voice & Language
+              - generic [ref=f8e54]: 1 language
+          - tab "Capabilities What it can handle" [ref=f8e55] [cursor=pointer]:
+            - generic [ref=f8e60]:
+              - generic [ref=f8e61]: Capabilities
+              - generic [ref=f8e62]: What it can handle
+          - tab "Knowledge Base Answers to questions" [ref=f8e63] [cursor=pointer]:
+            - generic [ref=f8e67]:
+              - generic [ref=f8e68]: Knowledge Base
+              - generic [ref=f8e69]: Answers to questions
+          - tab "Notifications Email and text alerts" [ref=f8e70] [cursor=pointer]:
+            - generic [ref=f8e75]:
+              - generic [ref=f8e76]: Notifications
+              - generic [ref=f8e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [selected] [ref=f8e78] [cursor=pointer]:
+            - generic [ref=f8e82]:
+              - generic [ref=f8e83]: Billing & Integrations
+              - generic [ref=f8e84]: Plan, usage, calendar
+        - tabpanel "Billing & Integrations Plan, usage, calendar" [ref=f8e85]:
+          - generic [ref=f8e86]:
+            - heading "Billing & Integrations" [level=2] [ref=f8e87]
+            - paragraph [ref=f8e88]: Your plan, how much you've used this month, and connected apps.
+          - generic [ref=f8e89]:
+            - generic [ref=f8e91]:
+              - heading "Usage this month" [level=3] [ref=f8e92]
+              - paragraph [ref=f8e93]: Resets on the 1st. Useful for keeping an eye on your plan.
+            - generic [ref=f8e95]:
+              - generic [ref=f8e96]:
+                - generic [ref=f8e97]: "93"
+                - generic [ref=f8e98]: Calls answered
+              - generic [ref=f8e99]:
+                - generic [ref=f8e100]: "110"
+                - generic [ref=f8e101]: Minutes used
+          - generic [ref=f8e102]:
+            - heading "Billing & Plan" [level=3] [ref=f8e105]
+            - generic [ref=f8e106]:
+              - generic [ref=f8e107]:
+                - term [ref=f8e108]: Current plan
+                - definition [ref=f8e109]:
+                  - generic [ref=f8e110]: Starter
+                - term [ref=f8e111]: Billing status
+                - definition [ref=f8e112]: Not connected yet
+                - term [ref=f8e113]: Usage this month
+                - definition [ref=f8e114]: 93 calls, 110 min
+                - term [ref=f8e115]: Phone number
+                - definition [ref=f8e116]: "+18175803291"
+              - paragraph [ref=f8e117]:
+                - generic [ref=f8e118]: You're on the Starter beta plan. Paid plans with detailed usage and billing controls are coming soon.
+  - contentinfo [ref=f8e119]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

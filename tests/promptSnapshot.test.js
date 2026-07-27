@@ -27,166 +27,11 @@ import {
   buildIntegrationTools,
   buildDbAppointmentTools,
 } from "../services/gemini.js";
-import { normalizeAllowedTasks } from "../services/supabase.js";
+import { FIXTURES } from "./fixtures/businessConfigs.js";
 
 // A fixed Monday inside business hours. The dynamic tail renders the current
 // date/time, so without a frozen clock these snapshots would churn every run.
 const FROZEN_NOW = new Date("2026-07-20T15:00:00Z");
-
-const WEEKLY_HOURS = {
-  mon: { open: "09:00", close: "17:00", closed: false },
-  tue: { open: "09:00", close: "17:00", closed: false },
-  wed: { open: "09:00", close: "17:00", closed: false },
-  thu: { open: "09:00", close: "17:00", closed: false },
-  fri: { open: "09:00", close: "16:00", closed: false },
-  sat: { open: null, close: null, closed: true },
-  sun: { open: null, close: null, closed: true },
-};
-
-/**
- * Fixtures span the distinct shapes the prompt builder can produce. Each pairs
- * a business config with the `extras` bag getReplyStreaming would pass.
- */
-const FIXTURES = {
-  // Full appointment stack behind an EHR — exercises ATHENA_FUNCTION_DECLARATIONS,
-  // the EHR fork in step guidance, and suppression of the DB appointment tools.
-  "clinic-athena": {
-    config: {
-      businessName: "Riverside Family Clinic",
-      greeting: "Thanks for calling Riverside Family Clinic.",
-      timezone: "America/Chicago",
-      businessHours: WEEKLY_HOURS,
-      transferPhoneNumber: "+15551230000",
-      allowedTasks: normalizeAllowedTasks([
-        "book_appointment",
-        "check_appointment",
-        "cancel_reschedule",
-      ]),
-      mainPhone: "555-0100",
-      generalInfo: "We are a family practice serving the Riverside area since 1998.",
-      afterHoursPolicy: "take_message",
-      transferPolicy: "always",
-      languagesSpoken: ["en", "es"],
-      customInstructions: "Never quote prices. New patients need a 40-minute slot.",
-    },
-    extras: {
-      knowledge: [
-        { question: "Do you take insurance?", answer: "Yes, most major plans.", category: "billing" },
-        { question: "Where do I park?", answer: "Free lot behind the building.", category: null },
-      ],
-      callerContext: {
-        callCount: 2,
-        lastCallSummary: "booked a cleaning",
-        upcomingAppointments: [{ scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane Doe" }],
-      },
-      transferAllowed: true,
-      integrations: [
-        { enabled: true, provider: "athenahealth", name: "athena", config: { practice_id: "195900" } },
-      ],
-    },
-  },
-
-  // Same appointment modules, NO EHR — exercises DB_APPOINTMENT_DECLARATIONS and
-  // the non-EHR cancel/reschedule guidance with its identity-check paragraph.
-  "appointments-db": {
-    config: {
-      businessName: "Acme Dental",
-      greeting: "Thanks for calling Acme Dental.",
-      timezone: "America/Chicago",
-      businessHours: { open_time: "09:00", close_time: "17:00" },
-      transferPhoneNumber: null,
-      allowedTasks: normalizeAllowedTasks(["book_appointment", "cancel_reschedule"]),
-      mainPhone: "555-1234",
-      generalInfo: null,
-      afterHoursPolicy: "offer_callback",
-      transferPolicy: "never",
-      languagesSpoken: ["en"],
-      customInstructions: null,
-    },
-    extras: {
-      knowledge: [],
-      callerContext: null,
-      transferAllowed: false,
-      integrations: [],
-    },
-  },
-
-  // Core tasks only, no modules — and now it genuinely is.
-  //
-  // This fixture used to register book_appointment despite asking for nothing:
-  // normalizeAllowedTasks treated an empty array and an unset value alike, both
-  // defaulting to ["book_appointment"], so a business that does not do
-  // appointments was unrepresentable. The snapshot captured that faithfully
-  // rather than hiding it, and its change when the fix landed IS the evidence
-  // the fix works: no appointment tool, no appointment clause in CAPABILITIES.
-  "messages-only": {
-    config: {
-      businessName: "Dave's Plumbing",
-      greeting: "Dave's Plumbing, how can I help?",
-      timezone: "America/New_York",
-      businessHours: WEEKLY_HOURS,
-      transferPhoneNumber: "+15559990000",
-      allowedTasks: normalizeAllowedTasks([]),
-      mainPhone: null,
-      generalInfo: "Emergency callouts available 24/7.",
-      afterHoursPolicy: "transfer_if_possible",
-      transferPolicy: "always",
-      languagesSpoken: ["en"],
-      customInstructions: null,
-    },
-    extras: {
-      knowledge: [],
-      callerContext: null,
-      transferAllowed: true,
-      integrations: [],
-    },
-  },
-
-  // The non-appointment modules plus a custom webhook tool — exercises the
-  // remaining CAPABILITIES branches and buildIntegrationTools' webhook path.
-  "modules-and-webhook": {
-    config: {
-      businessName: "Northside Law",
-      greeting: "Northside Law, how may I direct your call?",
-      timezone: "America/Los_Angeles",
-      businessHours: null,
-      transferPhoneNumber: "+15557778888",
-      allowedTasks: normalizeAllowedTasks([
-        "quote_request",
-        "directions_location",
-        "form_document_request",
-      ]),
-      mainPhone: "555-4321",
-      generalInfo: null,
-      afterHoursPolicy: "book_later",
-      transferPolicy: "business_hours_only",
-      languagesSpoken: ["es"],
-      customInstructions: "Never give legal advice. Always route to an attorney.",
-    },
-    extras: {
-      knowledge: [],
-      callerContext: null,
-      transferAllowed: true,
-      integrations: [
-        {
-          enabled: true,
-          provider: "webhook",
-          name: "open_case_file",
-          config: {
-            url: "https://example.test/hook",
-            method: "POST",
-            description: "Open a new case file in the practice management system.",
-            params_schema: {
-              type: "object",
-              properties: { matter_type: { type: "string" } },
-              required: ["matter_type"],
-            },
-          },
-        },
-      ],
-    },
-  },
-};
 
 // Every (step, intent) pair buildStepGuidance can branch on.
 const STEP_INTENTS = [
@@ -234,7 +79,7 @@ describe("golden prompt snapshots — must not move during the capability-packs 
         // so the snapshot covers the real merged tool list, not the pieces.
         const declarations = [
           ...(buildCallTools(config.allowedTasks).functionDeclarations || []),
-          ...(buildIntegrationTools(extras.integrations).functionDeclarations || []),
+          ...(buildIntegrationTools(extras.integrations, config).functionDeclarations || []),
           ...(buildDbAppointmentTools(config, extras).functionDeclarations || []),
         ];
         await expect(JSON.stringify(declarations, null, 2)).toMatchFileSnapshot(
@@ -302,11 +147,52 @@ describe("prompt structure invariants the refactor must preserve", () => {
     for (const [name, fx] of Object.entries(FIXTURES)) {
       const declarations = [
         ...(buildCallTools(fx.config.allowedTasks).functionDeclarations || []),
-        ...(buildIntegrationTools(fx.extras.integrations).functionDeclarations || []),
+        ...(buildIntegrationTools(fx.extras.integrations, fx.config).functionDeclarations || []),
         ...(buildDbAppointmentTools(fx.config, fx.extras).functionDeclarations || []),
       ];
       const names = declarations.map((d) => d.name);
       expect(new Set(names).size, `${name}: ${names.join(", ")}`).toBe(names.length);
     }
+  });
+});
+
+describe("greeting-context tail line only quotes what the caller actually heard", () => {
+  // lib/voice/session.js buildGreeting speaks config.greeting verbatim ONLY when
+  // config._hasCustomGreeting is true; otherwise it synthesizes a time-of-day +
+  // business-name line and config.greeting still holds the generic
+  // DEFAULT_GREETING (services/supabase.js loadConfig). The tail line must not
+  // quote text the caller never heard.
+  const { config: base, extras } = FIXTURES["appointments-db"];
+
+  it("custom greeting (_hasCustomGreeting: true) -> quoted line naming the greeting", () => {
+    const config = { ...base, greeting: "Thanks for calling Acme Dental.", _hasCustomGreeting: true };
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain(
+      'The caller was already greeted with: "Thanks for calling Acme Dental." — do not greet them again.'
+    );
+  });
+
+  it("greeting present but _hasCustomGreeting falsy -> generic line, nothing quoted", () => {
+    const config = { ...base, greeting: "Hi, how can I help you today?", _hasCustomGreeting: false };
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain("The caller was already greeted — do not greet them again.");
+    expect(tail).not.toContain("already greeted with:");
+    expect(tail).not.toContain("Hi, how can I help you today?");
+  });
+
+  it("greeting present but _hasCustomGreeting absent (unset) -> same generic fallback", () => {
+    const config = { ...base, greeting: "Hi, how can I help you today?" };
+    delete config._hasCustomGreeting;
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).toContain("The caller was already greeted — do not greet them again.");
+    expect(tail).not.toContain("already greeted with:");
+  });
+
+  it("no greeting at all -> no re-greet line of either form", () => {
+    const config = { ...base };
+    delete config.greeting;
+    delete config._hasCustomGreeting;
+    const tail = buildDynamicTail("confirm", null, config, extras);
+    expect(tail).not.toContain("already greeted");
   });
 });

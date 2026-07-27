@@ -1624,144 +1624,60 @@ function App() {
             )}
           </section>
         ) : activePage === "settings" ? (
-          <>
-            <section className="settings-overview">
-              <section className="panel usage-panel">
-                <div className="panel-header">
-                  <h2 className="panel-title">Usage this month</h2>
-                </div>
-                <div className="panel-body">
-                  {usageLoading ? (
-                    <div className="usage-loading">
-                      <span className="kpi-skeleton" style={{ display: "inline-block", width: 48, height: 28, borderRadius: 8 }} />
-                      <span className="kpi-skeleton" style={{ display: "inline-block", width: 56, height: 28, borderRadius: 8, marginLeft: 16 }} />
-                    </div>
-                  ) : usageError ? (
-                    <p style={{ margin: 0, color: "var(--vetra-muted)", fontSize: 14 }}>{usageError}</p>
-                  ) : usage ? (
-                    <div className="usage-stats">
-                      <div className="usage-stat">
-                        <span className="usage-stat-value">
-                          <AnimatedNumber value={usage.calls_this_month ?? 0} duration={900} />
-                        </span>
-                        <span className="usage-stat-label">Calls</span>
-                      </div>
-                      <div className="usage-stat">
-                        <span className="usage-stat-value">
-                          <AnimatedNumber value={usage.minutes_this_month ?? 0} duration={900} />
-                        </span>
-                        <span className="usage-stat-label">Minutes</span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--vetra-muted)" }}>
-                    Resets on the 1st of each month. Useful for billing and limits later.
-                  </p>
-                </div>
-              </section>
-
-              <section className="panel">
-                <div className="panel-header"><h2 className="panel-title">{t.billingPlan}</h2></div>
-                <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                  <div className="detail-card" style={{ padding: 14 }}>
-                    <div className="info-grid">
-                      <div className="info-label">{t.currentPlan}</div>
-                      <div className="info-value">
-                        <span className="plan-pill">{settingsPlanName}</span>
-                      </div>
-                      <div className="info-label">{t.billingStatus}</div><div className="info-value">{settingsBillingStatus}</div>
-                      <div className="info-label">{t.usageThisMonth}</div>
-                      <div className="info-value">
-                        {usage ? `${usage.calls_this_month ?? 0} calls, ${usage.minutes_this_month ?? 0} min` : t.comingSoon}
-                      </div>
-                      <div className="info-label">{t.phoneNumber}</div><div className="info-value">{business?.phone_number || t.notConnectedYet}</div>
-                    </div>
-                  </div>
-                  <div className="empty-note">{t.stripeComing}</div>
-                </div>
-              </section>
-            </section>
-
-            <SettingsPage
-              business={business}
-              businessId={businessId}
-              onBusinessUpdate={(updated) => setBusiness((prev) => ({ ...(prev || {}), ...updated }))}
-              onDirtyChange={setSettingsDirty}
-            />
-
-            <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
-              <section className="panel">
-                <div className="panel-header"><h2 className="panel-title">{t.calendarSync}</h2></div>
-                <div className="panel-body" style={{ display: "grid", gap: 14 }}>
-                  <p className="field-hint" style={{ margin: 0 }}>{t.calendarSyncDescription}</p>
-                  {calendarLoading ? (
-                    <span className="field-hint">{t.loadingCalls}</span>
-                  ) : calendarConnected ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-                      <span className="field-hint" style={{ color: "#1f8a4c" }}>{t.calendarConnected}</span>
-                      <button
-                        type="button"
-                        className="dashboard-logout"
-                        style={{ fontSize: 13, height: 36, padding: "0 14px" }}
-                        disabled={calendarSyncing}
-                        onClick={async () => {
-                          setCalendarSyncing(true);
-                          try {
-                            const res = await api.post("/api/calendar/sync");
-                            setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
-                            setTimeout(() => setToast(null), 3000);
-                          } catch (err) {
-                            setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
-                            setTimeout(() => setToast(null), 3000);
-                          } finally {
-                            setCalendarSyncing(false);
-                          }
-                        }}
-                      >
-                        {calendarSyncing ? "Syncing…" : t.syncToCalendarNow}
-                      </button>
-                      <button
-                        type="button"
-                        className="dashboard-logout"
-                        style={{ fontSize: 13, height: 36, padding: "0 14px", borderColor: "rgba(220,80,80,0.4)", color: "#b91c1c" }}
-                        onClick={async () => {
-                          try {
-                            await api.delete("/api/calendar/disconnect");
-                            setCalendarConnected(false);
-                            setToast({ type: "success", message: t.disconnectCalendar });
-                            setTimeout(() => setToast(null), 2000);
-                          } catch (err) {
-                            setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
-                            setTimeout(() => setToast(null), 2000);
-                          }
-                        }}
-                      >
-                        {t.disconnectCalendar}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="landing-cta-primary"
-                      style={{ alignSelf: "flex-start" }}
-                      onClick={async () => {
-                        try {
-                          const res = await api.get("/api/calendar/auth-url");
-                          if (res.data?.url) window.location.href = res.data.url;
-                          else setToast({ type: "error", message: "Calendar not configured" });
-                        } catch (err) {
-                          setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
-                          setTimeout(() => setToast(null), 2000);
-                        }
-                      }}
-                    >
-                      {t.connectGoogleCalendar}
-                    </button>
-                  )}
-                </div>
-              </section>
-            </section>
-          </>
+          // Usage, billing and calendar used to be hand-rolled panels here,
+          // above and below SettingsPage, in the old .panel visual language.
+          // They now live inside the settings group rail as AccountSection /
+          // CalendarSection — the data and these handlers still belong to
+          // App.jsx and are passed down.
+          <SettingsPage
+            business={business}
+            businessId={businessId}
+            onBusinessUpdate={(updated) => setBusiness((prev) => ({ ...(prev || {}), ...updated }))}
+            onDirtyChange={setSettingsDirty}
+            usage={usage}
+            usageLoading={usageLoading}
+            usageError={usageError}
+            planName={settingsPlanName}
+            billingStatus={settingsBillingStatus}
+            t={t}
+            calendarConnected={calendarConnected}
+            calendarLoading={calendarLoading}
+            calendarSyncing={calendarSyncing}
+            onCalendarSync={async () => {
+              setCalendarSyncing(true);
+              try {
+                const res = await api.post("/api/calendar/sync");
+                setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
+                setTimeout(() => setToast(null), 3000);
+              } catch (err) {
+                setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
+                setTimeout(() => setToast(null), 3000);
+              } finally {
+                setCalendarSyncing(false);
+              }
+            }}
+            onCalendarDisconnect={async () => {
+              try {
+                await api.delete("/api/calendar/disconnect");
+                setCalendarConnected(false);
+                setToast({ type: "success", message: t.disconnectCalendar });
+                setTimeout(() => setToast(null), 2000);
+              } catch (err) {
+                setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
+                setTimeout(() => setToast(null), 2000);
+              }
+            }}
+            onCalendarConnect={async () => {
+              try {
+                const res = await api.get("/api/calendar/auth-url");
+                if (res.data?.url) window.location.href = res.data.url;
+                else setToast({ type: "error", message: "Calendar not configured" });
+              } catch (err) {
+                setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
+                setTimeout(() => setToast(null), 2000);
+              }
+            }}
+          />
         ) : (
           <section className="guide-page">
             <section className="panel guide-intro-panel">

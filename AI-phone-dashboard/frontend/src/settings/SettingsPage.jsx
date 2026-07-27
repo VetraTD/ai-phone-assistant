@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import BusinessInfoSection from "./BusinessInfoSection";
 import BusinessHoursEditor from "./BusinessHoursEditor";
@@ -10,8 +10,14 @@ import KnowledgeBaseEditor from "./KnowledgeBaseEditor";
 import VoicePickerSection from "./VoicePickerSection";
 import NotificationsSection from "./NotificationsSection";
 import LanguagesSection from "./LanguagesSection";
-import { errorBoxStyle } from "./styles";
+import AccountSection from "./AccountSection";
+import CalendarSection from "./CalendarSection";
+import SettingsNav from "./SettingsNav";
+import SaveBar from "./SaveBar";
+import { FIELD_LABELS } from "./fieldLabels";
+import { GROUPS, GROUP_IDS, DEFAULT_GROUP } from "./groups";
 import { DAY_KEYS, MODULE_TASKS, AFTER_HOURS_POLICIES, TRANSFER_POLICIES } from "./constants";
+import "./Settings.css";
 
 const MODULE_TASK_KEYS = MODULE_TASKS.map((t) => t.key);
 const AFTER_HOURS_KEYS = AFTER_HOURS_POLICIES.map((p) => p.key);
@@ -96,12 +102,55 @@ function diffSnapshots(current, baseline) {
   return changed;
 }
 
-export default function SettingsPage({ business, businessId, onBusinessUpdate, onDirtyChange }) {
+// Deep link, so "open your Capabilities settings" can be a link rather than a
+// list of directions. replaceState rather than a route: settings is a tab
+// inside App.jsx, not a router destination, and pushing history here would
+// make Back walk group-by-group out of the page.
+function groupFromLocation() {
+  if (typeof window === "undefined") return DEFAULT_GROUP;
+  const requested = new URLSearchParams(window.location.search).get("section");
+  return GROUP_IDS.includes(requested) ? requested : DEFAULT_GROUP;
+}
+
+export default function SettingsPage({
+  business,
+  businessId,
+  onBusinessUpdate,
+  onDirtyChange,
+  // Billing & Integrations. The data and its handlers stay owned by App.jsx —
+  // only the markup moved here, so these panels could join the group rail
+  // instead of floating above and below the page in a different visual style.
+  usage,
+  usageLoading,
+  usageError,
+  planName,
+  billingStatus,
+  calendarConnected,
+  calendarLoading,
+  calendarSyncing,
+  onCalendarSync,
+  onCalendarDisconnect,
+  onCalendarConnect,
+  t,
+}) {
   const [baseline, setBaseline] = useState(() => snapshotFromBusiness(business));
   const [draft, setDraft] = useState(() => snapshotFromBusiness(business));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
+  const [activeGroup, setActiveGroup] = useState(groupFromLocation);
+  const [capabilityCounts, setCapabilityCounts] = useState(null);
+  const [knowledgeCount, setKnowledgeCount] = useState(null);
+  // Which capabilities are on, known page-wide — not just while the
+  // Capabilities group is mounted. Sections in *other* groups depend on this:
+  // After-hours hides "book for later" without appointments, and Notifications
+  // only promises appointment alerts when appointments are on. Fetched once
+  // here, then kept live by CapabilitiesSection via onCapabilityEnabledChange.
+  const [capEnabled, setCapEnabled] = useState({});
+  const panelRef = useRef(null);
+  // Set once focus should follow a group change — not on first render, where
+  // stealing focus from wherever the user was is hostile.
+  const shouldFocusPanel = useRef(false);
 
   // Reload the editable snapshot when the business identity changes (e.g.
   // after onboarding completes). Deliberately NOT keyed on `business` itself
@@ -119,12 +168,72 @@ export default function SettingsPage({ business, businessId, onBusinessUpdate, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
+  // Learn the enabled capabilities up front so cross-group gating works on
+  // first paint, before the Capabilities group has ever been opened. Core
+  // capabilities read as enabled; everything else follows its stored row.
+  useEffect(() => {
+    if (!businessId) return undefined;
+    let cancelled = false;
+    api
+      .get(`/api/business/${businessId}/capabilities`)
+      .then((res) => {
+        if (cancelled) return;
+        const map = {};
+        for (const c of res.data.capabilities || []) map[c.capability_id] = c.enabled;
+        setCapEnabled(map);
+      })
+      .catch(() => {
+        /* gating just stays at defaults if this fails; never blocks the page */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  const appointmentsEnabled = !!capEnabled.appointments;
+
   const changed = useMemo(() => diffSnapshots(draft, baseline), [draft, baseline]);
-  const dirty = Object.keys(changed).length > 0;
+  const changedKeys = useMemo(() => Object.keys(changed), [changed]);
+  const dirty = changedKeys.length > 0;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
+
+  // Which rail entries get an unsaved dot.
+  const dirtyGroups = useMemo(() => {
+    const groups = new Set();
+    for (const key of changedKeys) {
+      const group = FIELD_LABELS[key]?.group;
+      if (group) groups.add(group);
+    }
+    return groups;
+  }, [changedKeys]);
+
+  // Rail navigation (click, arrow keys): selection changes, focus stays where
+  // the tablist put it — that's what lets ArrowDown/Up keep walking the rail.
+  const goToGroup = useCallback((id) => {
+    setActiveGroup(id);
+  }, []);
+
+  // Jump from the save-bar popover: the user is navigating out of a menu and
+  // wants to land IN the group's content, so here — and only here — focus
+  // follows into the panel.
+  const jumpToGroup = useCallback((id) => {
+    shouldFocusPanel.current = true;
+    setActiveGroup(id);
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", activeGroup);
+    window.history.replaceState({}, "", url);
+
+    if (shouldFocusPanel.current) {
+      shouldFocusPanel.current = false;
+      panelRef.current?.focus();
+    }
+  }, [activeGroup]);
 
   const patch = (fields) => {
     setDraft((prev) => ({ ...prev, ...fields }));
@@ -151,62 +260,140 @@ export default function SettingsPage({ business, businessId, onBusinessUpdate, o
     }
   };
 
+  // Live captions for the rail, so a group says what is in it before you open
+  // it. Falls back to the static caption until the count is known.
+  const captions = useMemo(() => {
+    const out = {};
+    if (capabilityCounts) {
+      out.capabilities = `${capabilityCounts.on} of ${capabilityCounts.total} turned on`;
+    }
+    if (knowledgeCount != null) {
+      out.knowledge = knowledgeCount === 1 ? "1 answer saved" : `${knowledgeCount} answers saved`;
+    }
+    const langs = draft.languages_spoken?.length || 0;
+    if (langs) out.voice = langs === 1 ? "1 language" : `${langs} languages`;
+    return out;
+  }, [capabilityCounts, knowledgeCount, draft.languages_spoken]);
+
+  const group = GROUPS.find((g) => g.id === activeGroup) || GROUPS[0];
+
+  // The transfer capability is core (always registered), but "always on" reads
+  // as a lie when the policy is "never". The badge reflects the policy the
+  // owner actually set. Passed into the transfer card via extras so the schema
+  // renderer never has to know which capability this is.
+  const transferBadge =
+    draft.transfer_policy === "never" ? (
+      <span className="set-pill">Won't transfer</span>
+    ) : draft.transfer_policy === "business_hours_only" ? (
+      <span className="set-pill set-pill-locked">Business hours only</span>
+    ) : (
+      <span className="set-pill set-pill-on">On</span>
+    );
+
+  // Calendar sync only means something once appointments exist, so it lives
+  // inside the appointments card rather than off in Billing.
+  const calendarNode = (
+    <CalendarSection
+      connected={calendarConnected}
+      loading={calendarLoading}
+      syncing={calendarSyncing}
+      onSync={onCalendarSync}
+      onDisconnect={onCalendarDisconnect}
+      onConnect={onCalendarConnect}
+      t={t}
+    />
+  );
+
   return (
-    <>
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
-        <BusinessInfoSection value={draft} onChange={patch} phoneNumber={business?.phone_number} />
-        <BusinessHoursEditor value={draft} onChange={patch} />
-        <AIBehaviorSection value={draft} onChange={patch} />
-        <TransferRulesSection value={draft} onChange={patch} />
-        <AfterHoursSection value={draft} onChange={patch} />
-        <VoicePickerSection value={draft} onChange={patch} />
-        <NotificationsSection value={draft} onChange={patch} />
-        <LanguagesSection value={draft} onChange={patch} />
-      </section>
+    <div className="set-root">
+      <SaveBar
+        dirtyKeys={changedKeys}
+        saving={saving}
+        error={error}
+        saved={!!savedMessage}
+        onSave={handleSave}
+        onJump={jumpToGroup}
+      />
 
-      {/* Capability settings live in their own table (business_capabilities),
-          not on the businesses row, so this section loads and saves itself
-          rather than joining the draft/diff flow above. Each card saves
-          independently: a validation error in one must not discard edits in
-          another. It replaces the old Tasks checkboxes, which could say THAT a
-          business books appointments but never HOW. */}
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
-        <CapabilitiesSection businessId={businessId} />
-      </section>
+      <div className="set-body">
+        <SettingsNav active={activeGroup} onChange={goToGroup} dirtyGroups={dirtyGroups} captions={captions} />
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
-        <KnowledgeBaseEditor businessId={businessId} />
-      </section>
-
-      <section className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-header">
-          <h2 className="panel-title">Save changes</h2>
-        </div>
         <div
-          className="panel-body"
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}
+          className="set-group"
+          role="tabpanel"
+          id={`set-panel-${group.id}`}
+          aria-labelledby={`set-tab-${group.id}`}
+          tabIndex={-1}
+          ref={panelRef}
         >
-          <div style={{ display: "grid", gap: 8 }}>
-            {error ? (
-              <div style={errorBoxStyle}>{error}</div>
-            ) : savedMessage ? (
-              <div className="empty-note" style={{ color: "#1f8a4c" }}>
-                {savedMessage}
-              </div>
-            ) : (
-              <div className="empty-note">{dirty ? "You have unsaved changes." : "Everything is saved."}</div>
-            )}
+          <div className="set-group-head">
+            <h2 className="set-group-title">{group.title}</h2>
+            <p className="set-group-desc">{group.description}</p>
           </div>
-          <button
-            type="button"
-            className="dashboard-logout dashboard-save-button"
-            onClick={handleSave}
-            disabled={saving || !dirty}
-          >
-            {saving ? "Saving…" : "Save settings"}
-          </button>
+
+          {activeGroup === "general" ? (
+            <>
+              <BusinessInfoSection value={draft} onChange={patch} phoneNumber={business?.phone_number} />
+              <BusinessHoursEditor value={draft} onChange={patch} />
+              <AfterHoursSection value={draft} onChange={patch} appointmentsEnabled={appointmentsEnabled} />
+            </>
+          ) : null}
+
+          {activeGroup === "voice" ? (
+            <>
+              <VoicePickerSection value={draft} onChange={patch} />
+              <AIBehaviorSection value={draft} onChange={patch} />
+              <LanguagesSection value={draft} onChange={patch} />
+            </>
+          ) : null}
+
+          {/* Capability settings live in their own table (business_capabilities),
+              not on the businesses row, so this section loads and saves itself
+              rather than joining the draft/diff flow above. Each card saves
+              independently: a validation error in one must not discard edits in
+              another. It replaces the old Tasks checkboxes, which could say THAT a
+              business books appointments but never HOW.
+
+              Transfer policy/number and calendar sync DO belong elsewhere (the
+              page draft and the dashboard's own OAuth flow), but they are
+              meaningless read apart from their capability — so they are rendered
+              inside that capability's card via `extras`, an { node, badge } map
+              keyed by capability id. The renderer stays generic (it only asks
+              "is there an override for this id?"); the one coupling lives here,
+              where deciding what sits next to what is already this file's job. */}
+          {activeGroup === "capabilities" ? (
+            <CapabilitiesSection
+              businessId={businessId}
+              onCountsChange={setCapabilityCounts}
+              onEnabledChange={setCapEnabled}
+              extras={{
+                transfer: { node: <TransferRulesSection value={draft} onChange={patch} />, badge: transferBadge },
+                appointments: { node: calendarNode },
+              }}
+            />
+          ) : null}
+
+          {activeGroup === "knowledge" ? (
+            <KnowledgeBaseEditor businessId={businessId} onCountChange={setKnowledgeCount} />
+          ) : null}
+
+          {activeGroup === "notifications" ? (
+            <NotificationsSection value={draft} onChange={patch} appointmentsEnabled={appointmentsEnabled} />
+          ) : null}
+
+          {activeGroup === "billing" ? (
+            <AccountSection
+              usage={usage}
+              usageLoading={usageLoading}
+              usageError={usageError}
+              planName={planName}
+              billingStatus={billingStatus}
+              phoneNumber={business?.phone_number}
+              t={t}
+            />
+          ) : null}
         </div>
-      </section>
-    </>
+      </div>
+    </div>
   );
 }

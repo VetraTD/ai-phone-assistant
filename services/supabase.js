@@ -40,8 +40,6 @@ export const MODULE_TASKS = [
   "check_appointment",
   "cancel_reschedule",
   "quote_request",
-  "directions_location",
-  "form_document_request",
 ];
 
 /** Default modules for a business with no allowed_tasks configured. */
@@ -102,9 +100,6 @@ const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];
 const CAPABILITY_MODULE_TASKS = {
   appointments: ["book_appointment", "check_appointment", "cancel_reschedule"],
   quotes: ["quote_request"],
-  directions: ["directions_location"],
-  forms: ["form_document_request"],
-  general_question: ["general_question"],
 };
 
 /**
@@ -573,6 +568,101 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     throw e;
   }
   return data.id;
+}
+
+/**
+ * Count SCHEDULED appointments overlapping the window a booking of `startISO`
+ * would occupy. All slots share the business's configured length L, so two
+ * bookings overlap iff their starts are less than L apart — i.e. existing
+ * `scheduled_at ∈ (start - L, start + L)`. Used to decide whether a slot still
+ * has capacity.
+ *
+ * Fails OPEN (returns 0) on a DB error: a read failure must not falsely block a
+ * legitimate booking. The atomic RPC (createAppointmentIfAvailable) is the real
+ * race-safe guarantee; this is for the pre-collection check and the caller tool.
+ *
+ * @param {string} businessId
+ * @param {string} startISO - ISO 8601 instant
+ * @param {number} lengthMinutes
+ * @returns {Promise<number>}
+ */
+export async function countScheduledOverlapping(businessId, startISO, lengthMinutes) {
+  if (!supabase || !businessId) return 0;
+  const startMs = Date.parse(startISO);
+  if (!Number.isFinite(startMs)) return 0;
+  const L = (Number.isFinite(lengthMinutes) ? lengthMinutes : 30) * 60_000;
+  const lo = new Date(startMs - L + 1).toISOString();
+  const hi = new Date(startMs + L - 1).toISOString();
+  const { count, error } = await supabase
+    .from("appointments")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .eq("status", "scheduled")
+    .gte("scheduled_at", lo)
+    .lte("scheduled_at", hi);
+  if (error) {
+    log.error("db_error", { operation: "countScheduledOverlapping", error: error.message });
+    return 0;
+  }
+  return count || 0;
+}
+
+/**
+ * The start times of SCHEDULED appointments in [startISO, endISO) for a business
+ * — used to enumerate a day and offer free alternatives without a query per
+ * candidate slot.
+ * @returns {Promise<Array<{scheduled_at: string}>>}
+ */
+export async function listScheduledBetween(businessId, startISO, endISO) {
+  if (!supabase || !businessId) return [];
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("scheduled_at")
+    .eq("business_id", businessId)
+    .eq("status", "scheduled")
+    .gte("scheduled_at", startISO)
+    .lt("scheduled_at", endISO)
+    .order("scheduled_at", { ascending: true });
+  if (error) {
+    log.error("db_error", { operation: "listScheduledBetween", error: error.message });
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Atomically book only if the slot still has capacity. Delegates to the
+ * `create_appointment_if_available` plpgsql function (migration 022), which
+ * takes a per-(business, slot) advisory lock, re-counts overlaps under the lock,
+ * and inserts only when `count < capacity`. This is what makes the check
+ * race-safe: the app-level check can go stale between reading and writing; the
+ * RPC cannot.
+ *
+ * @returns {Promise<{id: string}|{full: true}|null>} id on success, {full:true}
+ *   when the slot filled, null on a hard error (caller falls back to a message).
+ */
+export async function createAppointmentIfAvailable(params) {
+  if (!supabase) return null;
+  const { businessId, callId, clientName, clientPhone, scheduledAt, notes, lengthMinutes, capacity } = params;
+  const { data, error } = await supabase.rpc("create_appointment_if_available", {
+    p_business_id: businessId,
+    p_scheduled_at: scheduledAt,
+    p_length_min: Number.isFinite(lengthMinutes) ? lengthMinutes : 30,
+    p_capacity: Number.isFinite(capacity) ? capacity : 1,
+    p_call_id: callId || null,
+    p_client_name: clientName || null,
+    p_client_phone: clientPhone || null,
+    p_notes: notes || null,
+  });
+  if (error) {
+    log.error("db_error", { operation: "createAppointmentIfAvailable", error: error.message, code: error.code });
+    captureException(new Error(error.message), { table: "appointments", op: "rpc_book" });
+    const e = new Error(error.message);
+    e.code = error.code;
+    throw e;
+  }
+  // The function returns the new uuid, or NULL when the slot is full.
+  return data ? { id: data } : { full: true };
 }
 
 /**

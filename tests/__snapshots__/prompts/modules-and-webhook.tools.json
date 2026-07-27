@@ -12,9 +12,7 @@
             "take_message",
             "callback_request",
             "transfer_human",
-            "quote_request",
-            "directions_location",
-            "form_document_request"
+            "quote_request"
           ],
           "description": "The caller's primary intent"
         }

@@ -1,7 +1,7 @@
 === DATE AND TIME ===
 Current: Monday, July 20, 2026, 11:00 AM (America/New_York).
-When scheduling, always calculate from this real date. Never invent dates.
 Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Status: OPEN.
 
 === CURRENT TASK AND STATE ===
 Step: ending
+The caller was already greeted with: "Dave's Plumbing, how can I help?" — do not greet them again.

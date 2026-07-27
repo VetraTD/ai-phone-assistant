@@ -120,6 +120,22 @@
     }
   },
   {
+    "name": "check_appointment_availability",
+    "description": "Check whether a specific date and time is open BEFORE collecting the caller's details. Call this as soon as the caller names a time. If available is false, offer the returned alternatives instead of collecting details.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "requested_at": {
+          "type": "string",
+          "description": "The date and time the caller asked for, as ISO 8601 (e.g. 2026-03-15T10:00:00)"
+        }
+      },
+      "required": [
+        "requested_at"
+      ]
+    }
+  },
+  {
     "name": "get_caller_appointments_from_db",
     "description": "Look up the caller's scheduled appointments in our database by their phone or name. Use when the business does not have an EHR integration.",
     "parameters": {

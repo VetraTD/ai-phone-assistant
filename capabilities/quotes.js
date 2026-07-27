@@ -31,8 +31,10 @@
 import {
   withRequirements,
   requirementPromptLines,
+  notesPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
+import { declineGuardrail } from "../lib/capabilities/decline.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -87,13 +89,11 @@ export default {
   adapterKind: null,
 
   toolNames: [RECORD_QUOTE_REQUEST_DECLARATION.name],
+  // No `adapter` knob: quotes has no adapterKind and always records+notifies
+  // internally (see execute/onEffect). Offering a "where should quotes go?"
+  // choice would be a control that does nothing. Webhook routing is a real
+  // feature to add later, with an actual backend behind it.
   configSchema: {
-    adapter: {
-      type: "choice",
-      label: "Where should quote requests go?",
-      options: ["internal", "webhook"],
-      default: "internal",
-    },
     require: {
       identity: {
         type: "identityFields",
@@ -131,7 +131,8 @@ export default {
         guardrails: enabled
           ? requirementPromptLines(capabilityConfig(config, "quotes")).map((l) => `${l}
 `)
-          : [],
+          : [declineGuardrail("give price quotes")],
+        capabilityNotes: enabled ? notesPromptLines(capabilityConfig(config, "quotes")) : [],
       },
       dynamic: {
         stepGuidance: enabled ? { quote_request: QUOTE_GUIDANCE } : {},

@@ -104,6 +104,29 @@ describe("normalizeAllowedTasks — empty vs unset", () => {
 describe("validateCapabilityConfig", () => {
   const validate = (raw) => validateCapabilityConfig(raw, appointments, "biz-1");
 
+  it("keeps well-formed availability numbers (no on/off flag — the calendar always checks)", () => {
+    // A stray `enabled` from an older shape is ignored, not stored.
+    const out = validate({ availability: { enabled: true, length: 45, capacity: 2 } });
+    expect(out.availability).toEqual({ length: 45, capacity: 2 });
+  });
+
+  it("drops an out-of-range number but keeps the valid one", () => {
+    const out = validate({ availability: { length: 4, capacity: 2 } });
+    // length (below 5) dropped; capacity kept.
+    expect(out.availability).toEqual({ capacity: 2 });
+  });
+
+  it("never injects availability defaults — absence stays absence (snapshot safety)", () => {
+    expect(validate({}).availability).toBeUndefined();
+    expect(validate({ availability: {} }).availability).toBeUndefined();
+    expect(validate({ availability: { enabled: true } }).availability).toBeUndefined();
+  });
+
+  it("keeps a builtin identity array", () => {
+    const out = validate({ require: { identity: { builtin: ["name", "dob", "phone_on_file"] } } });
+    expect(out.require.identity.builtin).toEqual(["name", "dob", "phone_on_file"]);
+  });
+
   it("keeps a well-formed custom identity field", () => {
     const out = validate({
       require: {
@@ -191,6 +214,43 @@ describe("validateCapabilityConfig", () => {
   it("bounds prose so it cannot crowd out the conversation", () => {
     const out = validate({ notes: "x".repeat(5000) });
     expect(out.notes).toHaveLength(2000);
+  });
+
+  it("bounds a custom identity label so it cannot bloat guardrails and tool params", () => {
+    // label flows into guardrail bullets AND tool param descriptions — unbounded
+    // it would push the cacheable prefix around on every call.
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", label: "L".repeat(500) }] } },
+    });
+    expect(out.require.identity.custom[0].label).toHaveLength(100);
+  });
+
+  it("bounds a custom identity ask — it is spoken verbatim", () => {
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", ask: "A".repeat(1000) }] } },
+    });
+    expect(out.require.identity.custom[0].ask).toHaveLength(300);
+  });
+
+  it("rejects an overlong pattern rather than slicing it (slicing could corrupt a regex)", () => {
+    // A valid-but-huge regex: slicing mid-escape would produce a different or
+    // broken regex, so the whole pattern is dropped and the field kept unchecked.
+    const out = validate({
+      require: {
+        identity: { custom: [{ key: "x", pattern: `^(?:${"a".repeat(300)})$` }] },
+      },
+    });
+    expect(out.require.identity.custom).toHaveLength(1);
+    expect(out.require.identity.custom[0].pattern).toBeUndefined();
+  });
+
+  it("keeps a pattern at the 200-char boundary", () => {
+    const pattern = `^${"a".repeat(198)}$`; // exactly 200 chars, valid regex
+    expect(pattern).toHaveLength(200);
+    const out = validate({
+      require: { identity: { custom: [{ key: "x", pattern }] } },
+    });
+    expect(out.require.identity.custom[0].pattern).toBe(pattern);
   });
 
   it("never throws on hostile input", () => {

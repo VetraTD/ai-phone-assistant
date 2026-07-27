@@ -17,6 +17,11 @@ export default {
   id: "webhook",
   label: "Send to my own system",
 
+  // Not offered in the dashboard: this adapter is a stub (its book() is null),
+  // so a business that selected it would have bookings fail silently. Hidden
+  // until it is actually wired, rather than presented as a working option.
+  selfServe: false,
+
   verifiableFields: [],
 
   claimsIntegration() {
@@ -30,5 +35,6 @@ export default {
   book: null,
   cancel: null,
   reschedule: null,
+  checkAvailability: null,
   findSlots: null,
 };

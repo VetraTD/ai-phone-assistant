@@ -7,9 +7,22 @@ const mockUpdateAppointment = vi.fn();
 const mockGetAppointmentById = vi.fn();
 const mockExecuteIntegration = vi.fn();
 const mockCaptureException = vi.fn();
+const mockCountScheduledOverlapping = vi.fn().mockResolvedValue(0);
+const mockListScheduledBetween = vi.fn().mockResolvedValue([]);
 
 vi.mock("../services/supabase.js", () => ({
   createAppointment: (...args) => mockCreateAppointment(...args),
+  // Internal booking now goes through the availability-aware RPC. For the tool
+  // layer these tests exercise, the DB either accepts the booking (returns an
+  // id) or the slot is full (returns null) — modelled here by delegating to the
+  // same createAppointment mock, so a resolved id books and a rejection still
+  // surfaces the "slot taken" path.
+  createAppointmentIfAvailable: async (params) => {
+    const id = await mockCreateAppointment(params);
+    return id ? { id } : { full: true };
+  },
+  countScheduledOverlapping: (...args) => mockCountScheduledOverlapping(...args),
+  listScheduledBetween: (...args) => mockListScheduledBetween(...args),
   listAppointmentsByCaller: (...args) => mockListAppointmentsByCaller(...args),
   updateAppointmentStatus: (...args) => mockUpdateAppointmentStatus(...args),
   updateAppointment: (...args) => mockUpdateAppointment(...args),
@@ -352,6 +365,29 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     await executeToolCall(fc, baseCtx);
 
     expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+  });
+
+  it("get_caller_appointments_from_db: message lists times in LOCAL time, not raw UTC (spoken-time fix)", async () => {
+    // 19:00Z is 2:00 PM America/Chicago — the model reads the message aloud, so
+    // it must not surface the raw UTC instant (which would be spoken as 7 PM).
+    mockListAppointmentsByCaller.mockResolvedValue([
+      { id: "appt-9", client_name: "Priya Nair", scheduled_at: "2026-07-29T19:00:00.000Z" },
+    ]);
+    const fc = { id: "fc6c", name: "get_caller_appointments_from_db", args: {} };
+
+    const { functionResponse } = await executeToolCall(fc, {
+      ...baseCtx,
+      config: { timezone: "America/Chicago" },
+    });
+    const { message, appointments } = functionResponse.response;
+
+    // Machine-readable rows keep the raw UTC ISO, unchanged.
+    expect(appointments[0].scheduled_at).toBe("2026-07-29T19:00:00.000Z");
+    // The spoken listing is localized: local time present, no raw ISO / UTC hour.
+    expect(message).toMatch(/2:00\s?PM/);
+    expect(message).toMatch(/July 29/);
+    expect(message).not.toMatch(/T\d{2}:\d{2}/);
+    expect(message).not.toMatch(/7:00\s?PM/);
   });
 
   describe("end_call step-gating", () => {
@@ -770,6 +806,32 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       // No booked effect: the original booking already fired the step
       // transition + notifications; the short-circuit must not re-fire them.
       expect(stateEffects.capabilityEffects).toBeUndefined();
+    });
+  });
+
+  describe("ctx.depsOverride — capability deps injectability seam", () => {
+    it("when present, pack.execute receives ctx.depsOverride as deps instead of the real CAPABILITY_DEPS", async () => {
+      const fakeListAppointmentsByCaller = vi.fn().mockResolvedValue([{ id: "fake-appt" }]);
+      const fc = { id: "fcDep1", name: "get_caller_appointments_from_db", args: {} };
+      const ctx = {
+        ...baseCtx,
+        depsOverride: { listAppointmentsByCaller: fakeListAppointmentsByCaller },
+      };
+
+      const { stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(fakeListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+      expect(mockListAppointmentsByCaller).not.toHaveBeenCalled();
+      expect(stateEffects.capabilityState.appointments.selectedAppointmentId).toBe("fake-appt");
+    });
+
+    it("when absent, pack.execute receives the real CAPABILITY_DEPS", async () => {
+      mockListAppointmentsByCaller.mockResolvedValue([{ id: "appt-9" }]);
+      const fc = { id: "fcDep2", name: "get_caller_appointments_from_db", args: {} };
+
+      await executeToolCall(fc, baseCtx);
+
+      expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
     });
   });
 

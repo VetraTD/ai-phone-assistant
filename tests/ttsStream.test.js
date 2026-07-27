@@ -67,6 +67,7 @@ vi.mock("../lib/logger.js", () => ({
 
 import { createTtsTurn } from "../lib/voice/ttsStream.js";
 import { ttsHealth } from "../lib/voice/ttsHealth.js";
+import { trimPreviousText } from "../services/elevenlabs.js";
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -77,6 +78,9 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     instances.length = 0;
     mockSynthesizeMulaw.mockReset();
     process.env.ELEVENLABS_API_KEY = "test-xi-key";
+    // ELEVENLABS_MODEL is an optional A/B knob — a value leaked from one test
+    // must not change the default model URL asserted by the others.
+    delete process.env.ELEVENLABS_MODEL;
     // The circuit breaker is a process-wide singleton — EL failures triggered
     // by earlier tests must not leak "breaker open" into later ones.
     ttsHealth.recordSuccess();
@@ -99,7 +103,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(sock.sentMessages()).toEqual([
       {
         text: " ",
-        voice_settings: { stability: 0.5, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
+        voice_settings: { stability: 0.65, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
       },
     ]);
   });
@@ -212,15 +216,14 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(onAudioChunk).toHaveBeenCalledTimes(1);
   });
 
-  it("7. connect timeout falls back to Google TTS per sentence on end(), emitting chunks and onDone", async () => {
+  it("7. connect timeout falls back to Google TTS as ONE request for short text on end(), emitting a chunk and onDone", async () => {
     vi.useFakeTimers();
     try {
       const onAudioChunk = vi.fn();
       const onDone = vi.fn();
       const onError = vi.fn();
-      const fallbackBuf1 = Buffer.from([1, 1]);
-      const fallbackBuf2 = Buffer.from([2, 2]);
-      mockSynthesizeMulaw.mockResolvedValueOnce(fallbackBuf1).mockResolvedValueOnce(fallbackBuf2);
+      const fallbackBuf = Buffer.from([1, 1]);
+      mockSynthesizeMulaw.mockResolvedValueOnce(fallbackBuf);
 
       const turn = createTtsTurn({ voiceId: "v1", callSid: "CA7", epoch: 1, getEpoch: () => 1, onAudioChunk, onDone, onError });
       turn.write("Hello there. How are you?");
@@ -231,11 +234,11 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
       turn.end();
       await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
 
-      expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(2);
-      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(1, "Hello there.", "en-US-Chirp3-HD-Aoede", "CA7");
-      expect(mockSynthesizeMulaw).toHaveBeenNthCalledWith(2, "How are you?", "en-US-Chirp3-HD-Aoede", "CA7");
-      expect(onAudioChunk).toHaveBeenCalledWith(fallbackBuf1);
-      expect(onAudioChunk).toHaveBeenCalledWith(fallbackBuf2);
+      // Short text (<= 400 chars) is a SINGLE Google request covering both
+      // sentences — no prosody seam at the sentence boundary.
+      expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(1);
+      expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there. How are you?", "en-US-Chirp3-HD-Aoede", "CA7");
+      expect(onAudioChunk).toHaveBeenCalledWith(fallbackBuf);
       expect(onError).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -268,16 +271,20 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     }
   });
 
-  it("8b. ElevenLabs dying AFTER end() (mid-flush, before isFinal) with audio already played completes via onDone({truncated: true}), not silently", () => {
+  it("8b. ElevenLabs dying AFTER end() (mid-flush, before isFinal) with only a trickle of audio played REPAIRS the unspoken remainder via Google, not silently", async () => {
     const onAudioChunk = vi.fn();
     const onDone = vi.fn();
     const onError = vi.fn();
+    const repairBuf = Buffer.from([7, 7, 7]);
+    // Only a few bytes were voiced, so the whole sentence is the remainder.
+    mockSynthesizeMulaw.mockResolvedValue(repairBuf);
+
     const turn = createTtsTurn({ voiceId: "v1", callSid: "CA8b", epoch: 1, getEpoch: () => 1, onAudioChunk, onDone, onError });
     turn.write("Hello there, here is the first part.");
 
     const sock = instances[0];
     sock._open();
-    sock._message({ audio: b64(Buffer.from([1, 2, 3])) }); // some audio already played
+    sock._message({ audio: b64(Buffer.from([1, 2, 3])) }); // a trickle of audio played (3 bytes)
     expect(onAudioChunk).toHaveBeenCalledTimes(1);
 
     turn.end(); // flush sent, waiting on isFinal
@@ -286,10 +293,103 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     // ElevenLabs dies right here — no isFinal ever arrives.
     sock._emit("error", new Error("socket died mid-flush"));
 
-    expect(onDone).toHaveBeenCalledTimes(1);
-    expect(onDone).toHaveBeenCalledWith({ truncated: true });
-    expect(onError).not.toHaveBeenCalled(); // this is a truncation, not a hard failure — no Google resynthesis is attempted
+    // 3 bytes is ~0 chars voiced, so the boundary rounds down to 0 and the
+    // whole sentence is resynthesized (not dropped).
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there, here is the first part.", "en-US-Chirp3-HD-Aoede", "CA8b");
+    expect(onAudioChunk).toHaveBeenCalledWith(repairBuf);
+    expect(onError).not.toHaveBeenCalled();
+
+    const payload = onDone.mock.calls[0][0];
+    expect(payload.truncated).toBe(true);
+    expect(payload.repairedFrom).toBe("duration");
+    expect(payload.remainderChars).toBe("Hello there, here is the first part.".length);
+    // spokenText = voiced prefix ("") + emitted remainder = the full sentence.
+    expect(payload.spokenText).toBe("Hello there, here is the first part.");
     expect(turn.getStatus()).toEqual({ truncated: true, elErrored: true, doneFired: true });
+  });
+
+  it("8d. EL dies mid-turn after enough audio to have voiced sentence 1 -> repairs from the sentence boundary (remainder = sentences 2+3)", async () => {
+    const onAudioChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    mockSynthesizeMulaw.mockImplementation((sentence) => Promise.resolve(Buffer.from(sentence)));
+
+    const text = "One sentence here. Two sentence here. Three sentence here.";
+    const remainder = "Two sentence here. Three sentence here.";
+
+    const turn = createTtsTurn({ voiceId: "v1", callSid: "CA8d", epoch: 1, getEpoch: () => 1, onAudioChunk, onDone, onError });
+    turn.write(text);
+
+    const sock = instances[0];
+    sock._open();
+    // 15000 mulaw bytes = 1.875s ≈ 28 chars voiced — lands mid-sentence-2, so
+    // the boundary rounds DOWN to the end of sentence 1 (char 19). Remainder =
+    // sentences 2 + 3.
+    sock._message({ audio: b64(Buffer.alloc(15000)) });
+    expect(onAudioChunk).toHaveBeenCalledTimes(1);
+
+    turn.end();
+    sock._emit("error", new Error("socket died mid-turn"));
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+
+    // The remainder (sentences 2+3, <= 400 chars) is resynthesized as ONE
+    // Google request — sentence 1 (already voiced) is NOT re-spoken.
+    const synthArgs = mockSynthesizeMulaw.mock.calls.map((c) => c[0]);
+    expect(synthArgs).toEqual(["Two sentence here. Three sentence here."]);
+
+    const payload = onDone.mock.calls[0][0];
+    expect(payload.truncated).toBe(true);
+    expect(payload.repairedFrom).toBe("duration");
+    expect(payload.remainderChars).toBe(remainder.length);
+    // spokenText = voiced prefix (sentence 1, incl. trailing space) + emitted
+    // remainder sentences.
+    expect(payload.spokenText).toBe("One sentence here. Two sentence here. Three sentence here.");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("8e. a barge (epoch bump) DURING repair synthesis cancels emission of the remaining sentences; onDone reports only what was voiced", async () => {
+    const onAudioChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    let epoch = 1;
+    // Deferred synthesis so the test can barge between the error and the
+    // remainder audio being produced.
+    const resolvers = [];
+    mockSynthesizeMulaw.mockImplementation(
+      (sentence) => new Promise((resolve) => resolvers.push({ sentence, resolve }))
+    );
+
+    const turn = createTtsTurn({ voiceId: "v1", callSid: "CA8e", epoch: 1, getEpoch: () => epoch, onAudioChunk, onDone, onError });
+    turn.write("One sentence here. Two sentence here. Three sentence here.");
+
+    const sock = instances[0];
+    sock._open();
+    sock._message({ audio: b64(Buffer.alloc(15000)) }); // sentence 1 voiced
+    expect(onAudioChunk).toHaveBeenCalledTimes(1);
+
+    turn.end();
+    sock._emit("error", new Error("socket died mid-turn"));
+
+    // Repair synthesis has been kicked off for the remainder sentences.
+    await vi.waitFor(() => expect(resolvers.length).toBeGreaterThan(0));
+
+    // Caller barges in: a newer turn bumps the epoch. The repair must stop
+    // emitting the remainder over them.
+    epoch = 2;
+    resolvers.forEach((r) => r.resolve(Buffer.from(r.sentence)));
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+
+    // No fallback audio was emitted after the barge — only the single
+    // pre-error ElevenLabs chunk ever reached onAudioChunk.
+    expect(onAudioChunk).toHaveBeenCalledTimes(1);
+    const payload = onDone.mock.calls[0][0];
+    expect(payload.truncated).toBe(true);
+    // spokenText = voiced prefix only; no repaired remainder was emitted.
+    expect(payload.spokenText).toBe("One sentence here. ");
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("8c. ElevenLabs erroring before ANY audio played is a clean fallback, not truncated", async () => {
@@ -306,7 +406,9 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     turn.end();
 
     await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
-    expect(onDone).toHaveBeenCalledWith({ truncated: false });
+    // A clean pre-audio fallback: not truncated, but Google audio WAS played,
+    // so usedFallback is reported (lets the session go sticky-Google).
+    expect(onDone).toHaveBeenCalledWith({ truncated: false, usedFallback: true });
     expect(mockSynthesizeMulaw).toHaveBeenCalledWith("Hello there.", "en-US-Chirp3-HD-Aoede", "CA8c");
   });
 
@@ -410,11 +512,9 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(onAudioChunk).toHaveBeenCalled();
   });
 
-  it("13. fallback synthesizes sentences concurrently but emits audio strictly in order", async () => {
-    const resolvers = [];
-    mockSynthesizeMulaw.mockImplementation(
-      (sentence) => new Promise((resolve) => resolvers.push({ sentence, resolve }))
-    );
+  it("13. short fallback text (<= 400 chars) is a SINGLE Google request, even across sentences", async () => {
+    const buf = Buffer.from("all");
+    mockSynthesizeMulaw.mockResolvedValue(buf);
 
     const chunks = [];
     const onDone = vi.fn();
@@ -423,7 +523,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
       callSid: "CA13",
       epoch: 1,
       getEpoch: () => 1,
-      onAudioChunk: (buf) => chunks.push(buf.toString()),
+      onAudioChunk: (b) => chunks.push(b.toString()),
       onDone,
       onError: vi.fn(),
       forceFallback: true,
@@ -431,34 +531,276 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     turn.write("One. Two. Three.");
     turn.end();
 
-    // All three synth calls were fired up-front (concurrency 3), before any
-    // has resolved — the old serial loop would have fired only the first.
-    await vi.waitFor(() => expect(resolvers).toHaveLength(3));
-
-    // Resolve out of order: 3rd, then 1st, then 2nd.
-    resolvers[2].resolve(Buffer.from("three"));
-    await Promise.resolve();
-    expect(chunks).toEqual([]); // sentence 1 not ready — nothing emitted yet
-
-    resolvers[0].resolve(Buffer.from("one"));
-    resolvers[1].resolve(Buffer.from("two"));
     await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
-
-    expect(chunks).toEqual(["one", "two", "three"]); // strict order preserved
+    // One request covering all three sentences — no per-sentence seam.
+    expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(1);
+    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("One. Two. Three.", "en-US-Chirp3-HD-Aoede", "CA13");
+    expect(chunks).toEqual(["all"]);
   });
 
-  it("14. a later sentence rejecting while an earlier one is still pending does not raise an unhandled rejection", async () => {
-    let resolveFirst;
-    mockSynthesizeMulaw.mockImplementation((sentence) => {
-      if (sentence === "One.") return new Promise((res) => { resolveFirst = res; });
-      return Promise.reject(new Error("google down"));
+  it("13b. long fallback text (> 400 chars) is chunked into a few sequential multi-sentence requests, emitted in order", async () => {
+    const sentences = Array.from(
+      { length: 9 },
+      (_, i) => `This is sentence number ${i} in a fairly long fallback reply.`
+    );
+    const text = sentences.join(" ");
+    expect(text.length).toBeGreaterThan(400);
+
+    const calls = [];
+    mockSynthesizeMulaw.mockImplementation((chunk) => {
+      calls.push(chunk);
+      return Promise.resolve(Buffer.from(`buf${calls.length - 1}`));
     });
+
+    const chunks = [];
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA13b",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: (b) => chunks.push(b.toString()),
+      onDone,
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write(text);
+    turn.end();
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+    // 9 sentences at 3 per request = 3 sequential requests, in order.
+    expect(calls).toEqual([
+      sentences.slice(0, 3).join(" "),
+      sentences.slice(3, 6).join(" "),
+      sentences.slice(6, 9).join(" "),
+    ]);
+    expect(chunks).toEqual(["buf0", "buf1", "buf2"]);
+  });
+
+  it("13c. a barge (epoch bump) between fallback chunks stops the remaining chunks (epoch gating honored per chunk)", async () => {
+    let epoch = 1;
+    const sentences = Array.from(
+      { length: 9 },
+      (_, i) => `This is sentence number ${i} in a fairly long fallback reply.`
+    );
+    const text = sentences.join(" ");
+
+    const resolvers = [];
+    mockSynthesizeMulaw.mockImplementation(
+      (chunk) => new Promise((resolve) => resolvers.push({ chunk, resolve }))
+    );
+
+    const chunks = [];
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA13c",
+      epoch: 1,
+      getEpoch: () => epoch,
+      onAudioChunk: (b) => chunks.push(b.toString()),
+      onDone,
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write(text);
+    turn.end();
+
+    // First chunk synthesized and emitted.
+    await vi.waitFor(() => expect(resolvers.length).toBe(1));
+    resolvers[0].resolve(Buffer.from("chunk0"));
+    await vi.waitFor(() => expect(chunks).toEqual(["chunk0"]));
+
+    // Second chunk's synthesis has started; caller barges in before it lands.
+    await vi.waitFor(() => expect(resolvers.length).toBe(2));
+    epoch = 2;
+    resolvers[1].resolve(Buffer.from("chunk1"));
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+    // chunk1's audio was suppressed and the third chunk was never requested.
+    expect(chunks).toEqual(["chunk0"]);
+    expect(resolvers.length).toBe(2);
+  });
+
+  it("15. previousText opt is sent as previous_text on the handshake frame (prosody continuity) when non-empty", () => {
+    createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA15",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      previousText: "Thanks so much for calling. This is the front desk.",
+    });
+
+    const sock = instances[0];
+    sock._open();
+
+    const handshake = sock.sentMessages()[0];
+    expect(handshake.text).toBe(" ");
+    expect(handshake.previous_text).toBe("Thanks so much for calling. This is the front desk.");
+    expect(handshake.voice_settings).toMatchObject({ stability: 0.65, similarity_boost: 0.8 });
+  });
+
+  it("16. previousText that is empty/whitespace/undefined omits the previous_text field entirely", () => {
+    for (const [i, prev] of [undefined, "", "   "].entries()) {
+      instances.length = 0;
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: `CA16-${i}`,
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: prev,
+      });
+      const sock = instances[0];
+      sock._open();
+      const handshake = sock.sentMessages()[0];
+      expect(handshake).not.toHaveProperty("previous_text");
+    }
+  });
+
+  it("17. a long previousText is trimmed to the last ~300 chars at a word boundary before sending", () => {
+    // 40 words * ~10 chars each = ~400 chars, well over the 300 cap.
+    const long = Array.from({ length: 40 }, (_, i) => `word${String(i).padStart(4, "0")}`).join(" ");
+    createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA17",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      previousText: long,
+    });
+    const sock = instances[0];
+    sock._open();
+    const sent = sock.sentMessages()[0].previous_text;
+    expect(sent.length).toBeLessThanOrEqual(300);
+    expect(long.endsWith(sent)).toBe(true); // it is a suffix of the original
+    expect(sent).toMatch(/^word\d{4}/); // starts cleanly on a whole word, not mid-token
+  });
+
+  it("18. ELEVENLABS_MODEL env overrides the model_id in the connection URL; unset/empty falls back to eleven_flash_v2_5", () => {
+    process.env.ELEVENLABS_MODEL = "eleven_turbo_v2_5";
+    createTtsTurn({ voiceId: "v1", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() });
+    expect(instances[0].url).toContain("model_id=eleven_turbo_v2_5");
+
+    // Empty string is treated as unset.
+    instances.length = 0;
+    process.env.ELEVENLABS_MODEL = "   ";
+    createTtsTurn({ voiceId: "v1", epoch: 1, getEpoch: () => 1, onAudioChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() });
+    expect(instances[0].url).toContain("model_id=eleven_flash_v2_5");
+  });
+
+  it("19. ELEVENLABS_DISABLE_PREVIOUS_TEXT=true (or \"1\") omits previous_text even when previousText is set; unset sends it normally", () => {
+    const prevEnv = process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+    try {
+      for (const [i, killSwitch] of ["true", "1"].entries()) {
+        instances.length = 0;
+        process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = killSwitch;
+        createTtsTurn({
+          voiceId: "voice123",
+          callSid: `CA19-${i}`,
+          epoch: 1,
+          getEpoch: () => 1,
+          onAudioChunk: vi.fn(),
+          onDone: vi.fn(),
+          onError: vi.fn(),
+          previousText: "Thanks so much for calling. This is the front desk.",
+        });
+        const sock = instances[0];
+        sock._open();
+        expect(sock.sentMessages()[0]).not.toHaveProperty("previous_text");
+      }
+
+      // Unset (and any other value, e.g. "false") restores normal behavior.
+      instances.length = 0;
+      delete process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: "CA19-unset",
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: "Thanks so much for calling. This is the front desk.",
+      });
+      let sock = instances[0];
+      sock._open();
+      expect(sock.sentMessages()[0].previous_text).toBe("Thanks so much for calling. This is the front desk.");
+
+      instances.length = 0;
+      process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = "false";
+      createTtsTurn({
+        voiceId: "voice123",
+        callSid: "CA19-false",
+        epoch: 1,
+        getEpoch: () => 1,
+        onAudioChunk: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+        previousText: "Thanks so much for calling. This is the front desk.",
+      });
+      sock = instances[0];
+      sock._open();
+      expect(sock.sentMessages()[0].previous_text).toBe("Thanks so much for calling. This is the front desk.");
+    } finally {
+      if (prevEnv === undefined) delete process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+      else process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT = prevEnv;
+    }
+  });
+
+  describe("trimPreviousText helper", () => {
+    it("returns '' for empty, whitespace, or non-string input", () => {
+      expect(trimPreviousText("")).toBe("");
+      expect(trimPreviousText("   ")).toBe("");
+      expect(trimPreviousText(undefined)).toBe("");
+      expect(trimPreviousText(null)).toBe("");
+      expect(trimPreviousText(123)).toBe("");
+    });
+
+    it("returns short text unchanged (trimmed)", () => {
+      expect(trimPreviousText("  Hello there.  ")).toBe("Hello there.");
+    });
+
+    it("keeps the last <=maxChars, starting on a word boundary", () => {
+      const out = trimPreviousText("alpha beta gamma delta epsilon", 12);
+      expect(out.length).toBeLessThanOrEqual(12);
+      expect("alpha beta gamma delta epsilon".endsWith(out)).toBe(true);
+      expect(out.startsWith(" ")).toBe(false);
+      // Must not begin mid-word: the char before `out` in the source is a space.
+      const idx = "alpha beta gamma delta epsilon".lastIndexOf(out);
+      expect("alpha beta gamma delta epsilon"[idx - 1]).toBe(" ");
+    });
+
+    it("never splits a UTF-16 surrogate pair at the cut point", () => {
+      // A run of emoji (each a surrogate pair) with no spaces.
+      const emoji = "😀".repeat(50); // 100 UTF-16 code units
+      const out = trimPreviousText(emoji, 15);
+      // No lone surrogate at either end.
+      const first = out.charCodeAt(0);
+      const last = out.charCodeAt(out.length - 1);
+      expect(first >= 0xdc00 && first <= 0xdfff).toBe(false); // not a lone low surrogate
+      expect(last >= 0xd800 && last <= 0xdbff).toBe(false); // not a lone high surrogate
+    });
+  });
+
+  it("14. a fallback synthesis rejection is reported via onError with no unhandled rejection and no onDone", async () => {
+    const rejErr = new Error("google down");
+    mockSynthesizeMulaw.mockRejectedValue(rejErr);
 
     const unhandled = [];
     const onUnhandled = (reason) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
     try {
       const onError = vi.fn();
+      const onDone = vi.fn();
       const chunks = [];
       const turn = createTtsTurn({
         voiceId: "voice123",
@@ -466,22 +808,20 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
         epoch: 1,
         getEpoch: () => 1,
         onAudioChunk: (buf) => chunks.push(buf.toString()),
-        onDone: vi.fn(),
+        onDone,
         onError,
         forceFallback: true,
       });
       turn.write("One. Two.");
       turn.end();
 
-      // Sentence 2 rejects immediately while the consumer is still awaiting
-      // sentence 1 — the rejection must already be observed (handled).
-      await new Promise((res) => setImmediate(res));
-      await new Promise((res) => setImmediate(res));
-
-      resolveFirst(Buffer.from("one"));
       await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+      // Let any stray microtasks flush so a lurking unhandled rejection surfaces.
+      await new Promise((res) => setImmediate(res));
 
-      expect(chunks).toEqual(["one"]); // sentence 1 still played
+      expect(onError.mock.calls[0][0]).toBe(rejErr);
+      expect(onDone).not.toHaveBeenCalled();
+      expect(chunks).toEqual([]); // the whole (short) request rejected — nothing played
       expect(unhandled).toEqual([]); // no process-killing unhandled rejection
     } finally {
       process.off("unhandledRejection", onUnhandled);

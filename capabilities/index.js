@@ -26,7 +26,6 @@ import appointments from "./appointments.js";
 import messages from "./messages.js";
 import transfer from "./transfer.js";
 import quotes from "./quotes.js";
-import { generalQuestion, directions, forms } from "./infoOnly.js";
 
 /**
  * Registry order. Governs two things at once:
@@ -39,7 +38,7 @@ import { generalQuestion, directions, forms } from "./infoOnly.js";
  *
  * @type {import("./_contract.js").CapabilityPack[]}
  */
-const PACKS = [appointments, generalQuestion, messages, quotes, directions, forms, transfer];
+const PACKS = [appointments, messages, quotes, transfer];
 
 const BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 

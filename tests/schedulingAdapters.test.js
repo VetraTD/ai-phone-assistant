@@ -107,10 +107,19 @@ describe("adapter interface", () => {
     expect(athena.book).toBeNull();
   });
 
-  it("the internal adapter has no availability search, and says so", () => {
-    // It records what was booked; it has no model of provider schedules or
-    // appointment length, so it cannot answer "what is free on Tuesday".
-    expect(getSchedulingAdapter("internal").findSlots).toBeNull();
+  it("the internal adapter now has availability search and a point check", () => {
+    // Appointment length + slot capacity config (migration 022) gave the
+    // built-in calendar a real overlap model, so it can answer availability.
+    const internal = getSchedulingAdapter("internal");
+    expect(typeof internal.findSlots).toBe("function");
+    expect(typeof internal.checkAvailability).toBe("function");
+  });
+
+  it("owner-managed / stub adapters still have no availability search", () => {
+    expect(getSchedulingAdapter("athenahealth").findSlots).toBeNull();
+    expect(getSchedulingAdapter("athenahealth").checkAvailability).toBeNull();
+    expect(getSchedulingAdapter("webhook").findSlots).toBeNull();
+    expect(getSchedulingAdapter("webhook").checkAvailability).toBeNull();
   });
 
   it("getSchedulingAdapter returns null for an unknown id", () => {

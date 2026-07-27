@@ -4,6 +4,9 @@ import {
   updateAppointmentStatus,
   updateAppointment,
   createAppointment,
+  createAppointmentIfAvailable,
+  countScheduledOverlapping,
+  listScheduledBetween,
   getAppointmentById,
 } from "./supabase.js";
 import { executeIntegration } from "./integrations.js";
@@ -46,6 +49,15 @@ const CAPABILITY_DEPS = {
   get createAppointment() {
     return createAppointment;
   },
+  get createAppointmentIfAvailable() {
+    return createAppointmentIfAvailable;
+  },
+  get countScheduledOverlapping() {
+    return countScheduledOverlapping;
+  },
+  get listScheduledBetween() {
+    return listScheduledBetween;
+  },
   get listAppointmentsByCaller() {
     return listAppointmentsByCaller;
   },
@@ -80,6 +92,10 @@ const CAPABILITY_DEPS = {
  * @param {string} [ctx.step] - current call step (e.g. "confirm", "ending") — gates end_call
  * @param {boolean} [ctx.transferAllowed] - gates request_transfer
  * @param {object} [ctx.config] - normalised business config
+ * @param {object} [ctx.depsOverride] - when present, replaces CAPABILITY_DEPS as the
+ *   data surface handed to a capability pack's execute (e.g. an eval/benchmark
+ *   harness supplying fakes). Ignored by the engine-owned set_call_intent/end_call
+ *   branches and by executeWebhookTool, neither of which read ctx.deps.
  * @returns {Promise<{
  *   functionResponse: {id: string, name: string, response: object},
  *   stateEffects: {
@@ -155,7 +171,7 @@ export async function executeToolCall(fc, ctx) {
         // about it — locking the door and the key inside.
         if ((pack.actionTools || []).includes(fc.name)) {
           const cfg = capabilityConfig(ctx?.config, pack.id);
-          const check = checkRequirements(cfg, fc.args || {}, ctx);
+          const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {
             return {
               functionResponse: {
@@ -170,7 +186,7 @@ export async function executeToolCall(fc, ctx) {
             };
           }
         }
-        return pack.execute(fc, { ...ctx, deps: CAPABILITY_DEPS });
+        return pack.execute(fc, { ...ctx, deps: ctx.depsOverride || CAPABILITY_DEPS });
       }
       return executeWebhookTool(fc, ctx);
     }

@@ -5,3 +5,4 @@ Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Sta
 
 === CURRENT TASK AND STATE ===
 Step: ending
+The caller was already greeted with: "Thanks for calling Riverside Family Clinic." — do not greet them again.

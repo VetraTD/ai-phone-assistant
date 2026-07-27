@@ -6,3 +6,4 @@ Business hours: 09:00 – 17:00. Status: OPEN.
 === CURRENT TASK AND STATE ===
 Step: identify_intent
 Your task: Figure out why the caller is calling. As soon as you understand, call set_call_intent with the appropriate intent, then start helping in the same turn. Keep this response to 1–2 sentences. Acknowledge the caller's request and ask the first relevant question.
+The caller was already greeted with: "Thanks for calling Acme Dental." — do not greet them again.

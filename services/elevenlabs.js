@@ -16,17 +16,71 @@ import { log } from "../lib/logger.js";
 //   verify it actually reaches the wire via the `ws` constructor's
 //   `options.headers`, not just present in this file's source).
 //   Handshake body: {"text":" ","voice_settings":{...}} — text MUST be a
-//   single space.
+//   single space. An optional `previous_text` may ride on this same handshake
+//   frame (see previousText below).
 // ---------------------------------------------------------------------------
 
 const CONNECT_TIMEOUT_MS = 3000;
 
+const DEFAULT_MODEL_ID = "eleven_flash_v2_5";
+
+// Longest previous-utterance context we condition prosody on. ~300 chars is a
+// couple of sentences — enough for the model to match cadence/energy without
+// bloating the handshake.
+const PREVIOUS_TEXT_MAX_CHARS = 300;
+
+/**
+ * Kill-switch for `previous_text`: cheap insurance in case ElevenLabs
+ * tightens handshake validation around this (currently undocumented) field
+ * in a way that starts rejecting connections. Set
+ * ELEVENLABS_DISABLE_PREVIOUS_TEXT=true (or "1") to omit the field entirely,
+ * with no code change or redeploy of the calling logic needed. Read at
+ * call-time (not module load) so tests can flip it per-case.
+ */
+function previousTextDisabled() {
+  const v = process.env.ELEVENLABS_DISABLE_PREVIOUS_TEXT;
+  return v === "true" || v === "1";
+}
+
 const DEFAULT_VOICE_SETTINGS = {
-  stability: 0.5,
+  // Raised 0.5 -> 0.65 (Task 13): one WS per turn means the model has no
+  // cross-turn prosody state, so a low stability let expression swing audibly
+  // between utterances. 0.65 damps that; the per-voice catalog pass
+  // (config/voices.js) fine-tunes from here pending the owner's listening test.
+  stability: 0.65,
   similarity_boost: 0.8,
   use_speaker_boost: false,
   speed: 1,
 };
+
+/**
+ * Trim previous-utterance text (for prosody continuity) to the last
+ * `maxChars` characters, cut on a word boundary and never splitting a UTF-16
+ * surrogate pair. Empty / whitespace-only / non-string input returns "".
+ *
+ * Prosody cares about the words immediately BEFORE the new utterance, so we
+ * keep the tail, not the head.
+ *
+ * @param {string} text
+ * @param {number} [maxChars=PREVIOUS_TEXT_MAX_CHARS]
+ * @returns {string}
+ */
+export function trimPreviousText(text, maxChars = PREVIOUS_TEXT_MAX_CHARS) {
+  if (typeof text !== "string") return "";
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  if (trimmed.length <= maxChars) return trimmed;
+
+  let slice = trimmed.slice(trimmed.length - maxChars);
+  // If the cut landed inside a surrogate pair, the slice would start with a
+  // lone low surrogate — drop it so we never emit half a code point.
+  const firstCode = slice.charCodeAt(0);
+  if (firstCode >= 0xdc00 && firstCode <= 0xdfff) slice = slice.slice(1);
+  // Advance past any leading partial word to the next whole-word boundary.
+  const firstSpace = slice.search(/\s/);
+  if (firstSpace >= 0) slice = slice.slice(firstSpace + 1);
+  return slice.trim();
+}
 
 /**
  * Open a streaming ElevenLabs TTS WebSocket connection.
@@ -34,8 +88,9 @@ const DEFAULT_VOICE_SETTINGS = {
  * @param {object} opts
  * @param {string} opts.voiceId
  * @param {string} [opts.apiKey=process.env.ELEVENLABS_API_KEY]
- * @param {string} [opts.modelId="eleven_flash_v2_5"]
+ * @param {string} [opts.modelId] - defaults to ELEVENLABS_MODEL env, else "eleven_flash_v2_5" (enables an eleven_turbo_v2_5 A/B by env with no code edit)
  * @param {object} [opts.voiceSettings] - merged over the defaults, sent in the handshake
+ * @param {string} [opts.previousText] - the previously-spoken text this utterance continues from; when non-empty it is trimmed (trimPreviousText) and sent as `previous_text` on the handshake so the model matches prior prosody/cadence. Undocumented on the stream-input schema but accepted on the wire (verified live 2026-07-24) — silently ignored if unsupported, so it is safe to always send. Omitted entirely when ELEVENLABS_DISABLE_PREVIOUS_TEXT=true|1 (see previousTextDisabled()).
  * @param {function} [opts.onAudio] - (buf: Buffer) => void — raw mulaw 8kHz, no container
  * @param {function} [opts.onFinal] - () => void — fired on {"isFinal":true}
  * @param {function} [opts.onError] - (err: Error) => void — socket error, unexpected close, or connect timeout
@@ -44,8 +99,9 @@ const DEFAULT_VOICE_SETTINGS = {
 export function createTtsConnection({
   voiceId,
   apiKey = process.env.ELEVENLABS_API_KEY,
-  modelId = "eleven_flash_v2_5",
+  modelId = process.env.ELEVENLABS_MODEL?.trim() || DEFAULT_MODEL_ID,
   voiceSettings,
+  previousText,
   onAudio,
   onFinal,
   onError,
@@ -109,7 +165,10 @@ export function createTtsConnection({
     clearConnectTimer();
 
     const settings = { ...DEFAULT_VOICE_SETTINGS, ...voiceSettings };
-    rawSend({ text: " ", voice_settings: settings });
+    const initFrame = { text: " ", voice_settings: settings };
+    const prev = previousTextDisabled() ? "" : trimPreviousText(previousText);
+    if (prev) initFrame.previous_text = prev;
+    rawSend(initFrame);
     handshakeSent = true;
 
     const queued = sendQueue;
@@ -216,4 +275,59 @@ export function createTtsConnection({
   }
 
   return { sendText, flush, close, isOpen };
+}
+
+/**
+ * Synthesize ONE fixed phrase in a business's ElevenLabs voice and resolve the
+ * concatenated raw mulaw 8kHz buffer — a one-shot over the same streaming
+ * WS client, used to pre-warm a call's micro-utterance cache (silence nudges,
+ * goodbye, filler) in the SAME voice every LLM turn uses, so those lines never
+ * flip to the Google fallback voice mid-call (see lib/voice/utteranceCache.js
+ * and lib/voice/session.js). This is a warm-up path only: it is never on the
+ * caller-latency-critical path (fire-and-forget at call start), so paying one
+ * connect + generate round-trip for a whole buffer is fine.
+ *
+ * Rejects on connect timeout / socket error / unexpected close (the caller —
+ * warm() — swallows per-entry failures, so a warm miss simply falls back to
+ * live synthesis at playback time). Resolves an empty buffer for empty text.
+ *
+ * @param {object} opts
+ * @param {string} opts.voiceId
+ * @param {string} opts.text
+ * @param {object} [opts.voiceSettings]
+ * @param {string} [opts.modelId]
+ * @param {string} [opts.apiKey]
+ * @returns {Promise<Buffer>}
+ */
+export function synthesizeMulawOnce({ voiceId, text, voiceSettings, modelId, apiKey } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!text) {
+      resolve(Buffer.alloc(0));
+      return;
+    }
+    const chunks = [];
+    let settled = false;
+    const conn = createTtsConnection({
+      voiceId,
+      apiKey,
+      modelId,
+      voiceSettings,
+      onAudio: (buf) => chunks.push(buf),
+      onFinal: () => {
+        if (settled) return;
+        settled = true;
+        const out = Buffer.concat(chunks);
+        try { conn.close(); } catch { /* already closing */ }
+        resolve(out);
+      },
+      onError: (err) => {
+        if (settled) return;
+        settled = true;
+        try { conn.close(); } catch { /* already gone */ }
+        reject(err);
+      },
+    });
+    conn.sendText(text);
+    conn.flush();
+  });
 }

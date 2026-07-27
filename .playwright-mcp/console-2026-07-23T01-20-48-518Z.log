@@ -1,0 +1,17 @@
+[     108ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2563aab5:20102
+[  892224ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:3001/api/calendar/auth-url:0
+[  895226ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:3001/api/calendar/auth-url:0
+[72874533ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3001/api/analytics/1c2021e1-f44f-4066-8d8d-86cd089d8e04:0
+[72874535ms] [ERROR] AxiosError: Request failed with status code 401
+    at settle (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:1281:12)
+    at XMLHttpRequest.onloadend (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:1638:7)
+    at Axios.request (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:2255:41) @ http://localhost:5173/src/App.jsx?t=1784769219031:980
+[72919757ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3001/api/analytics/1c2021e1-f44f-4066-8d8d-86cd089d8e04:0
+[72919757ms] [ERROR] AxiosError: Request failed with status code 401
+    at settle (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:1281:12)
+    at XMLHttpRequest.onloadend (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:1638:7)
+    at Axios.request (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:2255:41) @ http://localhost:5173/src/App.jsx?t=1784769219031:980
+[73755808ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2563aab5:20102
+[73765214ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:3001/api/calendar/auth-url:0
+[73766876ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:3001/api/calendar/auth-url:0
+[73767920ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://localhost:3001/api/calendar/auth-url:0

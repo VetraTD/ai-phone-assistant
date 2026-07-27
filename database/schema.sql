@@ -114,6 +114,8 @@ CREATE TABLE appointments (
   scheduled_at timestamptz NOT NULL,
   status       text DEFAULT 'scheduled',
   notes        text,
+  google_event_id text,        -- 021: set once pushed to Google Calendar; NULL = unsynced (dedup key)
+  synced_at    timestamptz,    -- 021: when it was pushed to the connected calendar
   created_at   timestamptz DEFAULT now()
 );
 
@@ -221,13 +223,56 @@ CREATE INDEX idx_calendar_connections_business ON calendar_connections (business
 CREATE INDEX idx_oauth_states_created_at ON oauth_states (created_at);
 -- Migration 020: capability lookup is on the hot path — every call loads it.
 CREATE INDEX idx_business_capabilities_business ON business_capabilities (business_id);
+-- Migration 021: the calendar sync worker's hot query is "unsynced upcoming
+-- appointments for this business"; this partial index keeps it cheap.
+CREATE INDEX idx_appointments_unsynced ON appointments (business_id, scheduled_at) WHERE google_event_id IS NULL;
 
--- Partial unique index (migration 009): a business cannot hold two
--- 'scheduled' appointments at the same instant. Cancelled/completed rows do
--- not block the slot from being reused. services/tools.js's book_appointment
--- catches the resulting Postgres 23505 to tell the caller the slot is no
--- longer available — WITHOUT this index, concurrent double-bookings both
--- succeed silently.
-CREATE UNIQUE INDEX uniq_appointments_business_scheduled_at_active
-  ON appointments (business_id, scheduled_at)
-  WHERE status = 'scheduled';
+-- Double-booking is prevented by the create_appointment_if_available function
+-- (migration 022), not a unique index: per-business slot capacity and
+-- appointment length cannot be expressed by any static constraint. Migration
+-- 009's exact-timestamp unique index was dropped there because it wrongly blocked
+-- capacity > 1. Every internal booking goes through the function, which counts
+-- overlaps under a per-slot advisory lock and inserts only if there is room.
+CREATE OR REPLACE FUNCTION create_appointment_if_available(
+  p_business_id  uuid,
+  p_scheduled_at timestamptz,
+  p_length_min   int,
+  p_capacity     int,
+  p_call_id      uuid,
+  p_client_name  text,
+  p_client_phone text,
+  p_notes        text
+) RETURNS uuid
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_overlap  int;
+  v_id       uuid;
+  v_capacity int := GREATEST(COALESCE(p_capacity, 1), 1);
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext(p_business_id::text || p_scheduled_at::text)::bigint);
+
+  IF COALESCE(p_length_min, 0) <= 0 THEN
+    SELECT count(*) INTO v_overlap
+    FROM appointments
+    WHERE business_id = p_business_id AND status = 'scheduled'
+      AND scheduled_at = p_scheduled_at;
+  ELSE
+    SELECT count(*) INTO v_overlap
+    FROM appointments
+    WHERE business_id = p_business_id AND status = 'scheduled'
+      AND scheduled_at > p_scheduled_at - make_interval(mins => p_length_min)
+      AND scheduled_at < p_scheduled_at + make_interval(mins => p_length_min);
+  END IF;
+
+  IF v_overlap >= v_capacity THEN
+    RETURN NULL;
+  END IF;
+
+  INSERT INTO appointments (business_id, call_id, client_name, client_phone, scheduled_at, notes)
+  VALUES (p_business_id, p_call_id, p_client_name, p_client_phone, p_scheduled_at, p_notes)
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
