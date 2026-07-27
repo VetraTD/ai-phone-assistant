@@ -8,7 +8,13 @@
 
 import { log } from "../lib/logger.js";
 
-const ATHENA_TIMEOUT_MS = 10_000;
+// Must stay comfortably inside the LLM turn budget that wraps it
+// (lib/voice/llmTurn.js: 8s base, extended per tool round). At the old 10s a
+// slow endpoint blew the whole turn before its own timeout could fire, so the
+// caller heard "Sorry, I'm taking a bit longer. Could you repeat that?"
+// instead of the answer — a worse outcome than a clean tool failure, which
+// the model can at least explain. Env-overridable for a slow integration.
+const ATHENA_TIMEOUT_MS = Number.parseInt(process.env.ATHENA_TIMEOUT_MS, 10) || 6_000;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
 
 /** @type {Record<string, { access_token: string, expiresAt: number, api_base: string }>} */

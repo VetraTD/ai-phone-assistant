@@ -56,6 +56,10 @@ function callFor(sid) {
         holdExtensions: 0,
         holdsCapped: 0,
         bargeIns: 0,
+        echoSuppressed: 0,
+        settles: 0,
+        stalls: 0,
+        loopBreaks: 0,
         turns: 0,
         latencySum: 0,
       },
@@ -92,6 +96,13 @@ function renderSummary(sid, call, reason) {
     `holds ${t.holds}${t.holdExtensions ? `(+${t.holdExtensions})` : ""}`,
     t.holdsCapped ? C.yellow(`capped ${t.holdsCapped}`) : null,
     `barge-ins ${t.bargeIns}`,
+    t.settles ? `settles ${t.settles}` : null,
+    // The number that proves the echo guard is working on a speakerphone call:
+    // echo-suppressed climbing while barge-ins stays flat.
+    t.echoSuppressed ? C.cyan(`echo-suppressed ${t.echoSuppressed}`) : null,
+    t.stalls ? C.yellow(`stalls ${t.stalls}`) : null,
+    // Non-zero means the echo guard and the settle let a runaway through.
+    t.loopBreaks ? C.red(`LOOP-BREAKS ${t.loopBreaks}`) : null,
   ].filter(Boolean);
   process.stdout.write(
     `${C.bold(`──── call ${short(sid)} ended`)} ${C.dim(`(${reason})`)}  ${parts.join("  ")}\n\n`
@@ -173,17 +184,25 @@ function render(e) {
       emit(call, sid, C.red("☎"), C.red(`silence hangup · ${e.step}`));
       break;
 
-    case "transcript_held":
-      call.tally.holds++;
+    case "transcript_held": {
       call.suppressedNoted = false;
+      // A settle is not an ordinary hold: it is the AI deliberately waiting
+      // after being interrupted, and it is the thing to watch when tuning the
+      // stutter fix, so it gets its own icon and tally.
+      const settling = e.rule === "post_barge_settle";
+      if (settling) call.tally.settles++;
+      else call.tally.holds++;
       emit(
         call,
         sid,
-        C.blue("⋯"),
-        `holding ${ms(e.holdMs)} — ${e.rule ?? "?"} ` +
-          (e.tail ? C.dim(`…${e.tail}`) : "")
+        settling ? C.cyan("⏳") : C.blue("⋯"),
+        settling
+          ? `settling after barge — waiting ${ms(e.holdMs)} for a real pause ` +
+            (e.tail ? C.dim(`…${e.tail}`) : "")
+          : `holding ${ms(e.holdMs)} — ${e.rule ?? "?"} ` + (e.tail ? C.dim(`…${e.tail}`) : "")
       );
       break;
+    }
 
     case "hold_extended":
       call.tally.holdExtensions++;
@@ -209,9 +228,58 @@ function render(e) {
       emit(call, sid, C.dim("✗"), C.dim(`discarded — ${e.reason}`));
       break;
 
+    case "llm_stalled":
+      call.tally.stalls++;
+      emit(
+        call,
+        sid,
+        C.yellow("⏳"),
+        `model stalled ${ms(e.sinceLastChunkMs)} — playing a hold line ` +
+          C.dim("(usually a slow tool round)")
+      );
+      break;
+
+    case "loop_breaker_tripped":
+      call.tally.loopBreaks++;
+      emit(
+        call,
+        sid,
+        C.red("🛑"),
+        C.red(`LOOP BREAKER — ${e.barges} barge-ins inside ${ms(e.windowMs)}; `) +
+          "stopping audio until one clean caller utterance"
+      );
+      break;
+
+    case "loop_breaker_released":
+      emit(call, sid, C.green("▶"), "loop breaker released — normal service resumed");
+      break;
+
+    case "barge_history_recorded":
+      emit(
+        call,
+        sid,
+        C.dim("📝"),
+        C.dim(`recorded interrupted turn — caller heard ${e.heardChars}/${e.writtenChars} chars`)
+      );
+      break;
+
     case "barge_in":
       // turnManager logs a decision line with `reason`; session.js logs the
-      // actual cut with `fadeMs`. Only the cut is worth a line here.
+      // actual cut with `fadeMs`. Only the cut is worth a line here — EXCEPT
+      // a suppressed echo, which is the single most useful thing to see on a
+      // speakerphone call and has no fadeMs (nothing was cut). It must
+      // therefore be handled ABOVE the fadeMs early-return below.
+      if (e.reason === "echo_suppressed") {
+        call.tally.echoSuppressed++;
+        emit(
+          call,
+          sid,
+          C.cyan("🛡"),
+          `echo suppressed ${C.dim(`(${e.source})`)} — ${C.dim(`"${String(e.text || "").slice(0, 48)}"`)} ` +
+            C.dim(`overlap ${e.ratio === undefined ? "?" : e.ratio.toFixed(2)}, new words ${e.novel ?? "?"}`)
+        );
+        break;
+      }
       if (e.fadeMs === undefined) break;
       call.tally.bargeIns++;
       call.suppressedNoted = false;

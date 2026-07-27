@@ -45,7 +45,11 @@ vi.mock("../lib/voice/sttStream.js", () => ({
 }));
 
 // ---- lib/voice/ttsStream.js ------------------------------------------------
-vi.mock("../lib/voice/ttsStream.js", () => ({
+// Only createTtsTurn is faked. remainderBoundary / REPAIR_CHARS_PER_SEC stay
+// REAL: session.js reuses them to work out how much of a barged reply the
+// caller actually heard, and a stubbed estimate would make that untested.
+vi.mock("../lib/voice/ttsStream.js", async (importActual) => ({
+  ...(await importActual()),
   createTtsTurn: vi.fn((opts) => {
     const turn = {
       opts,
@@ -341,14 +345,21 @@ import { VOICE_CATALOG } from "../config/voices.js";
 
 // ---- helpers ---------------------------------------------------------------
 
-/** Build a controllable async generator emulating runLlmTurn's contract. */
-function makeGen(events, { hang = false } = {}) {
+/**
+ * Build a controllable async generator emulating runLlmTurn's contract.
+ * @param {object} [opts]
+ * @param {boolean} [opts.hang] - never settle once the events run out
+ * @param {Error}   [opts.throwAfter] - reject once the events run out; models
+ *   a turn that did real work (e.g. emitted a toolEffect) and only THEN died
+ */
+function makeGen(events, { hang = false, throwAfter = null } = {}) {
   let i = 0;
   const returnSpy = vi.fn();
   const gen = {
     [Symbol.asyncIterator]() { return this; },
     next() {
       if (i < events.length) return Promise.resolve({ value: events[i++], done: false });
+      if (throwAfter) return Promise.reject(throwAfter);
       if (hang) return new Promise(() => {}); // never settles
       return Promise.resolve({ value: undefined, done: true });
     },
@@ -2305,10 +2316,18 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "done", reply: { text: "We're open every day.", toolResults: [] } },
       ]);
       tm.opts.onTurnEnd("what are your hours today");
-      await flush();
-      await flush();
+      // The post-barge settle holds this final before it becomes a turn (see
+      // POST_BARGE_SETTLE_MS), so turn 2 no longer starts on the same tick as
+      // the final that triggers it. Identify turn 2 by what it SPEAKS rather
+      // than by position: flushUntil spins real time, during which another
+      // test's still-pending timers can append to the shared ttsTurns array.
+      const spokeTurn2 = (t) =>
+        t.opts.callSid === sid &&
+        t.write.mock.calls.some((c) => /open every day/.test(c[0] || ""));
+      await flushUntil(() => H.ttsTurns.some(spokeTurn2));
 
-      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn2Tts = H.ttsTurns.find(spokeTurn2);
+      expect(turn2Tts).toBeDefined();
       expect(turn2Tts).not.toBe(turn1Tts);
       // Still the greeting — turn 1's barged partial text never overwrote it.
       expect(turn2Tts.opts.previousText).toBe("Hello, thanks for calling Test Biz.");
@@ -2495,6 +2514,711 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(realTurn).not.toBe(greetingTurn);
       // ElevenLabs still attempted — the call did not go sticky-Google.
       expect(realTurn.opts.forceFallback).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 16. Post-barge settle + barge recovery
+  //
+  // The bug these exist for, observed live on speakerphone: the caller
+  // interrupts, the AI stops, the caller pauses a beat to gather the thought,
+  // the AI answers the instant Deepgram endpoints (300ms), the caller resumes
+  // and talks over it, the AI stops again — and the loop only ends when the
+  // caller gives up and goes silent. Every test below pins one link of that
+  // chain open.
+  // -------------------------------------------------------------------------
+  describe("16. post-barge settle", () => {
+    async function startFakeTimerCall(streamSid) {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: {
+          callSid: sid,
+          streamSid,
+          customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+      return { ws, sid };
+    }
+
+    it("16a. a COMPLETE final arriving right after a barge is held for the settle, not sent straight to the LLM", async () => {
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16a");
+        const tm = H.turnManagerInstances[0];
+        const before = runLlmTurn.mock.calls.length;
+
+        // A COMPLETE utterance (isIncomplete false => classifyHold never
+        // runs, wantedHoldMs 0). Without the settle this reaches the LLM on
+        // the same tick.
+        tm.opts.onInterrupt("wait");
+        tm.opts.onTurnEnd("That is not what I meant.");
+        await vi.advanceTimersByTimeAsync(200);
+        expect(runLlmTurn.mock.calls.length).toBe(before); // settling
+
+        await vi.advanceTimersByTimeAsync(600); // past POST_BARGE_SETTLE_MS
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16b. barge -> brief pause -> caller resumes: both halves reach the LLM as ONE turn", async () => {
+      // The exact reported sequence. Two turns here is the bug.
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16b");
+        const tm = H.turnManagerInstances[0];
+        const before = runLlmTurn.mock.calls.length;
+
+        tm.opts.onInterrupt("no");
+        tm.opts.onTurnEnd("No, that's not what I meant.");
+        await vi.advanceTimersByTimeAsync(300);
+
+        // The caller was not finished — they resume mid-settle.
+        tm.opts.onTurnEnd("I wanted the Thursday slot instead.");
+        await vi.advanceTimersByTimeAsync(1_500);
+
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+        const text = runLlmTurn.mock.calls.at(-1)[0].userText;
+        expect(text).toContain("not what I meant");
+        expect(text).toContain("Thursday slot");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16c. the settle cannot outlast the hold-chain ceiling", async () => {
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16c");
+        const tm = H.turnManagerInstances[0];
+        const stt = H.sttInstances[0];
+        const before = runLlmTurn.mock.calls.length;
+
+        tm.opts.onInterrupt("wait");
+        tm.opts.onTurnEnd("hold on I need to");
+
+        // Caller keeps making noise, earning extension after extension.
+        for (let i = 0; i < 12; i++) {
+          await vi.advanceTimersByTimeAsync(400);
+          stt.opts.onSpeechStarted();
+        }
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        // Flushed at the ceiling rather than held forever.
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16d. an ordinary complete final with no recent barge is NOT delayed", async () => {
+      // The settle costs latency, so it must apply ONLY after an
+      // interruption. This is the regression guard for every normal turn.
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16d");
+        const tm = H.turnManagerInstances[0];
+        const before = runLlmTurn.mock.calls.length;
+
+        tm.opts.onTurnEnd("That is not what I meant.");
+        await vi.advanceTimersByTimeAsync(20);
+
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16d2. a barge older than BARGE_SETTLE_TTL_MS no longer delays a final", async () => {
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16d2");
+        const tm = H.turnManagerInstances[0];
+
+        tm.opts.onInterrupt("wait");
+        await vi.advanceTimersByTimeAsync(11_000); // past the 10s TTL
+
+        const before = runLlmTurn.mock.calls.length;
+        tm.opts.onTurnEnd("That is not what I meant.");
+        await vi.advanceTimersByTimeAsync(20);
+
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16e. a barge with NO following final still leaves the ladder armed (no permanent dead air)", async () => {
+      // onInterrupt clears the silence timer and its turn's -done mark is
+      // epoch-suppressed, so nothing else can re-arm. An interim-triggered
+      // barge whose utterance turns out to be empty/filler/echo used to
+      // strand the call in silence for the rest of its duration.
+      vi.useFakeTimers();
+      try {
+        await startFakeTimerCall("MZ16e");
+        const tm = H.turnManagerInstances[0];
+        const ttsBefore = H.ttsTurns.length;
+
+        tm.opts.onInterrupt("wait");
+        // No onTurnEnd ever follows.
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        expect(H.ttsTurns.length).toBeGreaterThan(ttsBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16f. a barge clears turnManager's interrupt latch so the caller can interrupt again", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      expect(tm.reset).not.toHaveBeenCalled();
+      tm.opts.onInterrupt("wait");
+      await flush();
+      expect(tm.reset).toHaveBeenCalled();
+    });
+
+    it("16g. text queued behind an in-flight turn is folded into the barge, not replayed on a later turn", async () => {
+      // startTurn's finally only replays queuedText when the epoch still
+      // matches, which a barge guarantees it does not — so without folding it
+      // in, this text resurfaced minutes later as a fresh caller utterance.
+      vi.useFakeTimers();
+      try {
+        const hanging = makeGen([{ type: "delta", text: "Let me check " }], { hang: true });
+        H.llmFactory = () => hanging;
+        await startFakeTimerCall("MZ16g");
+        const tm = H.turnManagerInstances[0];
+
+        tm.opts.onTurnEnd("what are your hours");
+        await vi.advanceTimersByTimeAsync(10);
+
+        // Arrives while the LLM is still streaming -> queuedText.
+        tm.opts.onTurnEnd("and your address");
+        await vi.advanceTimersByTimeAsync(10);
+
+        H.llmFactory = () => makeGen([
+          { type: "delta", text: "Sure." },
+          { type: "done", reply: { text: "Sure.", toolResults: [] } },
+        ]);
+
+        const before = runLlmTurn.mock.calls.length;
+        tm.opts.onInterrupt("wait");
+        // Deliberately free of self-correction markers ("actually", "no,",
+        // "sorry") — extractFinalIntent would otherwise drop the folded-in
+        // prefix and this would stop testing what it claims to.
+        tm.opts.onTurnEnd("just the address please.");
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+        const text = runLlmTurn.mock.calls.at(-1)[0].userText;
+        expect(text).toContain("your address");
+        expect(text).toContain("just the address");
+
+        // And it is not replayed again afterwards.
+        const after = runLlmTurn.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(runLlmTurn.mock.calls.length).toBe(after);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 17. Self-echo (lib/voice/echoGuard.js is NOT mocked here — these drive the
+  //     real matcher through the real session wiring)
+  // -------------------------------------------------------------------------
+  describe("17. the AI never answers its own voice", () => {
+    /** Make the playback-window check always pass, as it does on a live call. */
+    function alwaysAudible() {
+      H.audioOutInstances[0].aiAudioPlayingUntil.mockReturnValue(Number.MAX_SAFE_INTEGER);
+    }
+
+    it("17a. the greeting coming back through the caller's mic never becomes a turn", async () => {
+      // The live speakerphone failure: Deepgram transcribes the AI's own
+      // greeting, it clears the 4-word bar, and the session answers it — which
+      // produces more audio, which echoes again.
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      alwaysAudible();
+      const tm = H.turnManagerInstances[0];
+      const before = runLlmTurn.mock.calls.length;
+
+      tm.opts.onTurnEnd("Hello, thanks for calling Test Biz");
+      await flush();
+      await flush();
+
+      expect(runLlmTurn.mock.calls.length).toBe(before);
+      expect(log.debug).toHaveBeenCalledWith(
+        "transcript_discarded",
+        expect.objectContaining({ reason: "echo" })
+      );
+    });
+
+    it("17b. a real caller utterance during the same window is still answered", async () => {
+      // The guard must not become a general mute button.
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      alwaysAudible();
+      const tm = H.turnManagerInstances[0];
+      const before = runLlmTurn.mock.calls.length;
+
+      tm.opts.onTurnEnd("I need to book an appointment for next week");
+      await flush();
+      await flush();
+
+      expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+    });
+
+    it("17c. an echo final rejected by turnManager still leaves the silence ladder armed", async () => {
+      // An echo never reaches onTurnEnd, so nothing downstream re-arms the
+      // ladder. Without the explicit re-arm in onFinal, a line that echoes
+      // could leave the call silent for good.
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: {
+            callSid: sid,
+            streamSid: "MZ17c",
+            customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+          },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        const tm = H.turnManagerInstances[0];
+        const stt = H.sttInstances[0];
+        tm.handleFinal.mockReturnValue({ action: "ignore", reason: "echo" });
+
+        const ttsBefore = H.ttsTurns.length;
+        stt.opts.onFinal("we are open monday through friday");
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        expect(H.ttsTurns.length).toBeGreaterThan(ttsBefore);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("17d. an echo interim does not extend the post-barge settle", async () => {
+      // Otherwise the stutter loop is simply traded for a hold that never
+      // releases: every echo interim stamps the caller-speech window, and
+      // onHoldExpired keeps earning another extension from it.
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: {
+            callSid: sid,
+            streamSid: "MZ17d",
+            customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+          },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        H.audioOutInstances[0].aiAudioPlayingUntil.mockReturnValue(Number.MAX_SAFE_INTEGER);
+        const tm = H.turnManagerInstances[0];
+        const stt = H.sttInstances[0];
+        const before = runLlmTurn.mock.calls.length;
+
+        tm.opts.onInterrupt("wait");
+        tm.opts.onTurnEnd("That is not what I meant.");
+
+        // The AI's own greeting keeps arriving as interims through the settle.
+        for (let i = 0; i < 6; i++) {
+          await vi.advanceTimersByTimeAsync(300);
+          stt.opts.onInterim("Hello, thanks for calling Test Biz", { confidence: 0.9 });
+        }
+
+        // The settle released on schedule instead of being pushed out.
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 18. Loop breaker
+  //
+  // The backstop for the reported failure mode: a start/stop loop that never
+  // ends on its own. These tests assert termination, not diagnosis — the
+  // breaker deliberately knows nothing about WHY the AI keeps being cut off.
+  // -------------------------------------------------------------------------
+  describe("18. runaway barge-in backstop", () => {
+    it("18a. three barge-ins in quick succession stop the audio outright", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      const audioOut = H.audioOutInstances[0];
+
+      tm.opts.onInterrupt("wait");
+      tm.opts.onInterrupt("wait");
+      expect(log.info).not.toHaveBeenCalledWith("loop_breaker_tripped", expect.anything());
+
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      expect(log.info).toHaveBeenCalledWith(
+        "loop_breaker_tripped",
+        expect.objectContaining({ barges: 3 })
+      );
+      // A HARD clear (no fade): trailing off gracefully still emits audio, and
+      // emitting audio is what keeps the loop alive.
+      expect(audioOut.clear).toHaveBeenCalledWith();
+    });
+
+    it("18b. while yielding, a final arriving over live AI audio does not restart the loop", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      const audioOut = H.audioOutInstances[0];
+      tm.opts.onInterrupt("wait");
+      tm.opts.onInterrupt("wait");
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      audioOut._playing = true; // AI audio still going out
+      const before = runLlmTurn.mock.calls.length;
+      tm.opts.onTurnEnd("I need to book an appointment for next week");
+      await flush();
+      await flush();
+
+      expect(runLlmTurn.mock.calls.length).toBe(before);
+      expect(log.debug).toHaveBeenCalledWith(
+        "transcript_discarded",
+        expect.objectContaining({ reason: "loop_breaker_yield" })
+      );
+    });
+
+    it("18c. one clean caller utterance with the line quiet resumes normal service", async () => {
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: {
+            callSid: sid,
+            streamSid: "MZ18c",
+            customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+          },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        const tm = H.turnManagerInstances[0];
+        tm.opts.onInterrupt("wait");
+        tm.opts.onInterrupt("wait");
+        tm.opts.onInterrupt("wait");
+
+        const before = runLlmTurn.mock.calls.length;
+        tm.opts.onTurnEnd("I need to book an appointment for next week");
+        await vi.advanceTimersByTimeAsync(2_000); // outwait the post-barge settle
+
+        expect(runLlmTurn.mock.calls.length).toBe(before + 1);
+        expect(log.info).toHaveBeenCalledWith(
+          "loop_breaker_released",
+          expect.objectContaining({ callSid: sid })
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("18d. barge-ins spread out over a long call never trip it", async () => {
+      // Ordinary interruptions are a feature. Only a RATE is pathological.
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: {
+            callSid: sid,
+            streamSid: "MZ18d",
+            customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+          },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        const tm = H.turnManagerInstances[0];
+        for (let i = 0; i < 5; i++) {
+          tm.opts.onInterrupt("wait");
+          await vi.advanceTimersByTimeAsync(7_000); // outside the 6s window
+        }
+
+        expect(log.info).not.toHaveBeenCalledWith("loop_breaker_tripped", expect.anything());
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 19. An interrupted exchange survives in history
+  //
+  // A barged turn returns before applyReply, so the caller's question AND the
+  // partial answer used to vanish. The next turn was then generated from
+  // history ending before the interruption — which is why the reply after an
+  // interruption sounded new and unrelated rather than like a continuation.
+  // -------------------------------------------------------------------------
+  describe("19. barge history coherence", () => {
+    it("19a. records the caller's question, the audible part of the reply, and an interrupted note", async () => {
+      H.llmFactory = () => makeGen(
+        [{ type: "delta", text: "We are open from nine until five. " }],
+        { hang: true }
+      );
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      const state = callState.getState(sid);
+      const before = state.history.length;
+
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      const added = state.history.slice(before);
+      expect(added.length).toBe(3);
+      expect(added[0]).toEqual({ role: "user", parts: [{ text: "what are your hours" }] });
+      expect(added[1].role).toBe("model");
+      expect(added[1].parts[0].text).toContain("open from nine until five");
+      expect(added[2].role).toBe("user");
+      expect(added[2].parts[0].text).toMatch(/interrupted you/i);
+    });
+
+    it("19b. records only what the caller actually HEARD, not everything handed to TTS", async () => {
+      // audioOut still holds unplayed audio at the moment of the barge; that
+      // part was never heard, so the model must not be told it said it.
+      H.llmFactory = () => makeGen(
+        [
+          { type: "delta", text: "We are open from nine until five. " },
+          { type: "delta", text: "We also open on Saturday mornings. " },
+        ],
+        { hang: true }
+      );
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      const audioOut = H.audioOutInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      // ~1.5s of audio still queued. At REPAIR_CHARS_PER_SEC that is ~22
+      // unheard characters, and rounding DOWN to a sentence boundary lands
+      // just after "...until five." — so the Saturday sentence, which was
+      // written to TTS but never played, must not appear in history.
+      audioOut.aiAudioPlayingUntil.mockReturnValue(performance.now() + 1_500);
+
+      const state = callState.getState(sid);
+      const before = state.history.length;
+      tm.opts.onInterrupt("wait");
+      await flush();
+
+      const model = state.history.slice(before).find((h) => h.role === "model");
+      expect(model.parts[0].text).toContain("open from nine until five");
+      expect(model.parts[0].text).not.toContain("Saturday");
+    });
+
+    it("19c. barging the greeting records nothing (there is no caller turn to record)", async () => {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const state = callState.getState(sid);
+      const before = state.history.length;
+
+      tm_barge: {
+        const tm = H.turnManagerInstances[0];
+        tm.opts.onInterrupt("wait");
+      }
+      await flush();
+
+      expect(state.history.length).toBe(before);
+    });
+
+    it("19d. the record lands BEFORE the successor turn's LLM request is built", async () => {
+      // The ordering that justifies doing this synchronously in onInterrupt
+      // rather than in the barged generator's bail-out path.
+      H.llmFactory = () => makeGen(
+        [{ type: "delta", text: "We are open from nine until five. " }],
+        { hang: true }
+      );
+
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        const sid = `CA-session-fake-${++sidCounter}`;
+        ws.emit({
+          event: "start",
+          start: {
+            callSid: sid,
+            streamSid: "MZ19d",
+            customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" },
+          },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        const tm = H.turnManagerInstances[0];
+        tm.opts.onTurnEnd("what are your hours");
+        await vi.advanceTimersByTimeAsync(10);
+
+        H.llmFactory = () => makeGen([
+          { type: "delta", text: "Sure." },
+          { type: "done", reply: { text: "Sure.", toolResults: [] } },
+        ]);
+
+        tm.opts.onInterrupt("wait");
+        tm.opts.onTurnEnd("sorry, what about Saturday please");
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        const historySent = runLlmTurn.mock.calls.at(-1)[0].history;
+        expect(historySent.some((h) => h.parts?.[0]?.text === "what are your hours")).toBe(true);
+        expect(historySent.some((h) => /interrupted you/i.test(h.parts?.[0]?.text || ""))).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 20. Dead air while a tool runs
+  // -------------------------------------------------------------------------
+  describe("20. the line stays alive during a slow tool round", () => {
+    const spokeStillWorking = (t) =>
+      t.write.mock.calls.some((c) => /still working/i.test(c[0] || ""));
+
+    it("20a. a stall with no audio playing plays the hold line", async () => {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "One moment while I check that. " },
+        { type: "stalled", sinceLastChunkMs: 2500 },
+        { type: "done", reply: { text: "Thursday at three works.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("can you check Thursday");
+      await flush();
+      await flush();
+
+      expect(H.ttsTurns.some(spokeStillWorking)).toBe(true);
+      expect(log.info).toHaveBeenCalledWith("llm_stalled", expect.anything());
+    });
+
+    it("20b. a stall while the model's own announcement is still playing stays silent", async () => {
+      // The one thing the hold line must never do is talk over the "one
+      // moment while I check that" the model just said.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "One moment while I check that. " },
+        { type: "stalled", sinceLastChunkMs: 2500 },
+        { type: "done", reply: { text: "Thursday at three works.", toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      await startCall(ws, newSid());
+      await flush();
+
+      H.audioOutInstances[0]._playing = true; // announcement still going out
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("can you check Thursday");
+      await flush();
+      await flush();
+
+      expect(H.ttsTurns.some(spokeStillWorking)).toBe(false);
+    });
+
+    it("20c. a timeout AFTER a tool ran does not count toward the fallback threshold", async () => {
+      // Two slow lookups used to drop the whole call into the deterministic
+      // take-a-message script even though both tools succeeded.
+      H.llmFactory = () => makeGen(
+        [{ type: "toolEffect", effect: { success: true, capabilityEffects: [] } }],
+        { throwAfter: Object.assign(new Error("timeout"), { code: "LLM_TIMEOUT" }) }
+      );
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("can you check Thursday for me");
+      await flush();
+      await flush();
+
+      const state = callState.getState(sid);
+      expect(state.consecutiveFailures || 0).toBe(0); // never incremented
+      expect(log.info).toHaveBeenCalledWith("llm_timeout_after_tool_work", expect.anything());
+    });
+
+    it("20d. a timeout with NO tool work still counts (an actually-broken LLM must reach the fallback)", async () => {
+      H.llmFactory = () => makeThrowingGen(
+        Object.assign(new Error("timeout"), { code: "LLM_TIMEOUT" })
+      );
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = newSid();
+      await startCall(ws, sid);
+      await flush();
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("what are your hours");
+      await flush();
+      await flush();
+
+      expect(callState.getState(sid).consecutiveFailures).toBe(1);
     });
   });
 });

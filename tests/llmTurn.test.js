@@ -335,4 +335,202 @@ describe("llmTurn.js — single pre-stream transient retry", () => {
     expect(capturedSignal.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0); // no leaked timers after a retry+barge-in
   });
+
+  // ---------------------------------------------------------------------------
+  // Stall watchdog + tool-extended budget
+  //
+  // The dead-air case these exist for: the prompt has the model say "one
+  // moment while I check that" in the SAME response as the tool call, so by
+  // the time a lookup runs the turn has already produced text — which
+  // permanently disarms the one-shot "slow" signal — and the caller then hears
+  // nothing at all until the tool comes back.
+  // ---------------------------------------------------------------------------
+  describe("stall watchdog", () => {
+    /** A stream that yields a delta, then hangs until released. */
+    function stallingStream() {
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      mockGetReplyStreaming.mockImplementation(() =>
+        (async function* () {
+          yield { delta: "Let me check that. " };
+          await gate;
+          yield { done: true, reply: { text: "Let me check that. Thursday works." } };
+        })()
+      );
+      return () => release();
+    }
+
+    it("yields { type: 'stalled' } when the model goes quiet AFTER its first chunk", async () => {
+      vi.useFakeTimers();
+      const release = stallingStream();
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000, totalTimeoutMs: 30_000, stallTimeoutMs: 500,
+      });
+
+      expect((await gen.next()).value).toEqual({ type: "delta", text: "Let me check that. " });
+
+      const p = gen.next();
+      await vi.advanceTimersByTimeAsync(500);
+      const stalled = await p;
+      expect(stalled.value.type).toBe("stalled");
+      expect(stalled.value.sinceLastChunkMs).toBeGreaterThanOrEqual(500);
+
+      release();
+      expect((await gen.next()).value.type).toBe("done");
+    });
+
+    it("re-arms, unlike 'slow' — a long tool round can stall more than once", async () => {
+      vi.useFakeTimers();
+      const release = stallingStream();
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000, totalTimeoutMs: 30_000, stallTimeoutMs: 500, stallMaxYields: 2,
+      });
+      await gen.next(); // delta
+
+      const p1 = gen.next();
+      await vi.advanceTimersByTimeAsync(500);
+      expect((await p1).value.type).toBe("stalled");
+
+      const p2 = gen.next();
+      await vi.advanceTimersByTimeAsync(500);
+      expect((await p2).value.type).toBe("stalled");
+
+      // Capped: no third one, however long the tool takes.
+      const p3 = gen.next();
+      await vi.advanceTimersByTimeAsync(5_000);
+      release();
+      expect((await p3).value.type).toBe("done");
+    });
+
+    it("never yields 'stalled' before the first chunk — that window belongs to 'slow'", async () => {
+      vi.useFakeTimers();
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      mockGetReplyStreaming.mockImplementation(() =>
+        (async function* () {
+          await gate;
+          yield { done: true, reply: { text: "hi" } };
+        })()
+      );
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 300, totalTimeoutMs: 30_000, stallTimeoutMs: 100,
+      });
+
+      const p = gen.next();
+      await vi.advanceTimersByTimeAsync(300);
+      expect((await p).value).toEqual({ type: "slow" }); // not "stalled"
+
+      release();
+      expect((await gen.next()).value.type).toBe("done");
+    });
+
+    it("stallTimeoutMs=0 disables the signal entirely", async () => {
+      vi.useFakeTimers();
+      const release = stallingStream();
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000, totalTimeoutMs: 30_000, stallTimeoutMs: 0,
+      });
+      await gen.next(); // delta
+
+      const p = gen.next();
+      await vi.advanceTimersByTimeAsync(10_000);
+      release();
+      expect((await p).value.type).toBe("done");
+    });
+
+    it("leaves no dangling stall timer when the consumer bails out mid-stall", async () => {
+      vi.useFakeTimers();
+      stallingStream();
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000, totalTimeoutMs: 30_000, stallTimeoutMs: 500,
+      });
+      await gen.next();
+      await gen.return();
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe("tool-extended turn budget", () => {
+    it("a tool outcome buys more time, so a slow lookup does not kill its own turn", async () => {
+      vi.useFakeTimers();
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      mockGetReplyStreaming.mockImplementation(() =>
+        (async function* () {
+          yield { delta: "One moment while I check. " };
+          yield { toolEffect: { success: true } };
+          await gate; // the follow-up round runs past the BASE budget
+          yield { done: true, reply: { text: "Thursday at three works." } };
+        })()
+      );
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000,
+        totalTimeoutMs: 1_000,
+        stallTimeoutMs: 0,
+        toolGraceMs: 4_000,
+        hardTimeoutMs: 20_000,
+      });
+
+      await gen.next(); // delta
+      await gen.next(); // toolEffect -> extends the deadline
+
+      const p = gen.next();
+      await vi.advanceTimersByTimeAsync(1_500); // past the ORIGINAL 1s budget
+      release();
+      expect((await p).value.type).toBe("done");
+    });
+
+    it("an extension can never push past the hard ceiling", async () => {
+      // toolGraceMs (5s) would otherwise buy far more time than hardTimeoutMs
+      // (800ms) allows. The ceiling is what stops a turn that looks busy from
+      // holding the caller indefinitely.
+      vi.useFakeTimers();
+      let capturedSignal = null;
+      mockGetReplyStreaming.mockImplementation((h, u, s, i, c, e, opts) => {
+        capturedSignal = opts.signal;
+        return (async function* () {
+          yield { delta: "working " };
+          yield { toolEffect: { success: true } };
+          await new Promise((_, reject) => {
+            opts.signal.addEventListener("abort", () =>
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+            );
+          });
+        })();
+      });
+
+      const gen = runLlmTurn({
+        history: [], userText: "hi", step: "gather_details", intent: null, config: {}, extras: {},
+        firstChunkTimeoutMs: 10_000,
+        totalTimeoutMs: 500,
+        stallTimeoutMs: 0,
+        toolGraceMs: 5_000,
+        hardTimeoutMs: 800,
+      });
+
+      await gen.next(); // delta
+      await gen.next(); // toolEffect -> tries to extend by 5s
+
+      const p = gen.next();
+      p.catch(() => {});
+      await vi.advanceTimersByTimeAsync(1_000); // past the 800ms ceiling
+
+      await expect(p).rejects.toMatchObject({ code: "LLM_TIMEOUT" });
+      expect(capturedSignal.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
 });
