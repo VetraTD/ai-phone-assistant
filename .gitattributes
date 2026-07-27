@@ -1,0 +1,25 @@
+# Keep LF in the working tree on every platform.
+#
+# This machine has core.autocrlf=true, so without this file a `git checkout`
+# (including any branch switch) rewrites tracked files with CRLF. That is
+# harmless for most of them, but it silently breaks every executable script
+# that starts with a shebang: vitest's transform mis-parses `#!/usr/bin/env
+# node\r\n` and reports "SyntaxError: Invalid or unexpected token" pointing at
+# a comment several lines away, so the failure looks like a code defect in a
+# file that is actually fine. Observed on scripts/export-capability-schemas.js
+# and eval/run.js after a branch switch, with node itself importing both
+# without complaint.
+#
+# The repository content has always been LF (git normalises on commit), and
+# the server runs on Linux, so this only ever affected local Windows checkouts
+# — but a test suite that fails for reasons invisible in the diff is worse
+# than one that fails honestly.
+* text=auto eol=lf
+
+# Binary assets git must never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.msi binary
