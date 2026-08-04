@@ -249,3 +249,59 @@ describe("buildReport — the written artefact", () => {
     expect(md).toMatch(/barge/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression gates.
+//
+// A run is placed to settle "is the bug fixed", and a report that prints only
+// timings cannot answer that. These counters are the caller-visible failures a
+// latency number says nothing about.
+// ---------------------------------------------------------------------------
+describe("buildReport — regression gates", () => {
+  const base = { runId: "r1", callCount: 2, probeTurns: [], startBootId: "b1" };
+
+  it("reports every gate as ok on a clean run, and raises no warning", () => {
+    const md = buildReport({
+      ...base,
+      serverStats: { bootId: "b1", turnTaking: {} },
+    });
+
+    expect(md).toContain("## Regression gates");
+    expect(md).toContain("`internal_term_leaks` | 0 | ok");
+    expect(md).not.toContain("regression gate(s) tripped");
+  });
+
+  it("fails loudly, at the top, when internal vocabulary reached a caller", () => {
+    const md = buildReport({
+      ...base,
+      serverStats: { bootId: "b1", turnTaking: { internal_term_leaks: 3 } },
+    });
+
+    expect(md).toContain("1 regression gate(s) tripped");
+    expect(md).toContain("`internal_term_leaks` | 3 | **FAIL**");
+    // The warning has to say what the number MEANS. A bare counter name in a
+    // report read weeks later is not actionable.
+    expect(md).toMatch(/API \/ webhook \/ a UUID/);
+  });
+
+  it("counts each tripped gate, so several failures are not hidden behind the first", () => {
+    const md = buildReport({
+      ...base,
+      serverStats: {
+        bootId: "b1",
+        turnTaking: { internal_term_leaks: 1, silence_hangups: 2, loop_breaker_trips: 1 },
+      },
+    });
+
+    expect(md).toContain("3 regression gate(s) tripped");
+  });
+
+  it("treats a missing counter as 0 rather than as a failure", () => {
+    // An older server that does not report a counter is not evidence of a
+    // regression — the same reasoning the boot-id check already uses.
+    const md = buildReport({ ...base, serverStats: { bootId: "b1" } });
+
+    expect(md).not.toContain("regression gate(s) tripped");
+    expect(md).toContain("`silence_hangups` | 0 | ok");
+  });
+});
