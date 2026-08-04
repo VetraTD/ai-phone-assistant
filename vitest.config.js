@@ -29,6 +29,20 @@ export default {
       GEMINI_API_KEY: "test-key",
       BASE_URL: "https://test.example.com",
       DEEPGRAM_API_KEY: "test-key",
+      // Pin a NON-UTC zone deliberately.
+      //
+      // Several code paths parse a naive datetime string with Date.parse() or
+      // new Date(), which per spec resolves in the SERVER's local zone, then
+      // re-render it in the business zone. On a UTC box those two cancel out
+      // and the bug is invisible; on a developer machine in another zone it
+      // silently shifts appointment times. Leaving TZ unpinned meant CI could
+      // never see that class of defect. America/Los_Angeles also observes DST,
+      // so a zone-handling bug that only appears under DST has somewhere to
+      // show up.
+      //
+      // Run the suite a second time with TZ=UTC to cover the other direction:
+      //   TZ=UTC npx vitest run
+      TZ: process.env.TZ || "America/Los_Angeles",
     },
   },
 };

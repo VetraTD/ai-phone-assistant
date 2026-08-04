@@ -3,6 +3,7 @@ import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { isValidE164 } from "../lib/validate.js";
+import { formatLocalDateTime } from "../lib/capabilities/datetime.js";
 import * as db from "./supabase.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -94,6 +95,12 @@ export async function loadBusinessNotificationConfig(businessId) {
     email,
     phone,
     businessName: business.name || "Business",
+    // Carried so owner-facing notifications can state the appointment time in
+    // the BUSINESS's clock. Without it the formatters fell through to
+    // toLocaleString() with no zone, which renders in whatever timezone the
+    // Node process happens to run in — so an owner in London could be emailed
+    // a time in the server's zone and have no way to tell.
+    timezone: business.timezone || null,
   };
 }
 
@@ -139,8 +146,32 @@ async function sendSms({ to, body }) {
 // Formatters
 // ---------------------------------------------------------------------------
 
-function formatAppointmentEmail(appointment, call, businessName) {
-  const d = appointment.scheduled_at ? new Date(appointment.scheduled_at).toLocaleString() : "—";
+/**
+ * Owner-facing appointment time, in the business's own timezone.
+ *
+ * These formatters used bare toLocaleString(), which takes the PROCESS zone.
+ * The stored value is a UTC instant, so a UK clinic on a US-hosted server was
+ * emailed times hours away from the ones its assistant had spoken to the
+ * caller — the same class of defect as the read-back bug, pointed at the owner
+ * instead of the caller.
+ * @param {string|null|undefined} scheduledAt
+ * @param {string|null|undefined} timezone
+ * @returns {string}
+ */
+function ownerDateTime(scheduledAt, timezone) {
+  if (!scheduledAt) return "—";
+  return formatLocalDateTime(scheduledAt, timezone, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatAppointmentEmail(appointment, call, businessName, timezone) {
+  const d = ownerDateTime(appointment.scheduled_at, timezone);
   const client = appointment.client_name || appointment.client_phone || "—";
   const notes = appointment.notes ? `\nNotes: ${appointment.notes}` : "";
   return (
@@ -151,8 +182,8 @@ function formatAppointmentEmail(appointment, call, businessName) {
   );
 }
 
-function formatAppointmentSms(appointment, call) {
-  const d = appointment.scheduled_at ? new Date(appointment.scheduled_at).toLocaleString() : "—";
+function formatAppointmentSms(appointment, call, timezone) {
+  const d = ownerDateTime(appointment.scheduled_at, timezone);
   const from = call?.callerNumber || "caller";
   return `New appointment ${d} from ${from}.`;
 }
@@ -222,10 +253,11 @@ export async function notifyAppointmentBooked({ businessId, appointment, call })
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
-    const subject = `New appointment: ${appointment.scheduled_at ? new Date(appointment.scheduled_at).toLocaleString() : "—"} — ${appointment.client_name || appointment.client_phone || "caller"}`;
-    const body = formatAppointmentEmail(appointment, call, config.businessName);
+    const subject = `New appointment: ${ownerDateTime(appointment.scheduled_at, config.timezone)} — ${appointment.client_name || appointment.client_phone || "caller"}`;
+    const body = formatAppointmentEmail(appointment, call, config.businessName, config.timezone);
     if (config.email) await sendEmail({ to: config.email, subject, text: body });
-    if (config.phone) await sendSms({ to: config.phone, body: formatAppointmentSms(appointment, call) });
+    if (config.phone)
+      await sendSms({ to: config.phone, body: formatAppointmentSms(appointment, call, config.timezone) });
   } catch (err) {
     log.error("notify_appointment", { message: err?.message });
     captureException(err, { businessId });

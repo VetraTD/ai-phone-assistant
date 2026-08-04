@@ -23,8 +23,13 @@
 
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import {
+  DEFAULT_TIMEZONE,
   HAS_OFFSET_RE,
+  formatLocalDateTime,
+  getTzOffsetMs,
   parseNaiveDateTime,
+  speakableDateTime,
+  toLocalNaiveDateTime,
   zonedComponentsToUtcMs,
   zonedWeekdayAndMinutes,
 } from "../lib/capabilities/datetime.js";
@@ -522,23 +527,58 @@ const BOOKING_PAST_GRACE_MS = 60_000;
  * Validate and timezone-anchor a `book_appointment` scheduled_at value.
  * @param {unknown} rawScheduledAt
  * @param {{timezone?: string, businessHours?: object|null}} config
- * @returns {{ok: true, scheduledAt: string} | {ok: false, message: string}}
+ * @param {{log?: {warn: function}}} [deps] - optional; only used to report an
+ *   offset that disagrees with the business zone. Kept optional so the
+ *   validator stays a pure function tests can call with two arguments.
+ * @returns {{ok: true, scheduledAt: string, offsetDisagreesWithZone?: boolean} | {ok: false, message: string}}
  */
-function validateBookingTime(rawScheduledAt, config) {
+function validateBookingTime(rawScheduledAt, config, deps) {
   if (typeof rawScheduledAt !== "string" || !rawScheduledAt.trim()) {
     return { ok: false, message: INVALID_DATETIME_MESSAGE };
   }
   const trimmed = rawScheduledAt.trim();
-  const timezone = config?.timezone || "America/Chicago";
+  const timezone = config?.timezone || DEFAULT_TIMEZONE;
+  let offsetDisagreesWithZone = false;
 
   let targetMs;
   let storedValue;
 
   if (HAS_OFFSET_RE.test(trimmed)) {
-    // Already unambiguous (explicit Z/offset) — validate and store verbatim,
-    // no reformatting.
     const d = new Date(trimmed);
     if (Number.isNaN(d.getTime())) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+
+    // Already unambiguous as an INSTANT — validate and store verbatim, no
+    // reformatting.
+    //
+    // DETECTED BUT DELIBERATELY NOT "CORRECTED". There is a second way a wrong
+    // hour can reach the database here: the model writes the caller's local
+    // wall clock and appends "Z", so "1:05pm at a London clinic" is persisted
+    // as 13:05Z — which reads back as 2:05pm during BST.
+    //
+    // Re-anchoring the wall-clock digits to the business zone would fix that
+    // case and BREAK the opposite one, where the model correctly converted
+    // (10:00 America/Chicago -> 15:00Z) and re-anchoring would shove the
+    // booking five hours. The two are indistinguishable from the value alone,
+    // and guessing wrong is worse than the bug: a 5-6 hour shift on a US
+    // booking beats a 1 hour shift on a UK one.
+    //
+    // So: measure, don't guess. The naive path was the proven cause of the
+    // reported defect and is now anchored correctly; this branch gets a log
+    // line so we learn whether the model ever actually sends an offset that
+    // disagrees with the business zone. If the counter stays at zero, the
+    // question is closed. If it does not, the fix is to reject the value and
+    // make the model re-send a naive one — deterministic, and safe both ways.
+    const declared = parseNaiveDateTime(trimmed.replace(HAS_OFFSET_RE, "").replace(/\.\d+$/, ""));
+    const anchoredMs = declared ? zonedComponentsToUtcMs(declared, timezone) : NaN;
+    if (Number.isFinite(anchoredMs) && anchoredMs !== d.getTime()) {
+      offsetDisagreesWithZone = true;
+      deps?.log?.warn?.("booking_offset_disagrees_with_business_zone", {
+        supplied: trimmed,
+        timezone,
+        wouldShiftByMinutes: Math.round((anchoredMs - d.getTime()) / 60_000),
+      });
+    }
+
     targetMs = d.getTime();
     storedValue = trimmed;
   } else {
@@ -577,7 +617,7 @@ function validateBookingTime(rawScheduledAt, config) {
     }
   }
 
-  return { ok: true, scheduledAt: storedValue };
+  return { ok: true, scheduledAt: storedValue, offsetDisagreesWithZone };
 }
 
 // The read-back-and-confirm requirement itself now lives in NON-NEGOTIABLE RULE
@@ -960,54 +1000,14 @@ export default {
  * @param {string|undefined} timezone
  * @returns {string}
  */
-// Exported (alongside the pack's default export) purely so tests can exercise
-// the timezone-fallback behavior directly, without needing to route a whole
-// booking through validateBookingTime — which independently calls
-// zonedWeekdayAndMinutes on the same config.timezone and would itself throw
-// on a genuinely invalid IANA zone before execution ever reached here.
-/**
- * Timezone-safe core for every "speak this UTC instant as a local wall-clock
- * time" need in this pack — the single source of truth for turning a stored UTC
- * ISO string into human text the model will read aloud. Fails safe: a bad ISO
- * or an invalid-but-truthy timezone (typo in config) returns the raw string
- * rather than throwing on a live call, where a nice datetime is never worth
- * failing the turn over.
- * @param {string} iso - a UTC ISO instant
- * @param {string|undefined} timezone - IANA zone; defaults to America/Chicago
- * @param {Intl.DateTimeFormatOptions} options
- * @returns {string}
- */
-function formatLocalDateTime(iso, timezone, options) {
-  const tz = timezone || "America/Chicago";
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return String(iso);
-  try {
-    return new Date(ms).toLocaleString("en-US", { timeZone: tz, ...options });
-  } catch {
-    return String(iso);
-  }
-}
-
-/**
- * A fully spoken local datetime for an instant the model must say aloud —
- * e.g. "Thursday, July 30 at 2:00 PM" in the business timezone. Used for the
- * availability alternatives the model offers, which were previously joined as
- * raw UTC ISO strings and then mis-spoken as if local (a 2 PM Chicago slot read
- * back as "7 PM"). Same tz-safe fallback as bookedFactValue.
- * @param {string} iso - a UTC ISO instant
- * @param {string|undefined} timezone
- * @returns {string}
- */
-function speakableDateTime(iso, timezone) {
-  if (!Number.isFinite(Date.parse(iso))) return String(iso);
-  const date = formatLocalDateTime(iso, timezone, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
-  const time = formatLocalDateTime(iso, timezone, { hour: "numeric", minute: "2-digit" });
-  return `${date} at ${time}`;
-}
+// formatLocalDateTime / speakableDateTime used to be defined here. They now
+// live in lib/capabilities/datetime.js so services/gemini.js's CALLER CONTEXT
+// block can share the SAME implementation and the same timezone fallback —
+// that block previously hand-rolled its own toLocaleString with no fallback at
+// all, so one unset business timezone made the two paths disagree about what
+// time an appointment was. Re-exported below for the tests that exercise the
+// fallback behavior directly.
+export { formatLocalDateTime, speakableDateTime };
 
 export function bookedFactValue(scheduledAtISO, serviceType, timezone) {
   const when = formatLocalDateTime(scheduledAtISO, timezone, {
@@ -1079,7 +1079,7 @@ async function checkAvailabilityTool(fc, ctx) {
     },
   });
 
-  const validated = validateBookingTime(fc.args?.requested_at, config);
+  const validated = validateBookingTime(fc.args?.requested_at, config, ctx.deps);
   if (!validated.ok) {
     return respond({ success: true, available: false, message: validated.message });
   }
@@ -1119,15 +1119,20 @@ async function checkAvailabilityTool(fc, ctx) {
     }
   }
 
-  // The `alternatives` field stays raw UTC ISO (machine-readable, unchanged);
-  // only the natural-language message is localized, because the model SPEAKS the
-  // message and would otherwise read a UTC ISO back as if it were local time.
+  // `alternatives` used to stay raw UTC ISO, called "machine-readable". But the
+  // model picks one of these and passes it back as book_appointment's
+  // scheduled_at, where the declaration asks for a naive LOCAL wall clock — so
+  // the one field could arrive in either frame with no way to tell them apart.
+  // Emitting naive local makes the round-trip single-valued.
   const spokenAlternatives = alternatives.map((a) => speakableDateTime(a, config.timezone));
+  const localAlternatives = alternatives
+    .map((a) => toLocalNaiveDateTime(a, config.timezone))
+    .filter(Boolean);
 
   return respond({
     success: true,
     available: false,
-    alternatives,
+    alternatives: localAlternatives,
     message: alternatives.length
       ? `That time is taken. Offer these open times instead: ${spokenAlternatives.join(", ")}.`
       : "That time is taken and nothing else is open that day. Ask the caller about another day.",
@@ -1147,7 +1152,7 @@ async function bookAppointment(fc, ctx) {
   let alreadyBooked = false;
 
   if (args.scheduled_at) {
-    const validated = validateBookingTime(args.scheduled_at, config);
+    const validated = validateBookingTime(args.scheduled_at, config, ctx.deps);
     if (!validated.ok) {
       bookMessage = validated.message;
     } else {
@@ -1288,11 +1293,31 @@ async function lookupCallerAppointments(fc, ctx) {
     if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
   }
 
-  // The `appointments` array keeps its raw UTC scheduled_at (machine-readable,
-  // unchanged). But the model SPEAKS these times, and reading a stored UTC ISO
-  // aloud makes a 2:00 PM America/Chicago appointment come out as "7 PM". So
-  // hand it a natural-language listing in local time to read from — the same
-  // truthful-spoken-time fix as the availability alternatives.
+  // Project to a model-safe view before handing anything back.
+  //
+  // This array used to be the raw Supabase rows, justified as "machine-readable
+  // UTC". Two problems with that. First, the model SPEAKS these times, and a
+  // stored UTC ISO read aloud turns a 2:00 PM America/Chicago appointment into
+  // "7 PM". Second — and worse — it gave the model a UTC-shaped datetime it
+  // could echo straight back into a booking argument, while every tool
+  // DECLARATION asks for a naive LOCAL one. That is two spellings of a time in
+  // one field, and it is precisely the ambiguity that lets an hour go missing.
+  //
+  // scheduled_at is now the naive wall clock in the business zone: the same
+  // frame the model is asked to produce, so a round-trip cannot drift.
+  //
+  // client_phone is dropped outright. Identity is verified server-side from
+  // call metadata (see verifyAppointmentIdentity); the model never needs the
+  // stored number, and not sending it keeps another caller's digits out of the
+  // prompt entirely.
+  const tz = ctx.config?.timezone;
+  const modelSafeAppointments = appointments.map((a) => ({
+    id: a.id,
+    ...(a.client_name ? { client_name: a.client_name } : {}),
+    ...(a.scheduled_at ? { scheduled_at: toLocalNaiveDateTime(a.scheduled_at, tz) } : {}),
+    ...(a.status ? { status: a.status } : {}),
+  }));
+
   const spokenListing = appointments.length
     ? "Read these back in local time: " +
       appointments
@@ -1311,7 +1336,7 @@ async function lookupCallerAppointments(fc, ctx) {
     functionResponse: {
       id: fc.id,
       name: fc.name,
-      response: { success: true, appointments, message: spokenListing },
+      response: { success: true, appointments: modelSafeAppointments, message: spokenListing },
     },
     stateEffects: {
       ...(selectedAppointmentId !== undefined
@@ -1454,9 +1479,45 @@ async function rescheduleAppointment(fc, ctx) {
   );
   if (!identityOk) return identityMismatchResult(fc);
 
+  // Anchor the model's datetime to the business timezone before it reaches the
+  // database. THIS IS THE FIX FOR THE +1h READ-BACK BUG.
+  //
+  // The tool declaration asks the model for a naive wall-clock string
+  // ("2026-04-15T10:00:00"), and appointments.scheduled_at is timestamptz, so
+  // handing that string straight to PostgREST let the DB coerce it in ITS
+  // session zone (UTC on Supabase). A caller rescheduling to 1:05pm UK was
+  // stored as 13:05Z — which is 2:05pm in Europe/London during BST, and is
+  // exactly what the assistant then read back.
+  //
+  // book_appointment always went through this gate; reschedule was the one
+  // mutation that skipped it. Routing it here also restores the past-date and
+  // business-hours checks, which it had likewise been bypassing — a reschedule
+  // could previously move an appointment into the past or to 3am.
+  const validated = validateBookingTime(newScheduledAt, ctx.config, ctx.deps);
+  if (!validated.ok) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: { success: false, message: validated.message },
+      },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message: validated.message },
+        toolCallEvent: { name: fc.name, args: fc.args },
+        // Same shape as the adapter-failure path below. Identity WAS proven —
+        // only the time was rejected — so the verification stands and the
+        // caller is not made to prove who they are again just to pick another
+        // slot. Omitting capabilityState here would also change the result
+        // shape between two failure modes of the same tool.
+        capabilityState: { appointments: { identityVerifiedApptId: appointmentId } },
+      },
+    };
+  }
+  const anchoredScheduledAt = validated.scheduledAt;
+
   const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
     appointmentId,
-    newScheduledAt,
+    newScheduledAt: anchoredScheduledAt,
   });
 
   return {
@@ -1482,11 +1543,15 @@ async function rescheduleAppointment(fc, ctx) {
           // "Booked this call" fact must reflect that new time, or the tail
           // keeps asserting the OLD one every turn. Other facts (e.g. Name)
           // survive via nextCallerFacts.
+          // The ANCHORED value, not the model's raw string. bookedFactValue
+          // runs Date.parse(), which resolves a naive string in the SERVER's
+          // local zone — so the caller-facts line was previously rendered
+          // against whatever zone the box happened to run in.
           ...(ok
             ? {
                 callerFacts: nextCallerFacts(
                   ctx,
-                  bookedFactValue(newScheduledAt, fc.args?.service_type, (ctx.config || {}).timezone)
+                  bookedFactValue(anchoredScheduledAt, fc.args?.service_type, (ctx.config || {}).timezone)
                 ),
               }
             : {}),

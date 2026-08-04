@@ -6,6 +6,7 @@ import {
   getClient,
 } from "../services/gemini.js";
 import { FIXTURES } from "./fixtures/businessConfigs.js";
+import { speakableDateTime } from "../lib/capabilities/datetime.js";
 
 const config = {
   businessName: "Acme Dental",
@@ -296,6 +297,62 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
     expect(tail).toContain("They have called 4 times before");
     expect(tail).toContain("crown replacement");
     expect(tail).toContain("Jane Okafor");
+  });
+
+  // -------------------------------------------------------------------------
+  // The unprompted read path.
+  //
+  // This block is what makes the assistant volunteer "I see you have an
+  // appointment on..." from the caller's phone number alone, without being
+  // asked. It is therefore just as capable of speaking a wrong time as the
+  // tool path, and until now nothing asserted the time it renders — the
+  // fixture above even uses a NAIVE datetime, which made the rendered output
+  // depend on the machine running the suite.
+  // -------------------------------------------------------------------------
+  describe("renders appointment times in the BUSINESS timezone", () => {
+    const ukConfig = { ...config, timezone: "Europe/London" };
+    // 12:05Z is 1:05pm in London during BST. This is the reported bug's
+    // instant: read back as "2:05 PM" it means the write was corrupted, read
+    // back as "1:05 PM" the pipeline is honest.
+    const ukCaller = {
+      callCount: 2,
+      upcomingAppointments: [{ scheduled_at: "2026-08-10T12:05:00.000Z", client_name: "Josh" }],
+    };
+
+    it("speaks 12:05Z as 1:05 PM for a Europe/London business, in BST", () => {
+      const tail = buildDynamicTail("identify_intent", null, ukConfig, {
+        ...extras,
+        callerContext: ukCaller,
+      });
+
+      expect(tail).toMatch(/1:05\s?PM/);
+      expect(tail).not.toMatch(/2:05\s?PM/);
+    });
+
+    it("agrees with the appointment tool's own formatter on the same row", () => {
+      // Two independent read paths reached the caller, each with its own
+      // formatter and its own timezone fallback. They must not be able to
+      // disagree about what time an appointment is.
+      const tail = buildDynamicTail("identify_intent", null, ukConfig, {
+        ...extras,
+        callerContext: ukCaller,
+      });
+
+      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", "Europe/London"));
+    });
+
+    it("falls back to the shared default zone, not the server's, when no timezone is configured", () => {
+      // The old hand-rolled formatter passed `timeZone: undefined`, which makes
+      // Intl silently use the process zone — so this block's output changed
+      // depending on where the server happened to be deployed.
+      const noTz = { ...config, timezone: undefined };
+      const tail = buildDynamicTail("identify_intent", null, noTz, {
+        ...extras,
+        callerContext: ukCaller,
+      });
+
+      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", undefined));
+    });
   });
 
   it("emits nothing at all when the caller has no history (the empty-case contract)", () => {

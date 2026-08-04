@@ -1,4 +1,5 @@
 import { captureException } from "../lib/sentry.js";
+import { log } from "../lib/logger.js";
 import {
   listAppointmentsByCaller,
   updateAppointmentStatus,
@@ -81,6 +82,9 @@ const CAPABILITY_DEPS = {
   },
   get captureException() {
     return captureException;
+  },
+  get log() {
+    return log;
   },
 };
 

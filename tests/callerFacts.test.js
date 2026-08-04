@@ -314,12 +314,21 @@ describe("cancel/reschedule keep caller facts truthful", () => {
     expect(res.stateEffects.capabilityState.appointments.callerFacts).toBeUndefined();
   });
 
+  // reschedule now routes through validateBookingTime (the fix for the +1h
+  // read-back bug), which rejects a time in the past. These fixtures used a
+  // hardcoded 2026-08-01 that has since passed, so they were rescheduling
+  // backwards in time — something the tool is now right to refuse. Computed
+  // forward from now so they cannot rot again.
+  const RESCHEDULE_TARGET = `${new Date(Date.now() + 30 * 86_400_000)
+    .toISOString()
+    .slice(0, 10)}T15:00:00.000Z`;
+
   it("reschedule: a completed reschedule updates 'Booked this call' to the new time, keeps other facts", async () => {
     const res = await appointments.execute(
       {
         id: "1",
         name: "reschedule_appointment_db",
-        args: { appointment_id: "appt-1", new_scheduled_at: "2026-08-01T15:00:00.000Z" },
+        args: { appointment_id: "appt-1", new_scheduled_at: RESCHEDULE_TARGET },
       },
       baseCtx({ updateAppointment: vi.fn().mockResolvedValue(true) })
     );
@@ -328,8 +337,15 @@ describe("cancel/reschedule keep caller facts truthful", () => {
     const facts = res.stateEffects.capabilityState.appointments.callerFacts;
     expect(facts.Name).toBe("Jane");
     expect(facts["Booked this call"]).not.toBe("Thu Jul 30, 2:00 PM (checkup)");
-    // 15:00Z rendered in America/Chicago (CDT, UTC-5) is 10:00 AM.
-    expect(facts["Booked this call"]).toMatch(/10:00.?AM/);
+    // Derived, not hardcoded: America/Chicago is UTC-5 in summer and UTC-6 in
+    // winter, so a literal "10:00 AM" would be correct for only part of the
+    // year once the target date started moving.
+    const expectedLocal = new Date(RESCHEDULE_TARGET).toLocaleString("en-US", {
+      timeZone: "America/Chicago",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    expect(facts["Booked this call"]).toContain(expectedLocal);
 
     const tail = buildDynamicTail("confirm", "cancel_reschedule", makeConfig(), {
       integrations: [],
@@ -343,13 +359,34 @@ describe("cancel/reschedule keep caller facts truthful", () => {
       {
         id: "1",
         name: "reschedule_appointment_db",
-        args: { appointment_id: "appt-1", new_scheduled_at: "2026-08-01T15:00:00.000Z" },
+        args: { appointment_id: "appt-1", new_scheduled_at: RESCHEDULE_TARGET },
       },
       baseCtx({ updateAppointment: vi.fn().mockResolvedValue(false) })
     );
 
     expect(res.functionResponse.response.success).toBe(false);
     expect(res.stateEffects.capabilityState.appointments.callerFacts).toBeUndefined();
+  });
+
+  it("reschedule: a time in the PAST is refused and never reaches the adapter", async () => {
+    // Bypassing validateBookingTime also bypassed its past-date guard, so a
+    // reschedule could previously move an appointment backwards in time.
+    const updateAppointment = vi.fn().mockResolvedValue(true);
+    const res = await appointments.execute(
+      {
+        id: "1",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-1", new_scheduled_at: "2020-01-02T15:00:00.000Z" },
+      },
+      baseCtx({ updateAppointment })
+    );
+
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(updateAppointment).not.toHaveBeenCalled();
+    expect(res.stateEffects.capabilityState.appointments.callerFacts).toBeUndefined();
+    // Identity was proven before the time was judged — the caller should not
+    // have to prove it again just to choose a different slot.
+    expect(res.stateEffects.capabilityState.appointments.identityVerifiedApptId).toBe("appt-1");
   });
 });
 

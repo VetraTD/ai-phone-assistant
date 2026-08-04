@@ -277,7 +277,11 @@ async function runCall({
 
   const handleVoiceSessionConnection = await freshSession();
   const ws = new FakeWs();
-  handleVoiceSessionConnection(ws);
+  // Hand the session the SAME virtual clock the caller script and the mocked
+  // boundaries run on. Without this, turnManager/audioOut judged their VAD and
+  // echo windows against wall clock while the audio moved in virtual time —
+  // see the note in beforeEach, and session.js's `now` jsdoc.
+  handleVoiceSessionConnection(ws, undefined, { now: () => clock });
   ws.emit({
     event: "start",
     start: {
@@ -409,24 +413,25 @@ function median(xs) {
 
 describe("cutoff simulation", () => {
   beforeEach(() => {
-    // KNOWN LIMITATION — read before quoting any number this prints.
+    // CLOCK — fixed 2026-08-04. This block used to warn that no number printed
+    // here was quotable.
     //
-    // turnManager and echoGuard take their clock from performance.now() (see
-    // the CLOCK note at the top of echoGuard.js), which vitest does not fake
-    // here, so their VAD and echo windows are judged against WALL CLOCK while
-    // the caller script and every timer run on the virtual clock. Consecutive
-    // runs of identical input therefore disagree about which utterance was cut
-    // off — observed across three runs.
+    // The problem: turnManager and audioOut read performance.now() directly,
+    // which vitest does not fake, so their VAD and echo windows were judged
+    // against WALL CLOCK while the caller script and every timer ran on the
+    // virtual clock. Consecutive runs of identical input disagreed about which
+    // utterance was cut off. Faking `performance` globally was tried and made
+    // it worse — audioOut's pacing pump reads it too, so freezing it changed
+    // playback behaviour rather than just the measurement.
     //
-    // Faking performance as well was tried and made it worse: audioOut's pacing
-    // pump also reads it, and freezing that changed playback behaviour rather
-    // than just the measurement.
+    // The fix was the one this comment already prescribed: session.js now takes
+    // a `now` option and threads it into createAudioOut/createTurnManager and
+    // into every echoGuard timestamp it supplies (echoGuard itself never reads
+    // a clock — all its time is caller-supplied). runCall passes the virtual
+    // clock in, so the whole decision path shares one clock.
     //
-    // The fix is to thread an injectable clock through createTurnManager /
-    // createEchoGuard / createAudioOut (all three already accept a `now`
-    // option — session.js simply does not pass one) and have session.js accept
-    // it too. Until then the CONTROL CHECK below is the guard: if the fluent
-    // control is dirty, the run is not quotable.
+    // The CONTROL CHECK below still stands as the guard: if the fluent control
+    // is dirty, something else is mismodelled and the run is not quotable.
     vi.useFakeTimers();
     delete process.env.VOICE_ECHO_SHORT_TOKENS;
     delete process.env.VOICE_CUE_REQUIRES_VOICE;

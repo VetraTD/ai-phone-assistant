@@ -1,7 +1,9 @@
 # GCP Migration — Design Spec
 
 **Date:** 2026-07-22
-**Status:** Draft, pending owner review
+**Status:** SUPERSEDED by `2026-08-02-gcp-migration-architecture.md`. Baseline figures here (480
+tests, 791-line `services/supabase.js`, 19 migrations, Gemini 2.5 Flash) are stale, and three
+conclusions have since been disproven — see that document's appendix. Kept for provenance.
 **Branch:** to be cut from `feat/voice-v2`
 **Related:** [[receptionist-overhaul-plan]], [[voice-v2-test-call-fixes]]
 

@@ -38,6 +38,7 @@ vi.mock("../lib/sentry.js", () => ({
 }));
 
 import { executeToolCall } from "../services/tools.js";
+import { parseNaiveDateTime, zonedComponentsToUtcMs } from "../lib/capabilities/datetime.js";
 
 const baseCtx = {
   businessId: "biz-1",
@@ -46,6 +47,25 @@ const baseCtx = {
   integrations: [],
   capabilityState: {},
   config: {},
+};
+
+// Minimal stand-in for CAPABILITY_DEPS, for the few tests that need to observe
+// what a pack logs. depsOverride REPLACES the real surface wholesale, so every
+// dep the exercised path touches has to be present or the pack throws.
+const capabilityDepsFake = {
+  getAppointmentById: (...a) => mockGetAppointmentById(...a),
+  updateAppointment: (...a) => mockUpdateAppointment(...a),
+  updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
+  listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
+  createAppointment: (...a) => mockCreateAppointment(...a),
+  createAppointmentIfAvailable: async (p) => {
+    const id = await mockCreateAppointment(p);
+    return id ? { id } : { full: true };
+  },
+  countScheduledOverlapping: (...a) => mockCountScheduledOverlapping(...a),
+  listScheduledBetween: (...a) => mockListScheduledBetween(...a),
+  executeIntegration: (...a) => mockExecuteIntegration(...a),
+  captureException: (...a) => mockCaptureException(...a),
 };
 
 // book_appointment rejects any time in the past before it reaches the logic
@@ -63,7 +83,24 @@ const baseCtx = {
 // below) freeze the clock with vi.setSystemTime instead, which is the right
 // tool when the value itself is under test.
 const FUTURE_DATE = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-const FUTURE_SLOT = `${FUTURE_DATE}T10:00:00Z`;
+
+// NAIVE, not "...T10:00:00Z" as this used to be.
+//
+// The tool declarations ask the model for a naive local wall clock, and every
+// datetime a tool now hands BACK to the model is naive local too, so a naive
+// string is what book_appointment actually receives in production. The old
+// Z-suffixed fixture described a value the model has no legitimate way to
+// produce, and it quietly exercised the "store the offset verbatim" branch —
+// the branch that let a UK wall clock be persisted an hour off.
+const FUTURE_SLOT = `${FUTURE_DATE}T10:00:00`;
+
+// What FUTURE_SLOT anchors to once interpreted in the business timezone.
+// baseCtx carries no timezone, so validateBookingTime falls back to
+// America/Chicago. Derived rather than hardcoded because FUTURE_DATE moves and
+// Chicago changes offset at the DST boundary — a literal would rot twice a year.
+const FUTURE_SLOT_ANCHORED = new Date(
+  zonedComponentsToUtcMs(parseNaiveDateTime(FUTURE_SLOT), "America/Chicago")
+).toISOString();
 
 // The same instant written two ways, for the idempotency test: a normalized
 // UTC anchor versus the offset-bearing form the model re-sends. Both must be
@@ -141,12 +178,23 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
     const { functionResponse, stateEffects } = await executeToolCall(fc, baseCtx);
 
+    // The ANCHORED instant reaches the database, not the model's wall-clock
+    // string — scheduled_at is timestamptz, so a naive string would be coerced
+    // in the DB's own session zone (UTC) rather than the business's.
     expect(mockCreateAppointment).toHaveBeenCalledWith(
-      expect.objectContaining({ businessId: "biz-1", callId: "call-1", scheduledAt: args.scheduled_at })
+      expect.objectContaining({
+        businessId: "biz-1",
+        callId: "call-1",
+        scheduledAt: FUTURE_SLOT_ANCHORED,
+      })
     );
     expect(functionResponse.response.success).toBe(true);
     expect(stateEffects.capabilityEffects).toEqual([
-      { capability: "appointments", type: "booked", data: args },
+      {
+        capability: "appointments",
+        type: "booked",
+        data: { ...args, scheduled_at: FUTURE_SLOT_ANCHORED },
+      },
     ]);
   });
 
@@ -406,8 +454,25 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     });
     const { message, appointments } = functionResponse.response;
 
-    // Machine-readable rows keep the raw UTC ISO, unchanged.
-    expect(appointments[0].scheduled_at).toBe("2026-07-29T19:00:00.000Z");
+    // Machine-readable rows are now the BUSINESS-LOCAL wall clock, not the raw
+    // UTC instant they used to be.
+    //
+    // Raw UTC here was justified as "machine-readable", but the machine reading
+    // it is a language model that also passes these values back into booking
+    // arguments — where the declarations ask for a naive LOCAL time. One field,
+    // two possible frames, no way to tell them apart downstream. Emitting local
+    // makes the round-trip single-valued, and it removes the second-worst
+    // failure mode: the model reading a UTC ISO aloud as if it were local.
+    expect(appointments[0].scheduled_at).toBe("2026-07-29T14:00:00");
+    // No timezone suffix — an offset here would put us straight back into the
+    // ambiguity this change exists to remove.
+    expect(appointments[0].scheduled_at).not.toMatch(/(Z|[+-]\d{2}:\d{2})$/);
+
+    // Another caller's stored phone number is never handed to the model.
+    // Identity is proven server-side from call metadata, so the digits have no
+    // purpose in the prompt.
+    expect(appointments[0].client_phone).toBeUndefined();
+
     // The spoken listing is localized: local time present, no raw ISO / UTC hour.
     expect(message).toMatch(/2:00\s?PM/);
     expect(message).toMatch(/July 29/);
@@ -579,7 +644,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         {
           id: "fc10c",
           name: "reschedule_appointment_db",
-          args: { appointment_id: "appt-2", new_scheduled_at: "2026-08-02T10:00:00Z", client_name: "Jane Doe" },
+          args: { appointment_id: "appt-2", new_scheduled_at: FUTURE_SLOT, client_name: "Jane Doe" },
         },
         baseCtx
       );
@@ -592,7 +657,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
           name: "reschedule_appointment_db",
           args: {
             appointment_id: "appt-2",
-            new_scheduled_at: "2026-08-02T10:00:00Z",
+            new_scheduled_at: FUTURE_SLOT,
             client_name: "Jane Doe",
             phone_last4: "1111",
           },
@@ -637,12 +702,12 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fc10",
         name: "reschedule_appointment_db",
-        args: { appointment_id: "appt-2", new_scheduled_at: "2026-08-02T10:00:00Z" },
+        args: { appointment_id: "appt-2", new_scheduled_at: FUTURE_SLOT },
       };
 
       const { functionResponse } = await executeToolCall(fc, baseCtx);
 
-      expect(mockUpdateAppointment).toHaveBeenCalledWith("appt-2", { scheduled_at: "2026-08-02T10:00:00Z" }, "biz-1");
+      expect(mockUpdateAppointment).toHaveBeenCalledWith("appt-2", { scheduled_at: FUTURE_SLOT_ANCHORED }, "biz-1");
       expect(functionResponse.response).toEqual({ success: true, message: "Rescheduled." });
     });
 
@@ -651,7 +716,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fc10b",
         name: "reschedule_appointment_db",
-        args: { appointment_id: "appt-2", new_scheduled_at: "2026-08-02T10:00:00Z" },
+        args: { appointment_id: "appt-2", new_scheduled_at: FUTURE_SLOT },
       };
 
       const { functionResponse } = await executeToolCall(fc, baseCtx);
@@ -661,6 +726,190 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         success: false,
         message: "I can only make changes to appointments booked under your number. Let me take a message instead.",
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reschedule_appointment_db: timezone anchoring.
+  //
+  // THE REPORTED BUG. A caller on a UK number booked 1:00pm, then rescheduled
+  // to 1:05pm on a later call. The AI afterwards read it back as "2:05pm".
+  //
+  // book_appointment routes its scheduled_at through validateBookingTime, which
+  // anchors a naive wall-clock string to the business timezone. reschedule did
+  // not: it passed the model's raw string to supabase.updateAppointment, and
+  // scheduled_at is timestamptz, so PostgREST coerced the naive string using
+  // the DB session zone (UTC on Supabase). A UK wall clock of 13:05 was
+  // therefore stored as 13:05Z, which IS 14:05 in Europe/London during BST.
+  // The read-back was faithful; the write was wrong.
+  //
+  // Wrong from late March to late October and self-correcting in winter, which
+  // is exactly why it needs a test on both sides of the DST boundary rather
+  // than a single spot check.
+  //
+  // The old tests could not catch this: every one of them passed an
+  // already-offset-bearing value ("2026-08-02T10:00:00Z"), which skips the
+  // naive branch entirely.
+  // -------------------------------------------------------------------------
+  describe("reschedule_appointment_db: timezone anchoring across DST", () => {
+    const MON_FRI_9_5 = {
+      mon: { open: "09:00", close: "17:00", closed: false },
+      tue: { open: "09:00", close: "17:00", closed: false },
+      wed: { open: "09:00", close: "17:00", closed: false },
+      thu: { open: "09:00", close: "17:00", closed: false },
+      fri: { open: "09:00", close: "17:00", closed: false },
+      sat: { open: null, close: null, closed: true },
+      sun: { open: null, close: null, closed: true },
+    };
+    const ukCtx = {
+      ...baseCtx,
+      config: { timezone: "Europe/London", businessHours: MON_FRI_9_5 },
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-01T09:00:00Z"));
+      mockGetAppointmentById.mockResolvedValue({
+        id: "appt-uk",
+        client_phone: "+15551234567",
+        client_name: null,
+      });
+      mockUpdateAppointment.mockResolvedValue(true);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Extract the scheduled_at actually handed to the DB. */
+    function storedScheduledAt() {
+      expect(mockUpdateAppointment).toHaveBeenCalled();
+      return mockUpdateAppointment.mock.calls[0][1].scheduled_at;
+    }
+
+    it("BST: a naive 1:05pm UK wall clock is stored as 12:05Z, not 13:05Z", async () => {
+      // Monday 2026-08-10, British Summer Time (UTC+1).
+      const fc = {
+        id: "fcTz1",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-08-10T13:05:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ukCtx);
+
+      expect(functionResponse.response.success).toBe(true);
+      // The whole bug in one assertion. 13:05Z would read back as "2:05 PM".
+      expect(new Date(storedScheduledAt()).toISOString()).toBe("2026-08-10T12:05:00.000Z");
+    });
+
+    it("GMT: the same wall clock in winter is stored as 13:05Z — the offset is not hardcoded", async () => {
+      // Monday 2027-01-11, Greenwich Mean Time (UTC+0). Same wall clock, a
+      // different instant. A fix that subtracted a fixed hour would break here.
+      const fc = {
+        id: "fcTz2",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2027-01-11T13:05:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ukCtx);
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(new Date(storedScheduledAt()).toISOString()).toBe("2027-01-11T13:05:00.000Z");
+    });
+
+    it("an offset-bearing value is trusted as an instant, and a disagreement with the business zone is LOGGED not silently rewritten", async () => {
+      // The second way a wrong hour could reach the DB: the model writes a UK
+      // wall clock and appends "Z". We do NOT re-anchor it.
+      //
+      // Re-anchoring would fix that case and break its mirror image — a model
+      // that correctly converted 10:00 America/Chicago to 15:00Z would have its
+      // booking shoved five hours. The two are indistinguishable from the value
+      // alone, so the ambiguity is measured rather than guessed at. This test
+      // pins that decision so nobody "fixes" it later without reading why.
+      const warn = vi.fn();
+      const fc = {
+        id: "fcTz3",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-08-10T13:05:00Z" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, {
+        ...ukCtx,
+        depsOverride: { ...capabilityDepsFake, log: { warn } },
+      });
+
+      expect(functionResponse.response.success).toBe(true);
+      // Stored as the instant it literally denotes — verbatim, not rewritten.
+      expect(new Date(storedScheduledAt()).toISOString()).toBe("2026-08-10T13:05:00.000Z");
+      // ...but it did not pass unnoticed.
+      expect(warn).toHaveBeenCalledWith(
+        "booking_offset_disagrees_with_business_zone",
+        expect.objectContaining({ timezone: "Europe/London", wouldShiftByMinutes: -60 })
+      );
+    });
+
+    it("an offset that AGREES with the business zone is preserved and raises no warning", async () => {
+      // +01:00 is correct for London in August, so nothing is ambiguous here
+      // and the detector must stay quiet — otherwise it cries wolf on every
+      // correctly-formed value and the log signal is worthless.
+      const warn = vi.fn();
+      const fc = {
+        id: "fcTz4",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-08-10T13:05:00+01:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, {
+        ...ukCtx,
+        depsOverride: { ...capabilityDepsFake, log: { warn } },
+      });
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(new Date(storedScheduledAt()).toISOString()).toBe("2026-08-10T12:05:00.000Z");
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("refuses a reschedule into the past and never touches the DB", async () => {
+      // Bypassing validateBookingTime also bypassed its past-date guard, so the
+      // AI could move an appointment backwards in time.
+      const fc = {
+        id: "fcTz5",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-07-01T13:05:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ukCtx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(mockUpdateAppointment).not.toHaveBeenCalled();
+    });
+
+    it("refuses a reschedule outside business hours and never touches the DB", async () => {
+      // 3am on a Monday. Same bypass, same class of defect.
+      const fc = {
+        id: "fcTz6",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-08-10T03:00:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ukCtx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(mockUpdateAppointment).not.toHaveBeenCalled();
+    });
+
+    it("refuses a reschedule onto a closed day and never touches the DB", async () => {
+      // Sunday 2026-08-16.
+      const fc = {
+        id: "fcTz7",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-uk", new_scheduled_at: "2026-08-16T13:05:00" },
+      };
+
+      const { functionResponse } = await executeToolCall(fc, ukCtx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(mockUpdateAppointment).not.toHaveBeenCalled();
     });
   });
 
@@ -692,7 +941,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fcNB2",
         name: "reschedule_appointment_db",
-        args: { appointment_id: "appt-1", new_scheduled_at: "2026-08-02T10:00:00Z" },
+        args: { appointment_id: "appt-1", new_scheduled_at: FUTURE_SLOT },
       };
 
       const { functionResponse } = await executeToolCall(fc, noBizCtx);
@@ -813,7 +1062,13 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         ...baseCtx,
         capabilityState: {
           appointments: {
-            lastBooked: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
+            // The ANCHORED instant, because that is what a real booking stores
+            // — the effect carries validateBookingTime's output, not the
+            // model's raw wall-clock string. Seeding the naive form here would
+            // make the fixture describe a state the code cannot produce, and
+            // the comparison would be naive-vs-anchored rather than the
+            // instant-vs-instant check this test is about.
+            lastBooked: { scheduled_at: FUTURE_SLOT_ANCHORED, client_name: "Jane" },
           },
         },
       };

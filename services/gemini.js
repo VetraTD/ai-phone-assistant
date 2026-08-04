@@ -8,6 +8,7 @@ import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
+import { speakableDateTime } from "../lib/capabilities/datetime.js";
 import {
   resolveCachedContent,
   invalidateCache,
@@ -451,16 +452,17 @@ function buildCallerContextSection(callerContext, timezone) {
   }
   if (callerContext.upcomingAppointments?.length > 0) {
     const appts = callerContext.upcomingAppointments.map((a) => {
-      const d = a.scheduled_at
-        ? new Date(a.scheduled_at).toLocaleString("en-US", {
-            timeZone: timezone,
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })
-        : "unknown date";
+      // speakableDateTime, not a hand-rolled toLocaleString.
+      //
+      // This block is the path that volunteers an appointment UNPROMPTED from
+      // the caller's phone number, and it used to format the time itself with
+      // `timeZone: timezone` and NO fallback — so an unset business timezone
+      // silently fell through to the Node process zone, while the appointment
+      // TOOL path fell back to America/Chicago. The same row, read back two
+      // different ways depending on which path happened to speak it.
+      //
+      // One shared formatter, one shared fallback (lib/capabilities/datetime.js).
+      const d = a.scheduled_at ? speakableDateTime(a.scheduled_at, timezone) : "unknown date";
       return a.client_name ? `${d} (${a.client_name})` : d;
     });
     ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
