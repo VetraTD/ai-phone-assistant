@@ -127,7 +127,7 @@ export async function executeToolCall(fc, ctx) {
         functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
         stateEffects: {
           intentArgs,
-          toolResult: { name: fc.name, success: true, message: "How can I help you with that?" },
+          toolResult: { name: fc.name, success: true, message: "How can I help you with that?", callerSafe: true },
           toolCallEvent: { name: fc.name, args: fc.args },
         },
       };
@@ -171,7 +171,7 @@ export async function executeToolCall(fc, ctx) {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
           stateEffects: {
             endCallArgs,
-            toolResult: { name: fc.name, success: true, message: "Goodbye!" },
+            toolResult: { name: fc.name, success: true, message: "Goodbye!", callerSafe: true },
             toolCallEvent: { name: fc.name, args: fc.args },
           },
         };
@@ -184,7 +184,11 @@ export async function executeToolCall(fc, ctx) {
           toolResult: {
             name: fc.name,
             success: false,
+            // Note the split: `message` above is the refusal shown to the
+            // MODEL, this is the line meant for the caller. Only the latter is
+            // ever spoken.
             message: "Is there anything else I can help you with?",
+            callerSafe: true,
           },
           toolCallEvent: { name: fc.name, args: fc.args },
         },

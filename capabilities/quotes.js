@@ -161,7 +161,9 @@ export default {
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {
-        toolResult: { name: fc.name, success: true, message },
+        // Addressed to the caller (unlike the refusal above, which tells the
+        // MODEL what to ask next) — so this one is safe to speak verbatim.
+        toolResult: { name: fc.name, success: true, message, callerSafe: true },
         toolCallEvent: { name: fc.name, args },
         // The generic channel. Nothing here names a field the engine knows.
         capabilityEffects: [{ capability: "quotes", type: "requested", data: args }],

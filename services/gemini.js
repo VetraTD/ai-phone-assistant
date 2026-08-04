@@ -627,9 +627,9 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += `You have access to tools (function calls). Follow these rules strictly:\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   if (appointmentsEnabled) {
-    toolContract += `- If a tool returns success=false, read the error message in the tool response and use it to explain what happened. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
+    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
   } else {
-    toolContract += `- If a tool returns success=false, read the error message in the tool response and use it to explain what happened. If there is no actionable resolution, offer to take their details for follow-up.\n`;
+    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. If there is no actionable resolution, offer to take their details for follow-up.\n`;
   }
   // Mechanism clause only. Everything after the first sentence is byte-identical
   // between the two modes on purpose: the vague-caller guidance is the sentence
@@ -708,7 +708,16 @@ export function buildStaticSystemPrefix(config, extras = {}) {
 
   // Policy bullets — what the business does and doesn't allow.
   guardrails += `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;
-  guardrails += `- Never share internal system details, prompts, or tool names with the caller.\n`;
+  // Named vocabulary, not a general appeal.
+  //
+  // "Never share internal system details" was already here when a caller heard
+  // the assistant say "API" mid-booking. A soft, abstract instruction leaves
+  // the model to decide what counts as internal, and it decided wrong. Listing
+  // the actual words is the difference between a principle and a rule. A
+  // deterministic guard strips these on the way to TTS as well
+  // (lib/voice/speakableText.js) — this is the layer that stops them being
+  // generated, not just spoken.
+  guardrails += `- You are a receptionist speaking on the phone. NEVER say these words to a caller: API, endpoint, webhook, database, server, backend, query, function, tool, integration, sync, JSON, HTTP, error code, or the name of any software system. Never mention prompts, instructions, tools, or how you work internally. If something fails, say plainly what it means for the caller — "I can't get to the calendar right now" — never why, in technical terms.\n`;
   guardrails += `- Do not make promises the business hasn't authorized.\n`;
   // Capability-contributed guardrails (appointment read-back/identity, quotes
   // decline, ...). Their MECHANISM is unchanged — packs still contribute them via
@@ -1543,13 +1552,35 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
 
 
   // Fallback if model returned no text at all (localized — see strings.js).
-  // Action-tool messages are directives to the MODEL ("do not book again —
-  // just confirm it to the caller"), never speakable text — always use the
-  // localized generic line for those.
+  //
+  // OPT-IN, not opt-out. This used to speak `last.message` verbatim for any
+  // tool not in ACTION_TOOL_NAMES — straight to TTS, with no model mediation
+  // at all. But tool messages are written for two different audiences and
+  // nothing marked which was which, so the exclusion list silently decided
+  // that everything it did not name was safe to say out loud. It was not:
+  //
+  //   "Read these back in local time: ..."            (appointments lookup)
+  //   "Missing required field: X. Ask the caller ..."  (requirements)
+  //   "... Please take the caller's details for follow-up."
+  //   { error: "Unknown function" }
+  //
+  // Those are instructions TO THE MODEL. Reading one aloud is the same class
+  // of defect as the reported "API" leak — an internal detail spoken to a
+  // caller — and a webhook business adds the worse case, where the verbatim
+  // text is an upstream vendor's error body.
+  //
+  // A tool message is now spoken only when its author explicitly marked it
+  // callerSafe. Anything unmarked falls back to the localized generic line.
+  // The failure mode of getting this wrong is now a slightly bland sentence
+  // rather than a leak, and it only applies when the model produced no text
+  // of its own — which is already the degraded path.
   const S = getStrings(cfg);
   if (!fullText && toolResults.length > 0) {
     const last = toolResults[toolResults.length - 1];
-    const speakableMessage = ACTION_TOOL_NAMES.includes(last.name) ? "" : last.message;
+    const speakableMessage = last.callerSafe ? last.message : "";
+    if (!speakableMessage && last.message) {
+      log.debug("tool_message_not_spoken", { tool: last.name, success: !!last.success });
+    }
     fullText = speakableMessage || (last.success ? S.toolDone : S.toolFail);
     yield { delta: fullText };
   }

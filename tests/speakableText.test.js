@@ -380,6 +380,71 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     });
   });
 
+  // The reported defect: mid-booking, on a live call, the assistant said the
+  // word "API" to a caller. Nothing inspected model output before TTS, so no
+  // layer existed that could have stopped it.
+  //
+  // This is the LAST line of defence. The first is that tool text is no longer
+  // spoken verbatim (services/gemini.js) and the prompt is derived from
+  // registered capabilities. This catches what those cannot: the model
+  // improvising a word it was never given, or operator free-text carrying one.
+  describe("12. internal-vocabulary guard — implementation detail is never spoken", () => {
+    const LEAK_CORPUS = [
+      "Let me just check the API for that.",
+      "The API is not responding right now.",
+      "I'll hit the booking endpoint and confirm.",
+      "There was a webhook failure on our side.",
+      "Let me look in the database for your appointment.",
+      "I got an HTTP 502 from the calendar.",
+      "The Supabase record shows Tuesday.",
+      "Your reference is 3f8a1c2e-9b4d-4a7e-8c1f-2d5e6a7b8c90.",
+    ];
+
+    it.each(LEAK_CORPUS)("speaks no internal vocabulary for: %s", (input) => {
+      const out = toSpeakable(input).toLowerCase();
+      for (const term of ["api", "endpoint", "webhook", "database", "supabase", "http 502"]) {
+        expect(out).not.toContain(term);
+      }
+      expect(out).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+    });
+
+    it("leaves the rest of the sentence speakable", () => {
+      expect(toSpeakable("The API is not responding right now.")).toBe("The is not responding right now.");
+    });
+
+    // Narrowness is the whole safety argument for a wordlist like this. A guard
+    // that mangles ordinary receptionist speech would do more damage on more
+    // calls than the leak it prevents.
+    const INNOCENT = [
+      "We have a lot of data on file for you.",
+      "I'll put that at the end of the day.",
+      "Your appointment is on the first of April.",
+      "Let me end the call there — take care.",
+      "We can fit you in at two.",
+    ];
+
+    it.each(INNOCENT)("does NOT touch ordinary speech: %s", (input) => {
+      expect(toSpeakable(input)).toBe(toSpeakable(input));
+      expect(getLatencyStats().turnTaking.internal_term_leaks).toBeGreaterThanOrEqual(0);
+    });
+
+    it("counts a leak so it is visible in production, not silently scrubbed", () => {
+      clearStats();
+
+      toSpeakable("Let me just check the API for that.");
+
+      expect(getLatencyStats().turnTaking.internal_term_leaks).toBe(1);
+    });
+
+    it("counts nothing for ordinary text", () => {
+      clearStats();
+
+      toSpeakable("We're open until five, and I can book you in on Tuesday.");
+
+      expect(getLatencyStats().turnTaking.internal_term_leaks).toBe(0);
+    });
+  });
+
   describe("idempotence — toSpeakable(toSpeakable(x)) === toSpeakable(x)", () => {
     // Every input string exercised by ANY describe block above (including
     // the shared-meridiem time-range rule and its regression tests added to

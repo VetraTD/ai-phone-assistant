@@ -158,7 +158,9 @@ export default {
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {
-        toolResult: { name: fc.name, success: true, message },
+        // Written for the caller, so it may be spoken if the model produces no
+        // text of its own. See the callerSafe note in services/gemini.js.
+        toolResult: { name: fc.name, success: true, message, callerSafe: true },
         toolCallEvent: { name: fc.name, args },
         capabilityEffects: [{ capability: "messages", type: "recorded", data: args }],
       },

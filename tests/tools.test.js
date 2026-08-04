@@ -129,6 +129,9 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       name: "set_call_intent",
       success: true,
       message: "How can I help you with that?",
+      // Marked speakable: tool messages are no longer read aloud unless their
+      // author said they were written for the caller (services/gemini.js).
+      callerSafe: true,
     });
     expect(stateEffects.toolCallEvent).toEqual({
       name: "set_call_intent",
@@ -165,6 +168,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       name: "some_unregistered_tool",
       success: false,
       message: "I'm sorry, I wasn't able to do that.",
+      callerSafe: true,
     });
     // Default branch always yields a toolCallEvent, unlike the validation-
     // failure early-returns in cancel/reschedule below.
@@ -489,7 +493,12 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       expect(functionResponse.response).toEqual({ success: true });
       expect(stateEffects.endCallArgs).toEqual({ reason: "done" });
-      expect(stateEffects.toolResult).toEqual({ name: "end_call", success: true, message: "Goodbye!" });
+      expect(stateEffects.toolResult).toEqual({
+        name: "end_call",
+        success: true,
+        message: "Goodbye!",
+        callerSafe: true,
+      });
     });
 
     it("honors end_call during the ending step", async () => {
@@ -516,7 +525,10 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(stateEffects.toolResult).toEqual({
         name: "end_call",
         success: false,
+        // Note the split: the model is told "don't end the call yet"; only
+        // this caller-facing line is ever eligible to be spoken.
         message: "Is there anything else I can help you with?",
+        callerSafe: true,
       });
     });
 
@@ -887,7 +899,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       const { functionResponse } = await executeToolCall(fc, {
         ...ukCtx,
-        depsOverride: { ...capabilityDepsFake, log: { warn } },
+        depsOverride: { ...capabilityDepsFake, log: { error: warn } },
       });
 
       expect(functionResponse.response.success).toBe(true);
@@ -896,7 +908,11 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       // ...but it did not pass unnoticed.
       expect(warn).toHaveBeenCalledWith(
         "booking_offset_disagrees_with_business_zone",
-        expect.objectContaining({ timezone: "Europe/London", wouldShiftByMinutes: -60 })
+        expect.objectContaining({
+          timezone: "Europe/London",
+          wouldShiftByMinutes: -60,
+          severity: "warn",
+        })
       );
     });
 
@@ -913,7 +929,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       const { functionResponse } = await executeToolCall(fc, {
         ...ukCtx,
-        depsOverride: { ...capabilityDepsFake, log: { warn } },
+        depsOverride: { ...capabilityDepsFake, log: { error: warn } },
       });
 
       expect(functionResponse.response.success).toBe(true);

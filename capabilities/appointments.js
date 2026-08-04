@@ -572,10 +572,13 @@ function validateBookingTime(rawScheduledAt, config, deps) {
     const anchoredMs = declared ? zonedComponentsToUtcMs(declared, timezone) : NaN;
     if (Number.isFinite(anchoredMs) && anchoredMs !== d.getTime()) {
       offsetDisagreesWithZone = true;
-      deps?.log?.warn?.("booking_offset_disagrees_with_business_zone", {
+      // log exposes debug/info/error only; a warning is log.error carrying
+      // severity:"warn" (the convention used throughout lib/ and services/).
+      deps?.log?.error?.("booking_offset_disagrees_with_business_zone", {
         supplied: trimmed,
         timezone,
         wouldShiftByMinutes: Math.round((anchoredMs - d.getTime()) / 60_000),
+        severity: "warn",
       });
     }
 
@@ -1318,8 +1321,13 @@ async function lookupCallerAppointments(fc, ctx) {
     ...(a.status ? { status: a.status } : {}),
   }));
 
+  // Phrased as a note to the model, in the same "[...]" shape as the system
+  // notes the prompt already teaches it never to read aloud. The old wording
+  // opened with a bare imperative — "Read these back in local time: Monday,
+  // August 10 at 1:05 PM" — which on a turn where the model emitted no text
+  // was spoken to the caller verbatim, instruction and all.
   const spokenListing = appointments.length
-    ? "Read these back in local time: " +
+    ? "[not caller speech — these times are already in the business's local timezone; say them as-is] " +
       appointments
         .map((a) => {
           const who = a.client_name ? `${a.client_name}, ` : "";
@@ -1361,7 +1369,7 @@ function identityMismatchResult(fc) {
       response: { success: false, message: IDENTITY_MISMATCH_MESSAGE },
     },
     stateEffects: {
-      toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE },
+      toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE, callerSafe: true },
       toolCallEvent: { name: fc.name, args: fc.args },
     },
   };
@@ -1502,7 +1510,7 @@ async function rescheduleAppointment(fc, ctx) {
         response: { success: false, message: validated.message },
       },
       stateEffects: {
-        toolResult: { name: fc.name, success: false, message: validated.message },
+        toolResult: { name: fc.name, success: false, message: validated.message, callerSafe: true },
         toolCallEvent: { name: fc.name, args: fc.args },
         // Same shape as the adapter-failure path below. Identity WAS proven —
         // only the time was rejected — so the verification stands and the
