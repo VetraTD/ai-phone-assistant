@@ -145,8 +145,25 @@ describe("holdDurationFor()", () => {
     expect(holdDurationFor("Are you open on Saturday?")).toBe(0);
   });
 
+  // 1500 -> 500: this branch was unreachable for ordinary speech while
+  // classifyHold sat behind an isIncomplete() gate in lib/voice/session.js. Now
+  // that every final is classified it fires often, and 1500ms would hand back
+  // more than the whole latency win the 300->150ms endpointing change bought.
   it("holds briefly when there is no terminal punctuation at all", () => {
-    expect(holdDurationFor("I'd like to book an appointment")).toBe(1_500);
+    expect(holdDurationFor("I'd like to book an appointment")).toBe(500);
+  });
+
+  // stripFillers removes a trailing "." (but not "?" or "!"), so the cleaned
+  // text handed to classifyHold by session.js has already lost the full stop.
+  // Judging punctuation on the cleaned text would therefore hold EVERY
+  // declarative sentence a caller speaks. The raw transcript is the authority.
+  it("judges terminal punctuation on the raw transcript, not the filler-stripped one", () => {
+    expect(classifyHold("I'd like to book an appointment", "I'd like to book an appointment.")).toEqual({
+      holdMs: 0,
+      rule: "terminal_punctuation",
+    });
+    // No raw text supplied — falls back to the cleaned text, as before.
+    expect(classifyHold("I'd like to book an appointment").rule).toBe("no_terminal_punctuation");
   });
 
   it("returns 0 for empty input rather than starting a pointless hold", () => {
@@ -170,7 +187,7 @@ describe("holdDurationFor()", () => {
       rule: "terminal_punctuation",
     });
     expect(classifyHold("book me for Friday")).toEqual({
-      holdMs: 1_500,
+      holdMs: 500,
       rule: "no_terminal_punctuation",
     });
     expect(classifyHold("")).toEqual({ holdMs: 0, rule: "empty" });

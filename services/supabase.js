@@ -3,6 +3,7 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { allCapabilityToolNames, getPack } from "../capabilities/index.js";
 import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
+import { normalizePhoneNumber } from "../lib/phone.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -278,13 +279,11 @@ export async function fetchBusinessById(businessId) {
 }
 
 /**
- * Look up a business by its Twilio phone number.
- * @param {string} twilioNumber - The "To" number from Twilio
+ * One exact-equality lookup on businesses.phone_number.
+ * @param {string} value - the number to match, verbatim
  * @returns {Promise<object|null>} The business row or null
  */
-export async function lookupBusinessByPhone(twilioNumber) {
-  if (!supabase) return null;
-
+async function selectBusinessByExactPhone(value) {
   // Capability rows come back embedded in the SAME round trip. They are needed
   // before the first turn, because they decide which tools exist and which
   // requirements are enforced — fetching them in the background alongside
@@ -295,7 +294,7 @@ export async function lookupBusinessByPhone(twilioNumber) {
   const { data, error } = await supabase
     .from("businesses")
     .select("*, business_capabilities(*)")
-    .eq("phone_number", twilioNumber)
+    .eq("phone_number", value)
     .limit(1)
     .maybeSingle();
 
@@ -308,7 +307,7 @@ export async function lookupBusinessByPhone(twilioNumber) {
     const plain = await supabase
       .from("businesses")
       .select("*")
-      .eq("phone_number", twilioNumber)
+      .eq("phone_number", value)
       .limit(1)
       .maybeSingle();
     if (plain.error) {
@@ -318,6 +317,84 @@ export async function lookupBusinessByPhone(twilioNumber) {
     return plain.data;
   }
   return data;
+}
+
+/**
+ * Recover a business whose stored phone_number is damaged (whitespace or
+ * formatting characters) and therefore cannot match the clean E.164 value
+ * Twilio sends.
+ *
+ * This is the case that took every business except one offline: rows entered by
+ * hand in the Supabase table editor were stored as "\n+442079460958". Migration
+ * 024 cleans them and installs a trigger so it cannot recur — this is the
+ * safety net for a database where that has not run, or where the trigger has
+ * been dropped.
+ *
+ * The LIKE pattern only narrows the candidate set; the match is then confirmed
+ * in JS with normalizePhoneNumber, so a number that merely contains the same
+ * digits in order can never be returned as a false positive.
+ *
+ * @param {string} normalized - E.164 number Twilio dialed
+ * @returns {Promise<object|null>}
+ */
+async function recoverBusinessByDamagedPhone(normalized) {
+  const pattern = `%${normalized.replace(/^\+/, "").split("").join("%")}%`;
+  const { data, error } = await supabase
+    .from("businesses")
+    .select("*, business_capabilities(*)")
+    .like("phone_number", pattern)
+    .limit(5);
+
+  if (error) {
+    log.error("db_error", { operation: "lookupBusinessByPhone_recover", error: error.message });
+    return null;
+  }
+
+  const matches = (data || []).filter((b) => normalizePhoneNumber(b.phone_number) === normalized);
+  if (matches.length !== 1) {
+    if (matches.length > 1) {
+      log.error("business_phone_ambiguous", {
+        operation: "lookupBusinessByPhone",
+        phone: normalized,
+        count: matches.length,
+        severity: "warn",
+      });
+    }
+    return null;
+  }
+  return matches[0];
+}
+
+/**
+ * Look up a business by its Twilio phone number.
+ * @param {string} twilioNumber - The "To" number from Twilio
+ * @returns {Promise<object|null>} The business row or null
+ */
+export async function lookupBusinessByPhone(twilioNumber) {
+  if (!supabase) return null;
+
+  const normalized = normalizePhoneNumber(twilioNumber);
+  const primary = normalized ?? (typeof twilioNumber === "string" ? twilioNumber : null);
+  if (!primary) return null;
+
+  const row = await selectBusinessByExactPhone(primary);
+  if (row) return row;
+
+  // A miss is already a broken call (the caller would hear the "our office"
+  // default), so the extra round trip below costs nothing that was working.
+  if (!normalized) return null;
+
+  const recovered = await recoverBusinessByDamagedPhone(normalized);
+  if (recovered) {
+    log.error("business_phone_unnormalized", {
+      operation: "lookupBusinessByPhone",
+      businessId: recovered.id,
+      phone: normalized,
+      stored: JSON.stringify(recovered.phone_number),
+      severity: "warn",
+    });
+  }
+  return recovered;
 }
 
 /**
@@ -483,9 +560,23 @@ export async function updateBusinessNotificationSettings(businessId, payload) {
  */
 export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
   if (!supabase || !businessId) return false;
+  // Normalize on write as well as in the DB trigger (migration 024): the
+  // trigger is the backstop for hand-edits, this keeps the value the
+  // application believes it stored identical to the value it will later match
+  // against Twilio's `To`.
+  const normalized = normalizePhoneNumber(phoneNumber);
+  if (phoneNumber && !normalized) {
+    log.error("business_phone_rejected", {
+      operation: "updateBusinessPhoneNumber",
+      businessId,
+      reason: "not_e164",
+      severity: "warn",
+    });
+    return false;
+  }
   const { error } = await supabase
     .from("businesses")
-    .update({ phone_number: phoneNumber || null })
+    .update({ phone_number: normalized })
     .eq("id", businessId);
   if (error) {
     log.error("db_error", { operation: "updateBusinessPhoneNumber", error: error.message });

@@ -392,3 +392,76 @@ describe("turnManager.js — createTurnManager", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The cutoff path, end to end.
+//
+// Reported symptom: "the AI receptionist kept randomly cutting me off when it
+// should not have". The mechanism has nothing to do with silence windows —
+// "no" is an INTERRUPT_CUE, and a one-word cue used to bypass every remaining
+// gate on the final path. Meanwhile echoGuard.classify() refuses transcripts
+// under 4 tokens, so nothing checked whether that "no" was the AI's own
+// "No problem, I can get that booked" coming back off a speakerphone.
+// ---------------------------------------------------------------------------
+describe("turnManager.js — short-final echo containment (the cutoff bug)", () => {
+  const AI_REPLY = "No problem, I can get that booked for you.";
+
+  function makeEchoGuard(spokenByAi) {
+    return {
+      classify: () => ({ isEcho: false, reason: "too_short", ratio: 0, novel: 0 }),
+      isEcho: () => false,
+      isShortEcho: (text) =>
+        String(text)
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(Boolean)
+          .every((t) => spokenByAi.includes(t)),
+    };
+  }
+
+  it("does not cut the caller off when the AI's own word echoes back as a cue", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const echoGuard = makeEchoGuard(["no", "problem", "i", "can", "get", "that", "booked", "for", "you"]);
+    const tm = createTurnManager({ ...deps, echoGuard, now: () => 1000 });
+
+    const result = tm.handleFinal("no");
+
+    expect(result).toEqual({ action: "ignore", reason: "echo_short" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+    expect(deps.onTurnEnd).not.toHaveBeenCalled();
+  });
+
+  it("STILL interrupts on a genuine one-word cue the AI never said", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const echoGuard = makeEchoGuard(["no", "problem", "i", "can", "get", "that", "booked"]);
+    const tm = createTurnManager({ ...deps, echoGuard, now: () => 1000 });
+
+    const result = tm.handleFinal("stop");
+
+    expect(result.action).toBe("interrupt");
+    expect(deps.onInterrupt).toHaveBeenCalled();
+  });
+
+  it("STILL interrupts when the caller adds a word the AI did not say", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const echoGuard = makeEchoGuard(["no", "problem", "i", "can", "get", "that", "booked"]);
+    const tm = createTurnManager({ ...deps, echoGuard, now: () => 1000 });
+
+    expect(tm.handleFinal("no wait").action).toBe("interrupt");
+  });
+
+  it("leaves longer finals to the main echo classifier", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const echoGuard = makeEchoGuard(["no", "problem", "i", "can", "get", "that", "booked"]);
+    const tm = createTurnManager({ ...deps, echoGuard, now: () => 1000 });
+
+    // 4 words: isShortEcho declines by length, classify() is the right gate.
+    expect(tm.handleFinal("no problem i can").action).toBe("interrupt");
+  });
+
+  it("is inert when no echoGuard is wired at all", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+    expect(tm.handleFinal("no").action).toBe("interrupt");
+  });
+});

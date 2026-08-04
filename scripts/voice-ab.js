@@ -88,8 +88,13 @@ async function synthVariant({ voiceId, similarity, modelId, stability, turns }) 
   for (const text of turns) {
     const buf = await synthTurn({ voiceId, modelId, voiceSettings, previousText, text });
     audio.push(buf);
-    // The NEXT turn continues from everything the caller has heard so far.
-    previousText = `${previousText} ${text}`.trim();
+    // REPLACE, don't accumulate. Production threads only the PREVIOUS turn's
+    // spoken text (lib/voice/session.js sets lastSpokenText = spokenThisTurn,
+    // an assignment), trimmed to the last 300 chars by trimPreviousText.
+    // Accumulating the whole conversation here made this harness model a
+    // pipeline that does not exist — which matters most for the thing it is now
+    // used to judge: whether expression escalates across a long call.
+    previousText = text;
   }
   return Buffer.concat(audio);
 }

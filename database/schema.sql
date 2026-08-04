@@ -226,6 +226,63 @@ CREATE INDEX idx_business_capabilities_business ON business_capabilities (busine
 -- Migration 021: the calendar sync worker's hot query is "unsynced upcoming
 -- appointments for this business"; this partial index keeps it cheap.
 CREATE INDEX idx_appointments_unsynced ON appointments (business_id, scheduled_at) WHERE google_event_id IS NULL;
+-- Migration 024: phone_number is the tenant-routing key — lookupBusinessByPhone
+-- matches Twilio's `To` against it on every inbound call. Two businesses sharing
+-- a number means the caller reaches whichever row the planner happened to return.
+-- Partial because onboarding creates the business row before a number is attached.
+CREATE UNIQUE INDEX businesses_phone_number_unique ON businesses (phone_number) WHERE phone_number IS NOT NULL;
+
+-- ============================================================
+-- Phone-number normalization (migration 024)
+-- ============================================================
+-- Numbers are edited by hand in the Supabase table editor, which renders a text
+-- column as a multi-line textarea and saves a pasted newline verbatim. Every
+-- hand-entered business was stored as "\n+442079460958", which the equality
+-- match in lookupBusinessByPhone could never find — so those businesses answered
+-- with the generic "our office" config instead of their own. The same damage
+-- silently breaks <Dial> transfers and notification SMS.
+--
+-- The trigger is the only layer that can defend a hand-edit, because it bypasses
+-- every application-level validator. Keep in step with lib/phone.js and
+-- AI-phone-dashboard/backend/src/phone.js.
+CREATE OR REPLACE FUNCTION normalize_phone_value(v text)
+RETURNS text AS $$
+DECLARE
+  s text;
+BEGIN
+  IF v IS NULL THEN
+    RETURN NULL;
+  END IF;
+  s := regexp_replace(v, '[[:space:]]', '', 'g');
+  s := translate(s, E'()./ ​‌‍﻿‐‑‒–—―−-', '');
+  IF s = '' THEN
+    RETURN NULL;
+  END IF;
+  IF left(s, 2) = '00' THEN
+    s := '+' || substr(s, 3);
+  END IF;
+  RETURN s;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION businesses_normalize_phones()
+RETURNS trigger AS $$
+BEGIN
+  NEW.phone_number          := normalize_phone_value(NEW.phone_number);
+  NEW.transfer_phone_number := normalize_phone_value(NEW.transfer_phone_number);
+  NEW.main_phone            := normalize_phone_value(NEW.main_phone);
+  NEW.notification_phone    := normalize_phone_value(NEW.notification_phone);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS businesses_normalize_phones_trg ON businesses;
+
+CREATE TRIGGER businesses_normalize_phones_trg
+  BEFORE INSERT OR UPDATE OF phone_number, transfer_phone_number, main_phone, notification_phone
+  ON businesses
+  FOR EACH ROW
+  EXECUTE FUNCTION businesses_normalize_phones();
 
 -- Double-booking is prevented by the create_appointment_if_available function
 -- (migration 022), not a unique index: per-business slot capacity and

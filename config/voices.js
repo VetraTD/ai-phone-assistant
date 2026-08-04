@@ -23,11 +23,22 @@
  * @property {{stability: number, similarity_boost: number}} voiceSettings
  */
 
-// Task 13 prosody pass: every entry's stability is now >= 0.6. A per-turn
-// ElevenLabs socket carries no cross-turn prosody state, so lower stability
-// let expression swing audibly between utterances; these are damped to a
-// consistent floor pending the owner's own listening test (scripts/voice-ab.js).
-// Do NOT lower any of these below 0.6 without re-running that listening pass.
+// Task 13 prosody pass: a per-turn ElevenLabs socket carries no cross-turn
+// prosody state, so lower stability let expression swing audibly between
+// utterances; these were damped to a 0.6 floor.
+//
+// Raised again 0.6 -> 0.72 after a reported symptom the floor did not cover:
+// the voice "gets too emotional... the longer the conversation goes, it
+// sometimes starts yelling". Two causes, fixed together — unsanitized
+// exclamation marks and ALL-CAPS reaching the engine as emphasis (now damped in
+// lib/voice/speakableText.js dampEmphasis), and low stability letting any given
+// utterance land wild. Higher stability trades expressiveness for consistency,
+// which is the right trade for a receptionist.
+//
+// Do NOT lower any of these below 0.6 without re-running the listening pass
+// (scripts/voice-ab.js — note it must be fixed to REPLACE previous_text per
+// turn as production does, rather than accumulate, or it is not modelling the
+// live path).
 
 /** @type {VoiceCatalogEntry[]} */
 export const VOICE_CATALOG = [
@@ -39,7 +50,7 @@ export const VOICE_CATALOG = [
     gender: "female",
     accent: "american",
     previewText: "Thanks so much for calling — how can I help you today?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "sarah",
@@ -49,7 +60,7 @@ export const VOICE_CATALOG = [
     gender: "female",
     accent: "american",
     previewText: "Hi there, thanks for calling! What can I help you with?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "matilda",
@@ -59,7 +70,7 @@ export const VOICE_CATALOG = [
     gender: "female",
     accent: "american",
     previewText: "Hey! Thanks for calling — how can I help you out today?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "alice",
@@ -69,7 +80,7 @@ export const VOICE_CATALOG = [
     gender: "female",
     accent: "british",
     previewText: "Good afternoon, thank you for calling — how may I help you?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "eric",
@@ -79,7 +90,7 @@ export const VOICE_CATALOG = [
     gender: "male",
     accent: "american",
     previewText: "Thanks for calling — this is our assistant. How can I help you today?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "roger",
@@ -89,7 +100,7 @@ export const VOICE_CATALOG = [
     gender: "male",
     accent: "american",
     previewText: "Hey there, thanks for giving us a call — what can I do for you?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "daniel",
@@ -99,7 +110,7 @@ export const VOICE_CATALOG = [
     gender: "male",
     accent: "british",
     previewText: "Good day, thank you for calling. How may I assist you?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
   {
     id: "river",
@@ -109,6 +120,6 @@ export const VOICE_CATALOG = [
     gender: "neutral",
     accent: "american",
     previewText: "Hi, thanks for calling — how can I help you today?",
-    voiceSettings: { stability: 0.6, similarity_boost: 0.75 },
+    voiceSettings: { stability: 0.72, similarity_boost: 0.75 },
   },
 ];

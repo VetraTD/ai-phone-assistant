@@ -449,6 +449,16 @@ async function startCall(ws, callSid, { streamSid = "MZ1", businessPhone = "+155
   await flush();
 }
 
+// The micro-utterance warm is DEFERRED until the greeting has finished playing
+// (it is ~9 sequential ElevenLabs syntheses against the same account the
+// greeting and first turn are using, so firing it at "start" put nine requests
+// in front of the two the caller is waiting on). Settle the greeting to reach
+// the warm.
+async function settleGreeting() {
+  H.ttsTurns[0]?.opts?.onDone?.({});
+  await flush();
+}
+
 beforeEach(() => {
   H.sttInstances.length = 0;
   H.ttsTurns.length = 0;
@@ -572,7 +582,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(callState.getState(sid).sawCallerFinal).toBe(false);
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("what are your hours");
+    tm.opts.onTurnEnd("what are your hours.");
     await flush();
 
     expect(callState.getState(sid).sawCallerFinal).toBe(true);
@@ -593,7 +603,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     const tm = H.turnManagerInstances[0];
     // turnManager decides the caller's turn is complete:
-    tm.opts.onTurnEnd("I would like to book an appointment");
+    tm.opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -639,7 +649,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await startCall(ws, newSid());
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -660,7 +670,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await startCall(ws, newSid());
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours.");
     await flush();
     await flush();
 
@@ -686,7 +696,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     H.sttInstances[0]._speechEndAt = 12_345;
-    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -711,7 +721,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     H.sttInstances[0]._speechEndAt = null;
-    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -839,7 +849,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("I would like to book an appointment");
+    tm.opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -867,7 +877,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const epochBefore = state.speakEpoch;
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("tell me about your hours");
+    tm.opts.onTurnEnd("tell me about your hours.");
     await flush();
     await flush();
 
@@ -896,7 +906,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("what are your prices for a deep clean");
+    tm.opts.onTurnEnd("what are your prices for a deep clean.");
     await flush();
     await flush();
 
@@ -922,14 +932,14 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const tm = H.turnManagerInstances[0];
 
     // Failure #1 — should NOT enter the fallback flow yet.
-    tm.opts.onTurnEnd("what are your hours today please");
+    tm.opts.onTurnEnd("what are your hours today please.");
     await flush();
     await flush();
     expect(H.fallbackFlowInstances.length).toBe(0);
     expect(callState.getState(sid).consecutiveFailures).toBe(1);
 
     // Failure #2 — crosses the threshold, enters the fallback flow.
-    tm.opts.onTurnEnd("can you check my appointment please");
+    tm.opts.onTurnEnd("can you check my appointment please.");
     await flush();
     await flush();
 
@@ -961,10 +971,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const tm = H.turnManagerInstances[0];
 
     // Two failures -> enter the fallback flow.
-    tm.opts.onTurnEnd("first failing turn");
+    tm.opts.onTurnEnd("first failing turn.");
     await flush();
     await flush();
-    tm.opts.onTurnEnd("second failing turn");
+    tm.opts.onTurnEnd("second failing turn.");
     await flush();
     await flush();
 
@@ -1016,9 +1026,9 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("first failing turn");
+      tm.opts.onTurnEnd("first failing turn.");
       await vi.advanceTimersByTimeAsync(1);
-      tm.opts.onTurnEnd("second failing turn");
+      tm.opts.onTurnEnd("second failing turn.");
       await vi.advanceTimersByTimeAsync(1);
 
       expect(H.fallbackFlowInstances.length).toBe(1);
@@ -1087,7 +1097,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("no that is all thank you");
+    tm.opts.onTurnEnd("no that is all thank you.");
     await flush();
     await flush();
 
@@ -1127,7 +1137,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const tm = H.turnManagerInstances[0];
     // Non-English phrasing — must NOT match the English TRANSFER_TRIGGERS
     // regex escape-hatch, so this exercises the tool-driven path only.
-    tm.opts.onTurnEnd("quiero hablar con una persona");
+    tm.opts.onTurnEnd("quiero hablar con una persona.");
     await flush();
     await flush();
     await flush(); // doTransfer() is fire-and-forget from applyReply
@@ -1189,7 +1199,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("quiero hablar con una persona");
+      tm.opts.onTurnEnd("quiero hablar con una persona.");
       await vi.advanceTimersByTimeAsync(1);
 
       // Audio never finished playing (no mark echoed) — still waiting.
@@ -1234,7 +1244,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("quiero hablar con una persona");
+    tm.opts.onTurnEnd("quiero hablar con una persona.");
     await flush();
     await flush();
     await flush(); // doTransfer() is fire-and-forget from applyReply
@@ -1289,7 +1299,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("I would like to book an appointment");
+    tm.opts.onTurnEnd("I would like to book an appointment.");
     await flush();
     await flush();
 
@@ -1306,7 +1316,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(idsFor("intent_set")).toEqual([turn1Id]);
 
     // A second turn gets its own id.
-    tm.opts.onTurnEnd("actually make it Tuesday");
+    tm.opts.onTurnEnd("actually make it Tuesday.");
     await flush();
     await flush();
 
@@ -1356,7 +1366,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("what are your hours");
+    tm.opts.onTurnEnd("what are your hours.");
     await flush();
     await flush();
 
@@ -1368,7 +1378,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     // A successor turn starts, then Twilio echoes the BARGED turn's mark —
     // audio that was already queued when the interrupt landed.
-    tm.opts.onTurnEnd("wait");
+    tm.opts.onTurnEnd("wait.");
     await flush();
     ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
     await flush();
@@ -1451,7 +1461,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // Caller barges in ("wait" cue) -> onInterrupt clears the silence timer...
       tm.opts.onInterrupt("uh");
       // ...and the final strips to nothing, so no turn starts.
-      tm.opts.onTurnEnd("uh");
+      tm.opts.onTurnEnd("uh.");
 
       const ttsCountBefore = H.ttsTurns.length;
       // The discard path must have re-armed the ladder: nudge1 at 6s.
@@ -1780,7 +1790,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("cancel my appointment please");
+    tm.opts.onTurnEnd("cancel my appointment please.");
     await flush();
     await flush();
 
@@ -1820,7 +1830,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await startCall(ws, sid);
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("book me an appointment");
+    H.turnManagerInstances[0].opts.onTurnEnd("book me an appointment.");
     await flush();
     await flush();
 
@@ -1864,7 +1874,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       lastBooked: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Alex" },
     };
 
-    H.turnManagerInstances[0].opts.onTurnEnd("cancel my appointment please");
+    H.turnManagerInstances[0].opts.onTurnEnd("cancel my appointment please.");
     await flush();
     await flush();
 
@@ -1904,7 +1914,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await startCall(ws, sid);
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("yes book it please");
+    H.turnManagerInstances[0].opts.onTurnEnd("yes book it please.");
     await flush();
     await flush();
 
@@ -1956,7 +1966,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("book me an appointment");
+    tm.opts.onTurnEnd("book me an appointment.");
     await flush();
     await flush();
 
@@ -1994,7 +2004,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
 
     const tm = H.turnManagerInstances[0];
-    tm.opts.onTurnEnd("please take a message");
+    tm.opts.onTurnEnd("please take a message.");
     await flush();
     await flush();
 
@@ -2119,8 +2129,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
       expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
 
-      // warm() was still kicked off (fire-and-forget) with this call's voice
-      // key and a non-empty set of entries.
+      // …and warm() had NOT run yet — it must not compete with the greeting
+      // for the same ElevenLabs account.
+      expect(H.utteranceCacheInstance.warm).not.toHaveBeenCalled();
+
+      // Once the greeting finishes, warm() is kicked off (fire-and-forget)
+      // with this call's voice key and a non-empty set of entries.
+      await settleGreeting();
       expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
       const [, entries] = H.utteranceCacheInstance.warm.mock.calls[0];
       expect(Array.isArray(entries)).toBe(true);
@@ -2141,6 +2156,35 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(entries.some((e) => e.kind === "ack")).toBe(false);
       expect(entries.some((e) => e.text === "Let me check that for you…")).toBe(false);
       expect(entries.some((e) => e.text === "Sorry, go ahead.")).toBe(false);
+    });
+
+    // The warm is ~9 SEQUENTIAL one-shot ElevenLabs syntheses
+    // (lib/voice/utteranceCache.js warms with a for-await loop). Running them
+    // at "start" put nine requests against the same account and rate limit in
+    // front of the greeting and the first turn — the two the caller is actually
+    // waiting on. Nothing is lost by deferring: the LRU is process-wide, the
+    // warmed lines are fillers/nudges/goodbye that cannot play during the
+    // greeting, and a miss falls through to live synthesis.
+    it("11a-ii. a caller who barges the greeting still gets a warmed cache, via the backstop", async () => {
+      vi.useFakeTimers();
+      try {
+        const ws = new FakeWs();
+        handleVoiceSessionConnection(ws);
+        ws.emit({
+          event: "start",
+          start: { callSid: newSid(), streamSid: "MZwarm", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+        });
+        await vi.advanceTimersByTimeAsync(1);
+
+        // Greeting barged: its onSettled never fires, so the greeting-done path
+        // to warm() is closed for the whole call.
+        expect(H.utteranceCacheInstance.warm).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(8_000);
+        expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("11b. greeting always speaks live — never checks or uses the cache, even when the cache has a hit for that exact text", async () => {
@@ -2201,7 +2245,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const callsBefore = mockSynthesizeMulaw.mock.calls.length;
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2234,7 +2278,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         const callsBefore = mockSynthesizeMulaw.mock.calls.length;
 
         const tm = H.turnManagerInstances[0];
-        tm.opts.onTurnEnd("what are your hours");
+        tm.opts.onTurnEnd("what are your hours.");
         await flush();
         await flush();
 
@@ -2332,7 +2376,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         try {
           // The business's own main_phone (+18175803291), spoken as digit
           // groups — NOT the transfer target (+15551234567) and not raw E.164.
-          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Have a great day. Goodbye!";
+          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Have a great day. Goodbye.";
           const cachedGoodbye = Buffer.from([5, 5]);
           // Google-voiced entry present, but the EL business looks it up under
           // its EL voiceId — a warm-EL miss — so the goodbye is spoken live in
@@ -2390,7 +2434,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await startCall(ws, sid);
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2403,7 +2447,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
-      tm.opts.onTurnEnd("what time do you open");
+      tm.opts.onTurnEnd("what time do you open.");
       await flush();
       await flush();
 
@@ -2431,7 +2475,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       greetingTurn.opts.onDone({});
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2458,7 +2502,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       tm.opts.onInterrupt("wait");
       await flush();
 
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2520,7 +2564,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // generator suspends instead of reaching "done" — the barge-in happens
       // while it is still the current turn.
       H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Let me check that for you. " }]);
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2539,7 +2583,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We're open every day." },
         { type: "done", reply: { text: "We're open every day.", toolResults: [] } },
       ]);
-      tm.opts.onTurnEnd("what are your hours today");
+      tm.opts.onTurnEnd("what are your hours today.");
       // The post-barge settle holds this final before it becomes a turn (see
       // POST_BARGE_SETTLE_MS), so turn 2 no longer starts on the same tick as
       // the final that triggers it. Identify turn 2 by what it SPEAKS rather
@@ -2569,7 +2613,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await startCall(ws, sid);
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2592,7 +2636,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
-      tm.opts.onTurnEnd("what time do you open");
+      tm.opts.onTurnEnd("what time do you open.");
       await flush();
       await flush();
 
@@ -2612,6 +2656,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const ws = new FakeWs();
       handleVoiceSessionConnection(ws);
       await startCall(ws, newSid());
+      await settleGreeting();
 
       expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
       const [voiceKey, entries, opts] = H.utteranceCacheInstance.warm.mock.calls[0];
@@ -2641,6 +2686,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const ws = new FakeWs();
       handleVoiceSessionConnection(ws);
       await startCall(ws, newSid());
+      await settleGreeting();
 
       expect(H.utteranceCacheInstance.warm).toHaveBeenCalledTimes(1);
       const call = H.utteranceCacheInstance.warm.mock.calls[0];
@@ -2690,7 +2736,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await startCall(ws, newSid());
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -2704,7 +2750,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
-      tm.opts.onTurnEnd("what time do you open");
+      tm.opts.onTurnEnd("what time do you open.");
       await flush();
       await flush();
 
@@ -2730,7 +2776,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       greetingTurn.opts.onDone({ usedFallback: true });
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("hello");
+      tm.opts.onTurnEnd("hello.");
       await flush();
       await flush();
 
@@ -2922,11 +2968,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
         await startFakeTimerCall("MZ16g");
         const tm = H.turnManagerInstances[0];
 
-        tm.opts.onTurnEnd("what are your hours");
+        tm.opts.onTurnEnd("what are your hours.");
         await vi.advanceTimersByTimeAsync(10);
 
         // Arrives while the LLM is still streaming -> queuedText.
-        tm.opts.onTurnEnd("and your address");
+        tm.opts.onTurnEnd("and your address.");
         await vi.advanceTimersByTimeAsync(10);
 
         H.llmFactory = () => makeGen([
@@ -2980,7 +3026,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const tm = H.turnManagerInstances[0];
       const before = runLlmTurn.mock.calls.length;
 
-      tm.opts.onTurnEnd("Hello, thanks for calling Test Biz");
+      tm.opts.onTurnEnd("Hello, thanks for calling Test Biz.");
       await flush();
       await flush();
 
@@ -3002,7 +3048,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       const tm = H.turnManagerInstances[0];
       const before = runLlmTurn.mock.calls.length;
 
-      tm.opts.onTurnEnd("I need to book an appointment for next week");
+      tm.opts.onTurnEnd("I need to book an appointment for next week.");
       await flush();
       await flush();
 
@@ -3131,7 +3177,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
       audioOut._playing = true; // AI audio still going out
       const before = runLlmTurn.mock.calls.length;
-      tm.opts.onTurnEnd("I need to book an appointment for next week");
+      tm.opts.onTurnEnd("I need to book an appointment for next week.");
       await flush();
       await flush();
 
@@ -3164,7 +3210,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         tm.opts.onInterrupt("wait");
 
         const before = runLlmTurn.mock.calls.length;
-        tm.opts.onTurnEnd("I need to book an appointment for next week");
+        tm.opts.onTurnEnd("I need to book an appointment for next week.");
         await vi.advanceTimersByTimeAsync(2_000); // outwait the post-barge settle
 
         expect(runLlmTurn.mock.calls.length).toBe(before + 1);
@@ -3229,7 +3275,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await flush();
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -3267,7 +3313,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
       const tm = H.turnManagerInstances[0];
       const audioOut = H.audioOutInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -3330,7 +3376,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         await vi.advanceTimersByTimeAsync(1);
 
         const tm = H.turnManagerInstances[0];
-        tm.opts.onTurnEnd("what are your hours");
+        tm.opts.onTurnEnd("what are your hours.");
         await vi.advanceTimersByTimeAsync(10);
 
         H.llmFactory = () => makeGen([
@@ -3339,7 +3385,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         ]);
 
         tm.opts.onInterrupt("wait");
-        tm.opts.onTurnEnd("sorry, what about Saturday please");
+        tm.opts.onTurnEnd("sorry, what about Saturday please.");
         await vi.advanceTimersByTimeAsync(2_000);
 
         const historySent = runLlmTurn.mock.calls.at(-1)[0].history;
@@ -3371,7 +3417,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await flush();
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("can you check Thursday");
+      tm.opts.onTurnEnd("can you check Thursday.");
       await flush();
       await flush();
 
@@ -3395,7 +3441,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
       H.audioOutInstances[0]._playing = true; // announcement still going out
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("can you check Thursday");
+      tm.opts.onTurnEnd("can you check Thursday.");
       await flush();
       await flush();
 
@@ -3417,7 +3463,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await flush();
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("can you check Thursday for me");
+      tm.opts.onTurnEnd("can you check Thursday for me.");
       await flush();
       await flush();
 
@@ -3438,7 +3484,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await flush();
 
       const tm = H.turnManagerInstances[0];
-      tm.opts.onTurnEnd("what are your hours");
+      tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
@@ -3473,7 +3519,7 @@ describe("fallback visibility", () => {
     await startCall(ws, newSid());
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours.");
     await flush();
     await flush();
 
@@ -3499,7 +3545,7 @@ describe("fallback visibility", () => {
     await startCall(ws, newSid());
     await flush();
 
-    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours.");
     await flush();
     await flush();
 

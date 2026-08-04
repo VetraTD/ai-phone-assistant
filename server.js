@@ -15,12 +15,19 @@ import { WebSocketServer } from "ws";
 import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
+import { normalizePhoneNumber } from "./lib/phone.js";
+import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import * as voiceHealth from "./lib/voice/health.js";
-import { buildDegradedVoicemailTwiml } from "./lib/twiml.js";
+import {
+  buildDegradedVoicemailTwiml,
+  buildUnroutedTransferTwiml,
+  buildUnroutedVoicemailTwiml,
+  escapeXml,
+} from "./lib/twiml.js";
 import {
   isValidUUID,
   isValidE164,
@@ -81,6 +88,24 @@ const STATUS_URL = `${BASE_URL}/twilio/status`;
 // ---------------------------------------------------------------------------
 
 const TRANSFER_NUMBER = process.env.TRANSFER_NUMBER || "";
+
+/**
+ * Where to send a caller whose dialed number matches no business.
+ *
+ * Deliberately NOT TRANSFER_NUMBER: that is the per-business forwarding
+ * fallback, and sending a stranger's misrouted call to some other business's
+ * back office is its own kind of wrong. Unset (the default) means take a
+ * message instead.
+ *
+ * Read at call time, not module load, so it can be changed without a restart
+ * and flipped per-case in tests.
+ *
+ * @returns {string} E.164 number, or "" when unset/invalid
+ */
+function unroutedTransferNumber() {
+  return normalizePhoneNumber(process.env.UNROUTED_TRANSFER_NUMBER) || "";
+}
+
 const CALL_MAX_DURATION_MS =
   (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
 
@@ -208,12 +233,60 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
   const existingState = callState.getState(callSid);
   // Only connect the stream on the very first webhook hit (greeting step).
   if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
+    const businessPhone = req.body.To || "";
+    const callerPhone = req.body.From || "";
+
+    // Resolve the tenant HERE rather than inside the media-stream socket. Two
+    // reasons: an unroutable number must never reach the assistant at all (see
+    // below), and the socket can reuse this row instead of paying a second
+    // Supabase round trip on the latency-critical pickup path.
+    let business = null;
+    // A lookup that THREW is not the same as a lookup that found nothing.
+    // "No such business" means the caller must not reach the assistant; a
+    // Supabase blip must not turn a legitimate business's calls into voicemail.
+    // Only a clean miss triggers the unrouted path — an error falls through to
+    // the stream, where the socket retries the lookup.
+    let lookupFailed = false;
+    if (db.isEnabled() && businessPhone) {
+      try {
+        business = await db.lookupBusinessByPhone(businessPhone);
+      } catch (err) {
+        log.error("voice_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+        captureException(err, { callSid });
+        lookupFailed = true;
+        business = null;
+      }
+    }
+    // Left null on failure so the socket re-queries rather than trusting a miss.
+    existingState.business = business;
+
+    if (db.isEnabled() && businessPhone && !business && !lookupFailed) {
+      // The assistant cannot say who it is answering for, cannot persist a
+      // message, and cannot book anything. Hand the caller to a human, or take
+      // a message honestly — never impersonate a generic office.
+      const unroutedTo = unroutedTransferNumber();
+      log.error("no_business_found", {
+        callSid,
+        businessPhone,
+        stage: "voice_webhook",
+        action: unroutedTo ? "transfer" : "voicemail",
+        severity: "warn",
+      });
+      if (unroutedTo) {
+        return res.send(buildUnroutedTransferTwiml(unroutedTo, callerPhone));
+      }
+      return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+    }
+
     const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
     log.info("media_stream_initiated", { callSid });
+    // escapeXml on both: every other TwiML site in this codebase escapes its
+    // interpolations, and an unescaped attribute value is an XML-injection hole
+    // even when the only writer is Twilio.
     return res.send(
       `<Response><Connect><Stream url="${wsUrl}">` +
-      `<Parameter name="businessPhone" value="${req.body.To || ""}" />` +
-      `<Parameter name="callerPhone" value="${req.body.From || ""}" />` +
+      `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
+      `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
       `</Stream></Connect></Response>`
     );
   }
@@ -277,7 +350,17 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
           .catch((err) => log.error("sms_followup_failed", { callSid, kind: "message_received", reason: err?.message }));
       }
     } else {
-      log.error("degraded_voicemail_no_business", { callSid, twilioNumber, severity: "warn" });
+      // No business row, so there is nowhere to file this. The recording URL
+      // goes in the log line so a real caller's message is recoverable by hand
+      // rather than lost outright — this is the unrouted-number path as well as
+      // the degraded one. A proper ops mailbox for these does not exist yet.
+      log.error("degraded_voicemail_no_business", {
+        callSid,
+        twilioNumber,
+        callerNumber,
+        recordingUrl,
+        severity: "warn",
+      });
     }
   } catch (err) {
     log.error("degraded_voicemail_failed", { callSid, message: err?.message });
@@ -598,7 +681,16 @@ app.get("/api/debug/latency", async (req, res) => {
   // deploy mid-run clears the ring buffer and splits the calls across two
   // builds; without this the result is an empty report blamed on the wrong
   // thing (see docs/latency-and-tts-tests.md, probe E).
-  res.json({ ...getLatencyStats(), elBreaker: ttsHealth.getState(), bootId: BOOT_ID });
+  // promptCache is registry-level truth, and it is not redundant with the
+  // per-turn `cache` block: a cache that was never created and a cache that was
+  // created but never applied to a request both read as a 0% hit rate there.
+  // Only creates/errors/cooldowns tell those two apart.
+  res.json({
+    ...getLatencyStats(),
+    elBreaker: ttsHealth.getState(),
+    promptCache: getCacheStats(),
+    bootId: BOOT_ID,
+  });
 });
 
 // The ring buffer lives as long as the process, so without this a second

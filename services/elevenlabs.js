@@ -43,11 +43,16 @@ function previousTextDisabled() {
 }
 
 const DEFAULT_VOICE_SETTINGS = {
-  // Raised 0.5 -> 0.65 (Task 13): one WS per turn means the model has no
-  // cross-turn prosody state, so a low stability let expression swing audibly
-  // between utterances. 0.65 damps that; the per-voice catalog pass
-  // (config/voices.js) fine-tunes from here pending the owner's listening test.
-  stability: 0.65,
+  // 0.5 -> 0.65 (Task 13): one WS per turn means the model has no cross-turn
+  // prosody state, so a low stability let expression swing audibly between
+  // utterances.
+  //
+  // 0.65 -> 0.72: that still left the voice escalating over a long call —
+  // reported as "sometimes starts yelling". Paired with dampEmphasis in
+  // lib/voice/speakableText.js, which stops exclamation marks and ALL-CAPS
+  // reaching the engine as emphasis in the first place. This value applies to
+  // any voice_id not in config/voices.js (which sets its own 0.72).
+  stability: 0.72,
   similarity_boost: 0.8,
   use_speaker_boost: false,
   speed: 1,

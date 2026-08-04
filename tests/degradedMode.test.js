@@ -96,6 +96,7 @@ describe("POST /twilio/voice — degraded mode", () => {
   });
 
   it("returns <Connect><Stream> as normal when not degraded", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-normal", name: "Test Biz" });
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -105,6 +106,107 @@ describe("POST /twilio/voice — degraded mode", () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Connect><Stream");
     expect(res.text).not.toContain("<Record");
+  });
+
+  it("escapes the dialed and caller numbers in the Stream parameters", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-normal" });
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_escape_1", To: '+1555"><Hangup/>', From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('"><Hangup/>');
+    expect(res.text).toContain("&quot;&gt;&lt;Hangup/&gt;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unrouted calls. Before this existed, a dialed number matching no business
+// still connected the media stream and ran the assistant on loadConfig(null):
+// it greeted as "our office", offered booking that refused at execution, and
+// said "I'll make sure they get your message" while persisting nothing and
+// notifying nobody. An assistant that cannot name the business it answers for
+// must not answer for it.
+// ---------------------------------------------------------------------------
+describe("POST /twilio/voice — no business matches the dialed number", () => {
+  const savedUnrouted = process.env.UNROUTED_TRANSFER_NUMBER;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEnabled.mockReturnValue(true);
+    mockLookupBusinessByPhone.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    clearDegraded();
+    if (savedUnrouted === undefined) delete process.env.UNROUTED_TRANSFER_NUMBER;
+    else process.env.UNROUTED_TRANSFER_NUMBER = savedUnrouted;
+  });
+
+  it("takes a message when no unrouted transfer number is configured", async () => {
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_1", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Record");
+    expect(res.text).toContain("/twilio/voicemail");
+    // The caller must never reach the assistant with no business context.
+    expect(res.text).not.toContain("<Connect>");
+    // …and must not be promised a callback from a business we cannot identify.
+    expect(res.text).not.toContain("our office");
+  });
+
+  it("forwards to a human when UNROUTED_TRANSFER_NUMBER is set", async () => {
+    process.env.UNROUTED_TRANSFER_NUMBER = "+18005550123";
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_2", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Dial");
+    expect(res.text).toContain("+18005550123");
+    // The original caller's number is passed through so whoever picks up sees
+    // who is actually calling.
+    expect(res.text).toContain('callerId="+15559998888"');
+    expect(res.text).not.toContain("<Connect>");
+    expect(res.text).not.toContain("<Record");
+  });
+
+  it("normalizes a damaged UNROUTED_TRANSFER_NUMBER and ignores an unusable one", async () => {
+    process.env.UNROUTED_TRANSFER_NUMBER = "\n+1 800 555 0123";
+    let res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_3", To: "+15550002222", From: "+15559998888" });
+    expect(res.text).toContain("+18005550123");
+
+    // A number Twilio could never dial must fall back to taking a message
+    // rather than emitting a <Dial> that fails after the caller is committed.
+    process.env.UNROUTED_TRANSFER_NUMBER = "555-0123";
+    res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_4", To: "+15550002222", From: "+15559998888" });
+    expect(res.text).toContain("<Record");
+    expect(res.text).not.toContain("<Dial");
+  });
+
+  it("still connects the stream when the lookup throws (a blip is not a missing business)", async () => {
+    mockLookupBusinessByPhone.mockRejectedValue(new Error("supabase timeout"));
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_5", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Connect><Stream");
   });
 });
 

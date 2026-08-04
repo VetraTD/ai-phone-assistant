@@ -87,7 +87,8 @@ async function main() {
     const impl = PROVIDERS[provider];
     // previous_text continuity, where the vendor supports it: prosody across a
     // multi-sentence turn is part of what is being judged, and synthesizing
-    // each line cold would flatten exactly that difference.
+    // each line cold would flatten exactly that difference. Mirrors production
+    // exactly — one turn back, not the whole transcript.
     let previousText = "";
     let chars = 0;
     const ttfas = [];
@@ -103,7 +104,11 @@ async function main() {
         items.push({ provider, line, mulaw, ttfaMs });
         ttfas.push(ttfaMs);
         chars += text.length;
-        previousText = `${previousText} ${text}`.trim();
+        // REPLACE, don't accumulate — production threads only the previous
+        // turn's spoken text (lib/voice/session.js's lastSpokenText is an
+        // assignment, not an append). Accumulating made the pack model a
+        // pipeline that does not exist.
+        previousText = text;
         console.log(`${(mulaw.length / 8000).toFixed(2)}s, TTFA ${ttfaMs}ms`);
       } catch (err) {
         // One vendor failing must not cost the whole pack — the others are

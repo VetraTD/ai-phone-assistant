@@ -103,7 +103,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(sock.sentMessages()).toEqual([
       {
         text: " ",
-        voice_settings: { stability: 0.65, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
+        voice_settings: { stability: 0.72, similarity_boost: 0.8, use_speaker_boost: false, speed: 1 },
       },
     ]);
   });
@@ -641,7 +641,7 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     const handshake = sock.sentMessages()[0];
     expect(handshake.text).toBe(" ");
     expect(handshake.previous_text).toBe("Thanks so much for calling. This is the front desk.");
-    expect(handshake.voice_settings).toMatchObject({ stability: 0.65, similarity_boost: 0.8 });
+    expect(handshake.voice_settings).toMatchObject({ stability: 0.72, similarity_boost: 0.8 });
   });
 
   it("16. previousText that is empty/whitespace/undefined omits the previous_text field entirely", () => {

@@ -20,6 +20,7 @@ const {
   DAY_KEYS,
   ALLOWED_TIMEZONES,
 } = require("./constants");
+const { normalizePhoneNumber, stripPhoneFormatting } = require("./phone");
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 // Loose E.164-ish check: optional leading +, 7-20 digits/spaces/()/-/.
@@ -48,12 +49,34 @@ function validateBoundedString(maxLength) {
   };
 }
 
+// For numbers that are SPOKEN to a caller, not dialled by Twilio (main_phone).
+// Formatting is stripped so the stored value matches what the engine expects
+// (lib/voice/session.js runs it through toSpeakable to read out digit groups),
+// but a country code is not required.
 function validatePhone(value) {
   if (value === null || value === "") return { value: "" };
   if (typeof value !== "string") return { error: "must be a string" };
   const trimmed = value.trim();
   if (!PHONE_RE.test(trimmed)) return { error: "is not a valid phone number" };
-  return { value: trimmed };
+  return { value: stripPhoneFormatting(trimmed) };
+}
+
+// For numbers Twilio must DIAL or TEXT (phone_number, transfer_phone_number,
+// notification_phone). Twilio requires E.164, so anything else fails silently
+// at call time — a transfer that never connects, an SMS that never arrives.
+// Reject it here, where the operator can see the error, and never guess a
+// country code: guessing is how a UK number silently becomes a US one.
+function validateE164Phone(value) {
+  if (value === null || value === "") return { value: "" };
+  if (typeof value !== "string") return { error: "must be a string" };
+  const normalized = normalizePhoneNumber(value);
+  if (!normalized) {
+    return {
+      error:
+        "must be in international format, including the country code — for example +442079460958 or +18176011171",
+    };
+  }
+  return { value: normalized };
 }
 
 function validateEnum(list) {
@@ -185,6 +208,19 @@ function validateSmsTemplates(value) {
 const SETTINGS_FIELD_VALIDATORS = {
   name: validateName,
   timezone: validateTimezone,
+  // DELIBERATELY ABSENT: phone_number.
+  //
+  // It is the tenant-routing key — whoever holds a number receives its calls.
+  // This endpoint authenticates the user against their own business but there
+  // is no admin role, so a writable phone_number would let any tenant claim
+  // another business's Twilio number and take its calls. Migration 024's unique
+  // index blocks the duplicate, but an UNCLAIMED number could still be taken.
+  //
+  // Attaching an externally-owned number stays an operator action in Supabase,
+  // which migration 024's BEFORE trigger now makes safe (it normalizes the
+  // paste damage that made every hand-entered row invisible to the lookup).
+  // A self-serve field needs authenticated Twilio-ownership verification first
+  // — see the note on /api/businesses/:id/phone-numbers/* in server.js.
   greeting: validateBoundedString(500),
   custom_instructions: validateBoundedString(2000),
   general_info: validateBoundedString(2000),
@@ -192,7 +228,7 @@ const SETTINGS_FIELD_VALIDATORS = {
   business_hours: validateBusinessHours,
   after_hours_policy: validateEnum(AFTER_HOURS_POLICIES),
   transfer_policy: validateEnum(TRANSFER_POLICIES),
-  transfer_phone_number: validatePhone,
+  transfer_phone_number: validateE164Phone,
   allowed_tasks: validateAllowedTasks,
   languages_spoken: validateLanguagesSpoken,
   recording_disclosure_enabled: validateBoolean,
@@ -200,7 +236,7 @@ const SETTINGS_FIELD_VALIDATORS = {
   voice_provider: validateEnum(VOICE_PROVIDERS),
   voice_id: validateVoiceId,
   notification_email: validateEmail,
-  notification_phone: validatePhone,
+  notification_phone: validateE164Phone,
   notifications_enabled: validateBoolean,
   sms_followup_enabled: validateBoolean,
   sms_templates: validateSmsTemplates,

@@ -219,3 +219,86 @@ describe("echoGuard.js — createEchoGuard", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// isShortEcho — the gap that let the assistant cut callers off.
+//
+// classify() refuses anything under 4 tokens because bigram similarity is
+// meaningless there (a one-word transcript has no bigrams at all). But
+// turnManager treats a ONE-WORD interrupt cue as enough to cut the AI off, and
+// "no", "sorry", "wait" and "actually" are all cues. So the AI saying
+// "No problem, I can get that booked", echoing off a speakerphone and coming
+// back as "no", went straight to triggerInterrupt with nothing checking it.
+// Exact token containment is meaningful at that length, where ratios are not.
+// ---------------------------------------------------------------------------
+describe("echoGuard.js — isShortEcho (transcripts too short for classify)", () => {
+  const AI_REPLY = "No problem, I can get that booked for you.";
+
+  it("catches the single word that classify structurally cannot judge", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken(AI_REPLY, 1_000);
+
+    // The main classifier bails out — this is the gap, stated as a test.
+    expect(guard.classify("no", 1_200).reason).toBe("too_short");
+    expect(guard.isEcho("no", 1_200)).toBe(false);
+
+    // The short-echo check closes it.
+    expect(guard.isShortEcho("no", 1_200)).toBe(true);
+  });
+
+  it("catches other interrupt cues the AI itself just used", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken("Sorry, one moment while I check that.", 1_000);
+    expect(guard.isShortEcho("sorry", 1_100)).toBe(true);
+    expect(guard.isShortEcho("one moment", 1_100)).toBe(true);
+  });
+
+  it("does NOT suppress a word the AI never said — that is a real caller", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken(AI_REPLY, 1_000);
+    expect(guard.isShortEcho("stop", 1_200)).toBe(false);
+    expect(guard.isShortEcho("cancel", 1_200)).toBe(false);
+  });
+
+  it("does NOT suppress when only SOME tokens were spoken by the AI", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken(AI_REPLY, 1_000);
+    // "no" is echo-shaped, "thanks" is the caller adding content.
+    expect(guard.isShortEcho("no thanks", 1_200)).toBe(false);
+  });
+
+  it("does NOT suppress outside the audible window — later is a real caller", () => {
+    const { guard, setAudibleUntil } = makeGuard();
+    setAudibleUntil(1_000);
+    guard.noteSpoken(AI_REPLY, 900);
+    // Inside the window plus the echo tail.
+    expect(guard.isShortEcho("no", 1_100)).toBe(true);
+    // Well past it.
+    expect(guard.isShortEcho("no", 9_000)).toBe(false);
+  });
+
+  it("does NOT suppress when the AI has said nothing yet", () => {
+    const { guard } = makeGuard();
+    expect(guard.isShortEcho("no", 1_000)).toBe(false);
+  });
+
+  it("ignores transcripts longer than the short-echo bound (classify's job)", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken(AI_REPLY, 1_000);
+    expect(guard.isShortEcho("no problem i can", 1_200)).toBe(false);
+  });
+
+  it("respects the guard being disabled", () => {
+    const { guard } = makeGuard({ enabled: false });
+    guard.noteSpoken(AI_REPLY, 1_000);
+    expect(guard.isShortEcho("no", 1_200)).toBe(false);
+  });
+
+  it("handles empty and non-string input without throwing", () => {
+    const { guard } = makeGuard();
+    guard.noteSpoken(AI_REPLY, 1_000);
+    expect(guard.isShortEcho("", 1_200)).toBe(false);
+    expect(guard.isShortEcho(null, 1_200)).toBe(false);
+    expect(guard.isShortEcho(undefined, 1_200)).toBe(false);
+  });
+});

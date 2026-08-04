@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toSpeakable, expandAbbreviations } from "../lib/voice/speakableText.js";
+import { toSpeakable, expandAbbreviations, dampEmphasis } from "../lib/voice/speakableText.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { buildSayContent } from "../lib/twiml.js";
 
@@ -168,7 +168,10 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
       expect(toSpeakable("Hi   there,    how are you?")).toBe("Hi there, how are you?");
     });
     it("strips emoji", () => {
-      expect(toSpeakable("Thanks for calling! \u{1F600}")).toBe("Thanks for calling!");
+      // The "!" becomes "." via dampEmphasis — ElevenLabs reads an exclamation
+      // mark as emphasis, which is what made the voice escalate over a call.
+      // This case is here for the emoji strip; the punctuation is incidental.
+      expect(toSpeakable("Thanks for calling! \u{1F600}")).toBe("Thanks for calling.");
     });
     it("trims the result", () => {
       expect(toSpeakable("  Hello there  ")).toBe("Hello there");
@@ -439,5 +442,62 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
       expect(() => toSpeakable(weird)).not.toThrow();
       expect(toSpeakable(weird)).toBe(weird);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Emphasis damping. Reported symptom: the voice "gets too emotional... the
+// longer the conversation goes, it sometimes starts yelling". Nothing between
+// the model and ElevenLabs removed exclamation marks or ALL-CAPS, both of which
+// the engine reads as emphasis — and because each turn's spoken text seeds the
+// next turn's `previous_text`, an emphatic turn made the next one emphatic too.
+// ---------------------------------------------------------------------------
+describe("dampEmphasis", () => {
+  it("collapses exclamation runs and converts them to full stops", () => {
+    expect(dampEmphasis("Great!!!")).toBe("Great.");
+    expect(dampEmphasis("Perfect! I can help!")).toBe("Perfect. I can help.");
+    expect(dampEmphasis("Wow!!! Really!!")).toBe("Wow. Really.");
+  });
+
+  it("de-shouts capitalised words of four letters or more", () => {
+    expect(dampEmphasis("I NEED that today")).toBe("I Need that today");
+    expect(dampEmphasis("This is REALLY URGENT")).toBe("This is Really Urgent");
+  });
+
+  it("preserves acronyms, which the TTS reads letter-by-letter because they are capitalised", () => {
+    expect(dampEmphasis("Send a PDF or a DOB")).toBe("Send a PDF or a DOB");
+    expect(dampEmphasis("I'm an AI assistant")).toBe("I'm an AI assistant");
+    expect(dampEmphasis("We are HIPAA compliant")).toBe("We are HIPAA compliant");
+    expect(dampEmphasis("Come ASAP")).toBe("Come ASAP");
+  });
+
+  it("preserves spelled-out single letters (the once-per-call name spell-back)", () => {
+    expect(dampEmphasis("That's N-I-T-H-I-N")).toBe("That's N-I-T-H-I-N");
+  });
+
+  it("leaves tokens containing digits alone", () => {
+    expect(dampEmphasis("Suite SW1A 2AA")).toBe("Suite SW1A 2AA");
+  });
+
+  it("handles a possessive acronym and a possessive shout", () => {
+    expect(dampEmphasis("the NHS'S rules")).toBe("the NHS'S rules");
+    expect(dampEmphasis("the DOCTOR'S office")).toBe("the Doctor's office");
+  });
+
+  it("is idempotent", () => {
+    const once = dampEmphasis("STOP!!! I NEED help!");
+    expect(dampEmphasis(once)).toBe(once);
+    expect(once).toBe("Stop. I Need help.");
+  });
+
+  it("leaves ellipses and dashes alone — they buy pacing, not volume", () => {
+    expect(dampEmphasis("Let me see... one moment — nearly there")).toBe(
+      "Let me see... one moment — nearly there"
+    );
+  });
+
+  it("runs as part of toSpeakable", () => {
+    expect(toSpeakable("**GREAT!!!** See you at 3pm")).toContain("Great.");
+    expect(toSpeakable("**GREAT!!!** See you at 3pm")).not.toContain("!");
   });
 });
