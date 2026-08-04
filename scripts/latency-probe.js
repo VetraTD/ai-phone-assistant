@@ -120,14 +120,18 @@ if (has("--synth")) {
 }
 
 // --- Assemble and render a report from whatever the server has -----------
-async function renderReport(runId, callCount) {
+async function renderReport(runId, callCount, startBootId) {
   const [serverStats, probe] = await Promise.all([
     debugGet("/api/debug/latency"),
     debugGet("/api/debug/probe-results"),
   ]);
 
   const probeTurns = probe.runs.flatMap((r) => r.turns ?? []);
-  const md = buildReport({ runId, callCount, probeTurns, serverStats });
+  // startBootId is captured before the first call. If it differs from the one
+  // reported now, a deploy restarted the server mid-run and the numbers are not
+  // a result — the report says so rather than leaving an empty table to be
+  // misdiagnosed.
+  const md = buildReport({ runId, callCount, probeTurns, serverStats, startBootId });
 
   const dir = path.join(RUNS_DIR, runId);
   fs.mkdirSync(dir, { recursive: true });
@@ -141,7 +145,7 @@ async function renderReport(runId, callCount) {
 
 if (has("--report-only")) {
   const runId = opt("--run-id", `run-${process.pid}`);
-  await renderReport(runId, Number.parseInt(opt("--calls", "0"), 10));
+  await renderReport(runId, Number.parseInt(opt("--calls", "0"), 10), opt("--boot-id", undefined));
   process.exit(0);
 }
 
@@ -182,6 +186,7 @@ const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
 // A run starts from an empty buffer, or it pools with the previous one and
 // blurs any before/after comparison.
+const startBootId = (await debugGet("/api/debug/latency")).bootId;
 await debugPost("/api/debug/latency/reset");
 
 // The probe leg runs on the server, so the audio has to get there. Uploading
@@ -224,5 +229,5 @@ for (let i = 1; i <= plan.calls; i++) {
 }
 
 console.log(`\n  ${completed}/${plan.calls} calls completed.\n`);
-await renderReport(runId, completed);
+await renderReport(runId, completed, startBootId);
 console.log("  Remember to unset DEBUG_ENDPOINTS and DEBUG_TOKEN on the server.\n");

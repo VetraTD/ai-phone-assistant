@@ -32,6 +32,10 @@ import {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Identifies this process. Reported on /api/debug/latency so a measurement run
+// can prove the server did not restart (i.e. redeploy) underneath it.
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 // Trust Railway's proxy so express-rate-limit can read the real client IP
 // from X-Forwarded-For instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 app.set("trust proxy", 1);
@@ -590,7 +594,11 @@ app.get("/api/debug/latency", async (req, res) => {
   // route that does not exist, so probing can't confirm the endpoint is there.
   if (!debugAccessAllowed(req)) return res.status(404).end();
   const { ttsHealth } = await import("./lib/voice/ttsHealth.js");
-  res.json({ ...getLatencyStats(), elBreaker: ttsHealth.getState() });
+  // bootId lets a probe run prove the server did not restart underneath it. A
+  // deploy mid-run clears the ring buffer and splits the calls across two
+  // builds; without this the result is an empty report blamed on the wrong
+  // thing (see docs/latency-and-tts-tests.md, probe E).
+  res.json({ ...getLatencyStats(), elBreaker: ttsHealth.getState(), bootId: BOOT_ID });
 });
 
 // The ring buffer lives as long as the process, so without this a second

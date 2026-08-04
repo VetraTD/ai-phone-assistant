@@ -30,6 +30,52 @@ function stats({ trueV2v, sttEndpoint = 0, sttTail = 0, llm = 0, tts = 0, playou
   };
 }
 
+// ---------------------------------------------------------------------------
+// A run whose server restarted midway measured two different builds and is not
+// a result. This cost a full 12-call run on 2026-08-04: a docs commit triggered
+// a Railway redeploy 52 seconds before the probe dialled, every call died on
+// connect, and the report said "no data — check DEBUG_ENDPOINTS and that the
+// calls connected". Right to flag it, wrong cause.
+// ---------------------------------------------------------------------------
+describe("buildReport — server restart during the run", () => {
+  it("says the server restarted when the boot id changed", () => {
+    const md = buildReport({
+      runId: "r1",
+      callCount: 12,
+      probeTurns: [],
+      serverStats: { count: 0, byStage: {}, turnTaking: {}, holdRules: {}, bootId: "boot-B" },
+      startBootId: "boot-A",
+    });
+
+    expect(md).toMatch(/restarted during this run/i);
+    expect(md).toMatch(/boot-A/);
+    expect(md).toMatch(/boot-B/);
+  });
+
+  it("says nothing when the boot id held steady", () => {
+    const md = buildReport({
+      runId: "r1",
+      callCount: 12,
+      probeTurns: [],
+      serverStats: { count: 0, byStage: {}, turnTaking: {}, holdRules: {}, bootId: "boot-A" },
+      startBootId: "boot-A",
+    });
+
+    expect(md).not.toMatch(/restarted during this run/i);
+  });
+
+  it("says nothing when boot ids are unavailable (older server)", () => {
+    const md = buildReport({
+      runId: "r1",
+      callCount: 12,
+      probeTurns: [],
+      serverStats: { count: 0, byStage: {}, turnTaking: {}, holdRules: {} },
+    });
+
+    expect(md).not.toMatch(/restarted during this run/i);
+  });
+});
+
 describe("buildVerdict — which optimisation the numbers justify", () => {
   it("calls the whole exercise off when p50 is already under 800ms", () => {
     const v = buildVerdict({ serverStats: stats({ trueV2v: 700, llm: 400 }), probeP50: 750 });
