@@ -623,6 +623,52 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(marks.indexOf("speech_end")).toBeLessThan(marks.indexOf("llm_request"));
   });
 
+  // A turn whose first model round emits a function call and no text charges
+  // that entire round-trip to llm_ttfb_ms, with nothing in the payload to
+  // attribute it to. llm_first_tool is what makes it separable — and it has to
+  // land BEFORE llm_first_chunk or the delta it splits out is meaningless.
+  it("3b. a tool-calling turn marks llm_first_tool between llm_request and llm_first_chunk", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "toolEffect", effect: { name: "set_call_intent", success: true } },
+      { type: "delta", text: "Sure, I can help." },
+      { type: "done", reply: { text: "Sure, I can help.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    await flush();
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map((c) => c[0]);
+    expect(marks).toContain("llm_first_tool");
+    expect(marks.indexOf("llm_request")).toBeLessThan(marks.indexOf("llm_first_tool"));
+    expect(marks.indexOf("llm_first_tool")).toBeLessThan(marks.indexOf("llm_first_chunk"));
+  });
+
+  it("3c. a turn with no tool call never marks llm_first_tool", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "We're open until five." },
+      { type: "done", reply: { text: "We're open until five.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    await flush();
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map((c) => c[0]);
+    expect(marks).toContain("llm_first_chunk");
+    expect(marks).not.toContain("llm_first_tool");
+  });
+
   // -------------------------------------------------------------------------
   // Instrumentation that makes the out-of-process segments measurable: the
   // Deepgram tail before speech_end and the pacing gap after first_audio_sent.

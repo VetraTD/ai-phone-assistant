@@ -65,6 +65,45 @@ describe("metrics.js — per-turn latency tracker", () => {
       expect(payload.voice_to_voice_ms).toBeNull();
     });
 
+    // llm_first_chunk is stamped on the first TEXT delta, so a turn whose first
+    // model round emits only a function call charges that whole round-trip to
+    // llm_ttfb_ms with nothing to attribute it to. These two deltas split it.
+    it("splits llm_ttfb_ms across the tool round-trip when a tool ran", () => {
+      const tracker = createTurnMetrics("CA-tool");
+      tracker.mark("llm_request", 1000);
+      tracker.mark("llm_first_tool", 1700);
+      tracker.mark("llm_first_chunk", 2400);
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.llm_tool_ms).toBe(700);
+      expect(payload.llm_reply_after_tool_ms).toBe(700);
+      // The split is exhaustive: the two halves account for the whole wait.
+      expect(payload.llm_tool_ms + payload.llm_reply_after_tool_ms).toBe(payload.llm_ttfb_ms);
+    });
+
+    it("leaves both tool deltas null on a turn that called no tool", () => {
+      const tracker = createTurnMetrics("CA-notool");
+      tracker.mark("llm_request", 1000);
+      tracker.mark("llm_first_chunk", 1700);
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.llm_ttfb_ms).toBe(700);
+      expect(payload.llm_tool_ms).toBeNull();
+      expect(payload.llm_reply_after_tool_ms).toBeNull();
+    });
+
+    it("attributes llm_first_tool to the FIRST tool of a multi-tool turn", () => {
+      const tracker = createTurnMetrics("CA-multitool");
+      tracker.mark("llm_request", 1000);
+      tracker.mark("llm_first_tool", 1600);
+      tracker.mark("llm_first_tool", 2900); // a second tool later in the turn
+      tracker.mark("llm_first_chunk", 3000);
+
+      expect(tracker.finishTurn().llm_tool_ms).toBe(600);
+    });
+
     it("merges extra fields into the payload (e.g. barged_in)", () => {
       const tracker = createTurnMetrics("CA125");
       tracker.mark("speech_end", 0);
@@ -218,6 +257,32 @@ describe("metrics.js — per-turn latency tracker", () => {
       const stats = getLatencyStats();
       expect(stats.byStage.voice_to_voice_ms.p50).toBeNull();
       expect(stats.byStage.llm_ttfb_ms.p50).toBe(50);
+    });
+
+    // Mixed traffic is the normal case: some turns call a tool, some don't. The
+    // tool percentiles must describe only the turns that actually paid for one,
+    // or a rising share of tool-free turns would look like a latency win.
+    it("computes tool-stage percentiles over tool-calling turns only", () => {
+      const withTool = createTurnMetrics("CA-mixed-tool");
+      withTool.mark("llm_request", 0);
+      withTool.mark("llm_first_tool", 700);
+      withTool.mark("llm_first_chunk", 1400);
+      withTool.finishTurn();
+
+      const withoutTool = createTurnMetrics("CA-mixed-notool");
+      withoutTool.mark("llm_request", 0);
+      withoutTool.mark("llm_first_chunk", 700);
+      withoutTool.finishTurn();
+
+      const stats = getLatencyStats();
+      // Both turns contribute to llm_ttfb_ms (p50 of two samples takes the
+      // lower); only the tool-calling one contributes to the tool stages, so
+      // its 700ms is both their p50 and their max.
+      expect(stats.byStage.llm_ttfb_ms.p50).toBe(700);
+      expect(stats.byStage.llm_ttfb_ms.max).toBe(1400);
+      expect(stats.byStage.llm_tool_ms.p50).toBe(700);
+      expect(stats.byStage.llm_tool_ms.max).toBe(700);
+      expect(stats.byStage.llm_reply_after_tool_ms.p50).toBe(700);
     });
 
     it("returns count 0 and empty recent on a fresh ring buffer", () => {
