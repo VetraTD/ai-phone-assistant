@@ -369,6 +369,22 @@ describe("metrics.js — per-turn latency tracker", () => {
       expect(cache.turnsWithHit).toBe(0);
     });
 
+    it("treats a missing cached count as a zero hit when prompt tokens are known", () => {
+      // Gemini omits cachedContentTokenCount entirely when nothing was cached,
+      // so "prompt tokens present, cached absent" is not missing data — it is
+      // a measured zero. Reporting it as "no data" hid a dead cache prefix
+      // behind an empty table.
+      const tracker = createTurnMetrics("CA-implicit-zero");
+      tracker.mark("speech_end", 0);
+      tracker.mark("first_audio_sent", 100);
+      tracker.finishTurn({ prompt_tokens: 5397 });
+
+      const { cache } = getLatencyStats();
+      expect(cache.samples).toBe(1);
+      expect(cache.hitRatePctP50).toBe(0);
+      expect(cache.turnsWithHit).toBe(0);
+    });
+
     it("reports null hit rate when no turn carried token counts", () => {
       const tracker = createTurnMetrics("CA-notokens");
       tracker.mark("speech_end", 0);
