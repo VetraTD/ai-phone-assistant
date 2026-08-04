@@ -3446,3 +3446,66 @@ describe("session.js — v2 pipeline orchestrator", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// When ElevenLabs fails, the Google fallback keeps the call alive — and then
+// sticks for the rest of the call. That is the right behaviour, but until now
+// nothing counted it, so it never reached getLatencyStats and never reached the
+// probe report.
+//
+// The cost of that gap, 2026-08-04: the ElevenLabs quota ran out mid-probe and
+// two full 12-call runs were measured on the fallback voice. tts_ttfb_ms went
+// from ~95ms to ~850ms and read as an unexplained latency regression, when the
+// real story was "callers are not hearing ElevenLabs at all".
+// ---------------------------------------------------------------------------
+describe("fallback visibility", () => {
+  it("counts a caller turn that had to use the Google fallback", async () => {
+    const metrics = await import("../lib/voice/metrics.js");
+    metrics.bumpCounter.mockClear();
+
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "We're open until five." },
+      { type: "done", reply: { text: "We're open until five.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    await flush();
+    await flush();
+
+    // The TTS turn reports that Google produced the audio.
+    const turnTts = H.ttsTurns[H.ttsTurns.length - 1];
+    turnTts.opts.onDone({ truncated: false, usedFallback: true });
+    await flush();
+
+    expect(metrics.bumpCounter).toHaveBeenCalledWith("tts_fallback_turns");
+  });
+
+  it("does not count a turn ElevenLabs served", async () => {
+    const metrics = await import("../lib/voice/metrics.js");
+    metrics.bumpCounter.mockClear();
+
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "We're open until five." },
+      { type: "done", reply: { text: "We're open until five.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("what are your hours");
+    await flush();
+    await flush();
+
+    H.ttsTurns[H.ttsTurns.length - 1].opts.onDone({ truncated: false });
+    await flush();
+
+    expect(metrics.bumpCounter).not.toHaveBeenCalledWith("tts_fallback_turns");
+  });
+});
