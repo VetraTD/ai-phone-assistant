@@ -208,6 +208,32 @@ describe("probeRun — scripted caller side of a measured test call", () => {
     expect(h.sent.length).toBe(sentAfterOurTurn);
   });
 
+  // The gap the previous test covers (1400ms) never crosses silenceMs, so the
+  // countdown never starts. This is the case that does: the assistant pauses
+  // long enough for the probe to begin its own countdown, and then keeps
+  // talking. handleInbound's comment says voiced audio must cancel that
+  // countdown "so we don't talk over a continuation" — but its guard reads
+  // `state !== STATE.GAP`, and entering the gap from LISTENING sets state to
+  // GAP at the same moment, so the cancel never fires for a reply. Result: the
+  // probe talks over the assistant, which is the 30-barge-ins-against-12-
+  // scripted seen in every run so far.
+  it("aborts its countdown when the assistant resumes after a long pause", () => {
+    const h = setup({ script: [utterance("u1", 2), utterance("u2", 2)] });
+    passGreeting(h);
+
+    h.ticks(2); // our utterance goes out
+    const sentAfterOurTurn = h.sent.length;
+
+    h.inbound(5, voicedFrame()); // assistant starts replying
+    h.inbound(105, silentFrame()); // 2100ms pause — past silenceMs, countdown begins
+    h.inbound(5, voicedFrame()); // ...and the assistant carries on
+
+    // Give the countdown every chance to fire if it was not cancelled.
+    h.ticks(40);
+
+    expect(h.sent.length).toBe(sentAfterOurTurn);
+  });
+
   it("reports done once the script is exhausted", () => {
     const h = setup({ script: [utterance("u1", 2)], silenceMs: 400, gapMs: 200 });
     passGreeting(h);
