@@ -201,15 +201,21 @@ shape, so the reducer, step machine, nudge strings and logs are untouched.
 is now visible at runtime rather than inferred — `llm_first_chunk` is stamped on
 the first *text* delta, which hid the whole first round inside `llm_ttfb_ms`.
 
-## Eval results, two runs per mode
+## Eval results
+
+Two runs on the tool path, three on the marker path (all post-leak-fix):
 
 | | hard asserts | judge questions | marker leaks |
 |---|---|---|---|
-| tool path (flag off) | 47/50 | 91/98 | 0 |
-| marker (flag on) | **50/50** | **91/98** | 0 |
+| tool path (flag off) | 47/50 — 94.0% | 91/98 — 92.9% | 0 |
+| marker (flag on) | **74/75 — 98.7%** | 137/147 — 93.2% | 0 |
 
-Harness turn latency p50: **1,654ms → 925-981ms**. That is the text harness, not
-a phone call — the live probe number is still outstanding.
+Judge quality is indistinguishable; hard assertions are equal or better. Harness
+turn latency p50: **1,654ms → ~950ms**. That is the text harness, not a phone
+call — the live probe number is still outstanding.
+
+Read these as aggregates, not as any single pair. Individual pairs disagree; see
+the next section for why.
 
 ## The suite is noisier than the effect it was asked to measure
 
@@ -241,6 +247,32 @@ line at the top of every **round**, and the stripper resolved once per **turn**,
 so the copy at the head of round two streamed straight through. Fixed by
 re-arming the stripper between rounds; the unit tests that now cover it were
 written from the four transcripts.
+
+## A worse bug the review found: silence, not a leak
+
+A review pass over the branch found the failure this design can actually cause,
+and it was the opposite of the one being defended against.
+
+`couldBeMarker` only validated the `<<intent:` prefix, never the value. A value
+the strict pattern rejects — **one space, one hyphen** — left the buffer open to
+the end of the reply, and the unterminated-marker sweep (`[^\n]*`, and a voice
+reply rarely contains a newline) then deleted the entire thing. The caller heard
+the generic "say that again" line instead of a perfectly good answer. At
+temperature 0.4, one wrong character in an identifier is not a rare event.
+
+The sweep is now two bounded alternatives, and the rule is explicit: **a
+malformed marker costs the intent, never the reply.** Two smaller defects from
+the same review: a delta containing only a newline resolved the round before the
+marker began and discarded the following declaration, and a lagging separator
+could leave a stray backtick or blank line in `reply.text` — which never passes
+through `toSpeakable`, so it reached history and the stored transcript.
+
+Security review was otherwise clean: the parser never sees caller text, `intent`
+gates no tool or authorization anywhere, the `allowedTasks` check resists case
+and unicode bypass, and none of the three regexes backtrack. One low finding
+fixed — the rejected-value log line could echo a digit string, so it now redacts
+anything outside `[a-z_]+` (every real task name qualifies, so no diagnostic
+value is lost).
 
 `npm run eval:compare <baseline.json> <candidate.json>` diffs two runs per
 scenario, names the judge questions that moved, and sweeps every assistant reply
