@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toSpeakable, expandAbbreviations } from "../lib/voice/speakableText.js";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { buildSayContent } from "../lib/twiml.js";
 
 // Every input string used anywhere in the describe blocks below (all rules,
@@ -352,6 +353,27 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     // The strip must be narrow enough that ordinary speech survives it.
     it("does NOT touch a comparison that merely looks similar", () => {
       expect(toSpeakable("Is 2 << 3? Yes.")).toBe("Is 2 << 3? Yes.");
+    });
+
+    // Reaching this layer at all means the primary strip in services/gemini.js
+    // missed one. Repairing it silently would make the only caller-audible
+    // failure of the marker design invisible in production — and the live probe
+    // has no ears, so a counter is the only way a probe run can answer "did
+    // anything leak" with evidence rather than assumption.
+    it("counts a leak that reaches this layer, so it is visible in production", () => {
+      clearStats();
+
+      toSpeakable("<<intent:book_appointment>>\nSure, I can help.");
+
+      expect(getLatencyStats().turnTaking.intent_marker_leaks).toBe(1);
+    });
+
+    it("counts nothing for ordinary text", () => {
+      clearStats();
+
+      toSpeakable("We're open until five. Is 2 << 3? Yes.");
+
+      expect(getLatencyStats().turnTaking.intent_marker_leaks).toBe(0);
     });
   });
 
