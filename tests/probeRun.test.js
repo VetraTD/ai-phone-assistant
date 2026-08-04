@@ -59,10 +59,18 @@ function setup({ script, ...opts } = {}) {
   };
 }
 
-/** Play the assistant's greeting through, so the run reaches the script. */
+/**
+ * Play the assistant's greeting through, so the run reaches the script.
+ * The silence must exceed silenceMs + gapMs (2000 + 400) or the run never
+ * decides the greeting is over.
+ */
 function passGreeting(h) {
-  h.inbound(20, voicedFrame()); // 400ms of assistant audio
-  h.inbound(60, silentFrame()); // 1200ms of silence: ends the greeting, clears the gap
+  h.inbound(20, voicedFrame()); // 400ms of assistant audio, ending at t=400
+  // Silence must clear silenceMs (2000) then gapMs (400): the countdown starts
+  // at t=2400 and the first utterance begins exactly at t=2800, on the tick
+  // that leaves GREETING — which sends no frame itself. 120 ticks lands there
+  // precisely, so no test starts with frames already spent.
+  h.inbound(120, silentFrame());
 }
 
 describe("probeRun — scripted caller side of a measured test call", () => {
@@ -180,6 +188,24 @@ describe("probeRun — scripted caller side of a measured test call", () => {
 
     const bargeTurn = h.run.getTurns().find((t) => t.label === "u2");
     expect(bargeTurn?.bargeIn).toBe(true);
+  });
+
+  it("waits through a pause inside the assistant's reply instead of interrupting", () => {
+    // Real replies contain gaps longer than the old 800ms threshold — between
+    // streamed sentences, or while TTS catches up. Treating such a gap as
+    // "finished" made the probe barge in, which desynced every following turn
+    // and produced impossible measurements (8ms replies, negative ones) plus
+    // phantom timeouts that looked like the assistant never answering.
+    const h = setup({ script: [utterance("u1", 2), utterance("u2", 2)] });
+    passGreeting(h);
+
+    h.ticks(2); // our utterance goes out
+    h.inbound(5, voicedFrame()); // assistant starts replying
+    const sentAfterOurTurn = h.sent.length;
+    h.inbound(70, silentFrame()); // 1400ms gap mid-reply
+    h.inbound(5, voicedFrame()); // ...and it continues
+
+    expect(h.sent.length).toBe(sentAfterOurTurn);
   });
 
   it("reports done once the script is exhausted", () => {
