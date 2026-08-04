@@ -550,3 +550,65 @@ into the cache and the dynamic tail stays on the request.
 
 Still a cost lever only. TTFT is flat in prompt size; none of this makes a call
 faster.
+
+---
+
+# Explicit caching implemented, 2026-08-04 — measured on the real turn path
+
+`scripts/verify-explicit-cache.js` answered the three unknowns that blocked
+writing this correctly. All three came back different from the guess:
+
+| question | answer |
+|---|---|
+| minimum cacheable size | **1,024 tokens**, hard-rejected below (`min_total_token_count=1024`) |
+| does function calling survive with `tools` only in the cache? | **yes** — the hard gate passed |
+| error shape for a dead cache | **403 `PERMISSION_DENIED`**, "CachedContent not found" — *not* 404 |
+
+Then, on `getReplyStreaming` itself with `GEMINI_EXPLICIT_CACHE=true`:
+
+| turn | prompt tokens | cached | |
+|---|---|---|---|
+| 1 | 4,005 | 0 | cache created in background, turn runs uncached at full speed |
+| 2 | 4,038 | 3,786 | **94%** |
+| 3 | 4,036 | 3,786 | **94%** |
+| 4 | 4,036 | 3,786 | **94%** |
+
+One cache created, three reuses. Cache reads bill at 10% of input, so a ~10-turn
+call goes from ~40,000 billed input tokens to ~9,700 effective — **~76% off the
+dominant line**, matching the 75-80% predicted above.
+
+## The trap: the SDK mutates your tool declarations
+
+First run created **two** caches — `d83268…` on turn 1, `f0475f…` on turn 2 —
+and only reused the second. The prefix was byte-stable and `extras` was not
+mutated, so neither was the cause.
+
+`@google/genai` normalizes JSON-Schema `type` values **in place** when a request
+is sent (`"object"` → `"OBJECT"`), and the declaration objects are module-level
+and shared by reference. So the same business hashes one way before its first
+request of the process and another way after — one wasted cache per process,
+whose storage is paid for and never read.
+
+`computeCacheKey` now lower-cases every `type` before hashing
+(`canonicalizeTools`). Regression-tested in `tests/geminiCache.test.js`.
+
+Worth remembering beyond caching: **anything hashed or compared after being
+handed to the SDK may not be what you passed it.**
+
+## Design notes
+
+`resolveCachedContent` is **synchronous and never blocks a turn** — creation is
+a 200-500ms round trip, and awaiting it would put that on TTFT on a path where
+140ms was fought for. It returns a handle or null and schedules the create in
+the background, so turn 1 pays nothing and caching can never make a call slower
+or fail.
+
+`CALLER CONTEXT` moved from `buildStaticSystemPrefix` to `buildDynamicTail`. It
+rendered per-caller data, which would have meant one cache per caller — and it
+would have parked caller names, summaries and appointment times in Google's
+cache store for the TTL. Two invariants in `tests/promptSplit.test.js` now
+enforce that the prefix is byte-identical across callers and contains no caller
+data.
+
+**Still a cost lever only.** `llm_ttfb_ms` must stay flat; if it moves, the
+non-blocking design has been violated.

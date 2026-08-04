@@ -236,3 +236,82 @@ describe("NON-NEGOTIABLE availability rule names the tool that is actually regis
     expect(prefix).not.toContain("before checking it with get_available_slots");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cache safety + PHI containment.
+//
+// The static prefix is the unit of the explicit Gemini context cache
+// (services/geminiCache.js). Two properties have to hold, and neither is
+// obvious from reading the prompt builder:
+//
+//   1. It must be byte-identical for every CALLER of a business. If it varies
+//      per caller, the cache key varies per caller, and there is effectively no
+//      cache at all — every call pays full input price.
+//   2. It must contain no caller data. An explicit cache is stored on Google's
+//      side for its TTL; caller names, call summaries and appointment times
+//      must not be what gets parked there.
+//
+// CALLER CONTEXT used to live in the prefix and violated both. These tests are
+// what stop a future prompt change from quietly putting it (or anything like
+// it) back.
+// ---------------------------------------------------------------------------
+describe("gemini.js — static prefix is cache-safe and caller-free", () => {
+  const callerA = {
+    callCount: 4,
+    lastCallSummary: "asked about a crown replacement",
+    upcomingAppointments: [{ scheduled_at: "2026-08-01T10:00:00", client_name: "Jane Okafor" }],
+  };
+  const callerB = {
+    callCount: 1,
+    lastCallSummary: "rescheduled a cleaning",
+    upcomingAppointments: [{ scheduled_at: "2026-09-14T15:30:00", client_name: "Tomás Ruiz" }],
+  };
+
+  it("is byte-identical across different callers of the same business", () => {
+    const withA = buildStaticSystemPrefix(config, { ...extras, callerContext: callerA });
+    const withB = buildStaticSystemPrefix(config, { ...extras, callerContext: callerB });
+    const withNone = buildStaticSystemPrefix(config, { ...extras, callerContext: null });
+
+    expect(withA).toBe(withB);
+    expect(withA).toBe(withNone);
+  });
+
+  it("contains no caller name, summary, or rendered appointment date", () => {
+    const prefix = buildStaticSystemPrefix(config, { ...extras, callerContext: callerA });
+
+    expect(prefix).not.toContain("=== CALLER CONTEXT ===");
+    expect(prefix).not.toContain("Jane Okafor");
+    expect(prefix).not.toContain("crown replacement");
+    expect(prefix).not.toContain("returning caller");
+    expect(prefix).not.toMatch(/They have called \d+ time/);
+  });
+
+  it("still delivers the caller context — in the dynamic tail, which is never cached", () => {
+    const tail = buildDynamicTail("gather_details", "book_appointment", config, {
+      ...extras,
+      callerContext: callerA,
+    });
+
+    expect(tail).toContain("=== CALLER CONTEXT ===");
+    expect(tail).toContain("They have called 4 times before");
+    expect(tail).toContain("crown replacement");
+    expect(tail).toContain("Jane Okafor");
+  });
+
+  it("emits nothing at all when the caller has no history (the empty-case contract)", () => {
+    const bare = buildDynamicTail("identify_intent", null, config, { ...extras, callerContext: null });
+    expect(bare).not.toContain("=== CALLER CONTEXT ===");
+
+    const zero = buildDynamicTail("identify_intent", null, config, {
+      ...extras,
+      callerContext: { callCount: 0, upcomingAppointments: [] },
+    });
+    expect(zero).not.toContain("=== CALLER CONTEXT ===");
+  });
+
+  it("keeps buildSystemInstruction's total content unchanged by the move", () => {
+    const full = buildSystemInstruction("confirm", null, config, { ...extras, callerContext: callerA });
+    expect(full).toContain("=== CALLER CONTEXT ===");
+    expect(full).toContain("Jane Okafor");
+  });
+});

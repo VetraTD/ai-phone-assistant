@@ -7,6 +7,13 @@ import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from 
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
+import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
+import {
+  resolveCachedContent,
+  invalidateCache,
+  isCacheUnusableError,
+  explicitCacheEnabled,
+} from "./geminiCache.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
 import {
   collectStaticFragments,
@@ -415,9 +422,58 @@ export function isBusinessOpen(config) {
  * @param {object} config - Per-business config from loadConfig
  * @param {object} [extras] - { knowledge: Array, callerContext: object, transferAllowed: boolean }
  */
+/**
+ * The CALLER CONTEXT block — a returning caller's history.
+ *
+ * Lives in the DYNAMIC tail, never the static prefix: the prefix is the unit of
+ * the explicit context cache, so it has to be byte-identical across callers,
+ * and a cache is stored on Google's side for its TTL — caller names, summaries
+ * and appointment times do not belong there.
+ *
+ * Returns "" (not a heading with nothing under it) when there is no history,
+ * which is the empty-case contract the tail snapshots rely on.
+ *
+ * @param {object|null} callerContext
+ * @param {string} timezone
+ * @returns {string}
+ */
+function buildCallerContextSection(callerContext, timezone) {
+  if (!callerContext) return "";
+  if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
+
+  let ctx = `=== CALLER CONTEXT ===\n`;
+  ctx += `This is a returning caller. `;
+  if (callerContext.callCount > 0) {
+    ctx += `They have called ${callerContext.callCount} time${callerContext.callCount === 1 ? "" : "s"} before. `;
+    if (callerContext.lastCallSummary) {
+      ctx += `Last call: "${callerContext.lastCallSummary}" `;
+    }
+  }
+  if (callerContext.upcomingAppointments?.length > 0) {
+    const appts = callerContext.upcomingAppointments.map((a) => {
+      const d = a.scheduled_at
+        ? new Date(a.scheduled_at).toLocaleString("en-US", {
+            timeZone: timezone,
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })
+        : "unknown date";
+      return a.client_name ? `${d} (${a.client_name})` : d;
+    });
+    ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
+  }
+  ctx += `\nUse this context to personalize the conversation — e.g. reference their upcoming appointment if relevant. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps.`;
+  return ctx;
+}
+
 export function buildStaticSystemPrefix(config, extras = {}) {
   const markerMode = intentMarkerEnabled(extras);
-  const tz = config.timezone;
+  // No `tz` here on purpose: its only consumer was the CALLER CONTEXT block,
+  // which moved to buildDynamicTail. Anything time- or caller-dependent in this
+  // function would break the byte-stability the explicit cache depends on.
 
   const sections = [];
 
@@ -445,7 +501,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   identity += `- Never use lists, bullets, or headings — speak naturally.\n`;
   identity += `- Say numbers, times, and prices the way a person would say them aloud.\n`;
   identity += `- One question at a time. Never stack questions.\n`;
-  identity += `- Acknowledge briefly ("Of course.", "Sure thing.") before answering — but don't overdo it.`;
+  identity += `- Acknowledge briefly ("Of course.", "Sure thing.") before answering — but don't overdo it.\n`;
+  // The text-to-speech engine reads exclamation marks and capitals as emphasis,
+  // and each turn's spoken text seeds the next turn's prosody — so an emphatic
+  // reply makes the NEXT reply emphatic too, and the voice escalates over a long
+  // call. lib/voice/speakableText.js damps this on the way out regardless; this
+  // rule stops it at the source, where the wording can stay natural.
+  identity += `- Never use exclamation marks, and never capitalise a word for emphasis. Warmth comes from your words, not punctuation — you are speaking, not writing.`;
 
   const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
   if (langs.length > 1) {
@@ -513,36 +575,10 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     sections.push(kb.trimEnd());
   }
 
-  // === CALLER CONTEXT ===
-  const callerContext = extras.callerContext || null;
-  if (callerContext && (callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) {
-    let ctx = `=== CALLER CONTEXT ===\n`;
-    ctx += `This is a returning caller. `;
-    if (callerContext.callCount > 0) {
-      ctx += `They have called ${callerContext.callCount} time${callerContext.callCount === 1 ? "" : "s"} before. `;
-      if (callerContext.lastCallSummary) {
-        ctx += `Last call: "${callerContext.lastCallSummary}" `;
-      }
-    }
-    if (callerContext.upcomingAppointments?.length > 0) {
-      const appts = callerContext.upcomingAppointments.map((a) => {
-        const d = a.scheduled_at
-          ? new Date(a.scheduled_at).toLocaleString("en-US", {
-              timeZone: tz,
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })
-          : "unknown date";
-        return a.client_name ? `${d} (${a.client_name})` : d;
-      });
-      ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
-    }
-    ctx += `\nUse this context to personalize the conversation — e.g. reference their upcoming appointment if relevant. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps.`;
-    sections.push(ctx);
-  }
+  // CALLER CONTEXT used to sit here. It moved to buildDynamicTail, because it
+  // renders per-CALLER data (call count, last-call summary, upcoming
+  // appointments with dates) and this prefix must be byte-identical for every
+  // caller of a business — see buildCallerContextSection.
 
   // === CAPABILITIES ===
   //
@@ -818,6 +854,23 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   }
   sections.push(taskState);
 
+  // === CALLER CONTEXT ===
+  // Relocated here from buildStaticSystemPrefix. Two reasons, both structural:
+  //
+  //  - The prefix is the unit of the explicit context cache, so it must be
+  //    byte-identical for EVERY caller of a business. Caller history made it
+  //    vary per caller, which would have meant one cache per caller — i.e. no
+  //    cache at all.
+  //  - An explicit cache stores its contents on Google's side for its TTL.
+  //    Caller names, call history and appointment times must not be what gets
+  //    parked there. The dynamic tail is sent per request and never cached.
+  //
+  // It sits beside KNOWN CALLER FACTS, which is the other caller-scoped block,
+  // and keeps the same empty-case contract: emit nothing at all when there is
+  // no history, which is what leaves 4 of 5 fixture snapshots untouched.
+  const callerContextSection = buildCallerContextSection(extras.callerContext, config.timezone);
+  if (callerContextSection) sections.push(callerContextSection);
+
   // === KNOWN CALLER FACTS ===
   // Facts the call has already established (a confirmed name, a booking made
   // this call) — surfaced every turn so the model stops re-asking and stops
@@ -851,7 +904,44 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
 export function buildSystemInstruction(step, intent, config, extras = {}) {
   const staticPrefix = buildStaticSystemPrefix(config, extras);
   const dynamicTail = buildDynamicTail(step, intent, config, extras);
-  return `${staticPrefix}\n\n${dynamicTail}`;
+  return joinPromptHalves(staticPrefix, dynamicTail);
+}
+
+/**
+ * The one place the two prompt halves are joined, so getReplyStreaming can build
+ * them separately (the prefix is the cache unit) without the joined form drifting.
+ * @param {string} prefix
+ * @param {string} tail
+ * @returns {string}
+ */
+export function joinPromptHalves(prefix, tail) {
+  return `${prefix}\n\n${tail}`;
+}
+
+/**
+ * The user message for a CACHED request.
+ *
+ * cachedContent is mutually exclusive with systemInstruction, so under a cache
+ * the dynamic tail (date/time, step guidance, after-hours policy, caller
+ * context) cannot ride as a system instruction and has to travel in `contents`
+ * instead. It is framed with the bracketed system-note convention the static
+ * prefix already teaches the model in its TOOL CONTRACT section — trusted state,
+ * never caller speech.
+ *
+ * NOTE this is a genuine prompt-behavior change: the tail is demoted from system
+ * role to user role on every cached turn. Unit tests cannot detect that. It is
+ * why GEMINI_EXPLICIT_CACHE ships off and has to clear the eval suite first.
+ *
+ * @param {string} dynamicTail
+ * @param {string} userMessage
+ * @returns {string}
+ */
+export function composeCachedMessage(dynamicTail, userMessage) {
+  return (
+    `${SYSTEM_NOTE_PREFIX}current call context, not the caller speaking${SYSTEM_NOTE_SUFFIX}\n` +
+    `${dynamicTail}\n\n` +
+    `${SYSTEM_NOTE_PREFIX}the caller says${SYSTEM_NOTE_SUFFIX}\n${userMessage}`
+  );
 }
 
 /**
@@ -1134,19 +1224,49 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // per-request `config` REPLACES (does not merge with) the chat-level
   // config, so a bare `{ abortSignal }` per call would silently drop tools/
   // systemInstruction/thinkingConfig/maxOutputTokens on that request.
-  const chatConfig = {
+  const staticPrefix = buildStaticSystemPrefix(cfg, extras);
+  const dynamicTail = buildDynamicTail(step, intent, cfg, extras);
+
+  // Synchronous and non-blocking by design — returns a live handle or null, and
+  // schedules a background create on a miss. null means this turn runs exactly
+  // as it did before caching existed.
+  let usingCache = resolveCachedContent({
+    client: gemini,
+    model,
+    markerMode,
+    staticPrefix,
+    toolsConfig,
+    businessId: extras?.businessId ?? null,
+    enabled: explicitCacheEnabled(extras),
+  });
+
+  const baseConfig = {
     temperature: generationConfig.temperature,
-    systemInstruction: buildSystemInstruction(step, intent, cfg, extras),
-    tools: toolsConfig,
     thinkingConfig: buildThinkingConfig(model, generationConfig.thinkingBudget),
     maxOutputTokens: generationConfig.maxOutputTokens,
   };
-  const chat = gemini.chats.create({
+  // cachedContent is mutually exclusive with BOTH systemInstruction and tools —
+  // under a cache they live in the cache, and the dynamic tail moves into the
+  // message (see composeCachedMessage).
+  const buildChatConfig = (cacheName) =>
+    cacheName
+      ? { ...baseConfig, cachedContent: cacheName }
+      : { ...baseConfig, systemInstruction: joinPromptHalves(staticPrefix, dynamicTail), tools: toolsConfig };
+
+  // Kept in locals so per-request calls below can replicate them: the SDK's
+  // per-request `config` REPLACES (does not merge with) the chat-level config,
+  // so a bare `{ abortSignal }` per call would silently drop tools/
+  // systemInstruction/thinkingConfig/maxOutputTokens on that request. This is
+  // MORE load-bearing under a cache, not less: dropping cachedContent from a
+  // per-request config would silently re-bill the entire prefix at full price.
+  let chatConfig = buildChatConfig(usingCache?.name ?? null);
+  let chat = gemini.chats.create({
     model,
     config: chatConfig,
     history: trimmedHistory,
   });
-  const perRequestConfig = { ...chatConfig, abortSignal: signal };
+  let perRequestConfig = { ...chatConfig, abortSignal: signal };
+  const firstMessage = () => (usingCache ? composeCachedMessage(dynamicTail, userMessage) : userMessage);
 
   let intentArgs = null;
   let endCallArgs = null;
@@ -1209,7 +1329,23 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let declaredIntent = intent;
 
   // First request — stream it
-  let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
+  let streamResponse;
+  try {
+    streamResponse = await chat.sendMessageStream({ message: firstMessage(), config: perRequestConfig });
+  } catch (err) {
+    // A cache can expire or be deleted between the resolve above and this send.
+    // Safe to retry uncached here and ONLY here: nothing has been yielded to the
+    // caller and no tool has run, so the turn simply starts over. Any error that
+    // is not specifically about the cache rethrows untouched.
+    if (!usingCache || !isCacheUnusableError(err)) throw err;
+    log.error("gemini_cache_stale_retry", { key: usingCache.key.slice(0, 12), step, reason: err?.message, severity: "warn" });
+    invalidateCache(usingCache.key, "stale_on_use");
+    usingCache = null;
+    chatConfig = buildChatConfig(null);
+    perRequestConfig = { ...chatConfig, abortSignal: signal };
+    chat = gemini.chats.create({ model, config: chatConfig, history: trimmedHistory });
+    streamResponse = await chat.sendMessageStream({ message: firstMessage(), config: perRequestConfig });
+  }
   let lastUsageMetadata = null;
   // Truncation telemetry (Task 11 / plan 2.5): the finishReason of the FINAL
   // text round is what tells us whether maxOutputTokens cut the reply off
@@ -1367,7 +1503,18 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     }
 
     // Send function results back to chat and stream the follow-up
-    streamResponse = await chat.sendMessageStream({ message: results, config: perRequestConfig });
+    try {
+      streamResponse = await chat.sendMessageStream({ message: results, config: perRequestConfig });
+    } catch (err) {
+      // Deliberately asymmetric with round 0: invalidate so the NEXT turn is
+      // clean, but do not retry. Tools have already run and deltas may already
+      // have been streamed, so rebuilding the chat here would mean replaying
+      // function responses into a fresh session — far more machinery than a
+      // cache expiring in the seconds since it was validated justifies.
+      // llmTurn.js's existing error path already covers the caller.
+      if (usingCache && isCacheUnusableError(err)) invalidateCache(usingCache.key, "stale_mid_turn");
+      throw err;
+    }
   }
 
   // A buffer still held when the stream ended was never a marker (or was a
