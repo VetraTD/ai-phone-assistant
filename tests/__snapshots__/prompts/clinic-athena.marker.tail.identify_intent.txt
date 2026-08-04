@@ -1,0 +1,9 @@
+=== DATE AND TIME ===
+Current: Monday, July 20, 2026, 10:00 AM (America/Chicago).
+When scheduling, always calculate from this real date. Never invent dates.
+Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Status: OPEN.
+
+=== CURRENT TASK AND STATE ===
+Step: identify_intent
+Your task: Figure out why the caller is calling. As soon as you understand, name it on the intent line, then start helping in the same turn. Keep this response to 1–2 sentences. Acknowledge the caller's request and ask the first relevant question.
+The caller was already greeted with: "Thanks for calling Riverside Family Clinic." — do not greet them again.

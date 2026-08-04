@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toSpeakable, expandAbbreviations } from "../lib/voice/speakableText.js";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { buildSayContent } from "../lib/twiml.js";
 
 // Every input string used anywhere in the describe blocks below (all rules,
@@ -314,6 +315,65 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     });
     it("does NOT touch other apostrophes in the sentence — scoped narrowly to o'clock", () => {
       expect(toSpeakable("It’s three o’clock now.")).toBe("It’s three o'clock now.");
+    });
+  });
+
+  // The primary strip happens in services/gemini.js, on the stream, so a
+  // well-formed marker never reaches here. This layer exists for the ones that
+  // are not well-formed — the failure mode is a caller hearing "double angle
+  // bracket intent book appointment", which is the one outcome worth two
+  // independent defences.
+  describe("11. intent-marker leak corpus — nothing marker-shaped is ever spoken", () => {
+    const LEAK_CORPUS = [
+      "<<intent:book_appointment>> Sure, I can help.",
+      "<<intent:book_appointment>>\nSure, I can help.",
+      "**<<intent:take_message>>** Sure, I can help.",
+      "`<<intent:callback_request>>` Sure, I can help.",
+      "<< intent : book_appointment >> Sure, I can help.",
+      "<<INTENT:BOOK_APPOINTMENT>> Sure, I can help.",
+      "<<intent:>> Sure, I can help.",
+      "<<intent:book_appointment Sure, I can help.",
+      "<<intent:not_a_real_task>> Sure, I can help.",
+      "Sure, I can help. <<intent:book_appointment>>",
+      "Sure. <<intent:take_message>> What's the message?",
+      "<<intent:book_appointment>><<intent:take_message>> Sure.",
+    ];
+
+    it.each(LEAK_CORPUS)("speaks no marker for: %s", (input) => {
+      const out = toSpeakable(input);
+      expect(out).not.toContain("<");
+      expect(out).not.toContain(">");
+      expect(out.toLowerCase()).not.toContain("intent");
+    });
+
+    it("keeps the actual reply text intact around a stripped marker", () => {
+      expect(toSpeakable("<<intent:book_appointment>>\nSure, I can help.")).toBe("Sure, I can help.");
+    });
+
+    // The strip must be narrow enough that ordinary speech survives it.
+    it("does NOT touch a comparison that merely looks similar", () => {
+      expect(toSpeakable("Is 2 << 3? Yes.")).toBe("Is 2 << 3? Yes.");
+    });
+
+    // Reaching this layer at all means the primary strip in services/gemini.js
+    // missed one. Repairing it silently would make the only caller-audible
+    // failure of the marker design invisible in production — and the live probe
+    // has no ears, so a counter is the only way a probe run can answer "did
+    // anything leak" with evidence rather than assumption.
+    it("counts a leak that reaches this layer, so it is visible in production", () => {
+      clearStats();
+
+      toSpeakable("<<intent:book_appointment>>\nSure, I can help.");
+
+      expect(getLatencyStats().turnTaking.intent_marker_leaks).toBe(1);
+    });
+
+    it("counts nothing for ordinary text", () => {
+      clearStats();
+
+      toSpeakable("We're open until five. Is 2 << 3? Yes.");
+
+      expect(getLatencyStats().turnTaking.intent_marker_leaks).toBe(0);
     });
   });
 

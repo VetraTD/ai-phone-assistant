@@ -24,7 +24,10 @@
 const ok = (pass, name, detail) => ({ pass: !!pass, name, detail: detail ?? "" });
 
 /**
- * Flat, ordered list of every executed tool call ({ name, args }). Prefers the
+ * Flat, ordered list of every tool call the model made ({ name, args }). Under
+ * VOICE_INTENT_MARKER this includes a synthetic set_call_intent entry parsed out
+ * of the reply text, which is why scenario 25 also asserts on finalState.intent
+ * — see finalIntentIsOneOf. Prefers the
  * aggregate `ctx.toolCalls` the runner builds; falls back to flattening the
  * per-turn view so synthetic test ctxs (and partial ctxs) still work.
  */
@@ -208,6 +211,28 @@ export function toolNotCalledBeforeTurn(ctx, name, turnIndex) {
     }
   }
   return ok(true, `toolNotCalledBeforeTurn(${name}, ${turnIndex})`, `not called before turn ${turnIndex}`);
+}
+
+/**
+ * The call ended carrying one of `intents` as its intent.
+ *
+ * Every other assert here reads the tool trace. This one reads the state the
+ * reducer actually produced (lib/voice/replyState.js), which is the thing the
+ * next turn's prompt is built from — and, under VOICE_INTENT_MARKER, the one
+ * signal that does not pass through the marker parser on its way here. A guard
+ * that only inspected the tool trace would be partly testing the parser rather
+ * than the behaviour.
+ *
+ * @param {object} ctx
+ * @param {string[]} intents - acceptable final intents
+ */
+export function finalIntentIsOneOf(ctx, intents) {
+  const actual = ctx?.finalState?.intent ?? null;
+  return ok(
+    intents.includes(actual),
+    `finalIntentIsOneOf(${intents.join("|")})`,
+    `intent is ${actual === null ? "null" : actual}`
+  );
 }
 
 function truncate(s, n = 80) {

@@ -25,6 +25,7 @@ import {
   replyNeverMatches,
   turnsAtMost,
   toolNotCalledBeforeTurn,
+  finalIntentIsOneOf,
 } from "../eval/asserts.js";
 
 /** A ctx as the runner assembles it: flat tool-call/result traces + per-turn view. */
@@ -226,6 +227,39 @@ describe("toolNotCalledBeforeTurn", () => {
       const result = toolNotCalledBeforeTurn(truncatedCtx, "end_call", fixedThreshold);
       expect(result.pass).toBe(false);
       expect(result.detail).toMatch(/called in turn 0/);
+    });
+  });
+
+  // Reads the reducer's output rather than the tool trace. Scenario 25 needs
+  // both: under VOICE_INTENT_MARKER the tool-trace assertion is satisfied by an
+  // event synthesized from a parsed marker, so a guard resting only on it would
+  // partly be testing the parser.
+  describe("finalIntentIsOneOf", () => {
+    it("passes when the call ended on one of the accepted intents", () => {
+      const ctx = { finalState: { step: "gather_details", intent: "take_message" } };
+      expect(finalIntentIsOneOf(ctx, ["take_message", "callback_request"]).pass).toBe(true);
+    });
+
+    it("fails when the call ended on a different intent, and says which", () => {
+      const ctx = { finalState: { step: "gather_details", intent: "book_appointment" } };
+      const result = finalIntentIsOneOf(ctx, ["take_message", "callback_request"]);
+
+      expect(result.pass).toBe(false);
+      expect(result.detail).toMatch(/book_appointment/);
+    });
+
+    // The failure that matters most: the marker path silently sets nothing.
+    // Reported as "null", never confused with a real intent named null.
+    it("fails when no intent was ever set", () => {
+      const result = finalIntentIsOneOf({ finalState: { intent: null } }, ["take_message"]);
+
+      expect(result.pass).toBe(false);
+      expect(result.detail).toBe("intent is null");
+    });
+
+    it("fails rather than throwing when the run produced no final state", () => {
+      expect(finalIntentIsOneOf({}, ["take_message"]).pass).toBe(false);
+      expect(finalIntentIsOneOf(undefined, ["take_message"]).pass).toBe(false);
     });
   });
 });

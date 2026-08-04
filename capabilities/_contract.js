@@ -17,7 +17,8 @@
  *   ENGINE (hardcoded, never per-tenant)
  *     turn-taking, VAD, barge-in, TTS/STT, circuit breakers, the step machine,
  *     the function-call loop, fallback, safety guardrails, prompt STRUCTURE,
- *     and the two always-present tools (set_call_intent, end_call).
+ *     and the two engine tools (set_call_intent, end_call) — end_call always,
+ *     set_call_intent unless VOICE_INTENT_MARKER moves it into the reply text.
  *
  *   CAPABILITY PACK (this contract)
  *     which tools exist for a capability, what the prompt says about it, what

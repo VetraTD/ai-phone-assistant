@@ -47,22 +47,37 @@ export default {
         (args) => args.intent === "take_message" || args.intent === "callback_request",
         "intent switched to take_message/callback_request"
       ),
+    // Same requirement, read off the state the reducer produced rather than
+    // the tool trace.
+    //
+    // Under VOICE_INTENT_MARKER the assertion above is satisfied by an event
+    // services/gemini.js synthesizes from a marker it parsed out of the reply.
+    // That event is honest — the model did declare the intent — but a guard
+    // built only on it would be partly testing our own parser. finalState comes
+    // through lib/voice/replyState.js and is what the next turn's prompt is
+    // actually built from, so it fails independently if the marker path sets
+    // the wrong thing or nothing at all.
+    (ctx) => A.finalIntentIsOneOf(ctx, ["take_message", "callback_request"]),
     // Abandoning the booking means not booking it.
     (ctx) => A.toolNotCalled(ctx, "book_appointment"),
-    // NOTE, deliberately not asserted: this call makes set_call_intent about
-    // 7 times across 8 turns, mostly re-declaring an intent that has not
-    // changed. Each one is a model round-trip the caller waits through before
-    // hearing a word, and it is roughly a third of voice-to-voice latency.
+    // NOTE, deliberately not asserted: with the tool path (the default), this
+    // call makes set_call_intent about 7 times across 8 turns, mostly
+    // re-declaring an intent that has not changed. Each one is a model
+    // round-trip the caller waits through before hearing a word, and it is
+    // roughly a third of voice-to-voice latency.
     //
     // A prompt rewrite on 2026-08-04 cut it to 4-5 and saved ~185ms, but the
     // same run regressed three scenarios on the advisory judge — including
     // vague-caller, whose guidance shares the sentence that had to be edited.
     // It was reverted: a coin-flip on conversation quality is not worth 185ms.
     //
-    // No cap is asserted here because the current count is not a target worth
-    // freezing. Removing the redundancy properly means not routing intent
-    // through a tool call that blocks speech — a design change, not a wording
-    // one. See docs/latency-and-tts-tests.md.
+    // No cap is asserted here because the count is not a target worth freezing.
+    // The design change that removes the redundancy properly — declaring the
+    // intent in-band instead of through a tool call that blocks speech — landed
+    // behind VOICE_INTENT_MARKER; see
+    // docs/superpowers/specs/2026-08-03-intent-marker-design.md. This scenario
+    // must pass with the flag both off and on, which is what makes it a guard
+    // on the behaviour rather than on the mechanism.
   ],
   judge: [
     "Did the receptionist follow the caller's change from booking an appointment to leaving a message, without trying to continue the booking?",

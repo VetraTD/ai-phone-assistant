@@ -12,6 +12,7 @@
     "test:athena-token": "node scripts/test-athena-token.js",
     "chat": "node scripts/chat.js",
     "eval": "node eval/run.js",
+    "eval:compare": "node scripts/eval-compare.js",
     "probe:synth": "node scripts/latency-probe.js --synth",
     "probe": "node scripts/latency-probe.js",
     "probe:report": "node scripts/latency-probe.js --report-only",

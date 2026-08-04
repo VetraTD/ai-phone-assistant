@@ -11,7 +11,10 @@
  * tests/promptSnapshot.test.js. It reproduces the sequence the old hardcoded
  * builders in services/gemini.js produced:
  *
- *   set_call_intent, end_call        <- engine, not a pack
+ *   set_call_intent, end_call        <- engine, not a pack. Under
+ *                                       VOICE_INTENT_MARKER the list starts at
+ *                                       end_call instead; that variant is
+ *                                       snapshotted too (*.marker.tools.json).
  *   book_appointment                 <- appointments
  *   record_customer_request          <- messages
  *   request_transfer                 <- transfer

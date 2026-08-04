@@ -90,6 +90,70 @@ describe("golden prompt snapshots — must not move during the capability-packs 
   }
 });
 
+// ---------------------------------------------------------------------------
+// The same matrix under VOICE_INTENT_MARKER. Both shapes are frozen because
+// both are live: the flag ships off, and the tool path stays reachable until
+// the marker holds in production.
+//
+// A previous attempt to reduce set_call_intent traffic by rewording these same
+// strings regressed three scenarios on the advisory judge and was reverted.
+// These goldens are the review artifact that makes the trade explicit — read
+// the diff, do not just accept it.
+// ---------------------------------------------------------------------------
+describe("golden prompt snapshots — marker mode (VOICE_INTENT_MARKER)", () => {
+  for (const [name, { config, extras }] of Object.entries(FIXTURES)) {
+    const markerExtras = { ...extras, intentMarker: true };
+
+    describe(name, () => {
+      it("static system prefix is byte-identical", async () => {
+        const prefix = buildStaticSystemPrefix(config, markerExtras);
+        await expect(prefix).toMatchFileSnapshot(`${SNAP_DIR}/${name}.marker.static.txt`);
+      });
+
+      for (const [step, intent] of STEP_INTENTS) {
+        const label = intent ? `${step}--${intent}` : step;
+
+        it(`dynamic tail is byte-identical (${label})`, async () => {
+          const tail = buildDynamicTail(step, intent, config, markerExtras);
+          await expect(tail).toMatchFileSnapshot(`${SNAP_DIR}/${name}.marker.tail.${label}.txt`);
+        });
+      }
+
+      it("tool declarations are byte-identical", async () => {
+        const declarations = [
+          ...(buildCallTools(config.allowedTasks, { markerMode: true }).functionDeclarations || []),
+          ...(buildIntegrationTools(extras.integrations, config).functionDeclarations || []),
+          ...(buildDbAppointmentTools(config, extras).functionDeclarations || []),
+        ];
+        await expect(JSON.stringify(declarations, null, 2)).toMatchFileSnapshot(
+          `${SNAP_DIR}/${name}.marker.tools.json`
+        );
+      });
+    });
+  }
+
+  // Invariants that hold across every fixture, asserted rather than eyeballed
+  // in fifty golden files.
+  describe("mode separation", () => {
+    for (const [name, { config, extras }] of Object.entries(FIXTURES)) {
+      const markerExtras = { ...extras, intentMarker: true };
+
+      it(`${name}: the marker literal appears in marker mode only`, () => {
+        expect(buildStaticSystemPrefix(config, markerExtras)).toContain("<<intent:");
+        expect(buildStaticSystemPrefix(config, extras)).not.toContain("<<intent:");
+      });
+
+      it(`${name}: the tool name is absent from every marker-mode prompt`, () => {
+        const parts = [
+          buildStaticSystemPrefix(config, markerExtras),
+          ...STEP_INTENTS.map(([step, intent]) => buildDynamicTail(step, intent, config, markerExtras)),
+        ];
+        for (const part of parts) expect(part).not.toContain("set_call_intent");
+      });
+    }
+  });
+});
+
 describe("prompt structure invariants the refactor must preserve", () => {
   const { config, extras } = FIXTURES["clinic-athena"];
 
