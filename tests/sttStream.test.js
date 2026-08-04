@@ -70,7 +70,12 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
       punctuate: true,
       numerals: true,
       interim_results: true,
-      endpointing: 300,
+      // Lowered 300 -> 150 on 2026-08-04. stt_endpoint_ms measured 700ms, of
+      // which only the endpointing window is ours to spend; the rest is
+      // Deepgram inference plus network. See docs/latency-and-tts-tests.md for
+      // the probe D/E comparison that justified it, including whether
+      // classifyHold started firing on the premature finals this invites.
+      endpointing: 150,
       utterance_end_ms: 1000,
       vad_events: true,
       Authorization: "Token test-key",
