@@ -17,6 +17,9 @@ const H = vi.hoisted(() => {
     audioOutInstances: [],
     turnManagerInstances: [],
     metricsInstances: [],
+    // {rule, holdMs} per classifyHold decision, so hold attribution is
+    // assertable without reaching into the real metrics module's state
+    holdRuleCalls: [],
     fallbackFlowInstances: [],
     // set once, at session.js module-load time (utteranceCache is a
     // module-level singleton there) — see the utteranceCache.js mock below.
@@ -38,6 +41,13 @@ vi.mock("../lib/voice/sttStream.js", () => ({
       sendAudio: vi.fn(),
       close: vi.fn(),
       isAlive: vi.fn(() => true),
+      // Reconstructed wall-clock instant the caller stopped speaking. Null by
+      // default (Deepgram gave no usable word timings); tests that care set
+      // inst._speechEndAt to a number.
+      _speechEndAt: null,
+      getLastSpeechEndAt: vi.fn(function () {
+        return inst._speechEndAt;
+      }),
     };
     H.sttInstances.push(inst);
     return inst;
@@ -115,8 +125,18 @@ vi.mock("../lib/voice/metrics.js", () => ({
     H.metricsInstances.push(inst);
     return inst;
   }),
-  getLatencyStats: vi.fn(() => ({ count: 0, byStage: {}, turnTaking: {}, recent: [] })),
+  getLatencyStats: vi.fn(() => ({
+    count: 0,
+    byStage: {},
+    turnTaking: {},
+    holdRules: {},
+    cache: { samples: 0, turnsWithHit: 0, hitRatePctP50: null, cachedTokensP50: null },
+    recent: [],
+  })),
   bumpCounter: vi.fn(),
+  recordHoldRule: vi.fn((rule, holdMs) => {
+    H.holdRuleCalls.push({ rule, holdMs });
+  }),
 }));
 
 // ---- lib/voice/llmTurn.js --------------------------------------------------
@@ -435,6 +455,7 @@ beforeEach(() => {
   H.audioOutInstances.length = 0;
   H.turnManagerInstances.length = 0;
   H.metricsInstances.length = 0;
+  H.holdRuleCalls.length = 0;
   H.fallbackFlowInstances.length = 0;
   H.llmFactory = null;
   vi.clearAllMocks();
@@ -600,6 +621,163 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(marks).toContain("llm_first_chunk");
     expect(marks.indexOf("llm_request")).toBeLessThan(marks.indexOf("llm_first_chunk"));
     expect(marks.indexOf("speech_end")).toBeLessThan(marks.indexOf("llm_request"));
+  });
+
+  // -------------------------------------------------------------------------
+  // Instrumentation that makes the out-of-process segments measurable: the
+  // Deepgram tail before speech_end and the pacing gap after first_audio_sent.
+  // Both are caller-perceived latency that no previous metric covered.
+  // -------------------------------------------------------------------------
+  it("3c. marks audio_speech_end from the STT stream's reconstructed speech end", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure." },
+      { type: "done", reply: { text: "Sure.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.sttInstances[0]._speechEndAt = 12_345;
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    await flush();
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls;
+    const audioSpeechEnd = marks.find(([name]) => name === "audio_speech_end");
+    expect(audioSpeechEnd).toBeDefined();
+    expect(audioSpeechEnd[1]).toBe(12_345);
+    // Must precede speech_end: the tail between them is the thing being measured.
+    const names = marks.map((c) => c[0]);
+    expect(names.indexOf("audio_speech_end")).toBeLessThan(names.indexOf("speech_end"));
+  });
+
+  it("3d. skips audio_speech_end when the STT stream has no usable word timings", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure." },
+      { type: "done", reply: { text: "Sure.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.sttInstances[0]._speechEndAt = null;
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment");
+    await flush();
+    await flush();
+
+    // Marking with an undefined timestamp would default to now() and report a
+    // zero-length STT tail, which reads as "Deepgram is instant" rather than
+    // "we don't know".
+    const names = H.metricsInstances[0].mark.mock.calls.map((c) => c[0]);
+    expect(names).not.toContain("audio_speech_end");
+    expect(names).toContain("speech_end");
+  });
+
+  it("3e. marks first_frame_wire when audioOut writes its first frame to Twilio", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+
+    const names = H.metricsInstances[0].mark.mock.calls.map((c) => c[0]);
+    expect(names).toContain("first_frame_wire");
+  });
+
+  it("3f. attributes every hold decision, including the zero-cost ones", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure." },
+      { type: "done", reply: { text: "Sure.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    // Terminal punctuation -> complete -> no hold. Counting this is what makes
+    // the expensive rules' share interpretable.
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
+    await flush();
+    await flush();
+
+    expect(H.holdRuleCalls.length).toBeGreaterThan(0);
+    expect(H.holdRuleCalls[0].holdMs).toBe(0);
+  });
+
+  it("3g. attributes a held final to the rule that charged for it", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    // Trailing conjunction: classifyHold parks this for 2000ms before the LLM
+    // is called at all.
+    H.turnManagerInstances[0].opts.onTurnEnd("I want to book an appointment and");
+    await flush();
+
+    const held = H.holdRuleCalls[H.holdRuleCalls.length - 1];
+    expect(held.rule).toBe("trailing_conjunction");
+    expect(held.holdMs).toBeGreaterThan(0);
+  });
+
+  it("3h. carries the turn's prompt-cache token counts into the latency payload", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure." },
+      {
+        type: "done",
+        reply: {
+          text: "Sure.",
+          toolResults: [],
+          usage: { promptTokens: 4000, outputTokens: 60, cachedTokens: 3200 },
+        },
+      },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
+    await flush();
+    await flush();
+    ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+    await flush();
+
+    // Without these on the payload, cache-hit rate stays unobservable in
+    // production and a dead cache prefix is indistinguishable from a working
+    // one — while silently inflating LLM TTFT on every turn.
+    expect(H.metricsInstances[0].finishTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ cached_tokens: 3200, prompt_tokens: 4000 })
+    );
+  });
+
+  it("3i. does not attach stale token counts to a turn that reported none", async () => {
+    H.llmFactory = () => makeGen([
+      { type: "delta", text: "Sure." },
+      { type: "done", reply: { text: "Sure.", toolResults: [] } },
+    ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
+    await flush();
+    await flush();
+    ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+    await flush();
+
+    const extras = H.metricsInstances[0].finishTurn.mock.calls.at(-1)?.[0] ?? {};
+    expect(extras.cached_tokens).toBeUndefined();
+    expect(extras.prompt_tokens).toBeUndefined();
   });
 
   it("3b. tts onDone({truncated: true}) logs tts_turn_truncated with callSid + turn index", async () => {

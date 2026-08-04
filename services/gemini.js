@@ -985,6 +985,37 @@ export function resolveGenerationConfig(overrides) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Shape one turn's SDK usage metadata into caller-facing telemetry.
+ *
+ * Additive and never load-bearing for behavior: consumed by the harness/eval
+ * report to measure how often the output cap truncates a reply, and by the
+ * voice pipeline's turn metrics to measure prompt-cache effectiveness.
+ * Deliberately renames the SDK's fields so they don't leak to callers.
+ *
+ * `cachedTokens` is included whenever the SDK reports it, INCLUDING zero — a
+ * zero-hit turn and an unreported one mean different things (a broken cache
+ * prefix vs. a model that never tells us), and collapsing them would hide the
+ * former. `thoughtsTokens` keeps its existing omit-when-absent behavior
+ * because no consumer distinguishes those two cases.
+ *
+ * @param {object|null} usageMetadata - the SDK's usageMetadata from the last chunk
+ * @returns {{promptTokens: number|null, outputTokens: number|null, cachedTokens?: number, thoughtsTokens?: number}|null}
+ */
+export function buildUsage(usageMetadata) {
+  if (!usageMetadata) return null;
+  return {
+    promptTokens: usageMetadata.promptTokenCount ?? null,
+    outputTokens: usageMetadata.candidatesTokenCount ?? null,
+    ...(usageMetadata.cachedContentTokenCount != null
+      ? { cachedTokens: usageMetadata.cachedContentTokenCount }
+      : {}),
+    ...(usageMetadata.thoughtsTokenCount != null
+      ? { thoughtsTokens: usageMetadata.thoughtsTokenCount }
+      : {}),
+  };
+}
+
+/**
  * Streaming version of getReply for Media Streams real-time audio pipeline.
  *
  * Yields objects of these shapes:
@@ -1216,6 +1247,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     }
   }
 
+
   // Fallback if model returned no text at all (localized — see strings.js).
   // Action-tool messages are directives to the MODEL ("do not book again —
   // just confirm it to the caller"), never speakable text — always use the
@@ -1232,20 +1264,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     yield { delta: fullText };
   }
 
-  // Additive truncation telemetry — usage tokens and the final finishReason.
-  // Never load-bearing for behavior; consumed by the harness/eval report to
-  // measure how often the output cap truncates a reply (plan step 2.5). Shaped
-  // {promptTokens, outputTokens, thoughtsTokens?} so it does not leak the SDK's
-  // field names to callers.
-  const usage = lastUsageMetadata
-    ? {
-        promptTokens: lastUsageMetadata.promptTokenCount ?? null,
-        outputTokens: lastUsageMetadata.candidatesTokenCount ?? null,
-        ...(lastUsageMetadata.thoughtsTokenCount != null
-          ? { thoughtsTokens: lastUsageMetadata.thoughtsTokenCount }
-          : {}),
-      }
-    : null;
+  const usage = buildUsage(lastUsageMetadata);
 
   yield {
     done: true,

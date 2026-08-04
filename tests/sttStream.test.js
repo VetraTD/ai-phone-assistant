@@ -334,3 +334,133 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     handle.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The instant the caller stopped talking is NOT the instant we get the final:
+// Deepgram waits out its endpointing window, then the result crosses the
+// network. That gap is pure caller-perceived latency and is invisible to this
+// process unless it is reconstructed from Deepgram's own audio-relative word
+// timings against how much audio we had streamed by then.
+// ---------------------------------------------------------------------------
+describe("sttStream.js — reconstructed speech-end timestamp", () => {
+  beforeEach(() => {
+    process.env.DEEPGRAM_API_KEY = "test-key";
+    mockConnect.mockReset();
+  });
+
+  /** mu-law @ 8kHz is 1 byte per sample, so 8 bytes == 1ms of audio. */
+  function audioMs(ms) {
+    return Buffer.alloc(ms * 8, 0xff);
+  }
+
+  function finalWithWordEnd(transcript, endSec) {
+    return {
+      type: "Results",
+      is_final: true,
+      speech_final: true,
+      channel: {
+        alternatives: [{ transcript, confidence: 0.9, words: [{ word: "x", start: 0, end: endSec }] }],
+      },
+    };
+  }
+
+  it("back-dates speech end by the gap between streamed audio and the last word", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+    let clock = 10_000;
+
+    const handle = await createSttStream({ callSid: "CA-lag", now: () => clock });
+    handle.sendAudio(audioMs(500)); // 500ms of audio streamed
+    clock = 10_500;
+    fakeSocket.emit("message", finalWithWordEnd("hello", 0.2)); // last word ended at 200ms
+
+    // 500ms streamed - 200ms of speech = 300ms of endpointing + network.
+    expect(handle.getLastSpeechEndAt()).toBe(10_200);
+
+    handle.close();
+  });
+
+  it("falls back to result start+duration when word timings are absent", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+    let clock = 5_000;
+
+    const handle = await createSttStream({ callSid: "CA-nowords", now: () => clock });
+    handle.sendAudio(audioMs(800));
+    clock = 5_800;
+    fakeSocket.emit("message", {
+      type: "Results",
+      is_final: true,
+      speech_final: true,
+      start: 0.1,
+      duration: 0.4, // speech ended at 500ms
+      channel: { alternatives: [{ transcript: "hi", confidence: 0.9 }] },
+    });
+
+    expect(handle.getLastSpeechEndAt()).toBe(5_500); // 800 - 500 = 300ms tail
+
+    handle.close();
+  });
+
+  it("returns null before any final has arrived", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+
+    const handle = await createSttStream({ callSid: "CA-nofinal" });
+    handle.sendAudio(audioMs(200));
+
+    expect(handle.getLastSpeechEndAt()).toBeNull();
+
+    handle.close();
+  });
+
+  it("counts only audio Deepgram actually received, not audio the socket rejected", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+    let clock = 1_000;
+
+    const handle = await createSttStream({ callSid: "CA-drop", now: () => clock });
+    handle.sendAudio(audioMs(100)); // delivered
+
+    // A rejected send is re-buffered, not received. Counting it would advance
+    // our clock past Deepgram's and back-date every later speech-end by the
+    // difference, permanently, for the rest of the call.
+    fakeSocket.sendMedia.mockImplementationOnce(() => {
+      throw new Error("send failed");
+    });
+    handle.sendAudio(audioMs(900));
+
+    clock = 1_100;
+    fakeSocket.emit("message", finalWithWordEnd("hi", 0.05));
+
+    expect(handle.getLastSpeechEndAt()).toBe(1_050); // 100ms received - 50ms speech
+
+    handle.close();
+  });
+
+  it("realigns the audio clock after a reconnect restarts Deepgram's stream time", async () => {
+    const fakeSocket1 = createFakeSocket();
+    const fakeSocket2 = createFakeSocket();
+    mockConnect.mockResolvedValueOnce(fakeSocket1).mockResolvedValueOnce(fakeSocket2);
+    const onReconnect = vi.fn();
+    let clock = 20_000;
+
+    const handle = await createSttStream({ callSid: "CA-realign", onReconnect, now: () => clock });
+    handle.sendAudio(audioMs(1_000)); // 1s on the first socket
+    fakeSocket1.emit("close");
+
+    await vi.waitFor(() => expect(onReconnect).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
+
+    // New socket, new Deepgram stream clock starting at 0.
+    handle.sendAudio(audioMs(400));
+    clock = 21_400;
+    fakeSocket2.emit("message", finalWithWordEnd("again", 0.3));
+
+    // 400ms streamed on THIS socket - 300ms speech = 100ms tail. If the byte
+    // counter had not been reset it would read 1400 - 300 and back-date the
+    // speech end by 1.1 seconds.
+    expect(handle.getLastSpeechEndAt()).toBe(21_300);
+
+    handle.close();
+  });
+});

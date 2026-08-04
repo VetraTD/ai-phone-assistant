@@ -12,6 +12,7 @@ import {
   getLatencyStats,
   getCallStats,
   clearStats,
+  recordHoldRule,
   _ringBuffer,
 } from "../lib/voice/metrics.js";
 
@@ -223,6 +224,160 @@ describe("metrics.js — per-turn latency tracker", () => {
       const stats = getLatencyStats();
       expect(stats.count).toBe(0);
       expect(stats.recent).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Deltas added so the four original stages stop hiding the two segments the
+  // server could not previously see: Deepgram's endpointing/network tail
+  // (before speech_end) and the pacing pump's queue-to-wire gap (after
+  // first_audio_sent). Without these, "endpointing dominates" and "our own
+  // hold logic dominates" are indistinguishable in the numbers.
+  // -------------------------------------------------------------------------
+  describe("out-of-process deltas (stt_endpoint_ms, playout_ms, true_v2v_ms)", () => {
+    it("measures the Deepgram tail as audio_speech_end -> speech_end", () => {
+      const tracker = createTurnMetrics("CA-endpoint");
+      tracker.mark("audio_speech_end", 1000); // caller actually stopped talking
+      tracker.mark("speech_end", 1380); // we heard about it 380ms later
+      tracker.mark("first_audio_sent", 1900);
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.stt_endpoint_ms).toBe(380);
+    });
+
+    it("measures the pacing pump as first_audio_sent -> first_frame_wire", () => {
+      const tracker = createTurnMetrics("CA-playout");
+      tracker.mark("speech_end", 0);
+      tracker.mark("first_audio_sent", 500); // handed to the jitter buffer
+      tracker.mark("first_frame_wire", 560); // actually written to Twilio
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.playout_ms).toBe(60);
+    });
+
+    it("measures true_v2v_ms end to end, wider than voice_to_voice_ms", () => {
+      const tracker = createTurnMetrics("CA-truev2v");
+      tracker.mark("audio_speech_end", 0);
+      tracker.mark("speech_end", 380);
+      tracker.mark("first_audio_sent", 1500);
+      tracker.mark("first_frame_wire", 1560);
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.voice_to_voice_ms).toBe(1120); // what we reported before
+      expect(payload.true_v2v_ms).toBe(1560); // what the caller actually waits
+    });
+
+    it("leaves the new deltas null when the extra marks are absent", () => {
+      const tracker = createTurnMetrics("CA-legacy");
+      tracker.mark("speech_end", 0);
+      tracker.mark("first_audio_sent", 400);
+
+      const payload = tracker.finishTurn();
+
+      expect(payload.stt_endpoint_ms).toBeNull();
+      expect(payload.playout_ms).toBeNull();
+      expect(payload.true_v2v_ms).toBeNull();
+      expect(payload.voice_to_voice_ms).toBe(400);
+    });
+
+    it("reports the new stages in getLatencyStats().byStage", () => {
+      const tracker = createTurnMetrics("CA-stats");
+      tracker.mark("audio_speech_end", 0);
+      tracker.mark("speech_end", 300);
+      tracker.mark("first_audio_sent", 1000);
+      tracker.mark("first_frame_wire", 1040);
+      tracker.finishTurn();
+
+      const stats = getLatencyStats();
+      expect(stats.byStage.stt_endpoint_ms.p50).toBe(300);
+      expect(stats.byStage.playout_ms.p50).toBe(40);
+      expect(stats.byStage.true_v2v_ms.p50).toBe(1040);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // classifyHold charges 1500-2000ms per branch. The rule is logged today but
+  // never aggregated, so "the hold is expensive" cannot be narrowed to WHICH
+  // branch is expensive and how often it fires.
+  // -------------------------------------------------------------------------
+  describe("recordHoldRule — per-classifyHold-branch attribution", () => {
+    it("accumulates count and total ms per rule", () => {
+      recordHoldRule("no_terminal_punctuation", 1500);
+      recordHoldRule("no_terminal_punctuation", 1500);
+      recordHoldRule("partial_digits", 1500);
+
+      const { holdRules } = getLatencyStats();
+      expect(holdRules.no_terminal_punctuation).toEqual({ count: 2, totalMs: 3000 });
+      expect(holdRules.partial_digits).toEqual({ count: 1, totalMs: 1500 });
+    });
+
+    it("counts zero-cost rules so the no-hold share stays visible", () => {
+      recordHoldRule("terminal_punctuation", 0);
+
+      const { holdRules } = getLatencyStats();
+      expect(holdRules.terminal_punctuation).toEqual({ count: 1, totalMs: 0 });
+    });
+
+    it("ignores unknown rule names rather than inventing metrics", () => {
+      recordHoldRule("typo_rule", 1500);
+      expect(getLatencyStats().holdRules.typo_rule).toBeUndefined();
+    });
+
+    it("never throws on bad input", () => {
+      expect(() => recordHoldRule(undefined, undefined)).not.toThrow();
+      expect(() => recordHoldRule("partial_digits", "nope")).not.toThrow();
+    });
+
+    it("is cleared by clearStats()", () => {
+      recordHoldRule("partial_digits", 1500);
+      clearStats();
+      expect(getLatencyStats().holdRules.partial_digits).toEqual({ count: 0, totalMs: 0 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // cachedContentTokenCount is captured in gemini.js but dropped before it
+  // leaves the module, so prompt-cache hit rate has never been observable.
+  // -------------------------------------------------------------------------
+  describe("getLatencyStats().cache — prompt cache hit rate", () => {
+    function turnWithTokens(callSid, cached, prompt) {
+      const tracker = createTurnMetrics(callSid);
+      tracker.mark("speech_end", 0);
+      tracker.mark("first_audio_sent", 100);
+      tracker.finishTurn({ cached_tokens: cached, prompt_tokens: prompt });
+    }
+
+    it("reports the median hit rate across turns that carried token counts", () => {
+      turnWithTokens("CA-c1", 800, 1000); // 80%
+      turnWithTokens("CA-c2", 900, 1000); // 90%
+      turnWithTokens("CA-c3", 1000, 1000); // 100%
+
+      const { cache } = getLatencyStats();
+      expect(cache.samples).toBe(3);
+      expect(cache.hitRatePctP50).toBe(90);
+    });
+
+    it("reports a 0% hit rate distinctly from no data at all", () => {
+      turnWithTokens("CA-cold", 0, 1200);
+
+      const { cache } = getLatencyStats();
+      expect(cache.samples).toBe(1);
+      expect(cache.hitRatePctP50).toBe(0);
+      expect(cache.turnsWithHit).toBe(0);
+    });
+
+    it("reports null hit rate when no turn carried token counts", () => {
+      const tracker = createTurnMetrics("CA-notokens");
+      tracker.mark("speech_end", 0);
+      tracker.mark("first_audio_sent", 100);
+      tracker.finishTurn();
+
+      const { cache } = getLatencyStats();
+      expect(cache.samples).toBe(0);
+      expect(cache.hitRatePctP50).toBeNull();
     });
   });
 

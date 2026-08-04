@@ -323,4 +323,93 @@ describe("audioOut.js — createAudioOut", () => {
       expect(audioOut._queuedFrames()).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // enqueue() hands audio to the pacing queue, which is NOT the same instant
+  // it reaches Twilio — the pump deliberately holds everything past
+  // LOOKAHEAD_MS back. The turn metrics mark first_audio_sent at enqueue, so
+  // that pacing gap sits outside every latency number the server reports.
+  // -------------------------------------------------------------------------
+  describe("onFirstFrameWire — queue-to-wire visibility", () => {
+    it("fires once per burst, not once per frame", () => {
+      const onFirstFrameWire = vi.fn();
+      const out = createAudioOut({
+        sendFrame,
+        streamSid: STREAM_SID,
+        now: clock.now,
+        onFirstFrameWire,
+      });
+
+      out.enqueue(Buffer.alloc(480, 0x01)); // 3 frames, all pumped at t=0
+
+      expect(sendFrame.mock.calls.filter(([m]) => m.event === "media").length).toBe(3);
+      expect(onFirstFrameWire).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fire for a mark-only enqueue", () => {
+      const onFirstFrameWire = vi.fn();
+      const out = createAudioOut({
+        sendFrame,
+        streamSid: STREAM_SID,
+        now: clock.now,
+        onFirstFrameWire,
+      });
+
+      out.enqueue(Buffer.alloc(0), "turn-1-done");
+
+      expect(onFirstFrameWire).not.toHaveBeenCalled();
+    });
+
+    it("fires again for a later burst once the wire has gone idle", () => {
+      const onFirstFrameWire = vi.fn();
+      const out = createAudioOut({
+        sendFrame,
+        streamSid: STREAM_SID,
+        now: clock.now,
+        onFirstFrameWire,
+      });
+
+      out.enqueue(Buffer.alloc(320, 0x01)); // burst 1 drains the queue
+      out.enqueue(Buffer.alloc(320, 0x02)); // burst 2 — a new turn, or a later sentence
+
+      expect(onFirstFrameWire).toHaveBeenCalledTimes(2);
+    });
+
+    it("re-arms after a barge-in clear so the next turn is measured", () => {
+      const onFirstFrameWire = vi.fn();
+      const out = createAudioOut({
+        sendFrame,
+        streamSid: STREAM_SID,
+        now: clock.now,
+        onFirstFrameWire,
+      });
+
+      out.enqueue(Buffer.alloc(160 * 20, 0x01)); // long utterance, queue still full
+      expect(onFirstFrameWire).toHaveBeenCalledTimes(1);
+      out.clear();
+      out.enqueue(Buffer.alloc(320, 0x02)); // reply after the interruption
+
+      expect(onFirstFrameWire).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not break playout when the callback throws", () => {
+      const onFirstFrameWire = vi.fn(() => {
+        throw new Error("metrics exploded");
+      });
+      const out = createAudioOut({
+        sendFrame,
+        streamSid: STREAM_SID,
+        now: clock.now,
+        onFirstFrameWire,
+      });
+
+      expect(() => out.enqueue(Buffer.alloc(480, 0x01))).not.toThrow();
+      expect(sendFrame.mock.calls.filter(([m]) => m.event === "media").length).toBe(3);
+    });
+
+    it("works without a callback supplied", () => {
+      const out = createAudioOut({ sendFrame, streamSid: STREAM_SID, now: clock.now });
+      expect(() => out.enqueue(Buffer.alloc(320, 0x01))).not.toThrow();
+    });
+  });
 });
