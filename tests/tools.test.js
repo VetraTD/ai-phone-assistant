@@ -519,6 +519,58 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         message: "Is there anything else I can help you with?",
       });
     });
+
+    // -----------------------------------------------------------------------
+    // THE ~90% BUG: the gate was unreachable for most calls.
+    //
+    // end_call was allowed only in step "confirm"/"ending", or when an action
+    // tool completed in the SAME turn. But step reaches "confirm" from just
+    // three places — the appointments and quotes packs. Taking a message never
+    // got there, and an informational call never got there at all.
+    //
+    // So the model said its goodbye (already streamed to TTS and spoken to the
+    // caller), called end_call, and was refused. Nothing armed a close. The
+    // line stayed open until the silence ladder fired 20-28 seconds later, and
+    // the model — told to "ask if there's anything else" — tried again and was
+    // refused again for the same structural reason.
+    // -----------------------------------------------------------------------
+    it("honors end_call when an action completed EARLIER in the call, not just this turn", async () => {
+      // The caller booked, chatted for another turn, then said goodbye. The
+      // turn-scoped flag is false by then; the call-scoped one is what makes
+      // wrapping up possible at all.
+      const fc = { id: "fc7c", name: "end_call", args: { reason: "done" } };
+      const ctx = { ...baseCtx, step: "gather_details", completedActionThisCall: true };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(stateEffects.endCallArgs).toEqual({ reason: "done" });
+    });
+
+    it("honors end_call on an informational call once the caller has had a real conversation", async () => {
+      // No tool ever runs on "what are your hours?" — so no step transition and
+      // no action flag ever existed, and this call could never be ended by the
+      // assistant no matter how clearly the caller said goodbye.
+      const fc = { id: "fc7d", name: "end_call", args: { reason: "caller is done" } };
+      const ctx = { ...baseCtx, step: "identify_intent", callerTurnCount: 3 };
+
+      const { functionResponse } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(true);
+    });
+
+    it("still refuses end_call at the very start of a call", async () => {
+      // The gate exists to stop the assistant hanging up before it has helped.
+      // Widening it must not cost that: one caller turn in, with nothing done
+      // and nothing confirmed, is still too early.
+      const fc = { id: "fc7e", name: "end_call", args: { reason: "premature" } };
+      const ctx = { ...baseCtx, step: "identify_intent", callerTurnCount: 1 };
+
+      const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(stateEffects.endCallArgs).toBeUndefined();
+    });
   });
 
   describe("caller-identity guard on cancel/reschedule", () => {

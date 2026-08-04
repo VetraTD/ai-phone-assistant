@@ -175,6 +175,18 @@ export default {
   onEffect(effect, engine) {
     if (effect.type !== "recorded") return;
 
+    // Taking a message IS the whole job on this kind of call, so the step
+    // machine must say so — exactly as the appointments and quotes packs do
+    // after their own completing action.
+    //
+    // Without this, a message-taking call never left "gather_details", and
+    // end_call's gate (services/tools.js) refused every attempt to hang up
+    // after the goodbye had already been spoken. Set before the businessId
+    // guard below: the conversational outcome is the same whether or not the
+    // row lands, and refusing to let the assistant end the call is not a
+    // sensible response to a failed insert.
+    engine.setStep(engine.STEPS.CONFIRM, "record_customer_request");
+
     const { callSid, businessId, callId, callerNumber, config } = engine.call;
     if (!businessId) return;
 

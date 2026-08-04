@@ -436,10 +436,14 @@ async function flushUntil(predicate, timeoutMs = 5000) {
   // Fall through rather than throwing: the assertion that follows reports the
   // real expectation far more usefully than a generic timeout would.
 }
-// The socket is closed HANGUP_GRACE_MS (800ms) after the goodbye's mark
-// echoes, so the line doesn't drop on the final syllable. Real-timer tests
-// have to outwait that grace before asserting the close.
-const afterHangupGrace = () => new Promise((r) => setTimeout(r, 900));
+// The socket is closed HANGUP_GRACE_MS after the goodbye's mark echoes, so the
+// line doesn't drop on the final syllable AND the caller still has a moment to
+// add "oh wait, one more thing" (speaking in this window cancels the close
+// outright). Real-timer tests have to outwait that grace before asserting the
+// close. Kept slightly above the production constant — if that grows again,
+// this is the one place to follow it.
+const HANGUP_GRACE_MS = 1_500;
+const afterHangupGrace = () => new Promise((r) => setTimeout(r, HANGUP_GRACE_MS + 200));
 
 let sidCounter = 0;
 function newSid() { return `CA-session-${++sidCounter}`; }
@@ -1114,6 +1118,145 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(ws.closeCount).toBe(1);
   });
 
+  // ---------------------------------------------------------------------
+  // 7b/7c. The random mid-call hangup.
+  //
+  // startTurn used to open with:
+  //
+  //     // Already ending — just hang up.
+  //     if (state.step === STEPS.ENDING) { closeWs(); return; }
+  //
+  // an instant, silent disconnect on the caller's next word. Two ways that
+  // fired on someone who was still talking:
+  //
+  //   1. The caller adds "oh wait, one more thing" during the goodbye. They
+  //      get cut off mid-sentence instead of being answered.
+  //   2. doTransfer set ENDING BEFORE attempting the redial, so a transfer
+  //      that could not be placed left the call armed to drop dead on the
+  //      caller's next utterance.
+  // ---------------------------------------------------------------------
+  // Fake timers on purpose. These two tests deliberately leave the call OPEN —
+  // that is the assertion — and a call that stays open on real timers keeps
+  // firing its silence ladder and utterance-cache warm well after the test
+  // returns, landing inside whichever test runs next and corrupting the
+  // shared-module spies it asserts on. Virtual time makes them both
+  // deterministic and instant.
+  it("7b. a caller who speaks during the goodbye window CANCELS the close and is answered", async () => {
+    vi.useFakeTimers();
+    try {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Thanks for calling. Goodbye!" },
+        { type: "done", reply: { text: "Thanks for calling. Goodbye!", endCallArgs: { reason: "done" }, toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      ws.emit({
+        event: "start",
+        start: { callSid: `CA-session-fake-${++sidCounter}`, streamSid: "MZ7b", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("no that is all thank you.");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // The goodbye has been spoken and the close is armed on its mark.
+      ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(ws.closeCount).toBe(0);
+
+      // ...and the caller remembers one more thing, inside the grace window.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Of course — we open at nine." },
+        { type: "done", reply: { text: "Of course — we open at nine.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("oh wait, what time do you open?");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Well past the point the call would have dropped, it is still up.
+      await vi.advanceTimersByTimeAsync(HANGUP_GRACE_MS * 3);
+      expect(ws.closeCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("7d. barging the goodbye cancels the close, even though Twilio re-echoes the mark it was waiting on", async () => {
+    // After audioOut.clear(), Twilio immediately hands back marks that were
+    // queued but never played. closeAfterMark is a plain string compare, so
+    // that echoed mark used to arm the hangup on a caller who was mid-sentence.
+    // Waiting for their transcript to cancel it is too slow — endpointing plus
+    // the LLM round-trip routinely outlasts the grace window.
+    vi.useFakeTimers();
+    try {
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Thanks for calling. Goodbye!" },
+        { type: "done", reply: { text: "Thanks for calling. Goodbye!", endCallArgs: { reason: "done" }, toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      ws.emit({
+        event: "start",
+        start: { callSid: `CA-session-fake-${++sidCounter}`, streamSid: "MZ7d", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("no that is all thanks.");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Caller talks over the goodbye...
+      tm.opts.onInterrupt("actually hang on");
+      await vi.advanceTimersByTimeAsync(5);
+      // ...and Twilio echoes back the unplayed mark the close was waiting on.
+      ws.emit({ event: "mark", mark: { name: "turn-1-done" } });
+      await vi.advanceTimersByTimeAsync(HANGUP_GRACE_MS * 3);
+
+      expect(ws.closeCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("7c. a transfer that cannot be placed does not leave the call armed to hang up", async () => {
+    vi.useFakeTimers();
+    try {
+      // No transfer number configured, so doTransfer takes its can't-transfer
+      // branch. The step must NOT be left at ENDING, or the caller's next word
+      // silently drops the call.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "Let me put you through." },
+        { type: "done", reply: { text: "Let me put you through.", transferRequested: true, toolResults: [] } },
+      ]);
+
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      ws.emit({
+        event: "start",
+        start: { callSid: `CA-session-fake-${++sidCounter}`, streamSid: "MZ7c", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+
+      const tm = H.turnManagerInstances[0];
+      tm.opts.onTurnEnd("can I speak to a person please.");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // The caller carries on talking after the failed transfer.
+      H.llmFactory = () => makeGen([
+        { type: "delta", text: "I can take a message instead." },
+        { type: "done", reply: { text: "I can take a message instead.", toolResults: [] } },
+      ]);
+      tm.opts.onTurnEnd("okay, can you take a message then?");
+      await vi.advanceTimersByTimeAsync(HANGUP_GRACE_MS * 3);
+
+      expect(ws.closeCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("9a. done event with transferRequested effect triggers the transfer flow when the model produced no text of its own", async () => {
     // No delta events — the model called request_transfer without saying
     // anything of its own (e.g. very first token was the function call).
@@ -1414,7 +1557,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // Playback finishes and Twilio echoes the goodbye's mark.
       audioOut._playing = false;
       ws.emit({ event: "mark", mark: { name: "silence-goodbye-done" } });
-      await vi.advanceTimersByTimeAsync(1000); // hangup grace
+      await vi.advanceTimersByTimeAsync(HANGUP_GRACE_MS + 100);
       expect(ws.closeCount).toBe(1);
     } finally {
       vi.useRealTimers();

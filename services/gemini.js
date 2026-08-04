@@ -1435,6 +1435,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         callId: extras?.callId || null,
         integrations: extras?.integrations || [],
         completedActionThisTurn,
+        // Call-scoped counterparts, both read only by end_call's gate.
+        completedActionThisCall: !!extras?.completedActionThisCall || completedActionThisTurn,
+        callerTurnCount: Number(extras?.callerTurnCount) || 0,
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,

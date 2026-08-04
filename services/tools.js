@@ -134,15 +134,38 @@ export async function executeToolCall(fc, ctx) {
     }
 
     case "end_call": {
-      // Only allow ending the call during the confirm or ending steps. This
-      // makes it much less likely to hang up before the caller has a chance
-      // to say they don't need anything else.
+      // This gate exists to stop the assistant hanging up before the caller has
+      // had a chance to say they don't need anything else. It was doing that
+      // job far too well: it was unreachable for most calls.
       //
-      // completedActionThisTurn: an earlier FC round of this same turn already
-      // booked/cancelled/rescheduled/recorded — the step machine only advances
-      // to "confirm" after the whole turn, so without this the model could
-      // never wrap up cleanly in the same turn as the action.
-      if (ctx?.step === "confirm" || ctx?.step === "ending" || ctx?.completedActionThisTurn) {
+      // step reaches "confirm" from exactly three places — the appointments and
+      // quotes packs. A message-taking call never got there, and an
+      // informational call ("what are your hours?") ran no tools at all, so
+      // neither the step nor the action flag could ever unlock this. The model
+      // said goodbye (already spoken to the caller by then), called end_call,
+      // was refused, and nothing armed a close. That is the ~90% of goodbyes
+      // that left the line open until the silence ladder fired half a minute
+      // later.
+      //
+      // Four ways in, each a genuine "the assistant has done its job" signal:
+      //   - confirm/ending: the step machine says we are wrapping up.
+      //   - completedActionThisTurn: an earlier FC round of THIS turn already
+      //     booked/cancelled/rescheduled/recorded. The step machine only
+      //     advances after the whole turn, so without this the model could
+      //     never wrap up cleanly in the same turn as the action.
+      //   - completedActionThisCall: it did so on an EARLIER turn. A caller who
+      //     books and then chats for a turn before saying goodbye is the
+      //     ordinary case, not an edge case.
+      //   - callerTurnCount >= 2: a real back-and-forth happened. Covers the
+      //     informational call, where no tool will ever run. The prompt already
+      //     requires asking "is there anything else?" and hearing a no before
+      //     calling this, so the model is not reaching here on turn one — and
+      //     the threshold keeps a mis-fired end_call on the opening turn from
+      //     dropping a caller who has not been helped yet.
+      const wrappingUp = ctx?.step === "confirm" || ctx?.step === "ending";
+      const didSomething = ctx?.completedActionThisTurn || ctx?.completedActionThisCall;
+      const hadConversation = Number(ctx?.callerTurnCount) >= 2;
+      if (wrappingUp || didSomething || hadConversation) {
         const endCallArgs = fc.args ?? {};
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
