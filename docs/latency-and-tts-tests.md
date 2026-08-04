@@ -385,15 +385,73 @@ fallback-contaminated data.
   `STT_ENDPOINTING_MS` is a deploy-time knob read at connect time in
   `lib/voice/sttStream.js`, so this may be worth trying with no code change at
   all. Cheapest remaining win.
-- **The probe over-interrupts**: 30 barge-ins against 12 scripted, 12 turns
-  timed out, in both runs. Those turns are excluded from the percentiles so they
-  do not corrupt the numbers, but the harness threshold needs another look.
-- **`classifyHold` still has no representative data.** Both runs' hold mix is
-  dominated by `partial_digits` (22) and `trailing_conjunction` (12) because the
-  cached caller clips were built to trigger exactly those branches. Tuning
-  against this would be optimising a known-skewed sample. A representative
-  script is a prerequisite for that work.
+- ~~The probe over-interrupts~~ — **fixed**, see below.
+- ~~`classifyHold` has no representative data~~ — **it does now, and the answer
+  is that classifyHold costs nothing.** See below.
 - One manual call doing the scenario-25 mid-call switch, listening for a spoken
   marker.
 - Unset `DEBUG_ENDPOINTS` / `DEBUG_TOKEN` on Railway. They were found still
   enabled from the previous run, days later.
+
+---
+
+# Probe D, 2026-08-04 — the first run on realistic speech
+
+Two things changed since probe C: the probe stopped interrupting itself, and
+the caller script stopped being rigged.
+
+## The probe was talking over the assistant
+
+`handleInbound` cancelled its end-of-turn countdown on voiced audio — guarded by
+`state !== STATE.GAP`. But entering the gap from `LISTENING` sets `state = GAP`
+in the same step, so the cancel could only ever fire during the greeting. On a
+reply the countdown ran to completion however long the assistant kept talking.
+
+| | probe C | probe D |
+|---|---|---|
+| barge-ins recorded | 30 | **12** (exactly the 12 scripted) |
+| turns timed out | 11 | **0** |
+| clean probe turns | 73 | **108** |
+| server turns | 95 | **120** |
+
+Every spurious interruption desynced the turns after it, which is where the
+phantom timeouts came from. The runbook has warned since the first run to
+cross-check probe anomalies against the server's turn count; this was the
+harness, again.
+
+## classifyHold does not fire on real speech
+
+The old script hand-picked utterances to trigger each branch — 4 of its 8 lines
+carried an `expectRule`. `REPRESENTATIVE_LINES` is shaped from 1,000 real caller
+utterances in `call_transcripts` (aggregate statistics only, no text copied):
+median **6 words**, ~25% are 1-3 word acknowledgements, ~34% questions, ~10%
+carry digits. Real callers are far terser than the script assumed.
+
+Run on that, across 120 turns:
+
+| rule | holds | total ms |
+|---|---|---|
+| `post_barge_settle` | 12 | 4,404 |
+| `complete` | 108 | 0 |
+
+**Zero `partial_digits`, zero `trailing_conjunction`, zero
+`no_terminal_punctuation`.** `stt_tail_ms` p50 **0ms**, p95 362ms. The only
+holds are the post-barge settles from the one scripted interruption per call.
+
+So `classifyHold` costs nothing in production-like conditions. The runbook's
+"fires on ~36% of turns and costs 1.5-2s when it does" described the *script*.
+**Item #3 is closed: there is nothing to tune.** The code stays as insurance
+against the mid-sentence finals it was written for — which is exactly what makes
+lowering the endpointing window safe to try.
+
+## Where the turn goes now
+
+| stage p50 | ms | share |
+|---|---|---|
+| `llm_ttfb_ms` | 1,128 | 44% |
+| `stt_endpoint_ms` | 700 | 27% |
+| `tts_ttfb_ms` | 97 | 4% |
+| `stt_tail_ms` | 0 | 0% |
+| `true_v2v_ms` | **2,569** | |
+
+`intent_marker_leaks` 0, `tts_fallback_turns` 0.
