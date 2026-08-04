@@ -48,6 +48,31 @@ const baseCtx = {
   config: {},
 };
 
+// book_appointment rejects any time in the past before it reaches the logic
+// these tests are actually about, so a hardcoded date silently rots: this file
+// was written with 2026-08-01 and every booking test began failing the moment
+// that date passed. They then sat red, which is worse than the original
+// staleness — a red test cannot warn anyone about a real booking regression.
+//
+// Computed relative to now so it cannot expire again. 30 days is far enough
+// that no timezone anchoring can drag it into the past. The exact value is
+// never asserted; these tests only care that it is carried through unchanged,
+// so a moving date costs nothing in determinism.
+//
+// Tests that DO depend on a specific instant (the timezone-anchoring block
+// below) freeze the clock with vi.setSystemTime instead, which is the right
+// tool when the value itself is under test.
+const FUTURE_DATE = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+const FUTURE_SLOT = `${FUTURE_DATE}T10:00:00Z`;
+
+// The same instant written two ways, for the idempotency test: a normalized
+// UTC anchor versus the offset-bearing form the model re-sends. Both must be
+// derived from one date or they stop describing the same moment, which is the
+// entire thing that test is checking. -05:00 is written literally rather than
+// looked up, so the pair is unambiguous whatever the local zone does.
+const FUTURE_SLOT_UTC = `${FUTURE_DATE}T15:00:00.000Z`;
+const FUTURE_SLOT_OFFSET = `${FUTURE_DATE}T10:00:00-05:00`;
+
 describe("services/tools.js — executeToolCall (extracted from getReplyStreaming)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -111,7 +136,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
   it("book_appointment: success path calls createAppointment and emits a booked effect", async () => {
     mockCreateAppointment.mockResolvedValue("appt-1");
-    const args = { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane", service_type: "cleaning" };
+    const args = { scheduled_at: FUTURE_SLOT, client_name: "Jane", service_type: "cleaning" };
     const fc = { id: "fc4", name: "book_appointment", args };
 
     const { functionResponse, stateEffects } = await executeToolCall(fc, baseCtx);
@@ -690,7 +715,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fcNB4",
         name: "book_appointment",
-        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+        args: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
       };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, noBizCtx);
@@ -735,7 +760,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fcD1",
         name: "book_appointment",
-        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+        args: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
       };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, baseCtx);
@@ -750,7 +775,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const fc = {
         id: "fcD2",
         name: "book_appointment",
-        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+        args: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
       };
 
       const { functionResponse } = await executeToolCall(fc, baseCtx);
@@ -766,14 +791,14 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         ...baseCtx,
         capabilityState: {
           appointments: {
-            lastBooked: { scheduled_at: "2026-08-01T15:00:00.000Z", client_name: "Jane" },
+            lastBooked: { scheduled_at: FUTURE_SLOT_UTC, client_name: "Jane" },
           },
         },
       };
       const fc = {
         id: "fcD4",
         name: "book_appointment",
-        args: { scheduled_at: "2026-08-01T10:00:00-05:00", client_name: "Jane" },
+        args: { scheduled_at: FUTURE_SLOT_OFFSET, client_name: "Jane" },
       };
 
       const { functionResponse } = await executeToolCall(fc, ctx);
@@ -788,14 +813,14 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
         ...baseCtx,
         capabilityState: {
           appointments: {
-            lastBooked: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+            lastBooked: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
           },
         },
       };
       const fc = {
         id: "fcD3",
         name: "book_appointment",
-        args: { scheduled_at: "2026-08-01T10:00:00Z", client_name: "Jane" },
+        args: { scheduled_at: FUTURE_SLOT, client_name: "Jane" },
       };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
