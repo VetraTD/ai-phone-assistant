@@ -48,6 +48,12 @@ const H = vi.hoisted(() => ({
   nowMs: () => 0,
   /** Deterministic call ids — Math.random() made runs unreproducible. */
   sidCounter: 0,
+  /** 20ms audio frames emitted per TTS write. See the mock below. */
+  ttsChunkFrames: 1,
+  /** Every turnManager.handleFinal decision, with the rule that fired. */
+  finalDecisions: [],
+  /** Live audioOut instances, so the probe can ask whether audio was audible. */
+  audioOuts: [],
 }));
 
 vi.mock("../lib/voice/sttStream.js", () => ({
@@ -77,7 +83,12 @@ vi.mock("../lib/voice/ttsStream.js", async (importActual) => ({
           // of the assistant cutting them off.
           H.assistantAudioAtMs.push({ atMs: H.nowMs(), createdAtMs: turn.createdAtMs });
           opts.onFirstAudio?.();
-          opts.onAudioChunk?.(Buffer.alloc(160, 0x7f));
+          // One 160-byte frame is 20ms of audio, which leaves the assistant
+          // "playing" for only 20ms — long enough for the cutoff measurement
+          // below, far too short to interrupt. The barge probe raises this so
+          // there is real playback to talk over. Default 1 keeps every
+          // pre-existing scenario byte-identical.
+          opts.onAudioChunk?.(Buffer.alloc(160 * H.ttsChunkFrames, 0x7f));
         }, H.ttsTtfbMs);
       }),
       end: vi.fn(() => setTimeout(() => opts.onDone?.({}), 10)),
@@ -119,6 +130,43 @@ vi.mock("../lib/transcriptUtils.js", async (importActual) => {
       const result = actual.classifyHold(text, rawText);
       H.holdCalls.push({ text, rule: result.rule, holdMs: result.holdMs });
       return result;
+    },
+  };
+});
+
+// Pass-through spy on the REAL audioOut, so the probe can state whether the
+// assistant was actually AUDIBLE when a transcript arrived. "No cut" proves
+// nothing if there was no playback to cut.
+vi.mock("../lib/voice/audioOut.js", async (importActual) => {
+  const actual = await importActual();
+  return {
+    ...actual,
+    createAudioOut: (opts) => {
+      const inst = actual.createAudioOut(opts);
+      H.audioOuts.push(inst);
+      return inst;
+    },
+  };
+});
+
+// Pass-through spy on the REAL turn manager, so the barge probe can report
+// WHY a decision went the way it did instead of only that it did. A row that
+// says "no cut" is ambiguous on its own: it could mean the gates worked, or
+// that the assistant was not speaking and there was nothing to cut.
+vi.mock("../lib/voice/turnManager.js", async (importActual) => {
+  const actual = await importActual();
+  return {
+    ...actual,
+    createTurnManager: (opts) => {
+      const tm = actual.createTurnManager(opts);
+      return {
+        ...tm,
+        handleFinal: (text, meta) => {
+          const decision = tm.handleFinal(text, meta);
+          H.finalDecisions.push({ text, meta, ...decision });
+          return decision;
+        },
+      };
     },
   };
 });
@@ -541,5 +589,157 @@ describe("cutoff simulation", () => {
     console.log("  fixes should not be trusted to have fixed anything.\n");
 
     expect(rows.length).toBe(scenarios.length);
+  }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // FALSE BARGE-IN PROBE — the other half of the reported bug.
+  //
+  // The table above measures the assistant talking over the CALLER. This
+  // measures the reverse: the caller being heard to interrupt when they did
+  // not. Reported as "whenever we intend to cut it off, it cuts off, but
+  // whenever we are not and we accidentally slip a word or rarely a cough it
+  // will cut", and markedly worse on the UK number.
+  //
+  // Runs the REAL inboundVad, turnManager, echoGuard, audioOut and session
+  // wiring. Only the noise itself is modelled: a burst of voiced frames plus
+  // whatever Deepgram would have made of it, with the confidence such a
+  // transcript actually carries.
+  //
+  // The measurement is whether the assistant's TTS turn was aborted, which is
+  // exactly what a barge-in does to it.
+  // -------------------------------------------------------------------------
+  async function runBargeProbe({ burstMs, text, confidence, endpointMs = 150 }) {
+    H.sttInstances.length = 0;
+    H.ttsTurns.length = 0;
+    H.assistantAudioAtMs.length = 0;
+    H.finalDecisions.length = 0;
+    H.audioOuts.length = 0;
+    H.llmTtfbMs = 200;
+    H.ttsTtfbMs = 40;
+    // ~5s of assistant audio, so it is still playing after even the longest
+    // burst below. At 2s the deliberate-interruption cases arrived AFTER
+    // playback had finished, and "no cut" then meant "nothing left to cut"
+    // rather than "the gates held" — a probe that proves nothing.
+    H.ttsChunkFrames = 250;
+
+    let clock = 0;
+    H.nowMs = () => clock;
+    const tick = async (ms, buf) => {
+      for (let t = 0; t < ms; t += FRAME_MS) {
+        ws.emit({ event: "media", media: { payload: buf.toString("base64") } });
+        clock += FRAME_MS;
+        await vi.advanceTimersByTimeAsync(FRAME_MS);
+      }
+    };
+
+    const handleVoiceSessionConnection = await freshSession();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws, undefined, { now: () => clock });
+    ws.emit({
+      event: "start",
+      start: {
+        callSid: `SIMBARGE-${++H.sidCounter}`,
+        streamSid: `SIMBARGESTREAM-${H.sidCounter}`,
+        customParameters: { businessPhone: "+15550000000", callerPhone: "+15559998888" },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(5);
+
+    const stt = H.sttInstances[0];
+    if (!stt) throw new Error("STT stream never opened");
+
+    // Settle the greeting, then have the caller ask something so the assistant
+    // starts a reply we can try to interrupt.
+    H.ttsTurns[0]?.opts?.onDone?.({});
+    await tick(400, QUIET);
+    await tick(600, LOUD);
+    await tick(endpointMs + 60, QUIET);
+    const audioCountBefore = H.assistantAudioAtMs.length;
+    stt.opts.onFinal?.("What time do you open on Tuesday?", { confidence: 0.95 });
+
+    // Wait for the REPLY's audio specifically — not merely for any audio. The
+    // greeting has already played by this point, so a bare length check exits
+    // instantly and the probe then measures the greeting's TTS turn, which the
+    // caller's own legitimate question had already barged. That reads as "a
+    // cough cut the assistant off" when nothing of the sort happened.
+    for (let waited = 0; waited < 4000 && H.assistantAudioAtMs.length === audioCountBefore; waited += FRAME_MS) {
+      await tick(FRAME_MS, QUIET);
+    }
+    const replyTurn = H.ttsTurns[H.ttsTurns.length - 1];
+    const playingBefore = H.assistantAudioAtMs.length > audioCountBefore;
+
+    // Let the caller's own speech fall out of the VAD's memory before the
+    // noise. Without this the burst inherits the 600ms run they just produced,
+    // and the sustained-speech gate passes for the wrong reason.
+    await tick(600, QUIET);
+
+    // The noise: a burst of genuine energy (a cough HAS energy — that is the
+    // whole problem) followed by whatever STT made of it.
+    const audioAtMs = H.assistantAudioAtMs[H.assistantAudioAtMs.length - 1]?.atMs ?? null;
+    await tick(burstMs, LOUD);
+    const clockAtFinal = clock;
+    const audioOut = H.audioOuts[H.audioOuts.length - 1];
+    const audibleAtFinal = !!audioOut?.isPlaying?.(150);
+    stt.opts.onFinal?.(text, { confidence });
+    await vi.advanceTimersByTimeAsync(50);
+
+    return {
+      aborted: replyTurn?.abort.mock.calls.length > 0,
+      playingBefore,
+      audioAtMs,
+      clockAtFinal,
+      sinceAudioMs: audioAtMs === null ? null : clockAtFinal - audioAtMs,
+      turnsAtFinal: H.ttsTurns.length,
+      audibleAtFinal,
+      decision: H.finalDecisions[H.finalDecisions.length - 1] || null,
+    };
+  }
+
+  it("does not let a cough or a stray word cut the assistant off, but a real interruption still does", async () => {
+    const cases = [
+      // A cough. ~220ms of energy — enough to latch the VAD, which is why the
+      // old "was there energy recently" check could never reject it — forced
+      // by STT into the nearest vocabulary item, with the low confidence such
+      // a transcript actually carries.
+      { name: "cough heard as 'sorry'", burstMs: 220, text: "sorry", confidence: 0.28, expectAbort: false },
+      // A stray word slipped while the assistant talks. Two words used to sail
+      // straight through: the old rule doubted only ONE-word finals.
+      { name: "stray two-word mutter", burstMs: 240, text: "uh what", confidence: 0.35, expectAbort: false },
+      // Line noise that STT rendered as an interrupt cue. A cue used to bypass
+      // every remaining gate outright.
+      { name: "noise heard as cue 'no'", burstMs: 200, text: "no", confidence: 0.22, expectAbort: false },
+
+      // ...and the half that must NOT regress. A guard that stops real
+      // interruptions is worse than the noise it filters.
+      { name: "deliberate 'stop'", burstMs: 500, text: "stop", confidence: 0.93, expectAbort: true },
+      { name: "deliberate sentence", burstMs: 900, text: "actually can we make it Wednesday instead", confidence: 0.91, expectAbort: true },
+    ];
+
+    const rows = [];
+    for (const c of cases) {
+      rows.push({ ...c, ...(await runBargeProbe(c)) });
+    }
+
+    console.log("\n  FALSE BARGE-IN PROBE — was the assistant cut off?\n");
+    console.log("  case                          expected     actual   ok   sinceAudio  audible  decision");
+    console.log("  " + "-".repeat(86));
+    for (const r of rows) {
+      const ok = r.aborted === r.expectAbort ? "yes" : "NO";
+      console.log(
+        `  ${r.name.padEnd(28)} ${(r.expectAbort ? "cut" : "no cut").padEnd(11)} ${(r.aborted ? "cut" : "no cut").padEnd(8)} ${ok.padEnd(4)} ${String(r.sinceAudioMs).padStart(7)}ms  ${(r.audibleAtFinal ? "yes" : "NO ").padEnd(4)} ${(r.decision ? `${r.decision.action}/${r.decision.reason ?? "-"}` : "none")}`
+      );
+    }
+    console.log("");
+
+    // SELF-TEST, non-negotiable. If the assistant was not actually audible when
+    // the transcript landed, "not cut off" is meaningless — every row would
+    // pass for the wrong reason, and the table would read as a finding.
+    for (const r of rows) {
+      expect(r.playingBefore, `${r.name}: the reply never produced audio, so this proves nothing`).toBe(true);
+      expect(r.audibleAtFinal, `${r.name}: assistant was not audible, so there was nothing to cut off`).toBe(true);
+    }
+    for (const r of rows) {
+      expect(r.aborted, `${r.name}: expected ${r.expectAbort ? "a barge-in" : "no barge-in"}`).toBe(r.expectAbort);
+    }
   }, 120_000);
 });

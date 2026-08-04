@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createTurnManager, BACKCHANNELS, INTERRUPT_CUES } from "../lib/voice/turnManager.js";
 
-function makeDeps({ speaking = true, vadActive = true } = {}) {
+// voicedRunMs defaults to a value comfortably above BARGE_MIN_VOICED_MS (250),
+// i.e. "the caller has genuinely been speaking". Tests that care about the
+// cough case override it — a cough is a ~200ms burst, which clears isActive()
+// but not this.
+function makeDeps({ speaking = true, vadActive = true, voicedRunMs = 800 } = {}) {
   const vad = {
     processFrame: vi.fn(() => ({ voiced: true, voiceActive: vadActive, rms: 1000 })),
     isActive: vi.fn(() => vadActive),
   };
+  // Derived from the LIVE isActive mock, not the captured flag, so a test that
+  // flips isActive to "no voice" gets a zero run for free — which is what the
+  // real VAD does, since a run cannot outlive its activation.
+  vad.voicedRunMs = vi.fn(() => (vad.isActive() ? voicedRunMs : 0));
   const audioOut = {
     isPlaying: vi.fn(() => speaking),
   };
@@ -203,11 +211,26 @@ describe("turnManager.js — createTurnManager", () => {
       expect(deps.onTurnEnd).toHaveBeenCalledWith("Bob");
     });
 
-    it("while speaking, a final containing a cue amid filler still interrupts", () => {
-      deps.vad.isActive.mockReturnValue(false);
+    it("while speaking, a final containing a cue amid filler interrupts when the caller really spoke", () => {
       tm.handleFinal("uh wait");
       expect(deps.onInterrupt).toHaveBeenCalledWith("uh wait");
       expect(deps.onTurnEnd).toHaveBeenCalledWith("uh wait");
+    });
+
+    // CONTRACT CHANGE. A cue used to bypass every remaining gate, on the theory
+    // that "stop"/"wait" is urgent enough to act on unverified. That is also
+    // exactly how a mis-transcribed noise burst cut a caller off: a cough
+    // rendered as "no" or "sorry" went straight through to an interrupt.
+    //
+    // A cue still exempts a final from the WORD-COUNT rule — an urgent "stop"
+    // is one word and must work — but no longer from the evidence that the
+    // caller actually made a sound.
+    it("while speaking, a cue with NO mic energy at all is treated as a phantom", () => {
+      deps.vad.isActive.mockReturnValue(false);
+      deps.vad.voicedRunMs.mockReturnValue(0);
+      const result = tm.handleFinal("uh wait");
+      expect(result).toEqual({ action: "ignore", reason: "no_vad" });
+      expect(deps.onInterrupt).not.toHaveBeenCalled();
     });
 
     it("while speaking, a null final does not trigger a spurious interrupt (STT silence-timeout artifact)", () => {
@@ -463,5 +486,100 @@ describe("turnManager.js — short-final echo containment (the cutoff bug)", () 
     const deps = makeDeps({ speaking: true, vadActive: true });
     const tm = createTurnManager({ ...deps, now: () => 1000 });
     expect(tm.handleFinal("no").action).toBe("interrupt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The reported bug: "we accidentally slip a word or rarely a cough and it cuts".
+//
+// A cough is a ~200ms burst of high energy. The VAD latches voiceActive after
+// activeMs (200) and holds it for hangoverMs (300), and turnManager then
+// vouched for any transcript arriving within FINAL_VOICE_WINDOW_MS (1500). So
+// every cheap noise arrived pre-corroborated: whatever Deepgram forced it into
+// — "huh", "no", "sorry" — was treated as a caller interrupting.
+//
+// Nothing measured HOW LONG the caller had been speaking, and that is the one
+// thing that actually separates a cough from a sentence.
+// ---------------------------------------------------------------------------
+describe("turnManager.js — cough and noise rejection", () => {
+  /** VAD state for a single short burst: energy present, but no real speech. */
+  const coughDeps = () => makeDeps({ speaking: true, vadActive: true, voicedRunMs: 180 });
+
+  it("does not let a cough transcribed as a cue interrupt", () => {
+    const deps = coughDeps();
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    const result = tm.handleFinal("sorry");
+
+    expect(result).toEqual({ action: "ignore", reason: "no_vad" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("does not let a cough transcribed as two words interrupt", () => {
+    // The old rule doubted only ONE-word finals (SHORT_FINAL_MIN_WORDS = 2), so
+    // any two-word scrap went straight through with no VAD check whatsoever.
+    const deps = coughDeps();
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    const result = tm.handleFinal("uh huh what");
+
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+    expect(result.action).toBe("ignore");
+  });
+
+  it("does not let a low-confidence scrap interrupt, even with sustained energy", () => {
+    // Deepgram reports how sure it is; the pipeline threw that away entirely.
+    // Noise forced into the nearest vocabulary item is exactly what a speech
+    // model is uncertain about.
+    const deps = makeDeps({ speaking: true, vadActive: true, voicedRunMs: 900 });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    const result = tm.handleFinal("stop", { confidence: 0.21 });
+
+    expect(result).toEqual({ action: "ignore", reason: "low_confidence" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  // The other half of the bug report: "whenever we intend to cut it off, it
+  // cuts off". That must not regress — a guard that stops real interruptions
+  // is worse than the noise it filters.
+  it("STILL interrupts on a deliberate one-word interruption", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true, voicedRunMs: 400 });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    const result = tm.handleFinal("stop", { confidence: 0.95 });
+
+    expect(result.action).toBe("interrupt");
+    expect(deps.onInterrupt).toHaveBeenCalledWith("stop");
+  });
+
+  it("STILL interrupts on a full sentence, without needing to clear the short-final bars", () => {
+    // A caller who says a whole sentence over the assistant is unambiguously
+    // interrupting, so the sustained-voice and confidence gates never apply.
+    const deps = makeDeps({ speaking: true, vadActive: true, voicedRunMs: 50 });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    const result = tm.handleFinal("actually can we make it Wednesday instead", { confidence: 0.4 });
+
+    expect(result.action).toBe("interrupt");
+  });
+
+  it("treats an unreported confidence as acceptable rather than as noise", () => {
+    // Deepgram omits confidence on some events. Reading "not reported" as "not
+    // confident" would suppress real interruptions on a whole class of message.
+    const deps = makeDeps({ speaking: true, vadActive: true, voicedRunMs: 400 });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    expect(tm.handleFinal("stop", {}).action).toBe("interrupt");
+  });
+
+  it("falls back to isActive when the VAD has no voicedRunMs (injected stub)", () => {
+    // turnManager accepts an injected vad; a stub without the method must not
+    // silently suppress every barge-in.
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    delete deps.vad.voicedRunMs;
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    expect(tm.handleFinal("stop").action).toBe("interrupt");
   });
 });

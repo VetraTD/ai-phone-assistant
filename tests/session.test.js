@@ -336,6 +336,31 @@ describe("mapLanguage — Deepgram nova-3 language codes", () => {
     expect(mapLanguage({})).toBe("en-US");
     expect(mapLanguage({ languagesSpoken: ["xx"] })).toBe("en-US");
   });
+
+  // A UK business is configured as ["en"] like every other English one, so it
+  // ran Deepgram on a US acoustic model. British vowels through en-US raise the
+  // word-error rate, and every word error is a chance to invent a transcript
+  // that trips barge-in — a direct mechanical reason false cutoffs were
+  // markedly worse on the +44 number than on the US one.
+  //
+  // resolveLocale already worked this out; it was simply never wired to STT.
+  it("runs a UK business on en-GB rather than a US acoustic model", () => {
+    expect(mapLanguage({ languagesSpoken: ["en"], timezone: "Europe/London" })).toBe("en-GB");
+  });
+
+  it("still runs a US business on en-US", () => {
+    expect(mapLanguage({ languagesSpoken: ["en"], timezone: "America/Chicago" })).toBe("en-US");
+  });
+
+  it("follows a British-accented voice even without a UK timezone", () => {
+    // The other signal resolveLocale uses: an operator who picked a British
+    // voice is telling us something about their callers.
+    const british = VOICE_CATALOG.find((v) => v.accent === "british");
+    expect(british, "voice catalog should contain a british-accented voice").toBeTruthy();
+    expect(
+      mapLanguage({ languagesSpoken: ["en"], voiceProvider: "elevenlabs", voiceId: british.elevenVoiceId })
+    ).toBe("en-GB");
+  });
 });
 
 describe("TRANSFER_TRIGGERS regex", () => {

@@ -171,7 +171,55 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     fakeSocket.emit("message", resultsMsg({ transcript: "world", is_final: true, speech_final: true }));
 
     expect(onFinal).toHaveBeenCalledTimes(1);
-    expect(onFinal).toHaveBeenCalledWith("hello world");
+    // The second argument is the transcript's confidence, forwarded so
+    // turnManager can refuse to let a low-confidence scrap interrupt.
+    expect(onFinal).toHaveBeenCalledWith("hello world", expect.objectContaining({ confidence: expect.any(Number) }));
+
+    handle.close();
+  });
+
+  // Confidence is the cheapest signal separating a real word from noise forced
+  // into the nearest vocabulary item, and the pipeline threw it away for the
+  // whole of its life: sttStream produced it on interims, session.js dropped
+  // it, and no threshold existed anywhere in the repo. turnManager now refuses
+  // to let a low-confidence scrap interrupt the assistant, which only works if
+  // finals carry it too.
+  it("2b. reports the MINIMUM confidence across the fragments making up a final", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+    const onFinal = vi.fn();
+
+    const handle = await createSttStream({ callSid: "CA2b", onFinal });
+
+    // A final is assembled from several is_final results. The question being
+    // asked downstream is "could any part of this be noise?", so the weakest
+    // fragment is the honest answer — a mean would let one confident word
+    // launder a garbage one.
+    fakeSocket.emit("message", resultsMsg({ transcript: "hello", is_final: true, confidence: 0.95 }));
+    fakeSocket.emit("message", resultsMsg({ transcript: "world", is_final: true, speech_final: true, confidence: 0.31 }));
+
+    expect(onFinal).toHaveBeenCalledWith("hello world", { confidence: 0.31 });
+
+    handle.close();
+  });
+
+  it("2c. reports undefined confidence rather than inventing one when Deepgram omits it", async () => {
+    const fakeSocket = createFakeSocket();
+    mockConnect.mockResolvedValue(fakeSocket);
+    const onFinal = vi.fn();
+
+    const handle = await createSttStream({ callSid: "CA2c", onFinal });
+
+    // Downstream treats "not reported" as acceptable, not as "not confident" —
+    // so a fabricated 0 here would silently suppress real interruptions.
+    fakeSocket.emit("message", {
+      type: "Results",
+      is_final: true,
+      speech_final: true,
+      channel: { alternatives: [{ transcript: "stop" }] },
+    });
+
+    expect(onFinal).toHaveBeenCalledWith("stop", { confidence: undefined });
 
     handle.close();
   });
@@ -190,7 +238,7 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
     fakeSocket.emit("message", { type: "UtteranceEnd" });
 
     expect(onFinal).toHaveBeenCalledTimes(1);
-    expect(onFinal).toHaveBeenCalledWith("Stop");
+    expect(onFinal).toHaveBeenCalledWith("Stop", expect.objectContaining({ confidence: expect.any(Number) }));
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
 
     handle.close();

@@ -290,3 +290,89 @@ function loudFrameFor(vadInstance, amplitude, length = 160) {
   }
   return Buffer.alloc(length, bestByte);
 }
+
+// ---------------------------------------------------------------------------
+// voicedRunMs — how long the caller has actually been SPEAKING.
+//
+// isActive() answers "was there voice energy recently", which a cough satisfies
+// perfectly: activeMs is 200 and a cough is a ~200ms burst of high energy.
+// turnManager treated that as corroboration that the caller had spoken and let
+// a stray transcript cut the assistant off. Duration is the one thing that
+// separates a cough from a sentence, and nothing measured it.
+// ---------------------------------------------------------------------------
+describe("createVad — voicedRunMs (sustained-speech signal)", () => {
+  const FRAME_MS = 20;
+  const LOUD = Buffer.alloc(160, 0x10); // far from mu-law silence
+  const QUIET = Buffer.alloc(160, 0xff); // mu-law digital silence
+
+  /** Feed `ms` of audio, returning the clock afterwards. */
+  function feed(vad, buf, ms, startAt) {
+    let t = startAt;
+    for (let i = 0; i < ms; i += FRAME_MS) {
+      vad.processFrame(buf, t);
+      t += FRAME_MS;
+    }
+    return t;
+  }
+
+  it("reports 0 before any speech", () => {
+    const vad = createVad();
+    expect(vad.voicedRunMs(0)).toBe(0);
+  });
+
+  it("a cough-length burst stays below the barge threshold", () => {
+    // ~240ms of energy — long enough to latch voiceActive, which is exactly
+    // why the old isActive()-only check could never reject a cough.
+    //
+    // The margin here is deliberately narrow, and honestly so: coughs run
+    // roughly 200-500ms, so duration alone does not separate every one of them
+    // from a clipped word. That is why it is not the only new gate — a long
+    // cough forced into a vocabulary item is precisely what Deepgram reports
+    // low confidence for, and turnManager requires both.
+    const vad = createVad();
+    const t = feed(vad, LOUD, 240, 0);
+
+    expect(vad.isActive(t)).toBe(true); // the old signal says "voice!"
+    expect(vad.voicedRunMs(t)).toBeLessThan(250); // the new one is not fooled
+  });
+
+  it("sustained speech clears the threshold comfortably", () => {
+    const vad = createVad();
+    const t = feed(vad, LOUD, 900, 0);
+
+    expect(vad.voicedRunMs(t)).toBeGreaterThanOrEqual(250);
+  });
+
+  it("survives the micro-gaps inside real speech rather than resetting on each one", () => {
+    // Natural speech is not one unbroken block of energy. If a single quiet
+    // frame reset the measurement, no real caller would ever clear the bar.
+    const vad = createVad();
+    let t = feed(vad, LOUD, 400, 0);
+    t = feed(vad, QUIET, 40, t); // brief gap, well inside hangoverMs
+    t = feed(vad, LOUD, 400, t);
+
+    expect(vad.voicedRunMs(t)).toBeGreaterThanOrEqual(250);
+  });
+
+  it("goes back to 0 once the activation lapses, so a stale burst cannot vouch for a later transcript", () => {
+    const vad = createVad();
+    let t = feed(vad, LOUD, 900, 0);
+    expect(vad.voicedRunMs(t)).toBeGreaterThanOrEqual(250);
+
+    // Silence past hangoverMs (300).
+    t = feed(vad, QUIET, 600, t);
+
+    expect(vad.isActive(t)).toBe(false);
+    expect(vad.voicedRunMs(t)).toBe(0);
+  });
+
+  it("reset() clears it", () => {
+    const vad = createVad();
+    const t = feed(vad, LOUD, 900, 0);
+    expect(vad.voicedRunMs(t)).toBeGreaterThan(0);
+
+    vad.reset();
+
+    expect(vad.voicedRunMs(t)).toBe(0);
+  });
+});
