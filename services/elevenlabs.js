@@ -110,6 +110,7 @@ export function createTtsConnection({
 
   let open = false;
   let closed = false; // true once close() was called (intentionally) OR a terminal error/timeout fired
+  let sawFinal = false; // true once the server reported isFinal — the turn's audio is complete
   let handshakeSent = false;
   let sendQueue = [];
   let connectTimer = null;
@@ -193,6 +194,9 @@ export function createTtsConnection({
       }
     }
     if (msg.isFinal) {
+      // The turn's audio is complete. Whatever the server does with the socket
+      // from here is cleanup, not failure — see the close handler.
+      sawFinal = true;
       onFinal?.();
     }
   });
@@ -211,6 +215,22 @@ export function createTtsConnection({
     if (closed) return; // already handled (intentional close, connect timeout, or prior error)
     closed = true;
     const reasonText = reason?.toString?.() || "";
+
+    // The server closing a socket whose stream already reported isFinal is
+    // routine cleanup of a finished turn. Reporting it as a failure was a live
+    // hazard, not a cosmetic one: ttsHealth's benign-close filter matches on
+    // REASON TEXT, and this close arrives with an EMPTY reason (observed
+    // 2026-08-04: code 1000, no reason, right after a completed synthesis). It
+    // therefore counted toward CONSECUTIVE_THRESHOLD, and two in a row open the
+    // breaker and drop the rest of the call to the Google fallback — the exact
+    // incident recorded at lib/voice/ttsHealth.js:29-34.
+    //
+    // Gated on isFinal rather than on the close code: a close with no isFinal
+    // means the audio was cut short, which is a real failure whatever the code.
+    if (sawFinal) {
+      log.debug("tts_el_close_after_final", { voiceId, closeCode: code, reason: reasonText });
+      return;
+    }
     const err = new Error(
       `ElevenLabs TTS connection closed unexpectedly${reasonText ? ` (${reasonText})` : ""}`
     );

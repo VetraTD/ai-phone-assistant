@@ -38,7 +38,7 @@ const { instances, FakeWebSocket } = vi.hoisted(() => {
 vi.mock("ws", () => ({ default: FakeWebSocket }));
 vi.mock("../lib/logger.js", () => ({ log: { debug: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
-import { synthesizeMulawOnce } from "../services/elevenlabs.js";
+import { synthesizeMulawOnce, createTtsConnection } from "../services/elevenlabs.js";
 
 function b64(buf) { return Buffer.from(buf).toString("base64"); }
 
@@ -79,5 +79,52 @@ describe("services/elevenlabs.js synthesizeMulawOnce — one-shot micro-utteranc
     const buf = await synthesizeMulawOnce({ voiceId: "voiceA", text: "" });
     expect(buf).toEqual(Buffer.alloc(0));
     expect(instances).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A close that arrives AFTER isFinal is routine cleanup of a finished turn.
+//
+// Observed live on 2026-08-04 during the TTS A/B run: code 1000, empty reason,
+// immediately after a completed synthesis. It was reported as an error, and
+// ttsHealth's benign-close filter matches on REASON TEXT — an empty reason does
+// not match, so it counts toward CONSECUTIVE_THRESHOLD (2). Two of these in a
+// row disable ElevenLabs and drop the rest of the call to the Google fallback,
+// which is the exact incident recorded at lib/voice/ttsHealth.js:29-34.
+// ---------------------------------------------------------------------------
+describe("createTtsConnection — a close after isFinal is not a failure", () => {
+  beforeEach(() => {
+    instances.length = 0;
+    process.env.ELEVENLABS_API_KEY = "test-xi-key";
+  });
+
+  it("does not report an error when the socket closes after isFinal", () => {
+    const onError = vi.fn();
+    const onFinal = vi.fn();
+    createTtsConnection({ voiceId: "voiceA", onAudio: () => {}, onFinal, onError });
+
+    const sock = instances[0];
+    sock._open();
+    sock._message({ audio: b64(Buffer.from([0x01, 0x02])) });
+    sock._message({ isFinal: true });
+    sock._emit("close", 1000, Buffer.from(""));
+
+    expect(onFinal).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  // The other half of the contract: a close with no isFinal means the audio was
+  // cut short. That IS a failure and the breaker must still see it.
+  it("still reports an error when the socket closes before isFinal", () => {
+    const onError = vi.fn();
+    createTtsConnection({ voiceId: "voiceA", onAudio: () => {}, onFinal: () => {}, onError });
+
+    const sock = instances[0];
+    sock._open();
+    sock._message({ audio: b64(Buffer.from([0x01])) });
+    sock._emit("close", 1000, Buffer.from(""));
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0].code).toBe("TTS_CONNECTION_CLOSED");
   });
 });
