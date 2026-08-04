@@ -66,7 +66,7 @@ existed (`lib/probe/report.js`), so the conclusion isn't fitted to the result:
 |---|---|
 | `stt_tail_ms` dominates | `classifyHold` — the attribution table names the branch. Self-inflicted, no vendor involved. |
 | `stt_endpoint_ms` dominates | Deepgram's window. `STT_ENDPOINTING_MS` is a deploy-time knob; possibly no code change at all. |
-| `llm_ttfb_ms` dominates | The Groq test is worth running — but fix the cache prefix first if the hit rate is ~0. |
+| `llm_ttfb_ms` dominates | The Groq test is worth running. Do NOT wait on the prompt cache — a ~0% hit rate is expected on `gemini-3.6-flash` and is not a prefix bug (see the caching section at the end). |
 | `tts_ttfb_ms` dominates | Cartesia's TTFA is worth real money. Weight Test 2 toward latency. |
 | `playout_ms` dominates | The pacing pump. Cheapest possible fix, entirely ours. |
 | probe − server is large | Carrier transit. Nothing here fixes it — stop optimising. |
