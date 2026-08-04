@@ -24,7 +24,10 @@
 const ok = (pass, name, detail) => ({ pass: !!pass, name, detail: detail ?? "" });
 
 /**
- * Flat, ordered list of every executed tool call ({ name, args }). Prefers the
+ * Flat, ordered list of every tool call the model made ({ name, args }). Under
+ * VOICE_INTENT_MARKER this includes a synthetic set_call_intent entry parsed out
+ * of the reply text, which is why scenario 25 also asserts on finalState.intent
+ * — see finalIntentIsOneOf. Prefers the
  * aggregate `ctx.toolCalls` the runner builds; falls back to flattening the
  * per-turn view so synthetic test ctxs (and partial ctxs) still work.
  */

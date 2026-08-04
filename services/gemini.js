@@ -6,7 +6,7 @@ import { executeToolCall } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
-import { createMarkerStripper } from "../lib/intentMarker.js";
+import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
 import {
   collectStaticFragments,
@@ -106,10 +106,13 @@ const DEFAULT_CONFIG = {
  * Build the tool declarations for a call.
  *
  * Two tools are ENGINE-owned and defined here rather than in a capability pack:
- * set_call_intent and end_call are how the engine drives its own step machine,
- * so they exist on every call no matter which capabilities a business has. All
- * other declarations come from the capability registry, in registry order —
- * see capabilities/index.js for why that order is load-bearing.
+ * set_call_intent and end_call are how the engine drives its own step machine.
+ * end_call exists on every call no matter which capabilities a business has;
+ * set_call_intent is omitted under `markerMode`, where the model declares the
+ * intent in the reply itself instead (see INTENT LINE in the static prefix and
+ * lib/intentMarker.js). All other declarations come from the capability
+ * registry, in registry order — see capabilities/index.js for why that order is
+ * load-bearing.
  *
  * Accepts either the full business config or a bare allowedTasks array. The
  * array form is the original signature and several tests still use it, but it
@@ -1149,7 +1152,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   let endCallArgs = null;
   let transferRequested = null;
   const toolResults = [];
-  // Ordered {name, args} trace of every executed tool call. Additive: the live
+  // Ordered {name, args} trace of every tool call the model made. Under
+  // VOICE_INTENT_MARKER it also carries a synthetic set_call_intent entry for a
+  // marker parsed out of the reply, which never ran through executeToolCall —
+  // the declaration is real, only its transport differs. Additive: the live
   // session never reads it (it is not in applyReply's destructure), but the
   // eval/text-session harness needs the ARGS, which toolResults/capabilityEffects
   // do not carry. Accumulated here alongside the transient `{ toolCall }` events
@@ -1230,7 +1236,11 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
           // was still stripped, so nothing leaks; without this line the drift
           // would be invisible — the reply looks clean and the intent simply
           // never updates.
-          log.info("intent_marker_rejected", { value: out.rejected, step });
+          log.info("intent_marker_rejected", {
+            value: safeRejectedValue(out.rejected),
+            length: out.rejected.length,
+            step,
+          });
         }
 
         // Only a CHANGE is an intent event. The prompt asks for the line on

@@ -21,6 +21,12 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 // drive the step machine itself rather than doing anything for a business, so
 // they exist on every call regardless of configuration.
 //
+// Exception: under VOICE_INTENT_MARKER, set_call_intent is not declared to the
+// model at all — the intent arrives in the reply text instead
+// (lib/intentMarker.js), and services/gemini.js synthesizes the same
+// stateEffects shape. The case below stays as a defensive fallback; the model
+// simply has no way to reach it in that mode.
+//
 // Everything else dispatches to the capability pack that owns the tool name
 // (capabilities/index.js), falling back to the business's own webhook
 // integrations for names no pack claims.
