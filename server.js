@@ -17,7 +17,8 @@ import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
-import { getLatencyStats, getCallStats } from "./lib/voice/metrics.js";
+import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
+import { createHash, timingSafeEqual } from "node:crypto";
 import * as voiceHealth from "./lib/voice/health.js";
 import { buildDegradedVoicemailTwiml } from "./lib/twiml.js";
 import {
@@ -85,7 +86,16 @@ const CALL_MAX_DURATION_MS =
 
 app.use(helmet());
 app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+
+// Default JSON body parsing, at express's 100kb default — deliberately left
+// tight. The one route that needs more (the probe caller-audio upload, a few
+// hundred kb of mu-law) declares its own larger parser inline, so the raised
+// limit applies to exactly that path and nothing else.
+const defaultJsonParser = express.json();
+app.use((req, res, next) => {
+  if (req.path === "/api/debug/probe-script") return next();
+  return defaultJsonParser(req, res, next);
+});
 
 // Match dashboard backend: prod domains + localhost. Override/extend with CORS_ORIGIN (comma-separated).
 const defaultCorsOrigins = [
@@ -547,12 +557,81 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
 // Dev-only: per-turn voice pipeline latency stats (Phase 0 instrumentation)
 // ---------------------------------------------------------------------------
 
+/**
+ * Is this request allowed to see debug data?
+ *
+ * Two independent conditions, both required. DEBUG_ENDPOINTS is an operational
+ * switch, not a secret — during a measurement run these routes are live on a
+ * public host, where the flag alone would serve call SIDs and infrastructure
+ * timing to anyone who guesses the path. So a shared secret is required as
+ * well, and it FAILS CLOSED: no DEBUG_TOKEN configured means no access, rather
+ * than falling back to flag-only.
+ *
+ * Comparison is over SHA-256 digests, which makes it constant-time in the
+ * value AND fixed-length — raw timingSafeEqual throws on a length mismatch,
+ * and that throw would become a 500 that confirms the route exists.
+ *
+ * @param {import("express").Request} req
+ * @returns {boolean}
+ */
+function debugAccessAllowed(req) {
+  if (process.env.DEBUG_ENDPOINTS !== "true") return false;
+  const expected = process.env.DEBUG_TOKEN;
+  if (!expected) return false;
+  const supplied = req.get("x-debug-token");
+  if (!supplied) return false;
+  const a = createHash("sha256").update(String(supplied)).digest();
+  const b = createHash("sha256").update(String(expected)).digest();
+  return timingSafeEqual(a, b);
+}
+
 app.get("/api/debug/latency", async (req, res) => {
-  if (process.env.DEBUG_ENDPOINTS !== "true") {
-    return res.status(404).end();
-  }
+  // 404, never 401/403: a rejected request must be indistinguishable from a
+  // route that does not exist, so probing can't confirm the endpoint is there.
+  if (!debugAccessAllowed(req)) return res.status(404).end();
   const { ttsHealth } = await import("./lib/voice/ttsHealth.js");
   res.json({ ...getLatencyStats(), elBreaker: ttsHealth.getState() });
+});
+
+// The ring buffer lives as long as the process, so without this a second
+// measurement run would pool with the first and blur any before/after
+// comparison. Called by scripts/latency-probe.js before each run.
+app.post("/api/debug/latency/reset", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  clearStats();
+  // Probe results are per-run too — leaving them would pool a new run's
+  // ground truth with the previous one's.
+  const { clearProbeResults } = await import("./lib/probe/probeSocket.js");
+  clearProbeResults();
+  res.json({ cleared: true });
+});
+
+// Caller audio for the probe leg, uploaded before a run.
+//
+// A dedicated body parser: the global express.json() caps at 100kb and the
+// script is a few hundred kb of mu-law. Scoped to this route so the limit
+// increase cannot widen the attack surface of any other endpoint — and the
+// route itself is behind the same fail-closed token check.
+app.post("/api/debug/probe-script", express.json({ limit: "8mb" }), async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  try {
+    const { setProbeScript } = await import("./lib/probe/probeSocket.js");
+    const summary = setProbeScript(req.body?.lines);
+    log.info("probe_script_installed", summary);
+    res.json({ installed: true, ...summary });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Probe-side ground truth: what the far end of the phone network measured.
+// Kept separate from /latency because it comes from a different clock, and
+// conflating the two is exactly the mistake this run exists to avoid.
+app.get("/api/debug/probe-results", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  const { getProbeResults } = await import("./lib/probe/probeSocket.js");
+  const runs = getProbeResults();
+  res.json({ calls: runs.length, runs });
 });
 
 // ---------------------------------------------------------------------------
@@ -599,13 +678,43 @@ export function selectPipelineHandler() {
     : handleVoiceSessionConnection;
 }
 
+/**
+ * Is this upgrade allowed to become a probe leg?
+ *
+ * Same fail-closed rule as the debug HTTP routes, but the token arrives as a
+ * query param because Twilio's <Stream url="..."> cannot set headers. That
+ * makes the URL itself a credential — it is generated per run and the whole
+ * feature is off unless DEBUG_ENDPOINTS is explicitly "true".
+ *
+ * @param {URL} url
+ * @returns {boolean}
+ */
+function probeUpgradeAllowed(url) {
+  if (process.env.DEBUG_ENDPOINTS !== "true") return false;
+  const expected = process.env.DEBUG_TOKEN;
+  if (!expected) return false;
+  const supplied = url.searchParams.get("token");
+  if (!supplied) return false;
+  const a = createHash("sha256").update(String(supplied)).digest();
+  const b = createHash("sha256").update(String(expected)).digest();
+  return timingSafeEqual(a, b);
+}
+
 function attachWebSocket(httpServer) {
-  httpServer.on("upgrade", (req, socket, head) => {
+  httpServer.on("upgrade", async (req, socket, head) => {
     // Only accept upgrades on the media-stream path
-    const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
     if (pathname === "/twilio/media-stream") {
       wss.handleUpgrade(req, socket, head, (ws) => {
         selectPipelineHandler()(ws, req);
+      });
+    } else if (pathname === "/twilio/probe-stream" && probeUpgradeAllowed(url)) {
+      // Scripted caller side of a latency probe call. Imported lazily so the
+      // probe never loads — and costs nothing — in normal operation.
+      const { handleProbeConnection } = await import("./lib/probe/probeSocket.js");
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleProbeConnection(ws);
       });
     } else {
       socket.destroy();
