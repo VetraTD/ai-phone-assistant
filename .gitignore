@@ -7,3 +7,17 @@ ngrok.yml
 voice-previews/
 # Eval suite run artifacts (eval/run.js writes <ISO-ts>.json here)
 eval/results/
+# Latency probe: synthesized caller audio and per-run measurements.
+# Audio is regenerable (scripts/latency-probe.js --synth) and runs are
+# environment-specific, so neither belongs in the repo.
+test-audio/
+latency-runs/
+# Blind TTS A/B answer keys — committing one would defeat the blinding
+# for anyone who reads the repo before listening.
+**/answer-key.json
+# Playwright MCP session artifacts (console dumps, page snapshots)
+.playwright-mcp/
+# Local UI review screenshots from the website rebuild — kept on disk as a
+# visual record, but they are build output, not source.
+/v-*.png
+/landing-*.png

@@ -11,7 +11,12 @@
     "test:appointments": "node scripts/test-appointments.js",
     "test:athena-token": "node scripts/test-athena-token.js",
     "chat": "node scripts/chat.js",
-    "eval": "node eval/run.js"
+    "eval": "node eval/run.js",
+    "probe:synth": "node scripts/latency-probe.js --synth",
+    "probe": "node scripts/latency-probe.js",
+    "probe:report": "node scripts/latency-probe.js --report-only",
+    "voice:ab": "node scripts/voice-ab-blind.js",
+    "voice:ab:call": "node scripts/voice-ab-call.js"
   },
   "repository": {
     "type": "git",
