@@ -5,7 +5,7 @@ import path from "node:path";
 import twilio from "twilio";
 import { buildDialPlan, MAX_CALLS } from "../lib/probe/dialPlan.js";
 import { buildReport } from "../lib/probe/report.js";
-import { SCRIPT_LINES, synthesizeCallerAudio, buildProbeScript } from "../lib/probe/script.js";
+import { synthesizeCallerAudio, buildProbeScript, resolveScriptLines } from "../lib/probe/script.js";
 
 // ---------------------------------------------------------------------------
 // Test 1 — measure the voice path.
@@ -33,6 +33,11 @@ function opt(name, fallback) {
   const i = args.indexOf(name);
   return i === -1 || i === args.length - 1 ? fallback : args[i + 1];
 }
+
+// Which caller script to run. "diagnostic" (default) hand-picks utterances to
+// exercise each classifyHold branch; "representative" is shaped like real
+// caller speech and is the one to use when sizing what those branches cost.
+const SCRIPT_NAME = opt("--script", "diagnostic");
 
 const BASE_URL = (process.env.PROBE_BASE_URL || process.env.BASE_URL || "").replace(/\/$/, "");
 const DEBUG_TOKEN = process.env.DEBUG_TOKEN || "";
@@ -78,16 +83,39 @@ async function debugPost(pathname, body) {
 
 // --- --synth: cache the caller audio, once -------------------------------
 if (has("--synth")) {
-  const { synthesizeMulaw, isConfigured } = await import("../services/googleTts.js");
-  if (!isConfigured()) {
-    die("Google TTS is not configured. Set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_TTS_API_KEY.");
+  const lines = resolveScriptLines(SCRIPT_NAME);
+  // Either engine works; both are a DIFFERENT voice from the assistant's, which
+  // is what keeps self-echo out of a measurement. Google emits 8kHz mu-law
+  // natively; the ElevenLabs path exists because Google credentials are not
+  // always present, and it uses a deliberately different catalog voice
+  // (daniel) from the assistant default (bella).
+  let synthesizeMulaw;
+  let voiceName;
+  if (opt("--tts", "google") === "elevenlabs") {
+    const { synthesizeMulawOnce } = await import("../services/elevenlabs.js");
+    if (!process.env.ELEVENLABS_API_KEY) die("ELEVENLABS_API_KEY is not set.");
+    voiceName = opt("--caller-voice", "onwK4e9ZLuTAKqWW03F9");
+    synthesizeMulaw = (text, voiceId) => synthesizeMulawOnce({ voiceId, text });
+  } else {
+    const google = await import("../services/googleTts.js");
+    if (!google.isConfigured()) {
+      die(
+        "Google TTS is not configured. Set GOOGLE_APPLICATION_CREDENTIALS or " +
+          "GOOGLE_TTS_API_KEY, or pass --tts elevenlabs."
+      );
+    }
+    synthesizeMulaw = google.synthesizeMulaw;
+    voiceName = opt("--caller-voice", "en-US-Chirp3-HD-Charon");
   }
+
   const { written, skipped } = await synthesizeCallerAudio({
     synthesizeMulaw,
+    voiceName,
     force: has("--force"),
+    lines,
   });
   console.log(`\n  Caller audio: ${written.length} written, ${skipped.length} already cached.`);
-  console.log(`  ${SCRIPT_LINES.length} lines in test-audio/caller/\n`);
+  console.log(`  ${lines.length} lines (${SCRIPT_NAME}) in test-audio/caller/\n`);
   process.exit(0);
 }
 
@@ -140,7 +168,7 @@ if (!plan.ok) {
 // Fail before spending money if the audio isn't cached.
 let localScript;
 try {
-  localScript = buildProbeScript();
+  localScript = buildProbeScript(resolveScriptLines(SCRIPT_NAME));
 } catch (err) {
   die(err.message);
 }
