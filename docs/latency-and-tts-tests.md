@@ -183,3 +183,75 @@ nearly everything. Threshold raised to 2000ms.
 
 **Always cross-check a probe-side anomaly against the server's turn count
 before treating it as a product defect.**
+
+---
+
+# The intent round-trip, removed — 2026-08-04
+
+Design: `docs/superpowers/specs/2026-08-03-intent-marker-design.md`.
+Shipped behind `VOICE_INTENT_MARKER`, default **off**.
+
+The model now declares intent as a line at the top of its reply
+(`<<intent:book_appointment>>`), stripped in `services/gemini.js` before any
+consumer sees it, instead of through a `set_call_intent` function call. One
+model round-trip per turn instead of two. `reply.intentArgs` arrives in the same
+shape, so the reducer, step machine, nudge strings and logs are untouched.
+
+`llm_tool_ms` and `llm_reply_after_tool_ms` were added first, so the round-trip
+is now visible at runtime rather than inferred — `llm_first_chunk` is stamped on
+the first *text* delta, which hid the whole first round inside `llm_ttfb_ms`.
+
+## Eval results, two runs per mode
+
+| | hard asserts | judge questions | marker leaks |
+|---|---|---|---|
+| tool path (flag off) | 47/50 | 91/98 | 0 |
+| marker (flag on) | **50/50** | **91/98** | 0 |
+
+Harness turn latency p50: **1,654ms → 925-981ms**. That is the text harness, not
+a phone call — the live probe number is still outstanding.
+
+## The suite is noisier than the effect it was asked to measure
+
+Two *identical* baseline runs, same model pins, minutes apart:
+
+| baseline run | hard | judge questions |
+|---|---|---|
+| 1 | 22/25 | 43/49 |
+| 2 | 25/25 | 48/49 |
+
+Each candidate/baseline pair showed exactly one judge regression, and it was a
+**different scenario each time** (`name-recall`, then `long-call-memory`). In the
+`name-recall` case both transcripts asked the caller to spell their surname —
+identical behaviour, opposite verdicts. The prompt *mandates* that ask
+(`appointments-db.static.txt:68`), so the judge question and the guardrail are in
+tension in both modes.
+
+Consequence for future work: a single pair of runs cannot resolve a difference of
+one or two judge verdicts. Note that the 2026-08-04 rewording attempt was
+reverted on exactly that kind of evidence — three judge regressions against one
+improvement, from one run. That does not make the revert wrong, but the finding
+was inside this noise band and was never re-measured.
+
+## A leak the tests did not catch, and the run did
+
+The first live eval run leaked a marker into the spoken reply of 4 of 25
+scenarios. Every one was a turn that called a tool: the model writes the intent
+line at the top of every **round**, and the stripper resolved once per **turn**,
+so the copy at the head of round two streamed straight through. Fixed by
+re-arming the stripper between rounds; the unit tests that now cover it were
+written from the four transcripts.
+
+`npm run eval:compare <baseline.json> <candidate.json>` diffs two runs per
+scenario, names the judge questions that moved, and sweeps every assistant reply
+for anything marker-shaped. It exists because `npm run eval`'s exit code comes
+from hard assertions alone — judge verdicts set `judgePass` and nothing else, so
+a regression there is invisible unless it is diffed deliberately.
+
+## Still outstanding
+
+- Live probe run, before and after, for the real `true_v2v_ms` number. Needs
+  `DEBUG_ENDPOINTS`/`DEBUG_TOKEN` set on Railway for the run and unset after.
+- One manual call doing the scenario-25 mid-call switch, listening for a spoken
+  marker.
+- Flip the flag on Railway only after both.
