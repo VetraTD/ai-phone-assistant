@@ -13,6 +13,7 @@
     "chat": "node scripts/chat.js",
     "eval": "node eval/run.js",
     "eval:compare": "node scripts/eval-compare.js",
+    "sim:cutoff": "vitest run --config vitest.sim.config.js",
     "probe:synth": "node scripts/latency-probe.js --synth",
     "probe": "node scripts/latency-probe.js",
     "probe:report": "node scripts/latency-probe.js --report-only",
