@@ -1,0 +1,117 @@
+[
+  {
+    "name": "end_call",
+    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up. Include a brief goodbye in your text response.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Brief reason the call is ending"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    }
+  },
+  {
+    "name": "record_customer_request",
+    "description": "Record a message or callback request after collecting the caller's name, callback number, and message (and preferred callback time for callbacks). Call this when the caller wants to leave a message or have someone call them back.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "request_type": {
+          "type": "string",
+          "enum": [
+            "message",
+            "callback"
+          ],
+          "description": "Whether this is a message to pass along or a request for a callback"
+        },
+        "caller_name": {
+          "type": "string",
+          "description": "Caller's name"
+        },
+        "callback_number": {
+          "type": "string",
+          "description": "Phone number to call back"
+        },
+        "message": {
+          "type": "string",
+          "description": "The message or reason for callback"
+        },
+        "preferred_time": {
+          "type": "string",
+          "description": "When they prefer to be called back (for callback type)"
+        }
+      },
+      "required": [
+        "request_type"
+      ]
+    }
+  },
+  {
+    "name": "record_quote_request",
+    "description": "Record a pricing enquiry after collecting what the caller wants a price for, their name, and a callback number. Call this once you have those details. Never quote a price yourself — the team follows up with real pricing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "service_description": {
+          "type": "string",
+          "description": "What the caller wants priced, in their own words"
+        },
+        "caller_name": {
+          "type": "string",
+          "description": "Caller's name"
+        },
+        "callback_number": {
+          "type": "string",
+          "description": "Phone number to call back with the quote"
+        },
+        "service_address": {
+          "type": "string",
+          "description": "Where the work would happen, if the caller gives it (optional)"
+        },
+        "urgency": {
+          "type": "string",
+          "description": "How soon they need it, if mentioned (optional)"
+        }
+      },
+      "required": [
+        "service_description"
+      ]
+    }
+  },
+  {
+    "name": "request_transfer",
+    "description": "Transfer the caller to a human. Use when the caller asks for a person/representative/manager in any language, or when you cannot help and transfer is appropriate.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Brief reason for the transfer"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    }
+  },
+  {
+    "name": "open_case_file",
+    "description": "Open a new case file in the practice management system.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "matter_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "matter_type"
+      ]
+    }
+  }
+]

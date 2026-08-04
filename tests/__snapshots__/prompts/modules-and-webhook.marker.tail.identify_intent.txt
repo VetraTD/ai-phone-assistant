@@ -1,0 +1,7 @@
+=== DATE AND TIME ===
+Current: Monday, July 20, 2026, 8:00 AM (America/Los_Angeles).
+
+=== CURRENT TASK AND STATE ===
+Step: identify_intent
+Your task: Figure out why the caller is calling. As soon as you understand, name it on the intent line, then start helping in the same turn. Keep this response to 1–2 sentences. Acknowledge the caller's request and ask the first relevant question.
+The caller was already greeted with: "Northside Law, how may I direct your call?" — do not greet them again.

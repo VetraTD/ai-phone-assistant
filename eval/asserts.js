@@ -210,6 +210,28 @@ export function toolNotCalledBeforeTurn(ctx, name, turnIndex) {
   return ok(true, `toolNotCalledBeforeTurn(${name}, ${turnIndex})`, `not called before turn ${turnIndex}`);
 }
 
+/**
+ * The call ended carrying one of `intents` as its intent.
+ *
+ * Every other assert here reads the tool trace. This one reads the state the
+ * reducer actually produced (lib/voice/replyState.js), which is the thing the
+ * next turn's prompt is built from — and, under VOICE_INTENT_MARKER, the one
+ * signal that does not pass through the marker parser on its way here. A guard
+ * that only inspected the tool trace would be partly testing the parser rather
+ * than the behaviour.
+ *
+ * @param {object} ctx
+ * @param {string[]} intents - acceptable final intents
+ */
+export function finalIntentIsOneOf(ctx, intents) {
+  const actual = ctx?.finalState?.intent ?? null;
+  return ok(
+    intents.includes(actual),
+    `finalIntentIsOneOf(${intents.join("|")})`,
+    `intent is ${actual === null ? "null" : actual}`
+  );
+}
+
 function truncate(s, n = 80) {
   return typeof s === "string" && s.length > n ? `${s.slice(0, n)}…` : s;
 }

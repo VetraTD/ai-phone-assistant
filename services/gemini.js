@@ -6,6 +6,7 @@ import { executeToolCall } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
+import { createMarkerStripper } from "../lib/intentMarker.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
 import {
   collectStaticFragments,
@@ -119,7 +120,23 @@ const DEFAULT_CONFIG = {
  *
  * @param {object|string[]} configOrTasks
  */
-export function buildCallTools(configOrTasks) {
+/**
+ * Is the in-band intent marker active for this turn?
+ *
+ * Env-gated so it can be flipped on the running deploy without a redeploy, and
+ * killed the same way if a live call sounds wrong. `extras.intentMarker`
+ * overrides it, which is how tests and the prompt snapshots exercise both
+ * shapes without touching process.env.
+ *
+ * @param {object} [extras]
+ * @returns {boolean}
+ */
+export function intentMarkerEnabled(extras = {}) {
+  if (typeof extras?.intentMarker === "boolean") return extras.intentMarker;
+  return process.env.VOICE_INTENT_MARKER === "true";
+}
+
+export function buildCallTools(configOrTasks, { markerMode = false } = {}) {
   const config = Array.isArray(configOrTasks)
     ? { allowedTasks: configOrTasks }
     : configOrTasks || {};
@@ -129,8 +146,15 @@ export function buildCallTools(configOrTasks) {
     ? allowedTasks
     : ["general_question"];
 
-  const declarations = [
-    {
+  const declarations = [];
+
+  // In marker mode the model declares intent inline in its reply (see
+  // INTENT LINE in the static prefix), so the tool is not offered at all.
+  // Declaring it would defeat the point: the model would call it, and the
+  // extra model round-trip this change exists to remove would come straight
+  // back.
+  if (!markerMode) {
+    declarations.push({
       name: "set_call_intent",
       description:
         "Call this as soon as you understand why the caller is calling. " +
@@ -147,7 +171,10 @@ export function buildCallTools(configOrTasks) {
         },
         required: ["intent"],
       },
-    },
+    });
+  }
+
+  declarations.push(
     {
       name: "end_call",
       description:
@@ -161,7 +188,7 @@ export function buildCallTools(configOrTasks) {
         required: ["reason"],
       },
     },
-  ];
+  );
 
   // Capability contributions, in registry order:
   //   appointments -> book_appointment (module-gated on allowedTasks)
@@ -386,6 +413,7 @@ export function isBusinessOpen(config) {
  * @param {object} [extras] - { knowledge: Array, callerContext: object, transferAllowed: boolean }
  */
 export function buildStaticSystemPrefix(config, extras = {}) {
+  const markerMode = intentMarkerEnabled(extras);
   const tz = config.timezone;
 
   const sections = [];
@@ -535,6 +563,24 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     sections.push(protocol);
   }
 
+  // === INTENT LINE ===
+  // Marker mode only. Lives in the STATIC prefix (it varies only with
+  // allowedTasks, never with step/intent/time) so the cacheable region stays
+  // byte-stable — see buildDynamicTail's note on prefix stability.
+  if (markerMode) {
+    const intents = Array.isArray(config.allowedTasks) && config.allowedTasks.length > 0
+      ? config.allowedTasks
+      : ["general_question"];
+    sections.push(
+      `=== INTENT LINE ===\n` +
+      `Start every reply with one line naming the caller's current intent, then a line break, then what you say to the caller. For example:\n` +
+      `<<intent:${intents[0]}>>\n` +
+      `Of course — let me help you with that.\n` +
+      `Use exactly one of: ${intents.join(", ")}.\n` +
+      `The caller never hears this line; it is removed before your reply is spoken. Never mention it, never read it aloud, and never put anything else on it.`
+    );
+  }
+
   // === TOOL CONTRACT ===
   let toolContract = `=== TOOL CONTRACT ===\n`;
   toolContract += `You have access to tools (function calls). Follow these rules strictly:\n`;
@@ -544,7 +590,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   } else {
     toolContract += `- If a tool returns success=false, read the error message in the tool response and use it to explain what happened. If there is no actionable resolution, offer to take their details for follow-up.\n`;
   }
-  toolContract += `- Call set_call_intent once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`;
+  // Mechanism clause only. Everything after the first sentence is byte-identical
+  // between the two modes on purpose: the vague-caller guidance is the sentence
+  // the 2026-08-04 rewording attempt disturbed, and vague-caller was one of the
+  // three scenarios that regressed on the judge.
+  toolContract += markerMode
+    ? `- Name the intent on the intent line (see INTENT LINE) once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`
+    : `- Call set_call_intent once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`;
   toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
   if (appointmentsEnabled) {
     toolContract += `- Before calling a lookup tool (get_caller_appointments_from_db or any tool that queries data or checks availability), say something like "One moment while I check that for you" in the SAME response as the tool call — the announcement and the function call must happen together in one turn. Do NOT announce that you are going to look something up and then wait; you must call the tool immediately in that same response. Do NOT say "one moment" before book_appointment or end_call.\n`;
@@ -807,12 +859,15 @@ export function buildSystemInstruction(step, intent, config, extras = {}) {
  */
 function buildStepGuidance(step, intent, config, stepExtras = {}) {
   const now = stepExtras.now instanceof Date ? stepExtras.now : new Date();
+  const markerMode = intentMarkerEnabled(stepExtras);
 
   switch (step) {
     case "identify_intent":
       return (
         `Your task: Figure out why the caller is calling. ` +
-        `As soon as you understand, call set_call_intent with the appropriate intent, ` +
+        (markerMode
+          ? `As soon as you understand, name it on the intent line, `
+          : `As soon as you understand, call set_call_intent with the appropriate intent, `) +
         `then start helping in the same turn. Keep this response to 1–2 sentences. ` +
         `Acknowledge the caller's request and ask the first relevant question.`
       );
@@ -836,7 +891,12 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         `The action was just completed. Confirm the details to the caller — ` +
         `read back key information (dates, times, phone numbers). Read phone numbers digit by digit. ` +
         `Then explicitly ask if there's anything else they need help with. ` +
-        `If they ask for something new, call set_call_intent for the new request instead of ending the call. ` +
+        // The sentence eval/scenarios/25-intent-switch-midcall.js guards. Same
+        // instruction, different mechanism — a caller must still be able to
+        // abandon a booking and ask for something else instead of hanging up.
+        (markerMode
+          ? `If they ask for something new, put the new request on the intent line instead of ending the call. `
+          : `If they ask for something new, call set_call_intent for the new request instead of ending the call. `) +
         `Only when they clearly say they don't need anything else should you call end_call.`
       );
 
@@ -1044,9 +1104,11 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
+  const markerMode = intentMarkerEnabled(extras);
+
   // Full config, not just the task list: packs need config.capabilities to
   // turn a business's configured requirements into tool parameters.
-  const builtInTools = buildCallTools(cfg);
+  const builtInTools = buildCallTools(cfg, { markerMode });
   const integrationTools = buildIntegrationTools(extras?.integrations || [], cfg);
   const dbAppointmentTools = buildDbAppointmentTools(cfg, extras);
   const allDeclarations = [
@@ -1128,6 +1190,14 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const capabilityEffects = [];
   let capabilityState = { ...(extras?.capabilityState || {}) };
 
+  // Marker mode: the intent arrives as a line of the reply rather than a tool
+  // call. One stripper per turn — it stays unresolved across tool rounds, so a
+  // turn whose first round is a pure function call still gets its marker read
+  // off the front of the round that actually speaks.
+  const stripper = markerMode
+    ? createMarkerStripper({ allowedIntents: cfg.allowedTasks || [] })
+    : null;
+
   // First request — stream it
   let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
   let lastUsageMetadata = null;
@@ -1145,10 +1215,41 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     for await (const chunk of streamResponse) {
       // Text delta — extracted from parts directly (see textFromChunk) rather
       // than chunk.text, whose getter warns on every tool-call turn.
-      const delta = textFromChunk(chunk);
-      if (delta) {
-        fullText += delta;
-        yield { delta };
+      const raw = textFromChunk(chunk);
+      if (raw) {
+        const out = stripper
+          ? stripper.push(raw)
+          : { text: raw, intent: null, rejected: null };
+
+        if (out.rejected) {
+          // The model named something this business has not enabled. The text
+          // was still stripped, so nothing leaks; without this line the drift
+          // would be invisible — the reply looks clean and the intent simply
+          // never updates.
+          log.info("intent_marker_rejected", { value: out.rejected, step });
+        }
+
+        // Only a CHANGE is an intent event. The prompt asks for the line on
+        // every reply, and applyReplyState moves CONFIRM back to
+        // GATHER_DETAILS whenever intentArgs is present — so re-declaring an
+        // unchanged intent would knock the call out of its confirmation step
+        // every turn. Suppressing the no-op keeps the state machine behaving
+        // exactly as it does with the tool, where the prompt asked the model
+        // to re-declare only on a change.
+        if (out.intent && out.intent !== intent) {
+          intentArgs = { intent: out.intent };
+          const markerEvent = { name: "set_call_intent", args: { intent: out.intent } };
+          toolCallEvents.push(markerEvent);
+          // No toolResult (its message is speakable and feeds the zero-text
+          // fallback) and no toolEffect (that grants the turn 4s of extra
+          // deadline and would contaminate the llm_first_tool mark).
+          yield { toolCall: markerEvent };
+        }
+
+        if (out.text) {
+          fullText += out.text;
+          yield { delta: out.text };
+        }
       }
       // Function calls arrive (usually in the last chunk)
       if (chunk.functionCalls?.length) {
@@ -1238,6 +1339,18 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
 
     // Send function results back to chat and stream the follow-up
     streamResponse = await chat.sendMessageStream({ message: results, config: perRequestConfig });
+  }
+
+  // A buffer still held when the stream ended was never a marker (or was a
+  // broken one). Release it before the zero-text fallback below, or a short
+  // reply that fit entirely inside the marker window would be silently dropped
+  // and replaced with "say that again".
+  if (stripper) {
+    const tail = stripper.flush();
+    if (tail.text) {
+      fullText += tail.text;
+      yield { delta: tail.text };
+    }
   }
 
   if (lastUsageMetadata) {
