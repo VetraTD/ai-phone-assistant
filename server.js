@@ -678,6 +678,9 @@ export function selectPipelineHandler() {
     : handleVoiceSessionConnection;
 }
 
+/** Websocket path for the latency probe's scripted-caller leg. */
+const PROBE_WS_PATH = "/twilio/probe-stream";
+
 /**
  * Is this upgrade allowed to become a probe leg?
  *
@@ -693,7 +696,15 @@ function probeUpgradeAllowed(url) {
   if (process.env.DEBUG_ENDPOINTS !== "true") return false;
   const expected = process.env.DEBUG_TOKEN;
   if (!expected) return false;
-  const supplied = url.searchParams.get("token");
+  // The token rides in the PATH, not the query string: Twilio does not carry a
+  // <Stream url="..."> query string through to the websocket handshake, so a
+  // ?token= form arrives empty and the upgrade is refused with a 31920 that
+  // looks exactly like a broken endpoint. Query form is still accepted for
+  // hand-testing with a normal websocket client.
+  const fromPath = url.pathname.startsWith(`${PROBE_WS_PATH}/`)
+    ? decodeURIComponent(url.pathname.slice(PROBE_WS_PATH.length + 1))
+    : null;
+  const supplied = fromPath || url.searchParams.get("token");
   if (!supplied) return false;
   const a = createHash("sha256").update(String(supplied)).digest();
   const b = createHash("sha256").update(String(expected)).digest();
@@ -709,7 +720,10 @@ function attachWebSocket(httpServer) {
       wss.handleUpgrade(req, socket, head, (ws) => {
         selectPipelineHandler()(ws, req);
       });
-    } else if (pathname === "/twilio/probe-stream" && probeUpgradeAllowed(url)) {
+    } else if (
+      (pathname === PROBE_WS_PATH || pathname.startsWith(`${PROBE_WS_PATH}/`)) &&
+      probeUpgradeAllowed(url)
+    ) {
       // Scripted caller side of a latency probe call. Imported lazily so the
       // probe never loads — and costs nothing — in normal operation.
       const { handleProbeConnection } = await import("./lib/probe/probeSocket.js");

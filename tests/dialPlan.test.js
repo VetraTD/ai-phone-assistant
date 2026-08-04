@@ -104,7 +104,17 @@ describe("buildDialPlan — guardrails in front of automated dialling", () => {
     const plan = buildDialPlan(OK);
 
     expect(plan.streamUrl.startsWith("wss://")).toBe(true);
-    expect(plan.streamUrl).toContain("token=tok");
+    expect(plan.streamUrl).toContain("tok");
+  });
+
+  it("puts the token in the path, not the query string", () => {
+    // Twilio drops a <Stream url="..."> query string before the websocket
+    // handshake, so a ?token= form reaches the server empty and the call dies
+    // in under a second with error 31920.
+    const plan = buildDialPlan(OK);
+
+    expect(plan.streamUrl).toBe("wss://assistant.example.com/twilio/probe-stream/tok");
+    expect(plan.streamUrl).not.toContain("?");
   });
 
   it("keeps the token out of the human-readable summary", () => {
