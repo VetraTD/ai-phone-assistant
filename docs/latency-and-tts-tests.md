@@ -174,7 +174,9 @@ than Deepgram places the last word. Two independent clocks agreeing to within
   never produced a `cachedContentTokenCount` — implicit caching does not engage
   on `gemini-3.6-flash`. And it would not matter if it did: TTFT is flat in
   prompt size (6 tokens ≈ 700ms, 2586 tokens with 8 tools ≈ 680ms). Worth
-  fixing for token cost; worthless for speed.
+  fixing for token cost; worthless for speed. **See the caching section at the
+  end — the cost side turned out to be worth real money, and the fix is not the
+  one the prefix split was built for.**
 - **The pacing pump.** `playout_ms` p50 of 0.
 - **`classifyHold`.** 1ms at p50. It fires on ~36% of turns and costs 1.5-2s
   when it does, so it owns the p95 tail, not the median. Note the run's rule
@@ -493,3 +495,58 @@ the server restarted underneath the run.
 The report said "no data" and pointed at `DEBUG_ENDPOINTS` and whether the calls
 connected. Right to flag it, wrong cause. A push is a deploy is a restart: treat
 any commit during a run as invalidating it.
+
+---
+
+# Prompt caching, 2026-08-04 — implicit is dead, explicit works
+
+Billing confirmed what telemetry only hinted at. Two days of Gemini spend,
+$20.04, and the summary reads **"includes $0.00 in savings"** with a single
+dominant SKU — `Generate content input token count gemini 3.6 flash text` at
+**$18.62 of $20.04**. No cached-input line at all. **Input tokens are ~93% of
+the Gemini bill and none of them are cached.**
+
+## Why the prefix split never paid off
+
+Three byte-identical 4,186-token requests, run three ways:
+
+| where the stable content sits | `cachedContentTokenCount` |
+|---|---|
+| `systemInstruction` (what `services/gemini.js` does today) | **absent** |
+| leading turn of `contents` | **absent** |
+| explicit `ai.caches.create` + `config.cachedContent` | **4,182 of 4,186** |
+
+**Implicit caching does not engage on `gemini-3.6-flash` at all** — not from
+`systemInstruction`, not from `contents`. Moving the prefix around will not fix
+it; the mechanism simply is not there for this model. Explicit caching works
+perfectly on the same model.
+
+So `buildStaticSystemPrefix` / `buildDynamicTail` was built for a mechanism that
+never fires. The split is still correct and the byte-stability the snapshot
+tests enforce is exactly what an explicit cache needs — only the mechanism
+changes.
+
+## What it is worth
+
+Cache reads are 10% of base input price; explicit storage is ~$1.00 per 1M
+tokens per hour on Flash. The static prefix is ~5,000 tokens, and **a call is
+~10 turns that all share it**, so a cache pays for itself inside a single call:
+
+| per call (~10 turns) | uncached | cached |
+|---|---|---|
+| input billed | 54,000 @ $0.50/M ≈ $0.027 | ~4,000 @ $0.50/M + ~50,000 @ $0.05/M ≈ $0.005 |
+
+Roughly **75-80% off the dominant cost line**. Held 24/7 the storage is $3.60
+per business per month (break-even ~160 calls/month); created on demand with a
+~1 hour TTL it collapses to pennies and pays back almost immediately.
+
+## Shape of the fix, when someone takes it
+
+One cache per business keyed on the static prefix, created lazily, TTL ~1 hour,
+recreated on config change or expiry, and **falling back to the uncached path on
+any cache error** — a caching failure must never fail a call. `cachedContent`
+and `systemInstruction` are mutually exclusive on a request, so the prefix moves
+into the cache and the dynamic tail stays on the request.
+
+Still a cost lever only. TTFT is flat in prompt size; none of this makes a call
+faster.
