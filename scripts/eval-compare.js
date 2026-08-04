@@ -84,6 +84,7 @@ function main() {
   let hardRegressions = 0;
   let judgeRegressions = 0;
   let judgeImprovements = 0;
+  const notComparable = [];
 
   for (const name of names) {
     const b = base.byName.get(name);
@@ -91,6 +92,19 @@ function main() {
     if (!b || !c) {
       rows.push(`  ${name.padEnd(28)} MISSING from ${b ? "candidate" : "baseline"}`);
       hardRegressions++;
+      continue;
+    }
+
+    // A scenario that never ran (Gemini 503, timeout) has no assertions and no
+    // transcript. Counting its absent verdicts as losses would report an outage
+    // as a behaviour regression — the exact mistake the probe runbook warns
+    // about after the barge-in threshold bug.
+    const errored = [b, c].filter((r) => r.error || (r.turns || []).length === 0);
+    if (errored.length > 0) {
+      const where = b.error || (b.turns || []).length === 0 ? "baseline" : "candidate";
+      const why = String(b.error || c.error || "no turns recorded").split("\n")[0].slice(0, 90);
+      rows.push(`  ${name.padEnd(28)} NOT COMPARABLE (${where} did not run: ${why})`);
+      notComparable.push(name);
       continue;
     }
 
@@ -136,6 +150,10 @@ function main() {
   }
 
   console.log("\n--- verdict ---");
+  if (notComparable.length > 0) {
+    console.log(`  not comparable   : ${notComparable.length} (${notComparable.join(", ")})`);
+    console.log("                     re-run before drawing a conclusion — these scenarios never executed.");
+  }
   console.log(`  hard regressions : ${hardRegressions}`);
   console.log(`  judge regressions: ${judgeRegressions}`);
   console.log(`  judge improvements: ${judgeImprovements}`);

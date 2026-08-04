@@ -169,6 +169,48 @@ describe("getReplyStreaming — marker mode", () => {
     expect(reply.intentArgs).toEqual({ intent: "cancel_reschedule" });
   });
 
+  // Found by the first live eval run: 4 of 25 scenarios leaked a marker into
+  // the spoken reply, and every one was a turn containing a tool call. The
+  // model emits the line once per ROUND, not once per turn, so a stripper that
+  // resolves for the whole turn passes the second copy straight through.
+  it("strips the marker again when the model repeats it after a tool round", async () => {
+    H.chunks = [
+      [text("<<intent:cancel_reschedule>>\nOne moment while I check. "), call("get_caller_appointments_from_db", {})],
+      [text("<<intent:cancel_reschedule>>\nI found your appointment.")],
+    ];
+
+    const { spoken, reply } = await run({ step: "gather_details", intent: "book_appointment" });
+
+    expect(spoken).toBe("One moment while I check. I found your appointment.");
+    expect(spoken).not.toContain("<<");
+    expect(reply.text).not.toContain("<<");
+    // Still exactly one intent event: the repeat is the same value.
+    expect(reply.toolCallEvents.filter((e) => e.name === "set_call_intent")).toHaveLength(1);
+  });
+
+  it("strips a repeated marker when the first round was marker-only", async () => {
+    H.chunks = [
+      [text("<<intent:general_question>>"), call("get_caller_appointments_from_db", {})],
+      [text("<<intent:general_question>>\nI'm sorry, I can't find that.")],
+    ];
+
+    const { spoken } = await run();
+
+    expect(spoken).toBe("I'm sorry, I can't find that.");
+    expect(spoken).not.toContain("<<");
+  });
+
+  // Defence in depth for the shape the per-round reset does not cover: a marker
+  // the model emits partway through a round, after it has already spoken.
+  it("strips a marker emitted mid-round, after text", async () => {
+    H.chunks = [[text("Let me transfer you—one moment."), text("<<intent:transfer_human>>\nTransferring now.")]];
+
+    const { spoken } = await run();
+
+    expect(spoken).not.toContain("<<");
+    expect(spoken).not.toContain("intent:");
+  });
+
   it("speaks a short reply that never had a marker", async () => {
     H.chunks = [[text("We close at five.")]];
 

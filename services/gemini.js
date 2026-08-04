@@ -1194,9 +1194,13 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // call. One stripper per turn — it stays unresolved across tool rounds, so a
   // turn whose first round is a pure function call still gets its marker read
   // off the front of the round that actually speaks.
-  const stripper = markerMode
-    ? createMarkerStripper({ allowedIntents: cfg.allowedTasks || [] })
-    : null;
+  const newStripper = () => createMarkerStripper({ allowedIntents: cfg.allowedTasks || [] });
+  let stripper = markerMode ? newStripper() : null;
+  // What the intent is understood to be right now, starting from the state this
+  // turn was built with. Compared against — rather than the turn's opening
+  // intent — so the model re-stating the same value in a later round is one
+  // declaration, not two.
+  let declaredIntent = intent;
 
   // First request — stream it
   let streamResponse = await chat.sendMessageStream({ message: userMessage, config: perRequestConfig });
@@ -1236,7 +1240,8 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // every turn. Suppressing the no-op keeps the state machine behaving
         // exactly as it does with the tool, where the prompt asked the model
         // to re-declare only on a change.
-        if (out.intent && out.intent !== intent) {
+        if (out.intent && out.intent !== declaredIntent) {
+          declaredIntent = out.intent;
           intentArgs = { intent: out.intent };
           const markerEvent = { name: "set_call_intent", args: { intent: out.intent } };
           toolCallEvents.push(markerEvent);
@@ -1335,6 +1340,20 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
           capabilityState: stateEffects.capabilityState || null,
         },
       };
+    }
+
+    // The model writes the intent line at the top of every ROUND, not once per
+    // turn, so the next round needs a stripper that is looking for one again.
+    // Without this the second copy streams straight to the caller: the first
+    // live eval run leaked a marker into 4 of 25 scenarios, every one of them a
+    // turn that called a tool.
+    if (stripper) {
+      const carry = stripper.flush();
+      if (carry.text) {
+        fullText += carry.text;
+        yield { delta: carry.text };
+      }
+      stripper = newStripper();
     }
 
     // Send function results back to chat and stream the follow-up
