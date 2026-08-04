@@ -314,10 +314,54 @@ for anything marker-shaped. It exists because `npm run eval`'s exit code comes
 from hard assertions alone — judge verdicts set `judgePass` and nothing else, so
 a regression there is invisible unless it is diffed deliberately.
 
+## Live probe, 2026-08-04 — measured, not estimated
+
+Two runs, 12 calls each, **same deploy**, differing only in
+`VOICE_INTENT_MARKER`. Probe A is not "the old code": every fix on this branch
+was already live, so the comparison isolates the marker and nothing else.
+
+| stage p50 | A (tool) | B (marker) | |
+|---|---|---|---|
+| `true_v2v_ms` | 4,040ms | **3,551ms** | −489ms |
+| `llm_ttfb_ms` | 1,855ms | **969ms** | **−886ms, −48%** |
+| `llm_tool_ms` | 1,030ms | 1,113ms | see below |
+| `tts_ttfb_ms` | 777ms | 913ms | drifted up in both |
+| turns paying a tool round-trip | 80% | **35%** | the actual result |
+| `intent_marker_leaks` | 0 | **0** | gate passed |
+
+**`set_call_intent` cost 1,030ms, not the ~700ms hand-annotated from the first
+run.** The split validates itself: on probe A, `llm_tool_ms` + 
+`llm_reply_after_tool_ms` = 1,030 + 835 = 1,865 ≈ `llm_ttfb_ms` 1,855.
+
+`llm_tool_ms` does **not** vanish in marker mode, and expecting it to was a
+misreading of the metric: it marks the first tool of *any* turn, so a turn that
+legitimately calls `check_appointment_availability` still registers one. The
+evidence is the share of turns paying a round-trip at all — 80% → 35% — which is
+`set_call_intent` no longer taxing turns that needed no tool.
+
+The probe's own verdict, chosen by rules written before any numbers existed,
+moved from *"LLM time-to-first-token dominates (46% of the turn)"* to:
+
+> Cost is spread evenly across stages. No single fix pays for itself.
+
+The LLM is no longer the dominant cost of a turn, which was the objective.
+
 ## Still outstanding
 
-- Live probe run, before and after, for the real `true_v2v_ms` number. Needs
-  `DEBUG_ENDPOINTS`/`DEBUG_TOKEN` set on Railway for the run and unset after.
+- **`tts_ttfb_ms` has drifted**: 95ms in the first run, 777ms and 913ms in these
+  two. It spans `llm_first_chunk → tts_first_byte`, so it includes waiting for a
+  sentence boundary before anything is handed to TTS — a composite, not vendor
+  latency. Consistent across both runs, so it is a real property of the current
+  setup and now one of the larger remaining stages. Worth its own pass.
+- **The probe over-interrupts**: 30 barge-ins against 12 scripted, 12 turns
+  timed out, in both runs. Those turns are excluded from the percentiles so they
+  do not corrupt the numbers, but the harness threshold needs another look.
+- **`classifyHold` still has no representative data.** Both runs' hold mix is
+  dominated by `partial_digits` (22) and `trailing_conjunction` (12) because the
+  cached caller clips were built to trigger exactly those branches. Tuning
+  against this would be optimising a known-skewed sample. A representative
+  script is a prerequisite for that work.
 - One manual call doing the scenario-25 mid-call switch, listening for a spoken
   marker.
-- Flip the flag on Railway only after both.
+- Unset `DEBUG_ENDPOINTS` / `DEBUG_TOKEN` on Railway. They were found still
+  enabled from the previous run, days later.
