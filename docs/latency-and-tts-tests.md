@@ -346,13 +346,45 @@ moved from *"LLM time-to-first-token dominates (46% of the turn)"* to:
 
 The LLM is no longer the dominant cost of a turn, which was the objective.
 
+## Probe C — the clean run, and why A and B were not
+
+Probes A and B were both measured on the **Google fallback voice**. The
+ElevenLabs quota (30,000 characters) ran out mid-testing; every request was
+rejected, `ttsStream` fell back per sentence to batch Google synthesis, and the
+sticky-Google rule kept the rest of each call there. Nothing counted that, so it
+surfaced only as an 8x rise in `tts_ttfb_ms` that read like a latency regression.
+
+After a top-up, probe C — marker mode, healthy ElevenLabs, same 12 calls:
+
+| stage p50 | original (tool, healthy EL) | probe C (marker, healthy EL) | |
+|---|---|---|---|
+| `true_v2v_ms` | 3,062ms | **2,607ms** | −455ms |
+| probe-leg p50 | 2,664ms | **1,810ms** | **−854ms** |
+| `llm_ttfb_ms` | 1,836ms | **940ms** | **−49%** |
+| `tts_ttfb_ms` | 95ms | **94ms** | unchanged |
+| `stt_endpoint_ms` | 690ms | 700ms | unchanged |
+| `tts_fallback_turns` | — | **0** | |
+| `intent_marker_leaks` | — | **0** | |
+
+`tts_ttfb_ms` returning to **94ms** against the original 95ms is what confirms
+the fallback diagnosis outright: nothing in the TTS path ever regressed.
+
+The two clocks disagree on magnitude (−455ms server, −854ms probe-leg) because
+`stt_tail_ms` happened to fire more in probe C (304ms vs 1ms) — `classifyHold`
+is stochastic across runs. Both agree on direction and that the win is large.
+
+**`tts_ttfb_ms` is not a target and never was.** It is 94ms, 3.6% of the turn.
+Calling it "the next thing to look at" was a conclusion drawn from
+fallback-contaminated data.
+
 ## Still outstanding
 
-- **`tts_ttfb_ms` has drifted**: 95ms in the first run, 777ms and 913ms in these
-  two. It spans `llm_first_chunk → tts_first_byte`, so it includes waiting for a
-  sentence boundary before anything is handed to TTS — a composite, not vendor
-  latency. Consistent across both runs, so it is a real property of the current
-  setup and now one of the larger remaining stages. Worth its own pass.
+- **`stt_endpoint_ms` is now the second-largest stage** at 700ms, 27% of a
+  2,607ms turn — behind only `llm_ttfb_ms` at 940ms, which is one model
+  round-trip and close to irreducible. The runbook's own rule for this case:
+  `STT_ENDPOINTING_MS` is a deploy-time knob read at connect time in
+  `lib/voice/sttStream.js`, so this may be worth trying with no code change at
+  all. Cheapest remaining win.
 - **The probe over-interrupts**: 30 barge-ins against 12 scripted, 12 turns
   timed out, in both runs. Those turns are excluded from the percentiles so they
   do not corrupt the numbers, but the harness threshold needs another look.
