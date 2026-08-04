@@ -379,12 +379,8 @@ fallback-contaminated data.
 
 ## Still outstanding
 
-- **`stt_endpoint_ms` is now the second-largest stage** at 700ms, 27% of a
-  2,607ms turn — behind only `llm_ttfb_ms` at 940ms, which is one model
-  round-trip and close to irreducible. The runbook's own rule for this case:
-  `STT_ENDPOINTING_MS` is a deploy-time knob read at connect time in
-  `lib/voice/sttStream.js`, so this may be worth trying with no code change at
-  all. Cheapest remaining win.
+- ~~`stt_endpoint_ms` is the second-largest stage~~ — **done, see probe E.**
+  Lowered 300 → 150, worth −140ms, kept.
 - ~~The probe over-interrupts~~ — **fixed**, see below.
 - ~~`classifyHold` has no representative data~~ — **it does now, and the answer
   is that classifyHold costs nothing.** See below.
@@ -455,3 +451,45 @@ lowering the endpointing window safe to try.
 | `true_v2v_ms` | **2,569** | |
 
 `intent_marker_leaks` 0, `tts_fallback_turns` 0.
+
+---
+
+# Probe E, 2026-08-04 — endpointing 300 → 150. Kept.
+
+Only the endpointing window is ours to spend: of ~700ms measured, the rest is
+Deepgram inference plus network. Predicted ceiling ~150ms. What happened:
+
+| stage p50 | D (300ms) | E (150ms) | |
+|---|---|---|---|
+| `stt_endpoint_ms` | 700ms | **560ms** | **−140ms** |
+| `stt_tail_ms` | 0ms | **0ms** | unchanged |
+| `true_v2v_ms` | 2,569ms | **2,403ms** | **−166ms** |
+| `llm_ttfb_ms` | 1,128ms | 1,052ms | noise |
+| `tts_ttfb_ms` | 97ms | 95ms | unchanged |
+| barge-ins / timeouts | 12 of 12 / 0 | 8 of 8 / 0 | clean |
+
+The win landed at the predicted size and **`classifyHold` did not absorb it** —
+one `trailing_conjunction` hold across 83 turns, p50 still 0ms. The cost appears
+only in the tail: `stt_tail_ms` p95 362 → 500ms, max 407 → 2,001ms. Earlier
+finals do land mid-sentence more often; the hold logic catches them, which is
+what it is for.
+
+Caveat on the comparison: D is 12 calls, E is 8 (the run was interrupted and the
+report re-rendered from server data with `--report-only`). Single runs either
+way. The direction is consistent and the mechanism understood, but this is not a
+large sample.
+
+**Stop here rather than trying 100ms.** At 150 the stage is 560ms, of which
+~410ms is inference and network. The whole remaining knob is worth ~150ms, and
+taking it means more premature finals for ~2% of a turn.
+
+## Do not push while a probe is running
+
+Probe E had to be run twice. The first attempt returned **0 turns from 12
+calls**, every call dead in under a second. Cause: a docs commit pushed at
+08:42:25Z triggered a Railway redeploy, and the probe dialled at 08:43:17Z —
+the server restarted underneath the run.
+
+The report said "no data" and pointed at `DEBUG_ENDPOINTS` and whether the calls
+connected. Right to flag it, wrong cause. A push is a deploy is a restart: treat
+any commit during a run as invalidating it.
