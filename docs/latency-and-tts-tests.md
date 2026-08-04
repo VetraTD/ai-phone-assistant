@@ -105,6 +105,40 @@ Judge over a handset. Telephony bandwidth erases most of what separates these
 models — if the scores come out close, that is a real result, and an argument
 against paying top of range.
 
+## Smoke-test results, 2026-08-04 — two adapters were broken
+
+First live API call these adapters had ever made, and the gate earned its place:
+
+- **Inworld** — `model_id: inworld-tts-1.5 is not supported`. That model does not
+  exist. Probing the API, the live IDs are `inworld-tts-1`, `inworld-tts-1-max`,
+  `inworld-tts-1.5-max`, `inworld-tts-2`. Now defaults to `inworld-tts-2` so the
+  vendor is judged on its current best. List price corrected $0.02 → $0.025 per
+  1k chars on demand (Inworld tiers down steeply on monthly spend).
+- **Gemini** — `gemini-3.1-flash-preview-tts` not found; the live ID is
+  `gemini-3.1-flash-tts-preview`. A transposition.
+
+## The premise of Test 2 has changed: it is not sound-and-price for all four
+
+Test 1 concluded TTS is worth 95ms of a 3,062ms turn. That is true **of
+streaming vendors**. The batch APIs are a different animal, and the blind-pack
+run measured it:
+
+| vendor | TTFA p50 | TTFA range | $/1k chars |
+|---|---|---|---|
+| ElevenLabs Flash v2.5 | 187ms | 171-281ms | $0.05 |
+| Cartesia Sonic 3.5 | 181ms | 94-431ms | $0.035 |
+| Inworld TTS 2 | 1,268ms | 774-2,271ms | $0.025 |
+| Gemini 3.1 Flash TTS | 8,708ms | 2,549-9,247ms | $0.01 |
+
+For a batch API the first audio byte genuinely arrives only once the whole
+utterance is synthesized, so these numbers are what a caller waits. Against a
+3,062ms turn, Inworld adds ~1.3s and Gemini adds ~8.7s — Gemini would roughly
+quadruple the turn to save $0.04 per thousand characters.
+
+**So the real choice is ElevenLabs vs Cartesia**, which are within 6ms of each
+other and differ by 30% on price. Score the pack blind first as the runbook says;
+the objective table is written separately for exactly this reason.
+
 ---
 
 ## After the run
