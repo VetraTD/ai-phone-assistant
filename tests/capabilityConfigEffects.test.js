@@ -139,27 +139,44 @@ describe("appointments — every knob has an effect", () => {
       .toMatch(/office is closed right now/i);
   });
 
-  it("existingAppointment → changes the booking guidance AND whether the confirm flag is offered", () => {
+  it("existingAppointment → contributes a CALLER CONTEXT rule AND decides whether the confirm flag is offered", () => {
     // Two observable effects, matching the two layers the guard needs: prose
-    // that makes the model ask, and a parameter that lets the answer through.
-    const guidanceOf = (config) =>
-      appointments.prompt(config, { now: new Date("2026-07-20T15:00:00Z"), integrations: [] })
-        .dynamic.stepGuidance.book_appointment;
+    // that stops the model offering, and a parameter that lets a deliberate
+    // second booking through.
+    //
+    // The prose is a callerContextRule, NOT step guidance. Step guidance is
+    // keyed on intent, so it is absent at exactly the moment that matters —
+    // when the model itself decides to offer a call mid general-question. That
+    // is what happened on production call 0db83104.
+    const rulesOf = (config) =>
+      (
+        appointments.prompt(config, { now: new Date("2026-07-20T15:00:00Z"), integrations: [] })
+          .dynamic.callerContextRules || []
+      ).join(" ");
 
     // Default (nothing configured) behaves as "confirm".
     const dflt = apptConfig({});
-    expect(guidanceOf(dflt)).toMatch(/second appointment as well or to move that one/i);
+    expect(rulesOf(dflt)).toMatch(/do not offer to book, schedule, or arrange/i);
+    expect(rulesOf(dflt)).toMatch(/when YOU are the one raising it/i);
     expect(bookTool(dflt).parameters.properties.in_addition_to_existing).toBeDefined();
 
     const block = apptConfig({ existingAppointment: "block" });
-    expect(guidanceOf(block)).toMatch(/do NOT book a second one/i);
+    expect(rulesOf(block)).toMatch(/do not offer to book, schedule, or arrange/i);
+    expect(rulesOf(block)).toMatch(/move it instead/i);
     expect(bookTool(block).parameters.properties.in_addition_to_existing).toBeUndefined();
 
-    // "allow" adds no prose at all, so an opted-out business's guidance stays
-    // byte-identical to what it was before this knob existed.
+    // "allow" contributes nothing — it is the opt-out.
     const allow = apptConfig({ existingAppointment: "allow" });
-    expect(guidanceOf(allow)).not.toMatch(/already ha(s|ve) an upcoming appointment|CALLER CONTEXT lists/i);
+    expect(rulesOf(allow)).toBe("");
     expect(bookTool(allow).parameters.properties.in_addition_to_existing).toBeUndefined();
+
+    // And the booking step guidance is now identical across all three, because
+    // the rule no longer lives there.
+    const guidanceOf = (config) =>
+      appointments.prompt(config, { now: new Date("2026-07-20T15:00:00Z"), integrations: [] })
+        .dynamic.stepGuidance.book_appointment;
+    expect(guidanceOf(dflt)).toBe(guidanceOf(allow));
+    expect(guidanceOf(block)).toBe(guidanceOf(allow));
   });
 
   it("availability.length + capacity → reach the adapter's availability check", async () => {

@@ -11,7 +11,7 @@
  * appointments rather than on "is this a returning caller".
  */
 import * as A from "../asserts.js";
-import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { nextWeekdayAt, spokenSlot, hoursOpenNow } from "../scenarioUtils.js";
 
 const TZ = "America/Chicago";
 const CALLER_PHONE = "+15558675309";
@@ -21,6 +21,9 @@ export default {
   name: "first-appointment-unguarded",
   tags: ["existing-appointment", "rules"],
   fixture: "appointments-db",
+  // businessHours pinned open: the after-hours policy otherwise diverts booking
+  // to a callback depending on the time of day the suite runs.
+  configPatch: { businessHours: hoursOpenNow() },
   extrasPatch: {
     callerPhone: CALLER_PHONE,
     callerContext: {

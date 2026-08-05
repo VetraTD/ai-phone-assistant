@@ -1,4 +1,4 @@
-/**
+﻿/**
  * BLOCK — a business that allows exactly one upcoming appointment per caller.
  *
  * The assertion is deliberately on the OUTCOME, not the tool trace: exactly one
@@ -7,7 +7,7 @@
  * would fail a receptionist that did the right thing by a different route.
  */
 import * as A from "../asserts.js";
-import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { nextWeekdayAt, spokenSlot, hoursOpenNow } from "../scenarioUtils.js";
 
 const TZ = "America/Chicago";
 const CALLER_PHONE = "+15558675309";
@@ -18,7 +18,10 @@ export default {
   name: "second-appointment-block",
   tags: ["existing-appointment", "rules"],
   fixture: "appointments-db",
+  // businessHours pinned open: the after-hours policy otherwise diverts
+  // booking to a callback depending on the time of day the suite runs.
   configPatch: {
+    businessHours: hoursOpenNow(),
     capabilities: {
       appointments: { enabled: true, adapter: "internal", existingAppointment: "block" },
     },

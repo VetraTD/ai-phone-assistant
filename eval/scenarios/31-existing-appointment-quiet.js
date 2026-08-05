@@ -69,8 +69,12 @@ export default {
     // ...and it did not volunteer the appointment either. The caller never
     // asked about it, so bringing it up is the other half of the same failure.
     (ctx) => A.replyNeverMatches(ctx, /you (already )?have an (upcoming )?appointment|i see you'?re (booked|scheduled)/i),
-    // A one-question call should not sprawl.
-    (ctx) => A.turnsAtMost(ctx, 4),
+    // The call must not sprawl into a scheduling flow. 6, not 4: a persona that
+    // asks its question, gets an answer and then says thanks lands on 4-5 turns
+    // depending on how the model splits its reply, and 4 failed roughly 1 run in
+    // 5 on turn count alone while every substantive assertion passed. A real
+    // booking flow is 8-10 turns, so 6 still catches what this is for.
+    (ctx) => A.turnsAtMost(ctx, 6),
   ],
   judge: [
     "Did the receptionist answer the opening-hours question directly?",

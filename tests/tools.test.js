@@ -1411,3 +1411,93 @@ describe("services/tools.js — book_appointment guards against a second appoint
     expect(functionResponse.response.success).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The caller's OWN appointment must never be reported as "taken".
+//
+// From production call 0db83104 (2026-08-05). The caller had a 2 PM booking.
+// The assistant offered a call, the caller asked for 2 PM, and
+// check_appointment_availability said "It looks like tomorrow at 2 PM is
+// already taken. Would 1:30, 2:30 or 1 PM work instead?" — offering the caller
+// alternatives to their own appointment, because slot capacity counts THEIR row
+// like anyone else's. Two turns later the caller had to say "but don't I
+// already have a call?".
+//
+// This is a correctness bug, not a policy one: it is wrong under every value of
+// existingAppointment, including "allow".
+// ---------------------------------------------------------------------------
+describe("services/tools.js — check_appointment_availability and the caller's own booking", () => {
+  const ctxWithOwn = (upcoming, policy) => ({
+    ...baseCtx,
+    config: policy ? { capabilities: { appointments: { existingAppointment: policy } } } : {},
+    callerContext: { callCount: 1, lastCallSummary: null, upcomingAppointments: upcoming },
+  });
+
+  const checkFc = (at) => ({ id: "fcA", name: "check_appointment_availability", args: { requested_at: at } });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Slot is "full" — which is exactly what the caller's own appointment does.
+    mockCountScheduledOverlapping.mockResolvedValue(1);
+    mockListScheduledBetween.mockResolvedValue([]);
+  });
+
+  it("says it is the caller's own appointment rather than offering alternatives", async () => {
+    const { functionResponse } = await executeToolCall(
+      checkFc(FUTURE_SLOT),
+      ctxWithOwn([{ id: "a1", client_name: "Jane", scheduled_at: FUTURE_SLOT_ANCHORED }])
+    );
+
+    expect(functionResponse.response.own_appointment).toBe(true);
+    expect(functionResponse.response.message).toMatch(/own appointment|already booked/i);
+    // The failure being fixed is the "taken, here are alternatives" framing —
+    // matched on the phrasings the tool actually emits, not on the bare word
+    // "taken", which legitimately appears in the instruction NOT to use it.
+    expect(functionResponse.response.message).not.toMatch(
+      /that time is taken|already taken|offer these open times/i
+    );
+    expect(functionResponse.response.alternatives).toBeUndefined();
+  });
+
+  it("is a truth fix, not a policy one — it fires under allow too", async () => {
+    const { functionResponse } = await executeToolCall(
+      checkFc(FUTURE_SLOT),
+      ctxWithOwn([{ id: "a1", scheduled_at: FUTURE_SLOT_ANCHORED }], "allow")
+    );
+    expect(functionResponse.response.own_appointment).toBe(true);
+  });
+
+  it("still reports a genuinely full slot as unavailable when the caller owns nothing", async () => {
+    const { functionResponse } = await executeToolCall(
+      checkFc(FUTURE_SLOT),
+      ctxWithOwn([])
+    );
+    expect(functionResponse.response.available).toBe(false);
+    expect(functionResponse.response.own_appointment).toBeUndefined();
+  });
+
+  it("does not confuse a DIFFERENT time the caller has booked with the one requested", async () => {
+    // Their appointment is a day later; this slot really is someone else's.
+    const otherDay = new Date(Date.parse(FUTURE_SLOT_ANCHORED) + 86_400_000).toISOString();
+    const { functionResponse } = await executeToolCall(
+      checkFc(FUTURE_SLOT),
+      ctxWithOwn([{ id: "a1", scheduled_at: otherDay }])
+    );
+    expect(functionResponse.response.own_appointment).toBeUndefined();
+    expect(functionResponse.response.available).toBe(false);
+  });
+
+  it("tells the model about the caller's other appointments even when the slot is free", async () => {
+    // So the model cannot reason about times while blind to what they already
+    // have — which is how it offered a second call in the first place.
+    mockCountScheduledOverlapping.mockResolvedValue(0);
+    const otherDay = new Date(Date.parse(FUTURE_SLOT_ANCHORED) + 86_400_000).toISOString();
+    const { functionResponse } = await executeToolCall(
+      checkFc(FUTURE_SLOT),
+      ctxWithOwn([{ id: "a1", scheduled_at: otherDay }])
+    );
+
+    expect(functionResponse.response.available).toBe(true);
+    expect(functionResponse.response.message).toMatch(/already has an upcoming appointment/i);
+  });
+});

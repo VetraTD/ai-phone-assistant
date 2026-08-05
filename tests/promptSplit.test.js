@@ -380,3 +380,83 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
     expect(full).toContain("Jane Okafor");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The existing-appointment rule must not depend on the model having already
+// decided the call is about booking.
+//
+// Production call 0db83104: the ASSISTANT offered a strategy call while still
+// answering a general question. The rule lived in the book_appointment step
+// guidance, which is keyed on intent, so at the moment the offer was made
+// nothing had told the model to check. It offered, collected a time, and only
+// discovered the conflict when the caller pointed it out.
+//
+// The rule now lives in the CALLER CONTEXT block, which renders whenever the
+// caller HAS an upcoming appointment — whatever step or intent the call is in.
+// ---------------------------------------------------------------------------
+describe("gemini.js — the existing-appointment rule is intent-independent", () => {
+  const apptConfig = (existingAppointment) => ({
+    businessName: "Acme Dental",
+    timezone: "America/Chicago",
+    allowedTasks: ["book_appointment", "check_appointment", "cancel_reschedule"],
+    capabilities: {
+      appointments: { adapter: "internal", ...(existingAppointment ? { existingAppointment } : {}) },
+    },
+  });
+
+  const withAppt = {
+    callerContext: {
+      callCount: 2,
+      lastCallSummary: "asked about hours",
+      upcomingAppointments: [
+        { id: "a1", client_name: "Boris Johnson", scheduled_at: "2026-09-10T19:00:00.000Z" },
+      ],
+    },
+  };
+  const noAppt = {
+    callerContext: { callCount: 2, lastCallSummary: "asked about hours", upcomingAppointments: [] },
+  };
+
+  // Specific to the new rule. A looser pattern also matched escalation wording
+  // that has always been in the static prefix.
+  const OFFER_RULE = /do not offer to book, schedule, or arrange/i;
+
+  it("appears on a general-question turn, which is where the bad offer was made", () => {
+    const tail = buildDynamicTail("gather_details", "general_question", apptConfig(), withAppt);
+    expect(tail).toMatch(OFFER_RULE);
+  });
+
+  it("appears before any intent has been decided", () => {
+    const tail = buildDynamicTail("identify_intent", null, apptConfig(), withAppt);
+    expect(tail).toMatch(OFFER_RULE);
+  });
+
+  it("costs nothing for a returning caller who has no appointment", () => {
+    const tail = buildDynamicTail("gather_details", "general_question", apptConfig(), noAppt);
+    expect(tail).not.toMatch(OFFER_RULE);
+  });
+
+  it("costs nothing for a first-time caller", () => {
+    const tail = buildDynamicTail("gather_details", "general_question", apptConfig(), {});
+    expect(tail).not.toMatch(OFFER_RULE);
+  });
+
+  it("says nothing under allow, which is the opt-out", () => {
+    const tail = buildDynamicTail("gather_details", "general_question", apptConfig("allow"), withAppt);
+    expect(tail).not.toMatch(OFFER_RULE);
+    // ...but the appointment itself is still listed, so the model is not blind.
+    expect(tail).toContain("Upcoming appointments:");
+  });
+
+  it("tells the model to offer a move, not a second booking, under block", () => {
+    const tail = buildDynamicTail("gather_details", "general_question", apptConfig("block"), withAppt);
+    expect(tail).toMatch(OFFER_RULE);
+    expect(tail).toMatch(/move|reschedule/i);
+  });
+
+  it("never reaches the cacheable static prefix", () => {
+    const prefix = buildStaticSystemPrefix(apptConfig(), withAppt);
+    expect(prefix).not.toMatch(OFFER_RULE);
+    expect(prefix).not.toContain("Boris Johnson");
+  });
+});

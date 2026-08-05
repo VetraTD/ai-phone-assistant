@@ -11,7 +11,7 @@
  * never seen the setting.
  */
 import * as A from "../asserts.js";
-import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { nextWeekdayAt, spokenSlot, hoursOpenNow } from "../scenarioUtils.js";
 
 const TZ = "America/Chicago";
 const CALLER_PHONE = "+15558675309";
@@ -22,7 +22,11 @@ export default {
   name: "second-appointment-confirm",
   tags: ["existing-appointment", "rules"],
   fixture: "appointments-db",
-  // No configPatch on purpose — an unconfigured business must behave as "confirm".
+  // existingAppointment is deliberately NOT set — an unconfigured business must
+  // behave as "confirm", and this scenario is what proves it. businessHours is
+  // pinned open only because the after-hours policy otherwise diverts booking to
+  // a callback depending on what time of day the suite happens to run.
+  configPatch: { businessHours: hoursOpenNow() },
   extrasPatch: {
     callerPhone: CALLER_PHONE,
     callerContext: {

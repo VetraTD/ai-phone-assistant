@@ -22,6 +22,7 @@ import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../
 import {
   collectStaticFragments,
   collectStepGuidance,
+  collectCallerContextRules,
   collectCallerFacts,
   sanitizeFact,
 } from "../lib/capabilities/promptAssembler.js";
@@ -518,7 +519,7 @@ export function isBusinessOpen(config) {
  * @param {string} timezone
  * @returns {string}
  */
-function buildCallerContextSection(callerContext, timezone, profile) {
+function buildCallerContextSection(callerContext, timezone, profile, rules = []) {
   if (!callerContext) return "";
   if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
 
@@ -546,12 +547,21 @@ function buildCallerContextSection(callerContext, timezone, profile) {
       return a.client_name ? `${d} (${a.client_name})` : d;
     });
     ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
+    // Immediately after the fact it governs, not at the end of the block.
+    // Trailed after three other "Do NOT" sentences it was followed
+    // inconsistently — one eval run produced "We'd love to invite you to book a
+    // free strategy call... would you be interested?" to a caller whose
+    // appointment was listed two lines above. Adjacency is the cheapest lever
+    // available; the deterministic guarantee is book_appointment's guard, which
+    // is what actually stops a second row.
+    if (rules.length > 0) ctx += `\n${rules.join("\n")}`;
   }
   // "reference their upcoming appointment if relevant" used to sit in the first
   // sentence. It was removed, not trimmed: it is the direct contradiction of the
   // rule that follows, and with both present the model treated any call from a
   // caller with an appointment as an invitation to start scheduling.
   ctx += `\nUse this context to personalize the conversation. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps. Do NOT bring up an upcoming appointment unless the caller asks about it, or the conversation turns to booking, changing, or cancelling one.`;
+
   return ctx;
 }
 
@@ -1002,7 +1012,12 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // It sits beside KNOWN CALLER FACTS, which is the other caller-scoped block,
   // and keeps the same empty-case contract: emit nothing at all when there is
   // no history, which is what leaves 4 of 5 fixture snapshots untouched.
-  const callerContextSection = buildCallerContextSection(extras.callerContext, config.timezone, resolveProfile(config));
+  const callerContextSection = buildCallerContextSection(
+    extras.callerContext,
+    config.timezone,
+    resolveProfile(config),
+    collectCallerContextRules(config, { integrations: extras?.integrations || [], now })
+  );
   if (callerContextSection) sections.push(callerContextSection);
 
   // === KNOWN CALLER FACTS ===

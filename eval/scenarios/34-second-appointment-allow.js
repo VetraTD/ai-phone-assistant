@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ALLOW — a business that opts out of the check entirely.
  *
  * Two things are under test, and the second is the interesting one:
@@ -10,7 +10,7 @@
  * reporting caller_phone/caller_name searches it had never run.
  */
 import * as A from "../asserts.js";
-import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { nextWeekdayAt, spokenSlot, hoursOpenNow } from "../scenarioUtils.js";
 
 const TZ = "America/Chicago";
 const CALLER_PHONE = "+15558675309";
@@ -21,7 +21,10 @@ export default {
   name: "second-appointment-allow",
   tags: ["existing-appointment", "rules"],
   fixture: "appointments-db",
+  // businessHours pinned open: the after-hours policy otherwise diverts
+  // booking to a callback depending on the time of day the suite runs.
   configPatch: {
+    businessHours: hoursOpenNow(),
     capabilities: {
       appointments: { enabled: true, adapter: "internal", existingAppointment: "allow" },
     },

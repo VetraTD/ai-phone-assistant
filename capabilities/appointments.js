@@ -475,33 +475,47 @@ const CLOSED_BOOKING_DECLINE =
   "and offer to take a message so the team can call them back when they reopen.";
 
 /**
- * The one sentence that makes the receptionist check before it offers.
+ * The rule that makes the receptionist check before it offers.
  *
- * Lives in the BOOKING step guidance rather than anywhere global, which is what
- * implements "stay quiet unless relevant": it is rendered only once the model
- * has classified the call as booking, so a caller asking about opening hours is
- * never told about their appointment. `allow` contributes nothing, so an
- * opted-out business's guidance stays byte-identical to before this existed.
+ * Lives in the CALLER CONTEXT block, NOT in the booking step guidance, and that
+ * placement is the whole fix. Step guidance is keyed on intent; intent is what
+ * the model decided the call is about. On production call 0db83104 the model was
+ * still in general_question when it offered a strategy call to a caller who
+ * already had one — the booking guidance had not been rendered, so nothing had
+ * told it to look. A rule conditioned on "the call is about booking" cannot
+ * govern the moment the model itself brings booking up.
+ *
+ * "Stay quiet unless relevant" is preserved by a different mechanism: the block
+ * only renders when the caller HAS an upcoming appointment, and the rule governs
+ * OFFERING rather than announcing. A caller asking about opening hours is still
+ * not told about their appointment.
+ *
+ * `allow` contributes nothing — that policy is the opt-out.
+ *
+ * @param {"confirm"|"allow"|"block"} policy
+ * @returns {string[]}
  */
-function existingAppointmentGuidance(policy) {
-  if (policy === "allow") return "";
+function existingAppointmentContextRules(policy) {
+  if (policy === "allow") return [];
+
   if (policy === "block") {
-    return (
-      `If CALLER CONTEXT lists an upcoming appointment for this caller, do NOT book a second one — ` +
-      `tell them what they already have and offer to move that appointment instead.\n`
-    );
+    return [
+      "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
+        "another one — this applies just as much when YOU are the one raising it as when they ask. " +
+        "Mention the appointment they already have and offer to move it instead.",
+    ];
   }
-  return (
-    `If CALLER CONTEXT lists an upcoming appointment for this caller, tell them about it and ask ` +
-    `whether they want a second appointment as well or to move that one — before you check any ` +
-    `times or collect any details.\n`
-  );
+
+  return [
+    "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
+      "another one — this applies just as much when YOU are the one raising it as when they ask. " +
+      "If a new appointment would otherwise be the natural next step, mention the one they already " +
+      "have and ask whether anything should be added to it. Book a second appointment only if they " +
+      "explicitly ask for one as well, after you have told them about the existing one.",
+  ];
 }
 
 function bookingGuidance(config, now, canCheck) {
-  const existingLine = existingAppointmentGuidance(
-    existingAppointmentPolicy(capabilityConfig(config, "appointments"))
-  );
   const resolvedHours = resolveBusinessHoursForPrompt(config, now);
   let businessHoursStr = "business hours";
   if (resolvedHours) {
@@ -520,7 +534,6 @@ function bookingGuidance(config, now, canCheck) {
   // slot never costs the caller the whole flow. (An EHR uses its own get_available_slots.)
   if (canCheck) {
     return (
-      existingLine +
       `Your task: Help the caller book, checking the calendar before you collect any details. ` +
       `One question at a time:\n` +
       `1. Ask whether they prefer mornings or afternoons, and if any days don't work (business hours: ${businessHoursStr}).\n` +
@@ -532,7 +545,6 @@ function bookingGuidance(config, now, canCheck) {
   }
 
   return (
-    existingLine +
     `Your task: Help the caller find a good appointment time and collect their details. ` +
     `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
     `1. Ask whether they prefer mornings or afternoons.\n` +
@@ -1063,6 +1075,13 @@ export default {
           book_appointment: bhBlocked ? CLOSED_BOOKING_DECLINE : bookingGuidance(config, now, canCheckAvail),
           cancel_reschedule: bhBlocked ? CLOSED_BOOKING_DECLINE : cancelRescheduleGuidance(hasEhr),
         },
+        // Rendered by the CALLER CONTEXT block, and only when this caller
+        // actually has an upcoming appointment — so it reaches the model
+        // whatever step the call is in, and costs nothing when there is
+        // nothing to say. See existingAppointmentContextRules.
+        callerContextRules: existingAppointmentContextRules(
+          existingAppointmentPolicy(capabilityConfig(config, "appointments"))
+        ),
       },
     };
   },
@@ -1273,6 +1292,48 @@ async function checkAvailabilityTool(fc, ctx) {
   }
   const startISO = validated.scheduledAt;
 
+  // The caller's OWN appointment is not "unavailability".
+  //
+  // Slot capacity counts their row exactly like anyone else's, so on production
+  // call 0db83104 the assistant told a caller their 2 PM was "already taken" and
+  // offered them 1:30, 2:30 and 1 PM — alternatives to their own booking. Two
+  // turns later the caller had to ask "but don't I already have a call?".
+  //
+  // Checked BEFORE the adapter, because the answer does not depend on capacity:
+  // if this is their appointment, that is the fact, whatever the calendar says.
+  // Ungated by existingAppointment — reporting a caller's own booking as someone
+  // else's is wrong under "allow" too. This is a truth fix, not a policy.
+  const own = upcomingForCaller(ctx);
+  const spokenOwn = (list) =>
+    list.map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config))).join("; ");
+
+  const startMs = Date.parse(startISO);
+  const lengthMs = avail.length * 60_000;
+  const collides = own.filter((a) => {
+    const t = Date.parse(a.scheduled_at);
+    if (!Number.isFinite(t) || !Number.isFinite(startMs)) return false;
+    return startMs < t + lengthMs && t < startMs + lengthMs;
+  });
+
+  if (collides.length > 0) {
+    return respond({
+      success: true,
+      available: false,
+      own_appointment: true,
+      message:
+        `That is the caller's OWN appointment — they are already booked at ${spokenOwn(collides)}. ` +
+        `Do NOT describe the time as taken and do NOT offer alternative slots as though someone else ` +
+        `had it. Tell them they are already booked then, and ask whether they want to keep it, move it, ` +
+        `or arrange a separate appointment.`,
+    });
+  }
+
+  // Factual, no instruction: the model must not be reasoning about times while
+  // blind to what this caller already has. Policy-neutral on purpose — what to
+  // DO about it is decided by book_appointment's guard and the CALLER CONTEXT
+  // rules, not here.
+  const otherNote = own.length > 0 ? ` This caller already has an upcoming appointment: ${spokenOwn(own)}.` : "";
+
   let available = true;
   if (typeof adapter.checkAvailability === "function") {
     try {
@@ -1288,7 +1349,7 @@ async function checkAvailabilityTool(fc, ctx) {
   }
 
   if (available) {
-    return respond({ success: true, available: true, message: "That time is available." });
+    return respond({ success: true, available: true, message: `That time is available.${otherNote}` });
   }
 
   let alternatives = [];
@@ -1321,9 +1382,11 @@ async function checkAvailabilityTool(fc, ctx) {
     success: true,
     available: false,
     alternatives: localAlternatives,
-    message: alternatives.length
-      ? `That time is taken. Offer these open times instead: ${spokenAlternatives.join(", ")}.`
-      : "That time is taken and nothing else is open that day. Ask the caller about another day.",
+    message:
+      (alternatives.length
+        ? `That time is taken. Offer these open times instead: ${spokenAlternatives.join(", ")}.`
+        : "That time is taken and nothing else is open that day. Ask the caller about another day.") +
+      otherNote,
   });
 }
 
