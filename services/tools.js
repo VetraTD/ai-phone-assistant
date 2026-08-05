@@ -13,6 +13,7 @@ import {
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 
 // ---------------------------------------------------------------------------
@@ -267,4 +268,124 @@ async function executeWebhookTool(fc, ctx) {
       toolCallEvent: { name: fc.name, args: fc.args },
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Tool execution guard.
+//
+// NOT the cause of the 2026-08-04 incident — that was the model writing its
+// function call into the text channel. This is the neighbouring defect the
+// investigation turned up: nothing anywhere bounded a tool. getReplyStreaming
+// awaited executeToolCall bare, this module added no timeout of its own, and
+// the Supabase client was constructed with no AbortSignal. A hung query hung
+// until the LLM deadline fired — and then kept running, so a reschedule could
+// still land in the database AFTER the caller had been told it failed.
+//
+// The guard lives here rather than in services/gemini.js for three reasons: it
+// owns the {functionResponse, stateEffects} contract, so the synthesised
+// failure sits beside the shape it has to satisfy; it is the single choke point
+// every tool passes through, pack and webhook alike, so no author can forget
+// it; and it is testable without mocking the model client.
+// ---------------------------------------------------------------------------
+
+/**
+ * Deliberately above WEBHOOK_TIMEOUT_MS (6s) and the Athena timeout, so those
+ * vendor-specific bounds still fire first and produce their better-worded
+ * messages. This is the backstop for everything they do not cover — Supabase,
+ * pack logic, an adapter that forgets to bound itself. It must stay comfortably
+ * inside VOICE_LLM_HARD_TIMEOUT_MS (20s) or it can never fire at all.
+ */
+const TOOL_TIMEOUT_MS = (() => {
+  const v = Number.parseInt(process.env.TOOL_TIMEOUT_MS, 10);
+  return Number.isFinite(v) && v >= 1_000 && v <= 30_000 ? v : 8_000;
+})();
+
+/**
+ * Model-facing text per failure reason. Closed set on purpose: the alternative
+ * is passing an upstream error string through, and a vendor's error body is
+ * arbitrary text that has already been observed carrying implementation detail
+ * — and can carry a patient's name.
+ */
+const REASON_TEXT = {
+  TIMEOUT:
+    "That took too long and did not complete. Tell the caller you can't get it done right now and offer to take their details. Do not explain why, and do not name anything.",
+  UNAVAILABLE:
+    "That did not work. Tell the caller you can't get it done right now and offer to take their details. Do not explain why, and do not name anything.",
+};
+
+/**
+ * Run a tool with a deadline and an error boundary.
+ *
+ * A timed-out promise is ABANDONED, not cancelled — Promise.race cannot cancel
+ * anything, and the only thing that actually stops a late database write is the
+ * transport-level AbortSignal in services/supabase.js. What this adds is that
+ * the CALLER stops waiting, and that a late completion is visible
+ * (tool_late_completion) rather than silent.
+ *
+ * @param {object} fc - the model's function call
+ * @param {object} ctx - executeToolCall's context
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs]
+ * @returns {Promise<{functionResponse: object, stateEffects: object}>}
+ */
+export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT_MS } = {}) {
+  const startedAt = Date.now();
+  let settled = false;
+  let timer = null;
+
+  const failure = (reasonCode) => ({
+    functionResponse: {
+      id: fc?.id,
+      name: fc?.name,
+      response: { success: false, reason_code: reasonCode },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc?.name,
+        success: false,
+        message: REASON_TEXT[reasonCode] || REASON_TEXT.UNAVAILABLE,
+        // A directive to the model, never a line for the caller.
+        callerSafe: false,
+      },
+    },
+  });
+
+  const work = (async () => executeToolCall(fc, ctx))();
+
+  // Watch the abandoned promise: this is the evidence that a write landed after
+  // the caller was told otherwise, which is otherwise invisible.
+  work.then(
+    () => {
+      if (settled) {
+        log.error("tool_late_completion", {
+          tool: fc?.name,
+          ms: Date.now() - startedAt,
+          severity: "warn",
+        });
+      }
+    },
+    () => {}
+  );
+
+  try {
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(Symbol.for("tool.timeout")), timeoutMs);
+      timer.unref?.();
+    });
+    const result = await Promise.race([work, timeout]);
+    if (result === Symbol.for("tool.timeout")) {
+      settled = true;
+      bumpCounter("tool_timeouts");
+      log.error("tool_timeout", { tool: fc?.name, ms: timeoutMs, severity: "warn" });
+      return failure("TIMEOUT");
+    }
+    return result;
+  } catch (err) {
+    // The vendor's own words stop here. They reach the log, never the model.
+    log.error("tool_threw", { tool: fc?.name, reason: err?.message, severity: "warn" });
+    bumpCounter("tool_errors");
+    return failure("UNAVAILABLE");
+  } finally {
+    clearTimeout(timer);
+  }
 }

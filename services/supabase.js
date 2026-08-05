@@ -11,8 +11,33 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 /** @type {import("@supabase/supabase-js").SupabaseClient | null} */
 let supabase = null;
 
+/**
+ * Every Supabase request gets a deadline.
+ *
+ * The client was previously constructed bare, and undici imposes no request
+ * deadline of its own, so a hung query hung for the life of the call. The
+ * JS-side race in services/tools.js releases the CALLER, but it cannot cancel
+ * anything — only this can, and cancelling is what stops a reschedule landing
+ * in the database minutes after the caller was told it had failed.
+ *
+ * Sized below TOOL_TIMEOUT_MS so the transport gives up first and the tool
+ * layer reports a real error rather than its own generic timeout.
+ */
+const SUPABASE_TIMEOUT_MS = (() => {
+  const v = Number.parseInt(process.env.SUPABASE_TIMEOUT_MS, 10);
+  return Number.isFinite(v) && v >= 1_000 && v <= 30_000 ? v : 6_000;
+})();
+
+function fetchWithTimeout(input, init = {}) {
+  // Respect a caller-supplied signal if one ever appears; otherwise impose ours.
+  if (init.signal) return fetch(input, init);
+  return fetch(input, { ...init, signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS) });
+}
+
 if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    global: { fetch: fetchWithTimeout },
+  });
 } else {
   log.error("supabase_not_configured", { reason: "missing_url_or_key", severity: "warn" });
 }

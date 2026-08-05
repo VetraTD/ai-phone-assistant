@@ -1531,10 +1531,21 @@ async function rescheduleAppointment(fc, ctx) {
   }
   const anchoredScheduledAt = validated.scheduledAt;
 
-  const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
-    appointmentId,
-    newScheduledAt: anchoredScheduledAt,
-  });
+  // Booking has wrapped its own write since it was written; reschedule never
+  // did, so a throw here propagated out of the whole turn instead of becoming
+  // a failed tool result the model could talk about. Same asymmetry as the
+  // availability check and the identity read — this is the one that costs the
+  // caller an outcome.
+  let ok = false;
+  try {
+    ({ ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
+      appointmentId,
+      newScheduledAt: anchoredScheduledAt,
+    }));
+  } catch (err) {
+    log.error("reschedule_failed", { reason: err?.message, severity: "warn" });
+    ok = false;
+  }
 
   return {
     functionResponse: {

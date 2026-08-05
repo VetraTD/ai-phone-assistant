@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
-import { executeToolCall } from "./tools.js";
+import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
@@ -1720,7 +1720,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // undefined in production, where the real deps are always used.
         depsOverride: extras?.capabilityDeps,
       };
-      const { functionResponse, stateEffects } = await executeToolCall(fc, toolCtx);
+      const { functionResponse, stateEffects } = await executeToolCallGuarded(fc, toolCtx);
       realToolCalls++;
       results.push({ functionResponse });
       if (stateEffects.toolResult) toolResults.push(stateEffects.toolResult);
