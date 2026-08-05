@@ -147,6 +147,28 @@ describe("database/schema.sql represents the fully-migrated state", () => {
     expect(stripped).toMatch(/pg_advisory_xact_lock/i);
   });
 
+  it("migration 026 normalizes appointment phones without a unique index and without redefining the normalizer", () => {
+    const sql = stripComments(
+      fs.readFileSync(path.join(DB_DIR, "026_normalize_appointment_phones.sql"), "utf8")
+    );
+
+    // A unique index here would be wrong, not merely unnecessary: a returning
+    // caller, a family on one handset and an office landline all legitimately
+    // produce several appointments on the same number.
+    expect(sql).not.toMatch(/CREATE\s+UNIQUE\s+INDEX/i);
+
+    // normalize_phone_value is migration 024's, and has to stay in step with
+    // lib/phone.js in exactly one place — two copies drifting apart is the
+    // original bug wearing a different hat.
+    expect(sql).not.toMatch(/(CREATE|REPLACE)\s+FUNCTION\s+normalize_phone_value/i);
+    expect(sql).toMatch(/to_regprocedure\('normalize_phone_value\(text\)'\)/i);
+
+    // The trigger is the only layer that can defend a hand-edit in the Supabase
+    // table editor, which bypasses every application-level validator.
+    expect(sql).toMatch(/CREATE\s+TRIGGER\s+appointments_normalize_phones_trg/i);
+    expect(sql).toMatch(/BEFORE\s+INSERT\s+OR\s+UPDATE\s+OF\s+client_phone/i);
+  });
+
   it("defaults allowed_tasks to the post-013 modules-only shape and business_hours to the post-014 weekly shape", () => {
     const stripped = stripComments(schemaSql);
     expect(stripped).toMatch(/allowed_tasks\s+jsonb\s+DEFAULT\s+'\["book_appointment"\]'/i);

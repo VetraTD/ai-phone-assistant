@@ -36,6 +36,10 @@
         "notes": {
           "type": "string",
           "description": "Any additional notes about the appointment or client needs"
+        },
+        "in_addition_to_existing": {
+          "type": "boolean",
+          "description": "Set true ONLY after you have told the caller they already have an upcoming appointment and they confirmed they want this new one AS WELL AS that one. Never set it pre-emptively — booking is refused without it when the caller already has an appointment."
         }
       },
       "required": [

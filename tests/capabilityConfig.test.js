@@ -151,6 +151,25 @@ describe("validateCapabilityConfig", () => {
     });
   });
 
+  it("keeps a valid existingAppointment policy", () => {
+    for (const v of ["confirm", "allow", "block"]) {
+      expect(validate({ existingAppointment: v }).existingAppointment).toBe(v);
+    }
+  });
+
+  it("drops an existingAppointment value the engine would not understand", () => {
+    // Silently reaching the pack would read as the default and hide a bad save.
+    expect(validate({ existingAppointment: "maybe" }).existingAppointment).toBeUndefined();
+    expect(validate({ existingAppointment: true }).existingAppointment).toBeUndefined();
+  });
+
+  it("never writes the existingAppointment default, so absence stays absence", () => {
+    // Same rule availability follows: writing "confirm" into every business's
+    // config would move every prompt snapshot and make an unset business
+    // indistinguishable from one that chose.
+    expect("existingAppointment" in validate({})).toBe(false);
+  });
+
   it("keeps the field but drops an unusable pattern", () => {
     // Dropping the whole field would quietly remove a requirement the operator
     // asked for; keeping it unchecked is the lesser failure.

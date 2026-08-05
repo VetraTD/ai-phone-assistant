@@ -4,6 +4,7 @@ Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Sta
 
 === CURRENT TASK AND STATE ===
 Step: gather_details | Intent: book_appointment
+If CALLER CONTEXT lists an upcoming appointment for this caller, tell them about it and ask whether they want a second appointment as well or to move that one — before you check any times or collect any details.
 Your task: Help the caller find a good appointment time and collect their details. Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:
 1. Ask whether they prefer mornings or afternoons.
 2. Ask if any specific days of the week don't work for them.

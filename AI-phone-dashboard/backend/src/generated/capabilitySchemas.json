@@ -17,6 +17,21 @@
           ],
           "default": "internal"
         },
+        "existingAppointment": {
+          "type": "choice",
+          "label": "If the caller already has an upcoming appointment",
+          "options": [
+            "confirm",
+            "allow",
+            "block"
+          ],
+          "optionLabels": {
+            "confirm": "Check with them first — only book a second one if they say yes",
+            "allow": "Just book it",
+            "block": "Don't book a second one — offer to move the existing one"
+          },
+          "default": "confirm"
+        },
         "require": {
           "identity": {
             "type": "identityFields",

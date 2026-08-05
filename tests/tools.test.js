@@ -1239,3 +1239,175 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The caller already has an upcoming appointment.
+//
+// The live symptom: a caller with a booked appointment rings back, asks about
+// something else, is offered a "strategy call", says yes, and gets a SECOND
+// row. Nothing in the handler ever looked the caller up — the only dedupe was
+// the same-instant anchor, which is per-call and in-memory, so a callback
+// defeated it completely.
+// ---------------------------------------------------------------------------
+describe("services/tools.js — book_appointment guards against a second appointment", () => {
+  const soon = () => new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const past = () => new Date(Date.now() - 3 * 86_400_000).toISOString();
+
+  function ctxWith({ upcoming = null, policy = undefined, capabilityState = {} } = {}) {
+    return {
+      ...baseCtx,
+      capabilityState,
+      config: policy ? { capabilities: { appointments: { existingAppointment: policy } } } : {},
+      ...(upcoming === null ? {} : { callerContext: { callCount: 1, lastCallSummary: null, upcomingAppointments: upcoming } }),
+    };
+  }
+
+  const bookFc = (args = {}) => ({ id: "fcG", name: "book_appointment", args: { scheduled_at: FUTURE_SLOT, client_name: "Jane", ...args } });
+
+  beforeEach(() => {
+    // Several of these assert createAppointment was NOT called, which only
+    // means anything against a counter reset per test.
+    vi.clearAllMocks();
+    mockCreateAppointment.mockResolvedValue("appt-guard");
+  });
+
+  it("books when there is no caller context at all — the guard fails OPEN", async () => {
+    // Prefetch failed, database disabled, or a withheld number. Blocking on
+    // missing data would refuse a legitimate booking, which is worse than the
+    // duplicate it would prevent.
+    const { functionResponse } = await executeToolCall(bookFc(), ctxWith({ upcoming: null }));
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("books when the caller has no upcoming appointments", async () => {
+    const { functionResponse } = await executeToolCall(bookFc(), ctxWith({ upcoming: [] }));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("books when the caller's only appointment is in the past", async () => {
+    // The snapshot is taken at call start and re-filtered against now, because
+    // an appointment can pass during a long call.
+    const { functionResponse } = await executeToolCall(
+      bookFc(),
+      ctxWith({ upcoming: [{ scheduled_at: past(), client_name: "Jane" }] })
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("confirm (the default, config untouched): refuses and never touches the database", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      bookFc(),
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }] })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/in_addition_to_existing/);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // A caller-safe line is mandatory: without one a text-free turn falls
+    // through to the generic can'"'"'t-complete apology, which would be a lie.
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    expect(stateEffects.toolResult.message).toMatch(/already have an appointment/i);
+  });
+
+  it("confirm: books once the caller has confirmed they want a second one", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      bookFc({ in_addition_to_existing: true }),
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }] })
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(stateEffects.capabilityEffects).toEqual([
+      expect.objectContaining({ capability: "appointments", type: "booked" }),
+    ]);
+  });
+
+  it("allow: books despite an existing appointment, and tells the model about it", async () => {
+    const { functionResponse } = await executeToolCall(
+      bookFc(),
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }], policy: "allow" })
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(functionResponse.response.message).toMatch(/also has an existing upcoming appointment/i);
+  });
+
+  it("block: refuses, and the confirm flag is NOT a bypass", async () => {
+    // The flag is never advertised under this policy, so honouring it would
+    // turn an opt-in parameter into a way around the business'"'"'s own rule.
+    const { functionResponse } = await executeToolCall(
+      bookFc({ in_addition_to_existing: true }),
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }], policy: "block" })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/does not\s+book a second one/i);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("block: still books for a caller who has none", async () => {
+    const { functionResponse } = await executeToolCall(
+      bookFc(),
+      ctxWith({ upcoming: [], policy: "block" })
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("the same-call anchor wins over the guard, so a re-issued call is not refused", async () => {
+    // The model re-issuing book_appointment for the slot it just booked must
+    // hit the idempotency short-circuit. If the guard ran first it would refuse
+    // the caller their own appointment.
+    const anchored = new Date(
+      zonedComponentsToUtcMs(parseNaiveDateTime(FUTURE_SLOT), "America/Chicago")
+    ).toISOString();
+    const { functionResponse, stateEffects } = await executeToolCall(
+      bookFc(),
+      ctxWith({
+        upcoming: [{ scheduled_at: soon(), client_name: "Jane" }],
+        capabilityState: { appointments: { lastBooked: { scheduled_at: anchored } } },
+      })
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(functionResponse.response.message).toMatch(/already booked from earlier in this call/i);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(stateEffects.capabilityEffects).toBeUndefined();
+  });
+
+  it("time validation wins over the guard, so a bad time gets its own error", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "fcP", name: "book_appointment", args: { scheduled_at: "2020-01-01T10:00:00" } },
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }] })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).not.toMatch(/in_addition_to_existing/);
+  });
+
+  it("leaks no identifier the model must never see", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      bookFc(),
+      ctxWith({
+        upcoming: [
+          { id: "8a13a7c6-dead-4beef-9999-000000000000", client_name: "Jane", client_phone: "+15551234567", scheduled_at: soon() },
+        ],
+      })
+    );
+
+    const seen = `${functionResponse.response.message} ${stateEffects.toolResult.message}`;
+    expect(seen).not.toMatch(/8a13a7c6/);
+    expect(seen).not.toMatch(/\+1555/);
+    expect(seen).not.toMatch(/Jane/);
+  });
+
+  it("ignores a model-supplied phone number entirely", async () => {
+    // The snapshot is keyed on call metadata. A caller cannot reach someone
+    // else'"'"'s record, or dodge their own, by naming a different number.
+    const { functionResponse } = await executeToolCall(
+      bookFc({ caller_phone: "+19998887777" }),
+      ctxWith({ upcoming: [{ scheduled_at: soon(), client_name: "Jane" }] })
+    );
+    expect(functionResponse.response.success).toBe(false);
+  });
+});

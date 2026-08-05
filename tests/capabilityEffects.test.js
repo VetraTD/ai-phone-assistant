@@ -165,3 +165,136 @@ describe("dispatchCapabilityEffects", () => {
     expect(notes).toEqual(["reschedule_appointment_db succeeded"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Keeping the call-start caller snapshot honest.
+//
+// The snapshot is fetched once, before turn 1. Left alone it is wrong the
+// moment the call books or cancels anything: CALLER CONTEXT goes on reciting an
+// appointment that no longer exists, and book_appointment's guard refuses a
+// second booking on the strength of one this very call just cancelled.
+// ---------------------------------------------------------------------------
+describe("appointments.onEffect — the caller snapshot follows what the call did", () => {
+  const CTX = (upcoming) => ({ callCount: 2, lastCallSummary: "asked about hours", upcomingAppointments: upcoming });
+
+  function engineWith(callerContext) {
+    const setCallerContext = vi.fn();
+    return {
+      setCallerContext,
+      engine: {
+        STEPS: { CONFIRM: "confirm" },
+        setStep: vi.fn(),
+        addHistoryNote: vi.fn(),
+        setCallerContext,
+        call: {
+          callSid: "CA1",
+          businessId: "biz-1",
+          callerNumber: "+15551112222",
+          twilioNumber: null,
+          config: { timezone: "America/Chicago" },
+          callerContext,
+        },
+        deps: {
+          log: { error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+          captureException: vi.fn(),
+          notifications: { notifyAppointmentBooked: vi.fn(async () => {}), sendCallerSms: vi.fn(async () => {}) },
+          db: {},
+        },
+      },
+    };
+  }
+
+  it("a booking appends to the snapshot, in time order", async () => {
+    const { engine, setCallerContext } = engineWith(CTX([{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }]));
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      { capability: "appointments", type: "booked", data: { scheduled_at: "2026-09-05T15:00:00.000Z", client_name: "Jane" } },
+      engine
+    );
+
+    const next = setCallerContext.mock.calls[0][0].upcomingAppointments;
+    expect(next.map((a) => a.scheduled_at)).toEqual([
+      "2026-09-05T15:00:00.000Z",
+      "2026-09-10T15:00:00.000Z",
+    ]);
+    // No id on the fresh row: nothing reads it, and an appointment id is
+    // something the model must never be handed.
+    expect(next[0].id).toBeNull();
+    // The rest of the snapshot survives.
+    expect(setCallerContext.mock.calls[0][0].callCount).toBe(2);
+  });
+
+  it("a cancel removes the row it cancelled", async () => {
+    const { engine, setCallerContext } = engineWith(
+      CTX([{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }, { id: "a2", scheduled_at: "2026-09-11T15:00:00.000Z" }])
+    );
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a1" } },
+      engine
+    );
+
+    expect(setCallerContext.mock.calls[0][0].upcomingAppointments.map((a) => a.id)).toEqual(["a2"]);
+  });
+
+  it("a reschedule re-times the row rather than dropping it", async () => {
+    const { engine, setCallerContext } = engineWith(CTX([{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }]));
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      {
+        capability: "appointments",
+        type: "changed",
+        data: { tool: "reschedule_appointment_db", appointmentId: "a1", newScheduledAt: "2026-09-12T15:00:00.000Z" },
+      },
+      engine
+    );
+
+    expect(setCallerContext.mock.calls[0][0].upcomingAppointments).toEqual([
+      { id: "a1", scheduled_at: "2026-09-12T15:00:00.000Z" },
+    ]);
+  });
+
+  it("does nothing on an engine that has no setCallerContext (the v1 pipeline)", async () => {
+    // lib/mediaStream.js is a rollback escape hatch and deliberately not at
+    // parity. It must keep working, not throw.
+    const { engine } = engineWith(CTX([]));
+    delete engine.setCallerContext;
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    expect(() =>
+      appointments.onEffect(
+        { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a1" } },
+        engine
+      )
+    ).not.toThrow();
+  });
+
+  it("handles a call that had no caller context at all", async () => {
+    const { engine, setCallerContext } = engineWith(null);
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      { capability: "appointments", type: "booked", data: { scheduled_at: "2026-09-05T15:00:00.000Z" } },
+      engine
+    );
+
+    expect(setCallerContext.mock.calls[0][0].upcomingAppointments).toHaveLength(1);
+  });
+
+  it("leaves the snapshot alone when a change carries no appointment id", async () => {
+    // Nothing can be said about which row moved, so guessing would be worse
+    // than staying stale.
+    const { engine, setCallerContext } = engineWith(CTX([{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }]));
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db" } },
+      engine
+    );
+
+    expect(setCallerContext).not.toHaveBeenCalled();
+  });
+});

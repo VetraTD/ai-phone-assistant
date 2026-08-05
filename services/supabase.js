@@ -792,6 +792,10 @@ export async function createAppointmentIfAvailable(params) {
  * @param {object} [opts]
  * @param {string} [opts.clientPhone] - Caller phone (matched after normalizing to digits)
  * @param {string} [opts.clientName] - Caller name (case-insensitive partial match)
+ * @param {boolean} [opts.upcomingOnly] - Drop rows already in the past. Opt-in
+ *   so the tool path's behavior does not move: "your appointments" legitimately
+ *   includes one earlier today, whereas the prompt's CALLER CONTEXT block
+ *   answers the narrower question "what is still coming up".
  * @returns {Promise<Array<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}>>}
  */
 export async function listAppointmentsByCaller(businessId, opts = {}) {
@@ -812,7 +816,14 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
     log.error("db_error", { operation: "listAppointmentsByCaller", error: error.message });
     return [];
   }
-  const list = rows || [];
+  let list = rows || [];
+  if (opts.upcomingOnly) {
+    const now = Date.now();
+    list = list.filter((r) => {
+      const t = Date.parse(r.scheduled_at);
+      return Number.isFinite(t) && t >= now;
+    });
+  }
   if (phone) {
     return list.filter((r) => {
       const p = (r.client_phone || "").replace(/\D/g, "").trim();
@@ -964,7 +975,7 @@ export async function fetchCallerContext(businessId, callerNumber) {
   if (!supabase || !businessId || !callerNumber) return empty;
 
   // Run both queries in parallel
-  const [callsResult, appointmentsResult] = await Promise.all([
+  const [callsResult, apptRows] = await Promise.all([
     supabase
       .from("calls")
       .select("id, started_at, summary")
@@ -973,20 +984,31 @@ export async function fetchCallerContext(businessId, callerNumber) {
       .eq("status", "completed")
       .order("started_at", { ascending: false })
       .limit(5),
-    supabase
-      .from("appointments")
-      .select("id, client_name, scheduled_at, notes")
-      .eq("business_id", businessId)
-      .eq("client_phone", callerNumber)
-      .eq("status", "scheduled")
-      .gte("scheduled_at", new Date().toISOString())
-      .order("scheduled_at", { ascending: true })
-      .limit(5),
+    // The SAME function the get_caller_appointments_from_db tool calls, so the
+    // prompt's "Upcoming appointments" line and the tool can no longer disagree
+    // about whether this caller has one at all.
+    //
+    // This used to be .eq("client_phone", callerNumber) — exact string
+    // equality — while the tool matched the last ten digits. Any row not stored
+    // in the caller's exact E.164 spelling was therefore invisible to the
+    // prompt and findable by the tool, and migration 026 cannot close that gap
+    // on its own: it normalizes punctuation and whitespace but deliberately
+    // will not guess a country code, so a national number stays national.
+    listAppointmentsByCaller(businessId, { clientPhone: callerNumber, upcomingOnly: true }),
   ]);
 
   const calls = callsResult.data || [];
-  const upcomingAppointments = appointmentsResult.data || [];
   const lastCallSummary = calls[0]?.summary || null;
+
+  // Explicit projection, not the raw row. listAppointmentsByCaller selects
+  // client_phone, and this result reaches BOTH the prompt builder and an HTTP
+  // response — neither has any use for it.
+  const upcomingAppointments = (apptRows || []).slice(0, 5).map((a) => ({
+    id: a.id,
+    client_name: a.client_name,
+    scheduled_at: a.scheduled_at,
+    notes: a.notes,
+  }));
 
   return { callCount: calls.length, lastCallSummary, upcomingAppointments };
 }

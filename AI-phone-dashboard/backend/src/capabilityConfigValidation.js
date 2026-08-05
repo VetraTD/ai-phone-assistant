@@ -47,6 +47,19 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
     }
   }
 
+  // What to do when the caller already has an upcoming appointment. Rejected
+  // rather than silently dropped, per this file's contract: a value the engine
+  // would ignore must not be saved looking as though it took effect. Absence is
+  // left as absence — the engine defaults to "confirm" at read time.
+  if (raw.existingAppointment !== undefined && raw.existingAppointment !== "") {
+    const allowed = schema.existingAppointment?.options || [];
+    if (typeof raw.existingAppointment !== "string" || !allowed.includes(raw.existingAppointment)) {
+      errors.push("Choose what to do when the caller already has an appointment");
+    } else {
+      config.existingAppointment = raw.existingAppointment;
+    }
+  }
+
   const require = raw.require;
   if (require !== undefined) {
     if (typeof require !== "object" || require === null || Array.isArray(require)) {

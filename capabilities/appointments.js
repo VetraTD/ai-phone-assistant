@@ -77,6 +77,40 @@ const BOOK_APPOINTMENT_DECLARATION = {
 };
 
 /**
+ * Add the confirm-a-second-appointment parameter to a booking declaration.
+ *
+ * Applied ONLY under the "confirm" policy, because a declaration must describe
+ * what the handler actually does: under "allow" nothing blocks so the flag has
+ * no effect, and under "block" nothing can unblock so honouring it would turn
+ * an opt-in parameter into a bypass. Advertising it in either case is the same
+ * mistake that had the model reporting caller_phone/caller_name searches it
+ * never ran — see get_caller_appointments_from_db's description.
+ *
+ * Deliberately NOT added to `required`: forcing the model to emit a boolean on
+ * every booking, including for callers who have no appointment at all, is how
+ * it ends up defaulting to true and silently disabling the guard.
+ */
+function withAdditionalFlag(declaration) {
+  return {
+    ...declaration,
+    parameters: {
+      ...declaration.parameters,
+      properties: {
+        ...declaration.parameters.properties,
+        in_addition_to_existing: {
+          type: "boolean",
+          description:
+            "Set true ONLY after you have told the caller they already have an upcoming " +
+            "appointment and they confirmed they want this new one AS WELL AS that one. " +
+            "Never set it pre-emptively — booking is refused without it when the caller " +
+            "already has an appointment.",
+        },
+      },
+    },
+  };
+}
+
+/**
  * EHR-backed appointment tools. Present when the business has an enabled
  * athenahealth integration.
  *
@@ -310,6 +344,91 @@ function availabilitySettings(cfg) {
   };
 }
 
+/**
+ * What to do when the caller already has an upcoming appointment.
+ *
+ * Defaulted at read time (like availabilitySettings) so a business that never
+ * touched the setting gets "confirm" — the safe answer, because the failure it
+ * prevents is invisible: the assistant forgets, books a second appointment, and
+ * nobody learns about it until the caller turns up twice.
+ *
+ * @param {object} cfg - appointments capability config
+ * @returns {"confirm"|"allow"|"block"}
+ */
+function existingAppointmentPolicy(cfg) {
+  const v = cfg?.existingAppointment;
+  return v === "allow" || v === "block" ? v : "confirm";
+}
+
+/**
+ * The caller's OTHER upcoming appointments, from the call-start snapshot.
+ *
+ * Read from ctx.callerContext, never re-queried. The snapshot is resolved before
+ * turn 1 (session.js ensureContext awaits it), so this costs nothing on a turn
+ * the caller is already waiting through; a Supabase round trip inside a tool
+ * round would be latency they hear. Same-call staleness is closed by onEffect
+ * below, which updates the snapshot after every successful book/cancel/change.
+ *
+ * Re-filtered against NOW because the snapshot was taken minutes ago and an
+ * appointment can pass during a long call.
+ *
+ * Fails OPEN by design: no context (prefetch failed, DB disabled, withheld
+ * number) means no guard. Blocking on missing data would refuse a legitimate
+ * booking, which is a worse failure than the one being prevented.
+ *
+ * @param {object} ctx - tool context
+ * @returns {Array<{scheduled_at: string, client_name?: string}>}
+ */
+/**
+ * Keep the call-start caller snapshot honest after this call changes something.
+ *
+ * The snapshot is fetched once, before turn 1. Left alone it goes stale the
+ * moment the caller books, cancels or moves anything — CALLER CONTEXT would go
+ * on reciting an appointment that no longer exists, and the booking guard would
+ * refuse a second booking on the strength of one this very call just cancelled.
+ *
+ * The pack computes the next value; the engine owns the state. `setCallerContext`
+ * is optional on purpose: lib/mediaStream.js (the v1 rollback pipeline) does not
+ * provide it and is deliberately not at parity, so it keeps the call-start
+ * snapshot and simply does not refresh.
+ *
+ * The new row's id is left null — upcomingForCaller reads only scheduled_at, and
+ * an appointment id is something the model must never be handed.
+ */
+function applyToCallerSnapshot(effect, engine) {
+  if (typeof engine?.setCallerContext !== "function") return;
+  const current = engine.call?.callerContext;
+  const base = current || { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  const list = Array.isArray(base.upcomingAppointments) ? base.upcomingAppointments : [];
+  const data = effect.data || {};
+
+  let next;
+  if (effect.type === "booked") {
+    next = [...list, { id: null, client_name: data.client_name || null, scheduled_at: data.scheduled_at }];
+  } else if (data.newScheduledAt) {
+    next = list.map((a) =>
+      a?.id && a.id === data.appointmentId ? { ...a, scheduled_at: data.newScheduledAt } : a
+    );
+  } else if (data.appointmentId) {
+    next = list.filter((a) => a?.id !== data.appointmentId);
+  } else {
+    return; // a "changed" effect carrying no id — nothing can be said about which row moved
+  }
+
+  next.sort((a, b) => Date.parse(a?.scheduled_at || 0) - Date.parse(b?.scheduled_at || 0));
+  engine.setCallerContext({ ...base, upcomingAppointments: next });
+}
+
+function upcomingForCaller(ctx) {
+  const list = ctx?.callerContext?.upcomingAppointments;
+  if (!Array.isArray(list)) return [];
+  const now = Date.now();
+  return list.filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > now;
+  });
+}
+
 /** The what-you-can-do clauses for the CAPABILITIES line. */
 function capabilityClauses(allowed) {
   const hasAll =
@@ -355,7 +474,34 @@ const CLOSED_BOOKING_DECLINE =
   "details. Tell the caller you can't book or change an appointment while the office is closed, " +
   "and offer to take a message so the team can call them back when they reopen.";
 
+/**
+ * The one sentence that makes the receptionist check before it offers.
+ *
+ * Lives in the BOOKING step guidance rather than anywhere global, which is what
+ * implements "stay quiet unless relevant": it is rendered only once the model
+ * has classified the call as booking, so a caller asking about opening hours is
+ * never told about their appointment. `allow` contributes nothing, so an
+ * opted-out business's guidance stays byte-identical to before this existed.
+ */
+function existingAppointmentGuidance(policy) {
+  if (policy === "allow") return "";
+  if (policy === "block") {
+    return (
+      `If CALLER CONTEXT lists an upcoming appointment for this caller, do NOT book a second one — ` +
+      `tell them what they already have and offer to move that appointment instead.\n`
+    );
+  }
+  return (
+    `If CALLER CONTEXT lists an upcoming appointment for this caller, tell them about it and ask ` +
+    `whether they want a second appointment as well or to move that one — before you check any ` +
+    `times or collect any details.\n`
+  );
+}
+
 function bookingGuidance(config, now, canCheck) {
+  const existingLine = existingAppointmentGuidance(
+    existingAppointmentPolicy(capabilityConfig(config, "appointments"))
+  );
   const resolvedHours = resolveBusinessHoursForPrompt(config, now);
   let businessHoursStr = "business hours";
   if (resolvedHours) {
@@ -374,6 +520,7 @@ function bookingGuidance(config, now, canCheck) {
   // slot never costs the caller the whole flow. (An EHR uses its own get_available_slots.)
   if (canCheck) {
     return (
+      existingLine +
       `Your task: Help the caller book, checking the calendar before you collect any details. ` +
       `One question at a time:\n` +
       `1. Ask whether they prefer mornings or afternoons, and if any days don't work (business hours: ${businessHoursStr}).\n` +
@@ -385,6 +532,7 @@ function bookingGuidance(config, now, canCheck) {
   }
 
   return (
+    existingLine +
     `Your task: Help the caller find a good appointment time and collect their details. ` +
     `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
     `1. Ask whether they prefer mornings or afternoons.\n` +
@@ -694,6 +842,24 @@ export default {
       options: ["internal", "athenahealth", "webhook"],
       default: "internal",
     },
+    // What to do when the caller already has an upcoming appointment. The
+    // failure this exists to stop is a SILENT second booking: the assistant
+    // forgets, offers to book, runs the whole flow, and nobody finds out until
+    // the caller shows up twice. "confirm" is the default because that failure
+    // is never what any business wanted, while a genuine second appointment
+    // (two services, a shared family phone) is common enough that refusing
+    // outright would be wrong for most.
+    existingAppointment: {
+      type: "choice",
+      label: "If the caller already has an upcoming appointment",
+      options: ["confirm", "allow", "block"],
+      optionLabels: {
+        confirm: "Check with them first — only book a second one if they say yes",
+        allow: "Just book it",
+        block: "Don't book a second one — offer to move the existing one",
+      },
+      default: "confirm",
+    },
     require: {
       identity: {
         type: "identityFields",
@@ -767,9 +933,16 @@ export default {
   tools(config) {
     const allowed = config?.allowedTasks || [];
     if (!allowed.includes("book_appointment")) return [];
+    const cfg = capabilityConfig(config, "appointments");
+    // The confirm flag is declared only where the handler honours it — see
+    // withAdditionalFlag.
+    const base =
+      existingAppointmentPolicy(cfg) === "confirm"
+        ? withAdditionalFlag(BOOK_APPOINTMENT_DECLARATION)
+        : BOOK_APPOINTMENT_DECLARATION;
     // Configured requirements become real tool parameters, which is what turns
     // a config entry into something the model is actually asked for.
-    return [withRequirements(BOOK_APPOINTMENT_DECLARATION, capabilityConfig(config, "appointments"))];
+    return [withRequirements(base, cfg)];
   },
 
   adapterTools(config, ctx = {}) {
@@ -931,6 +1104,10 @@ export default {
    * texts for one appointment.
    */
   onEffect(effect, engine) {
+    if (effect.type === "changed" || effect.type === "booked") {
+      applyToCallerSnapshot(effect, engine);
+    }
+
     if (effect.type === "changed") {
       // A completed cancel or reschedule. Leaving the step at gather_details
       // would re-inject the cancel-flow identity guidance every turn, which is
@@ -1184,6 +1361,76 @@ async function bookAppointment(fc, ctx) {
         bookMessage =
           "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
       } else {
+        // ---- Does this caller already have an upcoming appointment? --------
+        //
+        // Placement is load-bearing, and all three neighbours matter:
+        //   * BELOW the anchor, or a model re-issuing book_appointment for the
+        //     slot it just booked would be blocked by its own appointment.
+        //   * BELOW validateBookingTime, so a past or out-of-hours time still
+        //     gets its specific, actionable error rather than this one.
+        //   * ABOVE the availability pre-check and the write, so a blocked
+        //     booking touches the database not at all.
+        //
+        // Internal calendar only: callerContext is read from OUR appointments
+        // table, so this says nothing about an EHR's book. book_appointment_in_ehr
+        // goes through executeViaEhr and never reaches here.
+        const policy = existingAppointmentPolicy(capabilityConfig(config, "appointments"));
+        const allUpcoming = upcomingForCaller(ctx);
+        const existing = policy === "allow" ? [] : allUpcoming;
+
+        if (existing.length > 0) {
+          // What the model may say. Times only — no id, no phone, no stored
+          // name, matching lookupCallerAppointments' projection discipline. The
+          // lookup tool stays the single source of appointment ids and the only
+          // route to a change.
+          const spoken = existing
+            .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
+            .join("; ");
+
+          // `block` ignores the flag entirely — it is never advertised under
+          // this policy (see tools()), and honouring it would make an opt-in
+          // parameter a bypass for the business's own rule.
+          const blocked = policy === "block" || args.in_addition_to_existing !== true;
+
+          if (blocked) {
+            const modelMessage =
+              policy === "block"
+                ? `This caller already has an upcoming appointment: ${spoken}. This business does not ` +
+                  `book a second one. Do NOT book. Tell them what they already have and offer to move ` +
+                  `it instead — use get_caller_appointments_from_db then reschedule_appointment_db. ` +
+                  `If they want to keep it as-is and add nothing, say so and move on.`
+                : `This caller already has an upcoming appointment: ${spoken}. Do NOT book anything yet. ` +
+                  `Tell them what they already have and ask whether they want this new time IN ADDITION ` +
+                  `to it, or whether they meant to move it. If they confirm they want both, call ` +
+                  `book_appointment again with in_addition_to_existing set to true. If they want to ` +
+                  `move it, use get_caller_appointments_from_db then reschedule_appointment_db instead.`;
+
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: { success: false, message: modelMessage },
+              },
+              stateEffects: {
+                // The split matters: `message` above instructs the MODEL, this
+                // one is the only string that may reach the caller. Without a
+                // callerSafe line a text-free turn falls through to the generic
+                // can't-complete apology, which would be a lie — nothing failed.
+                toolResult: {
+                  name: fc.name,
+                  success: false,
+                  message:
+                    policy === "block"
+                      ? "It looks like you already have an upcoming appointment with us. I can move that one to a new time if you'd like."
+                      : "It looks like you already have an appointment with us — did you want this as a second one, or should I move the existing one?",
+                  callerSafe: true,
+                },
+                toolCallEvent: { name: fc.name, args },
+              },
+            };
+          }
+        }
+
         const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
         const adapter = schedulingAdapter(ctx.config, ctx.integrations);
         const canCheck = typeof adapter.checkAvailability === "function";
@@ -1227,6 +1474,17 @@ async function bookAppointment(fc, ctx) {
             } else if (dbId) {
               bookSuccess = true;
               bookMessage = "Appointment booked successfully.";
+              // `allow` never blocks, but the model should still know — a
+              // receptionist who has just booked a second appointment for
+              // someone would mention the first if it were relevant. Costs
+              // nothing on the overwhelming majority of bookings, where the
+              // caller has none.
+              if (policy === "allow" && allUpcoming.length > 0) {
+                const alsoHas = allUpcoming
+                  .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
+                  .join("; ");
+                bookMessage += ` This caller also has an existing upcoming appointment on ${alsoHas} — that one still stands.`;
+              }
             }
           } catch (err) {
             const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
@@ -1456,7 +1714,11 @@ async function cancelAppointment(fc, ctx) {
       ...(ok
         ? {
             capabilityEffects: [
-              { capability: "appointments", type: "changed", data: { tool: fc.name } },
+              // appointmentId is carried so onEffect can drop this row from the
+              // caller snapshot. Without it the CALLER CONTEXT block keeps
+              // asserting an appointment the caller just cancelled, and the
+              // booking guard keeps refusing on the strength of it.
+              { capability: "appointments", type: "changed", data: { tool: fc.name, appointmentId } },
             ],
           }
         : {}),
@@ -1587,7 +1849,14 @@ async function rescheduleAppointment(fc, ctx) {
       ...(ok
         ? {
             capabilityEffects: [
-              { capability: "appointments", type: "changed", data: { tool: fc.name } },
+              // The id and the NEW time, so onEffect can re-time this row in the
+              // caller snapshot rather than leaving CALLER CONTEXT reciting the
+              // slot the caller just moved away from.
+              {
+                capability: "appointments",
+                type: "changed",
+                data: { tool: fc.name, appointmentId, newScheduledAt: anchoredScheduledAt },
+              },
             ],
           }
         : {}),

@@ -230,6 +230,10 @@ CREATE INDEX idx_business_capabilities_business ON business_capabilities (busine
 -- Migration 021: the calendar sync worker's hot query is "unsynced upcoming
 -- appointments for this business"; this partial index keeps it cheap.
 CREATE INDEX idx_appointments_unsynced ON appointments (business_id, scheduled_at) WHERE google_event_id IS NULL;
+-- Migration 026: tenant-scoped read of a caller's appointments. Not unique —
+-- the last-10-digit suffix match is applied in the application, so this serves
+-- the business_id scoping rather than the phone comparison itself.
+CREATE INDEX idx_appointments_business_client_phone ON appointments (business_id, client_phone);
 -- Migration 024: phone_number is the tenant-routing key — lookupBusinessByPhone
 -- matches Twilio's `To` against it on every inbound call. Two businesses sharing
 -- a number means the caller reaches whichever row the planner happened to return.
@@ -287,6 +291,26 @@ CREATE TRIGGER businesses_normalize_phones_trg
   ON businesses
   FOR EACH ROW
   EXECUTE FUNCTION businesses_normalize_phones();
+
+-- Migration 026: the same defence for appointments.client_phone, which is the
+-- column the caller-appointment lookup reads. NOT unique — many appointments
+-- legitimately share a number (a returning caller, a family, an office
+-- landline), so a duplicate here is the normal case rather than a conflict.
+CREATE OR REPLACE FUNCTION appointments_normalize_phones()
+RETURNS trigger AS $$
+BEGIN
+  NEW.client_phone := normalize_phone_value(NEW.client_phone);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS appointments_normalize_phones_trg ON appointments;
+
+CREATE TRIGGER appointments_normalize_phones_trg
+  BEFORE INSERT OR UPDATE OF client_phone
+  ON appointments
+  FOR EACH ROW
+  EXECUTE FUNCTION appointments_normalize_phones();
 
 -- Double-booking is prevented by the create_appointment_if_available function
 -- (migration 022), not a unique index: per-business slot capacity and

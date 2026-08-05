@@ -5,6 +5,7 @@ Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Sta
 
 === CURRENT TASK AND STATE ===
 Step: gather_details | Intent: book_appointment
+If CALLER CONTEXT lists an upcoming appointment for this caller, tell them about it and ask whether they want a second appointment as well or to move that one — before you check any times or collect any details.
 Your task: Help the caller book, checking the calendar before you collect any details. One question at a time:
 1. Ask whether they prefer mornings or afternoons, and if any days don't work (business hours: today's hours, 9:00 AM – 5:00 PM).
 2. As soon as the caller names a specific time, say something like "one moment while I check that" and call check_appointment_availability with that time IN THE SAME response.

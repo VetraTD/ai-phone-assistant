@@ -240,3 +240,45 @@ describe("booking guidance is check-first for the built-in calendar, not for an 
     expect(frag.dynamic.stepGuidance.book_appointment).not.toContain("check_appointment_availability");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A declaration must describe what the handler actually does.
+//
+// The precedent this guards: get_caller_appointments_from_db once advertised
+// caller_phone and caller_name parameters the handler had never read. Told it
+// could search by name, the model searched by name and then reported the result
+// of a lookup that never ran.
+// ---------------------------------------------------------------------------
+describe("appointments — the in_addition_to_existing parameter is declared only where it works", () => {
+  const cfgFor = (policy) => ({
+    allowedTasks: ["book_appointment"],
+    ...(policy ? { capabilities: { appointments: { existingAppointment: policy } } } : {}),
+  });
+  const bookDecl = (policy) =>
+    appointments.tools(cfgFor(policy)).find((d) => d.name === "book_appointment");
+
+  it("is offered under confirm, which is also the default when nothing is configured", () => {
+    for (const policy of [undefined, "confirm"]) {
+      const props = bookDecl(policy).parameters.properties;
+      expect(props.in_addition_to_existing).toBeDefined();
+      expect(props.in_addition_to_existing.type).toBe("boolean");
+    }
+  });
+
+  it("is NOT offered under allow — nothing blocks, so the flag would be a lie", () => {
+    expect(bookDecl("allow").parameters.properties.in_addition_to_existing).toBeUndefined();
+  });
+
+  it("is NOT offered under block — nothing can unblock, so it would be a bypass", () => {
+    expect(bookDecl("block").parameters.properties.in_addition_to_existing).toBeUndefined();
+  });
+
+  it("is never required, so the model is not forced to guess a boolean", () => {
+    // Forcing it on every booking, including for callers who have no
+    // appointment at all, is how it ends up defaulting to true and silently
+    // disabling the guard.
+    for (const policy of [undefined, "confirm", "allow", "block"]) {
+      expect(bookDecl(policy).parameters.required || []).not.toContain("in_addition_to_existing");
+    }
+  });
+});

@@ -547,7 +547,11 @@ function buildCallerContextSection(callerContext, timezone, profile) {
     });
     ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
   }
-  ctx += `\nUse this context to personalize the conversation — e.g. reference their upcoming appointment if relevant. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps.`;
+  // "reference their upcoming appointment if relevant" used to sit in the first
+  // sentence. It was removed, not trimmed: it is the direct contradiction of the
+  // rule that follows, and with both present the model treated any call from a
+  // caller with an appointment as an invitation to start scheduling.
+  ctx += `\nUse this context to personalize the conversation. Do NOT greet them with "Welcome back" or similar phrases. Do NOT read out all their history unprompted; use it naturally when it helps. Do NOT bring up an upcoming appointment unless the caller asks about it, or the conversation turns to booking, changing, or cancelling one.`;
   return ctx;
 }
 
@@ -1715,6 +1719,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Per-capability scratchpad, carrying both what earlier turns left
         // behind and what earlier tools in THIS turn produced.
         capabilityState,
+        // The call-start caller snapshot (prior call count, upcoming
+        // appointments), already resolved before turn 1. Passed so a tool can
+        // reason about it without a database round trip inside the tool round —
+        // book_appointment's existing-appointment guard is the consumer. Read
+        // only from call metadata, never from model arguments.
+        callerContext: extras?.callerContext || null,
         // Eval/benchmark harness seam: when set, services/tools.js hands this
         // to a capability pack's execute in place of the real CAPABILITY_DEPS.
         // undefined in production, where the real deps are always used.

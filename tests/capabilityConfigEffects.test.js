@@ -31,6 +31,7 @@ const WIRED_KEYS = {
     "adapter",
     "availability.capacity",
     "availability.length",
+    "existingAppointment",
     "notes",
     "require.businessHoursOnly",
     "require.confirmBeforeWrite",
@@ -136,6 +137,29 @@ describe("appointments — every knob has an effect", () => {
     expect(checkRequirements(cfg, {}, { toolName: "book_appointment", config }).ok).toBe(false);
     expect(appointments.prompt(config, { now: sun, integrations: [] }).dynamic.stepGuidance.book_appointment)
       .toMatch(/office is closed right now/i);
+  });
+
+  it("existingAppointment → changes the booking guidance AND whether the confirm flag is offered", () => {
+    // Two observable effects, matching the two layers the guard needs: prose
+    // that makes the model ask, and a parameter that lets the answer through.
+    const guidanceOf = (config) =>
+      appointments.prompt(config, { now: new Date("2026-07-20T15:00:00Z"), integrations: [] })
+        .dynamic.stepGuidance.book_appointment;
+
+    // Default (nothing configured) behaves as "confirm".
+    const dflt = apptConfig({});
+    expect(guidanceOf(dflt)).toMatch(/second appointment as well or to move that one/i);
+    expect(bookTool(dflt).parameters.properties.in_addition_to_existing).toBeDefined();
+
+    const block = apptConfig({ existingAppointment: "block" });
+    expect(guidanceOf(block)).toMatch(/do NOT book a second one/i);
+    expect(bookTool(block).parameters.properties.in_addition_to_existing).toBeUndefined();
+
+    // "allow" adds no prose at all, so an opted-out business's guidance stays
+    // byte-identical to what it was before this knob existed.
+    const allow = apptConfig({ existingAppointment: "allow" });
+    expect(guidanceOf(allow)).not.toMatch(/already ha(s|ve) an upcoming appointment|CALLER CONTEXT lists/i);
+    expect(bookTool(allow).parameters.properties.in_addition_to_existing).toBeUndefined();
   });
 
   it("availability.length + capacity → reach the adapter's availability check", async () => {
