@@ -220,6 +220,16 @@ vi.mock("../services/notifications.js", () => ({
 
 vi.mock("../services/gemini.js", () => ({
   isBusinessOpen: vi.fn(() => true),
+  // The live tool vocabulary the outbound leak guard matches against. Mirrors
+  // the real export so the guard runs for real in these tests rather than
+  // being silently skipped.
+  callToolNames: vi.fn(() => [
+    "book_appointment",
+    "cancel_appointment_db",
+    "reschedule_appointment_db",
+    "get_caller_appointments_from_db",
+    "record_customer_request",
+  ]),
   ACTION_TOOL_NAMES: [
     "book_appointment",
     "cancel_appointment_db",
@@ -3784,5 +3794,65 @@ describe("session.js — uninterruptible greeting", () => {
     callState.getState(sid).callStartTime = Date.now() - 60_000;
 
     expect(tm.opts.bargeInAllowed()).toBe(true);
+  });
+});
+
+describe("session.js — the transcript records what the caller heard", () => {
+  // On production call 7eee9cd1 the raw model text went into history and into
+  // the stored transcript, so the model saw itself having said "default_api:…"
+  // and the next eleven turns were the caller interrogating it about our
+  // stack. Storing the SPOKEN text closes that loop and makes the dashboard
+  // show what actually happened on the line.
+  it("stores the sanitized spoken text, not the model's raw output", async () => {
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "default_api:get_caller_appointments_from_db{} One moment while I check." },
+        {
+          type: "done",
+          reply: {
+            text: "default_api:get_caller_appointments_from_db{} One moment while I check.",
+            toolResults: [],
+          },
+        },
+      ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await flush();
+
+    const aiRows = db.addTranscriptEntry.mock.calls.filter((c) => c[1] === "ai");
+    expect(aiRows.length).toBeGreaterThanOrEqual(1);
+    const stored = aiRows[aiRows.length - 1][2];
+    expect(stored).not.toMatch(/default_api|get_caller_appointments_from_db/);
+    expect(stored).toContain("One moment while I check.");
+  });
+
+  it("does not feed the model its own leak back on the next turn", async () => {
+    // The mechanism behind turns 5-16 of the reported call: the raw text went
+    // into history, the model read it as something it had said, and the
+    // conversation never came back.
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "default_api:book_appointment{} One moment." },
+        { type: "done", reply: { text: "default_api:book_appointment{} One moment.", toolResults: [] } },
+      ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await settleGreeting();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("book me in please.");
+    await flush();
+    await flush();
+
+    const history = callState.getState(sid).history || [];
+    expect(JSON.stringify(history)).not.toMatch(/default_api|book_appointment\{/);
   });
 });

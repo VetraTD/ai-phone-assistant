@@ -75,6 +75,44 @@ function promisedAction(text, promiseRe) {
 // remembering to edit a list in the engine.
 export const ACTION_TOOL_NAMES = actionToolNames();
 
+/**
+ * Every function declaration this business's calls are given, in the order the
+ * model sees them.
+ *
+ * @param {object} cfg - normalised business config
+ * @param {object} [extras] - { integrations, ... }
+ * @param {boolean} [markerMode]
+ * @returns {object[]}
+ */
+function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
+  return [
+    ...(buildCallTools(cfg, { markerMode }).functionDeclarations || []),
+    ...(buildIntegrationTools(extras?.integrations || [], cfg).functionDeclarations || []),
+    ...(buildDbAppointmentTools(cfg, extras).functionDeclarations || []),
+  ];
+}
+
+/**
+ * The live tool vocabulary for a call: exactly the names the model could
+ * possibly write, including a business's operator-defined webhook tools.
+ *
+ * Exported for the TTS-boundary leak guard (lib/voice/speakableText.js), which
+ * has to recognise our own tool names in spoken text and must never rely on a
+ * hand-maintained list — that is precisely how `get_caller_appointments_from_db`
+ * reached a caller's ear on 2026-08-04.
+ *
+ * @param {object} cfg
+ * @param {object} [extras]
+ * @returns {string[]}
+ */
+export function callToolNames(cfg, extras = {}) {
+  try {
+    return buildAllDeclarations(cfg, extras, intentMarkerEnabled(extras)).map((d) => d.name);
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Singleton Gemini client — @google/genai's GoogleGenAI wraps a connection
 // pool; creating one per turn (as this file used to) throws that pool away
@@ -1253,14 +1291,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
 
   // Full config, not just the task list: packs need config.capabilities to
   // turn a business's configured requirements into tool parameters.
-  const builtInTools = buildCallTools(cfg, { markerMode });
-  const integrationTools = buildIntegrationTools(extras?.integrations || [], cfg);
-  const dbAppointmentTools = buildDbAppointmentTools(cfg, extras);
-  const allDeclarations = [
-    ...(builtInTools.functionDeclarations || []),
-    ...(integrationTools.functionDeclarations || []),
-    ...(dbAppointmentTools.functionDeclarations || []),
-  ];
+  const allDeclarations = buildAllDeclarations(cfg, extras, markerMode);
   const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
 
   // Turn-aware history bound (lib/voice/historyTrim.js): keeps whole turns from

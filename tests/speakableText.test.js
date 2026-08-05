@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toSpeakable, expandAbbreviations, dampEmphasis } from "../lib/voice/speakableText.js";
+import { toSpeakable, expandAbbreviations, dampEmphasis, sanitizeOutbound } from "../lib/voice/speakableText.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { buildSayContent } from "../lib/twiml.js";
 
@@ -564,5 +564,93 @@ describe("dampEmphasis", () => {
   it("runs as part of toSpeakable", () => {
     expect(toSpeakable("**GREAT!!!** See you at 3pm")).toContain("Great.");
     expect(toSpeakable("**GREAT!!!** See you at 3pm")).not.toContain("!");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural leak guard.
+//
+// The word denylist above is necessary but cannot be sufficient, and the
+// 2026-08-04 production leak proved it: \bapi\b does not match inside
+// `default_api` because `_` is a word character, and no denylist would ever
+// have contained `get_caller_appointments_from_db`. What a caller heard was
+// "default api get caller appointments from db".
+//
+// So this layer matches SHAPES — identifiers, call syntax, structured
+// fragments — plus the live tool registry, rather than a list of words.
+// ---------------------------------------------------------------------------
+describe("sanitizeOutbound — structural leak guard", () => {
+  const FALLBACK = "Sorry, let me get someone to help with that.";
+  const NAMES = ["get_caller_appointments_from_db", "reschedule_appointment_db", "book_appointment"];
+  const ctx = { toolNames: NAMES, fallback: FALLBACK };
+
+  it("excises a pseudo-call and keeps the sentence that shared the line with it", () => {
+    const out = sanitizeOutbound(
+      "default_api:get_caller_appointments_from_db{} One moment while I check that for you.",
+      ctx
+    );
+    expect(out).toBe("One moment while I check that for you.");
+  });
+
+  it("replaces a sentence whose leak leaves nothing speakable behind", () => {
+    const out = sanitizeOutbound("default_api:reschedule_appointment_db{appointment_id:x}", ctx);
+    expect(out).toBe(FALLBACK);
+  });
+
+  it("catches a tool name the model spelled out in prose", () => {
+    // No underscores to spot, no denylist word: only the live registry knows
+    // this phrase is ours.
+    const out = sanitizeOutbound("I ran get caller appointments from db and found two.", ctx);
+    expect(out).toBe(FALLBACK);
+  });
+
+  it("catches a snake_case identifier the word denylist cannot see", () => {
+    expect(sanitizeOutbound("The default_api_key was rejected.", ctx)).toBe(FALLBACK);
+  });
+
+  it("catches an env-var shaped token", () => {
+    expect(sanitizeOutbound("ATHENA_API_BASE is not configured.", ctx)).toBe(FALLBACK);
+  });
+
+  it("catches a file path and a stack frame", () => {
+    expect(sanitizeOutbound("It failed in services/tools.js on line 12.", ctx)).toBe(FALLBACK);
+  });
+
+  it("apologises only once however many sentences leak", () => {
+    const out = sanitizeOutbound(
+      "default_api_key failed. ATHENA_API_BASE is unset. I can still take a message.",
+      ctx
+    );
+    expect(out.match(new RegExp(FALLBACK.slice(0, 20), "g"))).toHaveLength(1);
+    expect(out).toContain("I can still take a message.");
+  });
+
+  it("never returns an empty utterance", () => {
+    expect(sanitizeOutbound("default_api_key", ctx).trim()).not.toBe("");
+  });
+
+  describe("what it must never touch", () => {
+    const CLEAN = [
+      "Good afternoon, thanks for calling Brightwork. How can I help you today?",
+      "You're booked for Thursday, August 6th at 2 PM.",
+      "I'm still here whenever you're ready.",
+      "There was an error on our side — let me take your details.",
+      "Our booking system has you down for Tuesday.",
+      "That's $85.50 including parts.",
+      "Sure thing. Can I take your name?",
+      "We're at 42 St. Andrews Rd., Suite 3.",
+      "I don't want to give you the wrong information.",
+    ];
+
+    for (const line of CLEAN) {
+      it(`leaves "${line.slice(0, 40)}…" byte-identical`, () => {
+        expect(sanitizeOutbound(line, ctx)).toBe(line);
+      });
+    }
+
+    it("leaves ordinary text alone when given no registry at all", () => {
+      const line = "I ran get caller appointments from db and found two.";
+      expect(sanitizeOutbound(line, { fallback: FALLBACK })).toBe(line);
+    });
   });
 });
