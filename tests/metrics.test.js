@@ -495,9 +495,17 @@ describe("metrics.js — greeting-gate counters", () => {
   // silent no-op rather than an error. These assert the registration itself.
   beforeEach(() => clearStats());
 
-  it("counts speech carried across the uninterruptible greeting", () => {
+  it("counts speech discarded during the uninterruptible greeting", () => {
+    bumpCounter("greeting_speech_discarded");
+    expect(getLatencyStats().turnTaking.greeting_speech_discarded).toBe(1);
+  });
+
+  it("no longer registers the carry counter, so the old name cannot quietly return", () => {
+    // Speech over the greeting is discarded, not carried. An unregistered name
+    // is a silent no-op, so a stale bumpCounter call would otherwise leave no
+    // trace at all — including in a dashboard still charting the old key.
     bumpCounter("greeting_speech_carried");
-    expect(getLatencyStats().turnTaking.greeting_speech_carried).toBe(1);
+    expect(getLatencyStats().turnTaking.greeting_speech_carried).toBeUndefined();
   });
 
   it("counts a greeting guard that had to expire, which must be 0 in production", () => {

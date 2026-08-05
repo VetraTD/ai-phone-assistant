@@ -413,6 +413,7 @@ import * as db from "../services/supabase.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
 import { resolveVoiceLocale } from "../lib/voice/voiceLocale.js";
@@ -3772,9 +3773,11 @@ describe("session.js — uninterruptible greeting", () => {
     expect(tm.opts.bargeInAllowed()).toBe(true);
   });
 
-  it("carries a final spoken over the greeting into the first turn instead of dropping it", async () => {
-    // Uninterruptible must not mean deaf: the caller who opens with "I need to
-    // reschedule" over the greeting should never have to say it twice.
+  it("discards a final spoken over the greeting instead of carrying it into the first turn", async () => {
+    // This gate sits ABOVE turnManager's word-count / sustained-voice /
+    // confidence checks, so anything held here would be unfiltered — a cough or
+    // a speakerphone reflection promoted to turn 1. Dropping is the whole point:
+    // the caller repeats themselves, the business name survives.
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);
     await startCall(ws, newSid());
@@ -3789,13 +3792,121 @@ describe("session.js — uninterruptible greeting", () => {
     await flush();
 
     expect(runLlmTurn).not.toHaveBeenCalled();
+    expect(bumpCounter).toHaveBeenCalledWith("greeting_speech_discarded");
 
     ws.emit({ event: "mark", mark: { name: "greeting-done" } });
     await flush();
     await flush();
 
+    // Still nothing. The words are gone, not queued.
+    expect(runLlmTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not count an empty greeting-gated final as discarded speech", async () => {
+    // The counter measures what a caller actually lost. An empty final costs
+    // them nothing, but must still take the re-arm path below.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const tm = H.turnManagerInstances[0];
+    tm.handleFinal.mockReturnValue({ action: "ignore", reason: "greeting" });
+
+    H.sttInstances[0].opts.onFinal("   ", {});
+    await flush();
+
+    expect(bumpCounter).not.toHaveBeenCalledWith("greeting_speech_discarded");
+  });
+
+  it("keeps the silence ladder armed after discarding, so the call does not go quiet", async () => {
+    // Every "ignore" branch in onFinal owes the ladder a re-arm. While speech
+    // was being HELD, the replay into startTurn supplied one implicitly; now
+    // that nothing is replayed, the branch has to arm it itself.
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: { callSid: sid, streamSid: "MZv4", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const tm = H.turnManagerInstances[0];
+      tm.handleFinal.mockReturnValue({ action: "ignore", reason: "greeting" });
+      H.sttInstances[0].opts.onFinal("I need to reschedule my appointment.", {});
+      await vi.advanceTimersByTimeAsync(1);
+
+      ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const ttsCountBefore = H.ttsTurns.length;
+      await vi.advanceTimersByTimeAsync(30_000); // past every silence threshold
+      expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("arms the ladder on the watchdog path too, when greeting-done never arrives", async () => {
+    // The failure this pins: mark lost AND the caller talked over the greeting.
+    // endGreetingPhase is then the ONLY thing that can arm the ladder — the
+    // mark handler's generic re-arm never runs. Without its armSilenceTimer the
+    // call is silent for its whole duration, which is the one outcome a caller
+    // cannot recover from.
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeWs();
+      handleVoiceSessionConnection(ws);
+      const sid = `CA-session-fake-${++sidCounter}`;
+      ws.emit({
+        event: "start",
+        start: { callSid: sid, streamSid: "MZv4", customParameters: { businessPhone: "+15550000000", callerPhone: "+15559999999" } },
+      });
+      await vi.advanceTimersByTimeAsync(1);
+
+      const tm = H.turnManagerInstances[0];
+      tm.handleFinal.mockReturnValue({ action: "ignore", reason: "greeting" });
+      H.sttInstances[0].opts.onFinal("I need to reschedule my appointment.", {});
+      await vi.advanceTimersByTimeAsync(1);
+
+      const ttsCountBefore = H.ttsTurns.length;
+
+      // No mark, ever. Only the 12s watchdog can reopen the gate.
+      await vi.advanceTimersByTimeAsync(13_000);
+      expect(bumpCounter).toHaveBeenCalledWith("greeting_guard_expired");
+      expect(tm.opts.bargeInAllowed()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still hears the caller's next utterance — discard is not a mute", async () => {
+    // STT stays open through the greeting on purpose (inboundVad's noise floor
+    // needs the audio). Proving the gate reopens for real speech is what
+    // separates this from muting the mic.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const tm = H.turnManagerInstances[0];
+    tm.handleFinal.mockReturnValue({ action: "ignore", reason: "greeting" });
+    H.sttInstances[0].opts.onFinal("I need to reschedule my appointment.", {});
+    await flush();
+
+    ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+    await flush();
+
+    tm.opts.onTurnEnd("what are your hours today?");
+    await flush();
+    await flush();
+
     expect(runLlmTurn).toHaveBeenCalledTimes(1);
-    expect(runLlmTurn.mock.calls[0][0].userText).toContain("reschedule");
+    expect(runLlmTurn.mock.calls[0][0].userText).toContain("hours");
   });
 
   it("reopens the gate even if the greeting-done mark never arrives", async () => {

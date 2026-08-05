@@ -217,6 +217,11 @@ vi.mock("../services/gemini.js", () => ({
   isBusinessOpen: () => true,
   generateSummaryAndSentiment: vi.fn(async () => ({})),
   ACTION_TOOL_NAMES: [],
+  // Reached from session.js's leak-guard context (handleTurnError -> the
+  // per-call tool vocabulary). Omitting it made the whole sim throw before
+  // either scenario could report a number — vitest treats a missing export on a
+  // factory mock as an error, not undefined.
+  callToolNames: () => [],
 }));
 vi.mock("../lib/logger.js", () => ({
   log: { debug: () => {}, info: () => {}, error: () => {}, warn: () => {} },
@@ -344,7 +349,15 @@ async function runCall({
   if (!stt) throw new Error("STT stream never opened");
 
   // Let the greeting settle before the caller speaks.
+  //
+  // onDone is the TTS stream finishing, NOT the caller-side playback mark. Our
+  // FakeWs does not echo marks, so without emitting greeting-done by hand the
+  // barge-in gate stays shut and every caller line for the first
+  // VOICE_GREETING_GUARD_MAX_MS is discarded — the sim would be measuring the
+  // greeting watchdog rather than turn-taking, and reporting zero cutoffs
+  // because nothing reached a turn at all.
   H.ttsTurns[0]?.opts?.onDone?.({});
+  ws.emit({ event: "mark", mark: { name: "greeting-done" } });
   await vi.advanceTimersByTimeAsync(600);
 
   const utterances = [];
@@ -649,8 +662,12 @@ describe("cutoff simulation", () => {
     if (!stt) throw new Error("STT stream never opened");
 
     // Settle the greeting, then have the caller ask something so the assistant
-    // starts a reply we can try to interrupt.
+    // starts a reply we can try to interrupt. The mark is emitted by hand for
+    // the reason given in the cutoff scenario above: FakeWs does not echo marks,
+    // and without it the barge-in gate never opens, so this scenario would
+    // report "no cutoff" for the trivial reason that no turn ever began.
     H.ttsTurns[0]?.opts?.onDone?.({});
+    ws.emit({ event: "mark", mark: { name: "greeting-done" } });
     await tick(400, QUIET);
     await tick(600, LOUD);
     await tick(endpointMs + 60, QUIET);
