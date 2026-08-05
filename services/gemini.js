@@ -7,6 +7,8 @@ import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from 
 import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
+import { createToolCallTextStripper } from "../lib/toolCallText.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
 import {
@@ -23,7 +25,46 @@ import {
   sanitizeFact,
 } from "../lib/capabilities/promptAssembler.js";
 
-const MAX_FC_ROUNDS = 3;
+// Tool-execution rounds allowed in one turn.
+//
+// Raised 3 -> 5 when text-channel recovery landed: a recovery round consumes
+// one of these, and a reschedule already needs up to four (lookup -> "which
+// one?" -> re-lookup -> reschedule). At 3 the recovery round could not fit.
+// If TEXT_CALL_MAX_REASKS is ever raised above 1, raise this to match.
+const MAX_FC_ROUNDS = (() => {
+  const v = Number.parseInt(process.env.GEMINI_MAX_FC_ROUNDS, 10);
+  return Number.isFinite(v) && v >= 1 && v <= 8 ? v : 5;
+})();
+
+// Ask the model to re-issue a tool call it wrote as text. Off reverts to
+// "mute it and carry on", which still protects the caller's ear but leaves the
+// action undone.
+const TEXT_CALL_RECOVERY = process.env.GEMINI_TEXT_CALL_RECOVERY !== "false";
+
+// A turn that tells the caller it is checking or updating something and then
+// calls no tool at all must not end in silence. Off is a revert switch only.
+const PROMISE_BACKSTOP = process.env.GEMINI_PROMISE_BACKSTOP !== "false";
+
+/**
+ * Does this reply owe the caller a result it has not produced?
+ *
+ * Two conjuncts, and the second is what keeps it honest: a promise buried in
+ * the middle of a substantial answer is not a turn that stopped short, it is a
+ * turn that carried on. Only a promise the reply ENDS on, or a reply that is
+ * essentially nothing but the promise, qualifies.
+ *
+ * @param {string} text
+ * @param {RegExp} promiseRe
+ * @returns {boolean}
+ */
+function promisedAction(text, promiseRe) {
+  const body = (text || "").trim();
+  if (!body || !(promiseRe instanceof RegExp)) return false;
+  if (!promiseRe.test(body)) return false;
+  if (body.length < 120) return true;
+  const lastSentence = body.split(/(?<=[.!?])\s+/).pop() || "";
+  return promiseRe.test(lastSentence);
+}
 
 // Tools that perform a caller-visible action. A success from any of these
 // unlocks same-turn end_call (see completedActionThisTurn) and is recorded
@@ -1333,6 +1374,30 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // off the front of the round that actually speaks.
   const newStripper = () => createMarkerStripper({ allowedIntents: cfg.allowedTasks || [] });
   let stripper = markerMode ? newStripper() : null;
+
+  // Tool calls the model wrote into the TEXT channel instead of emitting as
+  // structured functionCall parts (lib/toolCallText.js). Names come from the
+  // live declarations, so a business's webhook tools are covered too.
+  //
+  // One stripper for the whole turn, like the marker one: a pseudo-call can
+  // appear in any round, including after the model has already spoken.
+  const newToolCallStripper = () =>
+    createToolCallTextStripper({ toolNames: allDeclarations.map((d) => d.name) });
+  let toolCallStripper = newToolCallStripper();
+  // Pseudo-calls seen in the CURRENT round only — the recovery question is
+  // "did this round ask for a tool and fail to actually call one".
+  let textCallsThisRound = [];
+  // One re-ask per turn. A model stuck in text-channel mode would otherwise
+  // ping-pong until the 20s hard deadline, which is the dead air being fixed.
+  let textCallReaskUsed = false;
+  let textCallRecovered = false;
+  // Tool calls that actually EXECUTED this turn. Counted here rather than read
+  // off toolCallEvents because that array also carries the synthetic
+  // set_call_intent entry marker mode parses out of the reply text — nothing
+  // ran for that one, and treating it as "a tool ran" would silently disable
+  // the promise backstop for every marker-mode business.
+  let realToolCalls = 0;
+  let promiseGuardUsed = false;
   // What the intent is understood to be right now, starting from the state this
   // turn was built with. Compared against — rather than the turn's opening
   // intent — so the model re-stating the same value in a later round is one
@@ -1368,11 +1433,34 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   while (true) {
     // Drain the stream, yielding text deltas and collecting function calls
     let functionCalls = [];
+    textCallsThisRound = [];
 
     for await (const chunk of streamResponse) {
       // Text delta — extracted from parts directly (see textFromChunk) rather
       // than chunk.text, whose getter warns on every tool-call turn.
-      const raw = textFromChunk(chunk);
+      const rawChunk = textFromChunk(chunk);
+      // Pseudo-calls come out FIRST, ahead of the marker stripper. A pseudo-call
+      // can precede the marker line, and couldBeMarker's bail-out would release
+      // the buffer un-inspected — straight to the caller's ear.
+      const pseudo = rawChunk ? toolCallStripper.push(rawChunk) : { text: "", calls: [] };
+      if (pseudo.calls.length) {
+        for (const c of pseudo.calls) {
+          textCallsThisRound.push(c);
+          bumpCounter("text_channel_tool_calls");
+          // Arg KEYS only. The observed leak was
+          // `{caller_name:Boris Johnson}` — the values are caller PII.
+          log.error("text_channel_tool_call", {
+            tool: c.name,
+            shape: c.shape,
+            round,
+            step,
+            parseOk: c.parseOk,
+            argKeys: Object.keys(c.args || {}),
+            severity: "warn",
+          });
+        }
+      }
+      const raw = pseudo.text;
       if (raw) {
         const out = stripper
           ? stripper.push(raw)
@@ -1426,6 +1514,109 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       }
     }
 
+    // Release anything the pseudo-call stripper is still holding. A round can
+    // end mid-hold (a trailing word that is a prefix of a tool name), and text
+    // held past the end of the stream is silence the caller sits through.
+    {
+      const tail = toolCallStripper.flush();
+      for (const c of tail.calls) {
+        textCallsThisRound.push(c);
+        bumpCounter("text_channel_tool_calls");
+        log.error("text_channel_tool_call", {
+          tool: c.name, shape: c.shape, round, step,
+          parseOk: c.parseOk, argKeys: Object.keys(c.args || {}), severity: "warn",
+        });
+      }
+      if (tail.text) {
+        const out = stripper ? stripper.push(tail.text) : { text: tail.text };
+        if (out.text) { fullText += out.text; yield { delta: out.text }; }
+      }
+      toolCallStripper = newToolCallStripper();
+    }
+
+    if (functionCalls.length > 0) textCallRecovered = textCallRecovered || textCallReaskUsed;
+
+    // The model asked for a tool in words and never actually called one, so
+    // nothing ran. Do NOT execute what was parsed: those arguments never met a
+    // schema, and on the call this was found on they contained an appointment
+    // id that does not exist. Ask for the call properly instead.
+    if (
+      TEXT_CALL_RECOVERY &&
+      functionCalls.length === 0 &&
+      textCallsThisRound.length > 0 &&
+      !textCallReaskUsed
+    ) {
+      textCallReaskUsed = true;
+      const target = textCallsThisRound[0].name;
+      bumpCounter("text_channel_reasks");
+      log.info("text_channel_reask", { tool: target, round, step });
+      // Name the tool, withhold the arguments. Re-supplying them would launder
+      // a hallucinated id straight into a DB write; making the model re-derive
+      // them means they come from the conversation, where the real values came
+      // from an actual lookup.
+      const note =
+        `${SYSTEM_NOTE_PREFIX}your last reply contained the text "${target}" instead of an actual ` +
+        `function call, so nothing ran. Call ${target} now as a real function call. Do not write ` +
+        `function names, arguments, braces, or "default_api" in your reply text — the caller hears ` +
+        `everything you write.${SYSTEM_NOTE_SUFFIX}`;
+      // mode ANY makes a structured call mandatory; allowedFunctionNames pins it
+      // to the tool the model already announced, so this cannot invent a
+      // different action.
+      const forceCall = {
+        ...perRequestConfig,
+        toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [target] } },
+      };
+      try {
+        streamResponse = await chat.sendMessageStream({ message: note, config: forceCall });
+      } catch (err) {
+        // toolConfig may be rejected alongside cachedContent the way tools are
+        // (see services/geminiCache.js). Retry without it rather than lose the
+        // turn — the note alone still asks for the call.
+        log.error("gemini_toolconfig_rejected", { reason: err?.message, severity: "warn" });
+        streamResponse = await chat.sendMessageStream({ message: note, config: perRequestConfig });
+      }
+      if (stripper) stripper = newStripper();
+      continue;
+    }
+
+    // The caller was told something was being checked or changed, and not one
+    // tool ran in either channel. This is the shape that produced three
+    // consecutive silent turns on the reported call, and it carries no
+    // pseudo-call for the parser above to catch — the model simply said the
+    // words and did nothing.
+    //
+    // The zero-tool-call conjunct is what makes this precise rather than
+    // heuristic: a legitimate "one moment" that preceded a real call cannot
+    // reach here, so there is no timing or ordering to get wrong.
+    if (
+      PROMISE_BACKSTOP &&
+      functionCalls.length === 0 &&
+      realToolCalls === 0 &&
+      !promiseGuardUsed &&
+      !textCallReaskUsed &&
+      promisedAction(fullText, getStrings(cfg).promiseRe)
+    ) {
+      promiseGuardUsed = true;
+      bumpCounter("promise_only_turns");
+      log.info("promise_only_turn", { step, round });
+      const note =
+        `${SYSTEM_NOTE_PREFIX}you told the caller you would check or update something but you did ` +
+        `not call any function, so nothing happened. Call the correct function now, or tell the ` +
+        `caller plainly what you can do instead.${SYSTEM_NOTE_SUFFIX}`;
+      const forceCall = {
+        ...perRequestConfig,
+        toolConfig: { functionCallingConfig: { mode: "ANY" } },
+      };
+      try {
+        streamResponse = await chat.sendMessageStream({ message: note, config: forceCall });
+      } catch (err) {
+        log.error("gemini_toolconfig_rejected", { reason: err?.message, severity: "warn" });
+        streamResponse = await chat.sendMessageStream({ message: note, config: perRequestConfig });
+      }
+      if (stripper) stripper = newStripper();
+      continue;
+    }
+
     // No function calls — we're done
     if (functionCalls.length === 0 || round >= MAX_FC_ROUNDS) break;
     round++;
@@ -1459,6 +1650,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         depsOverride: extras?.capabilityDeps,
       };
       const { functionResponse, stateEffects } = await executeToolCall(fc, toolCtx);
+      realToolCalls++;
       results.push({ functionResponse });
       if (stateEffects.toolResult) toolResults.push(stateEffects.toolResult);
       if ("intentArgs" in stateEffects) intentArgs = stateEffects.intentArgs;
@@ -1575,6 +1767,29 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // rather than a leak, and it only applies when the model produced no text
   // of its own — which is already the degraded path.
   const S = getStrings(cfg);
+
+  // The model asked for a tool in words, was asked to call it properly, and
+  // still did not. Whatever else happened, the caller was told something was
+  // being checked or changed — they must not be left listening to nothing.
+  //
+  // Appended rather than substituted: the promise sentence has already been
+  // streamed and spoken by the time this is known, so there is nothing left to
+  // replace. This is what the caller hears after the pause.
+  const textCallFailed = textCallReaskUsed && !textCallRecovered;
+  const promiseFailed = promiseGuardUsed && realToolCalls === 0;
+  if (textCallFailed || promiseFailed) {
+    // One line, however many ways the turn went wrong — a caller who hears the
+    // apology twice learns something is broken.
+    bumpCounter(textCallFailed ? "text_channel_unrecovered" : "promise_only_unrecovered");
+    log.error(textCallFailed ? "text_channel_unrecovered" : "promise_only_unrecovered", {
+      step,
+      severity: "warn",
+    });
+    const line = fullText ? ` ${S.actionNotCompleted}` : S.actionNotCompleted;
+    fullText += line;
+    yield { delta: line };
+  }
+
   if (!fullText && toolResults.length > 0) {
     const last = toolResults[toolResults.length - 1];
     const speakableMessage = last.callerSafe ? last.message : "";
