@@ -362,14 +362,32 @@ describe("mapLanguage — Deepgram nova-3 language codes", () => {
     expect(mapLanguage({ languagesSpoken: ["en"], timezone: "America/Chicago" })).toBe("en-US");
   });
 
-  it("follows a British-accented voice even without a UK timezone", () => {
-    // The other signal resolveLocale uses: an operator who picked a British
-    // voice is telling us something about their callers.
+  it("does NOT follow the voice accent — the persona says nothing about the caller", () => {
+    // This assertion is inverted from what it used to be, deliberately.
+    //
+    // It used to read "follows a British-accented voice even without a UK
+    // timezone", on the theory that an operator who picks a British voice is
+    // telling us something about their callers. In the field that theory cost
+    // us: a US business with a British-sounding voice ran en-GB recognition on
+    // American callers, and a London business with an American voice ran en-US
+    // on British ones. The voice is the persona the operator chose; it is not
+    // evidence about who is dialling.
+    //
+    // Recognition now follows the caller's own number, then the business's
+    // number, then its timezone. With none of those present, en-US.
     const british = VOICE_CATALOG.find((v) => v.accent === "british");
     expect(british, "voice catalog should contain a british-accented voice").toBeTruthy();
     expect(
       mapLanguage({ languagesSpoken: ["en"], voiceProvider: "elevenlabs", voiceId: british.elevenVoiceId })
+    ).toBe("en-US");
+    // ...while the VOICE that business speaks with is still British.
+    expect(
+      resolveVoiceLocale({ languagesSpoken: ["en"], voiceProvider: "elevenlabs", voiceId: british.elevenVoiceId })
     ).toBe("en-GB");
+  });
+
+  it("uses a UK timezone when nothing better is available", () => {
+    expect(mapLanguage({ languagesSpoken: ["en"], timezone: "Europe/London" })).toBe("en-GB");
   });
 });
 
@@ -397,6 +415,7 @@ import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
+import { resolveVoiceLocale } from "../lib/voice/voiceLocale.js";
 
 // ---- helpers ---------------------------------------------------------------
 

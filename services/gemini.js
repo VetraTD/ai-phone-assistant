@@ -11,6 +11,7 @@ import { createToolCallTextStripper } from "../lib/toolCallText.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
+import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import {
   resolveCachedContent,
   invalidateCache,
@@ -517,7 +518,7 @@ export function isBusinessOpen(config) {
  * @param {string} timezone
  * @returns {string}
  */
-function buildCallerContextSection(callerContext, timezone) {
+function buildCallerContextSection(callerContext, timezone, profile) {
   if (!callerContext) return "";
   if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
 
@@ -541,7 +542,7 @@ function buildCallerContextSection(callerContext, timezone) {
       // different ways depending on which path happened to speak it.
       //
       // One shared formatter, one shared fallback (lib/capabilities/datetime.js).
-      const d = a.scheduled_at ? speakableDateTime(a.scheduled_at, timezone) : "unknown date";
+      const d = a.scheduled_at ? speakableDateTime(a.scheduled_at, timezone, profile) : "unknown date";
       return a.client_name ? `${d} (${a.client_name})` : d;
     });
     ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
@@ -997,7 +998,7 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // It sits beside KNOWN CALLER FACTS, which is the other caller-scoped block,
   // and keeps the same empty-case contract: emit nothing at all when there is
   // no history, which is what leaves 4 of 5 fixture snapshots untouched.
-  const callerContextSection = buildCallerContextSection(extras.callerContext, config.timezone);
+  const callerContextSection = buildCallerContextSection(extras.callerContext, config.timezone, resolveProfile(config));
   if (callerContextSection) sections.push(callerContextSection);
 
   // === KNOWN CALLER FACTS ===

@@ -6,6 +6,7 @@ import {
   getClient,
 } from "../services/gemini.js";
 import { FIXTURES } from "./fixtures/businessConfigs.js";
+import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
 
 const config = {
@@ -338,7 +339,14 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
         callerContext: ukCaller,
       });
 
-      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", "Europe/London"));
+      // Both paths take the same locale profile now, so agreement is asserted
+      // through it: a Europe/London business says "Monday the 10th of August",
+      // and BOTH read paths have to say it that way or the caller hears two
+      // different renderings of one row.
+      expect(tail).toContain(
+        speakableDateTime("2026-08-10T12:05:00.000Z", "Europe/London", resolveProfile(ukConfig))
+      );
+      expect(tail).toMatch(/the 10th of August/);
     });
 
     it("falls back to the shared default zone, not the server's, when no timezone is configured", () => {
@@ -351,7 +359,7 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
         callerContext: ukCaller,
       });
 
-      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", undefined));
+      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", undefined, resolveProfile(noTz)));
     });
   });
 

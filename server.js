@@ -28,6 +28,8 @@ import {
   buildUnroutedVoicemailTwiml,
   escapeXml,
 } from "./lib/twiml.js";
+import { countryFromE164 } from "./lib/phone.js";
+import { getProfile } from "./lib/voice/localeProfiles.js";
 import {
   isValidUUID,
   isValidE164,
@@ -272,10 +274,21 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         action: unroutedTo ? "transfer" : "voicemail",
         severity: "warn",
       });
+      // There is no business config here by definition — the dialled number
+      // matched nothing — so the locale comes off the numbers themselves.
+      // Without this a UK caller on a UK line heard a US ringback and an
+      // American voice, because both defaulted to "us".
+      const unroutedProfile = getProfile(
+        countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+      );
       if (unroutedTo) {
-        return res.send(buildUnroutedTransferTwiml(unroutedTo, callerPhone));
+        return res.send(
+          buildUnroutedTransferTwiml(unroutedTo, callerPhone, unroutedProfile.ringTone, unroutedProfile.twimlSayVoice)
+        );
       }
-      return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+      return res.send(
+        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, unroutedProfile.twimlSayVoice)
+      );
     }
 
     const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";

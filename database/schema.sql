@@ -23,6 +23,10 @@ CREATE TABLE businesses (
   name                         text NOT NULL,
   phone_number                 text,
   timezone                     text DEFAULT 'America/Chicago',
+  -- Explicit locale override (migration 025). NULL = derive from the chosen
+  -- voice's accent, the phone numbers and the timezone. Drives date phrasing,
+  -- currency, phone grouping, ringback and the STT language.
+  locale                       text CHECK (locale IS NULL OR locale IN ('en-US', 'en-GB', 'es-US')),
   greeting                     text,
   -- Weekly shape (migration 014). NULL still means "always open" — see
   -- services/gemini.js isBusinessOpen().

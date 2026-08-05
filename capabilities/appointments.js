@@ -42,6 +42,7 @@ import {
   isClosedNow,
 } from "../lib/capabilities/requirements.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
+import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
 
 /**
@@ -982,7 +983,7 @@ export default {
         // Business timezone, not the server's — `toLocaleString()` with no zone
         // rendered the confirmation SMS in whatever timezone the process ran in.
         datetime: data.scheduled_at
-          ? speakableDateTime(data.scheduled_at, config?.timezone)
+          ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
           : "your requested time",
       })
       .catch((err) =>
@@ -1134,7 +1135,7 @@ async function checkAvailabilityTool(fc, ctx) {
   // scheduled_at, where the declaration asks for a naive LOCAL wall clock — so
   // the one field could arrive in either frame with no way to tell them apart.
   // Emitting naive local makes the round-trip single-valued.
-  const spokenAlternatives = alternatives.map((a) => speakableDateTime(a, config.timezone));
+  const spokenAlternatives = alternatives.map((a) => speakableDateTime(a, config.timezone, resolveProfile(config)));
   const localAlternatives = alternatives
     .map((a) => toLocalNaiveDateTime(a, config.timezone))
     .filter(Boolean);
@@ -1339,7 +1340,7 @@ async function lookupCallerAppointments(fc, ctx) {
         .map((a) => {
           const who = a.client_name ? `${a.client_name}, ` : "";
           const when = a.scheduled_at
-            ? speakableDateTime(a.scheduled_at, ctx.config?.timezone)
+            ? speakableDateTime(a.scheduled_at, ctx.config?.timezone, resolveProfile(ctx.config))
             : "an unspecified time";
           return `${who}${when}`;
         })

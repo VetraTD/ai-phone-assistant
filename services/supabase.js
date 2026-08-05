@@ -239,6 +239,11 @@ export function loadConfig(business, capabilityRows = null) {
     greeting: business.greeting || DEFAULT_GREETING,
     _hasCustomGreeting: !!business.greeting,
     timezone: business.timezone || process.env.TIMEZONE || "America/Chicago",
+    // Explicit locale override (database/025_business_locale.sql). null means
+    // "derive" — see lib/voice/voiceLocale.js. An operator setting this beats
+    // every heuristic, which is the point: the heuristics exist only because
+    // there usually is not one.
+    locale: business.locale || null,
     businessHours: business.business_hours || null,
     transferPhoneNumber: business.transfer_phone_number || null,
     allowedTasks,
