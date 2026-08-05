@@ -583,3 +583,62 @@ describe("turnManager.js — cough and noise rejection", () => {
     expect(tm.handleFinal("stop").action).toBe("interrupt");
   });
 });
+
+describe("turnManager.js — bargeInAllowed gate (uninterruptible greeting)", () => {
+  // The greeting is the one moment of a call where the business name has to
+  // land. session.js closes this gate for the duration of the greeting audio
+  // and opens it on the greeting-done mark.
+
+  it("ignores a full-sentence interim while the gate is closed", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const tm = createTurnManager({ ...deps, now: () => 1000, bargeInAllowed: () => false });
+
+    const result = tm.handleInterim("I need to reschedule my appointment for next week please");
+
+    expect(result).toEqual({ action: "ignore", reason: "greeting" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("ignores a full-sentence final while the gate is closed, and does NOT end the turn", () => {
+    // endTurn is the trap: routing the final to onTurnEnd would start a turn
+    // over the greeting, which is the opposite of uninterruptible.
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const tm = createTurnManager({ ...deps, now: () => 1000, bargeInAllowed: () => false });
+
+    const result = tm.handleFinal("I need to reschedule my appointment for next week please");
+
+    expect(result).toEqual({ action: "ignore", reason: "greeting" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+    expect(deps.onTurnEnd).not.toHaveBeenCalled();
+  });
+
+  it("still classifies the greeting's own echo as echo, not as greeting", () => {
+    // Ordering proof: the echo check runs BEFORE the greeting gate, so a
+    // speakerphone reflecting the greeting back is attributed correctly and
+    // session.js's echo counters stay meaningful.
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const echoGuard = { classify: vi.fn(() => ({ isEcho: true, ratio: 0.9, novel: 0.1 })) };
+    const tm = createTurnManager({ ...deps, echoGuard, now: () => 1000, bargeInAllowed: () => false });
+
+    const result = tm.handleFinal("thanks for calling brightwork how can I help you today");
+
+    expect(result).toEqual({ action: "ignore", reason: "echo" });
+    expect(deps.onTurnEnd).not.toHaveBeenCalled();
+  });
+
+  it("interrupts normally once the gate is open", () => {
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const tm = createTurnManager({ ...deps, now: () => 1000, bargeInAllowed: () => true });
+
+    expect(tm.handleInterim("I need to reschedule my appointment").action).toBe("interrupt");
+    expect(deps.onInterrupt).toHaveBeenCalledTimes(1);
+  });
+
+  it("is inert when no predicate is injected", () => {
+    // Every existing construction site omits it; behavior there must not move.
+    const deps = makeDeps({ speaking: true, vadActive: true });
+    const tm = createTurnManager({ ...deps, now: () => 1000 });
+
+    expect(tm.handleFinal("actually can we make it Wednesday instead").action).toBe("interrupt");
+  });
+});

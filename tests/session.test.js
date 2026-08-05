@@ -3723,3 +3723,66 @@ describe("fallback visibility", () => {
     expect(metrics.bumpCounter).not.toHaveBeenCalledWith("tts_fallback_turns");
   });
 });
+
+describe("session.js — uninterruptible greeting", () => {
+  // The greeting is where the business name lands. A cough, a carrier echo or
+  // an impatient caller must not cut it off — but the call must never be left
+  // deaf either, so the gate has to reopen unconditionally.
+
+  it("closes the barge-in gate while the greeting plays and opens it on greeting-done", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const tm = H.turnManagerInstances[0];
+    expect(tm.opts.bargeInAllowed()).toBe(false);
+
+    ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+    await flush();
+
+    expect(tm.opts.bargeInAllowed()).toBe(true);
+  });
+
+  it("carries a final spoken over the greeting into the first turn instead of dropping it", async () => {
+    // Uninterruptible must not mean deaf: the caller who opens with "I need to
+    // reschedule" over the greeting should never have to say it twice.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const tm = H.turnManagerInstances[0];
+    tm.handleFinal.mockReturnValue({ action: "ignore", reason: "greeting" });
+
+    // Punctuated, as Deepgram delivers finals (punctuate: true) — an unpunctuated
+    // tail would take the ordinary mid-sentence hold path instead, which is
+    // correct behavior but a different test.
+    H.sttInstances[0].opts.onFinal("I need to reschedule my appointment.", {});
+    await flush();
+
+    expect(runLlmTurn).not.toHaveBeenCalled();
+
+    ws.emit({ event: "mark", mark: { name: "greeting-done" } });
+    await flush();
+    await flush();
+
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+    expect(runLlmTurn.mock.calls[0][0].userText).toContain("reschedule");
+  });
+
+  it("reopens the gate even if the greeting-done mark never arrives", async () => {
+    // Twilio dropping the mark, or a TTS path that never reports done, must not
+    // deafen the call for its whole duration.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+
+    const tm = H.turnManagerInstances[0];
+    expect(tm.opts.bargeInAllowed()).toBe(false);
+
+    // No mark. Age the call past any plausible greeting length.
+    callState.getState(sid).callStartTime = Date.now() - 60_000;
+
+    expect(tm.opts.bargeInAllowed()).toBe(true);
+  });
+});

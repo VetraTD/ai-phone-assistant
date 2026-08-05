@@ -14,6 +14,7 @@ import {
   clearStats,
   recordHoldRule,
   _ringBuffer,
+  bumpCounter,
 } from "../lib/voice/metrics.js";
 
 describe("metrics.js — per-turn latency tracker", () => {
@@ -486,5 +487,22 @@ describe("metrics.js — per-turn latency tracker", () => {
     it("returns null when no turns were recorded for the callSid", () => {
       expect(getCallStats("CA-never-seen")).toBeNull();
     });
+  });
+});
+
+describe("metrics.js — greeting-gate counters", () => {
+  // bumpCounter ignores unregistered names, so an unregistered counter is a
+  // silent no-op rather than an error. These assert the registration itself.
+  beforeEach(() => clearStats());
+
+  it("counts speech carried across the uninterruptible greeting", () => {
+    bumpCounter("greeting_speech_carried");
+    expect(getLatencyStats().turnTaking.greeting_speech_carried).toBe(1);
+  });
+
+  it("counts a greeting guard that had to expire, which must be 0 in production", () => {
+    expect(getLatencyStats().turnTaking.greeting_guard_expired).toBe(0);
+    bumpCounter("greeting_guard_expired");
+    expect(getLatencyStats().turnTaking.greeting_guard_expired).toBe(1);
   });
 });
