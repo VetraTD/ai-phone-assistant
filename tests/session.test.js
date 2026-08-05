@@ -3851,6 +3851,34 @@ describe("session.js — the transcript records what the caller heard", () => {
     expect(stored).toContain("One moment while I check.");
   });
 
+  it("keeps the space between sentences it spoke separately", async () => {
+    // toSpeakable trims each sentence batch, so accumulating them bare glued
+    // them together: "Great.May I please have your full name?" — which is what
+    // the transcript, the dashboard and the model's own history then carried.
+    // The audio was fine (each batch is written to TTS separately); everything
+    // that reads the text afterwards was not.
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "Great. " },
+        { type: "delta", text: "May I have your full name?" },
+        { type: "done", reply: { text: "Great. May I have your full name?", toolResults: [] } },
+      ]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("hello there.");
+    await flush();
+    await flush();
+
+    const aiRows = db.addTranscriptEntry.mock.calls.filter((c) => c[1] === "ai");
+    const stored = aiRows[aiRows.length - 1][2];
+    expect(stored).toBe("Great. May I have your full name?");
+    expect(stored).not.toMatch(/[.!?][A-Z]/);
+  });
+
   it("does not feed the model its own leak back on the next turn", async () => {
     // The mechanism behind turns 5-16 of the reported call: the raw text went
     // into history, the model read it as something it had said, and the
