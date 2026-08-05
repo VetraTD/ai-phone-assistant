@@ -503,19 +503,24 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard API: caller profile (reuses the same data as AI prompt injection)
+// GET /api/businesses/:id/callers/:phone was REMOVED.
+//
+// It returned a caller's prior-call count, their last call's summary, and the
+// times and names on their upcoming appointments — to anyone who knew a
+// business UUID and a phone number, with no authentication of any kind. A UUID
+// is an identifier, not a secret, and this server has no auth scheme to apply:
+// the only guard it has is debugAccessAllowed, which is a shared-token switch
+// for the /api/debug endpoints, not a per-tenant check.
+//
+// Nothing called it (no dashboard code, no test, no documented consumer), so
+// deletion is the strongest available lock and adds no new auth surface here.
+// Caller-scoped data belongs behind the dashboard backend's Supabase JWT plus
+// its ownership check — see AI-phone-dashboard/backend/src/routes/calls.js.
+//
+// NOT fixed here, and still open: /api/businesses/:id/notifications (GET+PUT)
+// and /api/businesses/:id/phone-numbers/{available,buy} have the identical
+// UUID-as-bearer-token hole, and `buy` spends money on the Twilio account.
 // ---------------------------------------------------------------------------
-
-app.get("/api/businesses/:id/callers/:phone", async (req, res) => {
-  const businessId = req.params.id;
-  const callerPhone = decodeURIComponent(req.params.phone);
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  if (!callerPhone || !isValidE164(callerPhone)) return res.status(400).json({ error: "Invalid phone number" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  const context = await db.fetchCallerContext(businessId, callerPhone);
-  res.json(context);
-});
 
 // ---------------------------------------------------------------------------
 // Integrations API: definitions (catalog for dashboard)
