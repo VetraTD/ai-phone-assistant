@@ -3856,3 +3856,78 @@ describe("session.js — the transcript records what the caller heard", () => {
     expect(JSON.stringify(history)).not.toMatch(/default_api|book_appointment\{/);
   });
 });
+
+describe("session.js — the engine covers a slow tool round, not the model", () => {
+  // The prompt used to MANDATE "One moment while I check that for you"
+  // alongside a lookup call. That is a two-part instruction, and on a live call
+  // the model said the words and never made the call — three turns running.
+  // The hold line now belongs to the engine, where it can only fire because a
+  // tool actually started.
+  const holdDelay = 600;
+  const armTurn = async (events) => {
+    H.llmFactory = () => makeGen(events);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    return ws;
+  };
+
+  it("says nothing when the tool answers quickly", async () => {
+    // A fast tool must not earn a gratuitous "One moment." — that is latency
+    // and chatter for nothing.
+    await armTurn([
+      { type: "toolCall", name: "get_caller_appointments_from_db" },
+      { type: "toolEffect", effect: { name: "get_caller_appointments_from_db", success: true } },
+      { type: "delta", text: "You're booked for Thursday at 2 PM." },
+      { type: "done", reply: { text: "You're booked for Thursday at 2 PM.", toolResults: [] } },
+    ]);
+    await new Promise((r) => setTimeout(r, holdDelay + 150));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/one moment/i);
+  });
+
+  it("speaks a hold line when the tool is slow", async () => {
+    // A slow tool means the generator stays OPEN waiting on it — the turn has
+    // not ended, the caller is simply hearing nothing.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "Thursday at 2 PM.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/one moment/i);
+  });
+
+  it("does not double up when the model volunteered its own promise", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "One moment while I check that for you." };
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "One moment while I check that for you.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written.match(/one moment/gi) || []).toHaveLength(1);
+  });
+});

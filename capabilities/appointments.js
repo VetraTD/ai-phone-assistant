@@ -178,16 +178,23 @@ const EHR_WRITE_TOOLS = new Set([
 const DB_APPOINTMENT_DECLARATIONS = [
   {
     name: "get_caller_appointments_from_db",
+    // The declaration used to say "by their phone or name" and offer
+    // caller_phone and caller_name parameters. Both were fictional: the handler
+    // has always looked up strictly by ctx.callerPhone, taken from call
+    // metadata, and ignored every argument it was passed.
+    //
+    // That lie had a cost. Told it could search by name, the model searched by
+    // name — on a live call it looked for a caller's WIFE, and then reported
+    // "I wasn't able to find an appointment for Sarah Chen", which is a
+    // disclosure about a third party AND a description of a search that never
+    // happened. An eval scenario reproduced it on the first run.
+    //
+    // Describing what the tool actually does removes the invitation. The
+    // parameters are gone for the same reason, plus one more: a caller's name
+    // in tool arguments is PII that ends up in logs.
     description:
-      "Look up the caller's scheduled appointments in our database by their phone or name. Use when the business does not have an EHR integration.",
-    parameters: {
-      type: "object",
-      properties: {
-        caller_phone: { type: "string", description: "Caller's phone number" },
-        caller_name: { type: "string", description: "Caller's full name (optional)" },
-      },
-      required: [],
-    },
+      "Look up the appointments belonging to the person on this call. Takes no arguments — it always uses the number the caller is calling from. It cannot search for anyone else, by name or otherwise. Use when the business does not have an EHR integration.",
+    parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "cancel_appointment_db",

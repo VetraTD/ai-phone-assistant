@@ -138,19 +138,10 @@
   },
   {
     "name": "get_caller_appointments_from_db",
-    "description": "Look up the caller's scheduled appointments in our database by their phone or name. Use when the business does not have an EHR integration.",
+    "description": "Look up the appointments belonging to the person on this call. Takes no arguments — it always uses the number the caller is calling from. It cannot search for anyone else, by name or otherwise. Use when the business does not have an EHR integration.",
     "parameters": {
       "type": "object",
-      "properties": {
-        "caller_phone": {
-          "type": "string",
-          "description": "Caller's phone number"
-        },
-        "caller_name": {
-          "type": "string",
-          "description": "Caller's full name (optional)"
-        }
-      },
+      "properties": {},
       "required": []
     }
   },
