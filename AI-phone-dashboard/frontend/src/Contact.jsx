@@ -5,7 +5,6 @@ import VetraLogo from "./components/VetraLogo";
 import "./Contact.css";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
-const DEMO_NUMBER = "+1 (817) 601-1171";
 
 export default function Contact() {
   const [name, setName] = useState("");
@@ -46,10 +45,9 @@ export default function Contact() {
           <h1 className="contact-title">We&apos;d love to hear from you</h1>
           <p className="contact-intro">
             Questions about Vetra, need help getting set up, or want to see if we&apos;re a good fit?
-            Send us a message and we&apos;ll get back to you as soon as we can. You can also call our
-            demo line at{" "}
-            <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="contact-link">
-              {DEMO_NUMBER}
+            Send us a message and we&apos;ll get back to you as soon as we can. You can also email us at{" "}
+            <a href="mailto:vetratd@gmail.com" className="contact-link">
+              vetratd@gmail.com
             </a>
             .
           </p>
@@ -102,11 +100,6 @@ export default function Contact() {
               </button>
             </form>
           )}
-
-          <p className="contact-fallback">
-            Prefer email? Write to{" "}
-            <a href="mailto:support@vetratd.com" className="contact-link">support@vetratd.com</a>.
-          </p>
         </div>
       </main>
     </div>
