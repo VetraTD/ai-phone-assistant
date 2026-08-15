@@ -17,9 +17,27 @@ import {
   Wifi,
   BatteryFull,
   Pause,
+  Check,
+  ArrowUp,
+  TrendingDown,
+  Sparkles,
+  Bell,
+  Moon,
+  Globe,
 } from "lucide-react";
 import VetraMark from "./components/VetraMark";
 import VetraLogo from "./components/VetraLogo";
+import {
+  CURRENCY_SYMBOLS,
+  COST_COMPARISON,
+  LANDING_PLANS,
+  ANNUAL_FREE_MONTHS,
+  detectCurrencyFromLocale,
+  formatLandingPrice,
+  getDisplayPrice,
+  getStoredCurrency,
+  storeCurrency,
+} from "./landingPricing.js";
 import "./Landing.css";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
@@ -138,8 +156,77 @@ const privacyOrigin =
   (import.meta.env.VITE_SITE_URL && String(import.meta.env.VITE_SITE_URL).replace(/\/$/, "")) ||
   (typeof window !== "undefined" ? window.location.origin : "https://vetratd.com");
 
+function readInitialCurrency() {
+  if (typeof window === "undefined") return "USD";
+  return getStoredCurrency() || detectCurrencyFromLocale();
+}
+
+const CORE_FEATURES = [
+  {
+    icon: Phone,
+    title: "Dedicated phone number",
+    desc: "A local or toll-free number that's yours alone.",
+    note: "Already have a number? Port it across at no extra charge.",
+  },
+  {
+    icon: Clock,
+    title: "24/7 call answering",
+    desc: "Every call answered, day or night, including weekends and holidays.",
+    note: "No voicemail, no hold music, no missed opportunities.",
+  },
+  {
+    icon: Sparkles,
+    title: "Natural, human-like voice",
+    desc: "Callers get a warm, real conversation, not a robotic phone menu.",
+    note: "Most callers can't tell they're speaking to an AI.",
+  },
+  {
+    icon: MessageSquareText,
+    title: "Answers common questions",
+    desc: "Vetra replies to your callers' most-asked questions instantly.",
+    note: "Add your own custom Q&A so answers always match your business.",
+  },
+  {
+    icon: FileText,
+    title: "Messages & call summaries",
+    desc: "Every call captured with a clear written summary in your dashboard.",
+    note: "Includes caller details, intent, and sentiment at a glance.",
+  },
+  {
+    icon: PhoneCall,
+    title: "Smart call transfers",
+    desc: "Route callers to the right person or team using your own rules.",
+    note: "Set different transfer destinations for different caller types.",
+  },
+  {
+    icon: Moon,
+    title: "After-hours handling",
+    desc: "Decide what happens outside opening hours, automatically.",
+    note: "Take a message, transfer urgent calls, or keep booking 24/7.",
+  },
+  {
+    icon: Bell,
+    title: "Instant notifications",
+    desc: "Get alerted the moment a call needs your attention.",
+    note: "Summaries delivered straight to your email after every call.",
+  },
+  {
+    icon: Globe,
+    title: "Multilingual ready",
+    desc: "Handle calls in multiple languages with a single setting.",
+    note: "Your greeting and call handling follow the language you choose.",
+  },
+];
+
 export default function Landing() {
   const revealRefs = useRef([]);
+  const [currency, setCurrency] = useState(readInitialCurrency);
+  const [billing, setBilling] = useState("monthly");
+
+  const selectCurrency = (next) => {
+    setCurrency(next);
+    storeCurrency(next);
+  };
 
   useEffect(() => {
     const sections = revealRefs.current || [];
@@ -167,6 +254,24 @@ export default function Landing() {
     return () => observer.disconnect();
   }, []);
 
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setShowScrollTop(window.scrollY > window.innerHeight * 1.5);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    const reduceMotion =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  };
+
   return (
     <div className="landing-page">
       <div className="landing-announcement" role="region" aria-label="Launch announcement">
@@ -176,8 +281,27 @@ export default function Landing() {
             ·
           </span>
           <span className="landing-announcement-price">
-            Plans from <strong>$49/mo</strong>
+            Plans from <strong>{formatLandingPrice(currency)}</strong>
           </span>
+          <div
+            className="landing-currency-toggle"
+            role="group"
+            aria-label="Pricing currency"
+          >
+            {["USD", "GBP"].map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={`landing-currency-toggle-btn ${
+                  currency === code ? "is-active" : ""
+                }`}
+                onClick={() => selectCurrency(code)}
+                aria-pressed={currency === code}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -187,6 +311,7 @@ export default function Landing() {
           <nav className="landing-nav">
             <a href="#how-it-works">How it works</a>
             <a href="#features">Features</a>
+            <a href="#pricing">Pricing</a>
             <a href="#preview">Dashboard</a>
             <a href="#different">Why Vetra</a>
             <a href="#faq">FAQ</a>
@@ -240,6 +365,278 @@ export default function Landing() {
           </div>
           <div className="landing-hero-visual">
             <HeroPhone />
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="pricing"
+        className="landing-pricing reveal-section"
+        ref={(el) => {
+          revealRefs.current[9] = el;
+        }}
+      >
+        <div className="landing-pricing-inner">
+          <h2 className="landing-pricing-title">Simple, transparent pricing</h2>
+          <p className="landing-pricing-sub">
+            Pick the plan that fits your business. No setup fees, cancel anytime.
+          </p>
+
+          <div className="landing-pricing-controls">
+            <div
+              className="landing-pricing-billing"
+              role="group"
+              aria-label="Billing period"
+            >
+              <button
+                type="button"
+                className={`landing-pricing-billing-btn ${
+                  billing === "monthly" ? "is-active" : ""
+                }`}
+                onClick={() => setBilling("monthly")}
+                aria-pressed={billing === "monthly"}
+              >
+                Monthly
+              </button>
+              <button
+                type="button"
+                className={`landing-pricing-billing-btn ${
+                  billing === "annual" ? "is-active" : ""
+                }`}
+                onClick={() => setBilling("annual")}
+                aria-pressed={billing === "annual"}
+              >
+                Annual
+                <span className="landing-pricing-billing-save">
+                  Save {ANNUAL_FREE_MONTHS} months
+                </span>
+              </button>
+            </div>
+
+            <div
+              className="landing-pricing-currency"
+              role="group"
+              aria-label="Pricing currency"
+            >
+              {["USD", "GBP"].map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  className={`landing-pricing-currency-btn ${
+                    currency === code ? "is-active" : ""
+                  }`}
+                  onClick={() => selectCurrency(code)}
+                  aria-pressed={currency === code}
+                >
+                  {CURRENCY_SYMBOLS[code]} {code}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="landing-pricing-stage">
+          <div className="landing-pricing-overlay" aria-hidden>
+            <div className="landing-pricing-overlay-card">
+              <span className="landing-pricing-overlay-dot" />
+              <span className="landing-pricing-overlay-title">Coming soon</span>
+              <span className="landing-pricing-overlay-text">
+                Pricing isn&apos;t live just yet — take a look at what&apos;s coming.
+              </span>
+            </div>
+          </div>
+          <div className="landing-pricing-grid">
+            {LANDING_PLANS.map((plan) => (
+              <div
+                key={plan.id}
+                className={`landing-pricing-card ${
+                  plan.highlighted ? "is-highlighted" : ""
+                }`}
+              >
+                {plan.highlighted && (
+                  <span className="landing-pricing-badge">Most popular</span>
+                )}
+                <h3 className="landing-pricing-card-name">{plan.name}</h3>
+                <p className="landing-pricing-card-tagline">{plan.tagline}</p>
+                <div className="landing-pricing-card-price">
+                  {plan.custom ? (
+                    <span className="landing-pricing-card-amount">Custom</span>
+                  ) : (
+                    <>
+                      <span className="landing-pricing-card-amount">
+                        {CURRENCY_SYMBOLS[currency]}
+                        {getDisplayPrice(plan, currency, billing).perMonth}
+                      </span>
+                      <span className="landing-pricing-card-period">/mo</span>
+                    </>
+                  )}
+                </div>
+                <p className="landing-pricing-card-billnote">
+                  {plan.custom
+                    ? "tailored to your needs"
+                    : billing === "annual"
+                    ? `${CURRENCY_SYMBOLS[currency]}${getDisplayPrice(
+                        plan,
+                        currency,
+                        billing
+                      ).annualTotal.toLocaleString()} billed yearly`
+                    : "billed monthly"}
+                </p>
+                <ul className="landing-pricing-card-features">
+                  {plan.features.map((feature) => (
+                    <li key={feature}>
+                      <Check
+                        size={16}
+                        strokeWidth={2.6}
+                        className="landing-pricing-card-check"
+                      />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  to={plan.cta === "Talk to us" ? "/contact" : "/app"}
+                  className={`landing-pricing-card-cta ${
+                    plan.highlighted ? "is-primary" : ""
+                  }`}
+                >
+                  {plan.cta}
+                </Link>
+              </div>
+            ))}
+          </div>
+          </div>
+          <p className="landing-pricing-foot">
+            Prices shown in {currency}
+            {currency === "GBP" ? " and include VAT" : ", excluding tax"}.
+          </p>
+        </div>
+      </section>
+
+      <section
+        id="included"
+        className="landing-included reveal-section"
+        ref={(el) => {
+          revealRefs.current[11] = el;
+        }}
+      >
+        <div className="landing-included-inner">
+          <span className="landing-included-eyebrow">Core features</span>
+          <h2 className="landing-included-title">Included in every plan</h2>
+          <p className="landing-included-sub">
+            The essentials your front office needs, no matter your call volume.
+          </p>
+
+          <div className="landing-included-grid">
+            {CORE_FEATURES.map((feature) => {
+              const Icon = feature.icon;
+              return (
+                <div key={feature.title} className="landing-included-item">
+                  <div className="landing-included-icon">
+                    <Icon size={22} strokeWidth={2.2} />
+                  </div>
+                  <div className="landing-included-body">
+                    <h3 className="landing-included-item-title">
+                      {feature.title}
+                    </h3>
+                    <p className="landing-included-item-desc">{feature.desc}</p>
+                    <p className="landing-included-item-note">{feature.note}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section
+        className="landing-cost reveal-section"
+        ref={(el) => {
+          revealRefs.current[10] = el;
+        }}
+      >
+        <div className="landing-cost-glow" aria-hidden />
+        <div className="landing-cost-inner">
+          <div className="landing-cost-head">
+            <span className="landing-cost-eyebrow">Do the math</span>
+            <h2 className="landing-cost-title">
+              Full coverage for a fraction of the cost.
+            </h2>
+            <p className="landing-cost-sub">
+              A 24/7 AI receptionist that answers every call for less than the
+              cost of a single part-time hire.
+            </p>
+          </div>
+
+          <div className="landing-cost-panel">
+            <div className="landing-cost-rows">
+              <div className="landing-cost-row">
+                <div className="landing-cost-row-head">
+                  <span className="landing-cost-row-label">In-house receptionist</span>
+                  <span className="landing-cost-row-amount">
+                    {COST_COMPARISON[currency].human.annual}
+                    <span className="landing-cost-row-per">/yr</span>
+                  </span>
+                </div>
+                <div className="landing-cost-track">
+                  <div
+                    className="landing-cost-bar is-human"
+                    style={{ width: `${COST_COMPARISON[currency].human.barPct}%` }}
+                  >
+                    <span className="landing-cost-bar-tag">
+                      {COST_COMPARISON[currency].human.monthly}/mo
+                    </span>
+                  </div>
+                </div>
+                <span className="landing-cost-row-note">
+                  9–5, Mon–Fri only · plus sick days, turnover &amp; training
+                </span>
+              </div>
+
+              <div className="landing-cost-row">
+                <div className="landing-cost-row-head">
+                  <span className="landing-cost-row-label is-ai">
+                    Vetra AI receptionist
+                  </span>
+                  <span className="landing-cost-row-amount is-ai">
+                    {COST_COMPARISON[currency].ai.annual}
+                    <span className="landing-cost-row-per">/yr</span>
+                  </span>
+                </div>
+                <div className="landing-cost-track">
+                  <div
+                    className="landing-cost-bar is-ai"
+                    style={{ width: `${COST_COMPARISON[currency].ai.barPct}%` }}
+                  >
+                    <span className="landing-cost-bar-tag">
+                      {COST_COMPARISON[currency].ai.monthly}/mo
+                    </span>
+                  </div>
+                </div>
+                <span className="landing-cost-row-note">
+                  24/7/365 · answers every call · zero additional costs
+                </span>
+              </div>
+            </div>
+
+            <div className="landing-cost-savings">
+              <TrendingDown
+                size={26}
+                strokeWidth={2.4}
+                className="landing-cost-savings-icon"
+              />
+              <div className="landing-cost-savings-figure">
+                <span className="landing-cost-savings-amount">
+                  {COST_COMPARISON[currency].savings}
+                </span>
+                <span className="landing-cost-savings-label">saved per year</span>
+              </div>
+              <span className="landing-cost-savings-pct">
+                {COST_COMPARISON[currency].savingsPct}% lower cost
+              </span>
+              <Link to="/app" className="landing-cost-savings-cta">
+                Start saving
+              </Link>
+            </div>
           </div>
         </div>
       </section>
@@ -557,6 +954,36 @@ export default function Landing() {
                 Most businesses are set up in a few minutes. Add your greeting, hours, and transfer rules, then you&apos;re ready to receive calls. Call the demo line first if you&apos;d like to hear how it works.
               </p>
             </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Can I change or cancel my plan?</summary>
+              <p className="landing-faq-answer">
+                Yes. You can upgrade, downgrade, or cancel anytime from your dashboard. Changes take effect at the start of your next billing cycle, and there are no long-term contracts.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Are there any setup or hidden fees?</summary>
+              <p className="landing-faq-answer">
+                No. The monthly price is all you pay. There are no setup fees, no per-call charges, and your dedicated phone number is included in every plan.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Do you offer annual billing?</summary>
+              <p className="landing-faq-answer">
+                Yes. Paying annually gives you two months free compared to paying monthly. You can switch between monthly and annual billing on the pricing section above.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">Which plan is right for my business?</summary>
+              <p className="landing-faq-answer">
+                Core suits solo operators and small teams that mainly need calls answered and messages taken. Professional adds appointment booking and team transfers for growing businesses. Enterprise is for high volume teams that need integrations, a custom voice, and dedicated support.
+              </p>
+            </details>
+            <details className="landing-faq-item">
+              <summary className="landing-faq-question">What currencies can I pay in?</summary>
+              <p className="landing-faq-answer">
+                Pricing is available in USD and GBP. UK prices include VAT; US prices are shown excluding tax. Use the currency switch in the pricing section to see your local rate.
+              </p>
+            </details>
           </div>
         </div>
       </section>
@@ -621,6 +1048,16 @@ export default function Landing() {
           <span className="landing-footer-copy">© {new Date().getFullYear()} Vetra</span>
         </div>
       </footer>
+
+      <button
+        type="button"
+        className={`landing-scroll-top ${showScrollTop ? "is-visible" : ""}`}
+        onClick={scrollToTop}
+        aria-label="Back to top"
+        tabIndex={showScrollTop ? 0 : -1}
+      >
+        <ArrowUp size={20} strokeWidth={2.6} />
+      </button>
     </div>
   );
 }
