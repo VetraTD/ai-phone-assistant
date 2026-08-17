@@ -1767,7 +1767,7 @@
 
 .dashboard-save-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 18px 40px rgba(53, 215, 210, 0.32);
+  box-shadow: 0 18px 40px rgba(58, 143, 242, 0.36);
 }
 
 .guide-panel-body {
