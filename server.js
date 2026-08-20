@@ -19,6 +19,7 @@ import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
+import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import * as voiceHealth from "./lib/voice/health.js";
@@ -517,9 +518,13 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 // Caller-scoped data belongs behind the dashboard backend's Supabase JWT plus
 // its ownership check — see AI-phone-dashboard/backend/src/routes/calls.js.
 //
-// NOT fixed here, and still open: /api/businesses/:id/notifications (GET+PUT)
-// and /api/businesses/:id/phone-numbers/{available,buy} have the identical
-// UUID-as-bearer-token hole, and `buy` spends money on the Twilio account.
+// The three routes that shared this UUID-as-bearer-token hole are now closed
+// (A1.5). /api/businesses/:id/notifications (GET+PUT) had zero callers and was
+// deleted for the same reason this one was. /api/businesses/:id/phone-numbers/
+// {available,buy} are live — Onboarding.jsx calls both — so they are guarded by
+// requireBusinessAccess instead, which is the per-tenant check this file
+// previously lacked. The dashboard was already sending a Supabase bearer token
+// on every one of those requests; this server simply never read it.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -544,56 +549,10 @@ app.post("/api/integrations/:provider/callback", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard API: per-business notification settings (placeholder for future UI)
-// ---------------------------------------------------------------------------
-
-app.get("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  res.json({
-    notification_email: business.notification_email ?? null,
-    notification_phone: business.notification_phone ?? null,
-    notifications_enabled: business.notifications_enabled !== false,
-  });
-});
-
-app.put("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  const body = req.body || {};
-  const payload = {};
-  if (body.notification_email !== undefined) {
-    if (body.notification_email !== null && body.notification_email !== "" && !isValidEmail(body.notification_email)) {
-      return res.status(400).json({ error: "Invalid notification email" });
-    }
-    payload.notification_email = body.notification_email;
-  }
-  if (body.notification_phone !== undefined) {
-    if (body.notification_phone !== null && body.notification_phone !== "" && !isValidE164(body.notification_phone)) {
-      return res.status(400).json({ error: "Invalid notification phone number" });
-    }
-    payload.notification_phone = body.notification_phone;
-  }
-  if (body.notifications_enabled !== undefined) payload.notifications_enabled = body.notifications_enabled;
-  const ok = await db.updateBusinessNotificationSettings(businessId, payload);
-  if (!ok) return res.status(500).json({ error: "Update failed" });
-  const updated = await db.fetchBusinessById(businessId);
-  res.json({
-    notification_email: updated?.notification_email ?? null,
-    notification_phone: updated?.notification_phone ?? null,
-    notifications_enabled: updated?.notifications_enabled !== false,
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Dashboard API: search and buy Twilio phone numbers
 // ---------------------------------------------------------------------------
 
-app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
+app.get("/api/businesses/:id/phone-numbers/available", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);
@@ -619,7 +578,7 @@ app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
   }
 });
 
-app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
+app.post("/api/businesses/:id/phone-numbers/buy", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
   const business = await db.fetchBusinessById(businessId);

@@ -293,6 +293,31 @@ export function loadConfig(business, capabilityRows = null) {
  * @param {string} businessId - UUID of the business
  * @returns {Promise<object|null>} The business row or null
  */
+/**
+ * Look up a staff user by the email their access token was issued for.
+ *
+ * `users.email` is UNIQUE, so this is the join between an authenticated
+ * identity and the tenant it may act on. Returns null when no staff row exists
+ * — an account that authenticated but was never attached to a business.
+ *
+ * @param {string} email
+ * @returns {Promise<{ id: string, business_id: string, email: string, role: string }|null>}
+ */
+export async function fetchUserByEmail(email) {
+  if (!supabase || !email) return null;
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, business_id, email, role")
+    .eq("email", email)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    log.error("db_error", { operation: "fetchUserByEmail", error: error.message });
+    return null;
+  }
+  return data;
+}
+
 export async function fetchBusinessById(businessId) {
   if (!supabase || !businessId) return null;
   const { data, error } = await supabase

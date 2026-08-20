@@ -11,6 +11,17 @@ vi.mock("../services/supabase.js", () => ({
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
 }));
 
+// This file tests HANDLER behaviour — 404s, 409s, idempotency, Twilio error
+// mapping. The auth guard in front of these routes is stubbed to a pass-through
+// so those cases stay readable and keep asserting exactly what they always did.
+//
+// The guard itself is not untested by this: tests/routeAuth.test.js exercises
+// the REAL requireBusinessAccess against these same routes and asserts 401/403,
+// so removing the middleware from a route fails there rather than passing here.
+vi.mock("../middleware/requireBusinessAccess.js", () => ({
+  requireBusinessAccess: (_req, _res, next) => next(),
+}));
+
 vi.mock("../services/twilioNumbers.js", () => ({
   searchAvailableNumbers: (...args) => mockSearchAvailableNumbers(...args),
   purchaseNumber: (...args) => mockPurchaseNumber(...args),
