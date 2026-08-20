@@ -1,0 +1,36 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# Everything here is an identifier, not a credential — none of it grants access
+# on its own. It is gitignored anyway, because this repository is public and
+# there is no reason to publish a map of the account.
+
+# vetratd.com. Numeric, not the domain. Confirm with:
+#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud organizations list
+org_id = "564252011558"
+
+# Confirm with:
+#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud billing accounts list
+billing_account = "01C71E-7C0893-377AE9"
+
+# The project the free-trial signup created. Used only as the quota project for
+# API calls made before the six projects exist. Delete it after the first apply
+# — but NOT before the GCP BAA has been re-verified, since it is the project the
+# BAA was accepted from.
+bootstrap_project_id = "ultra-glyph-506120-v5"
+
+# Full access to every project, including the ones that hold PHI.
+owner_principals = [
+  "user:admin@vetratd.com",
+]
+
+# Access to vetra-shared ONLY — Artifact Registry and Cloud Build. Never to a
+# project that can hold patient data.
+#
+# Empty today: the cofounder does not access Google Cloud (ledger O20). If that
+# changes, add them HERE rather than sharing admin@vetratd.com — shared
+# credentials make audit logs unattributable and fail §164.312(a)(2)(i) and
+# §164.312(b) at the same time.
+shared_only_principals = []
+
+# us_region = "us-central1"
+# uk_region = "europe-west2"
