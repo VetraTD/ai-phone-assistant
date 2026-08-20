@@ -92,6 +92,34 @@ With two founders this is not optional. Local state means only one machine can e
 
 Plus, per regional stack: a VPC with no default network, a subnet with flow logs, a reserved range and peering for private-IP Cloud SQL, a Serverless VPC Access connector, and a keyless runtime service account.
 
+## What this costs to apply: approximately nothing
+
+Deliberate, and worth preserving. Everything this module creates is free or
+rounds to free:
+
+| Resource | Cost |
+|---|---|
+| Projects, APIs enabled, IAM, org policies, service accounts | free |
+| VPC, subnets, firewall rules | free |
+| Reserved peering range + service-networking connection | free |
+| Artifact Registry, state bucket, log buckets | storage only — empty, so pennies |
+| Subnet flow logs | log ingestion; first 50 GB/month free, and an idle network is nowhere near it |
+
+**The rule this follows: provision paid infrastructure as late as possible.**
+GCP bills most managed services for capacity that *exists*, not capacity that is
+*used* — an empty Cloud SQL instance costs the same as a busy one. There is no
+value in a database running for two weeks while the code that will talk to it is
+still being written.
+
+An earlier version of this module created four Serverless VPC Access connectors,
+which are real VM instances and would have started a ~$70-80/month meter on the
+first apply for infrastructure nothing was using. They moved to `B2`.
+
+**What will cost money, when it arrives:** Cloud SQL (per instance-hour, idle or
+not), Memorystore (per GB provisioned, always on), and Cloud Run in prod — where
+`min-instances=1` with CPU always allocated is a deliberate latency choice, not a
+default. Staging Cloud Run scales to zero and is close to free.
+
 ## Why six projects and not one
 
 One project gets **one** `gcp.resourceLocations` policy. It would have to allow both continents, and then nothing prevents UK patient data landing in `us-central1` except somebody remembering.

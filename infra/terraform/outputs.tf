@@ -18,9 +18,14 @@ output "deployer_service_account" {
   value       = google_service_account.deployer.email
 }
 
-output "vpc_connectors" {
-  description = "Serverless VPC Access connectors. Cloud Run needs these to reach private-IP Cloud SQL."
-  value       = { for k, v in google_vpc_access_connector.this : k => v.id }
+output "vpc_networks" {
+  description = "VPC self-links per regional stack. B2 attaches Cloud SQL private IP and Cloud Run egress to these."
+  value       = { for k, v in google_compute_network.this : k => v.id }
+}
+
+output "private_services_ranges" {
+  description = "Reserved peering ranges Cloud SQL private IP is allocated from. Created here, consumed by B2."
+  value       = { for k, v in google_compute_global_address.private_services : k => v.name }
 }
 
 output "artifact_registry" {

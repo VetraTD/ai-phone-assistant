@@ -79,19 +79,26 @@ resource "google_service_networking_connection" "private_services" {
   reserved_peering_ranges = [google_compute_global_address.private_services[each.key].name]
 }
 
-# Cloud Run's route into the VPC. The /28 is a hard requirement of the connector
-# and must not overlap the subnet above.
-resource "google_vpc_access_connector" "this" {
-  for_each = local.regional_projects
-
-  project       = google_project.this[each.key].project_id
-  name          = "vetra-${each.key}-conn"
-  region        = each.value.region
-  network       = google_compute_network.this[each.key].name
-  ip_cidr_range = "${local.network_cidr[each.key]}.16.0/28"
-
-  min_instances = 2
-  max_instances = 3
-
-  depends_on = [google_project_service.this]
-}
+# ---------------------------------------------------------------------------
+# NOT HERE: the Serverless VPC Access connector.
+#
+# Cloud Run needs a route into this VPC to reach a private-IP Cloud SQL, and a
+# connector is one way to provide it — but a connector is a set of real VM
+# instances and bills per instance-hour from the moment it exists. Four of them
+# at min_instances=2 is roughly $70-80/month for infrastructure that does
+# nothing until B2 brings up a database.
+#
+# So it moves to B2, next to the thing that needs it, on the principle that paid
+# infrastructure gets provisioned as late as possible. That keeps B0a a free
+# apply: everything in this module is projects, policies, IAM, networks and
+# empty buckets, none of which bills.
+#
+# B2 should also prefer **Direct VPC egress** over a connector. It reaches
+# private IPs the same way, is configured on the Cloud Run service itself, and
+# has no per-instance charge — which may remove this cost rather than defer it.
+#
+# What IS here is the part that is free and that B2 depends on: the reserved
+# peering range and the service-networking connection above. Those are fiddly
+# and slow to get right, and having them already in place is what makes B2 a
+# database task rather than a networking project.
+# ---------------------------------------------------------------------------
