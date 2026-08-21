@@ -58,6 +58,71 @@ Verify the identity is the right one before proceeding — this must print `5642
 gcloud organizations list
 ```
 
+## Bootstrap: the two things that must exist before the first apply
+
+Both were found by running the apply, not by reading documentation. Both fail
+with an error that names the wrong cause.
+
+### 1. Enable Terraform's own APIs on the quota project
+
+`user_project_override = true` routes every API call Terraform makes through
+`bootstrap_project_id` for quota and billing. Google requires the API to be
+**enabled on that project** — even though the resources land elsewhere. Without
+it the first apply dies on:
+
+```
+Error 403: Organization Policy API has not been used in project
+ultra-glyph-506120-v5 before or it is disabled.
+```
+
+which reads as a permissions problem and is not.
+
+```bash
+gcloud services enable   orgpolicy.googleapis.com   cloudresourcemanager.googleapis.com   cloudbilling.googleapis.com   iam.googleapis.com   iamcredentials.googleapis.com   compute.googleapis.com   servicenetworking.googleapis.com   artifactregistry.googleapis.com   --project=<bootstrap_project_id>
+```
+
+Enabling an API is free.
+
+### 2. Raise the billing account's project quota above 6
+
+A **new self-serve / free-trial Cloud Billing account caps at 5 linked
+projects.** This module creates six, and the bootstrap project already occupies
+one of the five — so projects 6 and 7 are created and then fail to attach to
+billing:
+
+```
+Error 400: Precondition check failed.
+QuotaFailure: "Cloud billing quota exceeded"
+  subject: billingAccounts/<id>
+```
+
+Note the shape of that failure, because it is unusually expensive: the projects
+**are created** and only the billing attachment fails. Terraform marks them
+`tainted`, which means the next apply **destroys and recreates** them — and a
+deleted project holds its ID for 30 days while `random_id.project_suffix` does
+not change, so the recreate collides with the corpse of the project it just
+deleted. If you hit this, untaint before doing anything else:
+
+```bash
+terraform untaint 'google_project.this["shared"]'
+terraform untaint 'google_project.this["uk-prod"]'
+```
+
+Untainted, the next apply sets billing on the existing project in place, which
+is what you want.
+
+Check how many projects the account currently carries:
+
+```bash
+gcloud billing projects list --billing-account=<billing_account>
+```
+
+**Nothing else in the module applies until this is fixed.** Terraform's
+dependency graph for a `for_each` resource is per-RESOURCE, not per-instance:
+`google_project_service` depends on `google_project`, so two failed projects out
+of six skip all 89 service enablements and everything downstream of them. The
+apply reports 0 created, which looks like a much bigger problem than it is.
+
 ## First run
 
 ```bash
@@ -69,15 +134,28 @@ terraform plan                                 # read this. it creates ~60 resou
 
 `plan` is safe and creates nothing. **`apply` is B0a and needs the owner's go-ahead.**
 
-## After the first apply — move the state
+## After the first apply — three follow-ups, in this order
 
-The first apply runs on local state and creates its own state bucket. Then:
+The first apply runs on local state and creates its own state bucket.
+
+**1. Move the state.**
 
 1. Take `tfstate_bucket` from the outputs.
 2. Uncomment the `backend "gcs"` block in `versions.tf` and paste the name in.
 3. `terraform init -migrate-state`
 
 With two founders this is not optional. Local state means only one machine can ever apply without clobbering the other's view.
+
+**2. Repoint `bootstrap_project_id` at the `shared` project.** The bootstrap
+project is scheduled for deletion (ledger O3c) once the GCP BAA has been
+re-verified. Terraform routes every API call through it, so deleting it first
+breaks every future run. Change the tfvars value, `terraform plan` to confirm no
+diff, and only then delete. The `shared` project needs the same API list from
+the bootstrap section enabled on it.
+
+**3. Record the project IDs.** They are immutable and they carry a random
+suffix, so they cannot be reconstructed from the config. `terraform output
+project_ids`.
 
 ## What this module creates
 
