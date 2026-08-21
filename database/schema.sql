@@ -1,12 +1,21 @@
 -- ============================================================
 -- AI Phone Assistant — Multi-Tenant Schema
--- Run this in the Supabase SQL Editor to create all tables.
 -- ============================================================
 --
+-- Plain PostgreSQL. It was written for the Supabase SQL Editor and contains
+-- nothing Supabase-specific — verified across migrations 002-027 — which is
+-- what makes a local PG16 container a valid stand-in for Cloud SQL.
+--
 -- THIS FILE REPRESENTS THE FULLY-MIGRATED STATE (schema + every migration in
--- this directory, 002 through 018, already applied). A fresh install runs
+-- this directory, 002 through 027, already applied). A fresh install runs
 -- ONLY this file and needs no migrations afterwards; the numbered migration
 -- files exist solely to move an EXISTING database forward.
+--
+-- The "002 through NNN" above went stale at 018 and stayed stale for nine
+-- migrations, which is the failure mode this whole comment warns about, one
+-- level up. tests/schema.test.js now checks the columns and indexes
+-- rather than the sentence, so the sentence being wrong is a documentation
+-- bug instead of a silent install bug.
 --
 -- Consequently: whenever you add a migration that changes a table's shape,
 -- fold the result into this file in the same commit. Columns/indexes that

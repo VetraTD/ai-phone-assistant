@@ -14,7 +14,11 @@ export default {
     // default globs already skip it; excluded explicitly so a future scenario
     // helper named *.test.js can't be swept into the unit run by accident. The
     // eval helpers' OWN unit tests live in tests/ and still run.
-    exclude: [...defaultExclude, "**/AI-phone-dashboard/**", "eval/**"],
+    // tests/db/** needs a live Postgres and runs from vitest.db.config.js. It
+    // skips itself when DATABASE_URL is unset, so leaving it in would be
+    // harmless right up until a developer exports DATABASE_URL for something
+    // else and the root suite quietly starts requiring a container.
+    exclude: [...defaultExclude, "**/AI-phone-dashboard/**", "eval/**", "tests/db/**"],
     // The default 5s is not enough for the FIRST test in a file under full-suite
     // parallelism: cold module import (supabase + twilio + the genai SDK) is
     // billed to test #1, which measures ~1.9s alone and multiplies under

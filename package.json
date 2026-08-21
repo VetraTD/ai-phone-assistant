@@ -18,7 +18,13 @@
     "probe": "node scripts/latency-probe.js",
     "probe:report": "node scripts/latency-probe.js --report-only",
     "voice:ab": "node scripts/voice-ab-blind.js",
-    "voice:ab:call": "node scripts/voice-ab-call.js"
+    "voice:ab:call": "node scripts/voice-ab-call.js",
+    "db:up": "docker compose -f infra/docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "db:migrate": "node scripts/migrate.js",
+    "db:status": "node scripts/migrate.js --status",
+    "db:reset": "node scripts/migrate.js --reset",
+    "test:db": "vitest run --config vitest.db.config.js"
   },
   "repository": {
     "type": "git",
@@ -50,6 +56,7 @@
     "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
     "nodemailer": "^8.0.2",
+    "pg": "^8.23.0",
     "twilio": "^5.0.0",
     "ws": "^8.20.0"
   }
