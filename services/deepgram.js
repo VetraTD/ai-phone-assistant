@@ -1,6 +1,7 @@
 import { DeepgramClient } from "@deepgram/sdk";
 import { log } from "../lib/logger.js";
 import { captureException } from "../lib/sentry.js";
+import { assertVendorAllowed } from "../lib/compliance.js";
 
 // ---------------------------------------------------------------------------
 // Deepgram streaming STT — one connection per active call
@@ -33,6 +34,11 @@ export async function createStream({
   onClose,
   callSid,
 }) {
+  // A6, at the constructor for the same reason as ElevenLabs: it is the only
+  // place no other code path can route around. Before the key is read, because
+  // in `hipaa` mode there should be no key to read.
+  assertVendorAllowed("deepgram", { callSid });
+
   if (!DEEPGRAM_API_KEY) {
     throw new Error("DEEPGRAM_API_KEY is not set");
   }

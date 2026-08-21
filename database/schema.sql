@@ -36,6 +36,11 @@ CREATE TABLE businesses (
   -- voice's accent, the phone numbers and the timezone. Drives date phrasing,
   -- currency, phone grouping, ringback and the STT language.
   locale                       text CHECK (locale IS NULL OR locale IN ('en-US', 'en-GB', 'es-US')),
+  -- migration 028. What THIS TENANT requires. The effective tier for a call is
+  -- the STRICTER of this and DEPLOYMENT_MODE — a tenant row can tighten the
+  -- stack's posture, never relax it (lib/compliance.js effectiveTier).
+  compliance_tier              text NOT NULL DEFAULT 'standard'
+                                 CHECK (compliance_tier IN ('standard', 'hipaa')),
   greeting                     text,
   -- Weekly shape (migration 014). NULL still means "always open" — see
   -- services/gemini.js isBusinessOpen().
@@ -179,6 +184,9 @@ CREATE TABLE integrations (
 -- The first question an audit asks is "which integrations are uncovered?".
 -- Partial: the rows that matter are the NULLs.
 CREATE INDEX idx_integrations_no_baa ON integrations (business_id) WHERE baa_recorded_at IS NULL;
+
+-- "Which tenants require covered handling" is the first question an audit asks.
+CREATE INDEX idx_businesses_hipaa_tier ON businesses (id) WHERE compliance_tier = 'hipaa';
 
 -- 9. Calendar connections (per-business OAuth tokens; migration 016)
 -- INERT since A1.1 deleted Google Calendar sync. Nothing reads or writes these
