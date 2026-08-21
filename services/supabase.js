@@ -410,7 +410,7 @@ async function recoverBusinessByDamagedPhone(normalized) {
     if (matches.length > 1) {
       log.error("business_phone_ambiguous", {
         operation: "lookupBusinessByPhone",
-        phone: normalized,
+        businessPhone: normalized,
         count: matches.length,
         severity: "warn",
       });
@@ -444,7 +444,7 @@ export async function lookupBusinessByPhone(twilioNumber) {
     log.error("business_phone_unnormalized", {
       operation: "lookupBusinessByPhone",
       businessId: recovered.id,
-      phone: normalized,
+      businessPhone: normalized,
       stored: JSON.stringify(recovered.phone_number),
       severity: "warn",
     });

@@ -46,9 +46,16 @@ export async function requireBusinessAccess(req, res, next) {
   const requested = req.params.id;
   if (requested && requested !== user.business_id) {
     // The audit trail that matters: someone with a valid session reaching for
-    // another tenant. Emails are workforce identifiers, not PHI.
+    // another tenant.
+    //
+    // `userId`, not the email. The earlier reasoning here — that an email is a
+    // workforce identifier and not PHI — is right about HIPAA and beside the
+    // point for the UK stack, where a staff email is personal data under GDPR.
+    // A row id answers the audit question §164.312(b) actually asks, "which
+    // unique user", and it resolves to a person through the database rather
+    // than through the log.
     log.error("cross_tenant_denied", {
-      email: identity.email,
+      userId: user.id,
       requested,
       owned: user.business_id,
       path: req.path,

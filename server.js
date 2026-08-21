@@ -326,7 +326,7 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
   const twilioNumber = req.body.To || "";
   const recordingUrl = req.body.RecordingUrl || "";
 
-  log.info("degraded_voicemail_received", { callSid, callerNumber });
+  log.info("degraded_voicemail_received", { callSid });
 
   try {
     const business = db.isEnabled() && twilioNumber
@@ -369,10 +369,16 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
       // goes in the log line so a real caller's message is recoverable by hand
       // rather than lost outright — this is the unrouted-number path as well as
       // the degraded one. A proper ops mailbox for these does not exist yet.
+      //
+      // A1.7 removed `callerNumber` and kept `recordingUrl`, which is an
+      // uncomfortable pair to defend and is defensible: the recording is the
+      // message, and dropping the pointer to it loses a real person's request
+      // outright. The number is recoverable from Twilio using callSid. This
+      // stays a known exception rather than a quiet one — the log is still the
+      // only place an unrouted voicemail exists, and that is the actual defect.
       log.error("degraded_voicemail_no_business", {
         callSid,
         twilioNumber,
-        callerNumber,
         recordingUrl,
         severity: "warn",
       });
