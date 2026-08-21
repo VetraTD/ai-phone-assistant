@@ -65,11 +65,14 @@ resource "google_project_iam_member" "shared_only_builds" {
 # thing C6 exists to prove impossible — and in the merged staging project, where
 # both credential sets live side by side, project-wide secret access would erase
 # the boundary entirely.
+#
+# `roles/redis.editor` is NOT in this list. C-3 replaced Memorystore with a
+# Postgres table, and a role granted for a service nobody provisions is how the
+# service ends up provisioned.
 # ---------------------------------------------------------------------------
 locals {
   runtime_roles = [
     "roles/cloudsql.client",
-    "roles/redis.editor",
     "roles/aiplatform.user",
     "roles/logging.logWriter",
     "roles/monitoring.metricWriter",

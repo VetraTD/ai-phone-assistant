@@ -38,10 +38,14 @@ locals {
   # Everything a voice stack needs to serve a call. Vertex, STT and TTS are here
   # rather than in shared because the US lane's model and speech traffic must
   # stay inside the US project's location constraint.
+  #
+  # `redis.googleapis.com` is deliberately ABSENT — see cost-controls.tf, C-3.
+  # Memorystore is not being provisioned, and an API enabled "just in case" is
+  # how a $70-100/month instance gets created by someone who assumed the
+  # decision had gone the other way.
   regional_apis = concat(local.common_apis, [
     "run.googleapis.com",
     "sqladmin.googleapis.com",
-    "redis.googleapis.com",
     "compute.googleapis.com",
     "servicenetworking.googleapis.com",
     "secretmanager.googleapis.com",
@@ -197,18 +201,18 @@ locals {
   # Regional stacks — the four that serve calls and hold a VPC. `shared` and
   # `logging` have no network of their own.
   #
-  # `active_regional_stacks` is the set that actually gets provisioned.
-  # Everything that provisions per-stack infrastructure iterates over it, so a
-  # later cost control can narrow the set without touching a resource block.
+  # `active_regional_stacks` is the same set minus anything C-1 has switched
+  # off. Everything that provisions per-stack infrastructure iterates over the
+  # ACTIVE set; everything that describes the design iterates over all four.
   # -------------------------------------------------------------------------
   regional_stacks = {
     for k, v in local.stacks : k => v if contains(["us", "uk"], v.lane)
   }
 
-  # Identical to regional_stacks for now. C-1 narrows it to the stacks that are
-  # actually being provisioned; everything below iterates the ACTIVE set so that
-  # change lands in one place.
-  active_regional_stacks = local.regional_stacks
+  active_regional_stacks = {
+    for k, v in local.regional_stacks : k => v
+    if v.lane != "uk" || var.enable_uk_resources
+  }
 
   # Distinct PROJECTS holding at least one active regional stack. Used for the
   # bindings that are per-project rather than per-stack — granting the same

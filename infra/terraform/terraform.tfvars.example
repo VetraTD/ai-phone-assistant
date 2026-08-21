@@ -94,6 +94,30 @@ adopt_existing_org_policies = [
 ]
 
 # ---------------------------------------------------------------------------
+# Cost controls. See cost-controls.tf for the reasoning behind each default;
+# these are the ones worth stating explicitly because the value IS the decision.
+# ---------------------------------------------------------------------------
+
+# C-1. There is no UK clinic. The PROJECT exists either way — that is settled —
+# but nothing goes inside it until one signs. Lane C's UK gates need this ON
+# temporarily: flip it, apply, run the gates, destroy the UK resources, keep the
+# project and the state.
+enable_uk_resources = false
+
+# C-5. Regional roughly doubles the instance cost, and HA is not a HIPAA
+# requirement — §164.308(a)(7) is satisfied by PITR + backups + C7's restore
+# test. Buy it when downtime costs more than the second instance.
+cloud_sql_high_availability = false
+
+# C-3. Postgres, not Memorystore. The shared call-state slice is three scalars
+# written at call boundaries with zero per-turn reads.
+call_state_store = "postgres"
+
+# C-6. Never a Serverless VPC Access connector — those are real VMs at ~$30-40
+# each, billed whether or not a packet crosses them.
+cloud_run_vpc_egress = "direct"
+
+# ---------------------------------------------------------------------------
 # Principals.
 # ---------------------------------------------------------------------------
 
