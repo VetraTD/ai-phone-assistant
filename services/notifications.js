@@ -3,7 +3,6 @@ import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { isValidE164 } from "../lib/validate.js";
-import { formatLocalDateTime } from "../lib/capabilities/datetime.js";
 import * as db from "./supabase.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -95,11 +94,12 @@ export async function loadBusinessNotificationConfig(businessId) {
     email,
     phone,
     businessName: business.name || "Business",
-    // Carried so owner-facing notifications can state the appointment time in
-    // the BUSINESS's clock. Without it the formatters fell through to
-    // toLocaleString() with no zone, which renders in whatever timezone the
-    // Node process happens to run in — so an owner in London could be emailed
-    // a time in the server's zone and have no way to tell.
+    // Kept on the config even though A1.3's link-only bodies no longer print a
+    // time. It was added to fix a real defect — the formatters used bare
+    // toLocaleString(), which renders in the Node process's zone, so a UK clinic
+    // on a US-hosted server was emailed times hours off the ones its assistant
+    // had spoken aloud. Anything that renders a business-local time in future
+    // needs this, and rediscovering that lesson is more expensive than a field.
     timezone: business.timezone || null,
   };
 }
@@ -156,100 +156,56 @@ async function sendSms({ to, body }) {
 }
 
 // ---------------------------------------------------------------------------
-// Formatters
+// Formatters — link-only, by design
 // ---------------------------------------------------------------------------
+//
+// These used to carry the patient's name, their phone number, the appointment
+// time, free-text notes and the AI's summary of the call, in the body AND in
+// the subject line. The subject is the worse of the two: it survives in
+// notification previews on a lock screen, in mail-server logs, and in anything
+// that indexes headers without touching bodies.
+//
+// Email and SMS are not covered channels. The relay, the inbox provider and the
+// carrier are all third parties with no BAA. The choice is either to negotiate
+// BAAs down a delivery path whose entire job is to say "something happened, go
+// look", or to stop putting anything in it worth protecting. The second is
+// cheaper, stronger, and removes email from HIPAA scope altogether.
+//
+// What is left is deliberately the minimum that makes the message worth opening:
+// which business, what KIND of thing happened, and where to go. None of it
+// identifies a person.
+//   - the business name is the recipient's own name, not a disclosure;
+//   - "an appointment was booked" identifies no individual;
+//   - a Twilio call status ("no-answer", "busy") is carrier metadata.
+// Anything finer-grained than that stays in the dashboard, behind auth.
 
-/**
- * Owner-facing appointment time, in the business's own timezone.
- *
- * These formatters used bare toLocaleString(), which takes the PROCESS zone.
- * The stored value is a UTC instant, so a UK clinic on a US-hosted server was
- * emailed times hours away from the ones its assistant had spoken to the
- * caller — the same class of defect as the read-back bug, pointed at the owner
- * instead of the caller.
- * @param {string|null|undefined} scheduledAt
- * @param {string|null|undefined} timezone
- * @returns {string}
- */
-function ownerDateTime(scheduledAt, timezone) {
-  if (!scheduledAt) return "—";
-  return formatLocalDateTime(scheduledAt, timezone, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+// No default. A hardcoded fallback URL is how a notification quietly starts
+// pointing somewhere wrong; if it is not configured, the message says to open
+// the dashboard without pretending to know where that is. lib/bootChecks.js
+// announces the absence at boot.
+const DASHBOARD_URL = process.env.DASHBOARD_URL || null;
 
-function formatAppointmentEmail(appointment, call, businessName, timezone) {
-  const d = ownerDateTime(appointment.scheduled_at, timezone);
-  const client = appointment.client_name || appointment.client_phone || "—";
-  const notes = appointment.notes ? `\nNotes: ${appointment.notes}` : "";
+function ownerEmailBody(businessName, sentence) {
+  const where = DASHBOARD_URL
+    ? `Open your Vetra dashboard for the details:
+${DASHBOARD_URL}`
+    : "Open your Vetra dashboard for the details.";
   return (
-    `${businessName}\n\nNew appointment booked.\n\n` +
-    `Scheduled: ${d}\n` +
-    `Client: ${client}\n` +
-    `Phone: ${call?.callerNumber || "—"}${notes}`
+    `${businessName}
+
+${sentence}
+
+${where}
+
+` +
+    "This message contains no caller or patient information by design — email is " +
+    "not a private channel, so the details stay in Vetra."
   );
 }
 
-function formatAppointmentSms(appointment, call, timezone) {
-  const d = ownerDateTime(appointment.scheduled_at, timezone);
-  const from = call?.callerNumber || "caller";
-  return `New appointment ${d} from ${from}.`;
-}
-
-function formatCustomerRequestEmail(customerRequest, businessName) {
-  const type = customerRequest.request_type || "message";
-  const name = customerRequest.caller_name || "—";
-  const number = customerRequest.callback_number || "—";
-  const msg = customerRequest.message ? `\nMessage: ${customerRequest.message}` : "";
-  const time = customerRequest.preferred_time ? `\nPreferred time: ${customerRequest.preferred_time}` : "";
-  return (
-    `${businessName}\n\nNew customer ${type}.\n\n` +
-    `From: ${name}\n` +
-    `Callback number: ${number}${msg}${time}`
-  );
-}
-
-function formatCustomerRequestSms(customerRequest, call) {
-  const type = customerRequest.request_type || "message";
-  const from = call?.callerNumber || customerRequest.callback_number || "caller";
-  const short = customerRequest.message ? customerRequest.message.slice(0, 60) + (customerRequest.message.length > 60 ? "…" : "") : "";
-  return `New ${type} from ${from}${short ? ": " + short : "."}`;
-}
-
-function formatMissedCallEmail(call, status, businessName) {
-  return (
-    `${businessName}\n\nMissed call.\n\n` +
-    `From: ${call?.callerNumber || "—"}\n` +
-    `To: ${call?.twilioNumber || "—"}\n` +
-    `Status: ${status}\n` +
-    `Time: ${new Date().toISOString()}`
-  );
-}
-
-function formatMissedCallSms(call, status) {
-  const from = call?.callerNumber || "unknown";
-  const to = call?.twilioNumber || "your number";
-  return `Missed call from ${from} to ${to} (${status}).`;
-}
-
-function formatCallSummaryEmail(call, summary, sentiment, outcome, businessName) {
-  return (
-    `${businessName}\n\nCall summary.\n\n` +
-    `Outcome: ${outcome || "—"}\n` +
-    `Sentiment: ${sentiment || "—"}\n\n` +
-    `Summary:\n${summary || "—"}\n\n` +
-    `Caller: ${call?.callerNumber || "—"}\n` +
-    `Time: ${call?.endedAt ? new Date(call.endedAt).toISOString() : "—"}`
-  );
-}
-
-function formatCallSummarySms(outcome) {
-  return `Call summary: ${outcome || "completed"}.`;
+function ownerSmsBody(businessName, sentence) {
+  const where = DASHBOARD_URL ? ` Details: ${DASHBOARD_URL}` : " Details in your Vetra dashboard.";
+  return `Vetra — ${businessName}: ${sentence}${where}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,17 +216,16 @@ function formatCallSummarySms(outcome) {
  * Notify when an appointment is booked.
  * @param {{ businessId: string, appointment: { scheduled_at: string, client_name?: string, client_phone?: string, notes?: string }, call?: { callerNumber?: string, twilioNumber?: string } }} opts
  */
-export async function notifyAppointmentBooked({ businessId, appointment, call }) {
+export async function notifyAppointmentBooked({ businessId, appointment }) {
   if (!NOTIFICATIONS_ENABLED || !appointment) return;
   try {
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
-    const subject = `New appointment: ${ownerDateTime(appointment.scheduled_at, config.timezone)} — ${appointment.client_name || appointment.client_phone || "caller"}`;
-    const body = formatAppointmentEmail(appointment, call, config.businessName, config.timezone);
-    if (config.email) await sendEmail({ to: config.email, subject, text: body });
-    if (config.phone)
-      await sendSms({ to: config.phone, body: formatAppointmentSms(appointment, call, config.timezone) });
+    const sentence = "A new appointment was booked.";
+    const subject = `New appointment — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
   } catch (err) {
     log.error("notify_appointment", { message: err?.message });
     captureException(err, { businessId });
@@ -281,16 +236,16 @@ export async function notifyAppointmentBooked({ businessId, appointment, call })
  * Notify when a customer request (message/callback) is created.
  * @param {{ businessId: string, customerRequest: { request_type?: string, caller_name?: string, callback_number?: string, message?: string, preferred_time?: string }, call?: { callerNumber?: string } }} opts
  */
-export async function notifyCustomerRequest({ businessId, customerRequest, call }) {
+export async function notifyCustomerRequest({ businessId, customerRequest }) {
   if (!NOTIFICATIONS_ENABLED || !customerRequest) return;
   try {
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
-    const subject = "New customer message/callback request";
-    const body = formatCustomerRequestEmail(customerRequest, config.businessName);
-    if (config.email) await sendEmail({ to: config.email, subject, text: body });
-    if (config.phone) await sendSms({ to: config.phone, body: formatCustomerRequestSms(customerRequest, call) });
+    const sentence = "A caller left a message or a callback request.";
+    const subject = `New customer request — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
   } catch (err) {
     log.error("notify_customer_request", { message: err?.message });
     captureException(err, { businessId });
@@ -307,10 +262,12 @@ export async function notifyCallMissed({ businessId, call, status }) {
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
-    const subject = `Missed call from ${call?.callerNumber || "unknown"}`;
-    const body = formatMissedCallEmail(call, status, config.businessName);
-    if (config.email) await sendEmail({ to: config.email, subject, text: body });
-    if (config.phone) await sendSms({ to: config.phone, body: formatMissedCallSms(call, status) });
+    // `status` is a Twilio call disposition, not health information, and it is
+    // the one thing that tells an owner whether to change something.
+    const sentence = `A call was missed (${status}).`;
+    const subject = `Missed call — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
   } catch (err) {
     log.error("notify_call_missed", { message: err?.message });
     captureException(err, { businessId });
@@ -380,18 +337,28 @@ export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
 
 /**
  * Notify when a call completes and summary is ready.
+ *
+ * `call`, `summary`, `sentiment` and `outcome` are still accepted and are
+ * deliberately NOT read: callers already have them at the call site, and the
+ * signature staying stable is what keeps this a content change rather than a
+ * change that ripples into session.js and server.js. The summary in particular
+ * is a narrative account of what a caller said, and it does not leave the
+ * system.
+ *
  * @param {{ businessId: string, call?: { callerNumber?: string, endedAt?: string }, summary: string | null, sentiment: string | null, outcome: string | null }} opts
  */
-export async function notifyCallCompleted({ businessId, call, summary, sentiment, outcome }) {
+export async function notifyCallCompleted({ businessId }) {
   if (!NOTIFICATIONS_ENABLED) return;
   try {
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
-    const subject = `Call summary: ${outcome || "completed"}`;
-    const body = formatCallSummaryEmail(call, summary, sentiment, outcome, config.businessName);
-    if (config.email) await sendEmail({ to: config.email, subject, text: body });
-    if (config.phone) await sendSms({ to: config.phone, body: formatCallSummarySms(outcome) });
+    // The summary is a narrative account of what a caller said. It is the single
+    // most sensitive field this module ever handled, and it does not leave.
+    const sentence = "A call finished and its summary is ready.";
+    const subject = `Call summary ready — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
   } catch (err) {
     log.error("notify_call_completed", { message: err?.message });
     captureException(err, { businessId });

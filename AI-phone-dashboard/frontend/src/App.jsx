@@ -709,7 +709,9 @@ function App() {
     }
     try {
       await api.post("/api/appointments/email", { range });
-      setToast({ type: "success", message: `Appointments email has been sent to ${to}.` });
+      // The email is a nudge with a count and a link, not the list: bodies carry
+      // no patient information (A1.3), so the copy must not promise one.
+      setToast({ type: "success", message: `Sent a reminder to ${to}. Details stay here in the dashboard.` });
       setTimeout(() => setToast(null), 2200);
     } catch (err) {
       console.error(err);
@@ -1026,7 +1028,7 @@ function App() {
                         className="reset-button"
                         onClick={() => emailAppointments("upcoming")}
                       >
-                        Email upcoming appointments
+                        Email me a reminder
                       </button>
                       <button
                         type="button"

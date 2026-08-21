@@ -97,42 +97,35 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
       label = "Today";
     }
 
+    // COUNT only. The previous version selected client_name, client_phone,
+    // scheduled_at, status and notes and printed one line per appointment into
+    // an email — for a cardiology clinic, a list of who is being seen and when,
+    // through a transactional email vendor with no BAA, triggered by a button.
+    //
+    // Not selecting the columns is the point. Selecting them and then declining
+    // to print them leaves the payload one careless template literal away from
+    // leaking again; a query that never fetches a name cannot send one.
     const apptsRes = await pool.query(
-      `select a.client_name,
-              a.client_phone,
-              a.scheduled_at,
-              a.status,
-              a.notes
+      `select count(*)::int as total
        from appointments a
        join calls c on a.call_id = c.id
        where c.business_id = $1
-         ${dateCondition}
-       order by a.scheduled_at asc`,
+         ${dateCondition}`,
       [businessId]
     );
-    const appts = apptsRes.rows;
+    const count = apptsRes.rows[0]?.total ?? 0;
 
-    let text;
-    if (!appts.length) {
-      text = `No appointments are scheduled for ${label.toLowerCase()}.`;
-    } else {
-      const lines = appts.map((a) => {
-        const when = a.scheduled_at
-          ? new Date(a.scheduled_at).toLocaleString()
-          : "N/A";
-        const name = a.client_name || "Unknown client";
-        const phone = a.client_phone || "";
-        const status = a.status || "";
-        const notes = a.notes ? ` | Notes: ${a.notes}` : "";
-        return `- ${when} — ${name} ${
-          phone ? "(" + phone + ")" : ""
-        } [${status}]${notes}`;
-      });
-      text =
-        `Appointments (${label}) for ${
-          biz.name || "your business"
-        }:\n\n` + lines.join("\n");
-    }
+    const businessName = biz.name || "your business";
+    const where = process.env.DASHBOARD_URL
+      ? `Open your Vetra dashboard to see them:\n${process.env.DASHBOARD_URL}`
+      : "Open your Vetra dashboard to see them.";
+    const text =
+      count === 0
+        ? `${businessName}\n\nNo appointments are scheduled for ${label.toLowerCase()}.\n\n${where}`
+        : `${businessName}\n\n${count} appointment${count === 1 ? " is" : "s are"} scheduled ` +
+          `(${label.toLowerCase()}).\n\n${where}\n\n` +
+          "This email contains no patient information by design — email is not a " +
+          "private channel, so the details stay in Vetra.";
 
     await axios.post(
       "https://api.brevo.com/v3/smtp/email",
@@ -142,7 +135,9 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
           name: process.env.BREVO_FROM_NAME || biz.name || "Your business",
         },
         to: [{ email: biz.notification_email }],
-        subject: `${label} appointments for ${biz.name || "your business"}`,
+        // The subject named the business and "appointments", which is as far as
+        // a subject line can go without describing anyone’s care.
+        subject: `${label} appointments — ${businessName}`,
         textContent: text,
       },
       {
@@ -154,7 +149,7 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
       }
     );
 
-    res.json({ success: true, count: appts.length });
+    res.json({ success: true, count });
   } catch (err) {
     console.error("appointments-email failed:", err.response?.data ?? err.message);
     res.status(500).json({ error: "Failed to send appointments email" });

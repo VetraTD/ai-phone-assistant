@@ -96,8 +96,22 @@ describe("checkNotificationConfig — configuration that might be deliberate", (
       TWILIO_ACCOUNT_SID: SID,
       TWILIO_AUTH_TOKEN: TOKEN,
       TWILIO_SMS_FROM: FROM,
+      DASHBOARD_URL: "https://dashboard.example/app",
     });
     expect(findings).toEqual([]);
+  });
+
+  // A1.3 emptied the notification bodies, so the link IS the message. A working
+  // channel with nowhere to point is worth saying out loud.
+  it("a working channel with no DASHBOARD_URL is announced, never fatal", () => {
+    const { findings } = checkNotificationConfig({ SMTP_USER: "bot@example.com", SMTP_PASS: "secret" });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(codes(findings.filter((f) => f.severity === ANNOUNCE))).toContain("dashboard_url_unset");
+  });
+
+  it("no channel means no DASHBOARD_URL complaint — there is nothing to link from", () => {
+    const { findings } = checkNotificationConfig({});
+    expect(codes(findings)).not.toContain("dashboard_url_unset");
   });
 });
 
