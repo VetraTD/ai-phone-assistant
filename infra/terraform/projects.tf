@@ -24,16 +24,34 @@ resource "google_project" "this" {
   org_id          = var.org_id
   billing_account = var.billing_account
 
-  # Terraform owns these projects. Without this, `terraform destroy` leaves the
-  # project behind and the next apply collides with its own leftovers.
+  # PREVENT, not DELETE, and this was changed after reading a real plan.
   #
-  # It also means REMOVING A STACK FROM var.stack_projects WOULD DELETE ITS
-  # PROJECT if that project were in state. The 6 -> 4 collapse must therefore
-  # never be done by deleting a project from a state that holds it — the vacated
-  # projects are the restore path and an unbilled project costs nothing. If you
-  # are collapsing a state that already manages six, `terraform state rm` the
-  # vacated ones first, then edit the map.
-  deletion_policy = "DELETE"
+  # The original reasoning for DELETE was that `terraform destroy` should be
+  # complete — a half-destroy leaves an orphan project that collides with its
+  # own recreate. That is true and it is the smaller problem.
+  #
+  # What the plan showed is that adopting these projects would flip them from
+  # the provider's PREVENT default to DELETE, putting "delete four GCP
+  # projects" one `terraform destroy` away, in a repo whose own operating rules
+  # list creating or deleting a project as something that needs the owner
+  # present. A deleted project also holds its ID for 30 DAYS, and the ledger
+  # already has a decision recording that exact collision.
+  #
+  # And this session is the evidence: state is the fragile half, projects are
+  # the durable half. B0a's state vanished and every project survived. A
+  # configuration that lets a lost or confused state take the projects with it
+  # has the risk backwards.
+  #
+  # C-1's workflow still works — "provision UK, run the gates, destroy the UK
+  # resources, keep the project" is a `-target`ed destroy of resources, and
+  # PREVENT does not block any of it.
+  #
+  # NOTE EITHER WAY: removing a stack from var.stack_projects removes its
+  # project from the config. With PREVENT the destroy is refused loudly; with
+  # DELETE it would have gone through. The 6 -> 4 collapse is still not done by
+  # deleting anything — the vacated projects are the restore path, and an
+  # unbilled project costs nothing. `terraform state rm` them, then edit the map.
+  deletion_policy = var.project_deletion_policy
 
   labels = merge(var.labels, {
     lane = each.value.lane

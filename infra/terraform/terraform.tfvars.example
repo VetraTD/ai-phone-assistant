@@ -67,7 +67,7 @@ stack_projects = {
 # project already carries.
 project_display_names = {
   us-staging = "Vetra Staging - US and UK"
-  shared     = "Vetra Shared - control plane and log sinks"
+  shared     = "Vetra Shared - Log Sinks"
 }
 
 # ---------------------------------------------------------------------------

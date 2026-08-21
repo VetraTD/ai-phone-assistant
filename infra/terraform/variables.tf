@@ -132,6 +132,26 @@ variable "stack_projects" {
   }
 }
 
+variable "project_deletion_policy" {
+  description = <<-EOT
+    What `terraform destroy` is allowed to do to a PROJECT. "PREVENT" or "DELETE".
+
+    PREVENT by default. See the long note in projects.tf: a deleted project
+    holds its ID for 30 days, project deletion is on this repo's owner-present
+    list, and B0a demonstrated that state is the fragile half while the projects
+    are the durable one.
+
+    Set DELETE only for a genuinely disposable environment.
+  EOT
+  type        = string
+  default     = "PREVENT"
+
+  validation {
+    condition     = contains(["PREVENT", "DELETE"], var.project_deletion_policy)
+    error_message = "project_deletion_policy must be \"PREVENT\" or \"DELETE\"."
+  }
+}
+
 variable "project_display_names" {
   description = <<-EOT
     Display-name overrides, keyed by PROJECT (not stack). A project hosting two
