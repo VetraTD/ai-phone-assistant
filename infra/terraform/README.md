@@ -2,23 +2,84 @@
 
 Six GCP projects, their org policies, networks, IAM and control plane.
 
-**This module has never been applied.** Writing it needs no GCP; applying it is `B0a`.
+**Partially applied, and its state was lost.** B0a (2026-08-21) created three
+org-node policies and six projects, then died on the billing account's
+5-linked-project cap. It ran on LOCAL state and that file no longer exists
+anywhere on the workstation — so the resources are real and Terraform does not
+know about them. `imports.tf` adopts them back; read it before planning.
 
 ## Before you run anything
 
-Two environment variables. Both matter, and forgetting either produces a confusing failure rather than an obvious one.
+Three environment variables. Each one, forgotten, produces a confusing failure
+rather than an obvious one — and the first is the one that was wrong for a day
+without anybody noticing.
 
 ```bash
-# 1. The VetraTD identity, isolated from your personal gcloud setup.
-#    Without this, Terraform authenticates as whatever the default config holds
-#    — which on this machine is a personal account that cannot see the org.
+# 1. THE IDENTITY, FOR gcloud.
 export CLOUDSDK_CONFIG="$HOME/.gcloud-vetratd"
 
-# 2. Norton's loopback proxy MITMs Terraform's own plugin channel. See below.
+# 2. THE IDENTITY, FOR TERRAFORM. These are NOT the same thing. See below.
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.gcloud-vetratd/application_default_credentials.json"
+
+# 3. Norton's loopback proxy MITMs Terraform's own plugin channel.
 export TF_DISABLE_PLUGIN_TLS=1
 ```
 
-### Why `TF_DISABLE_PLUGIN_TLS` — and what it costs
+### `CLOUDSDK_CONFIG` DOES NOT STEER TERRAFORM. This is the important one.
+
+`CLOUDSDK_CONFIG` relocates **gcloud's** configuration directory. The Terraform
+Google provider does not run gcloud — it is Go, and it resolves Application
+Default Credentials through the Go auth library, which looks for
+`%APPDATA%\gcloudpplication_default_credentials.json` and **does not honour
+`CLOUDSDK_CONFIG` at all.** That is a Python-library behaviour.
+
+On this workstation the default ADC belongs to a **personal account**, whose own
+quota project is `physicianmessagingapp`. So every `terraform plan` run with
+only `CLOUDSDK_CONFIG` set authenticates as the wrong person, and it does not
+say so — it fails with:
+
+```
+Error 403: Caller does not have required permission to use project
+vetra-shared-c3a3bd. Grant the caller the roles/serviceusage.serviceUsageConsumer
+role ... reason: USER_PROJECT_DENIED
+```
+
+which reads as a missing IAM binding and is not. `admin@vetratd.com` already
+holds `roles/owner` on that project; a different identity was asking.
+
+`GOOGLE_APPLICATION_CREDENTIALS` is honoured by the Go library and takes
+precedence over the well-known path, so setting it explicitly is the fix.
+
+**Verify the identity Terraform will actually use, not the one gcloud shows:**
+
+```bash
+# gcloud's view — necessary, NOT sufficient
+gcloud organizations list                     # must print 564252011558
+
+# Terraform's view — this is the one that matters
+gcloud auth application-default print-access-token >/dev/null && echo "ADC ok"
+```
+
+### Reauthentication: `invalid_rapt`
+
+The org enforces reauthentication for sensitive operations, so the ADC refresh
+token goes stale on a schedule and Terraform stops with:
+
+```
+oauth2: "invalid_grant" "reauth related error (invalid_rapt)"
+```
+
+It is not a permissions problem and it cannot be fixed from a script — the
+remedy is **interactive**:
+
+```bash
+CLOUDSDK_CONFIG="$HOME/.gcloud-vetratd" gcloud auth application-default login
+```
+
+Expect to do this again. An unattended session cannot get past it, which is the
+point of the control.
+
+
 
 Without it, every Terraform command on this workstation fails with:
 
@@ -78,7 +139,7 @@ ultra-glyph-506120-v5 before or it is disabled.
 which reads as a permissions problem and is not.
 
 ```bash
-gcloud services enable   orgpolicy.googleapis.com   cloudresourcemanager.googleapis.com   cloudbilling.googleapis.com   iam.googleapis.com   iamcredentials.googleapis.com   compute.googleapis.com   servicenetworking.googleapis.com   artifactregistry.googleapis.com   --project=<bootstrap_project_id>
+gcloud services enable   orgpolicy.googleapis.com   cloudresourcemanager.googleapis.com   cloudbilling.googleapis.com   iam.googleapis.com   iamcredentials.googleapis.com   compute.googleapis.com   servicenetworking.googleapis.com   artifactregistry.googleapis.com   --project=<bootstrap_project_id>   # today: vetra-shared-c3a3bd
 ```
 
 Enabling an API is free.
@@ -161,14 +222,28 @@ project_ids`.
 
 | Project | Holds | Locations enforced |
 |---|---|---|
-| `vetra-us-prod` | US HIPAA stack — Cloud Run, Cloud SQL, Memorystore | `in:us-locations` |
-| `vetra-us-staging` | US staging | `in:us-locations` |
-| `vetra-uk-prod` | UK GDPR stack, europe-west2 | `in:eu-locations` |
-| `vetra-uk-staging` | UK staging | `in:eu-locations` |
-| `vetra-shared` | Artifact Registry, Cloud Build, Identity Platform, TF state | both |
-| `vetra-logging` | Two regional audit log buckets | both |
+**Six stacks. FOUR projects today** — see `var.stack_projects`, and the ledger's
+"SIX IS THE TARGET. FOUR IS WHAT IS BILLED".
 
-Plus, per regional stack: a VPC with no default network, a subnet with flow logs, a reserved range and peering for private-IP Cloud SQL, a Serverless VPC Access connector, and a keyless runtime service account.
+| Project | Stacks it holds | Locations enforced |
+|---|---|---|
+| `vetra-us-prod` | us-prod. Cloud Run, Cloud SQL | `in:us-locations` |
+| `vetra-uk-prod` | uk-prod, europe-west2. Empty until C-1's toggle | `in:eu-locations` |
+| `vetra-us-staging` | us-staging **and uk-staging** | both — see below |
+| `vetra-shared` | Artifact Registry, Cloud Build, Identity Platform, TF state, **and the log buckets** | both |
+
+`vetra-uk-staging` and `vetra-logging` still EXIST, unbilled. Do not delete
+them — they are the restore path, and relinking is cheaper than recreating.
+
+**The merge's one real cost:** a project gets ONE `gcp.resourceLocations`
+policy, so the merged staging project permits both continents and is not
+region-pinned. Unavoidable with one project, and it reverts on its own when
+`uk-staging` gets its own project back.
+
+Plus, per ACTIVE regional stack: a subnet with flow logs and a keyless runtime
+service account; per regional PROJECT: a VPC with no default network, and a
+reserved range and peering for private-IP Cloud SQL. **No Serverless VPC Access
+connector — see C-6 in `cost-controls.tf`.**
 
 ## What this costs to apply: approximately nothing
 
