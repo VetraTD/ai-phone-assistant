@@ -361,7 +361,14 @@ export function loadConfig(business, capabilityRows = null) {
  */
 export async function fetchUserByEmail(email) {
   if (!pool || !email) return null;
-  const res = await q(`SELECT id, business_id, email, role FROM users WHERE email = $1 LIMIT 1`, [email]);
+  // Through app_lookup_user_by_email (migration 029), not a plain SELECT.
+  //
+  // This is a BOOTSTRAP read: it is how the tenant becomes known, so it cannot
+  // be scoped to a tenant. Under row-level security a direct select returns
+  // nothing and nobody can authenticate. The SECURITY DEFINER function is the
+  // narrow, named exception — one row, pinned search_path — instead of a policy
+  // that would make "forgot to scope" mean "may see everything".
+  const res = await q(`SELECT * FROM app_lookup_user_by_email($1)`, [email]);
   if (res.error) {
     log.error("db_error", { operation: "fetchUserByEmail", error: res.error.message });
     return null;
@@ -411,7 +418,20 @@ async function selectBusinessByExactPhone(value) {
   // running turn one with no requirements applied, which for an identity check
   // is not an acceptable race. One round trip on the pickup path, which is
   // latency-critical.
-  const res = await q(`${BUSINESS_WITH_CAPABILITIES} WHERE b.phone_number = $1 LIMIT 1`, [value]);
+  // The capability embed, restricted to the one business the bootstrap function
+  // returns. app_lookup_business_by_phone (migration 029) is SECURITY DEFINER
+  // for the same reason as the user lookup: resolving the dialled number to a
+  // tenant is what makes scoping possible, so it cannot itself be scoped.
+  // Both halves go through bootstrap functions, and both are needed: a plain
+  // subquery over business_capabilities returns NOTHING here, because that
+  // table is RLS-protected and no tenant is set yet. Still ONE round trip —
+  // b.* keeps its native column types, so nothing downstream sees a date
+  // arrive as a string.
+  const res = await q(
+    `SELECT b.*, app_business_capabilities(b.id) AS business_capabilities
+       FROM app_lookup_business_by_phone($1) b`,
+    [value]
+  );
 
   if (res.error) {
     // An un-migrated database has no business_capabilities table, and the
@@ -421,7 +441,7 @@ async function selectBusinessByExactPhone(value) {
     // allowed_tasks. This branch is the reason the capability fetch is a
     // subquery in a string and not a JOIN somebody could "simplify".
     log.error("db_error", { operation: "lookupBusinessByPhone", error: res.error.message });
-    const plain = await q(`SELECT * FROM businesses WHERE phone_number = $1 LIMIT 1`, [value]);
+    const plain = await q(`SELECT * FROM app_lookup_business_by_phone($1)`, [value]);
     if (plain.error) {
       log.error("db_error", { operation: "lookupBusinessByPhone_fallback", error: plain.error.message });
       return null;
@@ -451,6 +471,11 @@ async function selectBusinessByExactPhone(value) {
  */
 async function recoverBusinessByDamagedPhone(normalized) {
   const pattern = `%${normalized.replace(/^\+/, "").split("").join("%")}%`;
+  // The recovery path cannot use the bootstrap function (that one matches
+  // exactly), so it reads `businesses` directly and is therefore subject to RLS
+  // like anything else. That is the correct trade: a damaged-row recovery is a
+  // safety net for an un-migrated database, and a safety net that can read
+  // across tenants is not one worth having.
   const res = await q(`${BUSINESS_WITH_CAPABILITIES} WHERE b.phone_number LIKE $1 LIMIT 5`, [pattern]);
 
   if (res.error) {
@@ -1446,6 +1471,91 @@ export async function eraseCallerData(businessId, phone) {
   } finally {
     client.release();
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Tenant scoping (migration 029)
+// ---------------------------------------------------------------------------
+//
+// Row-level security decides what a query can see from
+// `current_setting('app.business_id')`. Something has to set it, and WHERE that
+// happens is the design decision.
+//
+// NOT per function. Roughly eight of the exported functions are keyed by a
+// Twilio call SID or an appointment id and never receive a business id —
+// completeCall, markCallTransferred, updateCallSummary, addTranscriptEntry and
+// the rest. Threading a tenant into all of them would change signatures A3
+// deliberately kept byte-identical, and would still leave every future function
+// one forgotten argument away from returning nothing.
+//
+// Per REQUEST, at the boundary where the tenant is already known and there are
+// only a handful of places:
+//
+//   - the voice session, once the dialled number resolves to a business
+//   - /twilio/status, which A4 gave the businessId through the shared store
+//   - each authenticated dashboard request, from requireBusinessAccess
+//
+// `SET LOCAL` inside a transaction is what makes this safe on a POOLED
+// connection. A session-level `set_config` would outlive the checkout and leak
+// one tenant's scope into whatever request borrowed the connection next —
+// which is a cross-tenant read produced by connection reuse, the hardest kind
+// to reproduce and the easiest to ship.
+//
+// STILL TO DO, and it is B2's: the call sites. Nothing calls withTenant yet.
+// Until they do, the application connects as a superuser and RLS is inert for
+// it — see the migration header. Cloud SQL does NOT grant superuser, so at B2
+// this stops being optional and starts being the thing that makes the app work
+// at all.
+
+/**
+ * Run `fn` with the connection scoped to one tenant.
+ *
+ * Everything inside runs in ONE transaction on ONE connection, so `SET LOCAL`
+ * applies to all of it and is discarded on commit or rollback — including when
+ * `fn` throws, which is the case a manual reset would miss.
+ *
+ * @template T
+ * @param {string} businessId
+ * @param {(client: import("pg").PoolClient) => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withTenant(businessId, fn) {
+  if (!pool) throw new Error("withTenant: no database configured");
+  if (!businessId) throw new Error("withTenant: businessId is required");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Parameterised, not interpolated. set_config's third argument `true` means
+    // transaction-local.
+    await client.query("SELECT set_config('app.business_id', $1, true)", [businessId]);
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The tenant the current connection is scoped to, or null.
+ *
+ * Exists for tests and for a diagnostic: "which tenant does this connection
+ * think it is" has no answer from the application side otherwise, and that is
+ * a bad property for the mechanism the isolation rests on.
+ *
+ * @param {import("pg").PoolClient} [client]
+ * @returns {Promise<string|null>}
+ */
+export async function currentTenant(client) {
+  const runner = client ?? pool;
+  if (!runner) return null;
+  const res = await runner.query("SELECT app_current_business_id() AS id");
+  return res.rows[0]?.id ?? null;
 }
 
 /**

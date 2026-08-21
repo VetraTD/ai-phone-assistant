@@ -79,7 +79,11 @@ describe("lookupBusinessByPhone", () => {
 
     expect(biz).toMatchObject({ id: "biz-1", phone_number: "+442079460958" });
     expect(pg.queries).toHaveLength(1);
-    expect(sql()).toContain("WHERE b.phone_number = $1");
+    // Through app_lookup_business_by_phone (migration 029), not a direct
+    // select: this read happens BEFORE a tenant is known — it is how the tenant
+    // becomes known — so under row-level security a plain select returns
+    // nothing and the call cannot be answered.
+    expect(sql()).toContain("app_lookup_business_by_phone($1)");
     expect(params()).toEqual(["+442079460958"]);
   });
 
@@ -93,9 +97,18 @@ describe("lookupBusinessByPhone", () => {
 
     await lookupBusinessByPhone("+442079460958");
 
+    // ONE round trip, still. Capability rows decide which tools exist before
+    // turn one, and this is the latency-critical pickup path — a second query
+    // here is a regression even though it would be simpler to write.
+    //
+    // Both halves go through bootstrap functions because both tables are
+    // RLS-protected and no tenant is set yet. `b.*` rather than a JSON blob so
+    // column types survive: a date arriving as a string would be a silent
+    // behaviour change downstream.
     expect(pg.queries).toHaveLength(1);
-    expect(sql()).toContain("business_capabilities");
-    expect(sql()).toContain("json_agg");
+    expect(sql()).toContain("app_business_capabilities(b.id)");
+    expect(sql()).toContain("app_lookup_business_by_phone($1)");
+    expect(sql()).toContain("b.*");
   });
 
   // An un-migrated database has no business_capabilities table, and the
@@ -113,7 +126,7 @@ describe("lookupBusinessByPhone", () => {
     const biz = await lookupBusinessByPhone("+442079460958");
 
     expect(biz).toMatchObject({ id: "biz-1" });
-    expect(allSql()[1]).toBe("SELECT * FROM businesses WHERE phone_number = $1 LIMIT 1");
+    expect(allSql()[1]).toBe("SELECT * FROM app_lookup_business_by_phone($1)");
   });
 
   it("normalizes a damaged incoming value before querying", async () => {
