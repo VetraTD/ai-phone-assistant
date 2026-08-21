@@ -64,6 +64,10 @@ export async function requireBusinessAccess(req, res, next) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  req.user = { email: identity.email, businessId: user.business_id };
+  // `id` is here for the audit trail (§164.312(b)): the actor a PHI access is
+  // recorded against has to be a UNIQUE user, and an email is neither stable
+  // nor safe to write into a table designed to be kept for years. Same
+  // reasoning as the cross-tenant log line above.
+  req.user = { id: user.id, email: identity.email, businessId: user.business_id };
   return next();
 }

@@ -630,8 +630,14 @@ app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, asyn
   // Scoped: one HTTP handler is a unit of work, and requireBusinessAccess has
   // already proven this caller owns this tenant. Under row-level security the
   // export reads nothing without it.
-  const data = await db.withTenant(parsed.businessId, () =>
-    db.exportCallerData(parsed.businessId, parsed.phone)
+  const data = await db.withTenant(
+    parsed.businessId,
+    () => db.exportCallerData(parsed.businessId, parsed.phone),
+    // The actor, so §164.312(b)'s row names a unique staff member rather than
+    // "system". A subject-access request is the single largest disclosure this
+    // system performs on purpose; "somebody exported everything about a patient
+    // and we do not know who" is not an acceptable audit answer.
+    { actor: { type: "user", id: req.user?.id } }
   ).catch(() => null);
   if (!data) return res.status(500).json({ error: "Export failed" });
 
@@ -663,8 +669,10 @@ app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (r
   // Scoped, and NOT `withTenantSafe`: an erasure that partly failed must not
   // report success. withTenant rolls back and rethrows; the catch below turns
   // that into a 500, which is the honest answer.
-  const counts = await db.withTenant(parsed.businessId, () =>
-    db.eraseCallerData(parsed.businessId, parsed.phone)
+  const counts = await db.withTenant(
+    parsed.businessId,
+    () => db.eraseCallerData(parsed.businessId, parsed.phone),
+    { actor: { type: "user", id: req.user?.id } }
   ).catch(() => null);
   if (!counts) return res.status(500).json({ error: "Erasure failed" });
 

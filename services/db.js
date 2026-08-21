@@ -5,6 +5,12 @@ import { log } from "../lib/logger.js";
 import { allCapabilityToolNames, getPack } from "../capabilities/index.js";
 import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
 import { normalizePhoneNumber } from "../lib/phone.js";
+import { PHI_ACCESS, NON_PHI_EXPORTS, mergeAccess, validateAccessRecord } from "../lib/phiAudit.js";
+import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
+
+// Re-exported so tests/phiAuditCoverage.test.js can check the classification
+// against this module's real exports without importing two files to do it.
+export { PHI_ACCESS, NON_PHI_EXPORTS };
 
 // ---------------------------------------------------------------------------
 // The data layer, on plain PostgreSQL.
@@ -119,6 +125,92 @@ async function q(text, params = []) {
 /** First row or null — the `.maybeSingle()` shape, without the throw. */
 function one(res) {
   return res.rows?.[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// PHI-access audit trail (§164.312(b)) — the wiring
+//
+// The classification and the rules live in lib/phiAudit.js. What lives here is
+// the part that has to: the accumulator rides in the SAME AsyncLocalStorage
+// store withTenant already uses, because the unit of work is the only scope
+// that knows when to start a record and when to write it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Record that this unit of work touched PHI.
+ *
+ * Public because the boundary that knows the actor is not always inside this
+ * module, and because the validation is worth being able to call directly. The
+ * data-layer functions below go through `noteAccess`, which fills in the action
+ * and the resource list from the classification so the two cannot drift.
+ *
+ * @param {{ operation: string, action: string, resources: string[], resourceIds?: string[], rowCount?: number }} record
+ */
+export function recordPhiAccess(record) {
+  validateAccessRecord(record);
+
+  const audit = tenantContext.getStore()?.audit;
+  if (!audit) {
+    // A PHI access with nowhere to record it.
+    //
+    // ANNOUNCED IN `hipaa` MODE ONLY, and that is a deliberate line rather than
+    // a volume control. §164.312(b) is a HIPAA Security Rule requirement; it
+    // binds the covered lane. In `standard` mode — the UK/GDPR stack and every
+    // non-covered deployment — an unscoped access is not a compliance defect,
+    // and the ratchet this codebase already runs (A1.6, A6) only tightens.
+    //
+    // The volume matters too, and it is what makes an ungated version wrong
+    // rather than merely noisy. Some PHI writes happen per TURN — a transcript
+    // entry is one — and services/db.js's own rule is "wrap a unit of work,
+    // never a call", so those writes are outside withTenant BY DESIGN. An
+    // ungated line would therefore fire on every turn of every call, forever,
+    // reporting intended behaviour as a fault. An alarm that is always on is
+    // one nobody reads.
+    //
+    // KNOWN GAP, recorded rather than papered over: in `hipaa` mode those
+    // per-turn writes still need a home. The fix is B2's — wrap each one in its
+    // own short unit of work, which is three extra statements on a path already
+    // measured at 2,611 ms p50 — not a change to this line.
+    if (IS_HIPAA_MODE) {
+      log.error("phi_access_unaudited", {
+        operation: record.operation,
+        action: record.action,
+        resources: record.resources,
+        severity: "warn",
+      });
+    }
+    return;
+  }
+  mergeAccess(audit, record);
+}
+
+/**
+ * The data layer's own shorthand: look the operation up in the classification
+ * and record it.
+ *
+ * Deliberately NOT taking the action and resources as arguments. A call site
+ * that repeated them would be a second copy of the classification, free to
+ * disagree with the first, and the disagreement would be invisible.
+ *
+ * @param {string} operation - the exported function's own name
+ * @param {{ resourceIds?: Array<string|null|undefined>, rowCount?: number }} [detail]
+ */
+function noteAccess(operation, detail = {}) {
+  const entry = PHI_ACCESS[operation];
+  // Unclassified is a programming error, and tests/phiAuditCoverage.test.js
+  // fails the build on it. At runtime it must not take a call down, so it
+  // announces itself and returns.
+  if (!entry) {
+    log.error("phi_access_unclassified", { operation, severity: "warn" });
+    return;
+  }
+  recordPhiAccess({
+    operation,
+    action: entry.action,
+    resources: entry.resources,
+    resourceIds: (detail.resourceIds || []).filter(Boolean),
+    rowCount: detail.rowCount ?? 0,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +652,9 @@ export async function createCall(businessId, callSid, callerNumber, twilioNumber
     captureException(new Error(res.error.message), { table: "calls", op: "insert" });
     return null;
   }
-  return one(res).id;
+  const created = one(res).id;
+  noteAccess("createCall", { resourceIds: [created], rowCount: 1 });
+  return created;
 }
 
 /**
@@ -581,7 +675,9 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
     // Twilio Call SID, and referencing one here threw a ReferenceError that
     // replaced the real DB error before every call site's .catch() swallowed it.
     log.error("db_error", { callId, operation: "addTranscriptEntry", error: res.error.message });
+    return;
   }
+  noteAccess("addTranscriptEntry", { resourceIds: [callId], rowCount: 1 });
 }
 
 /**
@@ -635,6 +731,19 @@ export async function completeCall(callSid, status, durationSeconds) {
     log.error("db_error", { callSid, operation: "completeCall_status", error: st.error.message });
     captureException(new Error(st.error.message), { table: "calls", op: "update_complete_status" });
   }
+  // Both statements are keyed by call SID rather than by row id, so there is no
+  // uuid to record. `rowCount` still carries whether anything was actually
+  // written, which is the part an auditor reads.
+  //
+  // Only when something actually happened. This function deliberately does NOT
+  // return early on error — the two statements fail independently — so without
+  // this guard a completeCall in which both statements failed would still file
+  // an audit record saying the call record was written. An audit trail that
+  // reports work that did not happen is worse than one that misses work that
+  // did: the first is believed.
+  if (!timing.error || !st.error) {
+    noteAccess("completeCall", { rowCount: (timing.rowCount || 0) + (st.rowCount || 0) });
+  }
 }
 
 /**
@@ -649,7 +758,9 @@ export async function markCallTransferred(callSid) {
   if (res.error) {
     log.error("db_error", { callSid, operation: "markCallTransferred", error: res.error.message });
     captureException(new Error(res.error.message), { table: "calls", op: "update_transferred" });
+    return;
   }
+  noteAccess("markCallTransferred", { rowCount: res.rowCount || 0 });
 }
 
 /**
@@ -667,6 +778,7 @@ export async function fetchCallTranscript(callId) {
     log.error("db_error", { operation: "fetchCallTranscript", error: res.error.message });
     return [];
   }
+  noteAccess("fetchCallTranscript", { resourceIds: [callId], rowCount: res.rows?.length || 0 });
   return res.rows || [];
 }
 
@@ -715,7 +827,9 @@ export async function updateCallSummary(callSid, summary, sentiment, outcome) {
   );
   if (res.error) {
     log.error("db_error", { callSid, operation: "updateCallSummary", error: res.error.message });
+    return;
   }
+  noteAccess("updateCallSummary", { rowCount: res.rowCount || 0 });
 }
 
 /**
@@ -765,7 +879,9 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
     e.code = res.error.code;
     throw e;
   }
-  return one(res).id;
+  const appointmentId = one(res).id;
+  noteAccess("createAppointment", { resourceIds: [appointmentId], rowCount: 1 });
+  return appointmentId;
 }
 
 /**
@@ -862,6 +978,10 @@ export async function createAppointmentIfAvailable(params) {
   }
   // The function returns the new uuid, or NULL when the slot is full.
   const id = one(res)?.id ?? null;
+  // Recorded either way. A booking attempt that lost the race still submitted
+  // the caller's name and number to the database, which is a write of their
+  // data whether or not a row survived it.
+  noteAccess("createAppointmentIfAvailable", { resourceIds: id ? [id] : [], rowCount: id ? 1 : 0 });
   return id ? { id } : { full: true };
 }
 
@@ -913,11 +1033,15 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
     });
   }
   if (phone) {
-    return list.filter((r) => {
+    list = list.filter((r) => {
       const p = (r.client_phone || "").replace(/\D/g, "").trim();
       return p && p.slice(-10) === phone.slice(-10);
     });
   }
+  // After the filters, not before: the audit record says what was DISCLOSED to
+  // the caller of this function, not what the query happened to fetch on the
+  // way there.
+  noteAccess("listAppointmentsByCaller", { resourceIds: list.map((r) => r.id), rowCount: list.length });
   return list;
 }
 
@@ -946,7 +1070,9 @@ export async function getAppointmentById(appointmentId, businessId) {
     log.error("db_error", { operation: "getAppointmentById", error: res.error.message });
     return null;
   }
-  return one(res);
+  const found = one(res);
+  noteAccess("getAppointmentById", { resourceIds: [appointmentId], rowCount: found ? 1 : 0 });
+  return found;
 }
 
 /**
@@ -971,7 +1097,9 @@ export async function updateAppointmentStatus(appointmentId, status, businessId)
     log.error("db_error", { operation: "updateAppointmentStatus", error: res.error.message });
     return false;
   }
-  return one(res) != null;
+  const updated = one(res) != null;
+  noteAccess("updateAppointmentStatus", { resourceIds: [appointmentId], rowCount: updated ? 1 : 0 });
+  return updated;
 }
 
 /**
@@ -1028,7 +1156,9 @@ export async function updateAppointment(appointmentId, updates, businessId) {
     log.error("db_error", { operation: "updateAppointment", error: res.error.message });
     return false;
   }
-  return one(res) != null;
+  const changed = one(res) != null;
+  noteAccess("updateAppointment", { resourceIds: [appointmentId], rowCount: changed ? 1 : 0 });
+  return changed;
 }
 
 /**
@@ -1075,7 +1205,9 @@ export async function createCustomerRequest({
     captureException(new Error(res.error.message), { table: "customer_requests", op: "insert" });
     return null;
   }
-  return one(res).id;
+  const requestId = one(res).id;
+  noteAccess("createCustomerRequest", { resourceIds: [requestId], rowCount: 1 });
+  return requestId;
 }
 
 /**
@@ -1124,6 +1256,13 @@ export async function fetchCallerContext(businessId, callerNumber) {
     notes: a.notes,
   }));
 
+  // The nested listAppointmentsByCaller records its own access, so the unit of
+  // work's row names both operations. That is the intent: one row per unit of
+  // work, and the operations array is what shows how the disclosure was built.
+  noteAccess("fetchCallerContext", {
+    resourceIds: calls.map((c) => c.id),
+    rowCount: calls.length + upcomingAppointments.length,
+  });
   return { callCount: calls.length, lastCallSummary, upcomingAppointments };
 }
 
@@ -1373,6 +1512,12 @@ export async function exportCallerData(businessId, phone) {
     return null;
   }
 
+  noteAccess("exportCallerData", {
+    resourceIds: calls.rows.map((c) => c.id),
+    rowCount:
+      calls.rows.length + transcripts.rows.length + appointments.rows.length + requests.rows.length,
+  });
+
   return {
     calls: calls.rows,
     transcripts: transcripts.rows,
@@ -1472,6 +1617,10 @@ export async function eraseCallerData(businessId, phone) {
     // The audit trail an erasure needs, carrying no phone number — the thing
     // being erased must not be written to a log in the act of erasing it.
     log.info("dsr_erasure_completed", { businessId, ...counts });
+    noteAccess("eraseCallerData", {
+      resourceIds: callIds,
+      rowCount: t.rowCount + c.rowCount + a.rowCount + r.rowCount,
+    });
     return counts;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -1555,28 +1704,110 @@ const tenantContext = new AsyncLocalStorage();
  * connection next: a cross-tenant read produced by connection reuse, which is
  * the hardest kind to reproduce and the easiest to ship.
  *
+ * ---------------------------------------------------------------------------
+ * IT IS ALSO THE AUDIT BOUNDARY (§164.312(b)).
+ * ---------------------------------------------------------------------------
+ *
+ * The unit of work is the right grain for an audit record, and this is the only
+ * place that knows where one begins and ends. `actor` says who is doing it —
+ * pass it, because an audit trail that cannot name a unique actor satisfies
+ * neither §164.312(b) nor §164.312(a)(2)(i). Omitting it is not an error, it
+ * just records `system`, which is the honest answer for a background job.
+ *
  * @template T
  * @param {string} businessId
  * @param {() => Promise<T>} fn
+ * @param {{ actor?: { type?: "user"|"voice"|"system", id?: string|null }, requestId?: string|null, callSid?: string|null }} [opts]
  * @returns {Promise<T>}
  */
-export async function withTenant(businessId, fn) {
+export async function withTenant(businessId, fn, opts = {}) {
   if (!pool) throw new Error("withTenant: no database configured");
   if (!businessId) throw new Error("withTenant: businessId is required");
+
+  const audit = {
+    operations: new Set(),
+    resources: new Set(),
+    resourceIds: [],
+    rowCount: 0,
+    action: null,
+  };
+  const actorType = opts.actor?.type ?? "system";
+  const actorId = opts.actor?.id ?? null;
+  let committed = false;
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.business_id', $1, true)", [businessId]);
-    const result = await tenantContext.run({ client, businessId }, () => fn(client));
+    const result = await tenantContext.run({ client, businessId, audit }, () => fn(client));
+
+    // Inside the transaction, before COMMIT, on the connection that is already
+    // scoped — so the row satisfies its own RLS policy and costs no extra
+    // checkout. If this INSERT fails the whole unit of work rolls back, which
+    // is the correct posture: an access that cannot be audited is one that
+    // should not have happened. The voice paths run through withTenantSafe and
+    // degrade rather than crash.
+    await flushAudit(client, businessId, actorType, actorId, audit, opts);
+
     await client.query("COMMIT");
+    committed = true;
     return result;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
+    // The DURABLE copy, and the reason there are two destinations.
+    //
+    // Emitted in `finally`, so it survives a rollback that takes the table row
+    // with it: an ATTEMPTED access is recorded even when no committed record of
+    // it exists. On Cloud Run this goes to stdout, which the vetra-logging
+    // project's sink (B0w) collects under different IAM — so a compromised
+    // runtime can stop writing to the trail and cannot erase what it already
+    // wrote.
+    if (audit.action) {
+      log.info("phi_access", {
+        businessId,
+        actorType,
+        actorId,
+        action: audit.action,
+        operations: [...audit.operations],
+        resources: [...audit.resources],
+        rowCount: audit.rowCount,
+        requestId: opts.requestId ?? null,
+        callSid: opts.callSid ?? null,
+        committed,
+      });
+    }
   }
+}
+
+/**
+ * Write the unit of work's audit record, if it touched PHI at all.
+ *
+ * `audit.action` is null when nothing classified ran — a unit of work that only
+ * read configuration writes no row, which is the difference between an audit
+ * trail and a query log.
+ */
+async function flushAudit(client, businessId, actorType, actorId, audit, opts) {
+  if (!audit.action) return;
+  await client.query(
+    `INSERT INTO phi_access_log
+       (business_id, actor_type, actor_id, action, operations, resources, resource_ids, row_count, request_id, call_sid)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      businessId,
+      actorType,
+      actorId,
+      audit.action,
+      [...audit.operations],
+      [...audit.resources],
+      audit.resourceIds,
+      audit.rowCount,
+      opts.requestId ?? null,
+      opts.callSid ?? null,
+    ]
+  );
 }
 
 /**
@@ -1590,9 +1821,15 @@ export async function withTenant(businessId, fn) {
  * @template T
  * @param {string} businessId
  * @param {() => Promise<T>} fn
- * @param {{ operation: string, callSid?: string, fallback?: T }} opts
+ * @param {{ operation: string, callSid?: string, fallback?: T, actor?: { type?: string, id?: string|null } }} opts
  */
-export async function withTenantSafe(businessId, fn, { operation, callSid = null, fallback = null } = {}) {
+export async function withTenantSafe(businessId, fn, { operation, callSid = null, fallback = null, actor = null } = {}) {
+  // A call SID IS the actor on the voice path: it is the unique identifier of
+  // the interaction the receptionist is acting within, and it resolves to a
+  // person only through the database — the judgement lib/phiFields.js already
+  // records for callSid. Defaulting it here means the four voice boundaries do
+  // not each have to remember.
+  const effectiveActor = actor ?? (callSid ? { type: "voice", id: callSid } : { type: "system", id: null });
   // NO DATABASE: run it anyway. `fallback` is for a scope that FAILED, not for
   // a scope that was never possible — and the two are not the same thing.
   //
@@ -1636,7 +1873,7 @@ export async function withTenantSafe(businessId, fn, { operation, callSid = null
   }
 
   try {
-    return await withTenant(businessId, fn);
+    return await withTenant(businessId, fn, { actor: effectiveActor, callSid });
   } catch (err) {
     log.error("db_error", { operation, callSid, error: err?.message });
     return fallback;
