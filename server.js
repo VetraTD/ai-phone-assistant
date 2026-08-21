@@ -399,14 +399,22 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
-    const state = callState.getState(callSid);
-    const dbCallId = state.dbCallId;
-    const businessId = state.businessId;
-    // Captured synchronously, before any await below and before
-    // callState.remove(callSid) at the end of this handler — the spam
-    // heuristic's async block (below) needs this in-memory signal, not a
-    // fresh callState.getState() call that could read a since-removed state.
-    const sawCallerFinal = !!state.sawCallerFinal;
+    // Read from the SHARED store, not local memory.
+    //
+    // This handler is an ordinary HTTP POST. On Cloud Run the load balancer
+    // sends it to whichever instance is free, which is usually not the one
+    // that held the WebSocket — so `callState.getState()` here would create a
+    // fresh, empty state and the whole block below would silently do nothing:
+    // no summary, no missed-call notification, and every short call tagged as
+    // spam because sawCallerFinal read false on a caller who spoke.
+    //
+    // Awaited once, here, before anything else touches it. The values are then
+    // held in locals for the same reason they were before: the async blocks
+    // below outlive callState.remove() at the end of this handler.
+    const shared = await callState.readShared(callSid);
+    const dbCallId = shared.dbCallId ?? null;
+    const businessId = shared.businessId ?? null;
+    const sawCallerFinal = !!shared.sawCallerFinal;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
     const callContext = {
       callerNumber: req.body.From || null,

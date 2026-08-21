@@ -145,7 +145,10 @@ describe("POST /twilio/status", () => {
       // The summary/spam path only runs when this call went through the
       // pipeline far enough to get a DB call row (state.dbCallId) — set
       // directly since this test posts straight to /twilio/status.
-      callState.getState("CA_spam_1").dbCallId = "call-db-1";
+      // Seeded through the SHARED store, not local state: A4 moved the three
+      // fields this handler reads out of process memory, because on Cloud Run
+      // the status callback lands on an instance that never held the call.
+      callState.writeShared("CA_spam_1", { dbCallId: "call-db-1" });
 
       await request(app)
         .post("/twilio/status")
@@ -170,9 +173,7 @@ describe("POST /twilio/status", () => {
       // in-memory sawCallerFinal flag (set live, well before the call
       // ends — see lib/callState.js) must override the stale DB read.
       mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
-      const state = callState.getState("CA_spam_race");
-      state.dbCallId = "call-db-race";
-      state.sawCallerFinal = true;
+      callState.writeShared("CA_spam_race", { dbCallId: "call-db-race", sawCallerFinal: true });
 
       await request(app)
         .post("/twilio/status")
@@ -195,9 +196,7 @@ describe("POST /twilio/status", () => {
 
     it("still tags spam when sawCallerFinal is false (genuine silent/robo call) and the DB read agrees (zero caller rows)", async () => {
       mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
-      const state = callState.getState("CA_spam_genuine");
-      state.dbCallId = "call-db-genuine";
-      state.sawCallerFinal = false;
+      callState.writeShared("CA_spam_genuine", { dbCallId: "call-db-genuine", sawCallerFinal: false });
 
       await request(app)
         .post("/twilio/status")
@@ -218,7 +217,7 @@ describe("POST /twilio/status", () => {
         { speaker: "ai", message: "Hi!", sequence: 1 },
         { speaker: "caller", message: "What are your hours?", sequence: 2 },
       ]);
-      callState.getState("CA_spam_2").dbCallId = "call-db-2";
+      callState.writeShared("CA_spam_2", { dbCallId: "call-db-2" });
 
       await request(app)
         .post("/twilio/status")
@@ -237,7 +236,7 @@ describe("POST /twilio/status", () => {
 
     it("does not tag spam when duration is >= 8s even with zero caller turns", async () => {
       mockFetchCallTranscript.mockResolvedValue([{ speaker: "ai", message: "Hi, thanks for calling!", sequence: 1 }]);
-      callState.getState("CA_spam_3").dbCallId = "call-db-3";
+      callState.writeShared("CA_spam_3", { dbCallId: "call-db-3" });
 
       await request(app)
         .post("/twilio/status")
