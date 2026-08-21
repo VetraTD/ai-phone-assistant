@@ -91,14 +91,18 @@ describe("hipaa mode refuses non-covered vendors at construction", () => {
     expect(() => createTtsConnection({ voiceId: "v1" })).toThrow(/ElevenLabs/);
   });
 
-  it("refuses Deepgram too", async () => {
+  // Targets lib/voice/sttStream.js, the LIVE speech path. It used to target
+  // services/deepgram.js, which A10 left with no consumers when it deleted
+  // lib/mediaStream.js — so the guard was being proven on dead code while the
+  // path that actually runs went untested.
+  it("refuses Deepgram on the live STT path", async () => {
     for (const k of ENV) delete process.env[k];
     process.env.DEPLOYMENT_MODE = "hipaa";
     process.env.DEEPGRAM_API_KEY = "dg-key";
     vi.resetModules();
 
-    const { createStream } = await import("../services/deepgram.js");
-    await expect(createStream({ onTranscript() {}, onSpeechStart() {} })).rejects.toThrow(/Deepgram/);
+    const { createSttStream } = await import("../lib/voice/sttStream.js");
+    await expect(createSttStream({ language: "en-US", callSid: "CA1" })).rejects.toThrow(/Deepgram/);
   });
 });
 
