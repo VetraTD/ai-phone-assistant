@@ -100,3 +100,40 @@ resource "google_project_iam_member" "runtime_pull_images" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.runtime[each.key].email}"
 }
+
+# ---------------------------------------------------------------------------
+# Organization-level logging admin.
+#
+# Discovered by the apply, and the failure is the design working rather than a
+# gap in it. The four aggregated sinks in logging.tf are created at the ORG
+# node, and creating one needs `logging.sinks.create` ON THE ORGANIZATION.
+# `admin@vetratd.com` holds Organization Admin, Folder Admin, Project Creator
+# and Org Policy Admin — and NONE of them carry it:
+#
+#   Error 403: Permission 'logging.sinks.create' denied on resource
+#   '//logging.googleapis.com/organizations/564252011558/sinks/vetra-audit-eu'
+#
+# That separation is exactly why the sinks moved to the org node. A principal
+# with full control of a project still cannot touch the trail that records what
+# they did there, because the trail is administered one level up by a role
+# nobody holds by default.
+#
+# `roles/logging.configWriter`, not `roles/logging.admin`: config writer manages
+# sinks, exclusions and bucket configuration. Admin additionally grants
+# `logging.logEntries.*` and the ability to DELETE log entries, which is the one
+# capability an audit trail's administrator should not have.
+#
+# This is not a privilege escalation. Organization Admin already carries
+# `resourcemanager.organizations.setIamPolicy`, so this principal could grant
+# itself any role on the org at any time. Declaring it here makes an existing
+# capability usable by the API and, more usefully, makes it REVIEWABLE — the
+# alternative is somebody clicking it into the console during an outage and
+# nobody ever knowing which role they picked.
+# ---------------------------------------------------------------------------
+resource "google_organization_iam_member" "logging_config_writer" {
+  for_each = toset(var.owner_principals)
+
+  org_id = var.org_id
+  role   = "roles/logging.configWriter"
+  member = each.value
+}

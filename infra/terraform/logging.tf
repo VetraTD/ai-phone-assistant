@@ -243,6 +243,13 @@ resource "google_logging_organization_sink" "aggregated" {
     [each.value.region_key == "eu" ? "(${local.eu_project_predicate})" : "NOT (${local.eu_project_predicate})"],
   ))
 
+  # Creating a sink at the org node needs `logging.sinks.create` ON the org, and
+  # no role this principal holds by default carries it — see
+  # google_organization_iam_member.logging_config_writer in iam.tf. Without this
+  # dependency the first apply fails on all four sinks with a 403 that reads as
+  # a broken configuration.
+  depends_on = [google_organization_iam_member.logging_config_writer]
+
   # C-8. Exclusions on the application stream only; nothing is ever excluded
   # from the audit trail.
   dynamic "exclusions" {

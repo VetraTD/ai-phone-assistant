@@ -90,21 +90,53 @@ function parseArgs(argv) {
  * in `-prod`.
  */
 const US_PROD_KEY = "us-prod";
+
+/**
+ * `name = "value"` at the top level of a tfvars file.
+ *
+ * Parsed line by line rather than with a built RegExp. The first version built
+ * the pattern inside a template literal, where `\s` is not an escape sequence
+ * and JS silently collapses it to a bare `s` — so the pattern became
+ * `^s*project_id_suffixs*=...` and matched nothing, forever, with no error.
+ */
+function tfvar(src, name) {
+  for (const line of src.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(name)) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0 || trimmed.slice(0, eq).trim() !== name) continue;
+    const value = trimmed.slice(eq + 1).trim();
+    const quoted = value.match(/^"([^"]*)"/);
+    if (quoted) return quoted[1];
+  }
+  return null;
+}
+
 function resolveProjects(flagProjects) {
   if (flagProjects.length) return { projects: flagProjects, source: "--project" };
 
   const fromEnv = (process.env.VETRA_PHI_PROJECTS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (fromEnv.length) return { projects: fromEnv, source: "VETRA_PHI_PROJECTS" };
 
-  const tfvars = path.join(ROOT, "infra", "terraform", "terraform.tfvars");
-  if (fs.existsSync(tfvars)) {
-    const src = fs.readFileSync(tfvars, "utf8");
-    const block = src.match(/adopt_existing_projects\s*=\s*\{([^}]*)\}/s);
-    if (block) {
-      const projects = [...block[1].matchAll(/^\s*([\w-]+)\s*=\s*"([^"]+)"/gm)]
-        .filter(([, key]) => key === US_PROD_KEY)
-        .map(([, , id]) => id);
-      if (projects.length) return { projects, source: "infra/terraform/terraform.tfvars" };
+  // Composed from the two tfvars values that are PERMANENT, rather than read
+  // from a list that is not.
+  //
+  // The first version of this read `adopt_existing_projects`, which was the
+  // only place mapping a project key to a real ID — and whose whole documented
+  // lifecycle is "empty it once the adoption apply has succeeded". Emptying it
+  // turned this gate into exit 2 on every run. It failed SAFE, which is the
+  // only reason that was a bug and not an outage, but a gate that breaks when
+  // an unrelated variable is tidied up is a gate that gets switched off.
+  //
+  // `project_prefix` and `project_id_suffix` are both immutable facts about the
+  // account: a project ID cannot change, so neither can they.
+  const tfvarsPath = path.join(ROOT, "infra", "terraform", "terraform.tfvars");
+  if (fs.existsSync(tfvarsPath)) {
+    const src = fs.readFileSync(tfvarsPath, "utf8");
+    const prefix = tfvar(src, "project_prefix") || "vetra";
+    const suffix = tfvar(src, "project_id_suffix");
+    if (suffix) {
+      return { projects: [`${prefix}-${US_PROD_KEY}-${suffix}`], source: "infra/terraform/terraform.tfvars" };
     }
   }
 

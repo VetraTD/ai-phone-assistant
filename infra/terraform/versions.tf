@@ -29,14 +29,13 @@ terraform {
   # local state means only one machine can ever apply without clobbering the
   # other's view.
   #
-  # Commented until the adoption apply has succeeded. Then paste in the
-  # `tfstate_bucket` output, `terraform init -migrate-state`, and never think
-  # about it again.
-  #
-  # backend "gcs" {
-  #   bucket = "vetra-tfstate-c3a3bd"   # from the tfstate_bucket output
-  #   prefix = "root"
-  # }
+  # LIVE since 2026-08-21, immediately after the adoption apply created the
+  # bucket. The local state file it was migrated from is now dead weight; do not
+  # resurrect it.
+  backend "gcs" {
+    bucket = "vetra-tfstate-c3a3bd"
+    prefix = "root"
+  }
 }
 
 # `billing_project` is the project Terraform's own API calls are billed and

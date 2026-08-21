@@ -71,27 +71,18 @@ project_display_names = {
 }
 
 # ---------------------------------------------------------------------------
-# ADOPTION — temporary, and empty it once the adoption apply has succeeded.
+# ADOPTION — DONE 2026-08-21. Both emptied, and they stay empty.
 #
-# B0a applied partially and its local state was lost. These resources exist in
-# GCP and not in state, so they are imported rather than created. Terraform
-# ERRORS on an import block targeting an address already in state, so blank both
-# of these out after the apply that adopts them.
+# B0a applied partially and its local state was lost. The four projects and
+# three org policies were adopted back with import blocks rather than recreated,
+# and that apply has succeeded — `terraform plan` now reports no changes.
 #
-# See imports.tf.
+# Left in place, empty, because the next state loss is cheaper for the mechanism
+# already being here: refill them, plan, apply. See imports.tf.
 # ---------------------------------------------------------------------------
-adopt_existing_projects = {
-  us-prod    = "vetra-us-prod-c3a3bd"
-  us-staging = "vetra-us-staging-c3a3bd"
-  uk-prod    = "vetra-uk-prod-c3a3bd"
-  shared     = "vetra-shared-c3a3bd"
-}
+adopt_existing_projects = {}   # EMPTIED 2026-08-21 after the adoption apply
 
-adopt_existing_org_policies = [
-  "iam.disableServiceAccountKeyCreation",
-  "compute.skipDefaultNetworkCreation",
-  "compute.requireShieldedVm",
-]
+adopt_existing_org_policies = []  # EMPTIED 2026-08-21 after the adoption apply
 
 # ---------------------------------------------------------------------------
 # Cost controls. See cost-controls.tf for the reasoning behind each default;
