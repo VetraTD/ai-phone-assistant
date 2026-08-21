@@ -56,20 +56,48 @@ locals {
     "cloudscheduler.googleapis.com",
   ])
 
-  shared_apis = concat(local.common_apis, [
+  # -------------------------------------------------------------------------
+  # APIs Terraform calls THROUGH the quota project.
+  #
+  # `user_project_override = true` routes every API call Terraform makes for
+  # quota and billing through `bootstrap_project_id` — which is now `shared`.
+  # Google requires the API to be enabled ON THAT PROJECT even though the
+  # resource lands elsewhere entirely.
+  #
+  # THIS LIST IS A SUPERSET OF WHAT THE SHARED PROJECT ITSELF RUNS, and that is
+  # correct rather than sloppy: `sqladmin` is here because Terraform creates a
+  # Cloud SQL instance in ANOTHER project, not because anything in `shared`
+  # holds a database.
+  #
+  # It is written as one list because the alternative is what actually happened
+  # — three separate applies, each dying on a different missing API, each with
+  # a 403 that names this project and reads as a permissions problem:
+  #
+  #   Error 403: Organization Policy API has not been used in project ...
+  #   Error 403: Cloud Billing Budget API has not been used in project ...
+  #   Error 403: Cloud SQL Admin API has not been used in project ...
+  #
+  # Enabling an API is free. Add to this list whenever the module starts
+  # managing a new kind of resource, BEFORE the apply rather than after it.
+  # -------------------------------------------------------------------------
+  terraform_quota_apis = [
+    "orgpolicy.googleapis.com",
+    "cloudbilling.googleapis.com",
+    "billingbudgets.googleapis.com",
+    "compute.googleapis.com",
+    "servicenetworking.googleapis.com",
+    "sqladmin.googleapis.com",
+    "cloudkms.googleapis.com",
+    "run.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "storage.googleapis.com",
+  ]
+
+  shared_apis = concat(local.common_apis, local.terraform_quota_apis, [
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "identitytoolkit.googleapis.com",
     "secretmanager.googleapis.com",
-    # Terraform routes its own calls through whatever `bootstrap_project_id`
-    # names, and that is this project now. These are the APIs it calls THROUGH
-    # a quota project, which have to be enabled ON the quota project even though
-    # the resources land elsewhere. Their absence fails with a 403 naming this
-    # project, which reads as a permissions problem and is not.
-    "orgpolicy.googleapis.com",
-    "cloudbilling.googleapis.com",
-    "compute.googleapis.com",
-    "servicenetworking.googleapis.com",
   ])
 
   logging_apis = concat(local.common_apis, [

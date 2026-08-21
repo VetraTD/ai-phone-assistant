@@ -124,3 +124,26 @@ output "tfstate_bucket" {
   description = "State bucket. After the first apply: uncomment the backend block in versions.tf with this name, then `terraform init -migrate-state`. B0a's state was lost for want of this."
   value       = google_storage_bucket.tfstate.name
 }
+
+# ---------------------------------------------------------------------------
+# B2 outputs. B4 needs the connection name to attach Cloud Run; D3 needs it to
+# restore into.
+# ---------------------------------------------------------------------------
+output "cloud_sql_instances" {
+  description = "Created Cloud SQL instances. `connection_name` is what Cloud Run and the proxy take; `private_ip` is what a psql inside the VPC takes."
+  value = {
+    for k, v in google_sql_database_instance.this : k => {
+      connection_name = v.connection_name
+      private_ip      = v.private_ip_address
+      region          = v.region
+      tier            = v.settings[0].tier
+      availability    = v.settings[0].availability_type
+      databases       = [for dk, dv in local.active_sql_databases : dv.name if dv.instance_key == k]
+    }
+  }
+}
+
+output "cloud_sql_deferred" {
+  description = "Instances in the plan that C-12 has NOT created. Empty once enable_prod_databases is on. A production database with no production traffic is $98.62/month of nothing."
+  value       = [for k, v in local.cloud_sql_plan : v.instance if !contains(keys(local.active_sql_instances), k)]
+}
