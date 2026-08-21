@@ -1455,6 +1455,42 @@ function phoneMatch(col, param) {
  * @param {string} phone
  * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array}|null>}
  */
+/**
+ * The recording URLs this tenant holds for one caller.
+ *
+ * Exists because an Art. 17 erasure has to reach Twilio, and this column is the
+ * only index of what Twilio holds. server.js's degraded voicemail path files
+ * `Voicemail recording: <url>` into `customer_requests.message`, and that
+ * message is also what A5's erasure NULLs — so the pointer has to be read
+ * BEFORE the rows are cleared, or there is nothing left to delete with.
+ *
+ * Narrow on purpose rather than reusing exportCallerData: an erasure should not
+ * have to pull every transcript a caller ever produced in order to find two
+ * URLs.
+ *
+ * @param {string} businessId
+ * @param {string} phone
+ * @returns {Promise<string[]|null>} message bodies that may contain a URL, or null on error
+ */
+export async function listCallerRecordingMessages(businessId, phone) {
+  if (!pool || !businessId || !phone) return null;
+  const res = await q(
+    `SELECT id, message FROM customer_requests
+      WHERE business_id = $1 AND ${phoneMatch("callback_number", 2)}
+        AND message IS NOT NULL`,
+    [businessId, phone]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listCallerRecordingMessages", error: res.error.message });
+    return null;
+  }
+  noteAccess("listCallerRecordingMessages", {
+    resourceIds: res.rows.map((r) => r.id),
+    rowCount: res.rows.length,
+  });
+  return res.rows.map((r) => r.message);
+}
+
 export async function exportCallerData(businessId, phone) {
   if (!pool || !businessId || !phone) return null;
 
@@ -1567,16 +1603,39 @@ export async function exportCallerData(businessId, phone) {
 export async function eraseCallerData(businessId, phone) {
   if (!pool || !businessId || !phone) return null;
 
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (err) {
-    log.error("db_error", { operation: "eraseCallerData.connect", error: err?.message });
-    return null;
+  // THE CONNECTION IS THE WHOLE CORRECTNESS ARGUMENT, and this used to get it
+  // wrong in the silent direction.
+  //
+  // It called pool.connect() unconditionally, taking a FRESH connection while
+  // the route had already wrapped it in withTenant. `SET LOCAL app.business_id`
+  // lives on a connection, so the scope was set on one connection and the
+  // erasure ran on another. As the unprivileged role every statement matches
+  // zero rows — and this function returns a counts object, which is truthy, so
+  // the DELETE route answered 200 {erased: {all zeros}}. An Art. 17 erasure
+  // that erases nothing and reports success is worse than one that fails.
+  //
+  // Invisible because tests/db/dsr.test.js connects as the local superuser, for
+  // whom RLS is inert. Cloud SQL grants no superuser, so B2 would have shipped
+  // it. tests/db/rlsAppRole.test.js now pins it as the unprivileged role.
+  const scoped = tenantContext.getStore()?.client;
+
+  let client = scoped;
+  if (!client) {
+    try {
+      client = await pool.connect();
+    } catch (err) {
+      log.error("db_error", { operation: "eraseCallerData.connect", error: err?.message });
+      return null;
+    }
   }
 
   try {
-    await client.query("BEGIN");
+    // ONE TRANSACTION either way. Inside withTenant there already is one, and
+    // issuing BEGIN inside it is a no-op warning while COMMIT would end the
+    // CALLER's transaction early — committing half a unit of work and leaving
+    // the rest unprotected. So the transaction is owned by whoever opened the
+    // connection, and atomicity holds in both shapes.
+    if (!scoped) await client.query("BEGIN");
 
     const { rows: callRows } = await client.query(
       `SELECT id FROM calls WHERE business_id = $1 AND ${phoneMatch("caller_number", 2)}`,
@@ -1606,7 +1665,7 @@ export async function eraseCallerData(businessId, phone) {
       [businessId, phone]
     );
 
-    await client.query("COMMIT");
+    if (!scoped) await client.query("COMMIT");
 
     const counts = {
       transcripts: t.rowCount,
@@ -1623,12 +1682,23 @@ export async function eraseCallerData(businessId, phone) {
     });
     return counts;
   } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
     log.error("db_error", { operation: "eraseCallerData", error: err?.message });
     captureException(new Error(err?.message), { table: "calls", op: "dsr_erase" });
+    if (scoped) {
+      // Inside withTenant: RETHROW rather than swallow. withTenant rolls back
+      // and rethrows, and the route turns that into a 500 — which is the honest
+      // answer. Returning null here would leave the caller's transaction open
+      // and mid-erasure, and the route would report "Erasure failed" while the
+      // partial work sat waiting to be committed by something else.
+      throw err;
+    }
+    await client.query("ROLLBACK").catch(() => {});
     return null;
   } finally {
-    client.release();
+    // Only release what this function checked out. Releasing withTenant's
+    // connection here would hand it back to the pool while withTenant is still
+    // using it — a second borrower would join a stranger's open transaction.
+    if (!scoped) client.release();
   }
 }
 

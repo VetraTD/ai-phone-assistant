@@ -11,6 +11,7 @@ import * as db from "./services/db.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
+import * as twilioRecordings from "./services/twilioRecordings.js";
 import { WebSocketServer } from "ws";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
@@ -346,7 +347,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Degraded-mode voicemail recording callback
 //
-// Twilio POSTs here (recordingStatusCallback) once the <Record> from
+// Twilio POSTs here (recordingStatusCallback) once the Record verb from
 // buildDegradedVoicemailTwiml finishes. We can't rely on callState/DB call
 // rows here — degraded mode skips that setup entirely — so the business is
 // looked up fresh from the dialed (To) number.
@@ -666,17 +667,90 @@ app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (r
   if (!parsed) return;
   if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
 
+  const actor = { actor: { type: "user", id: req.user?.id } };
+
+  // -------------------------------------------------------------------------
+  // O28 — the erasure has to reach Twilio, and the ORDER is the design.
+  //
+  // The degraded voicemail path files `Voicemail recording: <url>` into a
+  // customer_requests message and the audio itself lives at Twilio. Erasing our
+  // rows first would NULL that message — destroying the only pointer to audio
+  // that still exists. For exactly these rows the pointer is all there is: the
+  // degraded path creates no `calls` row at all, so there is no call SID to
+  // recover the recording from afterwards.
+  //
+  // So: read the pointers, delete at the vendor, then erase our rows. A failure
+  // at any earlier step leaves everything needed to try again.
+  //
+  // Three separate units of work, not one. A Twilio call must not happen inside
+  // an open transaction — services/db.js's rule is "wrap a unit of work, never
+  // a call", and a network round trip to a third party is the clearest case of
+  // something that does not belong inside one.
+  // -------------------------------------------------------------------------
+  const messages = await db
+    .withTenant(parsed.businessId, () => db.listCallerRecordingMessages(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (messages === null) return res.status(500).json({ status: "failed", error: "Erasure failed" });
+
+  const recordingSids = messages.flatMap((m) => twilioRecordings.recordingSidsInText(m));
+  const vendor = await twilioRecordings.deleteRecordings(recordingSids);
+
+  // The database erasure runs REGARDLESS of what Twilio did. Twilio being
+  // unreachable must not leave the data subject's rows in place as well — that
+  // would turn one vendor's outage into a total refusal of a statutory right.
+  //
   // Scoped, and NOT `withTenantSafe`: an erasure that partly failed must not
   // report success. withTenant rolls back and rethrows; the catch below turns
   // that into a 500, which is the honest answer.
-  const counts = await db.withTenant(
-    parsed.businessId,
-    () => db.eraseCallerData(parsed.businessId, parsed.phone),
-    { actor: { type: "user", id: req.user?.id } }
-  ).catch(() => null);
-  if (!counts) return res.status(500).json({ error: "Erasure failed" });
+  const counts = await db
+    .withTenant(parsed.businessId, () => db.eraseCallerData(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (!counts) return res.status(500).json({ status: "failed", error: "Erasure failed" });
 
-  res.json({ erased: counts });
+  if (!vendor.ok) {
+    // NOT 200, and NOT 207 Multi-Status either.
+    //
+    // 207 is the semantically neat answer and it is the wrong one: it is 2xx,
+    // and every default client-side `res.ok` check reads 2xx as success — which
+    // is the precise misread this exists to prevent. The failure mode that
+    // matters is a member of staff ticking "erasure complete" off a green
+    // response.
+    //
+    // A non-2xx makes "not done" the default reading. The body still reports
+    // what WAS erased, so nobody re-runs blindly — and re-running is safe
+    // anyway: already-nulled rows are a no-op and an already-deleted recording
+    // is a 404, which deleteRecordings counts as success.
+    //
+    // No operator override is offered. "Proceed anyway and accept the audio
+    // stays at Twilio" is a decision with a legal shape, and it belongs to the
+    // owner and O18 counsel rather than to a query parameter.
+    log.error("dsr_erasure_blocked_by_vendor", {
+      businessId: parsed.businessId,
+      vendor: "twilio",
+      outstanding: vendor.failed.length,
+      reason: vendor.reason,
+      severity: "warn",
+    });
+    return res.status(502).json({
+      status: "partial",
+      erased: counts,
+      outstanding: {
+        vendor: "twilio",
+        recordings: vendor.failed.length,
+        reason: vendor.reason,
+      },
+    });
+  }
+
+  log.info("dsr_erasure_served", {
+    businessId: parsed.businessId,
+    recordingsDeleted: vendor.deleted.length,
+    recordingsAlreadyGone: vendor.alreadyGone.length,
+  });
+
+  // `erased` keeps its exact shape. The new `status` is additive so an existing
+  // consumer reading `body.erased` is unaffected.
+  res.json({ status: "complete", erased: counts });
 });
 
 // ---------------------------------------------------------------------------

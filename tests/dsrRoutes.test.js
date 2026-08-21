@@ -21,6 +21,8 @@ const mockExportCallerData = vi.fn();
 const mockEraseCallerData = vi.fn();
 const mockFetchUserByEmail = vi.fn();
 const mockVerifyAccessToken = vi.fn();
+const mockListCallerRecordingMessages = vi.fn();
+const mockDeleteRecordings = vi.fn();
 
 vi.mock("../services/db.js", () => ({
   isEnabled: () => true,
@@ -32,6 +34,18 @@ vi.mock("../services/db.js", () => ({
   exportCallerData: (...a) => mockExportCallerData(...a),
   eraseCallerData: (...a) => mockEraseCallerData(...a),
   fetchUserByEmail: (...a) => mockFetchUserByEmail(...a),
+  listCallerRecordingMessages: (...a) => mockListCallerRecordingMessages(...a),
+}));
+
+// O28. Mocked at the MODULE boundary, which is why services/twilioRecordings.js
+// is a module rather than a few functions inside server.js: an erasure test
+// must never be one misconfigured environment variable away from issuing a real
+// DELETE against Twilio.
+vi.mock("../services/twilioRecordings.js", async (importOriginal) => ({
+  // The parser is pure and worth exercising for real — mocking it would let a
+  // route test pass while the SID extraction was broken.
+  ...(await importOriginal()),
+  deleteRecordings: (...a) => mockDeleteRecordings(...a),
 }));
 
 vi.mock("../lib/auth/accessToken.js", async (importOriginal) => ({
@@ -64,6 +78,14 @@ beforeEach(() => {
   mockFetchUserByEmail.mockResolvedValue({ id: "user-1", business_id: BUSINESS });
   mockExportCallerData.mockResolvedValue(EMPTY);
   mockEraseCallerData.mockResolvedValue({ transcripts: 0, calls: 0, appointments: 0, customerRequests: 0 });
+  mockListCallerRecordingMessages.mockResolvedValue([]);
+  mockDeleteRecordings.mockResolvedValue({
+    ok: true,
+    deleted: [],
+    alreadyGone: [],
+    failed: [],
+    reason: null,
+  });
 });
 
 const routes = [
@@ -188,5 +210,132 @@ describe("DELETE erasure, authorised", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.erased).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// O28 — the erasure has to reach Twilio.
+//
+// The degraded voicemail path files a RecordingUrl into a customer_requests
+// message and the audio lives at Twilio. Before this, an Art. 17 erasure
+// reported success while leaving the data subject's recorded voice with a third
+// party indefinitely.
+// ---------------------------------------------------------------------------
+describe("DELETE erasure reaches the recordings at Twilio", () => {
+  const SID = "REaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const MESSAGE = `Voicemail recording: https://api.twilio.com/2010-04-01/Accounts/AC1/Recordings/${SID}`;
+
+  async function erase() {
+    return request(app)
+      .delete(`/api/businesses/${BUSINESS}/callers/${encodeURIComponent(PHONE)}`)
+      .set("Authorization", "Bearer t");
+  }
+
+  it("deletes the recording the stored message points at", async () => {
+    mockListCallerRecordingMessages.mockResolvedValue([MESSAGE]);
+    const res = await erase();
+
+    expect(mockDeleteRecordings).toHaveBeenCalledWith([SID]);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("complete");
+  });
+
+  it("deletes at Twilio BEFORE erasing our rows", async () => {
+    // The order is the design, not a coincidence. Erasing first NULLs the
+    // message column, destroying the only pointer to audio that still exists —
+    // and for these rows there is no second pointer, because the degraded
+    // voicemail path never creates a `calls` row to recover a SID from.
+    const order = [];
+    mockListCallerRecordingMessages.mockImplementation(async () => {
+      order.push("read");
+      return [MESSAGE];
+    });
+    mockDeleteRecordings.mockImplementation(async () => {
+      order.push("twilio");
+      return { ok: true, deleted: [SID], alreadyGone: [], failed: [], reason: null };
+    });
+    mockEraseCallerData.mockImplementation(async () => {
+      order.push("erase");
+      return { transcripts: 1, calls: 1, appointments: 0, customerRequests: 1 };
+    });
+
+    await erase();
+    expect(order).toEqual(["read", "twilio", "erase"]);
+  });
+
+  it("still erases our rows when Twilio fails", async () => {
+    // One vendor's outage must not become a total refusal of a statutory right.
+    mockListCallerRecordingMessages.mockResolvedValue([MESSAGE]);
+    mockDeleteRecordings.mockResolvedValue({
+      ok: false,
+      deleted: [],
+      alreadyGone: [],
+      failed: [SID],
+      reason: "503: service unavailable",
+    });
+    mockEraseCallerData.mockResolvedValue({ transcripts: 1, calls: 1, appointments: 0, customerRequests: 1 });
+
+    const res = await erase();
+    expect(mockEraseCallerData).toHaveBeenCalled();
+    expect(res.body.erased).toEqual({ transcripts: 1, calls: 1, appointments: 0, customerRequests: 1 });
+  });
+
+  it("does NOT report success when Twilio failed", async () => {
+    // The failure this prevents is a member of staff ticking "erasure complete"
+    // off a green response. 207 Multi-Status was considered and rejected for
+    // being 2xx — every default `res.ok` check would read it as success.
+    mockListCallerRecordingMessages.mockResolvedValue([MESSAGE]);
+    mockDeleteRecordings.mockResolvedValue({
+      ok: false,
+      deleted: [],
+      alreadyGone: [],
+      failed: [SID],
+      reason: "503: service unavailable",
+    });
+
+    const res = await erase();
+    expect(res.status).toBe(502);
+    expect(res.status).toBeGreaterThan(299); // the property that matters: not 2xx
+    expect(res.body.status).toBe("partial");
+    expect(res.body.outstanding).toMatchObject({ vendor: "twilio", recordings: 1 });
+  });
+
+  it("reports what WAS erased even on the partial path, so nobody re-runs blindly", async () => {
+    mockListCallerRecordingMessages.mockResolvedValue([MESSAGE]);
+    mockDeleteRecordings.mockResolvedValue({
+      ok: false, deleted: [], alreadyGone: [], failed: [SID], reason: "boom",
+    });
+    mockEraseCallerData.mockResolvedValue({ transcripts: 3, calls: 1, appointments: 1, customerRequests: 2 });
+
+    const res = await erase();
+    expect(res.body.erased).toEqual({ transcripts: 3, calls: 1, appointments: 1, customerRequests: 2 });
+  });
+
+  it("does not call Twilio at all when the subject left no recording", async () => {
+    mockListCallerRecordingMessages.mockResolvedValue(["Please call me back about my results"]);
+    const res = await erase();
+
+    expect(mockDeleteRecordings).toHaveBeenCalledWith([]);
+    expect(res.status).toBe(200);
+  });
+
+  it("aborts before touching Twilio or the rows when the pointer read fails", async () => {
+    // Without the pointers there is no way to know what Twilio holds, so
+    // proceeding would erase the rows and lose the only index of the audio.
+    mockListCallerRecordingMessages.mockResolvedValue(null);
+
+    const res = await erase();
+    expect(res.status).toBe(500);
+    expect(mockDeleteRecordings).not.toHaveBeenCalled();
+    expect(mockEraseCallerData).not.toHaveBeenCalled();
+  });
+
+  it("leaks no phone number into the response on any path", async () => {
+    mockListCallerRecordingMessages.mockResolvedValue([MESSAGE]);
+    mockDeleteRecordings.mockResolvedValue({
+      ok: false, deleted: [], alreadyGone: [], failed: [SID], reason: "boom",
+    });
+    const res = await erase();
+    expect(JSON.stringify(res.body)).not.toContain(PHONE);
   });
 });

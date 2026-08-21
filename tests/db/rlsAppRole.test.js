@@ -165,6 +165,63 @@ describeDb("withTenant scopes the connection", () => {
   });
 });
 
+describeDb("eraseCallerData runs inside the scope it was given", () => {
+  // The failure this catches is silent and it reports success.
+  //
+  // eraseCallerData opened its own `pool.connect()` while the route had already
+  // wrapped it in withTenant. SET LOCAL app.business_id was therefore set on a
+  // DIFFERENT connection, so as the unprivileged role every statement matched
+  // zero rows — and the function returns a counts object, which is truthy, so
+  // the DELETE route answered 200 {erased: {all zeros}}. An Art. 17 erasure
+  // that erases nothing and tells the operator it worked.
+  //
+  // Invisible until now because tests/db/dsr.test.js connects as the local
+  // superuser, for whom RLS is inert. Cloud SQL grants no superuser, so B2
+  // would have shipped it.
+  const SUBJECT = "+15556660001";
+
+  async function seed() {
+    const { rows } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, summary)
+       VALUES ($1, 'CA-erase-scope-0001', $2, 'completed', 'a summary') RETURNING id`,
+      [TENANT_A, SUBJECT]
+    );
+    await admin.query(
+      `INSERT INTO call_transcripts (call_id, speaker, message, sequence) VALUES ($1, 'caller', 'words', 1)`,
+      [rows[0].id]
+    );
+    return rows[0].id;
+  }
+
+  it("actually erases when scoped, rather than reporting zeros", async () => {
+    await seed();
+
+    const counts = await db.withTenant(TENANT_A, () => db.eraseCallerData(TENANT_A, SUBJECT));
+
+    expect(counts).not.toBeNull();
+    expect(counts.transcripts).toBe(1);
+    expect(counts.calls).toBe(1);
+
+    const left = await admin.query(
+      `SELECT caller_number, summary FROM calls WHERE twilio_call_sid = 'CA-erase-scope-0001'`
+    );
+    expect(left.rows[0].caller_number).toBeNull();
+    expect(left.rows[0].summary).toBeNull();
+  });
+
+  it("erases nothing for a tenant that does not own the caller", async () => {
+    await seed();
+    const counts = await db.withTenant(TENANT_B, () => db.eraseCallerData(TENANT_B, SUBJECT));
+    expect(counts.transcripts).toBe(0);
+    expect(counts.calls).toBe(0);
+
+    const left = await admin.query(
+      `SELECT caller_number FROM calls WHERE twilio_call_sid = 'CA-erase-scope-0001'`
+    );
+    expect(left.rows[0].caller_number).toBe(SUBJECT);
+  });
+});
+
 describeDb("unscoped access is denied, which is the whole point", () => {
   it("a tenant-scoped read with no tenant set returns nothing", async () => {
     // Not an error — nothing. Every policy compares against a NULL
