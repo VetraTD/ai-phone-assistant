@@ -21,7 +21,7 @@
  */
 
 import "dotenv/config";
-import { loadConfig, isEnabled } from "../services/supabase.js";
+import { loadConfig, isEnabled } from "../services/db.js";
 import { buildCallTools, buildIntegrationTools, buildDbAppointmentTools, buildStaticSystemPrefix } from "../services/gemini.js";
 import { executeToolCall } from "../services/tools.js";
 import { resolveSchedulingAdapter, verifiableFieldsFor } from "../adapters/scheduling/index.js";
@@ -189,7 +189,7 @@ const targetPhone = process.argv[2];
 if (targetPhone) {
   head(`6. Live business: ${targetPhone}`);
 
-  const { lookupBusinessByPhone } = await import("../services/supabase.js");
+  const { lookupBusinessByPhone } = await import("../services/db.js");
   const business = await lookupBusinessByPhone(targetPhone);
 
   if (!business) {

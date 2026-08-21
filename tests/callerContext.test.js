@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { pg, resetPg, setDbEnv, restoreDbEnv } from "./helpers/pgMock.js";
 
 // ---------------------------------------------------------------------------
 // fetchCallerContext — the block that tells the receptionist a caller already
@@ -11,40 +12,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // already had. Both paths now go through listAppointmentsByCaller.
 // ---------------------------------------------------------------------------
 
-/** Rows the mocked client returns, per table. */
+/** Rows the data layer should see, per table. */
 let tables = { calls: [], appointments: [] };
-/** Every table name `.from()` was called with. */
+/** Every table a statement was issued against, in order. */
 let fromCalls = [];
 
-/**
- * A chainable, awaitable query stub. Real enough for the two shapes under test:
- * the calls query (eq/order/limit) and listAppointmentsByCaller (eq/order,
- * awaited directly). Filters are NOT simulated — these tests are about which
- * rows survive the JS-side matching, so the stub returns the table verbatim and
- * lets the function under test do the filtering it actually does.
- */
-function makeQuery(table) {
-  const rows = tables[table] || [];
-  const q = {
-    select: () => q,
-    eq: () => q,
-    gte: () => q,
-    ilike: () => q,
-    order: () => q,
-    limit: () => q,
-    then: (resolve) => resolve({ data: rows, error: null }),
-  };
-  return q;
-}
-
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: vi.fn(() => ({
-    from: (table) => {
-      fromCalls.push(table);
-      return makeQuery(table);
-    },
-  })),
-}));
+// Ported from a mock of the Supabase client. The stub deliberately does NOT
+// simulate the WHERE clause — these tests are about which rows survive the
+// JS-side matching that happens AFTER the query, so it answers with the table
+// verbatim and lets the function under test do the filtering it actually does.
+// Dispatch is by the table named in the SQL, which is the pg equivalent of
+// recording `.from(table)`.
+vi.mock("pg", async () => (await import("./helpers/pgMock.js")).pgModuleMock());
 
 vi.mock("../lib/logger.js", () => ({
   log: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -58,14 +37,23 @@ const past = () => new Date(Date.now() - 3 * 86_400_000).toISOString();
 
 beforeEach(() => {
   vi.resetModules();
-  process.env.SUPABASE_URL = "https://test.supabase.co";
-  process.env.SUPABASE_SERVICE_KEY = "test-key";
+  resetPg();
+  setDbEnv();
   tables = { calls: [], appointments: [] };
   fromCalls = [];
+  pg.respond = (text) => {
+    const table = /FROM\s+(\w+)/i.exec(text)?.[1] ?? "";
+    fromCalls.push(table);
+    return { rows: tables[table] || [] };
+  };
+});
+
+afterEach(() => {
+  restoreDbEnv();
 });
 
 async function load() {
-  return import("../services/supabase.js");
+  return import("../services/db.js");
 }
 
 describe("fetchCallerContext", () => {

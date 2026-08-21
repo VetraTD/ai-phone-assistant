@@ -10,7 +10,7 @@ const mockCaptureException = vi.fn();
 const mockCountScheduledOverlapping = vi.fn().mockResolvedValue(0);
 const mockListScheduledBetween = vi.fn().mockResolvedValue([]);
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   createAppointment: (...args) => mockCreateAppointment(...args),
   // Internal booking now goes through the availability-aware RPC. For the tool
   // layer these tests exercise, the DB either accepts the booking (returns an
@@ -985,7 +985,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
   // Tenant scoping. lib/voice/session.js logs "no_business_found" and carries
   // on with state.businessId unset, so ctx.businessId can legitimately be
   // null mid-call. Every appointment tool must refuse to run at all in that
-  // state — previously they passed `null` straight through to supabase.js,
+  // state — previously they passed `null` straight through to db.js,
   // whose `if (businessId)` guards then issued the query UNSCOPED, across
   // every tenant in the table.
   // -------------------------------------------------------------------------

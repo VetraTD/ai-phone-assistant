@@ -15,7 +15,7 @@ import request from "supertest";
 
 const mockFetchCallerContext = vi.fn();
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   fetchBusinessById: vi.fn(async () => ({ id: "11111111-1111-1111-1111-111111111111", name: "Test Biz" })),
   updateBusinessPhoneNumber: vi.fn(),
   fetchCallerContext: (...args) => mockFetchCallerContext(...args),

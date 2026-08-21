@@ -23,7 +23,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildSystemInstruction } from "../services/gemini.js";
-import { normalizeAllowedTasks } from "../services/supabase.js";
+import { normalizeAllowedTasks } from "../services/db.js";
 
 const M = {
   generalInfo: "MARKER_GENERAL_INFO_7f3a",

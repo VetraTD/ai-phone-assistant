@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@supabase/supabase-js", () => ({ createClient: vi.fn(() => null) }));
 
-const { loadConfig, normalizeAllowedTasks, CORE_TASKS } = await import("../services/supabase.js");
+const { loadConfig, normalizeAllowedTasks, CORE_TASKS } = await import("../services/db.js");
 const { validateCapabilityConfig } = await import("../lib/capabilities/configSchema.js");
 const appointments = (await import("../capabilities/appointments.js")).default;
 

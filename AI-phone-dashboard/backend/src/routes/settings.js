@@ -148,7 +148,7 @@ const INTEGRATION_DEFINITIONS = [
 /**
  * Tool names an integration may not claim.
  *
- * MIRROR of services/supabase.js BUILTIN_TOOL_NAMES in the main app, which
+ * MIRROR of services/db.js BUILTIN_TOOL_NAMES in the main app, which
  * derives this from the capability registry (capabilities/index.js). This
  * dashboard is a separate CJS app with its own package.json and cannot import
  * that ESM module, so the list is duplicated by hand.

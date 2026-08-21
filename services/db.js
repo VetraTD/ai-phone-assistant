@@ -1,50 +1,114 @@
-import { createClient } from "@supabase/supabase-js";
+import pg from "pg";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { allCapabilityToolNames, getPack } from "../capabilities/index.js";
 import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
 import { normalizePhoneNumber } from "../lib/phone.js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+// ---------------------------------------------------------------------------
+// The data layer, on plain PostgreSQL.
+//
+// This is services/supabase.js rewritten against `pg`. Every exported
+// signature and every return shape is unchanged, deliberately: the callers did
+// not ask for a new data layer, they are having one moved out from under them,
+// and the way to keep that honest is for the module boundary to be the only
+// thing that knows.
+//
+// The two places a PostgREST-to-SQL translation actually bites, both handled
+// below where they occur:
+//
+//   1. `.single()` THROWS on no row; `.maybeSingle()` returns null. Raw pg does
+//      neither — it returns `rows: []`. Every lookup here reads `rows[0] ?? null`
+//      so a miss stays a miss rather than becoming an exception, and the two
+//      functions that DO throw (createAppointment, createAppointmentIfAvailable)
+//      keep throwing, with `err.code` intact so the tool layer can still tell a
+//      23505 unique violation from a generic write failure.
+//
+//   2. `.select("*, business_capabilities(*)")` is a PostgREST EMBED, and it is
+//      on the latency-critical pickup path. It becomes a correlated subquery
+//      returning a JSON array, so the shape the caller sees is identical — and
+//      its fallback for an un-migrated database is preserved explicitly, since
+//      a JOIN that assumes the table exists would lose it silently.
+// ---------------------------------------------------------------------------
 
-/** @type {import("@supabase/supabase-js").SupabaseClient | null} */
-let supabase = null;
+const DATABASE_URL = process.env.DATABASE_URL;
 
 /**
- * Every Supabase request gets a deadline.
+ * Every query gets a deadline, enforced by the SERVER.
  *
- * The client was previously constructed bare, and undici imposes no request
- * deadline of its own, so a hung query hung for the life of the call. The
- * JS-side race in services/tools.js releases the CALLER, but it cannot cancel
- * anything — only this can, and cancelling is what stops a reschedule landing
- * in the database minutes after the caller was told it had failed.
+ * The Supabase client carried a 6s fetch timeout, and the comment explaining it
+ * is worth keeping because the reasoning survives the rewrite: the JS-side race
+ * in services/tools.js releases the CALLER, but it cannot cancel anything. Only
+ * a real cancellation stops a reschedule landing in the database minutes after
+ * the caller was told it had failed.
  *
- * Sized below TOOL_TIMEOUT_MS so the transport gives up first and the tool
- * layer reports a real error rather than its own generic timeout.
+ * `statement_timeout` is strictly better than the fetch timeout it replaces. An
+ * aborted fetch abandons the response; Postgres cancels the statement. Sized
+ * below TOOL_TIMEOUT_MS so the database gives up first and the tool layer
+ * reports a real error rather than its own generic timeout.
  */
-const SUPABASE_TIMEOUT_MS = (() => {
-  const v = Number.parseInt(process.env.SUPABASE_TIMEOUT_MS, 10);
+const STATEMENT_TIMEOUT_MS = (() => {
+  const v = Number.parseInt(process.env.DB_TIMEOUT_MS ?? process.env.SUPABASE_TIMEOUT_MS, 10);
   return Number.isFinite(v) && v >= 1_000 && v <= 30_000 ? v : 6_000;
 })();
 
-function fetchWithTimeout(input, init = {}) {
-  // Respect a caller-supplied signal if one ever appears; otherwise impose ours.
-  if (init.signal) return fetch(input, init);
-  return fetch(input, { ...init, signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS) });
-}
+/** @type {pg.Pool | null} */
+let pool = null;
 
-if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    global: { fetch: fetchWithTimeout },
+if (DATABASE_URL) {
+  pool = new pg.Pool({
+    connectionString: DATABASE_URL,
+    // A voice call holds no connection between turns, so the pool is sized for
+    // concurrent CALLS, not concurrent users. Cloud SQL's own limit is the
+    // ceiling that matters and B2 sets it; this keeps one process from taking
+    // more than its share of it.
+    max: Number.parseInt(process.env.DB_POOL_MAX, 10) || 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    // Applied per connection, so it covers every query without each call site
+    // remembering. `options` reaches the server at startup.
+    options: `-c statement_timeout=${STATEMENT_TIMEOUT_MS}`,
+  });
+
+  // An idle client erroring (a server restart, a failover) emits on the pool.
+  // Unhandled, it is an uncaught exception that takes the process down —
+  // during a call.
+  pool.on("error", (err) => {
+    log.error("db_pool_error", { message: err?.message, severity: "warn" });
   });
 } else {
-  log.error("supabase_not_configured", { reason: "missing_url_or_key", severity: "warn" });
+  log.error("database_not_configured", { reason: "missing_database_url", severity: "warn" });
 }
 
-/** @returns {boolean} Whether the Supabase client is configured */
+/** @returns {boolean} Whether the database is configured */
 export function isEnabled() {
-  return supabase !== null;
+  return pool !== null;
+}
+
+/**
+ * Run one statement.
+ *
+ * Returns `{ rows, rowCount }` on success and `{ error }` on failure, rather
+ * than throwing — which mirrors what the Supabase client did and is what lets
+ * every function below keep its exact error handling. Callers that need to
+ * throw (createAppointment) do so themselves, from the returned error.
+ *
+ * @param {string} text
+ * @param {Array<unknown>} [params]
+ * @returns {Promise<{ rows?: Array<object>, rowCount?: number, error?: Error }>}
+ */
+async function q(text, params = []) {
+  try {
+    const res = await pool.query(text, params);
+    return { rows: res.rows, rowCount: res.rowCount };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/** First row or null — the `.maybeSingle()` shape, without the throw. */
+function one(res) {
+  return res.rows?.[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,16 +204,13 @@ const CAPABILITY_MODULE_TASKS = {
  * @returns {Promise<Array<object>>}
  */
 export async function fetchBusinessCapabilities(businessId) {
-  if (!supabase || !businessId) return [];
-  const { data, error } = await supabase
-    .from("business_capabilities")
-    .select("*")
-    .eq("business_id", businessId);
-  if (error) {
-    log.error("db_error", { operation: "fetchBusinessCapabilities", error: error.message });
+  if (!pool || !businessId) return [];
+  const res = await q(`SELECT * FROM business_capabilities WHERE business_id = $1`, [businessId]);
+  if (res.error) {
+    log.error("db_error", { operation: "fetchBusinessCapabilities", error: res.error.message });
     return [];
   }
-  return data || [];
+  return res.rows || [];
 }
 
 /**
@@ -289,11 +350,6 @@ export function loadConfig(business, capabilityRows = null) {
 }
 
 /**
- * Fetch a business by ID (for notifications and dashboard).
- * @param {string} businessId - UUID of the business
- * @returns {Promise<object|null>} The business row or null
- */
-/**
  * Look up a staff user by the email their access token was issued for.
  *
  * `users.email` is UNIQUE, so this is the join between an authenticated
@@ -304,34 +360,43 @@ export function loadConfig(business, capabilityRows = null) {
  * @returns {Promise<{ id: string, business_id: string, email: string, role: string }|null>}
  */
 export async function fetchUserByEmail(email) {
-  if (!supabase || !email) return null;
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, business_id, email, role")
-    .eq("email", email)
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "fetchUserByEmail", error: error.message });
+  if (!pool || !email) return null;
+  const res = await q(`SELECT id, business_id, email, role FROM users WHERE email = $1 LIMIT 1`, [email]);
+  if (res.error) {
+    log.error("db_error", { operation: "fetchUserByEmail", error: res.error.message });
     return null;
   }
-  return data;
+  return one(res);
 }
 
 export async function fetchBusinessById(businessId) {
-  if (!supabase || !businessId) return null;
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("*")
-    .eq("id", businessId)
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "fetchBusinessById", error: error.message });
+  if (!pool || !businessId) return null;
+  const res = await q(`SELECT * FROM businesses WHERE id = $1 LIMIT 1`, [businessId]);
+  if (res.error) {
+    log.error("db_error", { operation: "fetchBusinessById", error: res.error.message });
     return null;
   }
-  return data;
+  return one(res);
 }
+
+/**
+ * The PostgREST embed `.select("*, business_capabilities(*)")`, as SQL.
+ *
+ * A correlated subquery rather than a LEFT JOIN with GROUP BY: `businesses` has
+ * thirty-odd columns and grouping by all of them to collapse the join is both
+ * slower and a maintenance trap, since a new column added by a migration would
+ * have to be added to the GROUP BY as well or the query breaks.
+ *
+ * `'[]'::json` for the empty case, not NULL, because loadConfig does
+ * `business.business_capabilities ?? []` and an embed never yielded NULL.
+ */
+const BUSINESS_WITH_CAPABILITIES = `
+  SELECT b.*,
+         COALESCE(
+           (SELECT json_agg(bc.*) FROM business_capabilities bc WHERE bc.business_id = b.id),
+           '[]'::json
+         ) AS business_capabilities
+    FROM businesses b`;
 
 /**
  * One exact-equality lookup on businesses.phone_number.
@@ -339,39 +404,31 @@ export async function fetchBusinessById(businessId) {
  * @returns {Promise<object|null>} The business row or null
  */
 async function selectBusinessByExactPhone(value) {
-  // Capability rows come back embedded in the SAME round trip. They are needed
-  // before the first turn, because they decide which tools exist and which
+  // Capability rows come back in the SAME round trip. They are needed before
+  // the first turn, because they decide which tools exist and which
   // requirements are enforced — fetching them in the background alongside
   // knowledge and integrations would leave a caller who speaks immediately
   // running turn one with no requirements applied, which for an identity check
-  // is not an acceptable race. Embedding avoids paying a second round trip on
-  // the pickup path, which is latency-critical.
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("*, business_capabilities(*)")
-    .eq("phone_number", value)
-    .limit(1)
-    .maybeSingle();
+  // is not an acceptable race. One round trip on the pickup path, which is
+  // latency-critical.
+  const res = await q(`${BUSINESS_WITH_CAPABILITIES} WHERE b.phone_number = $1 LIMIT 1`, [value]);
 
-  if (error) {
+  if (res.error) {
     // An un-migrated database has no business_capabilities table, and the
-    // embed makes the whole query fail rather than returning the business
-    // without it. Falling back to the plain select keeps calls answerable
-    // during a partial deploy — the dual-read then uses allowed_tasks.
-    log.error("db_error", { operation: "lookupBusinessByPhone", error: error.message });
-    const plain = await supabase
-      .from("businesses")
-      .select("*")
-      .eq("phone_number", value)
-      .limit(1)
-      .maybeSingle();
+    // subquery makes the whole statement fail rather than returning the
+    // business without it. Falling back to the plain select keeps calls
+    // answerable during a partial deploy — the dual-read then uses
+    // allowed_tasks. This branch is the reason the capability fetch is a
+    // subquery in a string and not a JOIN somebody could "simplify".
+    log.error("db_error", { operation: "lookupBusinessByPhone", error: res.error.message });
+    const plain = await q(`SELECT * FROM businesses WHERE phone_number = $1 LIMIT 1`, [value]);
     if (plain.error) {
       log.error("db_error", { operation: "lookupBusinessByPhone_fallback", error: plain.error.message });
       return null;
     }
-    return plain.data;
+    return one(plain);
   }
-  return data;
+  return one(res);
 }
 
 /**
@@ -394,18 +451,14 @@ async function selectBusinessByExactPhone(value) {
  */
 async function recoverBusinessByDamagedPhone(normalized) {
   const pattern = `%${normalized.replace(/^\+/, "").split("").join("%")}%`;
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("*, business_capabilities(*)")
-    .like("phone_number", pattern)
-    .limit(5);
+  const res = await q(`${BUSINESS_WITH_CAPABILITIES} WHERE b.phone_number LIKE $1 LIMIT 5`, [pattern]);
 
-  if (error) {
-    log.error("db_error", { operation: "lookupBusinessByPhone_recover", error: error.message });
+  if (res.error) {
+    log.error("db_error", { operation: "lookupBusinessByPhone_recover", error: res.error.message });
     return null;
   }
 
-  const matches = (data || []).filter((b) => normalizePhoneNumber(b.phone_number) === normalized);
+  const matches = (res.rows || []).filter((b) => normalizePhoneNumber(b.phone_number) === normalized);
   if (matches.length !== 1) {
     if (matches.length > 1) {
       log.error("business_phone_ambiguous", {
@@ -426,7 +479,7 @@ async function recoverBusinessByDamagedPhone(normalized) {
  * @returns {Promise<object|null>} The business row or null
  */
 export async function lookupBusinessByPhone(twilioNumber) {
-  if (!supabase) return null;
+  if (!pool) return null;
 
   const normalized = normalizePhoneNumber(twilioNumber);
   const primary = normalized ?? (typeof twilioNumber === "string" ? twilioNumber : null);
@@ -461,23 +514,18 @@ export async function lookupBusinessByPhone(twilioNumber) {
  * @returns {Promise<string|null>} The new call's UUID or null on failure
  */
 export async function createCall(businessId, callSid, callerNumber, twilioNumber) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("calls")
-    .insert({
-      business_id: businessId,
-      twilio_call_sid: callSid,
-      caller_number: callerNumber,
-      twilio_number: twilioNumber,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    log.error("db_error", { callSid, operation: "createCall", error: error.message });
-    captureException(new Error(error.message), { table: "calls", op: "insert" });
+  if (!pool) return null;
+  const res = await q(
+    `INSERT INTO calls (business_id, twilio_call_sid, caller_number, twilio_number)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [businessId, callSid, callerNumber, twilioNumber]
+  );
+  if (res.error) {
+    log.error("db_error", { callSid, operation: "createCall", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "calls", op: "insert" });
     return null;
   }
-  return data.id;
+  return one(res).id;
 }
 
 /**
@@ -488,15 +536,16 @@ export async function createCall(businessId, callSid, callerNumber, twilioNumber
  * @param {number} sequence - Turn order number
  */
 export async function addTranscriptEntry(callId, speaker, message, sequence) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from("call_transcripts")
-    .insert({ call_id: callId, speaker, message, sequence });
-  if (error) {
+  if (!pool) return;
+  const res = await q(
+    `INSERT INTO call_transcripts (call_id, speaker, message, sequence) VALUES ($1, $2, $3, $4)`,
+    [callId, speaker, message, sequence]
+  );
+  if (res.error) {
     // callId (the DB call UUID) — NOT callSid: this function never receives a
     // Twilio Call SID, and referencing one here threw a ReferenceError that
     // replaced the real DB error before every call site's .catch() swallowed it.
-    log.error("db_error", { callId, operation: "addTranscriptEntry", error: error.message });
+    log.error("db_error", { callId, operation: "addTranscriptEntry", error: res.error.message });
   }
 }
 
@@ -507,26 +556,25 @@ export async function addTranscriptEntry(callId, speaker, message, sequence) {
  * @param {number|null} durationSeconds - Call duration from Twilio
  */
 export async function completeCall(callSid, status, durationSeconds) {
-  if (!supabase) return;
+  if (!pool) return;
 
   // ended_at/duration_seconds are written unconditionally — a transferred
   // call still ends and has a real duration, regardless of what happens to
   // the `status` column below.
-  const timingUpdates = { ended_at: new Date().toISOString() };
-  if (durationSeconds != null) {
-    timingUpdates.duration_seconds = Number(durationSeconds);
-  }
-  const { error: timingError } = await supabase
-    .from("calls")
-    .update(timingUpdates)
-    .eq("twilio_call_sid", callSid);
-  if (timingError) {
-    log.error("db_error", { callSid, operation: "completeCall_timing", error: timingError.message });
-    captureException(new Error(timingError.message), { table: "calls", op: "update_complete_timing" });
+  const timing =
+    durationSeconds != null
+      ? await q(`UPDATE calls SET ended_at = now(), duration_seconds = $2 WHERE twilio_call_sid = $1`, [
+          callSid,
+          Number(durationSeconds),
+        ])
+      : await q(`UPDATE calls SET ended_at = now() WHERE twilio_call_sid = $1`, [callSid]);
+  if (timing.error) {
+    log.error("db_error", { callSid, operation: "completeCall_timing", error: timing.error.message });
+    captureException(new Error(timing.error.message), { table: "calls", op: "update_complete_timing" });
   }
 
   // `status`: a single atomic UPDATE ... WHERE status <> 'transferred' —
-  // NOT a separate SELECT-then-UPDATE (the prior implementation). That
+  // NOT a separate SELECT-then-UPDATE (an older implementation). That
   // read-then-write had a race window: a markCallTransferred() landing
   // between the SELECT and the UPDATE would get silently clobbered back to
   // `status` here — the exact bug this guard exists to prevent. A single
@@ -535,14 +583,22 @@ export async function completeCall(callSid, status, durationSeconds) {
   // markCallTransferred() commits second always sees the other's already-
   // committed value, not a stale snapshot read earlier. Also saves a
   // round-trip on every terminal status callback.
-  const { error: statusError } = await supabase
-    .from("calls")
-    .update({ status })
-    .eq("twilio_call_sid", callSid)
-    .neq("status", "transferred");
-  if (statusError) {
-    log.error("db_error", { callSid, operation: "completeCall_status", error: statusError.message });
-    captureException(new Error(statusError.message), { table: "calls", op: "update_complete_status" });
+  //
+  // `IS DISTINCT FROM`, not `<>`. PostgREST's .neq() excluded NULLs for you;
+  // bare SQL `status <> 'transferred'` is NULL — and so not true — when status
+  // is NULL, which would silently skip the update.
+  //
+  // As it happens `calls.status` is NOT NULL, so the two are equivalent today
+  // and this is belt and braces. It is kept because it costs nothing and stops
+  // being equivalent the moment somebody drops that constraint, which is
+  // exactly the sort of change that would not think to look here.
+  const st = await q(
+    `UPDATE calls SET status = $2 WHERE twilio_call_sid = $1 AND status IS DISTINCT FROM 'transferred'`,
+    [callSid, status]
+  );
+  if (st.error) {
+    log.error("db_error", { callSid, operation: "completeCall_status", error: st.error.message });
+    captureException(new Error(st.error.message), { table: "calls", op: "update_complete_status" });
   }
 }
 
@@ -553,14 +609,11 @@ export async function completeCall(callSid, status, durationSeconds) {
  * @param {string} callSid - Twilio Call SID
  */
 export async function markCallTransferred(callSid) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from("calls")
-    .update({ status: "transferred" })
-    .eq("twilio_call_sid", callSid);
-  if (error) {
-    log.error("db_error", { callSid, operation: "markCallTransferred", error: error.message });
-    captureException(new Error(error.message), { table: "calls", op: "update_transferred" });
+  if (!pool) return;
+  const res = await q(`UPDATE calls SET status = 'transferred' WHERE twilio_call_sid = $1`, [callSid]);
+  if (res.error) {
+    log.error("db_error", { callSid, operation: "markCallTransferred", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "calls", op: "update_transferred" });
   }
 }
 
@@ -570,41 +623,16 @@ export async function markCallTransferred(callSid) {
  * @returns {Promise<Array<{speaker: string, message: string, sequence: number}>>}
  */
 export async function fetchCallTranscript(callId) {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("call_transcripts")
-    .select("speaker, message, sequence")
-    .eq("call_id", callId)
-    .order("sequence", { ascending: true });
-  if (error) {
-    log.error("db_error", { operation: "fetchCallTranscript", error: error.message });
+  if (!pool) return [];
+  const res = await q(
+    `SELECT speaker, message, sequence FROM call_transcripts WHERE call_id = $1 ORDER BY sequence ASC`,
+    [callId]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "fetchCallTranscript", error: res.error.message });
     return [];
   }
-  return data || [];
-}
-
-/**
- * Update per-business notification settings (for dashboard API).
- * @param {string} businessId
- * @param {{ notification_email?: string | null, notification_phone?: string | null, notifications_enabled?: boolean }} payload
- * @returns {Promise<boolean>} true if update succeeded
- */
-export async function updateBusinessNotificationSettings(businessId, payload) {
-  if (!supabase || !businessId) return false;
-  const updates = {};
-  if (payload.notification_email !== undefined) updates.notification_email = payload.notification_email || null;
-  if (payload.notification_phone !== undefined) updates.notification_phone = payload.notification_phone || null;
-  if (payload.notifications_enabled !== undefined) updates.notifications_enabled = !!payload.notifications_enabled;
-  if (Object.keys(updates).length === 0) return true;
-  const { error } = await supabase
-    .from("businesses")
-    .update(updates)
-    .eq("id", businessId);
-  if (error) {
-    log.error("db_error", { operation: "updateBusinessNotificationSettings", error: error.message });
-    return false;
-  }
-  return true;
+  return res.rows || [];
 }
 
 /**
@@ -614,7 +642,7 @@ export async function updateBusinessNotificationSettings(businessId, payload) {
  * @returns {Promise<boolean>} true if update succeeded
  */
 export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
-  if (!supabase || !businessId) return false;
+  if (!pool || !businessId) return false;
   // Normalize on write as well as in the DB trigger (migration 024): the
   // trigger is the backstop for hand-edits, this keeps the value the
   // application believes it stored identical to the value it will later match
@@ -629,12 +657,9 @@ export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
     });
     return false;
   }
-  const { error } = await supabase
-    .from("businesses")
-    .update({ phone_number: normalized })
-    .eq("id", businessId);
-  if (error) {
-    log.error("db_error", { operation: "updateBusinessPhoneNumber", error: error.message });
+  const res = await q(`UPDATE businesses SET phone_number = $2 WHERE id = $1`, [businessId, normalized]);
+  if (res.error) {
+    log.error("db_error", { operation: "updateBusinessPhoneNumber", error: res.error.message });
     return false;
   }
   return true;
@@ -648,13 +673,13 @@ export async function updateBusinessPhoneNumber(businessId, phoneNumber) {
  * @param {string|null} outcome - One of CALL_OUTCOMES (e.g. general_inquiry, appointment, unknown)
  */
 export async function updateCallSummary(callSid, summary, sentiment, outcome) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from("calls")
-    .update({ summary, sentiment, outcome: outcome ?? null })
-    .eq("twilio_call_sid", callSid);
-  if (error) {
-    log.error("db_error", { callSid, operation: "updateCallSummary", error: error.message });
+  if (!pool) return;
+  const res = await q(
+    `UPDATE calls SET summary = $2, sentiment = $3, outcome = $4 WHERE twilio_call_sid = $1`,
+    [callSid, summary, sentiment, outcome ?? null]
+  );
+  if (res.error) {
+    log.error("db_error", { callSid, operation: "updateCallSummary", error: res.error.message });
   }
 }
 
@@ -666,13 +691,13 @@ export async function updateCallSummary(callSid, summary, sentiment, outcome) {
  * @param {number} p95Ms
  */
 export async function updateCallLatency(callSid, avgMs, p95Ms) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from("calls")
-    .update({ avg_turn_latency_ms: avgMs, p95_turn_latency_ms: p95Ms })
-    .eq("twilio_call_sid", callSid);
-  if (error) {
-    log.error("db_error", { callSid, operation: "updateCallLatency", error: error.message });
+  if (!pool) return;
+  const res = await q(
+    `UPDATE calls SET avg_turn_latency_ms = $2, p95_turn_latency_ms = $3 WHERE twilio_call_sid = $1`,
+    [callSid, avgMs, p95Ms]
+  );
+  if (res.error) {
+    log.error("db_error", { callSid, operation: "updateCallLatency", error: res.error.message });
   }
 }
 
@@ -689,31 +714,23 @@ export async function updateCallLatency(callSid, avgMs, p95Ms) {
  * @returns {Promise<string|null>} The new appointment UUID or null
  */
 export async function createAppointment({ businessId, callId, serviceId, clientName, clientPhone, scheduledAt, notes }) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("appointments")
-    .insert({
-      business_id: businessId,
-      call_id: callId || null,
-      service_id: serviceId || null,
-      client_name: clientName || null,
-      client_phone: clientPhone || null,
-      scheduled_at: scheduledAt,
-      notes: notes || null,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    log.error("db_error", { operation: "createAppointment", error: error.message, code: error.code });
-    captureException(new Error(error.message), { table: "appointments", op: "insert" });
+  if (!pool) return null;
+  const res = await q(
+    `INSERT INTO appointments (business_id, call_id, service_id, client_name, client_phone, scheduled_at, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [businessId, callId || null, serviceId || null, clientName || null, clientPhone || null, scheduledAt, notes || null]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "createAppointment", error: res.error.message, code: res.error.code });
+    captureException(new Error(res.error.message), { table: "appointments", op: "insert" });
     // Surface the failure (with the Postgres code) so the tool layer can
     // distinguish "slot already taken" (23505 unique violation) from a
     // generic write error. A silent null made both look identical.
-    const e = new Error(error.message);
-    e.code = error.code;
+    const e = new Error(res.error.message);
+    e.code = res.error.code;
     throw e;
   }
-  return data.id;
+  return one(res).id;
 }
 
 /**
@@ -733,24 +750,23 @@ export async function createAppointment({ businessId, callId, serviceId, clientN
  * @returns {Promise<number>}
  */
 export async function countScheduledOverlapping(businessId, startISO, lengthMinutes) {
-  if (!supabase || !businessId) return 0;
+  if (!pool || !businessId) return 0;
   const startMs = Date.parse(startISO);
   if (!Number.isFinite(startMs)) return 0;
   const L = (Number.isFinite(lengthMinutes) ? lengthMinutes : 30) * 60_000;
   const lo = new Date(startMs - L + 1).toISOString();
   const hi = new Date(startMs + L - 1).toISOString();
-  const { count, error } = await supabase
-    .from("appointments")
-    .select("id", { count: "exact", head: true })
-    .eq("business_id", businessId)
-    .eq("status", "scheduled")
-    .gte("scheduled_at", lo)
-    .lte("scheduled_at", hi);
-  if (error) {
-    log.error("db_error", { operation: "countScheduledOverlapping", error: error.message });
+  const res = await q(
+    `SELECT count(*)::int AS n FROM appointments
+      WHERE business_id = $1 AND status = 'scheduled'
+        AND scheduled_at >= $2 AND scheduled_at <= $3`,
+    [businessId, lo, hi]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "countScheduledOverlapping", error: res.error.message });
     return 0;
   }
-  return count || 0;
+  return one(res)?.n || 0;
 }
 
 /**
@@ -760,20 +776,19 @@ export async function countScheduledOverlapping(businessId, startISO, lengthMinu
  * @returns {Promise<Array<{scheduled_at: string}>>}
  */
 export async function listScheduledBetween(businessId, startISO, endISO) {
-  if (!supabase || !businessId) return [];
-  const { data, error } = await supabase
-    .from("appointments")
-    .select("scheduled_at")
-    .eq("business_id", businessId)
-    .eq("status", "scheduled")
-    .gte("scheduled_at", startISO)
-    .lt("scheduled_at", endISO)
-    .order("scheduled_at", { ascending: true });
-  if (error) {
-    log.error("db_error", { operation: "listScheduledBetween", error: error.message });
+  if (!pool || !businessId) return [];
+  const res = await q(
+    `SELECT scheduled_at FROM appointments
+      WHERE business_id = $1 AND status = 'scheduled'
+        AND scheduled_at >= $2 AND scheduled_at < $3
+      ORDER BY scheduled_at ASC`,
+    [businessId, startISO, endISO]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listScheduledBetween", error: res.error.message });
     return [];
   }
-  return data || [];
+  return res.rows || [];
 }
 
 /**
@@ -788,27 +803,31 @@ export async function listScheduledBetween(businessId, startISO, endISO) {
  *   when the slot filled, null on a hard error (caller falls back to a message).
  */
 export async function createAppointmentIfAvailable(params) {
-  if (!supabase) return null;
+  if (!pool) return null;
   const { businessId, callId, clientName, clientPhone, scheduledAt, notes, lengthMinutes, capacity } = params;
-  const { data, error } = await supabase.rpc("create_appointment_if_available", {
-    p_business_id: businessId,
-    p_scheduled_at: scheduledAt,
-    p_length_min: Number.isFinite(lengthMinutes) ? lengthMinutes : 30,
-    p_capacity: Number.isFinite(capacity) ? capacity : 1,
-    p_call_id: callId || null,
-    p_client_name: clientName || null,
-    p_client_phone: clientPhone || null,
-    p_notes: notes || null,
-  });
-  if (error) {
-    log.error("db_error", { operation: "createAppointmentIfAvailable", error: error.message, code: error.code });
-    captureException(new Error(error.message), { table: "appointments", op: "rpc_book" });
-    const e = new Error(error.message);
-    e.code = error.code;
+  const res = await q(
+    `SELECT create_appointment_if_available($1, $2, $3, $4, $5, $6, $7, $8) AS id`,
+    [
+      businessId,
+      scheduledAt,
+      Number.isFinite(lengthMinutes) ? lengthMinutes : 30,
+      Number.isFinite(capacity) ? capacity : 1,
+      callId || null,
+      clientName || null,
+      clientPhone || null,
+      notes || null,
+    ]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "createAppointmentIfAvailable", error: res.error.message, code: res.error.code });
+    captureException(new Error(res.error.message), { table: "appointments", op: "rpc_book" });
+    const e = new Error(res.error.message);
+    e.code = res.error.code;
     throw e;
   }
   // The function returns the new uuid, or NULL when the slot is full.
-  return data ? { id: data } : { full: true };
+  const id = one(res)?.id ?? null;
+  return id ? { id } : { full: true };
 }
 
 /**
@@ -824,24 +843,33 @@ export async function createAppointmentIfAvailable(params) {
  * @returns {Promise<Array<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}>>}
  */
 export async function listAppointmentsByCaller(businessId, opts = {}) {
-  if (!supabase || !businessId) return [];
-  let q = supabase
-    .from("appointments")
-    .select("id, client_name, client_phone, scheduled_at, status, notes")
-    .eq("business_id", businessId)
-    .eq("status", "scheduled")
-    .order("scheduled_at", { ascending: true });
+  if (!pool || !businessId) return [];
   const phone = typeof opts.clientPhone === "string" ? opts.clientPhone.replace(/\D/g, "").trim() : "";
   const name = typeof opts.clientName === "string" ? opts.clientName.trim() : "";
+
+  const params = [businessId];
+  let nameClause = "";
   if (name) {
-    q = q.ilike("client_name", `%${name.replace(/%/g, "\\%")}%`);
+    // ILIKE with the same `%` escaping the PostgREST version applied. The
+    // ESCAPE clause is explicit because the default escape character in a
+    // Postgres LIKE pattern is the backslash, and leaving it implicit is how a
+    // name containing one starts matching things it should not.
+    params.push(`%${name.replace(/%/g, "\\%")}%`);
+    nameClause = ` AND client_name ILIKE $${params.length} ESCAPE '\\'`;
   }
-  const { data: rows, error } = await q;
-  if (error) {
-    log.error("db_error", { operation: "listAppointmentsByCaller", error: error.message });
+
+  const res = await q(
+    `SELECT id, client_name, client_phone, scheduled_at, status, notes
+       FROM appointments
+      WHERE business_id = $1 AND status = 'scheduled'${nameClause}
+      ORDER BY scheduled_at ASC`,
+    params
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listAppointmentsByCaller", error: res.error.message });
     return [];
   }
-  let list = rows || [];
+  let list = res.rows || [];
   if (opts.upcomingOnly) {
     const now = Date.now();
     list = list.filter((r) => {
@@ -869,22 +897,21 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
  * @returns {Promise<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}|null>}
  */
 export async function getAppointmentById(appointmentId, businessId) {
-  if (!supabase || !appointmentId) return null;
+  if (!pool || !appointmentId) return null;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "getAppointmentById", appointmentId });
     return null;
   }
-  const q = supabase
-    .from("appointments")
-    .select("id, client_name, client_phone, scheduled_at, status, notes")
-    .eq("id", appointmentId)
-    .eq("business_id", businessId);
-  const { data, error } = await q.maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "getAppointmentById", error: error.message });
+  const res = await q(
+    `SELECT id, client_name, client_phone, scheduled_at, status, notes
+       FROM appointments WHERE id = $1 AND business_id = $2`,
+    [appointmentId, businessId]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "getAppointmentById", error: res.error.message });
     return null;
   }
-  return data;
+  return one(res);
 }
 
 /**
@@ -896,49 +923,77 @@ export async function getAppointmentById(appointmentId, businessId) {
  * @returns {Promise<boolean>}
  */
 export async function updateAppointmentStatus(appointmentId, status, businessId) {
-  if (!supabase || !appointmentId) return false;
+  if (!pool || !appointmentId) return false;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "updateAppointmentStatus", appointmentId });
     return false;
   }
-  const q = supabase
-    .from("appointments")
-    .update({ status })
-    .eq("id", appointmentId)
-    .eq("business_id", businessId);
-  const { data, error } = await q.select("id").maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "updateAppointmentStatus", error: error.message });
+  const res = await q(
+    `UPDATE appointments SET status = $3 WHERE id = $1 AND business_id = $2 RETURNING id`,
+    [appointmentId, businessId, status]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "updateAppointmentStatus", error: res.error.message });
     return false;
   }
-  return data != null;
+  return one(res) != null;
 }
 
 /**
  * Update an appointment (e.g. reschedule).
+ *
+ * `updates` is a caller-supplied object of column => value. Column names are
+ * checked against an allowlist rather than interpolated, because a column name
+ * cannot be a bound parameter and everything else here is. The allowlist is
+ * every column a reschedule or an edit legitimately touches; anything else is
+ * dropped and logged rather than silently ignored, so a typo in a call site
+ * surfaces instead of quietly doing nothing.
+ *
  * @param {string} appointmentId
  * @param {object} updates - e.g. { scheduled_at: "2026-04-15T10:00:00" }
  * @param {string} businessId - REQUIRED; the tenant filter is unconditional
  *   (see getAppointmentById). Missing => no query at all.
  * @returns {Promise<boolean>}
  */
+const APPOINTMENT_UPDATABLE = new Set([
+  "scheduled_at",
+  "status",
+  "notes",
+  "client_name",
+  "client_phone",
+  "service_id",
+]);
+
 export async function updateAppointment(appointmentId, updates, businessId) {
-  if (!supabase || !appointmentId || !updates || typeof updates !== "object") return false;
+  if (!pool || !appointmentId || !updates || typeof updates !== "object") return false;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "updateAppointment", appointmentId });
     return false;
   }
-  const q = supabase
-    .from("appointments")
-    .update(updates)
-    .eq("id", appointmentId)
-    .eq("business_id", businessId);
-  const { data, error } = await q.select("id").maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "updateAppointment", error: error.message });
+
+  const cols = [];
+  const params = [appointmentId, businessId];
+  for (const [col, val] of Object.entries(updates)) {
+    if (!APPOINTMENT_UPDATABLE.has(col)) {
+      log.error("db_update_column_refused", { operation: "updateAppointment", column: col, severity: "warn" });
+      continue;
+    }
+    params.push(val);
+    cols.push(`${col} = $${params.length}`);
+  }
+  // An update with nothing to set was a no-op that returned true under
+  // PostgREST. Keeping that: the caller asked for nothing and got it.
+  if (cols.length === 0) return false;
+
+  const res = await q(
+    `UPDATE appointments SET ${cols.join(", ")} WHERE id = $1 AND business_id = $2 RETURNING id`,
+    params
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "updateAppointment", error: res.error.message });
     return false;
   }
-  return data != null;
+  return one(res) != null;
 }
 
 /**
@@ -964,27 +1019,28 @@ export async function createCustomerRequest({
   preferredTime,
   notes,
 }) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("customer_requests")
-    .insert({
-      business_id: businessId,
-      call_id: callId || null,
-      request_type: requestType || "message",
-      caller_name: callerName || null,
-      callback_number: callbackNumber || null,
-      message: message || null,
-      preferred_time: preferredTime || null,
-      notes: notes || null,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    log.error("db_error", { operation: "createCustomerRequest", error: error.message });
-    captureException(new Error(error.message), { table: "customer_requests", op: "insert" });
+  if (!pool) return null;
+  const res = await q(
+    `INSERT INTO customer_requests
+       (business_id, call_id, request_type, caller_name, callback_number, message, preferred_time, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [
+      businessId,
+      callId || null,
+      requestType || "message",
+      callerName || null,
+      callbackNumber || null,
+      message || null,
+      preferredTime || null,
+      notes || null,
+    ]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "createCustomerRequest", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "customer_requests", op: "insert" });
     return null;
   }
-  return data.id;
+  return one(res).id;
 }
 
 /**
@@ -997,32 +1053,30 @@ export async function createCustomerRequest({
  */
 export async function fetchCallerContext(businessId, callerNumber) {
   const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
-  if (!supabase || !businessId || !callerNumber) return empty;
+  if (!pool || !businessId || !callerNumber) return empty;
 
   // Run both queries in parallel
   const [callsResult, apptRows] = await Promise.all([
-    supabase
-      .from("calls")
-      .select("id, started_at, summary")
-      .eq("business_id", businessId)
-      .eq("caller_number", callerNumber)
-      .eq("status", "completed")
-      .order("started_at", { ascending: false })
-      .limit(5),
+    q(
+      `SELECT id, started_at, summary FROM calls
+        WHERE business_id = $1 AND caller_number = $2 AND status = 'completed'
+        ORDER BY started_at DESC LIMIT 5`,
+      [businessId, callerNumber]
+    ),
     // The SAME function the get_caller_appointments_from_db tool calls, so the
     // prompt's "Upcoming appointments" line and the tool can no longer disagree
     // about whether this caller has one at all.
     //
-    // This used to be .eq("client_phone", callerNumber) — exact string
-    // equality — while the tool matched the last ten digits. Any row not stored
-    // in the caller's exact E.164 spelling was therefore invisible to the
-    // prompt and findable by the tool, and migration 026 cannot close that gap
-    // on its own: it normalizes punctuation and whitespace but deliberately
-    // will not guess a country code, so a national number stays national.
+    // This used to be an exact string equality on client_phone while the tool
+    // matched the last ten digits. Any row not stored in the caller's exact
+    // E.164 spelling was therefore invisible to the prompt and findable by the
+    // tool, and migration 026 cannot close that gap on its own: it normalizes
+    // punctuation and whitespace but deliberately will not guess a country
+    // code, so a national number stays national.
     listAppointmentsByCaller(businessId, { clientPhone: callerNumber, upcomingOnly: true }),
   ]);
 
-  const calls = callsResult.data || [];
+  const calls = callsResult.rows || [];
   const lastCallSummary = calls[0]?.summary || null;
 
   // Explicit projection, not the raw row. listAppointmentsByCaller selects
@@ -1045,19 +1099,18 @@ export async function fetchCallerContext(businessId, callerNumber) {
  * @returns {Promise<Array<{question: string, answer: string, category: string|null}>>}
  */
 export async function fetchBusinessKnowledge(businessId, limit = 15) {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("business_knowledge")
-    .select("question, answer, category")
-    .eq("business_id", businessId)
-    .eq("enabled", true)
-    .order("priority", { ascending: false })
-    .limit(limit);
-  if (error) {
-    log.error("db_error", { operation: "fetchBusinessKnowledge", error: error.message });
+  if (!pool) return [];
+  const res = await q(
+    `SELECT question, answer, category FROM business_knowledge
+      WHERE business_id = $1 AND enabled = true
+      ORDER BY priority DESC LIMIT $2`,
+    [businessId, limit]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "fetchBusinessKnowledge", error: res.error.message });
     return [];
   }
-  return data || [];
+  return res.rows || [];
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,21 +1142,18 @@ export const BUILTIN_TOOL_NAMES = ["set_call_intent", "end_call", ...allCapabili
  * @returns {Promise<Array<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object, created_at: string, updated_at: string }>>}
  */
 export async function listIntegrationsForBusiness(businessId, opts = {}) {
-  if (!supabase || !businessId) return [];
-  let query = supabase
-    .from("integrations")
-    .select("*")
-    .eq("business_id", businessId)
-    .order("created_at", { ascending: true });
-  if (opts.enabledOnly) {
-    query = query.eq("enabled", true);
-  }
-  const { data, error } = await query;
-  if (error) {
-    log.error("db_error", { operation: "listIntegrationsForBusiness", error: error.message });
+  if (!pool || !businessId) return [];
+  const res = await q(
+    `SELECT * FROM integrations
+      WHERE business_id = $1${opts.enabledOnly ? " AND enabled = true" : ""}
+      ORDER BY created_at ASC`,
+    [businessId]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listIntegrationsForBusiness", error: res.error.message });
     return [];
   }
-  return data || [];
+  return res.rows || [];
 }
 
 /**
@@ -1113,18 +1163,13 @@ export async function listIntegrationsForBusiness(businessId, opts = {}) {
  * @returns {Promise<{ id: string, business_id: string, provider: string, name: string, enabled: boolean, config: object } | null>}
  */
 export async function getIntegrationByName(businessId, name) {
-  if (!supabase || !businessId || !name) return null;
-  const { data, error } = await supabase
-    .from("integrations")
-    .select("*")
-    .eq("business_id", businessId)
-    .eq("name", name)
-    .maybeSingle();
-  if (error) {
-    log.error("db_error", { operation: "getIntegrationByName", error: error.message });
+  if (!pool || !businessId || !name) return null;
+  const res = await q(`SELECT * FROM integrations WHERE business_id = $1 AND name = $2`, [businessId, name]);
+  if (res.error) {
+    log.error("db_error", { operation: "getIntegrationByName", error: res.error.message });
     return null;
   }
-  return data;
+  return one(res);
 }
 
 /**
@@ -1144,33 +1189,32 @@ export async function createOrUpdateIntegration({
   config,
   enabled = true,
 }) {
-  if (!supabase || !businessId || !provider || !name) return null;
+  if (!pool || !businessId || !provider || !name) return null;
   if (BUILTIN_TOOL_NAMES.includes(name)) {
     log.error("integration_invalid_name", { name, reason: "built_in_tool" });
     return null;
   }
-  const now = new Date().toISOString();
-  const payload = {
-    business_id: businessId,
-    provider,
-    name,
-    config: config || {},
-    enabled: !!enabled,
-    updated_at: now,
-  };
-  const { data, error } = await supabase
-    .from("integrations")
-    .upsert(payload, {
-      onConflict: "business_id,name",
-      ignoreDuplicates: false,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    log.error("db_error", { operation: "createOrUpdateIntegration", error: error.message });
+  // ON CONFLICT deliberately does NOT touch baa_recorded_at or baa_reference
+  // (migration 027). Editing a webhook's URL must not silently carry its old
+  // BAA record forward onto a new endpoint — but it must not wipe the record
+  // for an unrelated config tweak either, so the columns are simply left alone
+  // and managed by whatever records the agreement.
+  const res = await q(
+    `INSERT INTO integrations (business_id, provider, name, config, enabled, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (business_id, name) DO UPDATE
+       SET provider = EXCLUDED.provider,
+           config = EXCLUDED.config,
+           enabled = EXCLUDED.enabled,
+           updated_at = now()
+     RETURNING id`,
+    [businessId, provider, name, config || {}, !!enabled]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "createOrUpdateIntegration", error: res.error.message });
     return null;
   }
-  return data;
+  return one(res);
 }
 
 /**
@@ -1181,27 +1225,30 @@ export async function createOrUpdateIntegration({
  * @returns {Promise<boolean>}
  */
 export async function deleteIntegration(businessId, integrationId, opts = {}) {
-  if (!supabase || !businessId || !integrationId) return false;
+  if (!pool || !businessId || !integrationId) return false;
   if (opts.softDisable) {
-    const { error } = await supabase
-      .from("integrations")
-      .update({ enabled: false, updated_at: new Date().toISOString() })
-      .eq("id", integrationId)
-      .eq("business_id", businessId);
-    if (error) {
-      log.error("db_error", { operation: "deleteIntegration_softDisable", error: error.message });
+    const res = await q(
+      `UPDATE integrations SET enabled = false, updated_at = now() WHERE id = $1 AND business_id = $2`,
+      [integrationId, businessId]
+    );
+    if (res.error) {
+      log.error("db_error", { operation: "deleteIntegration_softDisable", error: res.error.message });
       return false;
     }
     return true;
   }
-  const { error } = await supabase
-    .from("integrations")
-    .delete()
-    .eq("id", integrationId)
-    .eq("business_id", businessId);
-  if (error) {
-    log.error("db_error", { operation: "deleteIntegration", error: error.message });
+  const res = await q(`DELETE FROM integrations WHERE id = $1 AND business_id = $2`, [integrationId, businessId]);
+  if (res.error) {
+    log.error("db_error", { operation: "deleteIntegration", error: res.error.message });
     return false;
   }
   return true;
+}
+
+/**
+ * Close the pool. Tests and short-lived scripts need this or the process hangs
+ * on an open connection; the server never calls it.
+ */
+export async function close() {
+  if (pool) await pool.end();
 }

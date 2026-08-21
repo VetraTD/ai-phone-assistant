@@ -1090,7 +1090,7 @@ export default {
    * @param {{id?: string, name: string, args?: object}} fc
    * @param {object} ctx - turn context; ctx.deps carries the injected data
    *   surface (see services/tools.js). Packs take no service imports of their
-   *   own: services/supabase.js imports the registry for its reserved-name
+   *   own: services/db.js imports the registry for its reserved-name
    *   list, so a pack importing it back would be a load-order-dependent cycle.
    *   Injection also means these paths can be tested without module mocks.
    */

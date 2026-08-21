@@ -9,7 +9,7 @@ import {
   countScheduledOverlapping,
   listScheduledBetween,
   getAppointmentById,
-} from "./supabase.js";
+} from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
@@ -34,7 +34,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 // integrations for names no pack claims.
 //
 // Packs deliberately import nothing from services/. They receive their data
-// surface through ctx.deps, assembled below. Two reasons: services/supabase.js
+// surface through ctx.deps, assembled below. Two reasons: services/db.js
 // imports the capability registry for its reserved-name list, so a pack
 // importing supabase back would be a load-order-dependent cycle; and injection
 // lets a pack's execution paths be tested without mocking modules.
@@ -48,7 +48,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
  * Exposed as getters, not plain properties, so each binding is resolved when a
  * pack actually uses it. A plain object literal would resolve all of them while
  * this module is evaluated, which breaks every test that partially mocks
- * services/supabase.js: vitest's mock throws on access to an export the mock
+ * services/db.js: vitest's mock throws on access to an export the mock
  * does not define, so a suite that never books an appointment would still fail
  * at import time on createAppointment. Lazy access mirrors the original switch,
  * where each branch referenced only what that branch needed.
@@ -318,7 +318,7 @@ const REASON_TEXT = {
  *
  * A timed-out promise is ABANDONED, not cancelled — Promise.race cannot cancel
  * anything, and the only thing that actually stops a late database write is the
- * transport-level AbortSignal in services/supabase.js. What this adds is that
+ * transport-level AbortSignal in services/db.js. What this adds is that
  * the CALLER stops waiting, and that a late completion is visible
  * (tool_late_completion) rather than silent.
  *

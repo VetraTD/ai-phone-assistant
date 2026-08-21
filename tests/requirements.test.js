@@ -23,7 +23,7 @@ import {
 } from "../lib/capabilities/requirements.js";
 import { executeToolCall } from "../services/tools.js";
 import { buildCallTools } from "../services/gemini.js";
-import { CORE_TASKS } from "../services/supabase.js";
+import { CORE_TASKS } from "../services/db.js";
 
 const DENTAL = {
   key: "dental_number",

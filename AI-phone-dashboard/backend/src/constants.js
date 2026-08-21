@@ -3,7 +3,7 @@
 // package boundaries — keep these in sync by hand when the source files
 // change).
 
-// Source of truth: root repo services/supabase.js (Phase 2A task model).
+// Source of truth: root repo services/db.js (Phase 2A task model).
 // CORE tasks are always available on every call and are never stored in
 // businesses.allowed_tasks; MODULE tasks are the opt-in set a business can
 // enable, and are exactly what businesses.allowed_tasks stores.
@@ -15,12 +15,12 @@ const MODULE_TASKS = [
   "quote_request",
 ];
 
-// Source of truth: root repo services/supabase.js loadConfig() /
+// Source of truth: root repo services/db.js loadConfig() /
 // config.languagesSpoken consumers (services/gemini.js, lib/voice/session.js,
 // lib/mediaStream.js).
 const ALLOWED_LANGUAGES = ["en", "es", "fr"];
 
-// Source of truth: root repo services/supabase.js AFTER_HOURS_POLICIES /
+// Source of truth: root repo services/db.js AFTER_HOURS_POLICIES /
 // TRANSFER_POLICIES.
 const AFTER_HOURS_POLICIES = ["take_message", "offer_callback", "book_later", "transfer_if_possible"];
 const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];

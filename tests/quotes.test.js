@@ -6,7 +6,7 @@
  * contract provides. These tests drive the pack directly with a fake engine,
  * which is possible precisely because packs take no service imports: they
  * receive their data surface through ctx.deps and engine.deps. If a pack had to
- * be tested by mocking services/supabase.js, the isolation would be a fiction.
+ * be tested by mocking services/db.js, the isolation would be a fiction.
  */
 
 import { describe, it, expect, vi } from "vitest";

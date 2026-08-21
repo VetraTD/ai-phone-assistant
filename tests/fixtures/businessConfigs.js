@@ -11,7 +11,7 @@
  * (the fake clock the dynamic tail renders against), not a property of a business.
  */
 
-import { normalizeAllowedTasks } from "../../services/supabase.js";
+import { normalizeAllowedTasks } from "../../services/db.js";
 
 export const WEEKLY_HOURS = {
   mon: { open: "09:00", close: "17:00", closed: false },

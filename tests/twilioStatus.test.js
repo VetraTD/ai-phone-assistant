@@ -13,7 +13,7 @@ const mockUpdateCallSummary = vi.fn(async () => {});
 const mockUpdateCallLatency = vi.fn(async () => {});
 const mockIsEnabled = vi.fn(() => true);
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
   completeCall: (...args) => mockCompleteCall(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),

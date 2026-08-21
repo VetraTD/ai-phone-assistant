@@ -44,7 +44,7 @@ router.get("/api/calls", authenticate, async (req, res) => {
 
     if (status && status !== "all") {
       // status is set authoritatively by markCallTransferred()/completeCall()
-      // now (see services/supabase.js) — no summary-text inference needed.
+      // now (see services/db.js) — no summary-text inference needed.
       where.push(`status = ${addParam(status)}`);
     }
 
@@ -133,7 +133,7 @@ if (needs_followup === "true") {
     const r = await pool.query(sql, params);
     // inferred_transferred is a legacy field name kept for frontend
     // compatibility — it now just mirrors the authoritative status column
-    // (set by markCallTransferred()/completeCall(), see services/supabase.js)
+    // (set by markCallTransferred()/completeCall(), see services/db.js)
     // instead of regexing the summary text for "transfer".
     const rows = (r.rows || []).map((row) => ({
       ...row,

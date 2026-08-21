@@ -3,7 +3,7 @@ import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { isValidE164 } from "../lib/validate.js";
-import * as db from "./supabase.js";
+import * as db from "./db.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
@@ -281,7 +281,7 @@ export async function notifyCallMissed({ businessId, call, status }) {
 // Caller-facing SMS follow-ups (Part 2) — distinct from the owner-facing
 // notifyXxx() functions above: these text the CALLER back, gated per
 // business on config.smsFollowupEnabled (see loadConfig in
-// services/supabase.js). Off by default.
+// services/db.js). Off by default.
 // ---------------------------------------------------------------------------
 
 // Generic "someone will get back to you {sla}" text for the message_received

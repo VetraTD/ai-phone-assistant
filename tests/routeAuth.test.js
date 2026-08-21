@@ -18,7 +18,7 @@ const mockPurchaseNumber = vi.fn();
 const mockFetchUserByEmail = vi.fn();
 const mockVerifyAccessToken = vi.fn();
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
   fetchUserByEmail: (...args) => mockFetchUserByEmail(...args),

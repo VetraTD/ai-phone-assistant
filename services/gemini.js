@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
-import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
+import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
@@ -177,7 +177,7 @@ const DEFAULT_CONFIG = {
   // no business config behaves identically to a business with no
   // allowed_tasks set. Kept out of this static object (rather than calling
   // normalizeAllowedTasks at module load) so importing gemini.js never
-  // requires services/supabase.js's mock to provide normalizeAllowedTasks
+  // requires services/db.js's mock to provide normalizeAllowedTasks
   // unless this fallback path is actually exercised.
   mainPhone: null,
   generalInfo: null,
@@ -979,7 +979,7 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   //
   // Quoting is gated on config._hasCustomGreeting: lib/voice/session.js
   // buildGreeting only ever speaks config.greeting verbatim when that flag is
-  // true. Otherwise (services/supabase.js loadConfig's default state) it
+  // true. Otherwise (services/db.js loadConfig's default state) it
   // synthesizes a time-of-day + business-name line the caller actually heard,
   // and config.greeting still holds the generic DEFAULT_GREETING text — quoting
   // that would tell the model the caller heard words they never did. Fall back

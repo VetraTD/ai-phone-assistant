@@ -16,7 +16,7 @@
  * model, and configPatch is what takes it away.
  */
 import * as A from "../asserts.js";
-import { normalizeAllowedTasks } from "../../services/supabase.js";
+import { normalizeAllowedTasks } from "../../services/db.js";
 
 export default {
   name: "disabled-quotes-decline",

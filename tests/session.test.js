@@ -181,7 +181,7 @@ vi.mock("../lib/voice/utteranceCache.js", () => ({
 }));
 
 // ---- services --------------------------------------------------------------
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: vi.fn(() => true),
   lookupBusinessByPhone: vi.fn(async () => ({ id: "biz1" })),
   loadConfig: vi.fn(() => ({
@@ -409,7 +409,7 @@ describe("TRANSFER_TRIGGERS regex", () => {
   });
 });
 import * as callState from "../lib/callState.js";
-import * as db from "../services/supabase.js";
+import * as db from "../services/db.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
@@ -1372,7 +1372,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     // Real transferred status (Part 1) — the redial succeeded (mocked
     // "twilio" above), so the call must be marked transferred in the DB.
-    const db = await import("../services/supabase.js");
+    const db = await import("../services/db.js");
     expect(db.markCallTransferred).toHaveBeenCalledWith(sid);
   });
 

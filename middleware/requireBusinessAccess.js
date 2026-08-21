@@ -1,5 +1,5 @@
 import { bearerFromHeader, verifyAccessToken } from "../lib/auth/accessToken.js";
-import { fetchUserByEmail } from "../services/supabase.js";
+import { fetchUserByEmail } from "../services/db.js";
 import { log } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------

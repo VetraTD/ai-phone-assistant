@@ -7,7 +7,7 @@ import express from "express";
 import * as twilio from "twilio";
 
 import * as geminiService from "./services/gemini.js";
-import * as db from "./services/supabase.js";
+import * as db from "./services/db.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";

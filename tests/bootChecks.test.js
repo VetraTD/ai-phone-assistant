@@ -11,7 +11,7 @@
 // The line between fatal and announced is drawn deliberately and is the whole
 // design decision here; see lib/bootChecks.js.
 import { describe, it, expect } from "vitest";
-import { checkNotificationConfig, checkDeploymentMode, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
+import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
 
 const SID = "AC" + "1".repeat(32);
 const TOKEN = "authtoken1234567890";
@@ -212,5 +212,31 @@ describe("checkDeploymentMode", () => {
         { log: () => {} }
       )
     ).toThrow(/deployment_mode_unrecognised/);
+  });
+});
+
+describe("checkDatabaseConfig", () => {
+  it("says nothing when DATABASE_URL is set", () => {
+    expect(checkDatabaseConfig({ DATABASE_URL: "postgres://u:p@h/db" }).findings).toEqual([]);
+  });
+
+  // A3 changed which variable decides whether this process has a database. A
+  // deployment that carries SUPABASE_URL forward and not DATABASE_URL boots
+  // happily and answers every call as "our office" — a working receptionist
+  // for the wrong company.
+  it("announces a missing DATABASE_URL, and does not make it fatal", () => {
+    const { findings } = checkDatabaseConfig({ SUPABASE_URL: "https://old.supabase.co" });
+    expect(codes(findings)).toContain("database_not_configured");
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+  });
+
+  // Deliberate, and worth pinning so nobody "tightens" it later: the degraded
+  // path exists because a call that gets a human-sounding apology beats a call
+  // that rings out. Refusing to boot turns a database outage into a phone
+  // outage.
+  it("assertBootConfig still boots with no database", () => {
+    expect(() =>
+      assertBootConfig({ SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example" }, { log: () => {} })
+    ).not.toThrow();
   });
 });

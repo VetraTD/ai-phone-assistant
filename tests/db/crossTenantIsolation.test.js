@@ -14,7 +14,7 @@ import pg from "pg";
 // What is actually being asserted
 // ---------------------------------------------------------------------------
 //
-// Not "does services/supabase.js filter by business_id". It does, wherever
+// Not "does services/db.js filter by business_id". It does, wherever
 // somebody remembered to. The assertion is that isolation survives a query that
 // FORGOT to — that there is a second line of defence underneath the discipline.
 //
@@ -25,7 +25,7 @@ import pg from "pg";
 // not satisfied by everyone being careful.
 //
 // The test speaks SQL rather than calling the data layer on purpose. It has to
-// keep meaning the same thing after A3 replaces services/supabase.js with
+// keep meaning the same thing after A3 replaces services/db.js with
 // services/db.js, and it must not encode a guess about that module's shape.
 // What it encodes instead is the property the database has to have:
 //

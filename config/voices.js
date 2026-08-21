@@ -6,7 +6,7 @@
 
 /**
  * Curated ElevenLabs voice picker for the per-business voice-selection
- * dashboard (see database/015_voice_settings.sql, services/supabase.js
+ * dashboard (see database/015_voice_settings.sql, services/db.js
  * loadConfig -> config.voiceId). Each entry's `voiceSettings` is used by
  * lib/voice/session.js's resolveVoice() whenever config.voiceId matches
  * `elevenVoiceId`, threaded through to ttsStream.js/elevenlabs.js's

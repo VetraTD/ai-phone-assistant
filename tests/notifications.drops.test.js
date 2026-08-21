@@ -32,7 +32,7 @@ const BUSINESS = {
   timezone: "America/Chicago",
 };
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: () => true,
   fetchBusinessById: async () => BUSINESS,
 }));

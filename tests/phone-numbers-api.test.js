@@ -6,7 +6,7 @@ const mockUpdateBusinessPhoneNumber = vi.fn();
 const mockSearchAvailableNumbers = vi.fn();
 const mockPurchaseNumber = vi.fn();
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
 }));
