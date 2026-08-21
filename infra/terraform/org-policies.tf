@@ -61,11 +61,23 @@ resource "google_org_policy_policy" "require_shielded_vm" {
 # Resource locations — the constraint the whole two-region split exists for.
 #
 # Applied PER PROJECT, because that is the only place it can be applied per
-# project. This is precisely why six projects instead of one: a single project
-# gets a single location policy, so it would have to allow both continents, and
-# then nothing stands between UK patient data and a us-central1 bucket except
-# somebody remembering. Here, creating a UK resource outside the EU is an API
-# rejection.
+# project. This is precisely why separate projects instead of one: a single
+# project gets a single location policy, so it would have to allow both
+# continents, and then nothing stands between UK patient data and a us-central1
+# bucket except somebody remembering. Here, creating a UK resource outside the
+# EU is an API rejection.
+#
+# THE MERGE COSTS EXACTLY THIS, IN ONE PLACE. `local.projects` derives a merged
+# project's allowed locations as the UNION of its stacks', so the staging
+# project — hosting both lanes — permits both continents and is therefore NOT
+# region-pinned. That is unavoidable: one project, one policy. It is why the
+# compensating-control table backs staging residency with a rule (probe/test
+# numbers only, no production Twilio credentials) rather than an enforcement,
+# and why `us-prod` and `uk-prod` are forbidden from ever sharing — a validation
+# on var.stack_projects, not a note.
+#
+# Restoring `uk-staging` to its own project restores the pin with no code change:
+# the union collapses back to one continent on its own.
 # ---------------------------------------------------------------------------
 resource "google_org_policy_policy" "resource_locations" {
   for_each = local.projects

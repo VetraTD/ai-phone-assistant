@@ -10,7 +10,8 @@
 # of us, always". Here it answers "one of us, and here is the binding".
 # ---------------------------------------------------------------------------
 
-# Owners: full access to every project.
+# Owners: full access to every project. Per PROJECT — a merged project is one
+# grant, not two.
 resource "google_project_iam_member" "owners" {
   for_each = {
     for pair in setproduct(keys(local.projects), var.owner_principals) :
@@ -23,17 +24,23 @@ resource "google_project_iam_member" "owners" {
 }
 
 # ---------------------------------------------------------------------------
-# Shared-only principals: vetra-shared, and nothing else.
+# Shared-only principals: the shared project, and nothing else.
 #
-# Deliberately NOT roles/owner even on shared — the two roles below are what a
+# Deliberately NOT roles/owner even there — the two roles below are what a
 # build pipeline actually needs, which is to push images and run builds. There
 # is no binding here for any PHI-bearing project, and that absence is the point
 # of the file.
+#
+# Under the merge, the shared project also holds the log sinks' destination
+# buckets. That is why these are two narrow roles rather than owner: a build
+# principal that could reach the audit trail would defeat the reason the sink
+# was moved to the org node in the first place. Neither role grants
+# `storage.admin` or `logging.admin`.
 # ---------------------------------------------------------------------------
 resource "google_project_iam_member" "shared_only_artifacts" {
   for_each = toset(var.shared_only_principals)
 
-  project = google_project.this["shared"].project_id
+  project = local.project_id_for_stack["shared"]
   role    = "roles/artifactregistry.writer"
   member  = each.value
 }
@@ -41,7 +48,7 @@ resource "google_project_iam_member" "shared_only_artifacts" {
 resource "google_project_iam_member" "shared_only_builds" {
   for_each = toset(var.shared_only_principals)
 
-  project = google_project.this["shared"].project_id
+  project = local.project_id_for_stack["shared"]
   role    = "roles/cloudbuild.builds.editor"
   member  = each.value
 }
@@ -55,7 +62,9 @@ resource "google_project_iam_member" "shared_only_builds" {
 #
 # Secret Manager access is granted per-secret in B4, not project-wide. A runtime
 # that can read every secret in its project is one env-var mistake away from the
-# thing C6 exists to prove impossible.
+# thing C6 exists to prove impossible — and in the merged staging project, where
+# both credential sets live side by side, project-wide secret access would erase
+# the boundary entirely.
 # ---------------------------------------------------------------------------
 locals {
   runtime_roles = [
@@ -70,21 +79,21 @@ locals {
 
 resource "google_project_iam_member" "runtime" {
   for_each = {
-    for pair in setproduct(keys(local.regional_projects), local.runtime_roles) :
-    "${pair[0]}/${pair[1]}" => { project = pair[0], role = pair[1] }
+    for pair in setproduct(keys(local.active_regional_stacks), local.runtime_roles) :
+    "${pair[0]}/${pair[1]}" => { stack = pair[0], role = pair[1] }
   }
 
-  project = google_project.this[each.value.project].project_id
+  project = local.project_id_for_stack[each.value.stack]
   role    = each.value.role
-  member  = "serviceAccount:${google_service_account.runtime[each.value.project].email}"
+  member  = "serviceAccount:${google_service_account.runtime[each.value.stack].email}"
 }
 
 # The runtimes pull their container image from the shared registry. Read-only,
 # and it is the only binding any runtime holds outside its own project.
 resource "google_project_iam_member" "runtime_pull_images" {
-  for_each = local.regional_projects
+  for_each = local.active_regional_stacks
 
-  project = google_project.this["shared"].project_id
+  project = local.project_id_for_stack["shared"]
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.runtime[each.key].email}"
 }

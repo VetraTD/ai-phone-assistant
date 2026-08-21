@@ -1,11 +1,18 @@
 # ---------------------------------------------------------------------------
-# The project matrix.
+# Stacks, and the projects they land in.
 #
-# Six projects, generated from one description rather than six copies. That is
-# not tidiness — it is what makes B0a's gate meaningful. The gate is
-# "`terraform plan` applies clean to BOTH staging stacks", and it exists to
-# prove the module is genuinely parameterised by region. Six hand-written copies
-# would pass that gate while hiding a us-central1 hard-coded in the UK stack.
+# There are two levels here and keeping them straight is the whole file:
+#
+#   STACK    a logical unit — "the UK staging environment". Six of them, fixed
+#            by the design, described once below rather than six times.
+#
+#   PROJECT  a GCP billing, quota and IAM boundary. Derived from the stacks by
+#            `var.stack_projects`. Six of them when that map is the identity;
+#            four when two stacks are told to share.
+#
+# They were 1:1 until the billing account's 5-linked-project cap forced two of
+# the no-PHI stacks to share. Deriving projects from stacks rather than writing
+# them out means the collapse and the restore are both a tfvars edit.
 #
 # Projects are SIBLINGS under the organization. GCP has no such thing as a
 # sub-project; nesting is done with folders, which hold no resources.
@@ -35,7 +42,6 @@ locals {
     "run.googleapis.com",
     "sqladmin.googleapis.com",
     "redis.googleapis.com",
-    "vpcaccess.googleapis.com",
     "compute.googleapis.com",
     "servicenetworking.googleapis.com",
     "secretmanager.googleapis.com",
@@ -51,13 +57,25 @@ locals {
     "cloudbuild.googleapis.com",
     "identitytoolkit.googleapis.com",
     "secretmanager.googleapis.com",
+    # Terraform routes its own calls through whatever `bootstrap_project_id`
+    # names, and that is this project now. These are the APIs it calls THROUGH
+    # a quota project, which have to be enabled ON the quota project even though
+    # the resources land elsewhere. Their absence fails with a 403 naming this
+    # project, which reads as a permissions problem and is not.
+    "orgpolicy.googleapis.com",
+    "cloudbilling.googleapis.com",
+    "compute.googleapis.com",
+    "servicenetworking.googleapis.com",
   ])
 
   logging_apis = concat(local.common_apis, [
     "storage.googleapis.com",
   ])
 
-  projects = {
+  # -------------------------------------------------------------------------
+  # The six stacks.
+  # -------------------------------------------------------------------------
+  stacks = {
     us-prod = {
       display   = "Vetra US Prod"
       lane      = "us"
@@ -99,8 +117,8 @@ locals {
       lane    = "shared"
       env     = "shared"
       region  = var.us_region
-      # Both continents allowed. This project holds Artifact Registry, Cloud
-      # Build and Identity Platform, and it serves BOTH stacks — a UK Cloud Run
+      # Both continents. This stack holds Artifact Registry, Cloud Build and
+      # Identity Platform, and it serves BOTH regional stacks — a UK Cloud Run
       # service pulling an image from a US registry is fine, because container
       # images are not patient data. Constraining it to one continent would
       # force a second registry for no safety gain.
@@ -113,18 +131,94 @@ locals {
       lane    = "logging"
       env     = "logging"
       region  = var.us_region
-      # Both continents, deliberately, because this project holds TWO regional
-      # log buckets rather than one. UK logs landing in a US bucket would be a
-      # transfer, so the sink is split by origin — see logging.tf.
+      # Both continents, deliberately, because this stack holds TWO regional
+      # sets of log buckets rather than one. UK logs landing in a US bucket
+      # would be a transfer, so the sinks are split by origin — see logging.tf.
       locations = concat(local.us_locations, local.eu_locations)
       apis      = local.logging_apis
       phi       = false
     }
   }
 
-  # The regional stacks only — the four that actually serve calls and hold a
-  # VPC. `shared` and `logging` have no network of their own.
-  regional_projects = {
-    for k, v in local.projects : k => v if contains(["us", "uk"], v.lane)
+  # -------------------------------------------------------------------------
+  # Projects, derived.
+  #
+  # A project's attributes are the UNION of the stacks living in it, which is
+  # the only safe direction to combine them: a project hosting a US stack and a
+  # UK stack must permit both continents and enable both stacks' APIs, and it
+  # holds PHI if ANY of its stacks does. Taking a first-stack-wins shortcut here
+  # would quietly under-permit a merged project and over-claim its posture.
+  # -------------------------------------------------------------------------
+  project_keys = distinct(values(var.stack_projects))
+
+  stacks_in_project = {
+    for pk in local.project_keys : pk => sort([
+      for sk, target in var.stack_projects : sk if target == pk
+    ])
   }
+
+  projects = {
+    for pk, members in local.stacks_in_project : pk => {
+      # A project named after a stack takes that stack's display name, unless
+      # overridden. A project hosting more than one stack should be overridden —
+      # see var.project_display_names.
+      display = lookup(var.project_display_names, pk, local.stacks[pk].display)
+
+      # `lane`/`env` become labels. A merged project genuinely has no single
+      # value for either, and saying so is better than picking one: a console
+      # filter on `env=staging` should not silently hide half of what is there.
+      lane = length(members) == 1 ? local.stacks[members[0]].lane : "multi"
+      env  = length(members) == 1 ? local.stacks[members[0]].env : "multi"
+
+      region    = local.stacks[pk].region
+      locations = distinct(flatten([for sk in members : local.stacks[sk].locations]))
+      apis      = distinct(flatten([for sk in members : local.stacks[sk].apis]))
+      phi       = anytrue([for sk in members : local.stacks[sk].phi])
+      stacks    = members
+
+      # Whether ANY stack here is production. Sizing, HA and warm-instance
+      # decisions all key off this, and `anytrue` is the only safe direction:
+      # a project that holds one prod stack is a prod project, whatever else is
+      # in it. (Today nothing else can be — the validation on var.stack_projects
+      # forbids a prod stack from sharing — but the derivation should not depend
+      # on that staying true.)
+      has_prod = anytrue([for sk in members : local.stacks[sk].env == "prod"])
+    }
+  }
+
+  # The project a given stack lives in, as a project ID. Every resource that is
+  # per-STACK reaches its project through this, so nothing has to know whether
+  # the shape is four or six.
+  project_id_for_stack = {
+    for sk, pk in var.stack_projects : sk => google_project.this[pk].project_id
+  }
+
+  # -------------------------------------------------------------------------
+  # Regional stacks — the four that serve calls and hold a VPC. `shared` and
+  # `logging` have no network of their own.
+  #
+  # `active_regional_stacks` is the set that actually gets provisioned.
+  # Everything that provisions per-stack infrastructure iterates over it, so a
+  # later cost control can narrow the set without touching a resource block.
+  # -------------------------------------------------------------------------
+  regional_stacks = {
+    for k, v in local.stacks : k => v if contains(["us", "uk"], v.lane)
+  }
+
+  # Identical to regional_stacks for now. C-1 narrows it to the stacks that are
+  # actually being provisioned; everything below iterates the ACTIVE set so that
+  # change lands in one place.
+  active_regional_stacks = local.regional_stacks
+
+  # Distinct PROJECTS holding at least one active regional stack. Used for the
+  # bindings that are per-project rather than per-stack — granting the same
+  # (project, role, member) twice is two Terraform resources fighting over one
+  # IAM binding, which flaps on every plan.
+  active_regional_project_keys = distinct([
+    for sk in keys(local.active_regional_stacks) : var.stack_projects[sk]
+  ])
+
+  # Project IDs are immutable and carry a suffix. Losing state must not rename
+  # them, so a pinned suffix wins over a generated one — see var.project_id_suffix.
+  project_suffix = var.project_id_suffix != "" ? var.project_id_suffix : random_id.project_suffix.hex
 }

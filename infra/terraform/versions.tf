@@ -1,4 +1,6 @@
 terraform {
+  # 1.7 for `for_each` on import blocks (imports.tf). 1.9 for the multiple
+  # `validation` blocks on var.stack_projects.
   required_version = ">= 1.9"
 
   required_providers {
@@ -10,38 +12,49 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   # State lives in the bucket this module creates (shared.tf). That sounds
   # circular and is not: the FIRST apply runs on local state, creates the
-  # bucket, and then `terraform init -migrate-state` moves state into it. With
-  # two founders local state is not an option long-term — it would mean only one
-  # machine could ever run an apply without corrupting the other's view.
+  # bucket, and then `terraform init -migrate-state` moves state into it.
   #
-  # Commented until the first apply has succeeded. Then paste in the
+  # DO THIS. B0a ran on local state, created six projects and three org
+  # policies, and the state file is gone — not on the workstation anywhere. The
+  # resources outlived Terraform's knowledge of them, and recovering that costs
+  # an adoption apply (imports.tf). With two founders it is doubly not optional:
+  # local state means only one machine can ever apply without clobbering the
+  # other's view.
+  #
+  # Commented until the adoption apply has succeeded. Then paste in the
   # `tfstate_bucket` output, `terraform init -migrate-state`, and never think
   # about it again.
   #
   # backend "gcs" {
-  #   bucket = "vetra-tfstate-<suffix>"   # from bootstrap output
+  #   bucket = "vetra-tfstate-c3a3bd"   # from the tfstate_bucket output
   #   prefix = "root"
   # }
 }
 
 # `billing_project` is the project Terraform's own API calls are billed and
-# quota'd against — it is NOT where resources land. Before the six projects
-# exist there is only the bootstrap project to point at, which is why
-# `bootstrap_project_id` is a variable rather than a hard-coded value.
+# quota'd against — it is NOT where resources land.
 #
-# TRAP, and the reason this comment exists: O3c deletes the bootstrap project
-# once the GCP BAA has been re-verified. The moment it goes, EVERY Terraform run
-# fails on a quota project that no longer exists. Repoint this variable at the
-# `shared` project ID from the outputs BEFORE deleting it, not after.
+# This now points at `vetra-shared`, not at the trial-signup project. The
+# bootstrap project was only ever a stand-in for the window before the six
+# projects existed, and that window closed when they were created. Repointing
+# early also defuses O3c's ordering trap, where deleting the bootstrap project
+# breaks every subsequent Terraform run — the README used to say "repoint before
+# deleting, not after", which is a rule someone has to remember at the exact
+# moment they are busy deleting something.
 #
-# The quota project must also have each API enabled that Terraform calls through
-# it — see the bootstrap section of the README. That is not obvious and it fails
-# with a 403 SERVICE_DISABLED naming the bootstrap project, which reads like a
-# permissions problem and is not.
+# THE QUOTA PROJECT MUST HAVE EACH API ENABLED that Terraform calls through it,
+# even though the resources land elsewhere. `vetra-shared` had NOTHING enabled
+# and had to be bootstrapped by hand — see the README. Skipping that fails with
+# a 403 SERVICE_DISABLED naming this project, which reads like a permissions
+# problem and is not.
 provider "google" {
   billing_project       = var.bootstrap_project_id
   user_project_override = true

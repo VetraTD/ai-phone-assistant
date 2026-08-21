@@ -12,19 +12,98 @@ org_id = "564252011558"
 #   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud billing accounts list
 billing_account = "01C71E-7C0893-377AE9"
 
-# The project the free-trial signup created. Used only as the quota project for
-# API calls made before the six projects exist. Delete it after the first apply
-# — but NOT before the GCP BAA has been re-verified, since it is the project the
-# BAA was accepted from.
-bootstrap_project_id = "ultra-glyph-506120-v5"
+# The project Terraform routes its own API calls through for quota and billing.
+#
+# This is `vetra-shared`, NOT the trial-signup project. The signup project was a
+# stand-in for the window before the six projects existed; that window closed.
+# Pointing here also removes O3c's trap, where deleting the signup project
+# breaks every future Terraform run.
+#
+# IT NEEDS THE APIS ENABLED ON IT. See the README's bootstrap section — a fresh
+# project has none, and the failure reads as a permissions problem.
+bootstrap_project_id = "vetra-shared-c3a3bd"
+
+# Project IDs are IMMUTABLE and carry this suffix. It used to be a random value
+# that existed only in Terraform state — and when B0a's state was lost, the
+# config could no longer name its own projects. Pin it.
+project_id_suffix = "c3a3bd"
+
+# ---------------------------------------------------------------------------
+# THE 6 -> 4 COLLAPSE. This block is the whole thing.
+#
+# The billing account caps at 5 linked projects and the trial-signup project
+# holds one, leaving 4. Rather than defer the UK stack or buy support, two
+# stacks the spec already calls "No PHI" were merged into projects that exist:
+#
+#   uk-staging -> us-staging   one staging project, both regions
+#   logging    -> shared       log sinks land in the shared project
+#
+# `vetra-uk-staging-c3a3bd` and `vetra-logging-c3a3bd` STILL EXIST, UNBILLED.
+# Do not delete them. An unbilled project costs nothing and does not touch the
+# billing quota, so they are the restore path: relink, do not recreate.
+#
+# THE RESTORE IS DELETING TWO LINES FROM THIS BLOCK. When a slot frees — the
+# quota is granted, or the signup project is deleted per O2e — take `logging`
+# out first (sink configuration only, cheapest), then `uk-staging`.
+#
+# Omit the block entirely and the module's default is the six-project target.
+#
+# What the merge may NEVER touch: `us-prod` and `uk-prod`. A validation on this
+# variable refuses it. That split is the credential boundary — `voice-us` holds
+# no ElevenLabs key — and Cloud SQL instances and Identity Platform tenants
+# cannot be moved between projects afterwards, so it would be close to
+# permanent.
+# ---------------------------------------------------------------------------
+stack_projects = {
+  us-prod    = "us-prod"
+  us-staging = "us-staging"
+  uk-prod    = "uk-prod"
+  uk-staging = "us-staging" # MERGED — restore by deleting this line's override
+  shared     = "shared"
+  logging    = "shared"     # MERGED — restore this one FIRST
+}
+
+# A merged project should say so in the console. Matches the display name the
+# project already carries.
+project_display_names = {
+  us-staging = "Vetra Staging - US and UK"
+  shared     = "Vetra Shared - control plane and log sinks"
+}
+
+# ---------------------------------------------------------------------------
+# ADOPTION — temporary, and empty it once the adoption apply has succeeded.
+#
+# B0a applied partially and its local state was lost. These resources exist in
+# GCP and not in state, so they are imported rather than created. Terraform
+# ERRORS on an import block targeting an address already in state, so blank both
+# of these out after the apply that adopts them.
+#
+# See imports.tf.
+# ---------------------------------------------------------------------------
+adopt_existing_projects = {
+  us-prod    = "vetra-us-prod-c3a3bd"
+  us-staging = "vetra-us-staging-c3a3bd"
+  uk-prod    = "vetra-uk-prod-c3a3bd"
+  shared     = "vetra-shared-c3a3bd"
+}
+
+adopt_existing_org_policies = [
+  "iam.disableServiceAccountKeyCreation",
+  "compute.skipDefaultNetworkCreation",
+  "compute.requireShieldedVm",
+]
+
+# ---------------------------------------------------------------------------
+# Principals.
+# ---------------------------------------------------------------------------
 
 # Full access to every project, including the ones that hold PHI.
 owner_principals = [
   "user:admin@vetratd.com",
 ]
 
-# Access to vetra-shared ONLY — Artifact Registry and Cloud Build. Never to a
-# project that can hold patient data.
+# Access to the shared project ONLY — Artifact Registry and Cloud Build. Never
+# to a project that can hold patient data.
 #
 # Empty today: the cofounder does not access Google Cloud (ledger O20). If that
 # changes, add them HERE rather than sharing admin@vetratd.com — shared
