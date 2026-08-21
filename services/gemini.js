@@ -148,6 +148,32 @@ let geminiClient = null;
  * other. Nothing here should be read as evidence that it works.
  * ---------------------------------------------------------------------------
  */
+/**
+ * Vertex serving locations, and why this list is so short.
+ *
+ * Probed live against the org on 2026-08-21, with `:countTokens` (free, no
+ * generation) and a bogus model name as the control:
+ *
+ *   locations/eu             200      locations/us             200
+ *   locations/global         200      us-central1              404
+ *   europe-west2             404      europe-west4             404
+ *
+ * `gemini-3.6-flash` IS NOT SERVED BY ANY SINGLE REGION. Same for
+ * `gemini-3-flash-preview` and `gemini-2.5-flash`. The two-region design
+ * assumed each lane would call a single-region endpoint next to its Cloud Run
+ * service; that endpoint does not exist for this model.
+ *
+ * So the only two usable values are the `us` and `eu` MULTI-REGIONS — and
+ * `global`, which is the trap. `global` routes to whichever region has capacity
+ * ANYWHERE ON EARTH. It returns 200, it is faster to reach, and it silently
+ * voids the residency claim that the entire two-project split exists to make
+ * true. It is refused below.
+ */
+export const VERTEX_MULTI_REGIONS = Object.freeze(["us", "eu"]);
+
+/** Routes worldwide. 200s happily. Never allowed here. */
+export const VERTEX_FORBIDDEN_LOCATIONS = Object.freeze(["global"]);
+
 export function vertexConfig(env = process.env) {
   const project = (env.GOOGLE_CLOUD_PROJECT || "").trim();
   const location = (env.VERTEX_LOCATION || "").trim();
@@ -156,7 +182,24 @@ export function vertexConfig(env = process.env) {
   // it alone would silently switch backends the moment this deploys — which is
   // exactly the kind of change that should be a decision, not a side effect.
   const enabled = env.VERTEX_ENABLED === "true" || env.VERTEX_ENABLED === "1";
-  return { enabled, project, location, usable: enabled && !!project && !!location };
+
+  const forbidden = VERTEX_FORBIDDEN_LOCATIONS.includes(location.toLowerCase());
+
+  // A single region is a plausible deliberate choice for some future model, so
+  // it is announced rather than refused — A1.2's line: fatal only when the
+  // operator asked for one thing and would get another. `global` IS that case:
+  // the operator asked for a region-constrained deployment and would get
+  // worldwide routing.
+  const unproven = !!location && !forbidden && !VERTEX_MULTI_REGIONS.includes(location.toLowerCase());
+
+  return {
+    enabled,
+    project,
+    location,
+    forbidden,
+    unproven,
+    usable: enabled && !!project && !!location && !forbidden,
+  };
 }
 
 /**
@@ -173,6 +216,19 @@ export function getClient() {
 
   const vertex = vertexConfig();
 
+  // Refused at CLIENT CONSTRUCTION, not at provider selection — the same rule
+  // A6 established for vendor guards. There is one place a Vertex client comes
+  // into existence, and putting the check anywhere else leaves doors beside it.
+  if (vertex.forbidden) {
+    throw new Error(
+      `VERTEX_LOCATION="${vertex.location}" routes requests to whichever region has ` +
+        "capacity anywhere in the world, which voids the data-residency commitment both " +
+        "deployments are built on. Set `us` (HIPAA lane) or `eu` (UK lane). " +
+        "Note that no SINGLE region serves gemini-3.6-flash — us-central1 and europe-west2 " +
+        "both 404 — so a multi-region value is the only working choice, not merely the safe one."
+    );
+  }
+
   if (vertex.usable) {
     // No apiKey. Vertex authenticates with Application Default Credentials,
     // which on Cloud Run is the runtime service account's metadata-server
@@ -184,6 +240,20 @@ export function getClient() {
       location: vertex.location,
     });
     log.info("gemini_backend", { backend: "vertex", project: vertex.project, location: vertex.location });
+
+    // Announced loudly rather than refused: a single region may be right for
+    // some future model. It is not right for any model this system runs today,
+    // and silence here would surface as a 404 mid-call.
+    if (vertex.unproven) {
+      log.error("vertex_location_unproven", {
+        location: vertex.location,
+        severity: "warn",
+        expected: VERTEX_MULTI_REGIONS.join(" | "),
+        reason:
+          "No single Vertex region serves gemini-3.6-flash (probed 2026-08-21: us-central1, " +
+          "europe-west2 and europe-west4 all 404). Expect a 404 on the first turn.",
+      });
+    }
     return geminiClient;
   }
 
@@ -193,6 +263,7 @@ export function getClient() {
   if (vertex.enabled) {
     throw new Error(
       "VERTEX_ENABLED is set but GOOGLE_CLOUD_PROJECT and/or VERTEX_LOCATION are not. " +
+        "VERTEX_LOCATION must be `us` or `eu` — no single region serves this model. " +
         "Refusing to fall back to the Gemini Developer API, which the Google Cloud BAA does not cover."
     );
   }

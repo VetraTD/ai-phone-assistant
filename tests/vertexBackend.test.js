@@ -51,15 +51,15 @@ describe("vertexConfig", () => {
     // GOOGLE_CLOUD_PROJECT is injected automatically by Cloud Run, so inferring
     // Vertex from its presence would silently switch backends the moment this
     // deploys. That has to be a decision, not a side effect.
-    expect(vertexConfig({ GOOGLE_CLOUD_PROJECT: "p", VERTEX_LOCATION: "us-central1" }).enabled).toBe(false);
+    expect(vertexConfig({ GOOGLE_CLOUD_PROJECT: "p", VERTEX_LOCATION: "us" }).enabled).toBe(false);
   });
 
   it("is usable only with a project AND a location", async () => {
     const { vertexConfig } = await load({ GEMINI_API_KEY: "k" });
     expect(vertexConfig({ VERTEX_ENABLED: "true", GOOGLE_CLOUD_PROJECT: "p" }).usable).toBe(false);
-    expect(vertexConfig({ VERTEX_ENABLED: "true", VERTEX_LOCATION: "us-central1" }).usable).toBe(false);
+    expect(vertexConfig({ VERTEX_ENABLED: "true", VERTEX_LOCATION: "us" }).usable).toBe(false);
     expect(
-      vertexConfig({ VERTEX_ENABLED: "true", GOOGLE_CLOUD_PROJECT: "p", VERTEX_LOCATION: "us-central1" }).usable
+      vertexConfig({ VERTEX_ENABLED: "true", GOOGLE_CLOUD_PROJECT: "p", VERTEX_LOCATION: "us" }).usable
     ).toBe(true);
   });
 });
@@ -69,7 +69,7 @@ describe("getClient — backend selection", () => {
     const { getClient } = await load({
       VERTEX_ENABLED: "true",
       GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
-      VERTEX_LOCATION: "us-central1",
+      VERTEX_LOCATION: "us",
       GEMINI_API_KEY: "should-be-ignored",
     });
 
@@ -79,7 +79,7 @@ describe("getClient — backend selection", () => {
     expect(constructed[0]).toEqual({
       vertexai: true,
       project: "vetra-us-prod-c3a3bd",
-      location: "us-central1",
+      location: "us",
     });
     // No apiKey, deliberately: Vertex authenticates with ADC, which on Cloud
     // Run is the runtime service account's metadata token — a credential that
@@ -129,7 +129,7 @@ describe("getClient — hipaa mode", () => {
       DEPLOYMENT_MODE: "hipaa",
       VERTEX_ENABLED: "true",
       GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
-      VERTEX_LOCATION: "us-central1",
+      VERTEX_LOCATION: "us",
     });
 
     expect(() => getClient()).not.toThrow();
@@ -149,5 +149,66 @@ describe("explicit caching survives the move", () => {
     const fs = await import("fs");
     const src = fs.readFileSync(new URL("../services/geminiCache.js", import.meta.url), "utf8");
     expect(src).toMatch(/config\.tools = toolsConfig/);
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// VERTEX_LOCATION, probed rather than assumed (2026-08-21).
+//
+// `:countTokens` against the real org, with a bogus model name as the control:
+// locations/eu 200, locations/us 200, locations/global 200, us-central1 404,
+// europe-west2 404, europe-west4 404.
+//
+// NO SINGLE REGION SERVES gemini-3.6-flash. The fixtures in this file used to
+// say `us-central1`, which reads as obviously correct, sits next to the US
+// Cloud Run service, and would have 404'd on the first turn of the first call.
+// ---------------------------------------------------------------------------
+describe("VERTEX_LOCATION", () => {
+  const base = { VERTEX_ENABLED: "true", GOOGLE_CLOUD_PROJECT: "p" };
+
+  it.each(["us", "eu"])("%s is a served multi-region and is usable", async (location) => {
+    const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
+    const cfg = vertexConfig();
+    expect(cfg.usable).toBe(true);
+    expect(cfg.forbidden).toBe(false);
+    expect(cfg.unproven).toBe(false);
+  });
+
+  it.each(["global", "GLOBAL", "Global"])("%s is REFUSED — it routes worldwide", async (location) => {
+    const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
+    const cfg = vertexConfig();
+    expect(cfg.forbidden).toBe(true);
+    // Not merely flagged. UNUSABLE, so getClient throws rather than quietly
+    // building a client that can send a UK caller's utterance to Iowa.
+    expect(cfg.usable).toBe(false);
+  });
+
+  it.each(["us-central1", "europe-west2", "europe-west4"])(
+    "%s is announced as unproven, not refused",
+    async (location) => {
+      const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
+      const cfg = vertexConfig();
+      expect(cfg.unproven).toBe(true);
+      // A1.2's line: fatal is for "the operator asked for one thing and would
+      // get another". `global` is that case. A single region is a plausible
+      // deliberate choice for some future model, so it is announced loudly and
+      // allowed.
+      expect(cfg.usable).toBe(true);
+    }
+  );
+
+  it("getClient refuses global at CLIENT CONSTRUCTION, not at provider selection", async () => {
+    const gemini = await load({ ...base, VERTEX_LOCATION: "global" });
+    expect(() => gemini.getClient()).toThrow(/routes requests to whichever region/i);
+    // And it built nothing. A guard that throws after construction has already
+    // handed the SDK the location it was supposed to reject.
+    expect(constructed).toEqual([]);
+  });
+
+  it("getClient accepts a multi-region and passes it through", async () => {
+    const gemini = await load({ ...base, VERTEX_LOCATION: "eu" });
+    gemini.getClient();
+    expect(constructed).toEqual([{ vertexai: true, project: "p", location: "eu" }]);
   });
 });
