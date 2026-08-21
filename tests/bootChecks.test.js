@@ -11,7 +11,7 @@
 // The line between fatal and announced is drawn deliberately and is the whole
 // design decision here; see lib/bootChecks.js.
 import { describe, it, expect } from "vitest";
-import { checkNotificationConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
+import { checkNotificationConfig, checkDeploymentMode, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
 
 const SID = "AC" + "1".repeat(32);
 const TOKEN = "authtoken1234567890";
@@ -175,5 +175,42 @@ describe("assertBootConfig", () => {
     }
     expect(lines.length).toBeGreaterThan(0);
     expect(JSON.stringify(lines)).toContain("smtp_half_configured");
+  });
+});
+
+describe("checkDeploymentMode", () => {
+  it("unset defaults to standard and says nothing", () => {
+    const { findings, mode } = checkDeploymentMode({});
+    expect(mode).toBe("standard");
+    expect(findings).toEqual([]);
+  });
+
+  it("hipaa is announced, so the boot log states which regime it is in", () => {
+    const { findings, mode } = checkDeploymentMode({ DEPLOYMENT_MODE: "hipaa" });
+    expect(mode).toBe("hipaa");
+    expect(codes(findings.filter((f) => f.severity === ANNOUNCE))).toContain("deployment_mode_hipaa");
+  });
+
+  // The direction of the mistake is the whole argument. A typo that defaulted
+  // to `standard` would turn every HIPAA protection OFF while reading, at a
+  // glance, as though it turned them on — invisible precisely to the person
+  // who was trying to be careful.
+  it.each(["hippa", "HIPPA", "hipaa-us", "true", "on"])("refuses DEPLOYMENT_MODE=%s", (value) => {
+    const { findings } = checkDeploymentMode({ DEPLOYMENT_MODE: value });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("deployment_mode_unrecognised");
+  });
+
+  it("is case- and whitespace-insensitive for a value that IS a mode", () => {
+    expect(checkDeploymentMode({ DEPLOYMENT_MODE: "  HIPAA " }).mode).toBe("hipaa");
+    expect(checkDeploymentMode({ DEPLOYMENT_MODE: "  HIPAA " }).findings.filter((f) => f.severity === FATAL)).toEqual([]);
+  });
+
+  it("assertBootConfig refuses to boot on a typo'd mode", () => {
+    expect(() =>
+      assertBootConfig(
+        { DEPLOYMENT_MODE: "hippa", SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example" },
+        { log: () => {} }
+      )
+    ).toThrow(/deployment_mode_unrecognised/);
   });
 });

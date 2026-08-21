@@ -157,15 +157,24 @@ CREATE TABLE integrations (
   name        text NOT NULL,
   enabled     boolean NOT NULL DEFAULT true,
   config      jsonb NOT NULL DEFAULT '{}',
+  -- migration 027. NULL means no Business Associate Agreement is recorded for
+  -- this endpoint's operator, which blocks dispatch in DEPLOYMENT_MODE=hipaa.
+  -- A record that one was asserted, not evidence that one exists.
+  baa_recorded_at timestamptz,
+  baa_reference   text,
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now(),
   UNIQUE(business_id, name)
 );
 
+-- The first question an audit asks is "which integrations are uncovered?".
+-- Partial: the rows that matter are the NULLs.
+CREATE INDEX idx_integrations_no_baa ON integrations (business_id) WHERE baa_recorded_at IS NULL;
+
 -- 9. Calendar connections (per-business OAuth tokens; migration 016)
--- Backs the dashboard backend's Google Calendar integration
--- (AI-phone-dashboard/backend/src/routes/calendar.js). One row per
--- (business_id, provider).
+-- INERT since A1.1 deleted Google Calendar sync. Nothing reads or writes these
+-- rows. Kept because migrations are append-only history: dropping the table
+-- would rewrite the past to remove four columns nobody pays for.
 CREATE TABLE calendar_connections (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id   uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
