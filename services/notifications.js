@@ -127,7 +127,10 @@ async function sendEmail({ to, subject, text, html }) {
     });
   } catch (err) {
     log.error("notification_email", { message: err?.message });
-    captureException(err, { to, subject });
+    // No `to` and no `subject`: a recipient address and a subject line that
+    // named a patient and an appointment time. lib/sentry.js would drop them
+    // now, but a leak the call site never produces cannot depend on that.
+    captureException(err, { context: "notifications.sendEmail" });
   }
 }
 
@@ -151,7 +154,7 @@ async function sendSms({ to, body }) {
     });
   } catch (err) {
     log.error("notification_sms", { message: err?.message });
-    captureException(err, { to });
+    captureException(err, { context: "notifications.sendSms" });
   }
 }
 
@@ -331,7 +334,7 @@ export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
     await sendSms({ to: toNumber, body: interpolateTemplate(chosen, vars) });
   } catch (err) {
     log.error("sms_followup_failed", { message: err?.message, kind });
-    captureException(err, { toNumber, kind });
+    captureException(err, { context: "notifications.sendCallerSms", kind });
   }
 }
 
