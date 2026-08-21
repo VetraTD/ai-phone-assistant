@@ -543,6 +543,84 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Data-subject requests (UK GDPR Art. 15 access, Art. 17 erasure)
+//
+// Behind requireBusinessAccess, which is the whole reason these can live on
+// this server at all. The caller route that used to sit here was DELETED by
+// A1.5 because it served a caller's call history and upcoming appointments to
+// anyone who knew a business UUID and a phone number — a UUID is an
+// identifier, not a secret, and at the time this server had no per-tenant
+// check to apply. A1.5 added one. These routes are strictly more sensitive
+// than the one that was removed, so they get it unconditionally.
+//
+// Staff-operated rather than self-service: a data subject asks the clinic, the
+// clinic runs it. Verifying that a caller on the phone is who they say they
+// are is a problem this system cannot solve, and Art. 12(6) expects a
+// controller to confirm identity before disclosing. Getting that wrong turns a
+// compliance feature into a disclosure channel.
+// ---------------------------------------------------------------------------
+
+/** Shared parsing for both routes: a valid tenant and a plausible phone. */
+function dsrParams(req, res) {
+  const businessId = req.params.id;
+  if (!businessId || !isValidUUID(businessId)) {
+    res.status(400).json({ error: "Invalid business id" });
+    return null;
+  }
+  const phone = req.params.phone;
+  // Loose on purpose. The stored spellings are inconsistent — E.164 from
+  // Twilio, hand-typed rows from the dashboard — and the matching is done on
+  // the last ten digits, so demanding E.164 here would reject the very inputs
+  // a member of staff is most likely to paste out of a ticket.
+  const digits = (phone || "").replace(/\D/g, "");
+  if (digits.length < 7) {
+    res.status(400).json({ error: "Invalid phone number" });
+    return null;
+  }
+  return { businessId, phone };
+}
+
+// GET — Art. 15. Everything held about one caller, for one tenant.
+app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  const data = await db.exportCallerData(parsed.businessId, parsed.phone);
+  if (!data) return res.status(500).json({ error: "Export failed" });
+
+  // Logged as an event because an access request is itself a processing
+  // activity worth recording under Art. 30 — with no phone number in it, since
+  // this log is not the place to publish the thing being asked about.
+  log.info("dsr_export_served", {
+    businessId: parsed.businessId,
+    calls: data.calls.length,
+    transcripts: data.transcripts.length,
+    appointments: data.appointments.length,
+    customerRequests: data.customerRequests.length,
+  });
+
+  res.json({
+    subject: { phone: parsed.phone },
+    generatedAt: new Date().toISOString(),
+    ...data,
+  });
+});
+
+// DELETE — Art. 17. See services/db.js eraseCallerData for what is erased,
+// what is kept, and the HIPAA retention tension flagged for counsel.
+app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  const counts = await db.eraseCallerData(parsed.businessId, parsed.phone);
+  if (!counts) return res.status(500).json({ error: "Erasure failed" });
+
+  res.json({ erased: counts });
+});
+
+// ---------------------------------------------------------------------------
 // Integrations API: definitions (catalog for dashboard)
 // ---------------------------------------------------------------------------
 

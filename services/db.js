@@ -1245,6 +1245,209 @@ export async function deleteIntegration(businessId, integrationId, opts = {}) {
   return true;
 }
 
+
+// ---------------------------------------------------------------------------
+// Data-subject requests (UK GDPR Art. 15 access, Art. 17 erasure)
+// ---------------------------------------------------------------------------
+//
+// Caller-level, because a caller is the data subject. Every one of these
+// matches a phone number the SAME way listAppointmentsByCaller does — the last
+// ten digits, compared after stripping non-digits.
+//
+// That is not a stylistic choice. The system stores the same person's number in
+// several spellings: E.164 from Twilio, whatever a member of staff typed into
+// the dashboard, whatever migration 026 could normalise without guessing a
+// country code. An export that matched exactly would return a subset and call
+// it complete, and an erasure that matched exactly would leave rows behind and
+// report success. Both are worse than not offering the feature at all.
+//
+// The rule lives in one place so export and erasure cannot drift apart. If they
+// drift, erasure silently misses exactly the rows export promised were there.
+
+/** Last ten digits of `col`, ignoring punctuation — the match rule, once. */
+function phoneMatch(col, param) {
+  const digits = (expr) => `regexp_replace(coalesce(${expr}, ''), '[^0-9]', '', 'g')`;
+  return `right(${digits(col)}, 10) = right(${digits("$" + param)}, 10)`;
+}
+
+/**
+ * Every PHI-bearing row this system holds about one caller, for one tenant.
+ *
+ * Tenant-scoped unconditionally. A phone number is not a secret and neither is
+ * a business UUID, so an unscoped export would be a cross-tenant read dressed
+ * up as a compliance feature.
+ *
+ * @param {string} businessId
+ * @param {string} phone
+ * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array}|null>}
+ */
+export async function exportCallerData(businessId, phone) {
+  if (!pool || !businessId || !phone) return null;
+
+  const calls = await q(
+    `SELECT id, twilio_call_sid, caller_number, twilio_number, status, started_at, ended_at,
+            duration_seconds, summary, sentiment, outcome
+       FROM calls
+      WHERE business_id = $1 AND ${phoneMatch("caller_number", 2)}
+      ORDER BY started_at ASC`,
+    [businessId, phone]
+  );
+  if (calls.error) {
+    log.error("db_error", { operation: "exportCallerData.calls", error: calls.error.message });
+    return null;
+  }
+
+  // Transcripts hang off calls, so they are reached through the ids just found
+  // rather than by matching a phone number they do not carry. This is the
+  // join-away table the RLS negative tests single out, for the same reason: it
+  // is where a hand-written filter gets forgotten.
+  const callIds = calls.rows.map((c) => c.id);
+  const transcripts = callIds.length
+    ? await q(
+        `SELECT call_id, speaker, message, sequence, created_at
+           FROM call_transcripts WHERE call_id = ANY($1) ORDER BY call_id, sequence`,
+        [callIds]
+      )
+    : { rows: [] };
+  if (transcripts.error) {
+    log.error("db_error", { operation: "exportCallerData.transcripts", error: transcripts.error.message });
+    return null;
+  }
+
+  const appointments = await q(
+    `SELECT id, client_name, client_phone, scheduled_at, status, notes, created_at
+       FROM appointments
+      WHERE business_id = $1 AND ${phoneMatch("client_phone", 2)}
+      ORDER BY scheduled_at ASC`,
+    [businessId, phone]
+  );
+  if (appointments.error) {
+    log.error("db_error", { operation: "exportCallerData.appointments", error: appointments.error.message });
+    return null;
+  }
+
+  const requests = await q(
+    `SELECT id, request_type, caller_name, callback_number, message, preferred_time, notes, created_at
+       FROM customer_requests
+      WHERE business_id = $1 AND ${phoneMatch("callback_number", 2)}
+      ORDER BY created_at ASC`,
+    [businessId, phone]
+  );
+  if (requests.error) {
+    log.error("db_error", { operation: "exportCallerData.requests", error: requests.error.message });
+    return null;
+  }
+
+  return {
+    calls: calls.rows,
+    transcripts: transcripts.rows,
+    appointments: appointments.rows,
+    customerRequests: requests.rows,
+  };
+}
+
+/**
+ * Erase a caller's personal data, keeping the non-identifying skeleton.
+ *
+ * WHAT THIS DOES, AND WHY IT IS NOT `DELETE FROM calls`:
+ *
+ *   call_transcripts  DELETED outright. A transcript is nothing but the data
+ *                     subject's own words; there is no non-personal residue
+ *                     worth keeping.
+ *   calls             KEPT, with caller_number and summary nulled. The row is
+ *                     also a business record — how many calls happened, how
+ *                     long they ran, what they cost. Deleting it erases the
+ *                     controller's own accounting along with the personal
+ *                     data, which Art. 17 does not ask for.
+ *   appointments      KEPT, with client_name, client_phone and notes nulled.
+ *                     Same reasoning: the slot was occupied, and that fact
+ *                     belongs to the clinic.
+ *   customer_requests KEPT, with every free-text and identifying field nulled.
+ *
+ * ONE TRANSACTION. A partial erasure is the worst outcome available: it reports
+ * success, satisfies nobody, and leaves the controller believing a request was
+ * honoured.
+ *
+ * ---------------------------------------------------------------------------
+ * FLAGGED FOR COUNSEL (ledger O18), deliberately NOT decided in code:
+ *
+ * UK GDPR gives a right to erasure. HIPAA gives no such right, and a covered
+ * entity has RETENTION obligations that can point the other way — Texas HB 300
+ * is in scope for the first clinic. This function does not refuse in `hipaa`
+ * mode, because refusing would be a legal judgement made by a developer, and
+ * the two lanes are separate stacks precisely so that policy can differ per
+ * lane. What it does instead is log every erasure with counts, so whatever
+ * counsel decides has an audit trail to be applied to.
+ * ---------------------------------------------------------------------------
+ *
+ * @param {string} businessId
+ * @param {string} phone
+ * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number}|null>}
+ */
+export async function eraseCallerData(businessId, phone) {
+  if (!pool || !businessId || !phone) return null;
+
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    log.error("db_error", { operation: "eraseCallerData.connect", error: err?.message });
+    return null;
+  }
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows: callRows } = await client.query(
+      `SELECT id FROM calls WHERE business_id = $1 AND ${phoneMatch("caller_number", 2)}`,
+      [businessId, phone]
+    );
+    const callIds = callRows.map((r) => r.id);
+
+    const t = callIds.length
+      ? await client.query(`DELETE FROM call_transcripts WHERE call_id = ANY($1)`, [callIds])
+      : { rowCount: 0 };
+
+    const c = callIds.length
+      ? await client.query(`UPDATE calls SET caller_number = NULL, summary = NULL WHERE id = ANY($1)`, [callIds])
+      : { rowCount: 0 };
+
+    const a = await client.query(
+      `UPDATE appointments SET client_name = NULL, client_phone = NULL, notes = NULL
+        WHERE business_id = $1 AND ${phoneMatch("client_phone", 2)}`,
+      [businessId, phone]
+    );
+
+    const r = await client.query(
+      `UPDATE customer_requests
+          SET caller_name = NULL, callback_number = NULL, message = NULL,
+              preferred_time = NULL, notes = NULL
+        WHERE business_id = $1 AND ${phoneMatch("callback_number", 2)}`,
+      [businessId, phone]
+    );
+
+    await client.query("COMMIT");
+
+    const counts = {
+      transcripts: t.rowCount,
+      calls: c.rowCount,
+      appointments: a.rowCount,
+      customerRequests: r.rowCount,
+    };
+    // The audit trail an erasure needs, carrying no phone number — the thing
+    // being erased must not be written to a log in the act of erasing it.
+    log.info("dsr_erasure_completed", { businessId, ...counts });
+    return counts;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    log.error("db_error", { operation: "eraseCallerData", error: err?.message });
+    captureException(new Error(err?.message), { table: "calls", op: "dsr_erase" });
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * Close the pool. Tests and short-lived scripts need this or the process hangs
  * on an open connection; the server never calls it.
