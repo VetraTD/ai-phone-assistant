@@ -109,7 +109,14 @@ export async function loadBusinessNotificationConfig(businessId) {
  * @param {{ to: string, subject: string, text: string, html?: string }} opts
  */
 async function sendEmail({ to, subject, text, html }) {
-  if (!mailTransport) return;
+  if (!mailTransport) {
+    // A caller reaching here has a business row asking for email. The boot
+    // check cannot see that — it only knows the env — so the drop is reported
+    // where it happens. Neither `to` nor `subject` is logged: both identify a
+    // person, and reporting one PHI leak must not open a second.
+    log.error("notification_dropped", { channel: "email", reason: "smtp_not_configured" });
+    return;
+  }
   try {
     await mailTransport.sendMail({
       from: SMTP_FROM_EMAIL,
@@ -129,7 +136,13 @@ async function sendEmail({ to, subject, text, html }) {
  * @param {{ to: string, body: string }} opts
  */
 async function sendSms({ to, body }) {
-  if (!twilioClient || !TWILIO_SMS_FROM) return;
+  if (!twilioClient || !TWILIO_SMS_FROM) {
+    log.error("notification_dropped", {
+      channel: "sms",
+      reason: !twilioClient ? "twilio_sms_not_configured" : "twilio_sms_from_missing",
+    });
+    return;
+  }
   try {
     await twilioClient.messages.create({
       to,

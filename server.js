@@ -19,6 +19,7 @@ import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
+import { assertBootConfig } from "./lib/bootChecks.js";
 import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -814,6 +815,14 @@ function attachWebSocket(httpServer) {
 }
 
 if (process.env.NODE_ENV !== "test") {
+  // Before the port opens, not after. A configuration problem that surfaces on
+  // the first real call surfaces during a real call — the point of this is that
+  // it is impossible to be running and quietly broken at the same time.
+  //
+  // It throws rather than exiting, so the failure travels the same path as any
+  // other startup error and a supervisor sees a non-zero exit with a reason.
+  assertBootConfig();
+
   const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Voice webhook: ${VOICE_URL}`);
