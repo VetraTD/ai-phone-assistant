@@ -7,6 +7,7 @@ const axios = require("axios");
 
 // DB pool (make sure src/db/index.js exports the pool)
 const pool = require("./db");
+const mailer = require("./services/mailer");
 
 const { sanitizeString, isValidEmail, rejectUnexpectedKeys } = require("./utils");
 const { apiLimiter, contactLimiter } = require("./middleware/rateLimiters");
@@ -80,10 +81,10 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Contact form (public, rate-limited) – sends to CONTACT_EMAIL via Brevo
+// Contact form (public, rate-limited) - sends to CONTACT_EMAIL over SMTP.
 app.post("/api/contact", contactLimiter, async (req, res) => {
   try {
-    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+    if (!mailer.isConfigured()) {
       return res.status(503).json({ error: "Contact form is not configured." });
     }
     const allowedKeys = ["name", "email", "message"];
@@ -99,31 +100,26 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: "Please provide a valid email address." });
     }
-    const toEmail = process.env.CONTACT_EMAIL || process.env.BREVO_FROM_EMAIL || "support@vetratd.com";
+    const toEmail = process.env.CONTACT_EMAIL || process.env.SMTP_FROM_EMAIL || "support@vetratd.com";
     const text = `Contact form submission from Vetra AI\n\nName: ${name}\nEmail: ${email}\n\nMessage:\n${message}`;
-    await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: process.env.BREVO_FROM_EMAIL,
-          name: process.env.BREVO_FROM_NAME || "Vetra AI",
-        },
-        to: [{ email: toEmail }],
-        replyTo: { email, name },
-        subject: `Vetra AI contact: ${name}`,
-        textContent: text,
-      },
-      {
-        headers: {
-          "api-key": process.env.BREVO_API_KEY,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-      }
-    );
+    // replyTo is the submitter, so hitting reply answers the prospect. The
+    // From stays the authenticated SMTP identity - sending AS the submitter
+    // would fail SPF at the receiver, which is how a contact form burns a
+    // domain's reputation.
+    await mailer.sendMail({
+      to: toEmail,
+      subject: `Vetra AI contact: ${name}`,
+      text,
+      replyTo: email,
+      fromName: "Vetra AI",
+    });
     res.json({ success: true });
   } catch (err) {
-    console.error("contact form failed:", err.response?.data ?? err.message);
+    // `err.message` only, never the error object. A transport error carries
+    // its connection options - including auth.pass - as own enumerable
+    // properties, so printing it wholesale dumps the SMTP password into the
+    // logs. Same defect class that leaked BREVO_API_KEY, one vendor later.
+    console.error("contact form failed:", err?.message);
     res.status(500).json({ error: "Failed to send message. Please try again or email us directly." });
   }
 });

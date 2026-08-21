@@ -6,6 +6,7 @@ const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
 const { getBusinessIdForUser, rejectUnexpectedKeys } = require("../utils");
 const { authSensitiveLimiter, sensitiveLimiter } = require("../middleware/rateLimiters");
+const mailer = require("../services/mailer");
 
 // Appointments for the authenticated user's business with simple ranges
 // GET /api/appointments?range=today|7days|upcoming
@@ -55,7 +56,7 @@ router.get("/api/appointments", authenticate, async (req, res) => {
 // POST /api/appointments/email  { range: "today" | "7days" | "upcoming" }
 router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, async (req, res) => {
   try {
-    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+    if (!mailer.isConfigured()) {
       return res
         .status(500)
         .json({ error: "Email sending is not configured on the server." });
@@ -127,31 +128,19 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
           "This email contains no patient information by design — email is not a " +
           "private channel, so the details stay in Vetra.";
 
-    await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: process.env.BREVO_FROM_EMAIL,
-          name: process.env.BREVO_FROM_NAME || biz.name || "Your business",
-        },
-        to: [{ email: biz.notification_email }],
-        // The subject named the business and "appointments", which is as far as
-        // a subject line can go without describing anyone’s care.
-        subject: `${label} appointments — ${businessName}`,
-        textContent: text,
-      },
-      {
-        headers: {
-          "api-key": process.env.BREVO_API_KEY,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-      }
-    );
+    await mailer.sendMail({
+      to: biz.notification_email,
+      // The subject names the business and "appointments", which is as far
+      // as a subject line can go without describing anyone's care.
+      subject: `${label} appointments - ${businessName}`,
+      text,
+      fromName: businessName,
+    });
 
     res.json({ success: true, count });
   } catch (err) {
-    console.error("appointments-email failed:", err.response?.data ?? err.message);
+    // Message only: a transport error carries auth.pass on its own properties.
+    console.error("appointments-email failed:", err?.message);
     res.status(500).json({ error: "Failed to send appointments email" });
   }
 });

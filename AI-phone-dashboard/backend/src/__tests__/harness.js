@@ -40,11 +40,18 @@ function injectFakeModule(specifier, exportsValue) {
  *
  * @returns {{ app: import('express').Express, poolQueryMock: import('vitest').Mock, authState: { user: object|null } }}
  */
-export function createTestApp() {
+export function createTestApp({ mailer } = {}) {
   clearSrcRequireCache();
 
   const poolQueryMock = vi.fn();
   const authState = { user: { ...DEFAULT_TEST_USER } };
+
+  // The mailer lives under src/, so clearSrcRequireCache() above would wipe any
+  // fake injected before this call — which is exactly why injectFakeAxios works
+  // and a symmetrical injectFakeMailer would not. It goes in here, after the
+  // clear and before server.js is required, the same way db and authMiddleware
+  // do.
+  if (mailer) injectFakeModule("../services/mailer.js", mailer);
 
   injectFakeModule("../db/index.js", {
     query: (...args) => poolQueryMock(...args),
@@ -86,3 +93,4 @@ export function injectFakeAxios(fake) {
     else delete require.cache[resolved];
   };
 }
+

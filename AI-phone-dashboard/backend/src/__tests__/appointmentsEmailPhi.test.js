@@ -1,10 +1,13 @@
 // A1.3 gate, dashboard half: the appointments digest carries no PHI.
 //
-// POST /api/appointments/email built a Brevo message containing, one line per
+// POST /api/appointments/email built an email containing, one line per
 // appointment: the patient's name, their phone number, the appointment time,
 // its status, and free-text notes. For a cardiology clinic that is a list of
 // who is being seen and when, sent through a transactional email vendor with no
 // BAA, with the business name and the word "appointments" in the subject.
+//
+// The vendor is gone now (Brevo -> SMTP), but the assertions are unchanged and
+// still the point: WHAT is in the message, not who carries it.
 //
 // It is the largest single PHI egress in the codebase, and it is triggered by a
 // button.
@@ -13,7 +16,7 @@
 // list itself stays in the dashboard, behind auth.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
-import { createTestApp, injectFakeAxios } from "./harness.js";
+import { createTestApp } from "./harness.js";
 
 const PHI = {
   clientName: "Jane Q Patient",
@@ -39,15 +42,12 @@ const COUNT_ROW = [
 ];
 
 describe("POST /api/appointments/email — digest content", () => {
-  let app, poolQueryMock, restoreAxios, axiosPost;
+  let app, poolQueryMock, sendMail;
 
   beforeEach(() => {
-    process.env.BREVO_API_KEY = "test-key";
-    process.env.BREVO_FROM_EMAIL = "noreply@example.com";
     process.env.DASHBOARD_URL = "https://dashboard.example/app";
-    axiosPost = vi.fn(async () => ({ data: { messageId: "1" } }));
-    restoreAxios = injectFakeAxios({ post: axiosPost });
-    ({ app, poolQueryMock } = createTestApp());
+    sendMail = vi.fn(async () => undefined);
+    ({ app, poolQueryMock } = createTestApp({ mailer: { sendMail, isConfigured: () => true } }));
     poolQueryMock.mockImplementation((sql) => {
       if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
       if (sql.includes("from businesses")) {
@@ -59,7 +59,6 @@ describe("POST /api/appointments/email — digest content", () => {
   });
 
   afterEach(() => {
-    restoreAxios();
     delete process.env.DASHBOARD_URL;
     vi.restoreAllMocks();
   });
@@ -70,10 +69,10 @@ describe("POST /api/appointments/email — digest content", () => {
       .set("Authorization", "Bearer t")
       .send({ range: "today" });
     expect(res.status).toBe(200);
-    return JSON.stringify(axiosPost.mock.calls[0]?.[1] ?? {});
+    return JSON.stringify(sendMail.mock.calls[0]?.[0] ?? {});
   }
 
-  it.each(Object.entries(PHI))("the Brevo payload carries no %s", async (_field, value) => {
+  it.each(Object.entries(PHI))("the message carries no %s", async (_field, value) => {
     expect(await send()).not.toContain(value);
   });
 

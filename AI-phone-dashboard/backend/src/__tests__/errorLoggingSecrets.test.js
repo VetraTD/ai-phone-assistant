@@ -1,44 +1,53 @@
-// Regression test: axios errors must never be serialized wholesale to logs.
+// Regression test: an outbound-transport error must never be serialized
+// wholesale to logs.
 //
-// A1.1 removed this file's second case with the Google Calendar OAuth callback
-// it exercised. The defect class is unchanged and still guarded here — the
-// contact form is now the one outbound axios call in this service that can fail
-// at the network level with a credential on `err.config`.
-//
-// On a network-level failure (DNS, TLS, timeout) an AxiosError has no
-// `.response`, so `err.response?.data || err` falls through to the error
-// object itself — whose `config.headers` / `config.data` are own enumerable
+// The defect class has now outlived two vendors, which is the argument for
+// testing the class rather than the vendor. It was first found with an
+// AxiosError: on a network-level failure (DNS, TLS, timeout) there is no
+// `.response`, so `err.response?.data || err` falls through to the error object
+// itself — whose `config.headers` and `config.data` are own enumerable
 // properties that console.error happily prints, dumping the outbound API key
-// or bearer token into stdout and any log retention behind it.
+// into stdout and whatever log retention sits behind it.
+//
+// A1.1 removed the Google Calendar OAuth case with the route it exercised.
+// Removing Brevo has now removed the second. The contact form is still the
+// place to test it, because it is still the one outbound send in this service —
+// only now it goes over SMTP, and a nodemailer transport error carries the
+// connection options, INCLUDING auth.pass, on exactly the same kind of own
+// enumerable property. Same shape, same trap, different vendor.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
-import { createTestApp, injectFakeAxios } from "./harness.js";
+import { createTestApp } from "./harness.js";
 
-const BREVO_KEY = "xkeysib-SECRET-BREVO-KEY-must-not-be-logged";
+const SMTP_PASS = "SECRET-SMTP-PASSWORD-must-not-be-logged";
 
-/** An AxiosError as it looks with no HTTP response: credentials on `config`. */
-function networkAxiosError(headers, data) {
-  const err = new Error("getaddrinfo ENOTFOUND api.example.com");
-  err.name = "AxiosError";
-  err.code = "ENOTFOUND";
-  err.isAxiosError = true;
-  err.config = { url: "https://api.example.com/v3/send", headers, data };
-  err.response = undefined;
+/**
+ * A transport error as nodemailer produces one, with credentials hanging off
+ * the error rather than inside the message.
+ */
+function transportError() {
+  const err = new Error("connect ETIMEDOUT smtp.example.com:587");
+  err.code = "ETIMEDOUT";
+  err.command = "CONN";
+  // The trap: printing this object prints the password.
+  err.options = {
+    host: "smtp.example.com",
+    port: 587,
+    auth: { user: "bot@example.com", pass: SMTP_PASS },
+  };
   return err;
 }
 
-describe("network-level axios failures do not leak credentials to logs", () => {
-  let app, restoreAxios, axiosPost, errorSpy;
+describe("transport failures do not leak credentials to logs", () => {
+  let app, sendMail, errorSpy;
 
   beforeEach(() => {
-    axiosPost = vi.fn();
-    restoreAxios = injectFakeAxios({ post: axiosPost });
+    sendMail = vi.fn();
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    ({ app } = createTestApp());
+    ({ app } = createTestApp({ mailer: { sendMail, isConfigured: () => true } }));
   });
 
   afterEach(() => {
-    restoreAxios();
     vi.restoreAllMocks();
   });
 
@@ -60,12 +69,8 @@ describe("network-level axios failures do not leak credentials to logs", () => {
       .join("\n");
   }
 
-  it("keeps BREVO_API_KEY out of the contact-form error log", async () => {
-    process.env.BREVO_API_KEY = BREVO_KEY;
-    process.env.BREVO_FROM_EMAIL = "noreply@example.com";
-    axiosPost.mockRejectedValue(
-      networkAxiosError({ "api-key": BREVO_KEY, "Content-Type": "application/json" })
-    );
+  it("keeps the SMTP password out of the contact-form error log", async () => {
+    sendMail.mockRejectedValue(transportError());
 
     const res = await request(app)
       .post("/api/contact")
@@ -75,6 +80,42 @@ describe("network-level axios failures do not leak credentials to logs", () => {
     expect(errorSpy).toHaveBeenCalled();
     const output = loggedOutput();
     expect(output).toContain("contact form failed");
-    expect(output).not.toContain(BREVO_KEY);
+    expect(output).not.toContain(SMTP_PASS);
+  });
+
+  it("keeps it out of the appointments-digest error log too", async () => {
+    // The second sender in this service, and it had the same `err.response?.data
+    // ?? err.message` shape the contact form did.
+    const { app: app2, poolQueryMock } = createTestApp({
+      mailer: { sendMail, isConfigured: () => true },
+    });
+    poolQueryMock.mockImplementation((sql) => {
+      if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
+      if (sql.includes("from businesses")) {
+        return Promise.resolve({ rows: [{ name: "Clinic", notification_email: "owner@example.com" }] });
+      }
+      if (sql.includes("from appointments")) return Promise.resolve({ rows: [{ total: 1 }] });
+      return Promise.reject(new Error("unexpected query: " + sql));
+    });
+    sendMail.mockRejectedValue(transportError());
+
+    const res = await request(app2)
+      .post("/api/appointments/email")
+      .set("Authorization", "Bearer t")
+      .send({ range: "today" });
+
+    expect(res.status).toBe(500);
+    expect(loggedOutput()).not.toContain(SMTP_PASS);
+  });
+
+  it("says nothing at all when the send succeeds", async () => {
+    sendMail.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .post("/api/contact")
+      .send({ name: "Ada", email: "ada@example.com", message: "hello" });
+
+    expect(res.status).toBe(200);
+    expect(loggedOutput()).not.toContain("contact form failed");
   });
 });
