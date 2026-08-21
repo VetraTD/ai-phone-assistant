@@ -19,6 +19,7 @@ import {
   explicitCacheEnabled,
 } from "./geminiCache.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
+import { assertVendorAllowed } from "../lib/compliance.js";
 import {
   collectStaticFragments,
   collectStepGuidance,
@@ -124,14 +125,89 @@ export function callToolNames(cfg, extras = {}) {
 let geminiClient = null;
 
 /**
+ * Which backend serves Gemini: Vertex AI, or the Gemini Developer API.
+ *
+ * ---------------------------------------------------------------------------
+ * They are not the same product, and the difference is a compliance boundary
+ * ---------------------------------------------------------------------------
+ *
+ * The API-key path is the Gemini Developer API (AI Studio). It is not a Google
+ * CLOUD service, and the Google Cloud BAA accepted 2026-08-20 covers Google
+ * Cloud services. Vertex AI is one; AI Studio is not.
+ *
+ * So in `hipaa` mode the API-key path is not a fallback, it is a violation, and
+ * getClient() refuses rather than quietly serving a call through an uncovered
+ * endpoint. That refusal is the point: an uncovered LLM call carries the
+ * caller's entire utterance.
+ *
+ * ---------------------------------------------------------------------------
+ * UNVERIFIED, and the ledger says so: "Code only — cannot be verified before
+ * C1." No Vertex call has been made from this code. What C1 measures is
+ * `llm_ttfb_ms`, which the A0 baseline puts at 42% of a 2,611 ms turn — the
+ * dominant stage, and the number this change moves in one direction or the
+ * other. Nothing here should be read as evidence that it works.
+ * ---------------------------------------------------------------------------
+ */
+export function vertexConfig(env = process.env) {
+  const project = (env.GOOGLE_CLOUD_PROJECT || "").trim();
+  const location = (env.VERTEX_LOCATION || "").trim();
+  // Explicit opt-in rather than "project is set, so probably Vertex".
+  // GOOGLE_CLOUD_PROJECT is set by Cloud Run automatically, so inferring from
+  // it alone would silently switch backends the moment this deploys — which is
+  // exactly the kind of change that should be a decision, not a side effect.
+  const enabled = env.VERTEX_ENABLED === "true" || env.VERTEX_ENABLED === "1";
+  return { enabled, project, location, usable: enabled && !!project && !!location };
+}
+
+/**
  * Lazily create (once) and return the shared GoogleGenAI client.
+ *
+ * One instance, reused: the SDK holds an HTTP agent and a connection pool, and
+ * creating one per turn (as this file used to) throws that pool away every
+ * call.
+ *
  * @returns {GoogleGenAI}
  */
 export function getClient() {
-  if (!geminiClient) {
-    geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  if (geminiClient) return geminiClient;
+
+  const vertex = vertexConfig();
+
+  if (vertex.usable) {
+    // No apiKey. Vertex authenticates with Application Default Credentials,
+    // which on Cloud Run is the runtime service account's metadata-server
+    // token — a credential that cannot be copied out of the project, unlike
+    // an API key that can be pasted into anything.
+    geminiClient = new GoogleGenAI({
+      vertexai: true,
+      project: vertex.project,
+      location: vertex.location,
+    });
+    log.info("gemini_backend", { backend: "vertex", project: vertex.project, location: vertex.location });
+    return geminiClient;
   }
+
+  // Asked for Vertex and did not supply what it needs. Falling back to the API
+  // key here would be the silent-failure class this codebase keeps finding:
+  // the operator asked for the covered backend and would get the uncovered one.
+  if (vertex.enabled) {
+    throw new Error(
+      "VERTEX_ENABLED is set but GOOGLE_CLOUD_PROJECT and/or VERTEX_LOCATION are not. " +
+        "Refusing to fall back to the Gemini Developer API, which the Google Cloud BAA does not cover."
+    );
+  }
+
+  // The Gemini Developer API. Refused in `hipaa` mode — see the comment above
+  // vertexConfig for why this is a compliance boundary and not a preference.
+  assertVendorAllowed("gemini-developer-api");
+
+  geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return geminiClient;
+}
+
+/** Test seam: drop the memoised client so a new env takes effect. */
+export function resetClient() {
+  geminiClient = null;
 }
 
 /**
