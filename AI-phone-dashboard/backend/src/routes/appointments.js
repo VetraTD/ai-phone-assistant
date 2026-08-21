@@ -4,19 +4,16 @@ const axios = require("axios");
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser, rejectUnexpectedKeys } = require("../utils");
+const { rejectUnexpectedKeys } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { authSensitiveLimiter, sensitiveLimiter } = require("../middleware/rateLimiters");
 const mailer = require("../services/mailer");
 
 // Appointments for the authenticated user's business with simple ranges
 // GET /api/appointments?range=today|7days|upcoming
-router.get("/api/appointments", authenticate, async (req, res) => {
+router.get("/api/appointments", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const { range } = req.query;
 
@@ -50,24 +47,18 @@ router.get("/api/appointments", authenticate, async (req, res) => {
     console.error("appointments-today failed:", err);
     res.status(500).json({ error: "Failed to load today's appointments" });
   }
-});
+}));
 
 // Send appointments summary email to the business notification email
 // POST /api/appointments/email  { range: "today" | "7days" | "upcoming" }
-router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, async (req, res) => {
+router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
     if (!mailer.isConfigured()) {
       return res
         .status(500)
         .json({ error: "Email sending is not configured on the server." });
     }
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res
-        .status(403)
-        .json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const bizRes = await pool.query(
       `select name, notification_email from businesses where id = $1`,
@@ -143,6 +134,6 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
     console.error("appointments-email failed:", err?.message);
     res.status(500).json({ error: "Failed to send appointments email" });
   }
-});
+}));
 
 module.exports = router;

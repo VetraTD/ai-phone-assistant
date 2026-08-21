@@ -3,7 +3,8 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser, sanitizeString } = require("../utils");
+const { sanitizeString } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 
 // Calls list with filters (scoped to the authenticated user's business)
 // Supports query params:
@@ -13,13 +14,9 @@ const { getBusinessIdForUser, sanitizeString } = require("../utils");
 // from (YYYY-MM-DD)      started_at >= from 00:00
 // to (YYYY-MM-DD)        started_at <  (to + 1 day)
 // has_appointments=true  only calls with at least 1 appointment
-router.get("/api/calls", authenticate, async (req, res) => {
+router.get("/api/calls", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const userBusinessId = await getBusinessIdForUser(authUserId);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
 
     const {
       status,
@@ -53,8 +50,6 @@ router.get("/api/calls", authenticate, async (req, res) => {
       // partial match (case-insensitive)
       where.push(`caller_number ILIKE ${addParam(`%${callerSearch}%`)}`);
     }
-
-
 
     const { sentiment, has_summary, outcome } = req.query;
 
@@ -90,8 +85,6 @@ if (needs_followup === "true") {
     )
   `);
 }
-
-
 
     // Date filtering
     // from/to are YYYY-MM-DD strings
@@ -144,17 +137,13 @@ if (needs_followup === "true") {
     const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
     res.status(status).json({ error: status === 500 ? "Failed to load calls" : err.message });
   }
-});
+}));
 
 // GET a single call with transcript + appointments + customer requests
 // /api/calls/:id (scoped to the authenticated user's business)
-router.get("/api/calls/:id", authenticate, async (req, res) => {
+router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const userBusinessId = await getBusinessIdForUser(authUserId);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
 
     const { id } = req.params;
 
@@ -199,6 +188,6 @@ router.get("/api/calls/:id", authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 module.exports = router;

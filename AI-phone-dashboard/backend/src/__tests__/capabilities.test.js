@@ -24,7 +24,7 @@ describe("capability settings", () => {
 
   function mockOwnership(businessId = BUSINESS_ID, rows = []) {
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) {
+      if (sql.includes("app_lookup_user_by_email")) {
         return Promise.resolve({ rows: [{ business_id: businessId }] });
       }
       if (sql.includes("from business_capabilities")) {

@@ -53,8 +53,19 @@ export function createTestApp({ mailer } = {}) {
   // do.
   if (mailer) injectFakeModule("../services/mailer.js", mailer);
 
+  // The db module now exports { query, withTenant, ... } rather than the Pool
+  // itself, so the fake has to carry both.
+  //
+  // `withTenant` is TRANSPARENT here, and deliberately so: what it actually
+  // does — BEGIN, SET LOCAL app.business_id, COMMIT — is only meaningful
+  // against a real database, and is proved there by
+  // tests/db/dashboardTenantScoping.test.js in the root suite. Simulating it
+  // over a query mock would prove things about the mock. These tests ask the
+  // other question: does each route build the right SQL and the right response.
   injectFakeModule("../db/index.js", {
     query: (...args) => poolQueryMock(...args),
+    withTenant: async (_businessId, fn) => fn(),
+    currentTenant: () => null,
   });
 
   injectFakeModule("../middleware/authMiddleware.js", function fakeAuthenticate(req, res, next) {

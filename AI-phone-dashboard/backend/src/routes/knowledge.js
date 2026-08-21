@@ -3,7 +3,8 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser, buildUpdateFromWhitelist } = require("../utils");
+const { buildUpdateFromWhitelist } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 const {
   KNOWLEDGE_FIELD_VALIDATORS,
   validateQuestion,
@@ -17,16 +18,13 @@ const { authSensitiveLimiter } = require("../middleware/rateLimiters");
 // Knowledge base CRUD (business_knowledge — Q&A pairs injected into the AI
 // prompt at call time). Business-ownership check mirrors the pattern used
 // by /api/business/:id/settings and the other business-scoped endpoints:
-// resolve the authenticated user's business_id via getBusinessIdForUser,
+// resolve the authenticated user's business_id in withTenantHandler,
 // then require every row touched to belong to it.
 // ---------------------------------------------------------------------------
 
-router.get("/api/knowledge", authenticate, async (req, res) => {
+router.get("/api/knowledge", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const { businessId } = req.query;
     if (!businessId || businessId !== userBusinessId) {
       return res.status(403).json({ error: "Forbidden" });
@@ -41,14 +39,11 @@ router.get("/api/knowledge", authenticate, async (req, res) => {
     console.error("knowledge list failed:", err);
     res.status(500).json({ error: "Failed to load knowledge base" });
   }
-});
+}));
 
-router.post("/api/knowledge", authSensitiveLimiter, authenticate, async (req, res) => {
+router.post("/api/knowledge", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
 
     const { businessId, question, answer, category, priority } = req.body || {};
     if (!businessId || businessId !== userBusinessId) {
@@ -75,14 +70,11 @@ router.post("/api/knowledge", authSensitiveLimiter, authenticate, async (req, re
     console.error("knowledge create failed:", err);
     res.status(500).json({ error: "Failed to create knowledge entry" });
   }
-});
+}));
 
-router.put("/api/knowledge/:id", authSensitiveLimiter, authenticate, async (req, res) => {
+router.put("/api/knowledge/:id", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const { id } = req.params;
 
     const existing = await pool.query(`SELECT * FROM business_knowledge WHERE id = $1`, [id]);
@@ -109,14 +101,11 @@ router.put("/api/knowledge/:id", authSensitiveLimiter, authenticate, async (req,
     console.error("knowledge update failed:", err);
     res.status(500).json({ error: "Failed to update knowledge entry" });
   }
-});
+}));
 
-router.delete("/api/knowledge/:id", authSensitiveLimiter, authenticate, async (req, res) => {
+router.delete("/api/knowledge/:id", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const { id } = req.params;
 
     const existing = await pool.query(`SELECT business_id FROM business_knowledge WHERE id = $1`, [id]);
@@ -133,6 +122,6 @@ router.delete("/api/knowledge/:id", authSensitiveLimiter, authenticate, async (r
     console.error("knowledge delete failed:", err);
     res.status(500).json({ error: "Failed to delete knowledge entry" });
   }
-});
+}));
 
 module.exports = router;

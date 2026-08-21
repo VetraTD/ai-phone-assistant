@@ -90,7 +90,7 @@ describe("transport failures do not leak credentials to logs", () => {
       mailer: { sendMail, isConfigured: () => true },
     });
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
+      if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
       if (sql.includes("from businesses")) {
         return Promise.resolve({ rows: [{ name: "Clinic", notification_email: "owner@example.com" }] });
       }

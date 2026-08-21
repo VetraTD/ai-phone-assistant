@@ -14,7 +14,7 @@ describe("PUT /api/business/:id/settings", () => {
 
   function mockOwnership(businessId = BUSINESS_ID) {
     poolQueryMock.mockImplementation((sql, params) => {
-      if (sql.includes("from users")) {
+      if (sql.includes("app_lookup_user_by_email")) {
         return Promise.resolve({ rows: [{ business_id: businessId }] });
       }
       if (sql.startsWith("UPDATE businesses")) {
@@ -335,7 +335,7 @@ describe("PUT /api/business/:id/settings", () => {
 
   it("forbids updating a business the authenticated user doesn't own", async () => {
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) {
+      if (sql.includes("app_lookup_user_by_email")) {
         return Promise.resolve({ rows: [{ business_id: OTHER_BUSINESS_ID }] });
       }
       return Promise.reject(new Error("should not query past ownership check"));

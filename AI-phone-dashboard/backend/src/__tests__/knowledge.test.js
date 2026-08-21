@@ -15,7 +15,7 @@ describe("/api/knowledge CRUD", () => {
 
   function mockOwner(businessId = BUSINESS_ID) {
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) {
+      if (sql.includes("app_lookup_user_by_email")) {
         return Promise.resolve({ rows: [{ business_id: businessId }] });
       }
       return Promise.reject(new Error("unhandled query in this test: " + sql));
@@ -25,7 +25,7 @@ describe("/api/knowledge CRUD", () => {
   describe("GET /api/knowledge", () => {
     it("returns rows for the caller's own business, ordered priority desc", async () => {
       poolQueryMock.mockImplementation((sql, params) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.includes("FROM business_knowledge")) {
           expect(params).toEqual([BUSINESS_ID]);
           expect(sql).toMatch(/ORDER BY priority DESC/);
@@ -54,7 +54,7 @@ describe("/api/knowledge CRUD", () => {
   describe("POST /api/knowledge", () => {
     it("creates an entry with defaults for optional fields", async () => {
       poolQueryMock.mockImplementation((sql, params) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("INSERT INTO business_knowledge")) {
           expect(params).toEqual([BUSINESS_ID, "Do you take walk-ins?", "Yes, anytime.", null, 0]);
           return Promise.resolve({ rows: [{ id: ENTRY_ID, ...paramsAsRow(params) }] });
@@ -108,7 +108,7 @@ describe("/api/knowledge CRUD", () => {
   describe("PUT /api/knowledge/:id", () => {
     it("applies a partial update (enabled toggle) and returns the row", async () => {
       poolQueryMock.mockImplementation((sql, params) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("SELECT * FROM business_knowledge")) {
           return Promise.resolve({ rows: [{ id: ENTRY_ID, business_id: BUSINESS_ID, enabled: true }] });
         }
@@ -131,7 +131,7 @@ describe("/api/knowledge CRUD", () => {
 
     it("404s for a nonexistent entry", async () => {
       poolQueryMock.mockImplementation((sql) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("SELECT * FROM business_knowledge")) return Promise.resolve({ rows: [] });
         return Promise.reject(new Error("unexpected query: " + sql));
       });
@@ -145,7 +145,7 @@ describe("/api/knowledge CRUD", () => {
 
     it("denies updating an entry owned by another business", async () => {
       poolQueryMock.mockImplementation((sql) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("SELECT * FROM business_knowledge")) {
           return Promise.resolve({ rows: [{ id: ENTRY_ID, business_id: OTHER_BUSINESS_ID }] });
         }
@@ -163,7 +163,7 @@ describe("/api/knowledge CRUD", () => {
   describe("DELETE /api/knowledge/:id", () => {
     it("deletes an owned entry", async () => {
       poolQueryMock.mockImplementation((sql, params) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("SELECT business_id FROM business_knowledge")) {
           return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         }
@@ -182,7 +182,7 @@ describe("/api/knowledge CRUD", () => {
 
     it("denies deleting an entry owned by another business", async () => {
       poolQueryMock.mockImplementation((sql) => {
-        if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
         if (sql.startsWith("SELECT business_id FROM business_knowledge")) {
           return Promise.resolve({ rows: [{ business_id: OTHER_BUSINESS_ID }] });
         }
