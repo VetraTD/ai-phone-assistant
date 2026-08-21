@@ -130,18 +130,51 @@ app.use((req, res, next) => {
   return defaultJsonParser(req, res, next);
 });
 
-// Match dashboard backend: prod domains + localhost. Override/extend with CORS_ORIGIN (comma-separated).
-const defaultCorsOrigins = [
-  "http://localhost:5173",
-  "http://localhost:4173",
-  "https://vetratd.com",
-  "https://www.vetratd.com",
-  "https://ai-phone-dashboard-lemon.vercel.app",
+// CORS allow-list.
+//
+// Both this server and the dashboard backend already allow-listed rather than
+// reflecting the Origin header, so the shape was right. A9 fixes what was
+// wrong inside it.
+//
+// 1. THE VERCEL PREVIEW DOMAIN IS GONE. `ai-phone-dashboard-lemon.vercel.app`
+//    was allow-listed permanently, and D7 cancels the Vercel account. A
+//    released Vercel subdomain can be claimed by anyone, so leaving it here
+//    would hand a stranger a cross-origin foothold against an authenticated
+//    dashboard session, at a moment nobody would connect to a hosting change.
+//    It stays reachable through CORS_ORIGINS for as long as it is genuinely in
+//    use, which is the difference between a deliberate entry and a permanent
+//    one.
+//
+// 2. LOCALHOST IS DEV-ONLY. A production deployment allow-listing
+//    http://localhost:5173 is not catastrophic, but it is an origin the
+//    production server has no reason to trust, and it costs nothing to drop.
+//
+// 3. ONE ENVIRONMENT VARIABLE NAME. This server read CORS_ORIGIN and the
+//    dashboard read CORS_ORIGINS — same concept, two spellings, and setting
+//    the wrong one fails silently by allowing nothing extra. Both now read
+//    CORS_ORIGINS, with the old singular still honoured so an existing
+//    deployment does not break, and announced at boot when it is what is
+//    actually in use. Exactly the class of drift D1 exists to reconcile.
+const isProduction = process.env.NODE_ENV === "production";
+
+const devCorsOrigins = ["http://localhost:5173", "http://localhost:4173"];
+const prodCorsOrigins = ["https://vetratd.com", "https://www.vetratd.com"];
+
+const envCorsOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (!process.env.CORS_ORIGINS && process.env.CORS_ORIGIN) {
+  log.error("cors_origin_deprecated", {
+    reason: "CORS_ORIGIN is the old name; the dashboard backend reads CORS_ORIGINS. Set CORS_ORIGINS.",
+    severity: "warn",
+  });
+}
+
+const allowedCorsOrigins = [
+  ...new Set([...(isProduction ? [] : devCorsOrigins), ...prodCorsOrigins, ...envCorsOrigins]),
 ];
-const envCorsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
-  : [];
-const allowedCorsOrigins = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])];
 
 app.use(
   cors({

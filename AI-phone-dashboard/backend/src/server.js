@@ -23,20 +23,28 @@ app.use(
   })
 );
 
-// CORS: allow localhost for dev, Vercel preview, and production domain(s)
-const defaultOrigins = [
-  "http://localhost:5173",
-  "http://localhost:4173",
-  "https://ai-phone-dashboard-lemon.vercel.app",
-  "https://vetratd.com",
-  "https://www.vetratd.com",
+// CORS allow-list. Kept deliberately in step with the voice server's — see the
+// long comment there for the reasoning behind each of these three changes.
+//
+// The short version: the Vercel preview domain is GONE, because D7 cancels the
+// Vercel account and a released *.vercel.app subdomain can be claimed by
+// anyone — which would hand a stranger a cross-origin foothold against an
+// authenticated dashboard session at a moment nobody would connect to a
+// hosting change. Localhost is dev-only. And the two servers now read the same
+// variable name.
+const isProduction = process.env.NODE_ENV === "production";
+
+const devOrigins = ["http://localhost:5173", "http://localhost:4173"];
+const prodOrigins = ["https://vetratd.com", "https://www.vetratd.com"];
+
+const envOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const allowedOrigins = [
+  ...new Set([...(isProduction ? [] : devOrigins), ...prodOrigins, ...envOrigins]),
 ];
-
-const envOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-  : [];
-
-const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 app.use(
   cors({
