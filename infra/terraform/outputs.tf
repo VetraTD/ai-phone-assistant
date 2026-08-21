@@ -59,9 +59,20 @@ output "artifact_registry" {
 
 
 
-output "audit_log_buckets" {
-  description = "Regional audit log buckets. UK logs stay in the EU one."
-  value       = { for k, v in google_logging_project_bucket_config.audit : k => v.id }
+output "log_buckets" {
+  description = "Log destinations, {region}-{stream}. The `audit` ones are what Bucket Lock will eventually be applied to; the `app` ones must never be locked."
+  value       = { for k, v in google_logging_project_bucket_config.sink_target : k => v.id }
+}
+
+output "organization_sinks" {
+  description = "Aggregated sinks at the org node. A project admin cannot delete or edit these, which is the point."
+  value = {
+    for k, v in google_logging_organization_sink.aggregated : k => {
+      name            = v.name
+      filter          = v.filter
+      writer_identity = v.writer_identity
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
