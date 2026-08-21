@@ -12,7 +12,6 @@ import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
 import { WebSocketServer } from "ws";
-import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber } from "./lib/phone.js";
@@ -862,23 +861,28 @@ export { app };
 const wss = new WebSocketServer({ noServer: true });
 
 /**
- * Pick the call pipeline for a new Media Streams connection.
+ * The call pipeline for a new Media Streams connection.
  *
- * v2 (lib/voice/session.js) is the DEFAULT. PIPELINE_V2 is an opt-OUT: only
- * the explicit string "false" falls back to the legacy lib/mediaStream.js,
- * which is retained this release purely as a rollback escape hatch. Legacy
- * lacks the LLM turn timeout (a hung Gemini stream holds the call to the
- * 30-minute cap), the take-message fallback, ElevenLabs/per-business voice
- * selection (the dashboard's voice picker writes columns legacy never reads),
- * multilingual STT, the toSpeakable normalizer, the utterance cache, and VAD
- * barge-in — so it must never be what a real caller gets by default.
+ * There is one. A10 deleted lib/mediaStream.js and the PIPELINE_V2 opt-out
+ * that reached it.
+ *
+ * The escape hatch was retained for exactly one release, and by the end of it
+ * the two pipelines were not comparable. v2 has the LLM turn timeout (without
+ * which a hung Gemini stream holds a call to the 30-minute cap), the
+ * deterministic take-message fallback, per-business voice selection, ElevenLabs
+ * streaming, multilingual STT, the toSpeakable normalizer, the utterance cache,
+ * and VAD barge-in. Setting PIPELINE_V2=false during an incident would not have
+ * been a rollback, it would have been a second, worse incident — and one nobody
+ * had exercised, since every measurement in the ledger (A0's baseline, the
+ * probe, the eval suite) runs through v2.
+ *
+ * A rollback path that is never tested is not a rollback path. The real one is
+ * the ledger's, and it is better: repoint the Twilio webhooks.
  *
  * @returns {Function} the connection handler
  */
 export function selectPipelineHandler() {
-  return process.env.PIPELINE_V2 === "false"
-    ? handleMediaStreamConnection
-    : handleVoiceSessionConnection;
+  return handleVoiceSessionConnection;
 }
 
 /** Websocket path for the latency probe's scripted-caller leg. */

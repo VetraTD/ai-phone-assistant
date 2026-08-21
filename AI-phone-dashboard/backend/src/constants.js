@@ -17,7 +17,7 @@ const MODULE_TASKS = [
 
 // Source of truth: root repo services/db.js loadConfig() /
 // config.languagesSpoken consumers (services/gemini.js, lib/voice/session.js,
-// lib/mediaStream.js).
+// lib/voice/session.js).
 const ALLOWED_LANGUAGES = ["en", "es", "fr"];
 
 // Source of truth: root repo services/db.js AFTER_HOURS_POLICIES /
