@@ -24,6 +24,11 @@ const mockVerifyAccessToken = vi.fn();
 
 vi.mock("../services/db.js", () => ({
   isEnabled: () => true,
+  // Transparent here. The real one opens a transaction with app.business_id
+  // set and rethrows on rollback — proven against a real database in
+  // tests/db/withTenantScoping.test.js. These tests are about authorisation
+  // and response shape.
+  withTenant: async (_businessId, fn) => fn(),
   exportCallerData: (...a) => mockExportCallerData(...a),
   eraseCallerData: (...a) => mockEraseCallerData(...a),
   fetchUserByEmail: (...a) => mockFetchUserByEmail(...a),

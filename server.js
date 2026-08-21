@@ -459,9 +459,16 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       durationSeconds: duration,
     });
 
-    db.completeCall(callSid, status, duration).catch((err) => {
-      log.error("db_complete_call_failed", { callSid, message: err?.message });
-      captureException(err, { callSid });
+    // Scoped, because completeCall is keyed by the Twilio call SID and carries
+    // no business id — so under row-level security it matches nothing unless
+    // somebody sets the tenant. `businessId` comes from the shared store above,
+    // which is the whole reason A4 put it there.
+    //
+    // Safe rather than strict: this handler returning 500 makes Twilio RETRY
+    // the callback, which turns one failed write into several.
+    db.withTenantSafe(businessId, () => db.completeCall(callSid, status, duration), {
+      operation: "completeCall",
+      callSid,
     });
 
     if (businessId && ["failed", "busy", "no-answer"].includes(status)) {
@@ -497,7 +504,7 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 
     // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
-      (async () => {
+      db.withTenantSafe(businessId, async () => {
         const transcript = await db.fetchCallTranscript(dbCallId);
         const callerTurns = transcript.filter((t) => t.speaker === "caller");
         // Spam/robocall detection (Part 3): the AI's own greeting is logged
@@ -524,9 +531,7 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
-      })().catch((err) => {
-        log.error("summary_generation_failed", { callSid, message: err?.message });
-      });
+      }, { operation: "generateSummary", callSid });
     }
 
     // Per-call turn-latency rollup (Part 2) — fire-and-forget; skip silently
@@ -536,8 +541,12 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       try {
         const stats = getCallStats(callSid);
         if (stats) {
-          db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms).catch((err) => {
-            log.error("db_update_latency_failed", { callSid, message: err?.message });
+          // Also SID-keyed, so also scoped. getCallStats reads an in-process
+          // ring buffer, so on a cold instance it returns nothing and this
+          // skips — the same per-process limitation A4 noted and did not fix.
+          db.withTenantSafe(businessId, () => db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms), {
+            operation: "updateCallLatency",
+            callSid,
           });
         }
       } catch (err) {
@@ -618,7 +627,12 @@ app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, asyn
   if (!parsed) return;
   if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
 
-  const data = await db.exportCallerData(parsed.businessId, parsed.phone);
+  // Scoped: one HTTP handler is a unit of work, and requireBusinessAccess has
+  // already proven this caller owns this tenant. Under row-level security the
+  // export reads nothing without it.
+  const data = await db.withTenant(parsed.businessId, () =>
+    db.exportCallerData(parsed.businessId, parsed.phone)
+  ).catch(() => null);
   if (!data) return res.status(500).json({ error: "Export failed" });
 
   // Logged as an event because an access request is itself a processing
@@ -646,7 +660,12 @@ app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (r
   if (!parsed) return;
   if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
 
-  const counts = await db.eraseCallerData(parsed.businessId, parsed.phone);
+  // Scoped, and NOT `withTenantSafe`: an erasure that partly failed must not
+  // report success. withTenant rolls back and rethrows; the catch below turns
+  // that into a 500, which is the honest answer.
+  const counts = await db.withTenant(parsed.businessId, () =>
+    db.eraseCallerData(parsed.businessId, parsed.phone)
+  ).catch(() => null);
   if (!counts) return res.status(500).json({ error: "Erasure failed" });
 
   res.json({ erased: counts });
@@ -680,7 +699,11 @@ app.post("/api/integrations/:provider/callback", (req, res) => {
 app.get("/api/businesses/:id/phone-numbers/available", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const country = req.query.country || "US";
   if (!isValidCountryCode(country)) return res.status(400).json({ error: "Invalid country code" });
@@ -706,7 +729,11 @@ app.get("/api/businesses/:id/phone-numbers/available", requireBusinessAccess, as
 app.post("/api/businesses/:id/phone-numbers/buy", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const phoneNumber = req.body?.phone_number;
   if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
@@ -727,7 +754,11 @@ app.post("/api/businesses/:id/phone-numbers/buy", requireBusinessAccess, async (
       voiceUrl: VOICE_URL,
       statusCallback: STATUS_URL,
     });
-    const ok = await db.updateBusinessPhoneNumber(businessId, result.phone_number);
+    const ok = await db.withTenantSafe(
+      businessId,
+      () => db.updateBusinessPhoneNumber(businessId, result.phone_number),
+      { operation: "updateBusinessPhoneNumber", fallback: false }
+    );
     if (!ok) {
       return res.status(500).json({ error: "Failed to save phone number to business" });
     }

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import pg from "pg";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
@@ -98,8 +99,17 @@ export function isEnabled() {
  * @returns {Promise<{ rows?: Array<object>, rowCount?: number, error?: Error }>}
  */
 async function q(text, params = []) {
+  // A tenant-scoped client if one is in scope, otherwise the pool.
+  //
+  // This is what lets withTenant() work without changing a single one of the
+  // 33 exported signatures. The alternative was threading a client argument
+  // through every function and every caller, which A3 deliberately avoided —
+  // and which would still leave `fetchCallerContext` broken, since it calls
+  // `listAppointmentsByCaller` two frames down and would have to thread it
+  // there too.
+  const runner = tenantContext.getStore()?.client ?? pool;
   try {
-    const res = await pool.query(text, params);
+    const res = await runner.query(text, params);
     return { rows: res.rows, rowCount: res.rowCount };
   } catch (error) {
     return { error };
@@ -1509,15 +1519,45 @@ export async function eraseCallerData(businessId, phone) {
 // at all.
 
 /**
- * Run `fn` with the connection scoped to one tenant.
+ * The scoped connection for the current async context.
  *
- * Everything inside runs in ONE transaction on ONE connection, so `SET LOCAL`
- * applies to all of it and is discarded on commit or rollback — including when
- * `fn` throws, which is the case a manual reset would miss.
+ * AsyncLocalStorage rather than an argument, because the thing that needs to
+ * see it is `q()` — twenty-odd frames below whoever called withTenant, through
+ * functions whose signatures A3 kept byte-identical on purpose.
+ */
+const tenantContext = new AsyncLocalStorage();
+
+/**
+ * Run `fn` with the database scoped to one tenant.
+ *
+ * Everything `fn` does — directly, or through any exported function it calls,
+ * at any depth — runs on ONE connection inside ONE transaction with
+ * `app.business_id` set. Row-level security (migration 029) does the rest.
+ *
+ * ---------------------------------------------------------------------------
+ * WRAP A UNIT OF WORK. NEVER A CALL.
+ * ---------------------------------------------------------------------------
+ *
+ * This holds a pooled connection and an open transaction for as long as `fn`
+ * runs. A unit of work is a pickup, a turn's tool call, one HTTP handler —
+ * milliseconds. A phone call is MINUTES, and wrapping one would pin a
+ * connection and an idle transaction for its whole duration: at five
+ * concurrent calls against a pool of ten that is half the pool asleep, plus
+ * the vacuum problems an hours-old open transaction causes.
+ *
+ * If you find yourself wanting to wrap something long, wrap the individual
+ * database units inside it instead.
+ *
+ * `SET LOCAL` (set_config with `true`) rather than a session-level setting, so
+ * the scope is discarded by COMMIT or ROLLBACK — including when `fn` throws,
+ * which is the case a manual reset would miss. A scope that outlived the
+ * checkout would leak one tenant onto whatever request borrowed that
+ * connection next: a cross-tenant read produced by connection reuse, which is
+ * the hardest kind to reproduce and the easiest to ship.
  *
  * @template T
  * @param {string} businessId
- * @param {(client: import("pg").PoolClient) => Promise<T>} fn
+ * @param {() => Promise<T>} fn
  * @returns {Promise<T>}
  */
 export async function withTenant(businessId, fn) {
@@ -1527,10 +1567,8 @@ export async function withTenant(businessId, fn) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // Parameterised, not interpolated. set_config's third argument `true` means
-    // transaction-local.
     await client.query("SELECT set_config('app.business_id', $1, true)", [businessId]);
-    const result = await fn(client);
+    const result = await tenantContext.run({ client, businessId }, () => fn(client));
     await client.query("COMMIT");
     return result;
   } catch (err) {
@@ -1538,6 +1576,70 @@ export async function withTenant(businessId, fn) {
     throw err;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Run `fn` scoped to a tenant, but never fail the caller because of it.
+ *
+ * For the paths where the database is not the point: a voice call must keep
+ * answering when a write fails, and `/twilio/status` returning 500 makes Twilio
+ * retry the callback. `withTenant` throws on a rollback; this logs and returns
+ * `fallback`, matching what the individual data-layer functions already do.
+ *
+ * @template T
+ * @param {string} businessId
+ * @param {() => Promise<T>} fn
+ * @param {{ operation: string, callSid?: string, fallback?: T }} opts
+ */
+export async function withTenantSafe(businessId, fn, { operation, callSid = null, fallback = null } = {}) {
+  // NO DATABASE: run it anyway. `fallback` is for a scope that FAILED, not for
+  // a scope that was never possible — and the two are not the same thing.
+  //
+  // Caught by tests/toolTimeout.test.js, which was right to fail. This wraps
+  // the whole tool-call boundary, and plenty of tools never touch the database
+  // at all: a webhook integration, set_call_intent, end_call. Returning a
+  // failure here would have broken every one of them on any deployment without
+  // DATABASE_URL set.
+  if (!pool) {
+    try {
+      return await fn();
+    } catch (err) {
+      log.error("db_error", { operation, callSid, error: err?.message });
+      return fallback;
+    }
+  }
+
+  // NO TENANT: run it anyway, unscoped, and say so.
+  //
+  // The alternative — skip the work — would change behaviour today to solve a
+  // problem that does not start until B2. Right now the application connects
+  // as a superuser and RLS is inert for it, so a missing tenant costs nothing;
+  // skipping would silently stop generating call summaries for any call whose
+  // shared state lost its businessId.
+  //
+  // Once B2 moves this to Cloud SQL, where there is no superuser, the same code
+  // FAILS CLOSED on its own: unscoped queries match no rows, the work produces
+  // nothing, and the individual functions log their own errors. So this
+  // degrades correctly rather than needing a second change later.
+  //
+  // The log line is the point. Unscoped work that nobody can see is how a
+  // tenant boundary quietly stops being one.
+  if (!businessId) {
+    log.error("db_unscoped_fallback", { operation, callSid, severity: "warn" });
+    try {
+      return await fn();
+    } catch (err) {
+      log.error("db_error", { operation, callSid, error: err?.message });
+      return fallback;
+    }
+  }
+
+  try {
+    return await withTenant(businessId, fn);
+  } catch (err) {
+    log.error("db_error", { operation, callSid, error: err?.message });
+    return fallback;
   }
 }
 

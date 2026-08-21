@@ -15,6 +15,17 @@ const mockIsEnabled = vi.fn(() => true);
 
 vi.mock("../services/db.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
+  // The real one opens a transaction, sets app.business_id and runs fn on that
+  // connection. Here it just runs fn — these tests are about what the handler
+  // DOES, and the scoping itself is proven against a real database in
+  // tests/db/withTenantScoping.test.js, where it means something.
+  withTenantSafe: async (_businessId, fn) => {
+    try {
+      return await fn();
+    } catch {
+      return null;
+    }
+  },
   completeCall: (...args) => mockCompleteCall(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   fetchCallTranscript: (...args) => mockFetchCallTranscript(...args),

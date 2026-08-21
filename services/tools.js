@@ -9,6 +9,7 @@ import {
   countScheduledOverlapping,
   listScheduledBetween,
   getAppointmentById,
+  withTenantSafe,
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
@@ -350,7 +351,29 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
     },
   });
 
-  const work = (async () => executeToolCall(fc, ctx))();
+  // Tenant scope for the whole tool call.
+  //
+  // THE RIGHT BOUNDARY for the per-turn path: one tool call is one unit of
+  // work — it books an appointment, records a request, cancels something — and
+  // every database write a capability makes happens inside it. Scoping here
+  // covers all of them at once, including the ones reached through
+  // ctx.deps several frames down, without any capability needing to know.
+  //
+  // It is also short. A tool call is bounded by TOOL_TIMEOUT_MS, so the
+  // connection and transaction this holds are released on a timescale the pool
+  // can absorb, which is the property withTenant depends on.
+  //
+  // Safe, not strict: a scope that fails must not take the turn with it. The
+  // caller is on the phone, and executeToolCall already returns a failure shape
+  // the model can explain.
+  const work = (async () =>
+    ctx?.businessId
+      ? withTenantSafe(ctx.businessId, () => executeToolCall(fc, ctx), {
+          operation: "executeToolCall",
+          callSid: ctx?.callSid ?? null,
+          fallback: failure("UNAVAILABLE"),
+        })
+      : executeToolCall(fc, ctx))();
 
   // Watch the abandoned promise: this is the evidence that a write landed after
   // the caller was told otherwise, which is otherwise invisible.

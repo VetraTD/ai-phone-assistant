@@ -183,6 +183,11 @@ vi.mock("../lib/voice/utteranceCache.js", () => ({
 // ---- services --------------------------------------------------------------
 vi.mock("../services/db.js", () => ({
   isEnabled: vi.fn(() => true),
+  // Runs fn and returns what it returns. The real one wraps it in a
+  // transaction with app.business_id set; that behaviour is proven against a
+  // real database in tests/db/withTenantScoping.test.js. Here it must be
+  // transparent, because these tests are about the session, not the scoping.
+  withTenantSafe: async (_businessId, fn) => fn(),
   lookupBusinessByPhone: vi.fn(async () => ({ id: "biz1" })),
   loadConfig: vi.fn(() => ({
     businessName: "Test Biz",

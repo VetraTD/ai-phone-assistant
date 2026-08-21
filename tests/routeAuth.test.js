@@ -19,6 +19,9 @@ const mockFetchUserByEmail = vi.fn();
 const mockVerifyAccessToken = vi.fn();
 
 vi.mock("../services/db.js", () => ({
+  // Transparent. The real one opens a transaction with app.business_id set;
+  // that is proven against a real database in tests/db/withTenantScoping.test.js.
+  withTenantSafe: async (_businessId, fn) => fn(),
   fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
   fetchUserByEmail: (...args) => mockFetchUserByEmail(...args),
