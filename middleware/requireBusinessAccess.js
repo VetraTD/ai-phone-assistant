@@ -1,4 +1,4 @@
-import { bearerFromHeader, verifyAccessToken } from "../lib/auth/accessToken.js";
+import { bearerFromHeader, verifyAccessToken, SESSION_MAX_AGE_CODE } from "../lib/auth/accessToken.js";
 import { fetchUserByEmail } from "../services/db.js";
 import { log } from "../lib/logger.js";
 
@@ -34,6 +34,14 @@ export async function requireBusinessAccess(req, res, next) {
 
   const identity = await verifyAccessToken(token);
   if (!identity) return res.status(401).json({ error: "Authentication required" });
+
+  // §164.312(a)(2)(iii). A distinct `code`, not just a 401, because the
+  // dashboard refreshes once and retries on exactly this — see the frontend's
+  // src/authRetry.js. Without it the ceiling would be indistinguishable from a
+  // real sign-out and would log a working clinic out mid-sentence.
+  if (identity.expiredByAge) {
+    return res.status(401).json({ error: "Session expired", code: SESSION_MAX_AGE_CODE });
+  }
 
   const user = await fetchUserByEmail(identity.email);
   if (!user?.business_id) {

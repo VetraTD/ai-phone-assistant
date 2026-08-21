@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { supabase } from "./supabaseClient";
+import { useIdleLogout, IDLE_TIMEOUT_MINUTES } from "./useIdleLogout";
 import { LanguageSwitcher, useTranslations } from "./LanguageSwitcher";
 
 import "./Dashboard.css";
@@ -515,6 +516,17 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // HIPAA 164.312(a)(2)(iii) automatic logoff. Before this, a session lasted
+  // until the tab closed — Supabase refreshes its one-hour token on a timer
+  // indefinitely, so an unattended browser on a clinic front desk stayed signed
+  // in overnight, in front of every patient record that clinic holds.
+  const idle = useIdleLogout({
+    enabled: !!session,
+    onLogout: async () => {
+      await supabase.auth.signOut();
+    },
+  });
+
   useEffect(() => {
     const loadMe = async () => {
       if (!session) {
@@ -774,6 +786,20 @@ function App() {
 
   return (
     <div className="dashboard-page">
+      {idle.warning ? (
+        <div className="idle-warning" role="alert" aria-live="assertive">
+          <span>
+            {t.idleWarning
+              ? t.idleWarning(Math.ceil(idle.secondsRemaining / 60))
+              : `You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
+                  idle.secondsRemaining % 60
+                ).padStart(2, "0")} for security.`}
+          </span>
+          <button type="button" className="idle-warning-button" onClick={idle.stayActive}>
+            {t.idleStaySignedIn ?? "Stay signed in"}
+          </button>
+        </div>
+      ) : null}
       <div className="dashboard-shell">
         <header className="dashboard-topbar">
           <div className="dashboard-topbar-left">
