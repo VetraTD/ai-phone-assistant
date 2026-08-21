@@ -237,15 +237,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "This saves your business name, timezone, preferred language, greeting, after-hours policy, transfer settings, and notifications to the database.",
 
-    calendarSync: "Calendar sync",
-    calendarSyncDescription: "Sync appointments to Google Calendar so they appear in your calendar app.",
-    connectGoogleCalendar: "Connect Google Calendar",
-    disconnectCalendar: "Disconnect",
-    syncToCalendarNow: "Sync upcoming to Google Calendar",
-    calendarConnected: "Google Calendar connected",
-    calendarNotConnected: "Google Calendar not connected",
-    calendarSyncSuccess: "Appointments synced to Google Calendar.",
-    calendarSyncError: "Failed to sync to calendar.",
 
     // Auth / loading
     checkingSession: "Checking your session",
@@ -423,15 +414,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "Guarda el nombre, zona horaria, idioma, saludo, política fuera de horario, transferencia y notificaciones.",
 
-    calendarSync: "Sincronización con calendario",
-    calendarSyncDescription: "Sincroniza las citas con Google Calendar para que aparezcan en tu calendario.",
-    connectGoogleCalendar: "Conectar Google Calendar",
-    disconnectCalendar: "Desconectar",
-    syncToCalendarNow: "Sincronizar próximas con Google Calendar",
-    calendarConnected: "Google Calendar conectado",
-    calendarNotConnected: "Google Calendar no conectado",
-    calendarSyncSuccess: "Citas sincronizadas con Google Calendar.",
-    calendarSyncError: "Error al sincronizar con el calendario.",
 
     checkingSession: "Verificando tu sesión",
     checkingSubtitle:
@@ -607,15 +589,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "Enregistre le nom, le fuseau horaire, la langue, le message d'accueil, la politique hors horaires, les transferts et les notifications.",
 
-    calendarSync: "Synchronisation calendrier",
-    calendarSyncDescription: "Synchronisez les rendez-vous avec Google Calendar pour les voir dans votre calendrier.",
-    connectGoogleCalendar: "Connecter Google Calendar",
-    disconnectCalendar: "Déconnecter",
-    syncToCalendarNow: "Synchroniser les prochains vers Google Calendar",
-    calendarConnected: "Google Calendar connecté",
-    calendarNotConnected: "Google Calendar non connecté",
-    calendarSyncSuccess: "Rendez-vous synchronisés avec Google Calendar.",
-    calendarSyncError: "Échec de la synchronisation avec le calendrier.",
 
     checkingSession: "Vérification de la session",
     checkingSubtitle:

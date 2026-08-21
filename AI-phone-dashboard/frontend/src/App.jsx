@@ -482,9 +482,6 @@ function App() {
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
   const [appointmentsError, setAppointmentsError] = useState(null);
   const [appointmentsRange, setAppointmentsRange] = useState("upcoming");
-  const [calendarConnected, setCalendarConnected] = useState(false);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarSyncing, setCalendarSyncing] = useState(false);
 
   const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
 
@@ -561,31 +558,6 @@ function App() {
       .catch((err) => { setUsageError(err?.response?.data?.error || "Failed to load usage"); setUsage(null); })
       .finally(() => { setUsageLoading(false); });
   }, [activePage, businessId]);
-
-  useEffect(() => {
-    if (activePage !== "settings" || !businessId) return;
-    setCalendarLoading(true);
-    api.get("/api/calendar/status")
-      .then((res) => setCalendarConnected(res.data?.connected === true))
-      .catch(() => setCalendarConnected(false))
-      .finally(() => setCalendarLoading(false));
-  }, [activePage, businessId]);
-
-  useEffect(() => {
-    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-    if (!params?.get("calendar")) return;
-    if (params.get("calendar") === "connected") {
-      setToast({ type: "success", message: t.calendarConnected });
-      setTimeout(() => setToast(null), 3000);
-      setCalendarConnected(true);
-    }
-    if (typeof window?.history?.replaceState === "function") {
-      const u = new URL(window.location.href);
-      u.searchParams.delete("calendar");
-      u.searchParams.delete("message");
-      window.history.replaceState({}, "", u.pathname + u.search);
-    }
-  }, [t.calendarConnected]);
 
   const callsQueryParams = useMemo(() => {
     const params = { limit: 200, offset: 0 };
@@ -1624,11 +1596,10 @@ function App() {
             )}
           </section>
         ) : activePage === "settings" ? (
-          // Usage, billing and calendar used to be hand-rolled panels here,
-          // above and below SettingsPage, in the old .panel visual language.
-          // They now live inside the settings group rail as AccountSection /
-          // CalendarSection — the data and these handlers still belong to
-          // App.jsx and are passed down.
+          // Usage and billing used to be hand-rolled panels here, above and
+          // below SettingsPage, in the old .panel visual language. They now live
+          // inside the settings group rail as AccountSection — the data and
+          // these handlers still belong to App.jsx and are passed down.
           <SettingsPage
             business={business}
             businessId={businessId}
@@ -1640,43 +1611,6 @@ function App() {
             planName={settingsPlanName}
             billingStatus={settingsBillingStatus}
             t={t}
-            calendarConnected={calendarConnected}
-            calendarLoading={calendarLoading}
-            calendarSyncing={calendarSyncing}
-            onCalendarSync={async () => {
-              setCalendarSyncing(true);
-              try {
-                const res = await api.post("/api/calendar/sync");
-                setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
-                setTimeout(() => setToast(null), 3000);
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
-                setTimeout(() => setToast(null), 3000);
-              } finally {
-                setCalendarSyncing(false);
-              }
-            }}
-            onCalendarDisconnect={async () => {
-              try {
-                await api.delete("/api/calendar/disconnect");
-                setCalendarConnected(false);
-                setToast({ type: "success", message: t.disconnectCalendar });
-                setTimeout(() => setToast(null), 2000);
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
-                setTimeout(() => setToast(null), 2000);
-              }
-            }}
-            onCalendarConnect={async () => {
-              try {
-                const res = await api.get("/api/calendar/auth-url");
-                if (res.data?.url) window.location.href = res.data.url;
-                else setToast({ type: "error", message: "Calendar not configured" });
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
-                setTimeout(() => setToast(null), 2000);
-              }
-            }}
           />
         ) : (
           <section className="guide-page">
@@ -1736,10 +1670,6 @@ function App() {
                   <li>
                     <strong>Notifications</strong> – if your business has a notification email/phone set, Vetra sends alerts for important events
                     (appointment booked, missed call, and call completed summaries).
-                  </li>
-                  <li>
-                    <strong>Calendar sync (optional)</strong> – if you connected Google Calendar in <strong>Settings</strong>, you can sync upcoming appointments
-                    so they appear in the calendar you already use.
                   </li>
                 </ul>
               </div>

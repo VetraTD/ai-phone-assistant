@@ -43,15 +43,6 @@ describe("route mounting smoke test (all split route files wired)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("GET /api/calendar/status (calendar.js)", async () => {
-    poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
-      return Promise.resolve({ rows: [] });
-    });
-    const res = await request(app).get("/api/calendar/status").set("Authorization", "Bearer t");
-    expect(res.status).toBe(200);
-  });
-
   it("GET /api/me (onboarding.js)", async () => {
     poolQueryMock.mockImplementation((sql) => {
       if (sql.includes("from users")) return Promise.resolve({ rows: [] });
