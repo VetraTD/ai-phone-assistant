@@ -262,6 +262,34 @@ resource "google_sql_database_instance" "this" {
       value = "on"
     }
 
+    # -----------------------------------------------------------------------
+    # IAM DATABASE AUTHENTICATION. This is what removes the password entirely.
+    #
+    # With this on, a principal authenticates to Postgres with a short-lived
+    # OAuth access token instead of a password. Three consequences, and the
+    # third is the one that changes this migration's shape:
+    #
+    #   1. There is no long-lived database credential to store, rotate, leak or
+    #      find in a state file. Access is granted by an IAM binding and revoked
+    #      by removing it, which is also how offboarding already works.
+    #   2. Postgres sees the IAM identity, so `log_connections` above names WHO
+    #      connected rather than "vetra_app" — a real §164.312(b) answer.
+    #   3. B4 does not need a database password in Secret Manager, which takes a
+    #      whole class of secret off the critical path.
+    #
+    # Static flag: turning it on RESTARTS the instance. Free to do now on an
+    # empty staging database, disruptive later.
+    #
+    # The application half is separate and not done: `services/db.js` builds a
+    # pg.Pool from a DATABASE_URL connection string, and IAM auth needs a token
+    # in the password field, refreshed roughly hourly. That is what
+    # `@google-cloud/cloud-sql-connector` exists for, and it is a Lane A change.
+    # -----------------------------------------------------------------------
+    database_flags {
+      name  = "cloudsql.iam_authentication"
+      value = "on"
+    }
+
     user_labels = merge(var.labels, {
       stack = each.key
       phi   = local.projects[each.key].has_prod ? "true" : "false"
@@ -290,13 +318,55 @@ resource "google_sql_database" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# NOT HERE: database USERS.
+# Database users — IAM ONLY. None of these has a password.
 #
-# `google_sql_user` takes a password, and a password in a Terraform resource is
-# a password in Terraform STATE — which now lives in a GCS bucket, versioned,
-# readable by anyone with access to it. Migration 029 creates `vetra_app` as
-# NOLOGIN precisely so its password does not live in git; putting it in state
-# instead would be the same mistake wearing a different hat.
+# `google_sql_user` normally takes a `password`, and a password in a Terraform
+# resource is a password in Terraform STATE, which now lives in a versioned GCS
+# bucket. Migration 029 makes `vetra_app` NOLOGIN precisely so its password does
+# not live in git; putting one in state instead would be the same mistake
+# wearing a different hat.
 #
-# Users and their passwords are B4/D2 work, from Secret Manager.
+# CLOUD_IAM_SERVICE_ACCOUNT and CLOUD_IAM_USER users have NO password field at
+# all. The credential is a short-lived OAuth token minted at connect time, so
+# there is nothing to store and nothing to rotate.
+#
+# WHAT THIS DOES NOT DO: it does not grant anything INSIDE the database. A fresh
+# IAM user can connect and read nothing — table grants and the RLS policies from
+# migration 029 are the schema's job, at D3. Being able to open a connection and
+# being allowed to read a row are two different questions, and only the first is
+# answered here.
 # ---------------------------------------------------------------------------
+
+# The runtime service accounts. This is the binding that means B4 needs no
+# database password.
+#
+# Postgres identifiers cap at 63 characters and Cloud SQL expects the service
+# account email with the `.gserviceaccount.com` suffix removed — passing the
+# full email creates a user that exists and can never authenticate.
+resource "google_sql_user" "runtime_iam" {
+  for_each = {
+    for sk in keys(local.active_regional_stacks) : sk => sk
+    if contains(keys(local.active_sql_instances), var.stack_projects[sk])
+  }
+
+  project  = local.active_sql_instances[var.stack_projects[each.key]].project_id
+  instance = google_sql_database_instance.this[var.stack_projects[each.key]].name
+  name     = trimsuffix(google_service_account.runtime[each.key].email, ".gserviceaccount.com")
+  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+}
+
+# The humans. Lets an owner reach the database through the Cloud SQL Auth Proxy
+# without a shared password existing anywhere — and makes each connection
+# attributable to a person, which a shared `postgres` login never can be.
+resource "google_sql_user" "owner_iam" {
+  for_each = {
+    for pair in setproduct(keys(local.active_sql_instances), var.owner_principals) :
+    "${pair[0]}/${pair[1]}" => { instance_key = pair[0], email = trimprefix(pair[1], "user:") }
+    if startswith(pair[1], "user:")
+  }
+
+  project  = local.active_sql_instances[each.value.instance_key].project_id
+  instance = google_sql_database_instance.this[each.value.instance_key].name
+  name     = each.value.email
+  type     = "CLOUD_IAM_USER"
+}

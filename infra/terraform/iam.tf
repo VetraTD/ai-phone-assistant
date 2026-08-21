@@ -73,6 +73,11 @@ resource "google_project_iam_member" "shared_only_builds" {
 locals {
   runtime_roles = [
     "roles/cloudsql.client",
+    # Required IN ADDITION to cloudsql.client for IAM database authentication.
+    # client permits opening the connection; instanceUser is what lets the token
+    # be accepted as a Postgres login. Granting only one of them produces an
+    # authentication failure that looks like a wrong password.
+    "roles/cloudsql.instanceUser",
     "roles/aiplatform.user",
     "roles/logging.logWriter",
     "roles/monitoring.metricWriter",
