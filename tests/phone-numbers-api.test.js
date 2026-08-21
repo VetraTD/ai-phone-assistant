@@ -35,9 +35,17 @@ vi.mock("../services/twilioNumbers.js", () => ({
 // in tests/degradedMode.test.js). Hoist to a beforeAll with a generous
 // hookTimeout so the cost is paid once, during setup, deterministically.
 let app;
+// Cold-importing server.js pulls the whole app graph — supabase-free now, but
+// still the genai SDK, twilio and ws — and measures ~3s on an idle machine.
+// FOUR test files pay that cost (callersRoute, routeAuth, dsrRoutes,
+// phone-numbers-api), and under real contention one of them exceeded a 20s
+// hook timeout during a concurrent docker build. A0's own findings say a flaky
+// gate trains you to ignore the gate, so the ceiling is raised rather than the
+// flake tolerated. A genuinely broken import still fails fast, with an error
+// rather than a timeout, so nothing is masked.
 beforeAll(async () => {
   ({ app } = await import("../server.js"));
-}, 20000);
+}, 40000);
 
 describe("GET /api/businesses/:id/phone-numbers/available", () => {
   beforeEach(() => {
