@@ -31,7 +31,16 @@ const nodemailer = require("nodemailer");
 // spelling — exactly the drift D1 exists to reconcile.
 // ---------------------------------------------------------------------------
 
-const SMTP_HOST = process.env.SMTP_HOST || "smtp.office365.com";
+// Default matches services/notifications.js EXACTLY. Two services reading one
+// set of credentials must not disagree about where to send them — a different
+// default here would mean the same SMTP_USER/SMTP_PASS silently going to a
+// different server depending on which service sent the mail, which is the
+// drift this consolidation was supposed to remove rather than introduce.
+//
+// Neither default is right for production. The credentials in use today are a
+// personal Gmail account; a vetratd.com mailbox on Microsoft 365 is the
+// destination, and SMTP_HOST should be set explicitly either way.
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
 const SMTP_SECURE = process.env.SMTP_SECURE === "true";
 const SMTP_USER = process.env.SMTP_USER;
