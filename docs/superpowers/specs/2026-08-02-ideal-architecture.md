@@ -1,5 +1,13 @@
 # Ideal Architecture — best voice, lowest latency, best value
 
+> **UPDATE 2026-08-19.** §13's BAA table and the "two Cloud Run deployments" note at the end
+> are superseded by `2026-08-19-gcp-migration-two-region.md`: the split is now **regional**
+> (US and UK) because clinics in both markets put the product under HIPAA *and* UK GDPR
+> simultaneously. Consequence for this document's vendor verdicts: under GDPR there is no
+> covered-products restriction, so **the UK stack keeps Deepgram and ElevenLabs** under Art. 28
+> DPAs — §8's "GCP loses clearly" on STT applies only to the US HIPAA stack. Deepgram's EU
+> endpoint (`api.eu.deepgram.com`) went GA 2026-01-10.
+
 **Date:** 2026-08-02
 **Status:** Design document. Nothing here is implemented.
 **Companion:** `2026-08-02-gcp-migration-architecture.md` (the HIPAA-constrained architecture)

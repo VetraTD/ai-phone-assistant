@@ -1,5 +1,14 @@
 # GCP Migration — Target Architecture
 
+> **SUPERSEDED 2026-08-19** by `2026-08-19-gcp-migration-two-region.md` on three points:
+> the deployment split (now **two regional stacks**, US and UK, not one US pair), the
+> regulatory scope (**UK GDPR applies alongside HIPAA** — clinics in both markets), and the
+> timeline. Two factual claims below are also wrong: §338's "`POST /twilio/status` reads
+> nothing from `callState`" (it reads `dbCallId`, `businessId`, `sawCallerFinal` at
+> `server.js:395-400`) and §449-452's "context caching is not implemented"
+> (`services/geminiCache.js` landed 2026-08-04). Everything else here still holds and the
+> new document builds on it rather than replacing it wholesale.
+
 **Date:** 2026-08-02
 **Status:** Design document. Nothing here is implemented. No GCP resources exist yet.
 **Supersedes:** `2026-07-22-gcp-migration-design.md` (baseline figures stale)
