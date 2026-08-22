@@ -27,7 +27,8 @@
     "db:status": "node scripts/migrate.js --status",
     "db:reset": "node scripts/migrate.js --reset",
     "test:db": "vitest run --config vitest.db.config.js",
-    "check:credentials": "node scripts/check-credential-boundary.js"
+    "check:credentials": "node scripts/check-credential-boundary.js",
+    "tts:readback": "node scripts/tts-readback.js"
   },
   "repository": {
     "type": "git",

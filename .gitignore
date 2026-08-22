@@ -27,3 +27,4 @@ latency-runs/
 # visual record, but they are build output, not source.
 /v-*.png
 /landing-*.png
+eval/results/tts-readback/
