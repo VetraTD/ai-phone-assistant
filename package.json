@@ -48,6 +48,7 @@
   "dependencies": {
     "@deepgram/sdk": "^5.0.0",
     "@google-cloud/cloud-sql-connector": "^1.11.3",
+    "@google-cloud/speech": "^8.0.1",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
     "@sentry/node": "^9.0.0",
