@@ -512,7 +512,31 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
     expect(onAudioChunk).toHaveBeenCalled();
   });
 
-  it("13. short fallback text (<= 400 chars) is a SINGLE Google request, even across sentences", async () => {
+  it("13. THE OPENING GOES OUT ON ITS OWN, so the caller is not waiting on the whole reply", async () => {
+    // CHANGED 2026-08-22, and the previous behaviour was correct for a premise
+    // that has since stopped being true.
+    //
+    // This used to send a short reply as ONE request, on the reasoning that the
+    // extra latency "is acceptable on the fallback path (it is already the
+    // degraded voice)". Google TTS is no longer the fallback — it is the ONLY
+    // path a covered deployment may use, so that is every US production call.
+    //
+    // And Google TTS is NOT streaming. Measured against the live API, synthesis
+    // time is linear in input length at roughly 14 ms per character:
+    //
+    //     48 chars -> 1,145 ms     213 chars -> 2,978 ms
+    //    129 chars -> 1,839 ms     260 chars -> 3,695 ms
+    //
+    // One request for the whole reply therefore means the caller hears NOTHING
+    // until the entire reply has been synthesised — about 3.7 s for a
+    // four-sentence answer, which is most of the `tts_ttfb_ms` p50 of 1,408 ms
+    // measured on live calls.
+    //
+    // Splitting the opening off costs exactly one prosody seam, at a sentence
+    // boundary, and buys back seconds of silence. Speech runs at ~15 chars/sec
+    // (REPAIR_CHARS_PER_SEC) against ~14 ms/char to synthesise, so the opening's
+    // audio plays roughly 4-5x slower than the remainder synthesises and the
+    // rest stays comfortably ahead — one seam, not a gap.
     const buf = Buffer.from("all");
     mockSynthesizeMulaw.mockResolvedValue(buf);
 
@@ -528,14 +552,64 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
       onError: vi.fn(),
       forceFallback: true,
     });
-    turn.write("One. Two. Three.");
+    turn.write("Doctor Patel has an opening on Tuesday. Two thirty in the afternoon. Shall I book it?");
     turn.end();
 
     await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
-    // One request covering all three sentences — no per-sentence seam.
+
+    // The FIRST request is the opening alone — that is the whole point, and it
+    // is what the caller waits for.
+    expect(mockSynthesizeMulaw.mock.calls[0][0]).toBe("Doctor Patel has an opening on Tuesday.");
+    // The remainder follows behind it, in order.
+    expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(2);
+    expect(mockSynthesizeMulaw.mock.calls[1][0]).toBe("Two thirty in the afternoon. Shall I book it?");
+    expect(chunks).toEqual(["all", "all"]);
+  });
+
+  it("13a. a TINY opening is padded with the next sentence rather than emitted alone", async () => {
+    // "Sure." synthesises in no time and plays for half a second, and the rest
+    // of the reply would not be ready when it ends — trading one upfront wait
+    // for a GAP in the middle, which is worse. So the opening takes sentences
+    // until it is long enough to cover the remainder while it plays.
+    mockSynthesizeMulaw.mockResolvedValue(Buffer.from("x"));
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA13a",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone,
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write("Sure. Of course. Doctor Patel has an opening on Tuesday at two thirty.");
+    turn.end();
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(mockSynthesizeMulaw.mock.calls[0][0].length).toBeGreaterThanOrEqual(40);
+  });
+
+  it("13d. a ONE-SENTENCE reply is still a single request — there is nothing to split", async () => {
+    // The case the old behaviour got right, kept. Splitting here would add a
+    // seam and save nothing.
+    mockSynthesizeMulaw.mockResolvedValue(Buffer.from("x"));
+    const onDone = vi.fn();
+    const turn = createTtsTurn({
+      voiceId: "voice123",
+      callSid: "CA13d",
+      epoch: 1,
+      getEpoch: () => 1,
+      onAudioChunk: vi.fn(),
+      onDone,
+      onError: vi.fn(),
+      forceFallback: true,
+    });
+    turn.write("Doctor Patel has an opening on Tuesday at two thirty in the afternoon.");
+    turn.end();
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(mockSynthesizeMulaw).toHaveBeenCalledTimes(1);
-    expect(mockSynthesizeMulaw).toHaveBeenCalledWith("One. Two. Three.", "en-US-Chirp3-HD-Aoede", "CA13");
-    expect(chunks).toEqual(["all"]);
   });
 
   it("13b. long fallback text (> 400 chars) is chunked into a few sequential multi-sentence requests, emitted in order", async () => {
@@ -569,13 +643,20 @@ describe("ttsStream.js — per-turn TTS orchestration with ElevenLabs + Google f
 
     await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 
-    // 9 sentences at 3 per request = 3 sequential requests, in order.
+    // The opening first — sentence 1 alone, because it already clears the
+    // 40-character floor — then the remaining 8 at 3 per request, in order.
     expect(calls).toEqual([
-      sentences.slice(0, 3).join(" "),
-      sentences.slice(3, 6).join(" "),
-      sentences.slice(6, 9).join(" "),
+      sentences[0],
+      sentences.slice(1, 4).join(" "),
+      sentences.slice(4, 7).join(" "),
+      sentences.slice(7, 9).join(" "),
     ]);
-    expect(chunks).toEqual(["buf0", "buf1", "buf2"]);
+    expect(chunks).toEqual(["buf0", "buf1", "buf2", "buf3"]);
+
+    // Whatever the grouping, NOTHING may be lost or reordered — that is the
+    // property, and the chunk boundaries are an implementation detail that has
+    // now moved twice.
+    expect(calls.join(" ")).toBe(text);
   });
 
   it("13c. a barge (epoch bump) between fallback chunks stops the remaining chunks (epoch gating honored per chunk)", async () => {
