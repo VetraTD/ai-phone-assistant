@@ -153,7 +153,16 @@ async function runOne(provider, line) {
     // first one. A paused utterance arrives in pieces.
     const deadline = performance.now() + MAX_SILENCE_MS;
     while (failure === null && performance.now() < deadline) {
-      if (lastFinalAt !== null && performance.now() - lastFinalAt >= UTTERANCE_QUIET_MS) break;
+      // The quiet window is measured from the LATER of the last final and the
+      // end of speech. Measuring it from the final alone ended the run the
+      // instant the audio stopped whenever a provider had endpointed at a
+      // mid-clip pause more than UTTERANCE_QUIET_MS earlier — which threw away
+      // the second half of the utterance and scored the provider for a
+      // truncation the harness caused. name_spelling ("My name is Nithin.
+      // That's N, I, T, H, I, N.") is exactly that shape, and Google was
+      // charged 0.727 WER for it.
+      const settledSince = Math.max(lastFinalAt ?? -Infinity, speechDoneAt);
+      if (lastFinalAt !== null && performance.now() - settledSince >= UTTERANCE_QUIET_MS) break;
       stt.sendAudio(SILENCE_FRAME);
       await sleep(FRAME_MS);
     }
