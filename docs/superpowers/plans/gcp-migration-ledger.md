@@ -45,19 +45,25 @@ can hear. What is left from it is an APPLY, and the apply is a hard stop:
 > implements no part of the Speech v2 API. A covered deployment refuses to boot
 > until it is done, so this is not optional, merely un-Terraformable.
 >
-> **APPLY IN THREE STEPS, NOT ONE, AND THE REASON IS AN ORDERING TRAP.**
-> `assertSttEncryption()` runs BEFORE the port opens and refuses to start when
-> the Speech config has no CMEK key. The key does not exist until Terraform
-> creates it, and pointing Speech at it needs `npm run stt:cmek`, which cannot
-> run before the key exists. **So a single full apply deploys a `hipaa`
-> revision that refuses to boot** — Cloud Run keeps serving the old `standard`
-> revision, Terraform reports an error, and it reads exactly like the STT work
-> being broken. It is not; it is this ordering.
+> **STEPS 1 AND 2 ARE APPLIED (2026-08-22). ONLY STEP 3 IS LEFT, AND IT IS YOURS.**
 >
-> **The image is already built and `image_tag` is already bumped:** `2fe7da1`,
-> digest `sha256:5f75451c…`, Cloud Build `4cb2440a` SUCCESS. Full plan at that
-> tag: **14 add / 2 change / 4 destroy** (the second change is the migration
-> job picking up the same image).
+> **Step 1 — DONE.** 14 resources created, 0 changed, 0 destroyed: a regional
+> CMEK key ring and key per US stack, the Speech service agent, its
+> encrypter/decrypter grant, `roles/speech.client` on each runtime, and the
+> custom `vetraSpeechConfigReader` role holding `speech.config.get` alone.
+> All 14 verified present in state. **The documented service-agent propagation
+> race did NOT fire this time** — it succeeded on the first apply, so treat
+> that race as intermittent rather than certain.
+>
+> **Step 2 — DONE.** Both US Speech configs carry CMEK:
+> `projects/vetra-us-{staging,prod}-c3a3bd/locations/us-central1/config`.
+> Verified with `npm run stt:cmek -- --check` (exit 0) AND by running the boot
+> assertion itself against the live config, in both directions: it PASSES on
+> `us-central1` and REFUSES `us-east1`, which has no key. **The control is
+> proven live, not just in tests.**
+>
+> **Step 3 — YOURS. Plan saved and verified: `0 to add, 2 to change, 4 to
+> destroy`.**
 >
 > ```sh
 > export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
@@ -65,36 +71,23 @@ can hear. What is left from it is an APPLY, and the apply is a hard stop:
 > export TF_DISABLE_PLUGIN_TLS=1
 > export SSL_CERT_FILE=/c/Users/nithi/gcloud-cacerts.pem
 > cd infra/terraform
->
-> # STEP 1 — the key and its grants ONLY. No service change, nothing destroyed.
-> # Plan is already saved and verified: 14 to add, 0 to change, 0 to destroy.
-> terraform apply stt-step1-keys.tfplan
-> #
-> # EXPECT THIS TO FAIL ON THE FIRST RUN, then re-run it. The Speech service
-> # agent is created but not yet visible to IAM, and the error reads
-> # "Service account service-<n>@gcp-sa-speech... does not exist", which looks
-> # like a typo in an email address. Same race as google_kms_crypto_key_iam_member.sql.
->
-> terraform output speech_cmek_keys
->
-> # STEP 2 — point Speech at the key. Terraform cannot express this (#18878).
-> cd ../..
-> npm run stt:cmek -- --project vetra-us-staging-c3a3bd --location us-central1 --key <kms_key_name from the output above>
-> npm run stt:cmek -- --project vetra-us-staging-c3a3bd --location us-central1 --check
->
-> # STEP 3 — the real one. Flips staging to hipaa and DESTROYS the US Deepgram
-> # secrets. Re-plan first, because steps 1 and 2 moved the state.
-> cd infra/terraform
-> terraform plan -out=stt-step3.tfplan     # expect 0 add / 2 change / 4 destroy
 > terraform apply stt-step3.tfplan
 > ```
+>
+> The 2 changes: `voice-us-staging` moves to image `2fe7da1` and
+> `DEPLOYMENT_MODE` `standard` -> `hipaa`; the migration job picks up the same
+> image. **The 4 destroys are Secret Manager** — `deepgram-api-key` and its IAM
+> binding in both US projects. That is why this step waits for you. The key is
+> not lost: it lives at Deepgram, in `.env`, and the UK lane keeps it.
 >
 > Then confirm it is actually serving, because that is the whole point:
 > `gcloud run services describe voice-us-staging --region us-central1` should
 > show a READY revision on image tag **2fe7da1**, its logs should carry
 > `[boot] Speech-to-Text CMEK verified:` and `stt_provider_selected` with
 > `provider: "google"`, and a test call from an allowlisted number should be
-> answered and transcribed.
+> answered and transcribed. **If the revision does not go READY, read its logs
+> before assuming the STT work is wrong** — the boot checks are deliberately
+> fatal and each one names itself.
 
 > **`npm run check:credentials` FAILS RIGHT NOW and is correct to.** Verified
 > live: `vetra-us-prod-c3a3bd` holds `deepgram-api-key`. The apply is what
