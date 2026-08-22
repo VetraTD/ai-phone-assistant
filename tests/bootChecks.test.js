@@ -11,6 +11,7 @@
 // The line between fatal and announced is drawn deliberately and is the whole
 // design decision here; see lib/bootChecks.js.
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
 import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
 
 const SID = "AC" + "1".repeat(32);
@@ -238,5 +239,73 @@ describe("checkDatabaseConfig", () => {
     expect(() =>
       assertBootConfig({ SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example" }, { log: () => {} })
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cloud SQL is a second way to be configured, added at B2.
+//
+// The check knew only about DATABASE_URL, so a correctly configured Cloud Run
+// deployment — which has no DATABASE_URL at all — would have announced "every
+// call runs on default config" on every boot. An alarm that fires when nothing
+// is wrong is an alarm people learn to scroll past, and that costs the real one.
+// ---------------------------------------------------------------------------
+describe("checkDatabaseConfig — Cloud SQL", () => {
+  it("says nothing when CLOUD_SQL_INSTANCE is set and DATABASE_URL is not", () => {
+    const { findings } = checkDatabaseConfig({
+      CLOUD_SQL_INSTANCE: "p:us-central1:i",
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it("still announces when NEITHER is set", () => {
+    const { findings } = checkDatabaseConfig({});
+    expect(findings.map((f) => f.code)).toEqual(["database_not_configured"]);
+  });
+
+  it("is FATAL when BOTH are set", () => {
+    // Ambiguity, not redundancy: two databases named and no way to know which
+    // one was meant. services/db.js refuses to start on it too.
+    const { findings } = checkDatabaseConfig({
+      CLOUD_SQL_INSTANCE: "p:us-central1:i",
+      DATABASE_URL: "postgres://localhost/x",
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].code).toBe("database_double_configured");
+    expect(findings[0].severity).toBe(FATAL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// server.js's env preflight, which predates both Vertex and this file.
+//
+// GEMINI_API_KEY was required unconditionally. A8 established that the API-key
+// path is the Gemini Developer API, which the Google Cloud BAA does not cover
+// and which lib/compliance.js REFUSES in hipaa mode — so a HIPAA deployment
+// could not boot without carrying a credential it is forbidden to use. The boot
+// check and the compliance guard demanded opposite things.
+//
+// Asserted against the source because the preflight runs at import and calls
+// process.exit, which cannot be exercised in-process.
+// ---------------------------------------------------------------------------
+describe("server.js env preflight and Vertex", () => {
+  const src = readFileSync(new URL("../server.js", import.meta.url), "utf8");
+
+  it("does not require GEMINI_API_KEY when Vertex is enabled", () => {
+    expect(src).toMatch(/if \(!GEMINI_API_KEY && !VERTEX_ENABLED\)/);
+    expect(src).not.toMatch(/if \(!GEMINI_API_KEY\) \{/);
+  });
+
+  it("still requires it when Vertex is NOT enabled", () => {
+    // The check must remain a hard exit for the API-key path. A deployment with
+    // neither backend configured cannot answer a call, and discovering that on
+    // the first caller is the failure this preflight exists to prevent.
+    const i = src.indexOf("if (!GEMINI_API_KEY && !VERTEX_ENABLED)");
+    expect(i).toBeGreaterThan(-1);
+    expect(src.slice(i, i + 400)).toMatch(/process\.exit\(1\)/);
+  });
+
+  it("points the operator at Vertex as the covered path", () => {
+    expect(src).toMatch(/BAA-covered path/);
   });
 });

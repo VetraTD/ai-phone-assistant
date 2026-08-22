@@ -61,8 +61,25 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_VALIDATE_SIGNATURE = process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 
-if (!GEMINI_API_KEY) {
-  console.error("Missing required env: GEMINI_API_KEY");
+// Required only when Vertex is NOT the backend, and this used to be
+// unconditional — which was wrong in a way that mattered.
+//
+// A8 established that the API-key path is the Gemini Developer API (AI Studio),
+// which the Google Cloud BAA does not cover, and lib/compliance.js REFUSES it in
+// `hipaa` mode at client construction. So an unconditional requirement meant a
+// HIPAA deployment could not start without carrying a credential it is
+// forbidden to use — the boot check and the compliance guard demanding opposite
+// things, with the operator in between.
+//
+// services/gemini.js already refuses to fall back from Vertex to the API key,
+// so nothing here is a fallback: if VERTEX_ENABLED is set, that path is the one
+// that runs and this key is not merely unnecessary but unwanted.
+const VERTEX_ENABLED = process.env.VERTEX_ENABLED === "true" || process.env.VERTEX_ENABLED === "1";
+if (!GEMINI_API_KEY && !VERTEX_ENABLED) {
+  console.error(
+    "Missing required env: GEMINI_API_KEY. Set it, or set VERTEX_ENABLED=true with " +
+      "GOOGLE_CLOUD_PROJECT and VERTEX_LOCATION to use Vertex — which is the BAA-covered path."
+  );
   process.exit(1);
 }
 if (!BASE_URL) {
@@ -189,6 +206,10 @@ app.use(
 );
 
 // --- Rate limiting (skip in test to avoid flakiness) ---
+// Top-level await is available in ESM, and this file is "type": "module".
+// Wrapped so a rejection during startup exits non-zero with a reason rather
+// than surfacing as an unhandled rejection warning on a process that keeps
+// running without a database.
 if (process.env.NODE_ENV !== "test") {
   app.use(
     "/twilio",
@@ -1064,6 +1085,16 @@ if (process.env.NODE_ENV !== "test") {
   // It throws rather than exiting, so the failure travels the same path as any
   // other startup error and a supervisor sees a non-zero exit with a reason.
   assertBootConfig();
+
+  // Cloud SQL's pool is built asynchronously (the connector fetches ephemeral
+  // client certificates), so it cannot be created at module load the way a
+  // DATABASE_URL pool is. Awaited HERE, before the port opens, for the same
+  // reason assertBootConfig runs here: a deployment that is listening and has
+  // no database is a deployment that answers a call and knows nothing about the
+  // business it is answering for.
+  //
+  // A no-op unless CLOUD_SQL_INSTANCE is set.
+  await db.initCloudSqlPool();
 
   const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

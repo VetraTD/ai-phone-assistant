@@ -7,6 +7,7 @@ import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
 import { normalizePhoneNumber } from "../lib/phone.js";
 import { PHI_ACCESS, NON_PHI_EXPORTS, mergeAccess, validateAccessRecord } from "../lib/phiAudit.js";
 import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
+import { cloudSqlConfig, cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
 
 // Re-exported so tests/phiAuditCoverage.test.js can check the classification
 // against this module's real exports without importing two files to do it.
@@ -90,6 +91,62 @@ if (DATABASE_URL) {
 /** @returns {boolean} Whether the database is configured */
 export function isEnabled() {
   return pool !== null;
+}
+
+/**
+ * Bring up the pool against Cloud SQL, if that is how this deployment connects.
+ *
+ * DATABASE_URL builds a pool synchronously at module load, which is why the
+ * rest of this file can assume `pool` exists. The Cloud SQL connector cannot:
+ * it fetches ephemeral client certificates from the Admin API, so obtaining
+ * connection options is asynchronous.
+ *
+ * Rather than make every caller await something, this is an explicit startup
+ * step. server.js calls it BEFORE the port opens, so by the time a request can
+ * arrive the pool is in exactly the state the rest of the module expects.
+ *
+ * A no-op when CLOUD_SQL_INSTANCE is unset, so local development, the tests and
+ * anything still on a connection string are untouched.
+ *
+ * @returns {Promise<boolean>} whether a Cloud SQL pool was created.
+ */
+export async function initCloudSqlPool() {
+  const cfg = cloudSqlConfig();
+  if (!cfg) return false;
+
+  if (pool) {
+    // Both configured. Refused rather than resolved, because either answer is
+    // a guess about which database the operator meant, and getting it wrong
+    // means writing patient data somewhere nobody is looking.
+    throw new Error(
+      "Both DATABASE_URL and CLOUD_SQL_INSTANCE are set. Refusing to choose between two databases."
+    );
+  }
+
+  // The runtime never uses password auth — that is the migration job's path,
+  // and it is the only thing holding a credential that can alter the schema.
+  // A password reaching a serving process means the wrong secret was mounted.
+  if (cfg.authType === "PASSWORD") {
+    throw new Error(
+      "CLOUD_SQL_PASSWORD is set in a serving process. The runtime authenticates as its own IAM " +
+        "identity; the superuser password belongs only to the migration job."
+    );
+  }
+
+  const { poolConfig } = await cloudSqlPoolConfig(cfg, {
+    max: Number.parseInt(process.env.DB_POOL_MAX, 10) || 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    options: `-c statement_timeout=${STATEMENT_TIMEOUT_MS}`,
+  });
+
+  pool = new pg.Pool(poolConfig);
+  pool.on("error", (err) => {
+    log.error("db_pool_error", { message: err.message });
+  });
+
+  log.info("db_backend", { backend: "cloudsql", instance: cfg.instance, database: cfg.database, auth: "IAM" });
+  return true;
 }
 
 /**
