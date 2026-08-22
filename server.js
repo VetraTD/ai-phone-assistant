@@ -274,7 +274,27 @@ function twilioValidation(req, res, next) {
     return res.status(403).send("Forbidden");
   }
   const url = BASE_URL + (req.originalUrl || req.url);
-  const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
+
+  // validateRequest THROWS on a malformed signature rather than returning
+  // false. It base64-decodes the header and compares with
+  // `crypto.timingSafeEqual`, which requires equal-length buffers — so a
+  // signature of the wrong length raises instead of failing cleanly, and the
+  // unhandled error became a 500.
+  //
+  // Two reasons that matters beyond tidiness. A 500 and a 403 are
+  // distinguishable, so the difference tells an attacker which of their guesses
+  // was well-formed. And anyone can produce unbounded 500s on a public endpoint
+  // by sending junk, which is error-budget noise that buries real failures.
+  //
+  // A signature that cannot be parsed is not a different outcome from a
+  // signature that does not match. Both are "not from Twilio".
+  let valid = false;
+  try {
+    valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
+  } catch {
+    valid = false;
+  }
+
   if (!valid) {
     log.error("twilio_signature_invalid", { url: req.url, ip: req.ip });
     return res.status(403).send("Forbidden");

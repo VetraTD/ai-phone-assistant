@@ -309,3 +309,36 @@ describe("server.js env preflight and Vertex", () => {
     expect(src).toMatch(/BAA-covered path/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Twilio signature validation, and the malformed case specifically.
+//
+// Found by POSTing junk at the deployed staging service: a bogus signature
+// returned 500, not 403. `twilio.validateRequest` base64-decodes the header and
+// compares with crypto.timingSafeEqual, which THROWS on unequal-length buffers
+// — so a wrong-length signature raised instead of returning false.
+//
+// It matters twice over. A 500 and a 403 are distinguishable, so the difference
+// tells an attacker which guesses were well-formed. And anyone can generate
+// unbounded 500s on a public endpoint with junk, burying real failures.
+// ---------------------------------------------------------------------------
+describe("twilioValidation handles a malformed signature", () => {
+  const src = readFileSync(new URL("../server.js", import.meta.url), "utf8");
+
+  it("wraps validateRequest so a throw becomes a rejection, not a 500", () => {
+    const i = src.indexOf("twilio.validateRequest(");
+    expect(i).toBeGreaterThan(-1);
+    const around = src.slice(Math.max(0, i - 400), i + 200);
+    expect(around).toMatch(/try\s*\{/);
+    expect(around).toMatch(/catch/);
+  });
+
+  it("a caught throw is treated as INVALID, never as valid", () => {
+    // The dangerous version of this fix sets `valid = true` in the catch, or
+    // calls next(). Both turn a crash into an authentication bypass.
+    const i = src.indexOf("twilio.validateRequest(");
+    const around = src.slice(i, i + 260);
+    expect(around).toMatch(/catch\s*\{[\s\S]*valid\s*=\s*false/);
+    expect(around).not.toMatch(/catch\s*\{[\s\S]*next\(\)/);
+  });
+});
