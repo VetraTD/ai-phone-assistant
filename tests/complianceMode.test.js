@@ -95,14 +95,43 @@ describe("hipaa mode refuses non-covered vendors at construction", () => {
   // services/deepgram.js, which A10 left with no consumers when it deleted
   // lib/mediaStream.js — so the guard was being proven on dead code while the
   // path that actually runs went untested.
-  it("refuses Deepgram on the live STT path", async () => {
+  //
+  // CHANGED once Google STT v2 existed. Before, `hipaa` mode had no STT at all
+  // and the only correct outcome was a refusal — this test asserted the
+  // receptionist going deaf and called it compliance. Now there is a covered
+  // provider, so the property worth protecting is sharper: the live path must
+  // still never reach Deepgram, but it must reach Google instead of failing.
+  it("routes the live STT path to Google in hipaa mode, never to Deepgram", async () => {
+    for (const k of ENV) delete process.env[k];
+    process.env.DEPLOYMENT_MODE = "hipaa";
+    process.env.DEEPGRAM_API_KEY = "dg-key";
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    vi.resetModules();
+
+    const { createSttStream, sttProviderFor } = await import("../lib/voice/sttStream.js");
+    expect(sttProviderFor("standard")).toBe("google");
+
+    // A Deepgram key is present and is still not reachable. The only way this
+    // can fail is for a Google reason — proving the request never got near the
+    // uncovered vendor.
+    await expect(createSttStream({ language: "en-US", callSid: "CA1" })).rejects.toThrow(
+      /GOOGLE_CLOUD_PROJECT/
+    );
+  });
+
+  // Defence in depth, and the reason the A6 guard stays in the provider module
+  // rather than moving up to the selector: a refusal inside the constructor
+  // cannot be routed around, and a refusal in a routing function can.
+  it("the Deepgram constructor itself still refuses in hipaa mode", async () => {
     for (const k of ENV) delete process.env[k];
     process.env.DEPLOYMENT_MODE = "hipaa";
     process.env.DEEPGRAM_API_KEY = "dg-key";
     vi.resetModules();
 
-    const { createSttStream } = await import("../lib/voice/sttStream.js");
-    await expect(createSttStream({ language: "en-US", callSid: "CA1" })).rejects.toThrow(/Deepgram/);
+    const { createDeepgramSttStream } = await import("../lib/voice/sttDeepgram.js");
+    await expect(
+      createDeepgramSttStream({ language: "en-US", callSid: "CA1" })
+    ).rejects.toThrow(/Deepgram/);
   });
 });
 

@@ -4094,3 +4094,34 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written.match(/one moment/gi) || []).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// STT provider routing — the tenant half of the compliance ratchet.
+//
+// The deployment half is covered in tests/sttProviderSelection.test.js. What
+// only session.js can prove is that the tenant's own tier reaches the seam at
+// all: effectiveTier() is the stricter of deployment and tenant, and if the
+// business row never gets passed, a covered tenant on a `standard` deployment
+// silently streams patient speech to Deepgram.
+// ---------------------------------------------------------------------------
+describe("session.js — the call's compliance tier reaches the STT seam", () => {
+  it("forwards tier `hipaa` when the business row is a covered tenant", async () => {
+    db.lookupBusinessByPhone.mockResolvedValueOnce({ id: "biz1", compliance_tier: "hipaa" });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    expect(H.sttInstances[0].opts.tier).toBe("hipaa");
+  });
+
+  it("forwards tier `standard` for an ordinary tenant on a standard deployment", async () => {
+    db.lookupBusinessByPhone.mockResolvedValueOnce({ id: "biz1" });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    expect(H.sttInstances[0].opts.tier).toBe("standard");
+  });
+});
