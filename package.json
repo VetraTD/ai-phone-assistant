@@ -13,6 +13,8 @@
     "chat": "node scripts/chat.js",
     "eval": "node eval/run.js",
     "eval:compare": "node scripts/eval-compare.js",
+    "stt:ab": "node scripts/stt-ab.js",
+    "stt:cmek": "node scripts/set-stt-cmek.js",
     "sim:cutoff": "vitest run --config vitest.sim.config.js",
     "probe:synth": "node scripts/latency-probe.js --synth",
     "probe": "node scripts/latency-probe.js",
