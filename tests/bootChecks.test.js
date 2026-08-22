@@ -328,38 +328,30 @@ describe("server.js env preflight and Vertex", () => {
 // tells an attacker which guesses were well-formed. And anyone can generate
 // unbounded 500s on a public endpoint with junk, burying real failures.
 // ---------------------------------------------------------------------------
-describe("twilioValidation handles a malformed signature", () => {
-  const src = readFileSync(new URL("../server.js", import.meta.url), "utf8");
+// ---------------------------------------------------------------------------
+// twilioValidation's tests MOVED to tests/twilioSignature.test.js, and the move
+// is the point rather than a tidy-up.
+//
+// What used to live here were SOURCE SCANS: read server.js as text, check a
+// try/catch is present, check `next()` does not appear after the catch. They
+// passed for months while the middleware they described rejected 100% of
+// traffic — `import * as twilio` made `twilio.validateRequest` undefined, the
+// TypeError was swallowed by that very try/catch, and every genuine Twilio
+// request got the same 403 as a forged one. The first real phone call was what
+// found it.
+//
+// A scan can confirm a shape. It cannot confirm behaviour, and the three
+// negative tests that existed could not tell "correctly refuses bad input"
+// apart from "refuses everything". The verification that was missing is the
+// positive one: a CORRECTLY signed request is ACCEPTED.
+//
+// So the logic moved into lib/twilioSignature.js, where it can be imported and
+// exercised for real. Two of these old scans also broke on their own terms —
+// one depended on line endings (passing on CRLF, failing on LF and therefore
+// on Linux CI), and one matched the comment that explains the bug rather than
+// the bug.
+// ---------------------------------------------------------------------------
 
-  it("wraps validateRequest so a throw becomes a rejection, not a 500", () => {
-    const i = src.indexOf("twilio.validateRequest(");
-    expect(i).toBeGreaterThan(-1);
-    const around = src.slice(Math.max(0, i - 400), i + 200);
-    expect(around).toMatch(/try\s*\{/);
-    expect(around).toMatch(/catch/);
-  });
-
-  it("a caught throw is treated as INVALID, never as valid", () => {
-    // The dangerous version of this fix sets `valid = true` in the catch, or
-    // calls next(). Both turn a crash into an authentication bypass.
-    //
-    // Reads the CATCH BLOCK, not a fixed byte window. The window version
-    // (`slice(i, i + 260)`) silently depended on line endings: with CRLF it
-    // stopped just short of the legitimate `next()` on the success path, and
-    // with LF — which .gitattributes asks for in every working tree, and which
-    // is what a Linux checkout gets — it ran past it and the test failed on
-    // correct code. It was a passing test on this workstation only.
-    const i = src.indexOf("twilio.validateRequest(");
-    expect(i).toBeGreaterThan(-1);
-    const catchStart = src.indexOf("catch", i);
-    const bodyStart = src.indexOf("{", catchStart);
-    const catchBody = src.slice(bodyStart + 1, src.indexOf("}", bodyStart));
-
-    expect(catchBody).toMatch(/valid\s*=\s*false/);
-    expect(catchBody).not.toMatch(/valid\s*=\s*true/);
-    expect(catchBody).not.toMatch(/next\(\)/);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // checkSttConfig — the contradiction that stopped the US lane serving a call.

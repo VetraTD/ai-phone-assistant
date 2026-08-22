@@ -4,7 +4,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
-import * as twilio from "twilio";
+import { verifyTwilioSignature } from "./lib/twilioSignature.js";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/db.js";
@@ -281,25 +281,29 @@ function twilioValidation(req, res, next) {
   }
   const url = BASE_URL + (req.originalUrl || req.url);
 
-  // validateRequest THROWS on a malformed signature rather than returning
-  // false. It base64-decodes the header and compares with
-  // `crypto.timingSafeEqual`, which requires equal-length buffers — so a
-  // signature of the wrong length raises instead of failing cleanly, and the
-  // unhandled error became a 500.
+  // The verification lives in lib/twilioSignature.js, and moving it there was
+  // the fix for a bug that rejected EVERY request for the life of this
+  // deployment.
   //
-  // Two reasons that matters beyond tidiness. A 500 and a 403 are
-  // distinguishable, so the difference tells an attacker which of their guesses
-  // was well-formed. And anyone can produce unbounded 500s on a public endpoint
-  // by sending junk, which is error-budget noise that buries real failures.
+  // This file did `import * as twilio from "twilio"`. The package is CommonJS,
+  // so Node's ESM interop puts only `default` on the namespace — making
+  // `twilio.validateRequest` undefined. Calling it threw a TypeError, and the
+  // try/catch that was added to turn a malformed signature into a clean 403
+  // swallowed that TypeError into `valid = false`. Genuine Twilio requests got
+  // the same 403 as forged ones.
   //
-  // A signature that cannot be parsed is not a different outcome from a
-  // signature that does not match. Both are "not from Twilio".
-  let valid = false;
-  try {
-    valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
-  } catch {
-    valid = false;
-  }
+  // It survived because the middleware could not be imported by a test — it
+  // lived in the file that boots the server — so it was "tested" by scanning
+  // this source for the presence of a try/catch. Those scans passed. Three
+  // negative tests passed. Nothing ever asserted that a GOOD signature is
+  // ACCEPTED, and that is the only assertion that could tell "correctly
+  // refuses bad input" apart from "refuses everything".
+  const valid = verifyTwilioSignature({
+    authToken: TWILIO_AUTH_TOKEN,
+    signature,
+    url,
+    params: req.body,
+  });
 
   if (!valid) {
     log.error("twilio_signature_invalid", { url: req.url, ip: req.ip });
