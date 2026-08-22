@@ -582,6 +582,63 @@ CREATE TRIGGER business_directory_sync
   AFTER INSERT OR UPDATE OF phone_number OR DELETE ON businesses
   FOR EACH ROW EXECUTE FUNCTION app_sync_business_directory();
 
+-- Routing only: verified login address -> tenant. The same shape as
+-- business_directory and for the same reason, one bootstrap along: `users` is
+-- FORCE RLS on `business_id = app_current_business_id()`, and the business_id
+-- is the very thing an authenticating request is trying to discover. NO
+-- row-level security, NOT granted to vetra_app. See migration 034.
+--
+-- MUST NEVER carry anything beyond an email and a business id.
+CREATE TABLE IF NOT EXISTS user_directory (
+  email       text PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS user_directory_business_id_idx
+  ON user_directory (business_id);
+
+REVOKE ALL ON user_directory FROM PUBLIC;
+
+-- A stale row here is the serious direction: it would resolve somebody's login
+-- to an employer they have left, which is a cross-tenant read with a valid
+-- session behind it. A missing row only locks somebody out.
+CREATE OR REPLACE FUNCTION app_sync_user_directory()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM user_directory WHERE email = OLD.email;
+    RETURN OLD;
+  END IF;
+
+  -- An address CHANGE must stop the old one resolving. Without this the
+  -- previous address keeps a live mapping to the tenant, and a decommissioned
+  -- login stays routable.
+  IF TG_OP = 'UPDATE' AND NEW.email IS DISTINCT FROM OLD.email THEN
+    DELETE FROM user_directory WHERE email = OLD.email;
+  END IF;
+
+  -- users.email is NOT NULL, which does not stop it being empty.
+  IF NEW.email IS NULL OR btrim(NEW.email) = '' THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO user_directory (email, business_id)
+  VALUES (NEW.email, NEW.business_id)
+  ON CONFLICT (email) DO UPDATE SET business_id = EXCLUDED.business_id;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS user_directory_sync ON users;
+CREATE TRIGGER user_directory_sync
+  AFTER INSERT OR UPDATE OF email, business_id OR DELETE ON users
+  FOR EACH ROW EXECUTE FUNCTION app_sync_user_directory();
+
 CREATE OR REPLACE FUNCTION app_lookup_business_by_phone(p_phone text)
 RETURNS SETOF businesses
 LANGUAGE plpgsql
@@ -644,19 +701,55 @@ $$;
 COMMENT ON FUNCTION app_business_capabilities(uuid) IS
   'Bootstrap: one business''s capability rows, needed before a tenant is set. Configuration, not patient data.';
 
+-- Reads user_directory, adopts the tenant it finds, and only then reads `users`
+-- — so the read SATISFIES the policy rather than bypassing it. The plain
+-- SELECT this replaced returned ZERO rows on Cloud SQL, which meant every
+-- authenticated request resolved to no business and 403'd. Migration 034.
 CREATE OR REPLACE FUNCTION app_lookup_user_by_email(p_email text)
 RETURNS TABLE (id uuid, business_id uuid, email text, role text)
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
-STABLE
 AS $$
-  SELECT u.id, u.business_id, u.email, u.role
-    FROM users u WHERE u.email = p_email LIMIT 1;
+DECLARE
+  v_business uuid;
+  v_current  text := current_setting('app.business_id', true);
+BEGIN
+  IF p_email IS NULL OR btrim(p_email) = '' THEN
+    RETURN;
+  END IF;
+
+  -- Qualified with `d.`, because RETURNS TABLE puts `email` and `business_id`
+  -- in scope as OUT parameters and an unqualified reference would resolve to
+  -- those rather than to the column.
+  SELECT d.business_id INTO v_business
+    FROM user_directory d
+   WHERE d.email = p_email;
+
+  IF v_business IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- Adopt the discovered tenant ONLY when the caller has not already declared
+  -- one. If a scope is already set, respect it: this function must never
+  -- repoint a transaction that already knows which tenant it is working for,
+  -- and in that case the row is visible only if the user genuinely belongs to
+  -- that tenant — which is the correct answer, not a limitation.
+  IF v_current IS NULL OR v_current = '' THEN
+    PERFORM set_config('app.business_id', v_business::text, true);
+  END IF;
+
+  -- Now an ordinary, policy-satisfying read.
+  RETURN QUERY
+    SELECT u.id, u.business_id, u.email, u.role
+      FROM users u
+     WHERE u.email = p_email
+     LIMIT 1;
+END;
 $$;
 
 COMMENT ON FUNCTION app_lookup_user_by_email(text) IS
-  'Bootstrap: an authenticated identity to the tenant it may act on. SECURITY DEFINER for the same reason as app_lookup_business_by_phone. Returns at most one row.';
+  'Bootstrap: a verified login address -> the tenant it may act on. Reads user_directory, which has no row-level security and is unreadable by the application role, then adopts that tenant for the transaction so the read of `users` SATISFIES the policy instead of bypassing it. SECURITY DEFINER alone is not enough under FORCE ROW LEVEL SECURITY, and a BYPASSRLS owner is unavailable on Cloud SQL — see migration 034.';
 
 REVOKE ALL ON FUNCTION app_lookup_business_by_phone(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_lookup_user_by_email(text) FROM PUBLIC;
