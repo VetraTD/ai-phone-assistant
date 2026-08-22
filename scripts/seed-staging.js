@@ -94,7 +94,19 @@ const HOURS = JSON.stringify({
 });
 
 try {
-  const found = await client.query("SELECT id FROM businesses WHERE phone_number = $1", [PHONE]);
+  // Through the bootstrap function, NOT a direct SELECT.
+  //
+  // `SELECT id FROM businesses WHERE phone_number = $1` returns ZERO ROWS here,
+  // however many rows exist: this runs unscoped, and FORCE row-level security
+  // binds the migration role like everyone else. The empty result then looked
+  // like "not seeded yet", so a re-run took the create branch and was refused
+  // with "user already belongs to a business" — the failure landing two steps
+  // from its cause.
+  //
+  // app_lookup_business_by_phone is the one read that works without a tenant,
+  // which is the whole point of migration 033, and it is what the receptionist
+  // itself uses. Same path, same answer.
+  const found = await client.query("SELECT id FROM app_lookup_business_by_phone($1)", [PHONE]);
   let id;
 
   if (found.rows.length) {
