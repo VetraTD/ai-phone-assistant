@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "./supabaseClient";
+import { signIn, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Login.css";
 
@@ -18,15 +18,12 @@ export default function Login({ onSwitchToSignup }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await signIn(email, password);
 
     setLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
     }
   };
 
@@ -41,21 +38,25 @@ export default function Login({ onSwitchToSignup }) {
 
     setResetLoading(true);
 
-    const redirectTo =
+    // Where the person lands AFTER the reset, not where the reset happens —
+    // Identity Platform issues a one-shot code rather than a recovery session,
+    // so the link goes to the action handler and only then here. The domain must
+    // be in Identity Platform's authorized_domains or the link is refused.
+    const continueUrl =
       typeof window !== "undefined"
         ? `${window.location.origin}/reset-password`
         : "http://localhost:5173/reset-password";
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    });
+    const { error } = await sendPasswordReset(email, { continueUrl });
 
     setResetLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
     } else {
-      setMessage("Check your email for a password reset link.");
+      // The same sentence whether or not that address has an account. Saying
+      // "no such user" would turn this form into a way to enumerate staff.
+      setMessage("If that email has an account, a reset link is on its way.");
       setPassword("");
     }
   };

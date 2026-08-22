@@ -1,5 +1,5 @@
 import axios from "axios";
-import { supabase } from "./supabaseClient";
+import { getAccessToken } from "./auth";
 import { attachAuthRetry } from "./authRetry";
 
 const NUMBER_API_BASE =
@@ -11,12 +11,11 @@ export const numberApi = axios.create({
 });
 
 numberApi.interceptors.request.use(async (config) => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const token = await getAccessToken();
 
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`;
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
   }
 
   return config;

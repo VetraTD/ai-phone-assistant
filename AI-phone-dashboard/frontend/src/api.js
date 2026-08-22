@@ -1,5 +1,5 @@
 import axios from "axios";
-import { supabase } from "./supabaseClient";
+import { getAccessToken } from "./auth";
 import { attachAuthRetry } from "./authRetry";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
@@ -9,8 +9,7 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
-  const { data } = await supabase.auth.getSession();
-  const token = data?.session?.access_token;
+  const token = await getAccessToken();
 
   if (token) {
     config.headers = config.headers || {};

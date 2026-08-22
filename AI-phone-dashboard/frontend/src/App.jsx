@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import { supabase } from "./supabaseClient";
+import { onAuthChange, signOut } from "./auth";
 import { useIdleLogout, IDLE_TIMEOUT_MINUTES } from "./useIdleLogout";
 import { LanguageSwitcher, useTranslations } from "./LanguageSwitcher";
 
@@ -504,26 +504,25 @@ function App() {
   }, [activePage]);
 
   useEffect(() => {
-    const boot = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session || null);
+    // One subscription, no separate boot read. onAuthChange fires once with the
+    // restored user (or null) as soon as Identity Platform has finished reading
+    // persisted storage, which is the same moment the old getSession() resolved
+    // — so `checkingSession` still clears exactly when the answer is known, and
+    // there is no window where a signed-in person sees the login screen.
+    return onAuthChange((user) => {
+      setSession(user || null);
       setCheckingSession(false);
-    };
-    boot();
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession || null);
     });
-    return () => listener.subscription.unsubscribe();
   }, []);
 
   // HIPAA 164.312(a)(2)(iii) automatic logoff. Before this, a session lasted
-  // until the tab closed — Supabase refreshes its one-hour token on a timer
+  // until the tab closed — Identity Platform refreshes its one-hour token
   // indefinitely, so an unattended browser on a clinic front desk stayed signed
   // in overnight, in front of every patient record that clinic holds.
   const idle = useIdleLogout({
     enabled: !!session,
     onLogout: async () => {
-      await supabase.auth.signOut();
+      await signOut();
     },
   });
 
@@ -757,7 +756,7 @@ function App() {
     return (
       <Onboarding
         existingBusiness={business && !business.phone_number ? business : null}
-        onBack={() => supabase.auth.signOut()}
+        onBack={() => signOut()}
         onComplete={(biz) => {
           setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
         }}
@@ -776,7 +775,7 @@ function App() {
           <button
             type="button"
             className="dashboard-logout"
-            onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+            onClick={async () => { await signOut(); window.location.reload(); }}
           >
             {t.signOut}
           </button>
@@ -872,7 +871,7 @@ function App() {
 
             <button
               className="dashboard-logout"
-              onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+              onClick={async () => { await signOut(); window.location.reload(); }}
             >
               {t.logout}
             </button>

@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 // §164.312(a)(2)(iii) automatic logoff — "implement electronic procedures that
 // terminate an electronic session after a predetermined time of inactivity."
 //
-// Nothing did. A dashboard session lasted until the tab was closed: Supabase
-// issues a one-hour access token and refreshes it on a timer indefinitely, so
-// an unattended browser on a clinic front desk stayed signed in overnight, in
+// Nothing did. A dashboard session lasted until the tab was closed: the auth
+// backend issues a one-hour access token and refreshes it indefinitely, so an
+// unattended browser on a clinic front desk stayed signed in overnight, in
 // front of every patient record that clinic holds.
 //
 // 15 minutes is the default because it is the healthcare convention — the
@@ -16,8 +16,8 @@ import { useEffect, useRef, useState } from "react";
 // WHAT THIS IS AND IS NOT. It terminates the SESSION in this browser: the timer
 // fires, signOut() runs, and the refresh token is discarded so no further access
 // tokens can be minted. It is not a bound on a token already stolen — that
-// needs the server, and see lib/auth/accessToken.js for why the honest version
-// of that is a B3 change rather than something that can be bolted on here.
+// needs the server, and lib/auth/accessToken.js does it: SESSION_MAX_AGE_MINUTES
+// refuses a token past a ceiling measured from its own `iat`.
 // ---------------------------------------------------------------------------
 
 /** Activity that counts as "the person is still there". */

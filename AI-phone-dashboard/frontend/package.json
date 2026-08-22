@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.98.0",
     "axios": "^1.13.5",
+    "firebase": "^12.18.0",
     "lucide-react": "^1.17.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

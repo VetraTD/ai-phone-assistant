@@ -1,13 +1,13 @@
-import { supabase } from "./supabaseClient";
+import { getAccessToken, signOut } from "./auth";
 
 // ---------------------------------------------------------------------------
 // What makes a short server-side token-age ceiling usable.
 //
 // Both servers reject an access token older than SESSION_MAX_AGE_MINUTES, which
 // bounds how long a LEAKED token keeps working. Without this, that bound would
-// also log a working clinic out mid-sentence: Supabase refreshes its token on a
-// timer near expiry, not when the person acts, so a perfectly valid session
-// routinely carries a token twenty minutes old.
+// also log a working clinic out mid-sentence: Identity Platform refreshes its
+// token near expiry rather than when the person acts, so a perfectly valid
+// session routinely carries a token well over half an hour old.
 //
 // So: when a server says the token is too old, mint a fresh one and retry once.
 // The person sees nothing. An IDLE browser makes no requests, refreshes
@@ -40,16 +40,18 @@ export function attachAuthRetry(instance) {
 
       config.__authRetried = true;
 
-      const { data, error: refreshError } = await supabase.auth.refreshSession();
-      if (refreshError || !data?.session?.access_token) {
+      // forceRefresh, not a plain read: the point is a token with a NEW `iat`,
+      // and the cached one is what the server just refused.
+      const fresh = await getAccessToken({ forceRefresh: true });
+      if (!fresh) {
         // The session really is over. Sign out so the app shows the login
         // screen rather than an endless row of failed requests.
-        await supabase.auth.signOut();
+        await signOut();
         return Promise.reject(error);
       }
 
       config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${data.session.access_token}`;
+      config.headers.Authorization = `Bearer ${fresh}`;
       return instance.request(config);
     }
   );

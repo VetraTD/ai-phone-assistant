@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "./supabaseClient";
+import { signUp } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Signup.css";
 
@@ -17,15 +17,12 @@ export default function Signup({ onSwitchToLogin }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { error } = await signUp(email, password);
 
     setLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
       return;
     }
 
