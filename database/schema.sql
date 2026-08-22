@@ -531,14 +531,87 @@ ALTER TABLE calendar_connections FORCE ROW LEVEL SECURITY;
 -- which `calls` table the body means, which is a privilege-escalation vector
 -- rather than a style issue.
 
-CREATE OR REPLACE FUNCTION app_lookup_business_by_phone(p_phone text)
-RETURNS SETOF businesses
-LANGUAGE sql
+-- Routing only: dialled number -> tenant. NO row-level security, and NOT
+-- granted to vetra_app — only the SECURITY DEFINER function below reads it.
+--
+-- It exists because a tenant cannot be discovered through a policy that
+-- requires the tenant. SECURITY DEFINER alone does not solve that here: the
+-- policies are FORCE, which applies to the table owner too, and a BYPASSRLS
+-- owner is unavailable on Cloud SQL (only `cloudsqladmin` has it). See
+-- migration 033.
+--
+-- MUST NEVER carry anything beyond a phone number and a business id.
+CREATE TABLE IF NOT EXISTS business_directory (
+  phone_number text PRIMARY KEY,
+  business_id  uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS business_directory_business_id_idx
+  ON business_directory (business_id);
+
+REVOKE ALL ON business_directory FROM PUBLIC;
+
+-- A routing table that drifts is worse than none: a stale row sends a caller to
+-- the wrong tenant, a missing row sends them to voicemail.
+CREATE OR REPLACE FUNCTION app_sync_business_directory()
+RETURNS trigger
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
-STABLE
 AS $$
-  SELECT * FROM businesses WHERE phone_number = p_phone LIMIT 1;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM business_directory WHERE business_id = OLD.id;
+    RETURN OLD;
+  END IF;
+
+  DELETE FROM business_directory WHERE business_id = NEW.id;
+
+  IF NEW.phone_number IS NOT NULL AND btrim(NEW.phone_number) <> '' THEN
+    INSERT INTO business_directory (phone_number, business_id)
+    VALUES (btrim(NEW.phone_number), NEW.id)
+    ON CONFLICT (phone_number) DO UPDATE SET business_id = EXCLUDED.business_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS business_directory_sync ON businesses;
+CREATE TRIGGER business_directory_sync
+  AFTER INSERT OR UPDATE OF phone_number OR DELETE ON businesses
+  FOR EACH ROW EXECUTE FUNCTION app_sync_business_directory();
+
+CREATE OR REPLACE FUNCTION app_lookup_business_by_phone(p_phone text)
+RETURNS SETOF businesses
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_id      uuid;
+  v_current text := current_setting('app.business_id', true);
+BEGIN
+  IF p_phone IS NULL OR btrim(p_phone) = '' THEN
+    RETURN;
+  END IF;
+
+  SELECT business_id INTO v_id
+    FROM business_directory
+   WHERE phone_number = btrim(p_phone);
+
+  IF v_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- Adopt the discovered tenant only when the caller has not declared one.
+  -- Never repoint a transaction that already knows which tenant it serves.
+  IF v_current IS NULL OR v_current = '' THEN
+    PERFORM set_config('app.business_id', v_id::text, true);
+  END IF;
+
+  RETURN QUERY SELECT * FROM businesses WHERE id = v_id;
+END;
 $$;
 
 COMMENT ON FUNCTION app_lookup_business_by_phone(text) IS
