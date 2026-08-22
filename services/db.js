@@ -85,7 +85,14 @@ if (DATABASE_URL) {
     log.error("db_pool_error", { message: err?.message, severity: "warn" });
   });
 } else {
-  log.error("database_not_configured", { reason: "missing_database_url", severity: "warn" });
+  // Not a warning when Cloud SQL is the backend. `initCloudSqlPool()` builds
+  // the pool at startup instead, so a Cloud Run deployment that is configured
+  // perfectly would otherwise announce "database not configured" at every boot
+  // — and an alarm that fires when nothing is wrong is one people learn to
+  // scroll past, which costs the real one.
+  if (!process.env.CLOUD_SQL_INSTANCE) {
+    log.error("database_not_configured", { reason: "missing_database_url", severity: "warn" });
+  }
 }
 
 /** @returns {boolean} Whether the database is configured */
