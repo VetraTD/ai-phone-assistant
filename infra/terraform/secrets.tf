@@ -71,8 +71,8 @@ variable "runtime_secrets" {
     }
     deepgram-api-key = {
       env_var = "DEEPGRAM_API_KEY"
-      lanes   = ["us", "uk"]
-      purpose = "Speech-to-text. PRESENT IN BOTH LANES ONLY IF THE BAA LANDS — see the ledger; asked 2026-08-21, unanswered. If the answer is no, the US lane loses this and gains Google STT v2."
+      lanes   = ["uk"]
+      purpose = "Speech-to-text. UK ONLY, as of Google STT v2 landing. The US lane transcribes with Google Speech-to-Text v2 (BAA-covered) and must hold no Deepgram credential at all — checkCoveredVendors refuses to boot a hipaa process that has one, which is exactly what kept US staging on `standard`. This list is now the same kind of boundary as elevenlabs-api-key's."
     }
     elevenlabs-api-key = {
       env_var = "ELEVENLABS_API_KEY"

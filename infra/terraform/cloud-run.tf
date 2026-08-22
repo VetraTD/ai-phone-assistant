@@ -248,43 +248,48 @@ resource "google_cloud_run_v2_service" "this" {
       }
 
       # -------------------------------------------------------------------
-      # The compliance tier, and why STAGING is not `hipaa`.
+      # The compliance tier. EVERY US STACK IS `hipaa` AGAIN, staging included.
       #
-      # This was `hipaa` for every US stack, and the first staging deploy
-      # refused to boot on it — correctly:
+      # It was not. The first staging deploy refused to boot on `hipaa`:
       #
       #   FATAL non_covered_credential_present: DEEPGRAM_API_KEY is set in a
       #   DEPLOYMENT_MODE=hipaa process. Deepgram has no BAA.
       #
-      # That is the guard working, and it is the ledger's UNASSIGNED WORK
-      # surfacing exactly where it said it would: THE US HIPAA LANE HAS NO
-      # BAA-COVERED SPEECH-TO-TEXT. Deepgram was asked for a BAA on 2026-08-21
-      # and has not answered. Until it does, a `hipaa` process cannot hold the
-      # only STT credential this system has, so a US production service cannot
-      # serve a call at all.
+      # That was the guard working, and it was the ledger's UNASSIGNED WORK
+      # surfacing exactly where it said it would: the US lane had no
+      # BAA-covered speech-to-text. Staging was dropped to `standard` to get a
+      # service up at all, and the recorded cost was that staging stopped
+      # rehearsing the hipaa vendor guard.
       #
-      # Staging is `standard` because staging holds no patient data — barred by
-      # rule and now enforced by CALLER_ALLOWLIST, which refuses every caller
-      # but the two test numbers. The tier that carries compliance weight is
-      # production's, and production is blocked on the BAA regardless of what
-      # staging is set to.
+      # Google STT v2 now exists behind the sttStream.js seam, so the covered
+      # lane HAS ears and the Deepgram credential is no longer in a US project
+      # at all — `deepgram-api-key` is UK-only in secrets.tf. Nothing here waits
+      # on the Deepgram BAA any more; that answer would change the UK lane's
+      # options and nothing about this line.
       #
-      # WHAT THIS COSTS, stated rather than hidden: staging no longer rehearses
-      # the hipaa vendor guard. The merge already recorded that staging cannot
-      # rehearse the credential boundary, which is why the CI gate checks
-      # PRODUCTION directly (scripts/check-credential-boundary.js) instead of
-      # trusting staging to catch it.
-      #
-      # Flip staging to `hipaa` the moment the Deepgram answer arrives — or, if
-      # the answer is no, when Google STT v2 replaces it.
+      # THIS FLIP IS THE MIGRATION'S OBJECTIVE PROOF. Staging ran `standard`
+      # ONLY because a hipaa process refused to boot with a Deepgram credential
+      # present. If a `hipaa` staging service boots and serves a call, the
+      # blocker is gone — and if it does not, no amount of passing tests says
+      # otherwise.
       # -------------------------------------------------------------------
       env {
-        name = "DEPLOYMENT_MODE"
-        value = (
-          local.stacks[each.value.stack].lane == "us" && local.stacks[each.value.stack].env == "prod"
-          ? "hipaa"
-          : "standard"
-        )
+        name  = "DEPLOYMENT_MODE"
+        value = local.stacks[each.value.stack].lane == "us" ? "hipaa" : "standard"
+      }
+
+      # A SINGLE region, never `global`. lib/voice/sttGoogle.js refuses `global`
+      # at construction and checkSttConfig refuses it at boot, for the reason
+      # VERTEX_LOCATION already carries: a global endpoint may process audio in
+      # any region on earth, which voids the data-location control while looking
+      # like a sensible value.
+      #
+      # Matches the project's own region, which is also where speech.tf puts the
+      # CMEK key ring — a key in another region is not a key Speech can use, and
+      # the error names neither.
+      env {
+        name  = "STT_LOCATION"
+        value = local.projects[var.stack_projects[each.value.stack]].region
       }
 
       # SMTP identity. Not secrets — a hostname, a port and an address — and
