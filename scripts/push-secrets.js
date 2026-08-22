@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Push credential values from a local .env into Secret Manager.
+ * Push credential values from local env files into Secret Manager.
  *
  *   node scripts/push-secrets.js --project vetra-us-staging-c3a3bd --dry-run
- *   node scripts/push-secrets.js --project vetra-us-staging-c3a3bd
+ *   node scripts/push-secrets.js --project vetra-us-staging-c3a3bd \
+ *     --from .env --from .env.staging
  *
  * ---------------------------------------------------------------------------
  * Why a script instead of four copy-pastes
@@ -14,18 +15,35 @@
  * chat with an assistant, a transcript. None of those are places a Twilio auth
  * token should end up, and all of them outlive the paste.
  *
- * This reads the file, pipes each value to `gcloud` on stdin, and never prints
- * one. What it prints is names, lengths and outcomes, which is enough to tell a
- * success from a silent no-op and nothing more.
+ * This reads the files, pipes each value to `gcloud` on stdin, and never prints
+ * one. What it prints is names, lengths, provenance and outcomes: enough to
+ * tell a success from a silent no-op, and nothing more.
  *
  * ---------------------------------------------------------------------------
- * printf, not echo
+ * Layering, and why it is the point
  * ---------------------------------------------------------------------------
  *
- * Values go to gcloud via stdin with no trailing newline. `echo` would append
- * one and the newline would become part of the secret. This project has already
- * lost a day to exactly that: a leading newline in a Supabase cell made every
- * business answer as "our office", and the fix was invisible because the value
+ * `--from` is repeatable and LATER FILES WIN. `.env` holds the production
+ * Twilio credentials the live receptionist runs on; `.env.staging` layers a
+ * subaccount SID and token on top while Deepgram and SMTP still come from the
+ * base file.
+ *
+ * Maintaining a complete second env file instead would mean every value exists
+ * twice, and the copy nobody edits is the one that goes stale and gets pushed.
+ *
+ * `--from`, not `--env-file`: Node 20.6+ has a BUILT-IN `--env-file` and claims
+ * the argument before this script sees it. The failure is
+ * `node.exe: .env.staging: not found`, which looks like a missing file and is a
+ * flag collision.
+ *
+ * ---------------------------------------------------------------------------
+ * No trailing newline, ever
+ * ---------------------------------------------------------------------------
+ *
+ * Values go to gcloud on stdin with nothing appended. `echo` would add a
+ * newline and the newline would become part of the secret. This project has
+ * already lost a day to exactly that: a leading newline in a Supabase cell made
+ * every business answer as "our office", and it was invisible because the value
  * LOOKED right everywhere it was displayed.
  */
 
@@ -40,13 +58,12 @@ const GCLOUD = IS_WINDOWS ? "gcloud.cmd" : "gcloud";
 const PROJECT_ID_RE = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 
 /**
- * env var in .env  ->  secret name in Secret Manager.
+ * env var  ->  secret name in Secret Manager.
  *
  * ELEVENLABS_API_KEY IS DELIBERATELY ABSENT. It is a UK-lane credential with no
  * BAA, the secret does not exist in any US project, and the entire US/UK split
- * exists so that it cannot. If it ever belongs somewhere, it belongs in a UK
- * project and this script should be told about it explicitly rather than
- * inheriting it from a shared .env.
+ * exists so that it cannot. If it ever belongs somewhere it belongs in a UK
+ * project, named explicitly, not inherited from a shared .env.
  */
 const MAPPING = Object.freeze({
   DEEPGRAM_API_KEY: "deepgram-api-key",
@@ -55,8 +72,23 @@ const MAPPING = Object.freeze({
   SMTP_PASS: "smtp-password",
 });
 
-/** Minimal .env reader. Handles `KEY=value`, quotes, comments, blank lines. */
-function readDotEnv(file) {
+/**
+ * Shapes for the credentials whose format is documented and stable.
+ *
+ * The failure this catches is a template created and never filled in. Only
+ * Twilio is checked strictly, because only Twilio publishes a format worth
+ * relying on.
+ */
+const FORMATS = Object.freeze({
+  TWILIO_ACCOUNT_SID: { re: /^AC[0-9a-f]{32}$/i, expected: "AC followed by 32 hex characters" },
+  TWILIO_AUTH_TOKEN: { re: /^[0-9a-f]{32}$/i, expected: "32 hex characters" },
+});
+
+/** Words that only appear in a value nobody has replaced yet. */
+const PLACEHOLDER_RE = /xxxx|changeme|placeholder|your[-_]?(sid|token|key|password)/i;
+
+/** Minimal env reader. Handles `KEY=value`, quotes, comments, blank lines. */
+function readEnvFile(file) {
   const out = {};
   if (!fs.existsSync(file)) return out;
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
@@ -74,113 +106,127 @@ function readDotEnv(file) {
   return out;
 }
 
-/**
- * `--from` is repeatable and LATER FILES WIN.
- *
- * Named `--from` rather than the more obvious `--env-file` because Node 20.6+
- * has a BUILT-IN `--env-file` flag and claims it before the script ever sees
- * the argument. The failure is `node.exe: .env.staging: not found`, which looks
- * like a missing file and is really a flag collision.
- *
- * That is what makes a staging subaccount safe to use. `.env` holds the
- * production Twilio credentials the live receptionist runs on; layering
- * `.env.staging` on top replaces only the keys it defines, so staging gets the
- * subaccount SID and token while still picking up Deepgram and SMTP from the
- * base file.
- *
- * The alternative — maintaining a complete second .env — means every value
- * exists twice, and the copy nobody edits is the one that goes stale and gets
- * pushed.
- */
 function parseArgs(argv) {
   let project = null;
   let dryRun = false;
-  const envFiles = [];
+  const from = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--project" && argv[i + 1]) project = argv[++i];
     else if (argv[i] === "--dry-run") dryRun = true;
-    else if (argv[i] === "--from" && argv[i + 1]) envFiles.push(argv[++i]);
+    else if (argv[i] === "--from" && argv[i + 1]) from.push(argv[++i]);
   }
-  if (!envFiles.length) envFiles.push(path.join(ROOT, ".env"));
-  return { project, dryRun, envFiles };
+  if (!from.length) from.push(path.join(ROOT, ".env"));
+  return { project, dryRun, from };
 }
 
+const USAGE = [
+  "Usage: node scripts/push-secrets.js --project <gcp-project-id> [--dry-run] [--from PATH]...",
+  "",
+  "--from is repeatable and later files win, which is how a staging subaccount",
+  "overrides the production Twilio credentials in .env:",
+  "  --from .env --from .env.staging",
+].join("\n");
+
 function main() {
-  const { project, dryRun, envFiles } = parseArgs(process.argv.slice(2));
+  const { project, dryRun, from } = parseArgs(process.argv.slice(2));
 
   if (!project || !PROJECT_ID_RE.test(project)) {
-    console.error(
-      "Usage: node scripts/push-secrets.js --project <gcp-project-id> [--dry-run] [--from PATH]...\n" +
-        "\n--from is repeatable and later files win, which is how a staging\n" +
-        "subaccount overrides the production Twilio credentials in .env:\n" +
-        "  --from .env --from .env.staging"
-    );
+    console.error(USAGE);
     return 2;
   }
 
-  const missingFiles = envFiles.filter((f) => !fs.existsSync(f));
+  // Refused rather than skipped. A typo'd overlay path would silently fall back
+  // to the base file, which here means pushing PRODUCTION Twilio credentials
+  // into staging while every line of output looks entirely normal.
+  const missingFiles = from.filter((f) => !fs.existsSync(f));
   if (missingFiles.length) {
-    // Refused rather than skipped. A typo'd overlay path would silently fall
-    // back to the base file, which here means pushing PRODUCTION Twilio
-    // credentials into staging while the output looks entirely normal.
     console.error(`No such env file: ${missingFiles.join(", ")}`);
     return 2;
   }
 
-  // Later files win. Tracked per key so the report can say where each value
-  // came from — the difference between a production and a subaccount token is
-  // invisible in a length.
+  // Later files win. `seen` tracks keys that APPEARED in some file whatever
+  // their value, because `env` cannot tell an empty value from an absent one.
   const env = {};
   const source = {};
-  for (const f of envFiles) {
-    for (const [k, v] of Object.entries(readDotEnv(f))) {
+  const seen = {};
+  for (const f of from) {
+    for (const [k, v] of Object.entries(readEnvFile(f))) {
+      seen[k] = true;
       env[k] = v;
       source[k] = path.basename(f);
     }
   }
 
-  console.log(`Reading ${envFiles.map((f) => path.relative(ROOT, f)).join(" then ")}; target project ${project}`);
-  if (dryRun) console.log("DRY RUN — nothing will be written.\n");
+  console.log(`Reading ${from.map((f) => path.relative(ROOT, f)).join(" then ")}; target project ${project}`);
+  if (dryRun) console.log("DRY RUN - nothing will be written.");
+  console.log("");
 
   const plan = [];
-  const missing = [];
-
+  const absent = [];
   for (const [envVar, secret] of Object.entries(MAPPING)) {
     const value = env[envVar];
     if (!value) {
-      missing.push(`${envVar} -> ${secret}`);
+      absent.push(envVar);
       continue;
     }
-    // Length and a masked shape, never the value. Enough to notice a truncated
-    // paste or a placeholder; useless to anyone reading over a shoulder.
     plan.push({ envVar, secret, value, length: value.length, from: source[envVar] });
   }
 
   for (const p of plan) {
-    console.log(`  ${p.envVar.padEnd(20)} -> ${p.secret.padEnd(20)} ${String(p.length).padStart(3)} chars   from ${p.from}`);
+    const len = String(p.length).padStart(3);
+    console.log(`  ${p.envVar.padEnd(20)} -> ${p.secret.padEnd(20)} ${len} chars   from ${p.from}`);
   }
-  for (const m of missing) console.log(`  SKIP (not set in .env): ${m}`);
+  for (const a of absent) console.log(`  SKIP (not set in any --from file): ${a}`);
 
-  if (!plan.length) {
-    console.error("\nNothing to push.");
+  // A key present-but-EMPTY in an overlay is the trap this script exists to
+  // avoid. It contributes nothing, so the key is reported as "not set" and
+  // skipped, which reads like a benign no-op and is not: whatever is already in
+  // Secret Manager stays, and on staging that may be a production credential
+  // pushed on an earlier run. An unedited template must fail, not quietly
+  // change nothing.
+  const emptyOverrides = Object.keys(MAPPING).filter((k) => seen[k] && !env[k]);
+  if (emptyOverrides.length) {
+    console.error("");
+    console.error(`Refusing: ${emptyOverrides.join(", ")} appear in a --from file with an EMPTY value.`);
+    console.error("  An empty override is not a no-op. The key is skipped, whatever is already in");
+    console.error("  Secret Manager stays, and on staging that may be a production credential from");
+    console.error("  an earlier run. Fill the value in, or delete the line to use the base file.");
     return 1;
   }
 
-  // A trailing newline or space in a .env value is invisible everywhere it is
-  // displayed and breaks everything downstream. Refused rather than trimmed:
-  // trimming would hide a defect in the source file that will be pasted
-  // somewhere else next time.
-  const dirty = plan.filter((p) => p.value !== p.value.trim());
-  if (dirty.length) {
-    console.error(
-      `\nRefusing: ${dirty.map((d) => d.envVar).join(", ")} has leading or trailing whitespace in .env. ` +
-        "Fix the source file — a stray newline in a credential is invisible and this project has lost a day to one."
-    );
+  if (!plan.length) {
+    console.error("");
+    console.error("Nothing to push.");
+    return 1;
+  }
+
+  // Format, placeholder and whitespace checks run BEFORE the dry run reports
+  // success. A dry run that passes on a placeholder taught you nothing.
+  const rejected = [];
+  for (const p of plan) {
+    const fmt = FORMATS[p.envVar];
+    if (fmt && !fmt.re.test(p.value)) {
+      rejected.push(`${p.envVar} (from ${p.from}) is not ${fmt.expected}`);
+    } else if (PLACEHOLDER_RE.test(p.value)) {
+      rejected.push(`${p.envVar} (from ${p.from}) still looks like a placeholder`);
+    }
+    // Surrounding whitespace is REFUSED rather than trimmed. Trimming hides a
+    // defect in the source file that gets pasted somewhere else next time.
+    if (p.value !== p.value.trim()) {
+      rejected.push(`${p.envVar} (from ${p.from}) has leading or trailing whitespace`);
+    }
+  }
+
+  if (rejected.length) {
+    console.error("");
+    console.error("Refusing:");
+    for (const r of rejected) console.error(`  ${r}`);
     return 1;
   }
 
   if (dryRun) {
-    console.log("\nDry run complete.");
+    console.log("");
+    console.log("Dry run complete.");
     return 0;
   }
 
@@ -190,14 +236,7 @@ function main() {
       execFileSync(
         GCLOUD,
         ["secrets", "versions", "add", p.secret, `--project=${project}`, "--data-file=-", "--quiet"],
-        {
-          // The value goes in on stdin with NO trailing newline, so nothing can
-          // append one on the way.
-          input: p.value,
-          stdio: ["pipe", "pipe", "pipe"],
-          shell: IS_WINDOWS,
-          env: process.env,
-        }
+        { input: p.value, stdio: ["pipe", "pipe", "pipe"], shell: IS_WINDOWS, env: process.env }
       );
       console.log(`  added version: ${p.secret}`);
     } catch (err) {
@@ -208,16 +247,18 @@ function main() {
   }
 
   if (failed) {
-    console.error(`\n${failed} secret(s) failed.`);
+    console.error("");
+    console.error(`${failed} secret(s) failed.`);
     return 1;
   }
 
-  console.log(
-    "\nDone. Next:\n" +
-      "  cd infra/terraform && terraform apply -var='wire_runtime_secrets=true'\n" +
-      "\nAnd set staging_caller_allowlist to the number you will test from — staging\n" +
-      "refuses every caller until you do, which is deliberate."
-  );
+  console.log("");
+  console.log("Done. Next:");
+  console.log("  cd infra/terraform");
+  console.log("  terraform apply -var='wire_runtime_secrets=true' \\");
+  console.log("                  -var='staging_caller_allowlist=[\"+1YOURNUMBER\"]'");
+  console.log("");
+  console.log("Staging refuses every caller until that list has a number in it.");
   return 0;
 }
 
