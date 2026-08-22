@@ -20,6 +20,8 @@ import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
 import { assertBootConfig } from "./lib/bootChecks.js";
+import { sttProviderFor } from "./lib/voice/sttStream.js";
+import { assertSttEncryption } from "./lib/voice/sttGoogle.js";
 import { callerAllowlist, callerAllowed, buildRefusedTwiml } from "./lib/callerAllowlist.js";
 import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
@@ -60,7 +62,6 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BASE_URL = process.env.BASE_URL?.replace(/\/$/, "");
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_VALIDATE_SIGNATURE = process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 
 // Required only when Vertex is NOT the backend, and this used to be
 // unconditional — which was wrong in a way that mattered.
@@ -94,13 +95,18 @@ if (BASE_URL.includes("example.ngrok") || BASE_URL === "https://example.ngrok.io
   );
   process.exit(1);
 }
-if (!DEEPGRAM_API_KEY) {
-  console.error(
-    "Missing required env: DEEPGRAM_API_KEY. The Media Streams voice pipeline " +
-      "requires Deepgram for real-time speech-to-text — there is no fallback mode."
-  );
-  process.exit(1);
-}
+// DEEPGRAM_API_KEY is deliberately NOT required here any more.
+//
+// It used to be, unconditionally, with the comment "there is no fallback mode"
+// — and that made a covered deployment impossible to start. lib/bootChecks.js
+// `checkCoveredVendors` refuses to boot when a Deepgram credential is present
+// in a `hipaa` process, because no BAA covers it, so this preflight and that
+// check demanded opposite things and no configuration satisfied both. The US
+// production stack could not answer a call in either direction.
+//
+// There IS now a second provider. The requirement moved to
+// `checkSttConfig`, which asks the mode-shaped question — does this deployment
+// have an STT it is ALLOWED to use — and is still fatal when the answer is no.
 
 // Resolved once. An allowlist re-parsed per call is an allowlist that can
 // change under a running process, which makes "who was allowed in" unanswerable
@@ -308,8 +314,9 @@ function twilioValidation(req, res, next) {
 // The only remaining responsibility here is handing the call off to the
 // Media Streams pipeline (lib/voice/session.js by default; lib/mediaStream.js
 // only when PIPELINE_V2=false — see selectPipelineHandler below). The legacy TwiML
-// <Gather> conversation loop has been removed — DEEPGRAM_API_KEY is
-// required at boot (see above), so Media Streams is always available.
+// <Gather> conversation loop has been removed — an STT provider the
+// deployment is allowed to use is required at boot (checkSttConfig), so Media
+// Streams is always available.
 //
 // Degraded mode: if lib/voice/health.js reports the pipeline's STT/TTS
 // dependencies are down, skip Media Streams entirely and fall back to a
@@ -1155,6 +1162,21 @@ if (process.env.NODE_ENV !== "test") {
   //
   // A no-op unless CLOUD_SQL_INSTANCE is set.
   await db.initCloudSqlPool();
+
+  // The covered lane's encryption control, verified against the live API
+  // before the port opens rather than trusted from configuration.
+  //
+  // Google exposes NO field for the Speech-to-Text data-logging tier — the
+  // string does not appear anywhere in the v1 or v2 protos — while the
+  // "Logged" SKU is real and cheaper ($0.012/min against $0.016). So the tier
+  // cannot be asserted in code, and the encryption of the audio at rest can:
+  // with a customer-managed key the recording is under a key this org holds
+  // and can destroy. Runs only where it applies, and only where a failure
+  // means something — a `standard` deployment does not use Google STT at all.
+  if (sttProviderFor() === "google") {
+    const { kmsKeyName } = await assertSttEncryption();
+    console.log(`[boot] Speech-to-Text CMEK verified: ${kmsKeyName}`);
+  }
 
   const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

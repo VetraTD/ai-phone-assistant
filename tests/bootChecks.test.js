@@ -12,7 +12,7 @@
 // design decision here; see lib/bootChecks.js.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
+import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, checkSttConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
 
 const SID = "AC" + "1".repeat(32);
 const TOKEN = "authtoken1234567890";
@@ -164,7 +164,10 @@ describe("assertBootConfig", () => {
   });
 
   it("does not throw when findings are only announcements", () => {
-    expect(() => assertBootConfig({}, { log: () => {} })).not.toThrow();
+    // DEEPGRAM_API_KEY joined the minimum here when checkSttConfig landed. It
+    // is not padding: a `standard` deployment with no STT provider cannot hear,
+    // which is fatal by design and was fatal in server.js before it moved.
+    expect(() => assertBootConfig({ DEEPGRAM_API_KEY: "dg-key" }, { log: () => {} })).not.toThrow();
   });
 
   it("announces every finding through the logger, fatal and non-fatal alike", () => {
@@ -237,7 +240,10 @@ describe("checkDatabaseConfig", () => {
   // outage.
   it("assertBootConfig still boots with no database", () => {
     expect(() =>
-      assertBootConfig({ SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example" }, { log: () => {} })
+      assertBootConfig(
+        { SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example", DEEPGRAM_API_KEY: "dg-key" },
+        { log: () => {} }
+      )
     ).not.toThrow();
   });
 });
@@ -336,9 +342,132 @@ describe("twilioValidation handles a malformed signature", () => {
   it("a caught throw is treated as INVALID, never as valid", () => {
     // The dangerous version of this fix sets `valid = true` in the catch, or
     // calls next(). Both turn a crash into an authentication bypass.
+    //
+    // Reads the CATCH BLOCK, not a fixed byte window. The window version
+    // (`slice(i, i + 260)`) silently depended on line endings: with CRLF it
+    // stopped just short of the legitimate `next()` on the success path, and
+    // with LF — which .gitattributes asks for in every working tree, and which
+    // is what a Linux checkout gets — it ran past it and the test failed on
+    // correct code. It was a passing test on this workstation only.
     const i = src.indexOf("twilio.validateRequest(");
-    const around = src.slice(i, i + 260);
-    expect(around).toMatch(/catch\s*\{[\s\S]*valid\s*=\s*false/);
-    expect(around).not.toMatch(/catch\s*\{[\s\S]*next\(\)/);
+    expect(i).toBeGreaterThan(-1);
+    const catchStart = src.indexOf("catch", i);
+    const bodyStart = src.indexOf("{", catchStart);
+    const catchBody = src.slice(bodyStart + 1, src.indexOf("}", bodyStart));
+
+    expect(catchBody).toMatch(/valid\s*=\s*false/);
+    expect(catchBody).not.toMatch(/valid\s*=\s*true/);
+    expect(catchBody).not.toMatch(/next\(\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkSttConfig — the contradiction that stopped the US lane serving a call.
+//
+// server.js exited WITHOUT a Deepgram key ("there is no fallback mode") while
+// checkCoveredVendors exited WITH one in hipaa mode. Those are not two bugs,
+// they are one requirement written in two places by people who did not know
+// about each other, and NO configuration satisfied both. The US production
+// stack could not answer a call in either direction.
+//
+// The requirement is mode-shaped, so the check is too: what a deployment needs
+// is an STT provider it is ALLOWED to use, and which one that is follows the
+// compliance tier.
+// ---------------------------------------------------------------------------
+describe("checkSttConfig — every mode needs an STT it is allowed to use", () => {
+  it("a standard deployment with no Deepgram key cannot hear, and that is fatal", () => {
+    const { findings } = checkSttConfig({});
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("stt_not_configured");
+  });
+
+  it("a standard deployment with a Deepgram key is satisfied", () => {
+    const { findings, provider } = checkSttConfig({ DEEPGRAM_API_KEY: "dg-key" });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(provider).toBe("deepgram");
+  });
+
+  it("a hipaa deployment does NOT require a Deepgram key — that is the contradiction", () => {
+    const { findings, provider } = checkSttConfig({
+      DEPLOYMENT_MODE: "hipaa",
+      GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
+    });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(provider).toBe("google");
+  });
+
+  it("a hipaa deployment with no GOOGLE_CLOUD_PROJECT is fatal", () => {
+    const { findings } = checkSttConfig({ DEPLOYMENT_MODE: "hipaa" });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("stt_not_configured");
+  });
+
+  it("STT_LOCATION=global is refused at boot, not on the first call", () => {
+    const { findings } = checkSttConfig({
+      DEPLOYMENT_MODE: "hipaa",
+      GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
+      STT_LOCATION: "global",
+    });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("stt_location_global");
+  });
+
+  it("announces which vendor will hear the caller, in both modes", () => {
+    const std = checkSttConfig({ DEEPGRAM_API_KEY: "dg-key" });
+    const hip = checkSttConfig({ DEPLOYMENT_MODE: "hipaa", GOOGLE_CLOUD_PROJECT: "p" });
+    expect(codes(std.findings)).toContain("stt_provider");
+    expect(codes(hip.findings)).toContain("stt_provider");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The whole point, asserted end to end.
+// ---------------------------------------------------------------------------
+describe("a hipaa deployment can now actually boot", () => {
+  it("boots with Google STT configured and NO Deepgram credential", () => {
+    expect(() =>
+      assertBootConfig(
+        {
+          DEPLOYMENT_MODE: "hipaa",
+          GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
+          CLOUD_SQL_INSTANCE: "vetra:us-central1:db",
+          SMTP_USER: "bot@example.com",
+          SMTP_PASS: "pw",
+          DASHBOARD_URL: "https://dash.example.com",
+        },
+        { log: () => {} }
+      )
+    ).not.toThrow();
+  });
+
+  it("still refuses to boot if a Deepgram credential is present", () => {
+    expect(() =>
+      assertBootConfig(
+        {
+          DEPLOYMENT_MODE: "hipaa",
+          GOOGLE_CLOUD_PROJECT: "vetra-us-prod-c3a3bd",
+          DEEPGRAM_API_KEY: "dg-key",
+          CLOUD_SQL_INSTANCE: "vetra:us-central1:db",
+          SMTP_USER: "bot@example.com",
+          SMTP_PASS: "pw",
+          DASHBOARD_URL: "https://dash.example.com",
+        },
+        { log: () => {} }
+      )
+    ).toThrow(/non_covered_credential_present/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// server.js no longer carries its own Deepgram requirement.
+// ---------------------------------------------------------------------------
+describe("server.js STT preflight", () => {
+  const src = readFileSync(new URL("../server.js", import.meta.url), "utf8");
+
+  it("does not exit on a missing DEEPGRAM_API_KEY", () => {
+    // The old preflight made a covered deployment unbootable: it demanded the
+    // one credential checkCoveredVendors refuses to let it hold.
+    expect(src).not.toMatch(/if \(!DEEPGRAM_API_KEY\)/);
+  });
+
+  it("verifies STT encryption before the port opens in a covered deployment", () => {
+    expect(src).toMatch(/assertSttEncryption/);
   });
 });
