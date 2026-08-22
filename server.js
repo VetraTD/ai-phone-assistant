@@ -20,6 +20,7 @@ import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
 import { assertBootConfig } from "./lib/bootChecks.js";
+import { callerAllowlist, callerAllowed, buildRefusedTwiml } from "./lib/callerAllowlist.js";
 import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -99,6 +100,27 @@ if (!DEEPGRAM_API_KEY) {
       "requires Deepgram for real-time speech-to-text — there is no fallback mode."
   );
   process.exit(1);
+}
+
+// Resolved once. An allowlist re-parsed per call is an allowlist that can
+// change under a running process, which makes "who was allowed in" unanswerable
+// after the fact.
+const CALLER_ALLOWLIST = callerAllowlist();
+if (CALLER_ALLOWLIST.active) {
+  console.log(
+    `[boot] CALLER_ALLOWLIST active: ${CALLER_ALLOWLIST.numbers.size} number(s) may call. ` +
+      "Everyone else is refused. This is expected on staging and NOT expected in production."
+  );
+  if (CALLER_ALLOWLIST.malformed.length) {
+    // Fatal, and it is the announce-loudly principle at its sharpest: a
+    // malformed entry never matches, so the operator sees a configured
+    // allowlist that admits nobody — including the tester it was written for.
+    console.error(
+      `[boot] FATAL CALLER_ALLOWLIST has ${CALLER_ALLOWLIST.malformed.length} entr(ies) that are not E.164 ` +
+        "(+ and 1-15 digits). Twilio delivers `From` in E.164, so these can never match."
+    );
+    process.exit(1);
+  }
 }
 
 const VOICE_URL = `${BASE_URL}/twilio/voice`;
@@ -286,6 +308,24 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       severity: "warn",
     });
     return res.send(buildDegradedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+  }
+
+  // The staging caller allowlist, checked BEFORE anything looks up a business
+  // or touches the database. A refused caller should leave no trace beyond the
+  // refusal itself — the whole point is that this environment never holds data
+  // about someone who did not mean to reach it.
+  //
+  // Inert in production, where CALLER_ALLOWLIST is unset.
+  if (!callerAllowed(req.body.From, CALLER_ALLOWLIST)) {
+    log.error("caller_not_on_allowlist", {
+      callSid,
+      severity: "warn",
+      // The number itself is a PHI-typed field and does not go in a log line;
+      // the allowlist size is what makes this actionable.
+      allowlistSize: CALLER_ALLOWLIST.numbers.size,
+      reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
+    });
+    return res.send(buildRefusedTwiml());
   }
 
   const existingState = callState.getState(callSid);

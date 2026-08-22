@@ -46,6 +46,29 @@ variable "wire_runtime_secrets" {
   default     = false
 }
 
+variable "staging_caller_allowlist" {
+  description = <<-EOT
+    E.164 numbers permitted to call a STAGING voice service. Everyone else is
+    answered with "this number is not in service" and hung up on.
+
+    Empty by default, which refuses every caller. That is deliberate: staging
+    shares a Twilio account with production, and the cost of an over-restrictive
+    staging service is a tester adding their own number, while the cost of an
+    open one is a real patient's speech reaching an environment outside the
+    production retention and backup story.
+
+    Never set for production — the variable is only read on staging services,
+    and an allowlist in production would refuse real callers.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for n in var.staging_caller_allowlist : can(regex("^\\+[1-9][0-9]{1,14}$", n))])
+    error_message = "Every entry must be E.164 (+ then 1-15 digits). Twilio delivers `From` in E.164, so anything else can never match and would produce an allowlist that admits nobody."
+  }
+}
+
 variable "cloud_run_concurrency" {
   description = <<-EOT
     Requests per instance. Low, because a voice request is not a request: the
@@ -204,6 +227,33 @@ resource "google_cloud_run_v2_service" "this" {
       env {
         name  = "GOOGLE_CLOUD_PROJECT"
         value = each.value.project
+      }
+
+      # -------------------------------------------------------------------
+      # The staging caller allowlist. THE COMPENSATING CONTROL FOR THE MERGE.
+      #
+      # The control table says staging must never take production Twilio
+      # credentials — "probe/test numbers only, backed by a boot-time refusal
+      # for any caller number outside the test allowlist". Staging is about to
+      # be handed the same Twilio ACCOUNT the production number lives on, so a
+      # patient misdialling by one digit could otherwise reach a staging build:
+      # the one environment whose residency cannot be enforced and whose
+      # database sits outside the production backup and retention story.
+      #
+      # Set on staging, UNSET in production. Absence means no restriction, and
+      # that direction matters — a control that fails closed in production would
+      # refuse real callers, which is the outage this exists to prevent causing.
+      #
+      # An empty list on staging is not a mistake either: it refuses everyone
+      # until somebody adds the tester's number, which is the correct default
+      # for an environment nobody should be dialling by accident.
+      # -------------------------------------------------------------------
+      dynamic "env" {
+        for_each = local.stacks[each.value.stack].env == "staging" ? [1] : []
+        content {
+          name  = "CALLER_ALLOWLIST"
+          value = join(",", var.staging_caller_allowlist)
+        }
       }
 
       # `us`/`eu`, never a single region and never `global`. Probed 2026-08-21:
