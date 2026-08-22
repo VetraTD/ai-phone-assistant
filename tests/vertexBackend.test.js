@@ -80,6 +80,11 @@ describe("getClient — backend selection", () => {
       vertexai: true,
       project: "vetra-us-prod-c3a3bd",
       location: "us",
+      // `us` is a MULTI-REGION, and the SDK would derive
+      // us-aiplatform.googleapis.com for it, which 404s. The global host with
+      // the location in the path is the one that answers. A real call failed on
+      // this — see tests/vertexStreamingPath.test.js.
+      httpOptions: { baseUrl: "https://aiplatform.googleapis.com" },
     });
     // No apiKey, deliberately: Vertex authenticates with ADC, which on Cloud
     // Run is the runtime service account's metadata token — a credential that
@@ -209,6 +214,14 @@ describe("VERTEX_LOCATION", () => {
   it("getClient accepts a multi-region and passes it through", async () => {
     const gemini = await load({ ...base, VERTEX_LOCATION: "eu" });
     gemini.getClient();
-    expect(constructed).toEqual([{ vertexai: true, project: "p", location: "eu" }]);
+    expect(constructed).toEqual([
+      {
+        vertexai: true,
+        project: "p",
+        location: "eu",
+        // Same as `us`: a multi-region needs the global host, not eu-aiplatform.
+        httpOptions: { baseUrl: "https://aiplatform.googleapis.com" },
+      },
+    ]);
   });
 });

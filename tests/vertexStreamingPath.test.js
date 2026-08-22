@@ -97,6 +97,54 @@ describe("getReplyStreaming on Vertex", () => {
     expect(H.constructed[0].apiKey).toBeUndefined();
   });
 
+  it("pins the MULTI-REGION hostname, which the SDK derives wrongly", async () => {
+    // The SDK builds `{location}-aiplatform.googleapis.com`. That is right for a
+    // real region and WRONG for the `us`/`eu` multi-regions, which are served by
+    // the global hostname with the location in the path. Measured against the
+    // live API:
+    //
+    //   us-aiplatform.googleapis.com           -> 404
+    //   aiplatform.googleapis.com              -> 200
+    //   us-central1-aiplatform.googleapis.com  -> 404
+    //
+    // A real call failed on exactly this, AFTER the API-key guard was removed:
+    //   400 INVALID_ARGUMENT "Invalid hostname: us-aiplatform.googleapis.com"
+    //
+    // It completes B1's finding. It was not enough to learn that no single
+    // region serves the model; the multi-region value needs a different HOST
+    // than the SDK assumes, and nothing said so until a caller hit it.
+    for (const loc of ["us", "eu"]) {
+      for (const k of ENV) delete process.env[k];
+      process.env.VERTEX_ENABLED = "true";
+      process.env.GOOGLE_CLOUD_PROJECT = "p";
+      process.env.VERTEX_LOCATION = loc;
+      vi.resetModules();
+      H.constructed.length = 0;
+
+      const { getClient } = await import("../services/gemini.js");
+      getClient();
+
+      expect(H.constructed[0].httpOptions?.baseUrl).toBe("https://aiplatform.googleapis.com");
+    }
+  });
+
+  it("does NOT override the hostname for a single region — the SDK is right there", async () => {
+    for (const k of ENV) delete process.env[k];
+    process.env.VERTEX_ENABLED = "true";
+    process.env.GOOGLE_CLOUD_PROJECT = "p";
+    process.env.VERTEX_LOCATION = "us-central1";
+    vi.resetModules();
+    H.constructed.length = 0;
+
+    const { getClient } = await import("../services/gemini.js");
+    getClient();
+
+    // us-central1-aiplatform.googleapis.com is a real host. Forcing the global
+    // one here would silently move traffic out of a pinned region, which is the
+    // residency control the whole two-region design rests on.
+    expect(H.constructed[0].httpOptions?.baseUrl).toBeUndefined();
+  });
+
   it("still refuses when NEITHER Vertex nor an API key is configured", async () => {
     // The guard was not pointless — a deployment with no backend at all must
     // fail loudly rather than produce silence on a call.

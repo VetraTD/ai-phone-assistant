@@ -234,10 +234,39 @@ export function getClient() {
     // which on Cloud Run is the runtime service account's metadata-server
     // token — a credential that cannot be copied out of the project, unlike
     // an API key that can be pasted into anything.
+    // THE HOSTNAME, which the SDK gets wrong for exactly the values we must use.
+    //
+    // @google/genai derives `{location}-aiplatform.googleapis.com`. That is
+    // correct for a real region and WRONG for the `us` / `eu` MULTI-REGIONS,
+    // which are served by the global host with the location in the path.
+    // Measured against the live API:
+    //
+    //   us-aiplatform.googleapis.com           -> 404
+    //   aiplatform.googleapis.com              -> 200
+    //   us-central1-aiplatform.googleapis.com  -> 404
+    //
+    // A real caller hit this as
+    //   400 INVALID_ARGUMENT "Invalid hostname: us-aiplatform.googleapis.com"
+    // on every turn, which surfaced as "technical difficulties" and a drop into
+    // the take-a-message script.
+    //
+    // It completes B1's finding rather than contradicting it. Learning that NO
+    // single region serves gemini-3.6-flash forced the multi-region value; what
+    // nobody had established was that the multi-region value also needs a
+    // different HOST than the SDK assumes. Both facts are required to make one
+    // working call.
+    //
+    // Overridden ONLY for the multi-regions. A single region keeps the SDK's
+    // derived host, because forcing the global one there would quietly move
+    // traffic out of a pinned region — the residency control the two-region
+    // design rests on.
+    const multiRegion = VERTEX_MULTI_REGIONS.includes(vertex.location.toLowerCase());
+
     geminiClient = new GoogleGenAI({
       vertexai: true,
       project: vertex.project,
       location: vertex.location,
+      ...(multiRegion ? { httpOptions: { baseUrl: "https://aiplatform.googleapis.com" } } : {}),
     });
     log.info("gemini_backend", { backend: "vertex", project: vertex.project, location: vertex.location });
 
