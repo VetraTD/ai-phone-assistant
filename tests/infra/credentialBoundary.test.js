@@ -51,7 +51,6 @@ describe("credential boundary matcher", () => {
   it.each([
     "proxi-api-key",
     "twilio-auth-token",
-    "deepgram-api-key",
     "vertex-service-account",
     "gemini-vertex-project-id",
     "eleven-oclock-digest",
@@ -82,14 +81,36 @@ describe("credential boundary matcher", () => {
     expect(findForbiddenSecrets([])).toEqual([]);
   });
 
-  // Deepgram is deliberately absent from the rule set. Its BAA was requested
-  // 2026-08-21 and the answer has not arrived. Encoding a guess in either
-  // direction is worse than encoding nothing: a rule that fails the deploy
-  // would block on an unanswered email, and an explicit allow would look like a
-  // decision somebody made. When the answer lands, this test changes with it.
-  it("does not yet rule on Deepgram", () => {
-    expect(FORBIDDEN_IN_PHI_PROJECTS.map((r) => r.vendor).join(" ")).not.toMatch(/deepgram/i);
-    expect(findForbiddenSecrets(["deepgram-api-key"])).toEqual([]);
+  // Deepgram USED to be deliberately absent here, because its BAA had been
+  // requested and not answered, and a rule in either direction would have
+  // encoded a guess. That is no longer the situation and the absence is no
+  // longer honest: Google STT v2 exists behind the sttStream.js seam, the US
+  // lane transcribes with it, and secrets.tf now lists deepgram-api-key as
+  // `lanes = ["uk"]`. A Deepgram credential in a PHI project is a boundary
+  // violation the same way an ElevenLabs one is.
+  //
+  // The Deepgram BAA answer, if it ever comes, does not reopen this. It would
+  // change what the UK lane MAY do and nothing about what a US project may
+  // HOLD, because the covered lane no longer needs Deepgram for anything.
+  it.each([
+    "deepgram-api-key",
+    "DEEPGRAM_API_KEY",
+    "deepgram_key",
+    "Deepgram-Token",
+  ])("%s is caught in a PHI project", (name) => {
+    const found = findForbiddenSecrets([name]);
+    expect(found).toHaveLength(1);
+    expect(found[0].vendor).toMatch(/Deepgram/i);
+    expect(found[0].why).toMatch(/BAA/);
+  });
+
+  it("names Deepgram in the rule set, so the deploy log says what is enforced", () => {
+    expect(FORBIDDEN_IN_PHI_PROJECTS.map((r) => r.vendor).join(" ")).toMatch(/deepgram/i);
+  });
+
+  it("does not fire on a name that merely contains the letters", () => {
+    // A gate that fires on innocent names is a gate someone disables.
+    expect(findForbiddenSecrets(["deep-storage-key", "gram-schmidt-notes"])).toEqual([]);
   });
 });
 
