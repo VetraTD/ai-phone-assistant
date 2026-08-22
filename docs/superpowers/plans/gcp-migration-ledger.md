@@ -175,18 +175,38 @@ to the dashboard in a browser, reloaded, loaded its tenant and signed out.
    a convenience — see the escalation note below.
 3. **D-lane**, once staging is back.
 
-**B1(2) IS NO LONGER JUST AN IMPORT.** Migration 034 resolves a session's tenant
-BY EMAIL, and signup is open. So an address that has a `users` row and NO
-Identity Platform account can be claimed by a stranger who simply signs up with
-it — and they inherit that clinic's tenant. **Not live today**: every existing
-`users` row predates Identity Platform entirely, and the only account that
-exists is the test one. It goes live at the moment of the import, which will
-look like it succeeded.
+**~~B1(2) IS NO LONGER JUST AN IMPORT~~ — THE ESCALATION IS CLOSED, 2026-08-22,
+AND IT DID NOT NEED THE IMPORT.**
 
-The fix is built and waiting: migration 035 added `users.auth_uid text UNIQUE`.
-Import every user, backfill `auth_uid`, make it NOT NULL, and move the lookup
-from email to `auth_uid` — which a stranger's newly created account cannot
-collide with. Do that IN the import, not after it.
+The hole was: migration 034 resolved a tenant BY EMAIL and signup is open, so an
+address with a `users` row and no Identity Platform account could be claimed by
+a stranger who inherited that clinic. **Migration 036 closed it by re-keying the
+lookup onto `auth_uid`**, which a brand-new account cannot collide with.
+
+**It ran BEFORE the import, which was a change of plan and a better one.** Every
+path that ever created a `users` row set `users.id` from the auth provider — the
+pre-031 raw insert and 031/032 alike, verified in git history — so `users.id` IS
+the Supabase auth uid for every older row and the backfill needed no export and
+no credentials. The hole therefore never opened, instead of being closed in a
+race with the import.
+
+**Demonstrated against the live service, not argued.** A seeded staff row for
+`victim@vetratd.com` with no account, then a real signup with that address:
+
+```
+attacker signed up   -> 200, localId = C9gJ1NHCITQYQXFoB2Qm1yy4x0t2
+attacker GET /api/me -> 200 {"needsOnboarding":true}
+CLOSED: the attacker resolved to NO tenant
+```
+
+Pinned as a database test so it cannot regress.
+
+**What the import still owes, and it is now only one thing:** the PASSWORD
+HASHES. `scripts/import-users.js` is written, tested and waiting. Without a real
+export the fallback is to create accounts with no password and send everyone a
+reset link — which for one clinic may simply be the better trade than moving
+production password hashes onto a workstation. **That is a product decision, no
+longer a security one.**
 
 ### Environment — get these wrong and you lose an hour each
 
@@ -295,6 +315,9 @@ unlink or budget change · anything touching Secret Manager or real credentials 
 | **Supabase's bcrypt hashes import into Identity Platform and the ORIGINAL password signs in** | 2026-08-22 (live) | **B1(2)'s whole question, answered YES: nobody has to reset a password at cutover.** GoTrue is Go and emits `$2a$`; Node emits `$2b$`; both were imported and both signed in. `passwordHash` is the bcrypt string's own bytes, base64url — no separate salt, no signer key, no rounds parameter, because bcrypt carries its own. A wrong password still 400s, asserted alongside so the acceptance is not inferred from the refusals |
 | **`accounts:batchCreate` RETURNS HTTP 200 ON PARTIAL FAILURE**, with a per-record `error[]` array carrying `index` and `message` | 2026-08-22 (live) | A script that checks the status code reports success and drops people, and the people it drop are the ones who cannot log in on Monday. Verified by sending three records and getting `200` with one error. **`scripts/import-users.js` treats the array as the result and the status code as a precondition** |
 | **`accounts:batchCreate` IGNORES `allow_duplicate_emails`, and a second run STEALS THE IDENTITY** | 2026-08-22 (live, both directions) | The Identity Platform config forbids duplicate emails; the bulk import creates them anyway, **silently, with no error** — that setting governs sign-up, not admin import. Two accounts on one address, and `signInWithPassword` then returns the **LAST-imported** one, three times out of three. So a careless re-run does not merely make a mess: it repoints every member of staff onto a different account id, reported as 200. **With the tenant lookup keyed on `auth_uid` that is every clinic losing access at once.** THE FIX IS ONE LINE OF DESIGN: **set `localId` explicitly** — measured, the same localId twice is ONE account, upserted. Letting the service assign it is what duplicates. `localId` is therefore required by the import script and never delegated |
+| **`users.id` IS the Supabase auth uid, for every row that predates Identity Platform** | 2026-08-22 (git history, all three write paths) | The pre-031 onboarding did `INSERT INTO users (id, email) VALUES ($1, $2)` with `$1 = req.authUser.id`; 031 and 032 pass the same argument as `p_user_id`. Only migration 035 separated them. **This is what let migration 036 close the tenant-claim escalation with NO Supabase export and no credentials** — `auth_uid` was derivable from a column we already had. It also collapses what the export is FOR: the email↔uid mapping is already ours, so the export buys exactly one thing, the password hashes, and that is a "do people reset their password at cutover" question rather than a security one |
+| **An email address is something a stranger can CHOOSE, so it must not key a tenant lookup while signup is open** | 2026-08-22 (demonstrated live) | Migration 034 resolved a tenant from the token's `email` claim. With open signup, an address holding a `users` row and NO identity-provider account could be claimed by anyone: they sign up, get a **genuinely valid** token, and the lookup hands them that clinic. Every layer behaves correctly and the tenant is still wrong. **Migration 036 re-keys onto `auth_uid`.** Proven by running the attack against the live service — a real signup on a seeded victim's address came back `needsOnboarding: true` rather than the clinic. **The general rule: a bootstrap lookup may only be keyed on something the CALLER CANNOT PICK** |
+| **A text-level guard that applies all CREATEs then all DROPs misreads any migration that REBUILDS a table** | 2026-08-22 | `tests/schema.test.js` parsed each migration's creates and drops in two separate loops, so migration 036 — which drops `user_directory` and immediately recreates it re-keyed — was read as deleting it, and the guard then reported schema.sql as wrongly containing a dropped table. **The opposite of the truth, from a guard whose whole job is to be believed.** Fixed by walking the statements in the order they appear. Latent since the guard was written; nothing had rebuilt a table before |
 | First clinic: **Excel Cardiac Care PLLC**, Texas, **ONE** covered entity across two sites (Keller 76244, Decatur 76234). Runs **athenahealth** for everything. Medicare + Medicaid. 8–5 M–F, closed weekends | 2026-08-20 | **One BAA, one `businesses` row**, location as an attribute. Not CA → no CIPA, no AB 3030. Cardiology only → 42 CFR Part 2 near-certainly `n/a`. After-hours + lunch + multi-site routing is the product. |
 
 ---
