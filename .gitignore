@@ -1,5 +1,11 @@
 node_modules
 .env
+# Every .env VARIANT, not just `.env`. Only the bare name was listed, so a
+# `.env.staging` or `.env.production` holding real credentials would have been
+# committed — to a PUBLIC repository. Found while about to tell someone to
+# create exactly such a file.
+.env.*
+!.env.example
 ngrok.yml
 .claude
 .cursor

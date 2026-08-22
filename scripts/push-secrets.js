@@ -74,28 +74,72 @@ function readDotEnv(file) {
   return out;
 }
 
+/**
+ * `--from` is repeatable and LATER FILES WIN.
+ *
+ * Named `--from` rather than the more obvious `--env-file` because Node 20.6+
+ * has a BUILT-IN `--env-file` flag and claims it before the script ever sees
+ * the argument. The failure is `node.exe: .env.staging: not found`, which looks
+ * like a missing file and is really a flag collision.
+ *
+ * That is what makes a staging subaccount safe to use. `.env` holds the
+ * production Twilio credentials the live receptionist runs on; layering
+ * `.env.staging` on top replaces only the keys it defines, so staging gets the
+ * subaccount SID and token while still picking up Deepgram and SMTP from the
+ * base file.
+ *
+ * The alternative — maintaining a complete second .env — means every value
+ * exists twice, and the copy nobody edits is the one that goes stale and gets
+ * pushed.
+ */
 function parseArgs(argv) {
   let project = null;
   let dryRun = false;
-  let envFile = path.join(ROOT, ".env");
+  const envFiles = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--project" && argv[i + 1]) project = argv[++i];
     else if (argv[i] === "--dry-run") dryRun = true;
-    else if (argv[i] === "--env-file" && argv[i + 1]) envFile = argv[++i];
+    else if (argv[i] === "--from" && argv[i + 1]) envFiles.push(argv[++i]);
   }
-  return { project, dryRun, envFile };
+  if (!envFiles.length) envFiles.push(path.join(ROOT, ".env"));
+  return { project, dryRun, envFiles };
 }
 
 function main() {
-  const { project, dryRun, envFile } = parseArgs(process.argv.slice(2));
+  const { project, dryRun, envFiles } = parseArgs(process.argv.slice(2));
 
   if (!project || !PROJECT_ID_RE.test(project)) {
-    console.error("Usage: node scripts/push-secrets.js --project <gcp-project-id> [--dry-run] [--env-file PATH]");
+    console.error(
+      "Usage: node scripts/push-secrets.js --project <gcp-project-id> [--dry-run] [--from PATH]...\n" +
+        "\n--from is repeatable and later files win, which is how a staging\n" +
+        "subaccount overrides the production Twilio credentials in .env:\n" +
+        "  --from .env --from .env.staging"
+    );
     return 2;
   }
 
-  const env = readDotEnv(envFile);
-  console.log(`Reading ${path.relative(ROOT, envFile)}; target project ${project}`);
+  const missingFiles = envFiles.filter((f) => !fs.existsSync(f));
+  if (missingFiles.length) {
+    // Refused rather than skipped. A typo'd overlay path would silently fall
+    // back to the base file, which here means pushing PRODUCTION Twilio
+    // credentials into staging while the output looks entirely normal.
+    console.error(`No such env file: ${missingFiles.join(", ")}`);
+    return 2;
+  }
+
+  // Later files win. Tracked per key so the report can say where each value
+  // came from — the difference between a production and a subaccount token is
+  // invisible in a length.
+  const env = {};
+  const source = {};
+  for (const f of envFiles) {
+    for (const [k, v] of Object.entries(readDotEnv(f))) {
+      env[k] = v;
+      source[k] = path.basename(f);
+    }
+  }
+
+  console.log(`Reading ${envFiles.map((f) => path.relative(ROOT, f)).join(" then ")}; target project ${project}`);
   if (dryRun) console.log("DRY RUN — nothing will be written.\n");
 
   const plan = [];
@@ -109,10 +153,12 @@ function main() {
     }
     // Length and a masked shape, never the value. Enough to notice a truncated
     // paste or a placeholder; useless to anyone reading over a shoulder.
-    plan.push({ envVar, secret, value, length: value.length });
+    plan.push({ envVar, secret, value, length: value.length, from: source[envVar] });
   }
 
-  for (const p of plan) console.log(`  ${p.envVar.padEnd(20)} -> ${p.secret.padEnd(20)} ${p.length} chars`);
+  for (const p of plan) {
+    console.log(`  ${p.envVar.padEnd(20)} -> ${p.secret.padEnd(20)} ${String(p.length).padStart(3)} chars   from ${p.from}`);
+  }
   for (const m of missing) console.log(`  SKIP (not set in .env): ${m}`);
 
   if (!plan.length) {
