@@ -23,7 +23,13 @@ function makeEngine(overrides = {}) {
   const calls = {
     steps: [],
     notes: [],
-    createCustomerRequest: vi.fn().mockResolvedValue("req-1"),
+    /** Tenant in scope when the write ran — null means RLS would refuse it. */
+    writeTenant: undefined,
+    createCustomerRequest: vi.fn(function () {
+      calls.writeTenant = calls.activeTenant ?? null;
+      return Promise.resolve("req-1");
+    }),
+    activeTenant: null,
     notifyCustomerRequest: vi.fn().mockResolvedValue(undefined),
     sendCallerSms: vi.fn().mockResolvedValue(undefined),
     errors: [],
@@ -43,7 +49,21 @@ function makeEngine(overrides = {}) {
       ...(overrides.call || {}),
     },
     deps: {
-      db: { createCustomerRequest: calls.createCustomerRequest },
+      db: {
+        createCustomerRequest: calls.createCustomerRequest,
+        // Models what withTenantSafe does: opens app.business_id for the
+        // duration of fn. A capability write that never passes through here is
+        // a write FORCE row-level security refuses outright.
+        withTenantSafe: async (businessId, fn) => {
+          const previous = calls.activeTenant;
+          calls.activeTenant = businessId ?? null;
+          try {
+            return await fn();
+          } finally {
+            calls.activeTenant = previous;
+          }
+        },
+      },
       notifications: {
         notifyCustomerRequest: calls.notifyCustomerRequest,
         sendCallerSms: calls.sendCallerSms,
@@ -190,5 +210,41 @@ describe("quotes — effects", () => {
     const { engine, calls } = makeEngine({ call: { businessId: null } });
     quotes.onEffect(effect, engine);
     expect(calls.createCustomerRequest).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capability writes must open a tenant scope of their own.
+//
+// A deferred effect runs AFTER executeToolCallGuarded's withTenantSafe has
+// already closed, so it inherits nothing. Under FORCE row-level security that
+// is not a degraded write, it is a refused one — proven on a live call:
+//
+//   tool_result success=true tool=record_customer_request
+//   db_error new row violates row-level security policy for table "customer_requests"
+//
+// The tool reported success to the model, the model told the caller their
+// message was taken, and the row was never written.
+// ---------------------------------------------------------------------------
+describe("capability writes are tenant-scoped", () => {
+  it("the quote request write opens a scope for its own business", async () => {
+    const { engine, calls } = makeEngine();
+    quotes.onEffect(
+      {
+        capability: "quotes",
+        type: "requested",
+        data: {
+          service_description: "replace a water heater",
+          caller_name: "Nithin",
+          callback_number: "555-0134",
+        },
+      },
+      engine
+    );
+    await vi.waitFor(() => expect(calls.createCustomerRequest).toHaveBeenCalled());
+
+    // null here means the write ran with no tenant set, which the database
+    // refuses outright — the row is simply never created.
+    expect(calls.writeTenant).toBe("biz-1");
   });
 });

@@ -195,15 +195,30 @@ export default {
     const args = effect.data || {};
     const { db, notifications, log, captureException } = engine.deps;
 
-    db.createCustomerRequest({
+    // Scoped by the capability itself, because a DEFERRED EFFECT runs after
+    // executeToolCallGuarded's withTenantSafe has already closed — it inherits
+    // no scope at all. Under FORCE row-level security (migration 029) that is a
+    // REFUSED write, not a degraded one, and the refusal is invisible from
+    // here: the tool has already told the model it succeeded.
+    //
+    // Proven on a live call:
+    //   tool_result success=true tool=record_customer_request
+    //   db_error   new row violates row-level security policy for "customer_requests"
+    // The caller was told their message had been taken. It had not.
+    db.withTenantSafe(
       businessId,
-      callId,
-      requestType: args.request_type || "message",
-      callerName: args.caller_name || null,
-      callbackNumber: args.callback_number || null,
-      message: args.message || null,
-      preferredTime: args.preferred_time || null,
-    })
+      () =>
+        db.createCustomerRequest({
+          businessId,
+          callId,
+          requestType: args.request_type || "message",
+          callerName: args.caller_name || null,
+          callbackNumber: args.callback_number || null,
+          message: args.message || null,
+          preferredTime: args.preferred_time || null,
+        }),
+      { operation: "createCustomerRequest", callSid }
+    )
       .then((id) => {
         if (!id) return;
         notifications

@@ -182,7 +182,7 @@ export default {
   onEffect(effect, engine) {
     if (effect.type !== "requested") return;
 
-    const { businessId, callId, callerNumber, config } = engine.call;
+    const { businessId, callId, callerNumber, config, callSid } = engine.call;
     if (!businessId) return;
 
     const data = effect.data || {};
@@ -203,16 +203,31 @@ export default {
       .filter(Boolean)
       .join(" — ");
 
+    // Scoped by the capability itself, because a DEFERRED EFFECT runs after
+    // executeToolCallGuarded's withTenantSafe has already closed — it inherits
+    // no scope at all. Under FORCE row-level security (migration 029) that is a
+    // REFUSED write, not a degraded one, and the refusal is invisible from
+    // here: the tool has already told the model it succeeded.
+    //
+    // Proven on a live call:
+    //   tool_result success=true tool=record_customer_request
+    //   db_error   new row violates row-level security policy for "customer_requests"
+    // The caller was told their message had been taken. It had not.
     engine.deps.db
-      .createCustomerRequest({
+      .withTenantSafe(
         businessId,
-        callId,
-        requestType: "quote",
-        callerName: data.caller_name || null,
-        callbackNumber: data.callback_number || callerNumber || null,
-        message: detail,
-        preferredTime: null,
-      })
+        () =>
+          engine.deps.db.createCustomerRequest({
+            businessId,
+            callId,
+            requestType: "quote",
+            callerName: data.caller_name || null,
+            callbackNumber: data.callback_number || callerNumber || null,
+            message: detail,
+            preferredTime: null,
+          }),
+        { operation: "createCustomerRequest", callSid }
+      )
       .then((id) => {
         if (!id) return;
         engine.deps.notifications
