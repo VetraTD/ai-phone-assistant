@@ -12,7 +12,7 @@ const mockCreateCustomerRequest = vi.fn();
 const mockNotifyCustomerRequest = vi.fn(async () => {});
 const mockSendCallerSms = vi.fn(async () => {});
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   createCustomerRequest: (...args) => mockCreateCustomerRequest(...args),

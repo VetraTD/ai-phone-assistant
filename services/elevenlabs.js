@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { log } from "../lib/logger.js";
+import { assertVendorAllowed } from "../lib/compliance.js";
 
 // ---------------------------------------------------------------------------
 // Low-level ElevenLabs WebSocket streaming TTS client.
@@ -111,6 +112,13 @@ export function createTtsConnection({
   onFinal,
   onError,
 } = {}) {
+  // A6. Before the URL is even built, and deliberately inside the constructor
+  // rather than at provider selection: the TTS layer has a per-business
+  // voice_provider column, a forceFallback argument and a circuit breaker that
+  // switches providers mid-call, and a guard in any one of them is a guard
+  // with three doors beside it. This one cannot be routed around.
+  assertVendorAllowed("elevenlabs");
+
   const url = `wss://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream-input?model_id=${modelId}&output_format=ulaw_8000&auto_mode=true`;
 
   let open = false;

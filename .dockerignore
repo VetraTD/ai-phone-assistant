@@ -1,0 +1,24 @@
+# Build-context exclusions.
+#
+# The Dockerfile still names every directory it copies explicitly, and that is
+# the guard that matters — an exclusion list fails OPEN, so anything added later
+# is included unless somebody remembers to add it here. This file is about
+# BUILD SPEED: without it the whole context, node_modules included, is uploaded
+# to the daemon on every build.
+node_modules
+**/node_modules
+.git
+.env
+.env.*
+tests
+eval
+sim
+scripts
+docs
+latency-runs
+infra
+AI-phone-dashboard
+.superpowers
+*.log
+Dockerfile
+.dockerignore

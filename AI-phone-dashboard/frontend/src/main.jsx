@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import "./fonts.css";
 import "./index.css";
 import Landing from "./Landing.jsx";
 

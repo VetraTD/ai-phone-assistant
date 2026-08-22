@@ -388,7 +388,7 @@ function existingAppointmentPolicy(cfg) {
  * refuse a second booking on the strength of one this very call just cancelled.
  *
  * The pack computes the next value; the engine owns the state. `setCallerContext`
- * is optional on purpose: lib/mediaStream.js (the v1 rollback pipeline) does not
+ * is optional on purpose: the text harness (lib/harness/) does not
  * provide it and is deliberately not at parity, so it keeps the call-start
  * snapshot and simply does not refresh.
  *
@@ -1090,7 +1090,7 @@ export default {
    * @param {{id?: string, name: string, args?: object}} fc
    * @param {object} ctx - turn context; ctx.deps carries the injected data
    *   surface (see services/tools.js). Packs take no service imports of their
-   *   own: services/supabase.js imports the registry for its reserved-name
+   *   own: services/db.js imports the registry for its reserved-name
    *   list, so a pack importing it back would be a load-order-dependent cycle.
    *   Injection also means these paths can be tested without module mocks.
    */

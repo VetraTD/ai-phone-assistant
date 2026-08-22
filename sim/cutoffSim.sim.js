@@ -171,7 +171,7 @@ vi.mock("../lib/voice/turnManager.js", async (importActual) => {
   };
 });
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: () => false,
   lookupBusinessByPhone: vi.fn(async () => null),
   loadConfig: () => ({

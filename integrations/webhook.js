@@ -5,6 +5,7 @@
 
 import dns from "dns";
 import { log } from "../lib/logger.js";
+import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
 
 /**
  * Check if an IP address is private/reserved.
@@ -55,6 +56,28 @@ export function validateWebhookConfig(config) {
 }
 
 /**
+ * Whether a BAA is recorded for this integration's endpoint.
+ *
+ * A timestamp in a database is a record that somebody asserted an agreement
+ * exists, not evidence that it does. Its value is that the assertion is
+ * explicit, attributable and auditable — and that its absence is a refusal
+ * rather than a silent send.
+ *
+ * Empty and whitespace strings count as absent. A column that is `text`-ish in
+ * transit through JSON can arrive as "" from a form that submitted a blank
+ * field, and "" is not a date.
+ *
+ * @param {{ baa_recorded_at?: unknown }} integration
+ * @returns {boolean}
+ */
+function hasRecordedBaa(integration) {
+  const v = integration?.baa_recorded_at;
+  if (v == null) return false;
+  if (typeof v === "string") return v.trim() !== "";
+  return true;
+}
+
+/**
  * Execute a webhook integration: POST to config.url with payload.
  * @param {object} integration - { provider, name, config }
  * @param {object} payload - { tool, arguments, business_id, call_id, caller_phone }
@@ -65,6 +88,38 @@ export async function executeWebhook(integration, payload) {
   const err = validateWebhookConfig(config);
   if (err) {
     return { success: false, error: `Invalid webhook config: ${err}` };
+  }
+
+  // A webhook posts the tool's arguments and the caller's phone number to a URL
+  // the tenant typed into a settings form. In a HIPAA deployment that is a
+  // disclosure of PHI to a third party, which is what a Business Associate
+  // Agreement exists to authorise — so without a recorded one, it does not go.
+  //
+  // BEFORE the DNS lookup below, not after. A blocked request must not resolve
+  // the hostname either: a DNS query for a tenant's endpoint tells that
+  // endpoint's operator (and their resolver) that a call is happening, which is
+  // a smaller disclosure than the payload but the same kind. Nothing leaves.
+  //
+  // Mode-scoped, so `standard` deployments are unaffected. The record lives on
+  // integrations.baa_recorded_at (migration 027) and every existing row is NULL,
+  // which is the correct direction to fail: an unrecorded BAA is
+  // indistinguishable from no BAA.
+  if (IS_HIPAA_MODE && !hasRecordedBaa(integration)) {
+    log.error("webhook_blocked_no_baa", {
+      integrationId: integration.id || null,
+      businessId: payload?.business_id || null,
+    });
+    // `error` is handed to the model (services/tools.js shapes it into the
+    // functionResponse), so it is deliberately caller-neutral. "no Business
+    // Associate Agreement is recorded" is internal vocabulary, and a
+    // receptionist that paraphrases internal vocabulary out loud is a defect
+    // this codebase has already shipped once. The diagnosis goes to the log
+    // above and to `reason`, which nothing speaks.
+    return {
+      success: false,
+      reason: "baa_not_recorded",
+      error: "That isn't available right now.",
+    };
   }
 
   const url = config.url;

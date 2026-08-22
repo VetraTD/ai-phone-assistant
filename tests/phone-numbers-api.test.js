@@ -6,9 +6,23 @@ const mockUpdateBusinessPhoneNumber = vi.fn();
 const mockSearchAvailableNumbers = vi.fn();
 const mockPurchaseNumber = vi.fn();
 
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
+  // Transparent. The real one opens a transaction with app.business_id set;
+  // that is proven against a real database in tests/db/withTenantScoping.test.js.
+  withTenantSafe: async (_businessId, fn) => fn(),
   fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
+}));
+
+// This file tests HANDLER behaviour — 404s, 409s, idempotency, Twilio error
+// mapping. The auth guard in front of these routes is stubbed to a pass-through
+// so those cases stay readable and keep asserting exactly what they always did.
+//
+// The guard itself is not untested by this: tests/routeAuth.test.js exercises
+// the REAL requireBusinessAccess against these same routes and asserts 401/403,
+// so removing the middleware from a route fails there rather than passing here.
+vi.mock("../middleware/requireBusinessAccess.js", () => ({
+  requireBusinessAccess: (_req, _res, next) => next(),
 }));
 
 vi.mock("../services/twilioNumbers.js", () => ({
@@ -24,9 +38,17 @@ vi.mock("../services/twilioNumbers.js", () => ({
 // in tests/degradedMode.test.js). Hoist to a beforeAll with a generous
 // hookTimeout so the cost is paid once, during setup, deterministically.
 let app;
+// Cold-importing server.js pulls the whole app graph — supabase-free now, but
+// still the genai SDK, twilio and ws — and measures ~3s on an idle machine.
+// FOUR test files pay that cost (callersRoute, routeAuth, dsrRoutes,
+// phone-numbers-api), and under real contention one of them exceeded a 20s
+// hook timeout during a concurrent docker build. A0's own findings say a flaky
+// gate trains you to ignore the gate, so the ceiling is raised rather than the
+// flake tolerated. A genuinely broken import still fails fast, with an error
+// rather than a timeout, so nothing is masked.
 beforeAll(async () => {
   ({ app } = await import("../server.js"));
-}, 20000);
+}, 40000);
 
 describe("GET /api/businesses/:id/phone-numbers/available", () => {
   beforeEach(() => {

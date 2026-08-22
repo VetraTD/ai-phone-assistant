@@ -78,6 +78,13 @@ describe("sttStream.js — Deepgram nova-3 STT wrapper with reconnect", () => {
       endpointing: 150,
       utterance_end_ms: 1000,
       vad_events: true,
+      // Opt OUT of Deepgram's Model Improvement Partnership. Without it caller
+      // audio is eligible for retention and model training, which on a
+      // healthcare line is a disclosure nobody consented to — and it was the
+      // silent default for the entire life of this system until 2026-08-21.
+      // Asserted in the exact-config test on purpose: this is the one that
+      // fails if somebody ever rebuilds these options and drops it.
+      mip_opt_out: true,
       Authorization: "Token test-key",
     });
 

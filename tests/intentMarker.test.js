@@ -192,7 +192,7 @@ describe("intentMarker — streaming stripper", () => {
 // an unformatted phone number or account identifier if the model ever misplaces
 // caller data into that slot.
 describe("safeRejectedValue — what is safe to log", () => {
-  // Every real task name is [a-z_]+ (services/supabase.js CORE_TASKS /
+  // Every real task name is [a-z_]+ (services/db.js CORE_TASKS /
   // MODULE_TASKS), so nothing diagnostic is lost by refusing to log digits.
   it("passes a real-looking intent name through, so drift stays diagnosable", () => {
     expect(safeRejectedValue("quote_request")).toBe("quote_request");

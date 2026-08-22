@@ -3,7 +3,7 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 const schemas = require("../generated/capabilitySchemas.json");
 const { validateCapabilityConfig } = require("../capabilityConfigValidation");
 
@@ -42,11 +42,10 @@ router.get("/api/capabilities/definitions", (req, res) => {
  * without it the UI could not tell "explicitly off" from "never set up", which
  * is exactly the ambiguity migration 020 existed to remove.
  */
-router.get("/api/business/:id/capabilities", authenticate, async (req, res) => {
+router.get("/api/business/:id/capabilities", authenticate, withTenantHandler(async (req, res) => {
   try {
     const { id } = req.params;
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) return res.status(403).json({ error: "No business linked to this user" });
+    const userBusinessId = req.businessId;
     if (id !== userBusinessId) return res.status(403).json({ error: "Forbidden" });
 
     const r = await pool.query(
@@ -75,7 +74,7 @@ router.get("/api/business/:id/capabilities", authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 /**
  * Upsert one capability's settings.
@@ -84,12 +83,11 @@ router.get("/api/business/:id/capabilities", authenticate, async (req, res) => {
  * so a validation failure in one capability cannot discard edits made to
  * another.
  */
-router.put("/api/business/:id/capabilities/:capabilityId", authenticate, async (req, res) => {
+router.put("/api/business/:id/capabilities/:capabilityId", authenticate, withTenantHandler(async (req, res) => {
   try {
     const { id, capabilityId } = req.params;
 
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) return res.status(403).json({ error: "No business linked to this user" });
+    const userBusinessId = req.businessId;
     if (id !== userBusinessId) return res.status(403).json({ error: "Forbidden" });
 
     if (!CAPABILITY_IDS.has(capabilityId)) {
@@ -148,6 +146,6 @@ router.put("/api/business/:id/capabilities/:capabilityId", authenticate, async (
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 module.exports = router;

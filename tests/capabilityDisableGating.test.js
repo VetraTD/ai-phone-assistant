@@ -15,7 +15,7 @@ import {
   buildCallTools,
   buildIntegrationTools,
 } from "../services/gemini.js";
-import { loadConfig } from "../services/supabase.js";
+import { loadConfig } from "../services/db.js";
 
 /** Build a business config with a set of capability rows. */
 function configWith(rows, allowedTasks = ["book_appointment", "check_appointment", "cancel_reschedule", "quote_request"]) {

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
-import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
+import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
@@ -19,6 +19,7 @@ import {
   explicitCacheEnabled,
 } from "./geminiCache.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
+import { assertVendorAllowed } from "../lib/compliance.js";
 import {
   collectStaticFragments,
   collectStepGuidance,
@@ -124,14 +125,160 @@ export function callToolNames(cfg, extras = {}) {
 let geminiClient = null;
 
 /**
+ * Which backend serves Gemini: Vertex AI, or the Gemini Developer API.
+ *
+ * ---------------------------------------------------------------------------
+ * They are not the same product, and the difference is a compliance boundary
+ * ---------------------------------------------------------------------------
+ *
+ * The API-key path is the Gemini Developer API (AI Studio). It is not a Google
+ * CLOUD service, and the Google Cloud BAA accepted 2026-08-20 covers Google
+ * Cloud services. Vertex AI is one; AI Studio is not.
+ *
+ * So in `hipaa` mode the API-key path is not a fallback, it is a violation, and
+ * getClient() refuses rather than quietly serving a call through an uncovered
+ * endpoint. That refusal is the point: an uncovered LLM call carries the
+ * caller's entire utterance.
+ *
+ * ---------------------------------------------------------------------------
+ * UNVERIFIED, and the ledger says so: "Code only — cannot be verified before
+ * C1." No Vertex call has been made from this code. What C1 measures is
+ * `llm_ttfb_ms`, which the A0 baseline puts at 42% of a 2,611 ms turn — the
+ * dominant stage, and the number this change moves in one direction or the
+ * other. Nothing here should be read as evidence that it works.
+ * ---------------------------------------------------------------------------
+ */
+/**
+ * Vertex serving locations, and why this list is so short.
+ *
+ * Probed live against the org on 2026-08-21, with `:countTokens` (free, no
+ * generation) and a bogus model name as the control:
+ *
+ *   locations/eu             200      locations/us             200
+ *   locations/global         200      us-central1              404
+ *   europe-west2             404      europe-west4             404
+ *
+ * `gemini-3.6-flash` IS NOT SERVED BY ANY SINGLE REGION. Same for
+ * `gemini-3-flash-preview` and `gemini-2.5-flash`. The two-region design
+ * assumed each lane would call a single-region endpoint next to its Cloud Run
+ * service; that endpoint does not exist for this model.
+ *
+ * So the only two usable values are the `us` and `eu` MULTI-REGIONS — and
+ * `global`, which is the trap. `global` routes to whichever region has capacity
+ * ANYWHERE ON EARTH. It returns 200, it is faster to reach, and it silently
+ * voids the residency claim that the entire two-project split exists to make
+ * true. It is refused below.
+ */
+export const VERTEX_MULTI_REGIONS = Object.freeze(["us", "eu"]);
+
+/** Routes worldwide. 200s happily. Never allowed here. */
+export const VERTEX_FORBIDDEN_LOCATIONS = Object.freeze(["global"]);
+
+export function vertexConfig(env = process.env) {
+  const project = (env.GOOGLE_CLOUD_PROJECT || "").trim();
+  const location = (env.VERTEX_LOCATION || "").trim();
+  // Explicit opt-in rather than "project is set, so probably Vertex".
+  // GOOGLE_CLOUD_PROJECT is set by Cloud Run automatically, so inferring from
+  // it alone would silently switch backends the moment this deploys — which is
+  // exactly the kind of change that should be a decision, not a side effect.
+  const enabled = env.VERTEX_ENABLED === "true" || env.VERTEX_ENABLED === "1";
+
+  const forbidden = VERTEX_FORBIDDEN_LOCATIONS.includes(location.toLowerCase());
+
+  // A single region is a plausible deliberate choice for some future model, so
+  // it is announced rather than refused — A1.2's line: fatal only when the
+  // operator asked for one thing and would get another. `global` IS that case:
+  // the operator asked for a region-constrained deployment and would get
+  // worldwide routing.
+  const unproven = !!location && !forbidden && !VERTEX_MULTI_REGIONS.includes(location.toLowerCase());
+
+  return {
+    enabled,
+    project,
+    location,
+    forbidden,
+    unproven,
+    usable: enabled && !!project && !!location && !forbidden,
+  };
+}
+
+/**
  * Lazily create (once) and return the shared GoogleGenAI client.
+ *
+ * One instance, reused: the SDK holds an HTTP agent and a connection pool, and
+ * creating one per turn (as this file used to) throws that pool away every
+ * call.
+ *
  * @returns {GoogleGenAI}
  */
 export function getClient() {
-  if (!geminiClient) {
-    geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  if (geminiClient) return geminiClient;
+
+  const vertex = vertexConfig();
+
+  // Refused at CLIENT CONSTRUCTION, not at provider selection — the same rule
+  // A6 established for vendor guards. There is one place a Vertex client comes
+  // into existence, and putting the check anywhere else leaves doors beside it.
+  if (vertex.forbidden) {
+    throw new Error(
+      `VERTEX_LOCATION="${vertex.location}" routes requests to whichever region has ` +
+        "capacity anywhere in the world, which voids the data-residency commitment both " +
+        "deployments are built on. Set `us` (HIPAA lane) or `eu` (UK lane). " +
+        "Note that no SINGLE region serves gemini-3.6-flash — us-central1 and europe-west2 " +
+        "both 404 — so a multi-region value is the only working choice, not merely the safe one."
+    );
   }
+
+  if (vertex.usable) {
+    // No apiKey. Vertex authenticates with Application Default Credentials,
+    // which on Cloud Run is the runtime service account's metadata-server
+    // token — a credential that cannot be copied out of the project, unlike
+    // an API key that can be pasted into anything.
+    geminiClient = new GoogleGenAI({
+      vertexai: true,
+      project: vertex.project,
+      location: vertex.location,
+    });
+    log.info("gemini_backend", { backend: "vertex", project: vertex.project, location: vertex.location });
+
+    // Announced loudly rather than refused: a single region may be right for
+    // some future model. It is not right for any model this system runs today,
+    // and silence here would surface as a 404 mid-call.
+    if (vertex.unproven) {
+      log.error("vertex_location_unproven", {
+        location: vertex.location,
+        severity: "warn",
+        expected: VERTEX_MULTI_REGIONS.join(" | "),
+        reason:
+          "No single Vertex region serves gemini-3.6-flash (probed 2026-08-21: us-central1, " +
+          "europe-west2 and europe-west4 all 404). Expect a 404 on the first turn.",
+      });
+    }
+    return geminiClient;
+  }
+
+  // Asked for Vertex and did not supply what it needs. Falling back to the API
+  // key here would be the silent-failure class this codebase keeps finding:
+  // the operator asked for the covered backend and would get the uncovered one.
+  if (vertex.enabled) {
+    throw new Error(
+      "VERTEX_ENABLED is set but GOOGLE_CLOUD_PROJECT and/or VERTEX_LOCATION are not. " +
+        "VERTEX_LOCATION must be `us` or `eu` — no single region serves this model. " +
+        "Refusing to fall back to the Gemini Developer API, which the Google Cloud BAA does not cover."
+    );
+  }
+
+  // The Gemini Developer API. Refused in `hipaa` mode — see the comment above
+  // vertexConfig for why this is a compliance boundary and not a preference.
+  assertVendorAllowed("gemini-developer-api");
+
+  geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return geminiClient;
+}
+
+/** Test seam: drop the memoised client so a new env takes effect. */
+export function resetClient() {
+  geminiClient = null;
 }
 
 /**
@@ -177,7 +324,7 @@ const DEFAULT_CONFIG = {
   // no business config behaves identically to a business with no
   // allowed_tasks set. Kept out of this static object (rather than calling
   // normalizeAllowedTasks at module load) so importing gemini.js never
-  // requires services/supabase.js's mock to provide normalizeAllowedTasks
+  // requires services/db.js's mock to provide normalizeAllowedTasks
   // unless this fallback path is actually exercised.
   mainPhone: null,
   generalInfo: null,
@@ -979,7 +1126,7 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   //
   // Quoting is gated on config._hasCustomGreeting: lib/voice/session.js
   // buildGreeting only ever speaks config.greeting verbatim when that flag is
-  // true. Otherwise (services/supabase.js loadConfig's default state) it
+  // true. Otherwise (services/db.js loadConfig's default state) it
   // synthesizes a time-of-day + business-name line the caller actually heard,
   // and config.greeting still holds the generic DEFAULT_GREETING text — quoting
   // that would tell the model the caller heard words they never did. Fall back

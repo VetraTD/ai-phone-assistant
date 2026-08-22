@@ -11,7 +11,7 @@ import {
 } from "../capabilities/index.js";
 import { collectStaticFragments, collectStepGuidance } from "../lib/capabilities/promptAssembler.js";
 import { ACTION_TOOL_NAMES, buildCallTools } from "../services/gemini.js";
-import { BUILTIN_TOOL_NAMES, CORE_TASKS } from "../services/supabase.js";
+import { BUILTIN_TOOL_NAMES, CORE_TASKS } from "../services/db.js";
 
 describe("capability registry — pack contract", () => {
   it("every pack declares an id, toolNames, and contributes something", () => {

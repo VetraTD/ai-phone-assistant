@@ -9,7 +9,8 @@ import {
   countScheduledOverlapping,
   listScheduledBetween,
   getAppointmentById,
-} from "./supabase.js";
+  withTenantSafe,
+} from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
@@ -34,7 +35,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 // integrations for names no pack claims.
 //
 // Packs deliberately import nothing from services/. They receive their data
-// surface through ctx.deps, assembled below. Two reasons: services/supabase.js
+// surface through ctx.deps, assembled below. Two reasons: services/db.js
 // imports the capability registry for its reserved-name list, so a pack
 // importing supabase back would be a load-order-dependent cycle; and injection
 // lets a pack's execution paths be tested without mocking modules.
@@ -48,7 +49,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
  * Exposed as getters, not plain properties, so each binding is resolved when a
  * pack actually uses it. A plain object literal would resolve all of them while
  * this module is evaluated, which breaks every test that partially mocks
- * services/supabase.js: vitest's mock throws on access to an export the mock
+ * services/db.js: vitest's mock throws on access to an export the mock
  * does not define, so a suite that never books an appointment would still fail
  * at import time on createAppointment. Lazy access mirrors the original switch,
  * where each branch referenced only what that branch needed.
@@ -318,7 +319,7 @@ const REASON_TEXT = {
  *
  * A timed-out promise is ABANDONED, not cancelled — Promise.race cannot cancel
  * anything, and the only thing that actually stops a late database write is the
- * transport-level AbortSignal in services/supabase.js. What this adds is that
+ * transport-level AbortSignal in services/db.js. What this adds is that
  * the CALLER stops waiting, and that a late completion is visible
  * (tool_late_completion) rather than silent.
  *
@@ -350,7 +351,29 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
     },
   });
 
-  const work = (async () => executeToolCall(fc, ctx))();
+  // Tenant scope for the whole tool call.
+  //
+  // THE RIGHT BOUNDARY for the per-turn path: one tool call is one unit of
+  // work — it books an appointment, records a request, cancels something — and
+  // every database write a capability makes happens inside it. Scoping here
+  // covers all of them at once, including the ones reached through
+  // ctx.deps several frames down, without any capability needing to know.
+  //
+  // It is also short. A tool call is bounded by TOOL_TIMEOUT_MS, so the
+  // connection and transaction this holds are released on a timescale the pool
+  // can absorb, which is the property withTenant depends on.
+  //
+  // Safe, not strict: a scope that fails must not take the turn with it. The
+  // caller is on the phone, and executeToolCall already returns a failure shape
+  // the model can explain.
+  const work = (async () =>
+    ctx?.businessId
+      ? withTenantSafe(ctx.businessId, () => executeToolCall(fc, ctx), {
+          operation: "executeToolCall",
+          callSid: ctx?.callSid ?? null,
+          fallback: failure("UNAVAILABLE"),
+        })
+      : executeToolCall(fc, ctx))();
 
   // Watch the abandoned promise: this is the evidence that a write landed after
   // the caller was told otherwise, which is otherwise invisible.

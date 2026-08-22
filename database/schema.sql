@@ -1,12 +1,21 @@
 -- ============================================================
 -- AI Phone Assistant — Multi-Tenant Schema
--- Run this in the Supabase SQL Editor to create all tables.
 -- ============================================================
 --
+-- Plain PostgreSQL. It was written for the Supabase SQL Editor and contains
+-- nothing Supabase-specific — verified across migrations 002-027 — which is
+-- what makes a local PG16 container a valid stand-in for Cloud SQL.
+--
 -- THIS FILE REPRESENTS THE FULLY-MIGRATED STATE (schema + every migration in
--- this directory, 002 through 018, already applied). A fresh install runs
+-- this directory, 002 through 027, already applied). A fresh install runs
 -- ONLY this file and needs no migrations afterwards; the numbered migration
 -- files exist solely to move an EXISTING database forward.
+--
+-- The "002 through NNN" above went stale at 018 and stayed stale for nine
+-- migrations, which is the failure mode this whole comment warns about, one
+-- level up. tests/schema.test.js now checks the columns and indexes
+-- rather than the sentence, so the sentence being wrong is a documentation
+-- bug instead of a silent install bug.
 --
 -- Consequently: whenever you add a migration that changes a table's shape,
 -- fold the result into this file in the same commit. Columns/indexes that
@@ -27,6 +36,11 @@ CREATE TABLE businesses (
   -- voice's accent, the phone numbers and the timezone. Drives date phrasing,
   -- currency, phone grouping, ringback and the STT language.
   locale                       text CHECK (locale IS NULL OR locale IN ('en-US', 'en-GB', 'es-US')),
+  -- migration 028. What THIS TENANT requires. The effective tier for a call is
+  -- the STRICTER of this and DEPLOYMENT_MODE — a tenant row can tighten the
+  -- stack's posture, never relax it (lib/compliance.js effectiveTier).
+  compliance_tier              text NOT NULL DEFAULT 'standard'
+                                 CHECK (compliance_tier IN ('standard', 'hipaa')),
   greeting                     text,
   -- Weekly shape (migration 014). NULL still means "always open" — see
   -- services/gemini.js isBusinessOpen().
@@ -157,15 +171,27 @@ CREATE TABLE integrations (
   name        text NOT NULL,
   enabled     boolean NOT NULL DEFAULT true,
   config      jsonb NOT NULL DEFAULT '{}',
+  -- migration 027. NULL means no Business Associate Agreement is recorded for
+  -- this endpoint's operator, which blocks dispatch in DEPLOYMENT_MODE=hipaa.
+  -- A record that one was asserted, not evidence that one exists.
+  baa_recorded_at timestamptz,
+  baa_reference   text,
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now(),
   UNIQUE(business_id, name)
 );
 
+-- The first question an audit asks is "which integrations are uncovered?".
+-- Partial: the rows that matter are the NULLs.
+CREATE INDEX idx_integrations_no_baa ON integrations (business_id) WHERE baa_recorded_at IS NULL;
+
+-- "Which tenants require covered handling" is the first question an audit asks.
+CREATE INDEX idx_businesses_hipaa_tier ON businesses (id) WHERE compliance_tier = 'hipaa';
+
 -- 9. Calendar connections (per-business OAuth tokens; migration 016)
--- Backs the dashboard backend's Google Calendar integration
--- (AI-phone-dashboard/backend/src/routes/calendar.js). One row per
--- (business_id, provider).
+-- INERT since A1.1 deleted Google Calendar sync. Nothing reads or writes these
+-- rows. Kept because migrations are append-only history: dropping the table
+-- would rewrite the past to remove four columns nobody pays for.
 CREATE TABLE calendar_connections (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id   uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -361,3 +387,468 @@ BEGIN
   RETURN v_id;
 END;
 $$;
+
+
+-- ============================================================
+-- 14. Row-level security (migration 029)
+-- ============================================================
+-- Folded in here because this file is the fully-migrated state and a fresh
+-- install runs ONLY this file. RLS living solely in the migration would mean a
+-- new database has tenant isolation on paper and not in the schema, which is
+-- the precise failure mode the header of this file warns about — and the worst
+-- possible one to get wrong, since everything would appear to work.
+--
+-- The reasoning behind every choice below is in
+-- database/029_row_level_security.sql and is not repeated.
+-- ============================================================
+-- ------------------------------------------------------------
+-- The application role
+-- ------------------------------------------------------------
+-- NOSUPERUSER and NOBYPASSRLS are the point of it. The migration user is a
+-- superuser and therefore ignores every policy below; the application must not
+-- be. NOLOGIN here because the password belongs in Secret Manager, not in a
+-- migration file that lives in git — B2/B4 grants login with a real credential.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vetra_app') THEN
+    CREATE ROLE vetra_app NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOLOGIN;
+  ELSE
+    -- Idempotent, and it re-asserts the two attributes that matter in case an
+    -- earlier hand-created role had them wrong.
+    ALTER ROLE vetra_app NOSUPERUSER NOBYPASSRLS;
+  END IF;
+END $$;
+
+GRANT USAGE ON SCHEMA public TO vetra_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO vetra_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO vetra_app;
+-- Tables created by future migrations, so a new table is not accidentally
+-- unreadable — or, worse, readable only because somebody granted it broadly in
+-- a hurry when the application broke.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vetra_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO vetra_app;
+
+-- ------------------------------------------------------------
+-- The current tenant, as a function
+-- ------------------------------------------------------------
+-- STABLE, not IMMUTABLE: it depends on session state, and marking it IMMUTABLE
+-- would let the planner cache it across a change of tenant on a pooled
+-- connection. That is a cross-tenant read produced by an optimisation.
+CREATE OR REPLACE FUNCTION app_current_business_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('app.business_id', true), '')::uuid;
+$$;
+
+COMMENT ON FUNCTION app_current_business_id() IS
+  'The tenant the current connection is scoped to, or NULL when unscoped. NULL makes every RLS policy false, so an unscoped connection sees nothing.';
+
+-- ------------------------------------------------------------
+-- Policies: the tables that carry business_id directly
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'calls', 'appointments', 'customer_requests', 'business_knowledge',
+    'business_capabilities', 'integrations', 'users'
+  ] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
+    -- USING governs what is visible to SELECT/UPDATE/DELETE; WITH CHECK governs
+    -- what may be written. Both are required: USING alone would let a scoped
+    -- connection INSERT a row belonging to another tenant, which it could then
+    -- not see — a write-only cross-tenant leak, and the kind that is discovered
+    -- much later than a read one.
+    EXECUTE format($f$
+      CREATE POLICY tenant_isolation ON %I
+        USING (business_id = app_current_business_id())
+        WITH CHECK (business_id = app_current_business_id())
+    $f$, t);
+  END LOOP;
+END $$;
+
+-- ------------------------------------------------------------
+-- businesses: the tenant row itself
+-- ------------------------------------------------------------
+ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE businesses FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON businesses;
+CREATE POLICY tenant_isolation ON businesses
+  USING (id = app_current_business_id())
+  WITH CHECK (id = app_current_business_id());
+
+-- ------------------------------------------------------------
+-- call_transcripts: the join-away table
+-- ------------------------------------------------------------
+-- Nothing on the row says which tenant it belongs to, which is exactly why a
+-- hand-written filter forgets it — and why the negative tests single it out.
+-- The policy reaches through call_id rather than trusting anybody to remember
+-- the join.
+ALTER TABLE call_transcripts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_transcripts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON call_transcripts;
+CREATE POLICY tenant_isolation ON call_transcripts
+  USING (EXISTS (
+    SELECT 1 FROM calls c
+     WHERE c.id = call_transcripts.call_id
+       AND c.business_id = app_current_business_id()
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM calls c
+     WHERE c.id = call_transcripts.call_id
+       AND c.business_id = app_current_business_id()
+  ));
+
+-- The subquery runs per row, so it needs the index that makes it free.
+CREATE INDEX IF NOT EXISTS idx_calls_id_business ON calls (id, business_id);
+
+-- ------------------------------------------------------------
+-- oauth_states: inert since A1.1, and locked down rather than left open
+-- ------------------------------------------------------------
+-- A1.1 deleted the only code that read or wrote this table. Enabling RLS with
+-- no policy means NOBODY except a superuser can touch it, which is the
+-- accurate description of a table nothing uses.
+ALTER TABLE oauth_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE oauth_states FORCE ROW LEVEL SECURITY;
+
+-- calendar_connections is the same story (A1.1), same treatment.
+ALTER TABLE calendar_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_connections FORCE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------
+-- The two bootstrap lookups
+-- ------------------------------------------------------------
+-- SECURITY DEFINER, so they run with the definer's rights and see across
+-- tenants. Both return exactly one row. `SET search_path` is pinned: an
+-- unpinned search_path on a SECURITY DEFINER function lets the caller decide
+-- which `calls` table the body means, which is a privilege-escalation vector
+-- rather than a style issue.
+
+CREATE OR REPLACE FUNCTION app_lookup_business_by_phone(p_phone text)
+RETURNS SETOF businesses
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+  SELECT * FROM businesses WHERE phone_number = p_phone LIMIT 1;
+$$;
+
+COMMENT ON FUNCTION app_lookup_business_by_phone(text) IS
+  'Bootstrap: the dialled number to a tenant, before any tenant is known. SECURITY DEFINER because a scoped connection cannot yet be scoped. Returns at most one row.';
+
+-- The capability rows for one business, also as a bootstrap read.
+--
+-- Needed because `business_capabilities` is itself RLS-protected, so the
+-- capability subquery that rides along with the business lookup returns NOTHING
+-- at pickup — when no tenant is set yet. Losing it is not cosmetic: capability
+-- rows decide which tools exist and which requirements are enforced BEFORE
+-- turn one, and the alternative is a second round trip on the latency-critical
+-- pickup path, which services/db.js argues against at length and correctly.
+--
+-- Scoped to one business id, and capability rows are configuration rather than
+-- patient data — which is what makes a definer function acceptable here and
+-- would not make one acceptable over `calls`.
+CREATE OR REPLACE FUNCTION app_business_capabilities(p_business_id uuid)
+RETURNS json
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+  SELECT COALESCE(json_agg(bc.*), '[]'::json)
+    FROM business_capabilities bc
+   WHERE bc.business_id = p_business_id;
+$$;
+
+COMMENT ON FUNCTION app_business_capabilities(uuid) IS
+  'Bootstrap: one business''s capability rows, needed before a tenant is set. Configuration, not patient data.';
+
+CREATE OR REPLACE FUNCTION app_lookup_user_by_email(p_email text)
+RETURNS TABLE (id uuid, business_id uuid, email text, role text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+  SELECT u.id, u.business_id, u.email, u.role
+    FROM users u WHERE u.email = p_email LIMIT 1;
+$$;
+
+COMMENT ON FUNCTION app_lookup_user_by_email(text) IS
+  'Bootstrap: an authenticated identity to the tenant it may act on. SECURITY DEFINER for the same reason as app_lookup_business_by_phone. Returns at most one row.';
+
+REVOKE ALL ON FUNCTION app_lookup_business_by_phone(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_lookup_user_by_email(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_lookup_business_by_phone(text) TO vetra_app;
+REVOKE ALL ON FUNCTION app_business_capabilities(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_business_capabilities(uuid) TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_lookup_user_by_email(text) TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_current_business_id() TO vetra_app;
+
+-- create_appointment_if_available (migration 022) inserts into appointments,
+-- so under FORCE RLS it needs the tenant set by the caller like any other
+-- write. It is intentionally NOT made SECURITY DEFINER: it takes p_business_id
+-- as an argument, so a scoped connection passing its own tenant satisfies the
+-- policy, and making it definer would hand it the ability to book into any
+-- tenant.
+GRANT EXECUTE ON FUNCTION create_appointment_if_available(uuid, timestamptz, int, int, uuid, text, text, text) TO vetra_app;
+
+-- ============================================================
+-- Migration 030: PHI-access audit logging — §164.312(b)
+-- ============================================================
+-- §164.312(b) "Audit controls" is a REQUIRED implementation specification, not
+-- an addressable one: "implement hardware, software, and/or procedural
+-- mechanisms that record and examine activity in information systems that
+-- contain or use electronic protected health information."
+--
+-- Nothing in this system did. lib/logger.js records EVENTS — a call started, a
+-- tool ran, a notification dropped. None of that answers the question an audit
+-- control exists to answer, which is: WHO read WHICH patient's data, and WHEN.
+--
+-- ------------------------------------------------------------
+-- 1. What is recorded, and what is deliberately not
+-- ------------------------------------------------------------
+-- Who (actor_id + actor_type), what (operations + resources + resource_ids),
+-- when (occurred_at), and which tenant (business_id).
+--
+-- NOT the protected health information itself. No phone number, no caller name,
+-- no transcript, no summary. Row IDs instead, on the same reasoning
+-- middleware/requireBusinessAccess.js already applies when it logs `userId`
+-- rather than `email`: an id resolves to a person THROUGH the database rather
+-- than through the log, so the trail stays useful to an investigator with
+-- database access and useless to anyone who only has the logs.
+--
+-- This is the single worst place in the system to leak PHI into. It is designed
+-- to be retained longest and read by the most people — auditors, counsel,
+-- incident responders — so services/db.js REFUSES a PHI-typed key here rather
+-- than redacting it. Redaction would make a leak survivable; refusal makes it
+-- impossible to write in the first place.
+--
+-- ------------------------------------------------------------
+-- 2. Why there is no foreign key on business_id
+-- ------------------------------------------------------------
+-- The obvious `REFERENCES businesses(id) ON DELETE CASCADE` would mean that
+-- deleting a tenant deletes the record of everything ever done to that tenant's
+-- patient data. An audit trail a DELETE can cascade away is not an audit trail.
+-- ON DELETE RESTRICT is no better: it makes offboarding a clinic impossible.
+--
+-- So business_id is recorded as a VALUE, not a reference. It resolves while the
+-- tenant exists and stops resolving afterwards, which is the correct behaviour:
+-- the trail outlives the tenancy, as HIPAA's six-year documentation retention
+-- expects it to.
+--
+-- ------------------------------------------------------------
+-- 3. Append-only, with two independent locks
+-- ------------------------------------------------------------
+-- Migration 029 granted vetra_app SELECT/INSERT/UPDATE/DELETE on all tables AND
+-- set ALTER DEFAULT PRIVILEGES to hand the same four to every FUTURE table. So
+-- this table is writable-and-erasable by the application the instant it is
+-- created, silently, by a decision made in a different file. That is exactly
+-- the kind of inherited permission nobody re-reads, so it is revoked here
+-- explicitly and loudly.
+--
+-- Two locks, because either one alone is one edit away from gone:
+--
+--   a. Table privileges: SELECT + INSERT granted, UPDATE/DELETE/TRUNCATE
+--      revoked.
+--   b. RLS policies: a SELECT policy and an INSERT policy exist. There is NO
+--      UPDATE policy and NO DELETE policy, so even a role that somehow held the
+--      privilege matches zero rows.
+--
+-- Neither substitutes for the real answer to "a compromised project cannot
+-- erase its own trail" — that is the copy Cloud Run ships to stdout, which
+-- lands in the vetra-logging project's sink (B0w) under different IAM. This
+-- table is the QUERYABLE copy; the log sink is the DURABLE one. They fail
+-- independently, which is the property worth having.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS phi_access_log (
+  id            bigserial PRIMARY KEY,
+  occurred_at   timestamptz NOT NULL DEFAULT now(),
+  business_id   uuid NOT NULL,
+
+  -- WHO. §164.312(a)(2)(i) requires unique user identification, and an audit
+  -- trail that cannot name a unique actor does not satisfy §164.312(b) either.
+  --   user   a staff member acting through the dashboard  -> users.id
+  --   voice  the receptionist acting during a call        -> the Twilio call SID
+  --   system a background job with no human behind it     -> null
+  actor_type    text NOT NULL CHECK (actor_type IN ('user', 'voice', 'system')),
+  actor_id      text,
+
+  -- WHAT. The strongest action taken in the unit of work, ordered
+  -- read < write < export < erase, plus every data-layer operation that ran.
+  -- One row describes one unit of work rather than one statement: a statement
+  -- has no subject and a pickup would emit dozens.
+  action        text NOT NULL CHECK (action IN ('read', 'write', 'export', 'erase')),
+  operations    text[] NOT NULL,
+  resources     text[] NOT NULL,
+
+  -- WHICH RECORDS. Capped by the writer; row_count stays authoritative, so a
+  -- truncated id list reads as "200 rows, here are the first 100" rather than
+  -- as "100 rows".
+  resource_ids  uuid[],
+  row_count     integer NOT NULL DEFAULT 0,
+
+  -- Correlation back to the rest of the logs. Neither is PHI: a request id is
+  -- random, and a call SID resolves to a person only through the database —
+  -- the same judgement lib/phiFields.js already records for callSid.
+  request_id    text,
+  call_sid      text
+);
+
+COMMENT ON TABLE phi_access_log IS
+  'HIPAA 164.312(b) audit controls. One row per unit of work that touched PHI. Append-only for the application role. Carries identifiers, never protected health information.';
+
+-- "Show me this tenant's access trail, most recent first" — the accounting a
+-- covered entity asks its business associate for.
+CREATE INDEX IF NOT EXISTS idx_phi_access_business_time
+  ON phi_access_log (business_id, occurred_at DESC);
+
+-- "What did this user access?" — the question asked after a workforce incident.
+CREATE INDEX IF NOT EXISTS idx_phi_access_actor_time
+  ON phi_access_log (actor_id, occurred_at DESC);
+
+-- "Who accessed THIS record?" — the question §164.312(b) exists for, and the
+-- one that is unanswerable without an index on the id array.
+CREATE INDEX IF NOT EXISTS idx_phi_access_resource_ids
+  ON phi_access_log USING gin (resource_ids);
+
+-- ------------------------------------------------------------
+-- Lock 1: table privileges
+-- ------------------------------------------------------------
+-- The REVOKE is the load-bearing half. Migration 029's ALTER DEFAULT PRIVILEGES
+-- has already granted UPDATE and DELETE on this table by the time these lines
+-- run.
+GRANT SELECT, INSERT ON phi_access_log TO vetra_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON phi_access_log FROM vetra_app;
+GRANT USAGE, SELECT ON SEQUENCE phi_access_log_id_seq TO vetra_app;
+
+-- ------------------------------------------------------------
+-- Lock 2: row-level security
+-- ------------------------------------------------------------
+ALTER TABLE phi_access_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phi_access_log FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_read ON phi_access_log;
+DROP POLICY IF EXISTS tenant_append ON phi_access_log;
+
+-- A tenant may read its own trail. That is a feature, not a concession: the
+-- clinic is the covered entity and we are the business associate, so an
+-- accounting of who touched their patients' records is theirs to see.
+CREATE POLICY tenant_read ON phi_access_log
+  FOR SELECT USING (business_id = app_current_business_id());
+
+-- A tenant may add to its own trail, and cannot forge another tenant's.
+CREATE POLICY tenant_append ON phi_access_log
+  FOR INSERT WITH CHECK (business_id = app_current_business_id());
+
+-- Deliberately absent: any policy FOR UPDATE or FOR DELETE. Their absence is
+-- the lock. Adding one later should require explaining, in writing, why an
+-- audit record needs to change after the fact.
+
+-- ============================================================
+-- Migration 031: the onboarding bootstrap
+-- ============================================================
+-- Migration 029 solved the READ bootstrap — how a dialled number or an
+-- authenticated identity becomes a tenant before any tenant is set. It did not
+-- solve the WRITE one, and nothing had noticed, because the only code that
+-- performs it lives in the dashboard backend, which has its own pool and has
+-- never been run against a database where row-level security applies.
+--
+-- POST /api/onboarding/create-business does three writes, in this order:
+--
+--   1. INSERT INTO users (id, email)            -- business_id is NULL
+--   2. INSERT INTO businesses (name, timezone)  -- a brand-new id
+--   3. UPDATE users SET business_id = ...
+--
+-- Under FORCE row security every one of them fails:
+--
+--   (1) users' WITH CHECK is `business_id = app_current_business_id()`. NULL
+--       never equals anything, so the row is refused.
+--   (2) businesses' WITH CHECK is `id = app_current_business_id()`. The new id
+--       is by definition not the current tenant, which is not set anyway.
+--   (3) the row from (1) does not exist, and would not be visible if it did.
+--
+-- There is no scope that makes this work, because the whole operation is what
+-- CREATES the scope. That is the definition of a bootstrap.
+--
+-- The tempting fix is a policy allowing writes when app.business_id is unset.
+-- Migration 029 argues against the read version of that at length and the same
+-- argument applies harder here: it would make "forgot to scope" mean "may write
+-- anything, to any tenant", which is worse than the read case, not better.
+--
+-- So: one SECURITY DEFINER function, narrow and named, doing exactly the three
+-- writes above and nothing else. Pinned search_path, because an unpinned one on
+-- a SECURITY DEFINER function lets the caller decide which `users` table the
+-- body means.
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION app_create_business_for_user(
+  p_user_id  uuid,
+  p_email    text,
+  p_name     text,
+  p_timezone text
+)
+RETURNS businesses
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_existing uuid;
+  v_business businesses;
+BEGIN
+  IF p_user_id IS NULL OR p_email IS NULL OR p_name IS NULL OR p_timezone IS NULL THEN
+    RAISE EXCEPTION 'app_create_business_for_user: all arguments are required';
+  END IF;
+
+  -- REFUSE if this account already has a business.
+  --
+  -- The function is SECURITY DEFINER, so it is the one place in the system that
+  -- can create a tenant, and it must not be usable to create a second one. The
+  -- old route had no such check: calling it twice made an orphaned business
+  -- every time and silently repointed the user at the newest, stranding the
+  -- previous tenant's data behind an account that could no longer see it.
+  SELECT business_id INTO v_existing FROM users WHERE id = p_user_id;
+  IF v_existing IS NOT NULL THEN
+    RAISE EXCEPTION 'app_create_business_for_user: user already belongs to a business'
+      USING ERRCODE = '23505';
+  END IF;
+
+  INSERT INTO businesses (name, timezone) VALUES (p_name, p_timezone)
+  RETURNING * INTO v_business;
+
+  -- One statement rather than the route's insert-then-update, so a users row
+  -- with a NULL business_id never exists — not even briefly, and not at all if
+  -- anything downstream fails.
+  INSERT INTO users (id, email, business_id)
+  VALUES (p_user_id, p_email, v_business.id)
+  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, business_id = EXCLUDED.business_id;
+
+  RETURN v_business;
+END;
+$$;
+
+COMMENT ON FUNCTION app_create_business_for_user(uuid, text, text, text) IS
+  'Bootstrap: creates a tenant and attaches the signing-up account to it. SECURITY DEFINER because the operation is what establishes the scope it would otherwise need. Refuses if the account already has a business.';
+
+REVOKE ALL ON FUNCTION app_create_business_for_user(uuid, text, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_create_business_for_user(uuid, text, text, text) TO vetra_app;
+
+-- ------------------------------------------------------------
+-- The other half: reading a business the caller has just been told they own
+-- ------------------------------------------------------------
+-- GET /api/me answers "which business is this, and does it need onboarding" —
+-- and the businesses read inside it CAN be scoped, because by then
+-- app_lookup_user_by_email has already produced the tenant id. No new function
+-- is needed for it; the route simply has to open a scope. Recorded here so the
+-- next person does not add a third definer function for a read that does not
+-- need one.

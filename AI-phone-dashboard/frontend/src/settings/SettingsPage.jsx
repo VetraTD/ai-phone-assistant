@@ -11,7 +11,6 @@ import VoicePickerSection from "./VoicePickerSection";
 import NotificationsSection from "./NotificationsSection";
 import LanguagesSection from "./LanguagesSection";
 import AccountSection from "./AccountSection";
-import CalendarSection from "./CalendarSection";
 import SettingsNav from "./SettingsNav";
 import SaveBar from "./SaveBar";
 import { FIELD_LABELS } from "./fieldLabels";
@@ -125,12 +124,6 @@ export default function SettingsPage({
   usageError,
   planName,
   billingStatus,
-  calendarConnected,
-  calendarLoading,
-  calendarSyncing,
-  onCalendarSync,
-  onCalendarDisconnect,
-  onCalendarConnect,
   t,
 }) {
   const [baseline, setBaseline] = useState(() => snapshotFromBusiness(business));
@@ -290,20 +283,6 @@ export default function SettingsPage({
       <span className="set-pill set-pill-on">On</span>
     );
 
-  // Calendar sync only means something once appointments exist, so it lives
-  // inside the appointments card rather than off in Billing.
-  const calendarNode = (
-    <CalendarSection
-      connected={calendarConnected}
-      loading={calendarLoading}
-      syncing={calendarSyncing}
-      onSync={onCalendarSync}
-      onDisconnect={onCalendarDisconnect}
-      onConnect={onCalendarConnect}
-      t={t}
-    />
-  );
-
   return (
     <div className="set-root">
       <SaveBar
@@ -354,13 +333,16 @@ export default function SettingsPage({
               another. It replaces the old Tasks checkboxes, which could say THAT a
               business books appointments but never HOW.
 
-              Transfer policy/number and calendar sync DO belong elsewhere (the
-              page draft and the dashboard's own OAuth flow), but they are
-              meaningless read apart from their capability — so they are rendered
+              Transfer policy/number DOES belong elsewhere (the page draft), but
+              it is meaningless read apart from its capability — so it renders
               inside that capability's card via `extras`, an { node, badge } map
               keyed by capability id. The renderer stays generic (it only asks
               "is there an override for this id?"); the one coupling lives here,
-              where deciding what sits next to what is already this file's job. */}
+              where deciding what sits next to what is already this file's job.
+
+              A1.1 removed the second `extras` entry (Google Calendar sync on the
+              appointments card). The mechanism is still worth its generality —
+              it is how anything page-owned reaches a capability card. */}
           {activeGroup === "capabilities" ? (
             <CapabilitiesSection
               businessId={businessId}
@@ -368,7 +350,6 @@ export default function SettingsPage({
               onEnabledChange={setCapEnabled}
               extras={{
                 transfer: { node: <TransferRulesSection value={draft} onChange={patch} />, badge: transferBadge },
-                appointments: { node: calendarNode },
               }}
             />
           ) : null}

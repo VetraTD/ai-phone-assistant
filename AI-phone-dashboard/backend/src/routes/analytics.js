@@ -3,16 +3,12 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 
 // Analytics for the authenticated user's business
-router.get("/api/analytics/:businessId", authenticate, async (req, res) => {
-  const authUserId = req.authUser.id;
+router.get("/api/analytics/:businessId", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const callsToday = await pool.query(`
       SELECT COUNT(*)
@@ -55,16 +51,12 @@ router.get("/api/analytics/:businessId", authenticate, async (req, res) => {
     console.error(err);
     res.status(500).send("Server Error");
   }
-});
+}));
 
 // Usage this month (calls count + total minutes) for Settings
-router.get("/api/usage", authenticate, async (req, res) => {
+router.get("/api/usage", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const usageRes = await pool.query(
       `SELECT
@@ -87,16 +79,12 @@ router.get("/api/usage", authenticate, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Failed to load usage" });
   }
-});
+}));
 
 // Analytics breakdown: period=7d|30d|90d, returns time buckets + totals for analytics page
-router.get("/api/analytics-breakdown", authenticate, async (req, res) => {
+router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const period = (req.query.period || "90d").toLowerCase();
     const interval = period === "7d" ? "7 days" : period === "30d" ? "30 days" : "3 months";
@@ -341,6 +329,6 @@ router.get("/api/analytics-breakdown", authenticate, async (req, res) => {
     console.error("analytics-breakdown failed:", err);
     res.status(500).json({ error: "Failed to load analytics breakdown" });
   }
-});
+}));
 
 module.exports = router;

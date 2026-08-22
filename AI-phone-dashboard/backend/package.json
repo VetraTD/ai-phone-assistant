@@ -14,7 +14,6 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@sendgrid/mail": "^8.1.0",
     "@supabase/supabase-js": "^2.98.0",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
@@ -25,6 +24,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.0.1",
+    "nodemailer": "^9.0.5",
     "pg": "^8.18.0"
   },
   "devDependencies": {

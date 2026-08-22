@@ -181,8 +181,13 @@ vi.mock("../lib/voice/utteranceCache.js", () => ({
 }));
 
 // ---- services --------------------------------------------------------------
-vi.mock("../services/supabase.js", () => ({
+vi.mock("../services/db.js", () => ({
   isEnabled: vi.fn(() => true),
+  // Runs fn and returns what it returns. The real one wraps it in a
+  // transaction with app.business_id set; that behaviour is proven against a
+  // real database in tests/db/withTenantScoping.test.js. Here it must be
+  // transparent, because these tests are about the session, not the scoping.
+  withTenantSafe: async (_businessId, fn) => fn(),
   lookupBusinessByPhone: vi.fn(async () => ({ id: "biz1" })),
   loadConfig: vi.fn(() => ({
     businessName: "Test Biz",
@@ -409,7 +414,7 @@ describe("TRANSFER_TRIGGERS regex", () => {
   });
 });
 import * as callState from "../lib/callState.js";
-import * as db from "../services/supabase.js";
+import * as db from "../services/db.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
@@ -1372,7 +1377,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
     // Real transferred status (Part 1) — the redial succeeded (mocked
     // "twilio" above), so the call must be marked transferred in the DB.
-    const db = await import("../services/supabase.js");
+    const db = await import("../services/db.js");
     expect(db.markCallTransferred).toHaveBeenCalledWith(sid);
   });
 

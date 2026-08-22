@@ -4,18 +4,16 @@ const axios = require("axios");
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser, rejectUnexpectedKeys } = require("../utils");
+const { rejectUnexpectedKeys } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { authSensitiveLimiter, sensitiveLimiter } = require("../middleware/rateLimiters");
+const mailer = require("../services/mailer");
 
 // Appointments for the authenticated user's business with simple ranges
 // GET /api/appointments?range=today|7days|upcoming
-router.get("/api/appointments", authenticate, async (req, res) => {
+router.get("/api/appointments", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const { range } = req.query;
 
@@ -49,24 +47,18 @@ router.get("/api/appointments", authenticate, async (req, res) => {
     console.error("appointments-today failed:", err);
     res.status(500).json({ error: "Failed to load today's appointments" });
   }
-});
+}));
 
 // Send appointments summary email to the business notification email
 // POST /api/appointments/email  { range: "today" | "7days" | "upcoming" }
-router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, async (req, res) => {
+router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+    if (!mailer.isConfigured()) {
       return res
         .status(500)
         .json({ error: "Email sending is not configured on the server." });
     }
-    const authUserId = req.authUser.id;
-    const businessId = await getBusinessIdForUser(authUserId);
-    if (!businessId) {
-      return res
-        .status(403)
-        .json({ error: "No business linked to this user" });
-    }
+    const businessId = req.businessId;
 
     const bizRes = await pool.query(
       `select name, notification_email from businesses where id = $1`,
@@ -97,68 +89,51 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
       label = "Today";
     }
 
+    // COUNT only. The previous version selected client_name, client_phone,
+    // scheduled_at, status and notes and printed one line per appointment into
+    // an email — for a cardiology clinic, a list of who is being seen and when,
+    // through a transactional email vendor with no BAA, triggered by a button.
+    //
+    // Not selecting the columns is the point. Selecting them and then declining
+    // to print them leaves the payload one careless template literal away from
+    // leaking again; a query that never fetches a name cannot send one.
     const apptsRes = await pool.query(
-      `select a.client_name,
-              a.client_phone,
-              a.scheduled_at,
-              a.status,
-              a.notes
+      `select count(*)::int as total
        from appointments a
        join calls c on a.call_id = c.id
        where c.business_id = $1
-         ${dateCondition}
-       order by a.scheduled_at asc`,
+         ${dateCondition}`,
       [businessId]
     );
-    const appts = apptsRes.rows;
+    const count = apptsRes.rows[0]?.total ?? 0;
 
-    let text;
-    if (!appts.length) {
-      text = `No appointments are scheduled for ${label.toLowerCase()}.`;
-    } else {
-      const lines = appts.map((a) => {
-        const when = a.scheduled_at
-          ? new Date(a.scheduled_at).toLocaleString()
-          : "N/A";
-        const name = a.client_name || "Unknown client";
-        const phone = a.client_phone || "";
-        const status = a.status || "";
-        const notes = a.notes ? ` | Notes: ${a.notes}` : "";
-        return `- ${when} — ${name} ${
-          phone ? "(" + phone + ")" : ""
-        } [${status}]${notes}`;
-      });
-      text =
-        `Appointments (${label}) for ${
-          biz.name || "your business"
-        }:\n\n` + lines.join("\n");
-    }
+    const businessName = biz.name || "your business";
+    const where = process.env.DASHBOARD_URL
+      ? `Open your Vetra dashboard to see them:\n${process.env.DASHBOARD_URL}`
+      : "Open your Vetra dashboard to see them.";
+    const text =
+      count === 0
+        ? `${businessName}\n\nNo appointments are scheduled for ${label.toLowerCase()}.\n\n${where}`
+        : `${businessName}\n\n${count} appointment${count === 1 ? " is" : "s are"} scheduled ` +
+          `(${label.toLowerCase()}).\n\n${where}\n\n` +
+          "This email contains no patient information by design — email is not a " +
+          "private channel, so the details stay in Vetra.";
 
-    await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: process.env.BREVO_FROM_EMAIL,
-          name: process.env.BREVO_FROM_NAME || biz.name || "Your business",
-        },
-        to: [{ email: biz.notification_email }],
-        subject: `${label} appointments for ${biz.name || "your business"}`,
-        textContent: text,
-      },
-      {
-        headers: {
-          "api-key": process.env.BREVO_API_KEY,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-      }
-    );
+    await mailer.sendMail({
+      to: biz.notification_email,
+      // The subject names the business and "appointments", which is as far
+      // as a subject line can go without describing anyone's care.
+      subject: `${label} appointments - ${businessName}`,
+      text,
+      fromName: businessName,
+    });
 
-    res.json({ success: true, count: appts.length });
+    res.json({ success: true, count });
   } catch (err) {
-    console.error("appointments-email failed:", err.response?.data ?? err.message);
+    // Message only: a transport error carries auth.pass on its own properties.
+    console.error("appointments-email failed:", err?.message);
     res.status(500).json({ error: "Failed to send appointments email" });
   }
-});
+}));
 
 module.exports = router;

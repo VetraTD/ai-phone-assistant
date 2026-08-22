@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { supabase } from "./supabaseClient";
+import { useIdleLogout, IDLE_TIMEOUT_MINUTES } from "./useIdleLogout";
 import { LanguageSwitcher, useTranslations } from "./LanguageSwitcher";
 
 import "./Dashboard.css";
@@ -482,9 +483,6 @@ function App() {
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
   const [appointmentsError, setAppointmentsError] = useState(null);
   const [appointmentsRange, setAppointmentsRange] = useState("upcoming");
-  const [calendarConnected, setCalendarConnected] = useState(false);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarSyncing, setCalendarSyncing] = useState(false);
 
   const isDemo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
 
@@ -517,6 +515,17 @@ function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // HIPAA 164.312(a)(2)(iii) automatic logoff. Before this, a session lasted
+  // until the tab closed — Supabase refreshes its one-hour token on a timer
+  // indefinitely, so an unattended browser on a clinic front desk stayed signed
+  // in overnight, in front of every patient record that clinic holds.
+  const idle = useIdleLogout({
+    enabled: !!session,
+    onLogout: async () => {
+      await supabase.auth.signOut();
+    },
+  });
 
   useEffect(() => {
     const loadMe = async () => {
@@ -561,31 +570,6 @@ function App() {
       .catch((err) => { setUsageError(err?.response?.data?.error || "Failed to load usage"); setUsage(null); })
       .finally(() => { setUsageLoading(false); });
   }, [activePage, businessId]);
-
-  useEffect(() => {
-    if (activePage !== "settings" || !businessId) return;
-    setCalendarLoading(true);
-    api.get("/api/calendar/status")
-      .then((res) => setCalendarConnected(res.data?.connected === true))
-      .catch(() => setCalendarConnected(false))
-      .finally(() => setCalendarLoading(false));
-  }, [activePage, businessId]);
-
-  useEffect(() => {
-    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-    if (!params?.get("calendar")) return;
-    if (params.get("calendar") === "connected") {
-      setToast({ type: "success", message: t.calendarConnected });
-      setTimeout(() => setToast(null), 3000);
-      setCalendarConnected(true);
-    }
-    if (typeof window?.history?.replaceState === "function") {
-      const u = new URL(window.location.href);
-      u.searchParams.delete("calendar");
-      u.searchParams.delete("message");
-      window.history.replaceState({}, "", u.pathname + u.search);
-    }
-  }, [t.calendarConnected]);
 
   const callsQueryParams = useMemo(() => {
     const params = { limit: 200, offset: 0 };
@@ -737,7 +721,9 @@ function App() {
     }
     try {
       await api.post("/api/appointments/email", { range });
-      setToast({ type: "success", message: `Appointments email has been sent to ${to}.` });
+      // The email is a nudge with a count and a link, not the list: bodies carry
+      // no patient information (A1.3), so the copy must not promise one.
+      setToast({ type: "success", message: `Sent a reminder to ${to}. Details stay here in the dashboard.` });
       setTimeout(() => setToast(null), 2200);
     } catch (err) {
       console.error(err);
@@ -800,6 +786,20 @@ function App() {
 
   return (
     <div className="dashboard-page">
+      {idle.warning ? (
+        <div className="idle-warning" role="alert" aria-live="assertive">
+          <span>
+            {t.idleWarning
+              ? t.idleWarning(Math.ceil(idle.secondsRemaining / 60))
+              : `You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
+                  idle.secondsRemaining % 60
+                ).padStart(2, "0")} for security.`}
+          </span>
+          <button type="button" className="idle-warning-button" onClick={idle.stayActive}>
+            {t.idleStaySignedIn ?? "Stay signed in"}
+          </button>
+        </div>
+      ) : null}
       <div className="dashboard-shell">
         <header className="dashboard-topbar">
           <div className="dashboard-topbar-left">
@@ -1054,7 +1054,7 @@ function App() {
                         className="reset-button"
                         onClick={() => emailAppointments("upcoming")}
                       >
-                        Email upcoming appointments
+                        Email me a reminder
                       </button>
                       <button
                         type="button"
@@ -1624,11 +1624,10 @@ function App() {
             )}
           </section>
         ) : activePage === "settings" ? (
-          // Usage, billing and calendar used to be hand-rolled panels here,
-          // above and below SettingsPage, in the old .panel visual language.
-          // They now live inside the settings group rail as AccountSection /
-          // CalendarSection — the data and these handlers still belong to
-          // App.jsx and are passed down.
+          // Usage and billing used to be hand-rolled panels here, above and
+          // below SettingsPage, in the old .panel visual language. They now live
+          // inside the settings group rail as AccountSection — the data and
+          // these handlers still belong to App.jsx and are passed down.
           <SettingsPage
             business={business}
             businessId={businessId}
@@ -1640,43 +1639,6 @@ function App() {
             planName={settingsPlanName}
             billingStatus={settingsBillingStatus}
             t={t}
-            calendarConnected={calendarConnected}
-            calendarLoading={calendarLoading}
-            calendarSyncing={calendarSyncing}
-            onCalendarSync={async () => {
-              setCalendarSyncing(true);
-              try {
-                const res = await api.post("/api/calendar/sync");
-                setToast({ type: "success", message: t.calendarSyncSuccess + (res.data?.created != null ? ` (${res.data.created} created)` : "") });
-                setTimeout(() => setToast(null), 3000);
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || t.calendarSyncError });
-                setTimeout(() => setToast(null), 3000);
-              } finally {
-                setCalendarSyncing(false);
-              }
-            }}
-            onCalendarDisconnect={async () => {
-              try {
-                await api.delete("/api/calendar/disconnect");
-                setCalendarConnected(false);
-                setToast({ type: "success", message: t.disconnectCalendar });
-                setTimeout(() => setToast(null), 2000);
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || "Failed to disconnect" });
-                setTimeout(() => setToast(null), 2000);
-              }
-            }}
-            onCalendarConnect={async () => {
-              try {
-                const res = await api.get("/api/calendar/auth-url");
-                if (res.data?.url) window.location.href = res.data.url;
-                else setToast({ type: "error", message: "Calendar not configured" });
-              } catch (err) {
-                setToast({ type: "error", message: err?.response?.data?.error || "Failed to get auth URL" });
-                setTimeout(() => setToast(null), 2000);
-              }
-            }}
           />
         ) : (
           <section className="guide-page">
@@ -1736,10 +1698,6 @@ function App() {
                   <li>
                     <strong>Notifications</strong> – if your business has a notification email/phone set, Vetra sends alerts for important events
                     (appointment booked, missed call, and call completed summaries).
-                  </li>
-                  <li>
-                    <strong>Calendar sync (optional)</strong> – if you connected Google Calendar in <strong>Settings</strong>, you can sync upcoming appointments
-                    so they appear in the calendar you already use.
                   </li>
                 </ul>
               </div>

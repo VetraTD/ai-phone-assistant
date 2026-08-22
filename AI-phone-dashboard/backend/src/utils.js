@@ -1,8 +1,35 @@
 const pool = require("./db");
 
-/** Get the business_id for the authenticated user (or null if unlinked). */
-async function getBusinessIdForUser(userId) {
-  const r = await pool.query(`select business_id from users where id = $1`, [userId]);
+/**
+ * Get the business_id for the authenticated user (or null if unlinked).
+ *
+ * THROUGH app_lookup_user_by_email (migration 029), not a plain SELECT on
+ * `users`. This is a BOOTSTRAP read — it is how the tenant becomes known, so it
+ * cannot itself be scoped to a tenant — and `users` is RLS-protected, so the
+ * direct select it used to do returns nothing as the application role. Every
+ * route then 403'd with "No business linked to this user", which reads as an
+ * authorisation bug and is a scoping one.
+ *
+ * KEYED ON EMAIL, where the old version keyed on the Supabase auth uid. Two
+ * reasons, and the first is decisive: there is no bootstrap function for the id
+ * and adding one would be a second answer to a question that already has one.
+ * The second is that the voice server's requireBusinessAccess resolves an
+ * identity through fetchUserByEmail, so both servers now ask the same question
+ * the same way instead of drifting — the class of thing D1 exists to catch.
+ *
+ * `users.email` is UNIQUE, and onboarding writes it from the same auth identity
+ * the token carries, so the two agree by construction.
+ *
+ * Accepts the auth user object rather than an id, so the caller cannot pass the
+ * wrong one of the two fields silently.
+ *
+ * @param {{ id?: string, email?: string }|string|null} authUser
+ * @returns {Promise<string|null>}
+ */
+async function getBusinessIdForUser(authUser) {
+  const email = typeof authUser === "string" ? null : authUser?.email;
+  if (!email) return null;
+  const r = await pool.query(`select business_id from app_lookup_user_by_email($1)`, [email]);
   return r.rows[0]?.business_id || null;
 }
 

@@ -20,7 +20,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { listPacks } from "../capabilities/index.js";
 import appointments from "../capabilities/appointments.js";
 import { buildCallTools, buildIntegrationTools, buildSystemInstruction } from "../services/gemini.js";
-import { loadConfig } from "../services/supabase.js";
+import { loadConfig } from "../services/db.js";
 import { checkRequirements, CONFIRMATION_ARG } from "../lib/capabilities/requirements.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 

@@ -5,7 +5,7 @@
  * tests/session.test.js) so these exercise the harness's own wiring — reducer
  * application, effect dispatch through the real packs, tool-trace surfacing, and
  * the extras it hands the brain — with no real Gemini call. The fake capability
- * deps are exercised directly against the contracts services/supabase.js defines.
+ * deps are exercised directly against the contracts services/db.js defines.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

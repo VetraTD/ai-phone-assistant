@@ -13,7 +13,7 @@ describe("GET /api/analytics/:businessId", () => {
 
   it("counts transferred_today from status='transferred' with no summary ILIKE inference", async () => {
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("from users")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+      if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
       if (sql.includes("FROM calls") && sql.includes("status = 'transferred'")) {
         // The old inference bug OR'd in a summary ILIKE '%transfer%' clause —
         // assert it's gone entirely.

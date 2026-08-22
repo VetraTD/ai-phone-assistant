@@ -1,0 +1,31 @@
+# Local Postgres 16 — the stand-in for Cloud SQL during Lane A.
+#
+# It is a valid stand-in for one verified reason and not out of convenience:
+# migrations 002-027 and database/schema.sql contain zero Supabase-specific
+# SQL. No PostgREST, no `auth.*`, no Supabase extensions. What runs here runs
+# on Cloud SQL for PostgreSQL 16.
+#
+# 16 to match B2's instance, because a version gap is exactly the kind of thing
+# that passes locally and fails once, in the region that matters.
+#
+# Ephemeral by design: no named volume. A database you can throw away is a
+# database whose migration path gets exercised. `docker compose down` and
+# `npm run db:reset` should be indistinguishable.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vetra-pg16
+    environment:
+      POSTGRES_USER: vetra
+      POSTGRES_PASSWORD: vetra_local_dev
+      POSTGRES_DB: vetra
+    ports:
+      # 55432, not 5432. A developer with a system Postgres should not have to
+      # stop it, and a migration aimed at the wrong database is unrecoverable
+      # in the way that matters — it succeeds.
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vetra -d vetra"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

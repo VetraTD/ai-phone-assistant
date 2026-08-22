@@ -1,5 +1,6 @@
 import axios from "axios";
 import { supabase } from "./supabaseClient";
+import { attachAuthRetry } from "./authRetry";
 
 const NUMBER_API_BASE =
   import.meta.env.VITE_NUMBER_API_URL ||
@@ -20,3 +21,7 @@ numberApi.interceptors.request.use(async (config) => {
 
   return config;
 });
+
+// Refresh once and retry when a server reports the token is past the
+// session-age ceiling. See src/authRetry.js.
+attachAuthRetry(numberApi);

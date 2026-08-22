@@ -3,19 +3,16 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { getBusinessIdForUser, buildUpdateFromWhitelist } = require("../utils");
+const { buildUpdateFromWhitelist } = require("../utils");
+const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { SETTINGS_FIELD_VALIDATORS } = require("../settingsValidation");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
 
 // Get a business by id (must match authenticated user's business)
 // /api/businesses/:id
-router.get("/api/businesses/:id", authenticate, async (req, res) => {
+router.get("/api/businesses/:id", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const authUserId = req.authUser.id;
-    const userBusinessId = await getBusinessIdForUser(authUserId);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
 
     const { id } = req.params;
 
@@ -39,7 +36,7 @@ router.get("/api/businesses/:id", authenticate, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 // Update business settings — dynamic UPDATE built only from whitelisted,
 // validated keys (see settingsValidation.js SETTINGS_FIELD_VALIDATORS).
@@ -51,13 +48,12 @@ router.get("/api/businesses/:id", authenticate, async (req, res) => {
 // from request input) and every value is bound as a parameter — never
 // string-interpolated — so this stays injection-safe even though the set of
 // columns updated varies per request.
-router.put("/api/business/:id/settings", authenticate, async (req, res) => {
+router.put("/api/business/:id/settings", authenticate, withTenantHandler(async (req, res) => {
   try {
     const { id } = req.params;
 
     // Ensure the authenticated user actually owns this business
-    const authUserId = req.authUser.id;
-    const userBusinessId = await getBusinessIdForUser(authUserId);
+    const userBusinessId = req.businessId;
     if (!userBusinessId || userBusinessId !== id) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -90,7 +86,7 @@ router.put("/api/business/:id/settings", authenticate, async (req, res) => {
     console.error("settings update failed:", err);
     res.status(500).json({ error: "Failed to update settings" });
   }
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Voice catalog (dashboard voice picker) — mirrors root repo config/voices.js
@@ -148,7 +144,7 @@ const INTEGRATION_DEFINITIONS = [
 /**
  * Tool names an integration may not claim.
  *
- * MIRROR of services/supabase.js BUILTIN_TOOL_NAMES in the main app, which
+ * MIRROR of services/db.js BUILTIN_TOOL_NAMES in the main app, which
  * derives this from the capability registry (capabilities/index.js). This
  * dashboard is a separate CJS app with its own package.json and cannot import
  * that ESM module, so the list is duplicated by hand.
@@ -188,12 +184,9 @@ router.get("/api/integrations/definitions", (req, res) => {
   res.json(INTEGRATION_DEFINITIONS);
 });
 
-router.get("/api/integrations", authenticate, async (req, res) => {
+router.get("/api/integrations", authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const r = await pool.query(
       `SELECT id, business_id, provider, name, enabled, config, created_at, updated_at
        FROM integrations
@@ -206,14 +199,11 @@ router.get("/api/integrations", authenticate, async (req, res) => {
     console.error("list integrations error:", err.message);
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
-router.post("/api/integrations", authSensitiveLimiter, authenticate, async (req, res) => {
+router.post("/api/integrations", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const { provider, name, config, enabled } = req.body || {};
     if (!provider || !name) {
       return res.status(400).json({ error: "provider and name are required" });
@@ -246,14 +236,11 @@ router.post("/api/integrations", authSensitiveLimiter, authenticate, async (req,
     console.error("create/update integration error:", err.message);
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
-router.delete("/api/integrations/:id", authSensitiveLimiter, authenticate, async (req, res) => {
+router.delete("/api/integrations/:id", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
   try {
-    const userBusinessId = await getBusinessIdForUser(req.authUser.id);
-    if (!userBusinessId) {
-      return res.status(403).json({ error: "No business linked to this user" });
-    }
+    const userBusinessId = req.businessId;
     const { id } = req.params;
     const softDisable = req.query.soft === "true";
     if (softDisable) {
@@ -272,6 +259,6 @@ router.delete("/api/integrations/:id", authSensitiveLimiter, authenticate, async
     console.error("delete integration error:", err.message);
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 module.exports = router;

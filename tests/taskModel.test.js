@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeAllowedTasks, CORE_TASKS, MODULE_TASKS } from "../services/supabase.js";
+import { normalizeAllowedTasks, CORE_TASKS, MODULE_TASKS } from "../services/db.js";
 import { buildCallTools, buildDbAppointmentTools } from "../services/gemini.js";
 
 // ---------------------------------------------------------------------------
@@ -10,7 +10,7 @@ import { buildCallTools, buildDbAppointmentTools } from "../services/gemini.js";
 //                quote_request, directions_location, form_document_request
 // ---------------------------------------------------------------------------
 
-describe("services/supabase.js — normalizeAllowedTasks", () => {
+describe("services/db.js — normalizeAllowedTasks", () => {
   it("default (null raw) returns CORE + book_appointment", () => {
     const result = normalizeAllowedTasks(null);
     expect(result).toEqual(expect.arrayContaining([...CORE_TASKS, "book_appointment"]));

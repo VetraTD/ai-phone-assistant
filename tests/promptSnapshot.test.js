@@ -224,7 +224,7 @@ describe("greeting-context tail line only quotes what the caller actually heard"
   // lib/voice/session.js buildGreeting speaks config.greeting verbatim ONLY when
   // config._hasCustomGreeting is true; otherwise it synthesizes a time-of-day +
   // business-name line and config.greeting still holds the generic
-  // DEFAULT_GREETING (services/supabase.js loadConfig). The tail line must not
+  // DEFAULT_GREETING (services/db.js loadConfig). The tail line must not
   // quote text the caller never heard.
   const { config: base, extras } = FIXTURES["appointments-db"];
 

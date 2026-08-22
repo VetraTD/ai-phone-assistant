@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import appointments from "../capabilities/appointments.js";
 import internal from "../adapters/scheduling/internal.js";
-import { loadConfig } from "../services/supabase.js";
+import { loadConfig } from "../services/db.js";
 
 const WEEKLY = {
   mon: { open: "09:00", close: "17:00", closed: false },

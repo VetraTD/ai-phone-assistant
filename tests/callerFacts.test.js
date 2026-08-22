@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { collectCallerFacts } from "../lib/capabilities/promptAssembler.js";
 import { buildDynamicTail } from "../services/gemini.js";
 import appointments, { bookedFactValue } from "../capabilities/appointments.js";
-import { loadConfig } from "../services/supabase.js";
+import { loadConfig } from "../services/db.js";
 
 describe("collectCallerFacts", () => {
   it("returns [] for empty / missing / malformed state", () => {

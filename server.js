@@ -7,18 +7,20 @@ import express from "express";
 import * as twilio from "twilio";
 
 import * as geminiService from "./services/gemini.js";
-import * as db from "./services/supabase.js";
+import * as db from "./services/db.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
+import * as twilioRecordings from "./services/twilioRecordings.js";
 import { WebSocketServer } from "ws";
-import { handleMediaStreamConnection } from "./lib/mediaStream.js";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
+import { assertBootConfig } from "./lib/bootChecks.js";
+import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
 import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import * as voiceHealth from "./lib/voice/health.js";
@@ -128,18 +130,51 @@ app.use((req, res, next) => {
   return defaultJsonParser(req, res, next);
 });
 
-// Match dashboard backend: prod domains + localhost. Override/extend with CORS_ORIGIN (comma-separated).
-const defaultCorsOrigins = [
-  "http://localhost:5173",
-  "http://localhost:4173",
-  "https://vetratd.com",
-  "https://www.vetratd.com",
-  "https://ai-phone-dashboard-lemon.vercel.app",
+// CORS allow-list.
+//
+// Both this server and the dashboard backend already allow-listed rather than
+// reflecting the Origin header, so the shape was right. A9 fixes what was
+// wrong inside it.
+//
+// 1. THE VERCEL PREVIEW DOMAIN IS GONE. `ai-phone-dashboard-lemon.vercel.app`
+//    was allow-listed permanently, and D7 cancels the Vercel account. A
+//    released Vercel subdomain can be claimed by anyone, so leaving it here
+//    would hand a stranger a cross-origin foothold against an authenticated
+//    dashboard session, at a moment nobody would connect to a hosting change.
+//    It stays reachable through CORS_ORIGINS for as long as it is genuinely in
+//    use, which is the difference between a deliberate entry and a permanent
+//    one.
+//
+// 2. LOCALHOST IS DEV-ONLY. A production deployment allow-listing
+//    http://localhost:5173 is not catastrophic, but it is an origin the
+//    production server has no reason to trust, and it costs nothing to drop.
+//
+// 3. ONE ENVIRONMENT VARIABLE NAME. This server read CORS_ORIGIN and the
+//    dashboard read CORS_ORIGINS — same concept, two spellings, and setting
+//    the wrong one fails silently by allowing nothing extra. Both now read
+//    CORS_ORIGINS, with the old singular still honoured so an existing
+//    deployment does not break, and announced at boot when it is what is
+//    actually in use. Exactly the class of drift D1 exists to reconcile.
+const isProduction = process.env.NODE_ENV === "production";
+
+const devCorsOrigins = ["http://localhost:5173", "http://localhost:4173"];
+const prodCorsOrigins = ["https://vetratd.com", "https://www.vetratd.com"];
+
+const envCorsOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (!process.env.CORS_ORIGINS && process.env.CORS_ORIGIN) {
+  log.error("cors_origin_deprecated", {
+    reason: "CORS_ORIGIN is the old name; the dashboard backend reads CORS_ORIGINS. Set CORS_ORIGINS.",
+    severity: "warn",
+  });
+}
+
+const allowedCorsOrigins = [
+  ...new Set([...(isProduction ? [] : devCorsOrigins), ...prodCorsOrigins, ...envCorsOrigins]),
 ];
-const envCorsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
-  : [];
-const allowedCorsOrigins = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])];
 
 app.use(
   cors({
@@ -312,7 +347,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Degraded-mode voicemail recording callback
 //
-// Twilio POSTs here (recordingStatusCallback) once the <Record> from
+// Twilio POSTs here (recordingStatusCallback) once the Record verb from
 // buildDegradedVoicemailTwiml finishes. We can't rely on callState/DB call
 // rows here — degraded mode skips that setup entirely — so the business is
 // looked up fresh from the dialed (To) number.
@@ -324,7 +359,7 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
   const twilioNumber = req.body.To || "";
   const recordingUrl = req.body.RecordingUrl || "";
 
-  log.info("degraded_voicemail_received", { callSid, callerNumber });
+  log.info("degraded_voicemail_received", { callSid });
 
   try {
     const business = db.isEnabled() && twilioNumber
@@ -367,10 +402,16 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
       // goes in the log line so a real caller's message is recoverable by hand
       // rather than lost outright — this is the unrouted-number path as well as
       // the degraded one. A proper ops mailbox for these does not exist yet.
+      //
+      // A1.7 removed `callerNumber` and kept `recordingUrl`, which is an
+      // uncomfortable pair to defend and is defensible: the recording is the
+      // message, and dropping the pointer to it loses a real person's request
+      // outright. The number is recoverable from Twilio using callSid. This
+      // stays a known exception rather than a quiet one — the log is still the
+      // only place an unrouted voicemail exists, and that is the actual defect.
       log.error("degraded_voicemail_no_business", {
         callSid,
         twilioNumber,
-        callerNumber,
         recordingUrl,
         severity: "warn",
       });
@@ -391,14 +432,22 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
-    const state = callState.getState(callSid);
-    const dbCallId = state.dbCallId;
-    const businessId = state.businessId;
-    // Captured synchronously, before any await below and before
-    // callState.remove(callSid) at the end of this handler — the spam
-    // heuristic's async block (below) needs this in-memory signal, not a
-    // fresh callState.getState() call that could read a since-removed state.
-    const sawCallerFinal = !!state.sawCallerFinal;
+    // Read from the SHARED store, not local memory.
+    //
+    // This handler is an ordinary HTTP POST. On Cloud Run the load balancer
+    // sends it to whichever instance is free, which is usually not the one
+    // that held the WebSocket — so `callState.getState()` here would create a
+    // fresh, empty state and the whole block below would silently do nothing:
+    // no summary, no missed-call notification, and every short call tagged as
+    // spam because sawCallerFinal read false on a caller who spoke.
+    //
+    // Awaited once, here, before anything else touches it. The values are then
+    // held in locals for the same reason they were before: the async blocks
+    // below outlive callState.remove() at the end of this handler.
+    const shared = await callState.readShared(callSid);
+    const dbCallId = shared.dbCallId ?? null;
+    const businessId = shared.businessId ?? null;
+    const sawCallerFinal = !!shared.sawCallerFinal;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
     const callContext = {
       callerNumber: req.body.From || null,
@@ -411,9 +460,16 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       durationSeconds: duration,
     });
 
-    db.completeCall(callSid, status, duration).catch((err) => {
-      log.error("db_complete_call_failed", { callSid, message: err?.message });
-      captureException(err, { callSid });
+    // Scoped, because completeCall is keyed by the Twilio call SID and carries
+    // no business id — so under row-level security it matches nothing unless
+    // somebody sets the tenant. `businessId` comes from the shared store above,
+    // which is the whole reason A4 put it there.
+    //
+    // Safe rather than strict: this handler returning 500 makes Twilio RETRY
+    // the callback, which turns one failed write into several.
+    db.withTenantSafe(businessId, () => db.completeCall(callSid, status, duration), {
+      operation: "completeCall",
+      callSid,
     });
 
     if (businessId && ["failed", "busy", "no-answer"].includes(status)) {
@@ -449,7 +505,7 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 
     // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
-      (async () => {
+      db.withTenantSafe(businessId, async () => {
         const transcript = await db.fetchCallTranscript(dbCallId);
         const callerTurns = transcript.filter((t) => t.speaker === "caller");
         // Spam/robocall detection (Part 3): the AI's own greeting is logged
@@ -476,9 +532,7 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
-      })().catch((err) => {
-        log.error("summary_generation_failed", { callSid, message: err?.message });
-      });
+      }, { operation: "generateSummary", callSid });
     }
 
     // Per-call turn-latency rollup (Part 2) — fire-and-forget; skip silently
@@ -488,8 +542,12 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
       try {
         const stats = getCallStats(callSid);
         if (stats) {
-          db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms).catch((err) => {
-            log.error("db_update_latency_failed", { callSid, message: err?.message });
+          // Also SID-keyed, so also scoped. getCallStats reads an in-process
+          // ring buffer, so on a cold instance it returns nothing and this
+          // skips — the same per-process limitation A4 noted and did not fix.
+          db.withTenantSafe(businessId, () => db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms), {
+            operation: "updateCallLatency",
+            callSid,
           });
         }
       } catch (err) {
@@ -517,10 +575,183 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 // Caller-scoped data belongs behind the dashboard backend's Supabase JWT plus
 // its ownership check — see AI-phone-dashboard/backend/src/routes/calls.js.
 //
-// NOT fixed here, and still open: /api/businesses/:id/notifications (GET+PUT)
-// and /api/businesses/:id/phone-numbers/{available,buy} have the identical
-// UUID-as-bearer-token hole, and `buy` spends money on the Twilio account.
+// The three routes that shared this UUID-as-bearer-token hole are now closed
+// (A1.5). /api/businesses/:id/notifications (GET+PUT) had zero callers and was
+// deleted for the same reason this one was. /api/businesses/:id/phone-numbers/
+// {available,buy} are live — Onboarding.jsx calls both — so they are guarded by
+// requireBusinessAccess instead, which is the per-tenant check this file
+// previously lacked. The dashboard was already sending a Supabase bearer token
+// on every one of those requests; this server simply never read it.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Data-subject requests (UK GDPR Art. 15 access, Art. 17 erasure)
+//
+// Behind requireBusinessAccess, which is the whole reason these can live on
+// this server at all. The caller route that used to sit here was DELETED by
+// A1.5 because it served a caller's call history and upcoming appointments to
+// anyone who knew a business UUID and a phone number — a UUID is an
+// identifier, not a secret, and at the time this server had no per-tenant
+// check to apply. A1.5 added one. These routes are strictly more sensitive
+// than the one that was removed, so they get it unconditionally.
+//
+// Staff-operated rather than self-service: a data subject asks the clinic, the
+// clinic runs it. Verifying that a caller on the phone is who they say they
+// are is a problem this system cannot solve, and Art. 12(6) expects a
+// controller to confirm identity before disclosing. Getting that wrong turns a
+// compliance feature into a disclosure channel.
+// ---------------------------------------------------------------------------
+
+/** Shared parsing for both routes: a valid tenant and a plausible phone. */
+function dsrParams(req, res) {
+  const businessId = req.params.id;
+  if (!businessId || !isValidUUID(businessId)) {
+    res.status(400).json({ error: "Invalid business id" });
+    return null;
+  }
+  const phone = req.params.phone;
+  // Loose on purpose. The stored spellings are inconsistent — E.164 from
+  // Twilio, hand-typed rows from the dashboard — and the matching is done on
+  // the last ten digits, so demanding E.164 here would reject the very inputs
+  // a member of staff is most likely to paste out of a ticket.
+  const digits = (phone || "").replace(/\D/g, "");
+  if (digits.length < 7) {
+    res.status(400).json({ error: "Invalid phone number" });
+    return null;
+  }
+  return { businessId, phone };
+}
+
+// GET — Art. 15. Everything held about one caller, for one tenant.
+app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  // Scoped: one HTTP handler is a unit of work, and requireBusinessAccess has
+  // already proven this caller owns this tenant. Under row-level security the
+  // export reads nothing without it.
+  const data = await db.withTenant(
+    parsed.businessId,
+    () => db.exportCallerData(parsed.businessId, parsed.phone),
+    // The actor, so §164.312(b)'s row names a unique staff member rather than
+    // "system". A subject-access request is the single largest disclosure this
+    // system performs on purpose; "somebody exported everything about a patient
+    // and we do not know who" is not an acceptable audit answer.
+    { actor: { type: "user", id: req.user?.id } }
+  ).catch(() => null);
+  if (!data) return res.status(500).json({ error: "Export failed" });
+
+  // Logged as an event because an access request is itself a processing
+  // activity worth recording under Art. 30 — with no phone number in it, since
+  // this log is not the place to publish the thing being asked about.
+  log.info("dsr_export_served", {
+    businessId: parsed.businessId,
+    calls: data.calls.length,
+    transcripts: data.transcripts.length,
+    appointments: data.appointments.length,
+    customerRequests: data.customerRequests.length,
+  });
+
+  res.json({
+    subject: { phone: parsed.phone },
+    generatedAt: new Date().toISOString(),
+    ...data,
+  });
+});
+
+// DELETE — Art. 17. See services/db.js eraseCallerData for what is erased,
+// what is kept, and the HIPAA retention tension flagged for counsel.
+app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  const actor = { actor: { type: "user", id: req.user?.id } };
+
+  // -------------------------------------------------------------------------
+  // O28 — the erasure has to reach Twilio, and the ORDER is the design.
+  //
+  // The degraded voicemail path files `Voicemail recording: <url>` into a
+  // customer_requests message and the audio itself lives at Twilio. Erasing our
+  // rows first would NULL that message — destroying the only pointer to audio
+  // that still exists. For exactly these rows the pointer is all there is: the
+  // degraded path creates no `calls` row at all, so there is no call SID to
+  // recover the recording from afterwards.
+  //
+  // So: read the pointers, delete at the vendor, then erase our rows. A failure
+  // at any earlier step leaves everything needed to try again.
+  //
+  // Three separate units of work, not one. A Twilio call must not happen inside
+  // an open transaction — services/db.js's rule is "wrap a unit of work, never
+  // a call", and a network round trip to a third party is the clearest case of
+  // something that does not belong inside one.
+  // -------------------------------------------------------------------------
+  const messages = await db
+    .withTenant(parsed.businessId, () => db.listCallerRecordingMessages(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (messages === null) return res.status(500).json({ status: "failed", error: "Erasure failed" });
+
+  const recordingSids = messages.flatMap((m) => twilioRecordings.recordingSidsInText(m));
+  const vendor = await twilioRecordings.deleteRecordings(recordingSids);
+
+  // The database erasure runs REGARDLESS of what Twilio did. Twilio being
+  // unreachable must not leave the data subject's rows in place as well — that
+  // would turn one vendor's outage into a total refusal of a statutory right.
+  //
+  // Scoped, and NOT `withTenantSafe`: an erasure that partly failed must not
+  // report success. withTenant rolls back and rethrows; the catch below turns
+  // that into a 500, which is the honest answer.
+  const counts = await db
+    .withTenant(parsed.businessId, () => db.eraseCallerData(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (!counts) return res.status(500).json({ status: "failed", error: "Erasure failed" });
+
+  if (!vendor.ok) {
+    // NOT 200, and NOT 207 Multi-Status either.
+    //
+    // 207 is the semantically neat answer and it is the wrong one: it is 2xx,
+    // and every default client-side `res.ok` check reads 2xx as success — which
+    // is the precise misread this exists to prevent. The failure mode that
+    // matters is a member of staff ticking "erasure complete" off a green
+    // response.
+    //
+    // A non-2xx makes "not done" the default reading. The body still reports
+    // what WAS erased, so nobody re-runs blindly — and re-running is safe
+    // anyway: already-nulled rows are a no-op and an already-deleted recording
+    // is a 404, which deleteRecordings counts as success.
+    //
+    // No operator override is offered. "Proceed anyway and accept the audio
+    // stays at Twilio" is a decision with a legal shape, and it belongs to the
+    // owner and O18 counsel rather than to a query parameter.
+    log.error("dsr_erasure_blocked_by_vendor", {
+      businessId: parsed.businessId,
+      vendor: "twilio",
+      outstanding: vendor.failed.length,
+      reason: vendor.reason,
+      severity: "warn",
+    });
+    return res.status(502).json({
+      status: "partial",
+      erased: counts,
+      outstanding: {
+        vendor: "twilio",
+        recordings: vendor.failed.length,
+        reason: vendor.reason,
+      },
+    });
+  }
+
+  log.info("dsr_erasure_served", {
+    businessId: parsed.businessId,
+    recordingsDeleted: vendor.deleted.length,
+    recordingsAlreadyGone: vendor.alreadyGone.length,
+  });
+
+  // `erased` keeps its exact shape. The new `status` is additive so an existing
+  // consumer reading `body.erased` is unaffected.
+  res.json({ status: "complete", erased: counts });
+});
 
 // ---------------------------------------------------------------------------
 // Integrations API: definitions (catalog for dashboard)
@@ -544,59 +775,17 @@ app.post("/api/integrations/:provider/callback", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard API: per-business notification settings (placeholder for future UI)
-// ---------------------------------------------------------------------------
-
-app.get("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  res.json({
-    notification_email: business.notification_email ?? null,
-    notification_phone: business.notification_phone ?? null,
-    notifications_enabled: business.notifications_enabled !== false,
-  });
-});
-
-app.put("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  const body = req.body || {};
-  const payload = {};
-  if (body.notification_email !== undefined) {
-    if (body.notification_email !== null && body.notification_email !== "" && !isValidEmail(body.notification_email)) {
-      return res.status(400).json({ error: "Invalid notification email" });
-    }
-    payload.notification_email = body.notification_email;
-  }
-  if (body.notification_phone !== undefined) {
-    if (body.notification_phone !== null && body.notification_phone !== "" && !isValidE164(body.notification_phone)) {
-      return res.status(400).json({ error: "Invalid notification phone number" });
-    }
-    payload.notification_phone = body.notification_phone;
-  }
-  if (body.notifications_enabled !== undefined) payload.notifications_enabled = body.notifications_enabled;
-  const ok = await db.updateBusinessNotificationSettings(businessId, payload);
-  if (!ok) return res.status(500).json({ error: "Update failed" });
-  const updated = await db.fetchBusinessById(businessId);
-  res.json({
-    notification_email: updated?.notification_email ?? null,
-    notification_phone: updated?.notification_phone ?? null,
-    notifications_enabled: updated?.notifications_enabled !== false,
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Dashboard API: search and buy Twilio phone numbers
 // ---------------------------------------------------------------------------
 
-app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
+app.get("/api/businesses/:id/phone-numbers/available", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const country = req.query.country || "US";
   if (!isValidCountryCode(country)) return res.status(400).json({ error: "Invalid country code" });
@@ -619,10 +808,14 @@ app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
   }
 });
 
-app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
+app.post("/api/businesses/:id/phone-numbers/buy", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const phoneNumber = req.body?.phone_number;
   if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
@@ -643,7 +836,11 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
       voiceUrl: VOICE_URL,
       statusCallback: STATUS_URL,
     });
-    const ok = await db.updateBusinessPhoneNumber(businessId, result.phone_number);
+    const ok = await db.withTenantSafe(
+      businessId,
+      () => db.updateBusinessPhoneNumber(businessId, result.phone_number),
+      { operation: "updateBusinessPhoneNumber", fallback: false }
+    );
     if (!ok) {
       return res.status(500).json({ error: "Failed to save phone number to business" });
     }
@@ -777,23 +974,28 @@ export { app };
 const wss = new WebSocketServer({ noServer: true });
 
 /**
- * Pick the call pipeline for a new Media Streams connection.
+ * The call pipeline for a new Media Streams connection.
  *
- * v2 (lib/voice/session.js) is the DEFAULT. PIPELINE_V2 is an opt-OUT: only
- * the explicit string "false" falls back to the legacy lib/mediaStream.js,
- * which is retained this release purely as a rollback escape hatch. Legacy
- * lacks the LLM turn timeout (a hung Gemini stream holds the call to the
- * 30-minute cap), the take-message fallback, ElevenLabs/per-business voice
- * selection (the dashboard's voice picker writes columns legacy never reads),
- * multilingual STT, the toSpeakable normalizer, the utterance cache, and VAD
- * barge-in — so it must never be what a real caller gets by default.
+ * There is one. A10 deleted lib/mediaStream.js and the PIPELINE_V2 opt-out
+ * that reached it.
+ *
+ * The escape hatch was retained for exactly one release, and by the end of it
+ * the two pipelines were not comparable. v2 has the LLM turn timeout (without
+ * which a hung Gemini stream holds a call to the 30-minute cap), the
+ * deterministic take-message fallback, per-business voice selection, ElevenLabs
+ * streaming, multilingual STT, the toSpeakable normalizer, the utterance cache,
+ * and VAD barge-in. Setting PIPELINE_V2=false during an incident would not have
+ * been a rollback, it would have been a second, worse incident — and one nobody
+ * had exercised, since every measurement in the ledger (A0's baseline, the
+ * probe, the eval suite) runs through v2.
+ *
+ * A rollback path that is never tested is not a rollback path. The real one is
+ * the ledger's, and it is better: repoint the Twilio webhooks.
  *
  * @returns {Function} the connection handler
  */
 export function selectPipelineHandler() {
-  return process.env.PIPELINE_V2 === "false"
-    ? handleMediaStreamConnection
-    : handleVoiceSessionConnection;
+  return handleVoiceSessionConnection;
 }
 
 /** Websocket path for the latency probe's scripted-caller leg. */
@@ -855,6 +1057,14 @@ function attachWebSocket(httpServer) {
 }
 
 if (process.env.NODE_ENV !== "test") {
+  // Before the port opens, not after. A configuration problem that surfaces on
+  // the first real call surfaces during a real call — the point of this is that
+  // it is impossible to be running and quietly broken at the same time.
+  //
+  // It throws rather than exiting, so the failure travels the same path as any
+  // other startup error and a supervisor sees a non-zero exit with a reason.
+  assertBootConfig();
+
   const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Voice webhook: ${VOICE_URL}`);

@@ -7,6 +7,7 @@ const axios = require("axios");
 
 // DB pool (make sure src/db/index.js exports the pool)
 const pool = require("./db");
+const mailer = require("./services/mailer");
 
 const { sanitizeString, isValidEmail, rejectUnexpectedKeys } = require("./utils");
 const { apiLimiter, contactLimiter } = require("./middleware/rateLimiters");
@@ -23,20 +24,28 @@ app.use(
   })
 );
 
-// CORS: allow localhost for dev, Vercel preview, and production domain(s)
-const defaultOrigins = [
-  "http://localhost:5173",
-  "http://localhost:4173",
-  "https://ai-phone-dashboard-lemon.vercel.app",
-  "https://vetratd.com",
-  "https://www.vetratd.com",
+// CORS allow-list. Kept deliberately in step with the voice server's — see the
+// long comment there for the reasoning behind each of these three changes.
+//
+// The short version: the Vercel preview domain is GONE, because D7 cancels the
+// Vercel account and a released *.vercel.app subdomain can be claimed by
+// anyone — which would hand a stranger a cross-origin foothold against an
+// authenticated dashboard session at a moment nobody would connect to a
+// hosting change. Localhost is dev-only. And the two servers now read the same
+// variable name.
+const isProduction = process.env.NODE_ENV === "production";
+
+const devOrigins = ["http://localhost:5173", "http://localhost:4173"];
+const prodOrigins = ["https://vetratd.com", "https://www.vetratd.com"];
+
+const envOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const allowedOrigins = [
+  ...new Set([...(isProduction ? [] : devOrigins), ...prodOrigins, ...envOrigins]),
 ];
-
-const envOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-  : [];
-
-const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 app.use(
   cors({
@@ -72,10 +81,10 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Contact form (public, rate-limited) – sends to CONTACT_EMAIL via Brevo
+// Contact form (public, rate-limited) - sends to CONTACT_EMAIL over SMTP.
 app.post("/api/contact", contactLimiter, async (req, res) => {
   try {
-    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+    if (!mailer.isConfigured()) {
       return res.status(503).json({ error: "Contact form is not configured." });
     }
     const allowedKeys = ["name", "email", "message"];
@@ -91,31 +100,26 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: "Please provide a valid email address." });
     }
-    const toEmail = process.env.CONTACT_EMAIL || process.env.BREVO_FROM_EMAIL || "support@vetratd.com";
+    const toEmail = process.env.CONTACT_EMAIL || process.env.SMTP_FROM_EMAIL || "support@vetratd.com";
     const text = `Contact form submission from Vetra AI\n\nName: ${name}\nEmail: ${email}\n\nMessage:\n${message}`;
-    await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: process.env.BREVO_FROM_EMAIL,
-          name: process.env.BREVO_FROM_NAME || "Vetra AI",
-        },
-        to: [{ email: toEmail }],
-        replyTo: { email, name },
-        subject: `Vetra AI contact: ${name}`,
-        textContent: text,
-      },
-      {
-        headers: {
-          "api-key": process.env.BREVO_API_KEY,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-      }
-    );
+    // replyTo is the submitter, so hitting reply answers the prospect. The
+    // From stays the authenticated SMTP identity - sending AS the submitter
+    // would fail SPF at the receiver, which is how a contact form burns a
+    // domain's reputation.
+    await mailer.sendMail({
+      to: toEmail,
+      subject: `Vetra AI contact: ${name}`,
+      text,
+      replyTo: email,
+      fromName: "Vetra AI",
+    });
     res.json({ success: true });
   } catch (err) {
-    console.error("contact form failed:", err.response?.data ?? err.message);
+    // `err.message` only, never the error object. A transport error carries
+    // its connection options - including auth.pass - as own enumerable
+    // properties, so printing it wholesale dumps the SMTP password into the
+    // logs. Same defect class that leaked BREVO_API_KEY, one vendor later.
+    console.error("contact form failed:", err?.message);
     res.status(500).json({ error: "Failed to send message. Please try again or email us directly." });
   }
 });
@@ -138,7 +142,6 @@ app.get("/db-test", async (req, res) => {
 app.use(require("./routes/calls"));
 app.use(require("./routes/appointments"));
 app.use(require("./routes/analytics"));
-app.use(require("./routes/calendar"));
 app.use(require("./routes/onboarding"));
 app.use(require("./routes/settings"));
 app.use(require("./routes/knowledge"));
@@ -161,46 +164,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Background calendar sync: push newly-booked appointments into connected
-// Google Calendars automatically, so the owner never has to click "Sync now".
-// A ~90s timer is the trigger today; post-GCP the same syncPendingAppointments
-// function can be driven by Cloud Scheduler instead (swap the trigger, keep the
-// work). Guarded so it only runs with real server credentials and never during
-// tests, and it self-disables (rather than spamming logs) if migration 021
-// hasn't been applied yet.
-function startCalendarSyncWorker() {
-  if (process.env.NODE_ENV === "test") return;
-  if (!process.env.GOOGLE_CLIENT_ID) return; // no Google config → nothing to sync
-  if (process.env.CALENDAR_AUTOSYNC_ENABLED === "false") return;
-
-  const calendarSync = require("./services/calendarSync");
-  const INTERVAL_MS = 90 * 1000;
-  let running = false;
-
-  const tick = async () => {
-    if (running) return; // never overlap slow cycles
-    running = true;
-    try {
-      const { created } = await calendarSync.syncPendingAppointments();
-      if (created > 0) console.log(`calendar auto-sync: pushed ${created} appointment(s)`);
-    } catch (err) {
-      if (calendarSync.isMissingSyncColumns(err)) {
-        console.error("calendar auto-sync disabled: apply migration 021 (appointments.google_event_id)");
-        clearInterval(handle);
-        return;
-      }
-      console.error("calendar auto-sync cycle failed:", err?.message);
-    } finally {
-      running = false;
-    }
-  };
-
-  const handle = setInterval(tick, INTERVAL_MS);
-  handle.unref?.(); // never keep the process alive just for the timer
-  // A short first pass so a fresh boot doesn't wait a full interval.
-  setTimeout(tick, 5000).unref?.();
-}
-
 // Only start listening when run directly (`node src/server.js` /
 // `nodemon src/server.js`) — not when required by a test harness, so
 // supertest can exercise `app` without binding a real port.
@@ -209,7 +172,6 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log("Dashboard backend running on port " + PORT);
   });
-  startCalendarSyncWorker();
 }
 
 module.exports = app;
