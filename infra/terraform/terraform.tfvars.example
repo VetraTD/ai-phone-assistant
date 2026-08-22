@@ -128,3 +128,29 @@ shared_only_principals = []
 
 # us_region = "us-central1"
 # uk_region = "europe-west2"
+
+# ---------------------------------------------------------------------------
+# Essential Contacts — who Google tells when something is wrong.
+#
+# THIS WAS EMPTY UNTIL A SUSPENSION, and the notices that would have warned us
+# had already been sent to a mailbox nobody was reading. Treat it as required,
+# not optional: the free-trial expiry warns through the same channel and
+# suspends projects.
+#
+# @vetratd.com ONLY. `essentialcontacts.managed.allowedContactDomains` is one of
+# Google's secure-by-default managed constraints on this org, and a personal
+# address is refused at apply time with "Operation denied by org policy". The
+# variable validates the domain so you find out at plan time instead.
+#
+# ADD THE COFOUNDER. One contact is a single point of failure for the one class
+# of message that arrives with a deadline attached.
+essential_contacts = {
+  "someone@vetratd.com" = {}
+  # "cofounder@vetratd.com" = { categories = ["ALL"] }
+}
+
+# Contacts created outside Terraform, to be ADOPTED rather than recreated —
+# Terraform errors on creating one that already exists. Read the ids with
+#   gcloud essential-contacts list --organization=<org id>
+# BLANK THIS ONCE APPLIED, same documented lifecycle as adopt_existing_projects.
+adopt_existing_contacts = {}
