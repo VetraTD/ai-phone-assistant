@@ -71,6 +71,9 @@ COPY scripts/migrate.js ./scripts/migrate.js
 # unrouted-voicemail path. Safe to ship — it refuses unless the database and
 # instance names both say staging.
 COPY scripts/seed-staging.js ./scripts/seed-staging.js
+# Read-only. Answers questions about what the REAL database allows, which the
+# local dev container cannot be trusted to represent — it is more permissive.
+COPY scripts/db-inspect.js ./scripts/db-inspect.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:

@@ -21,6 +21,9 @@ scripts
 # business in a database that has schema and no rows. It refuses to run
 # unless the database AND instance names both contain "staging".
 !scripts/seed-staging.js
+# ...and the read-only inspector, for questions only the real database can
+# answer — the instances are private-IP only, so there is no psql from a laptop.
+!scripts/db-inspect.js
 docs
 latency-runs
 infra
