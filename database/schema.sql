@@ -803,35 +803,45 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_existing uuid;
+  -- Generated up front, because the RLS policy on `businesses` compares against
+  -- it. See migration 032: SECURITY DEFINER is not enough under FORCE ROW LEVEL
+  -- SECURITY, which applies to the table owner too.
+  v_id       uuid := gen_random_uuid();
+  v_previous text := current_setting('app.business_id', true);
   v_business businesses;
 BEGIN
   IF p_user_id IS NULL OR p_email IS NULL OR p_name IS NULL OR p_timezone IS NULL THEN
     RAISE EXCEPTION 'app_create_business_for_user: all arguments are required';
   END IF;
 
-  -- REFUSE if this account already has a business.
-  --
-  -- The function is SECURITY DEFINER, so it is the one place in the system that
-  -- can create a tenant, and it must not be usable to create a second one. The
-  -- old route had no such check: calling it twice made an orphaned business
-  -- every time and silently repointed the user at the newest, stranding the
-  -- previous tenant's data behind an account that could no longer see it.
-  SELECT business_id INTO v_existing FROM users WHERE id = p_user_id;
-  IF v_existing IS NOT NULL THEN
-    RAISE EXCEPTION 'app_create_business_for_user: user already belongs to a business'
-      USING ERRCODE = '23505';
-  END IF;
+  -- Become the tenant being created, for this transaction only, so the insert
+  -- SATISFIES the policy rather than trying to bypass it.
+  PERFORM set_config('app.business_id', v_id::text, true);
 
-  INSERT INTO businesses (name, timezone) VALUES (p_name, p_timezone)
+  INSERT INTO businesses (id, name, timezone) VALUES (v_id, p_name, p_timezone)
   RETURNING * INTO v_business;
 
   -- One statement rather than the route's insert-then-update, so a users row
   -- with a NULL business_id never exists — not even briefly, and not at all if
   -- anything downstream fails.
+  -- THE DUPLICATE GUARD. It cannot be a SELECT above: `users` is under the same
+  -- FORCE row-level security, so with no tenant scope set that SELECT returns
+  -- no rows for a user who exists, and the guard silently stops firing. The
+  -- unique index is not subject to visibility, so ON CONFLICT works either way.
+  -- DO NOTHING rather than DO UPDATE, because updating is what silently
+  -- repoints an account at a newer tenant and strands the previous one.
   INSERT INTO users (id, email, business_id)
-  VALUES (p_user_id, p_email, v_business.id)
-  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, business_id = EXCLUDED.business_id;
+  VALUES (p_user_id, p_email, v_id)
+  ON CONFLICT (id) DO NOTHING;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'app_create_business_for_user: user already belongs to a business'
+      USING ERRCODE = '23505';
+  END IF;
+
+  -- Hand the caller back the scope it arrived with, so this cannot silently
+  -- repoint the rest of an in-flight transaction at the new tenant.
+  PERFORM set_config('app.business_id', COALESCE(v_previous, ''), true);
 
   RETURN v_business;
 END;
