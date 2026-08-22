@@ -53,6 +53,21 @@ COPY integrations ./integrations
 COPY middleware ./middleware
 COPY config ./config
 
+# The schema and its runner. Not for the voice server — nothing at runtime
+# reads these — but for the Cloud Run JOB that applies migrations from inside
+# the VPC, which is the only way to reach a private-IP Cloud SQL instance.
+#
+# One image, two entrypoints, rather than a second image: the job needs `pg`,
+# the Cloud SQL connector and the migration files, and every one of those is
+# already here. A separate image would duplicate node_modules to save ~200KB of
+# SQL, and would then be a second thing to remember to rebuild.
+#
+# `scripts/` as a whole stays excluded (.dockerignore) — only this one file is
+# named, so the probe harness, the eval runner and the TTS A/B tooling do not
+# ship to production.
+COPY scripts/migrate.js ./scripts/migrate.js
+COPY database ./database
+
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:
 # it is what keeps .env, latency-runs/, docs/ and the entire test suite out of a
 # production image. A .dockerignore does the same job by exclusion, which fails

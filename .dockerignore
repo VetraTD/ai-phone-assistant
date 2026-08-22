@@ -14,6 +14,9 @@ tests
 eval
 sim
 scripts
+# ...except the migration runner, which the Cloud Run migration job needs. The
+# Dockerfile names it explicitly; without this negation that COPY fails.
+!scripts/migrate.js
 docs
 latency-runs
 infra

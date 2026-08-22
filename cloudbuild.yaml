@@ -1,0 +1,115 @@
+# Build the voice image and push it to the shared Artifact Registry.
+#
+# ---------------------------------------------------------------------------
+# Why this is built in Cloud Build and not on a workstation
+# ---------------------------------------------------------------------------
+#
+# Norton intercepts TLS on the development machine, including inside containers,
+# so `npm ci` in Docker fails there with "Exit handler never called!" — which
+# reads as an npm bug and is really UNABLE_TO_VERIFY_LEAF_SIGNATURE three layers
+# down. The Dockerfile carries a `--mount=type=secret` accommodation for that.
+#
+# Cloud Build has no Norton, passes no secret, and the mount resolves to an
+# empty file, so the same Dockerfile reduces to a plain `npm ci`. Building here
+# is not a convenience: it is the only place the build is uncomplicated.
+#
+# ---------------------------------------------------------------------------
+# Running it
+# ---------------------------------------------------------------------------
+#
+#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit \
+#     --config=cloudbuild.yaml \
+#     --project=vetra-shared-c3a3bd \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# ---------------------------------------------------------------------------
+
+substitutions:
+  _REGION: us-central1
+  _REPO: vetra
+  _IMAGE: voice
+  # Overridden with the git SHA. `dev` is a deliberately unhelpful default:
+  # an untagged build should be obviously untagged rather than quietly
+  # overwriting something meaningful.
+  _TAG: dev
+
+options:
+  # The default Cloud Build service account writes logs to a bucket it creates.
+  # Logging to Cloud Logging only keeps that bucket from existing at all, which
+  # is one fewer place build output — and anything a build prints — can sit.
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+
+steps:
+  # -------------------------------------------------------------------------
+  # BuildKit, explicitly.
+  #
+  # The Dockerfile uses `RUN --mount=type=secret`, which the classic builder
+  # does not understand — it fails on the syntax rather than ignoring it. Cloud
+  # Build's docker image supports BuildKit but does not enable it by default.
+  # -------------------------------------------------------------------------
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      # Reuse the previous image's layers. Without this every build reinstalls
+      # node_modules from scratch, which is most of the wall clock.
+      - --cache-from=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+
+  # -------------------------------------------------------------------------
+  # Prove the image can actually start before it is allowed to be `latest`.
+  #
+  # `node --check` parses server.js and every module it would load at import
+  # time without opening a socket, a database connection or a Twilio client. It
+  # catches the failure that costs the most to discover later: an image that
+  # builds, pushes, deploys, and then crash-loops on Cloud Run because a file
+  # the Dockerfile forgot to COPY is imported at module scope.
+  #
+  # It is a syntax and presence check, not a boot test. A real boot needs the
+  # secrets B4 has not populated yet.
+  # -------------------------------------------------------------------------
+  - id: smoke
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args: ["--check", "server.js"]
+    waitFor: [build]
+
+  # The migration runner ships in this image too, so it gets the same treatment.
+  # A migration job that fails to parse is discovered here, not at D3 with a
+  # production restore half-finished.
+  - id: smoke-migrate
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args: ["--check", "scripts/migrate.js"]
+    waitFor: [build]
+
+  # The migration files have to BE in the image. A `COPY database ./database`
+  # that silently matched nothing would leave a job that connects, finds zero
+  # migrations, reports "Nothing to apply", and exits 0 — a green run that did
+  # nothing, which is the worst possible outcome for a schema deploy.
+  - id: verify-migrations-present
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        count=$(ls database/*.sql 2>/dev/null | wc -l)
+        echo "migration files in image: $count"
+        if [ "$count" -lt 20 ]; then
+          echo "FAIL: expected at least 20 .sql files, found $count."
+          echo "The image would run a schema deploy that applies nothing."
+          exit 1
+        fi
+    waitFor: [build]
+
+timeout: 1200s

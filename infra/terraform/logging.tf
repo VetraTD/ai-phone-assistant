@@ -122,8 +122,22 @@ variable "log_exclusions" {
 
   default = {
     debug-severity = {
-      filter      = "severity < INFO"
-      description = "DEBUG and below. Useful attached to a debugger, not worth storing for a month."
+      # `severity = "DEBUG"`, NOT `severity < INFO`, and the difference cost a
+      # debugging session.
+      #
+      # Cloud Logging severities: DEFAULT(0) DEBUG(100) INFO(200). Unstructured
+      # container stdout — every `console.log`, every plain `print` — arrives as
+      # DEFAULT, which is BELOW DEBUG. So `severity < INFO` silently swallowed
+      # all of it, and the first migration job failure showed up as a single
+      # line reading "Container called exit(1)" with the actual error nowhere.
+      #
+      # This is precisely the failure this variable's own comment warns about:
+      # discovering during an incident that the thing you needed was excluded as
+      # noise. Structured logs via lib/logger.js set an explicit severity and
+      # were never affected, which is what made it look like a logging outage
+      # rather than a filter.
+      filter      = "severity = \"DEBUG\""
+      description = "DEBUG only. Useful attached to a debugger, not worth storing for a month."
     }
     health-checks = {
       filter      = "resource.type=\"cloud_run_revision\" AND httpRequest.requestUrl:\"/health\""

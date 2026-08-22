@@ -103,6 +103,63 @@ resource "google_project_iam_member" "deployer_logs" {
   member  = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# `gcloud builds submit` uploads the source as a tarball to the auto-created
+# `<project>_cloudbuild` bucket, and the build's service account has to read it
+# back. Without this the submit fails with a 403 on `storage.objects.get`,
+# naming a bucket the caller never asked for and did not create.
+#
+# objectVIEWER, not objectAdmin: the build reads its own source and pushes an
+# image to Artifact Registry. It has no reason to write to a bucket, and the log
+# buckets live in this project too — `logging: CLOUD_LOGGING_ONLY` in
+# cloudbuild.yaml keeps build output out of GCS entirely, and this role means it
+# could not write there even if that changed.
+resource "google_project_iam_member" "deployer_read_source" {
+  project = local.project_id_for_stack["shared"]
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# ---------------------------------------------------------------------------
+# Cross-project image pulls.
+#
+# The runtime service account having `artifactregistry.reader` is NOT what lets
+# Cloud Run pull the image. Cloud Run pulls it as its own SERVICE AGENT,
+# `service-<number>@serverless-robot-prod.iam.gserviceaccount.com`, before the
+# container exists and therefore before the runtime identity is in play at all.
+#
+# The failure names the right thing and is easy to misread as the runtime SA
+# being under-permissioned:
+#
+#   Error code 7: Google Cloud Run Service Agent
+#   service-536266051432@serverless-robot-prod.iam.gserviceaccount.com must have
+#   permission to read the image ... Note that the image is from project
+#   [vetra-shared-c3a3bd], which is not the same as this project
+#
+# This is the direct cost of one shared registry serving four projects, and it
+# is still the right trade: two registries would mean two images, which
+# eventually means two slightly different images.
+#
+# The runtime grant stays too (iam.tf) — the agent pulls, but a runtime that
+# needs to re-pull on a cold start uses its own identity.
+# ---------------------------------------------------------------------------
+resource "google_project_service_identity" "run" {
+  provider = google-beta
+  for_each = toset(local.active_regional_project_keys)
+
+  project = google_project.this[each.value].project_id
+  service = "run.googleapis.com"
+
+  depends_on = [google_project_service.this]
+}
+
+resource "google_project_iam_member" "run_agent_pull_images" {
+  for_each = toset(local.active_regional_project_keys)
+
+  project = local.project_id_for_stack["shared"]
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_project_service_identity.run[each.value].email}"
+}
+
 # ---------------------------------------------------------------------------
 # Terraform state.
 #

@@ -355,6 +355,94 @@ resource "google_sql_user" "runtime_iam" {
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
 
+# ---------------------------------------------------------------------------
+# The one password in the system, and why it has to exist.
+#
+# Applying a schema needs privileges the application must NEVER hold: CREATE on
+# `public`, role creation, ownership. Migration 029 builds `vetra_app` as
+# NOSUPERUSER NOBYPASSRLS on purpose — row-level security is decorative if the
+# runtime connects as a role that can switch it off — so migrations cannot run
+# as the app.
+#
+# IAM users cannot do it either. Cloud SQL puts them in `cloudsqliamuser`, and
+# nothing grants them CREATE; the first migration attempt failed with exactly
+# `permission denied for schema public`. Granting them more requires a
+# privileged connection, which is the thing that does not exist yet.
+#
+# So one superuser password, generated here, never seen by a human, and read
+# only by the migration job. The runtime never touches it — that is the whole
+# separation: two identities, two privilege levels, and the powerful one appears
+# in nothing that serves a call.
+#
+# THE PASSWORD IS IN TERRAFORM STATE. That is a real cost and it is accepted
+# knowingly: state lives in a versioned GCS bucket with uniform access and
+# public access prevention, reachable only by principals that could read the
+# secret anyway. The alternative — a human generating one and pasting it —
+# trades state exposure for a password that exists in someone's clipboard,
+# password manager and shell history.
+# ---------------------------------------------------------------------------
+resource "random_password" "postgres" {
+  for_each = local.active_sql_instances
+
+  length = 32
+  # Cloud SQL accepts these; the exclusions avoid characters that get mangled
+  # by a shell, a URL, or a YAML file on the way to somewhere.
+  special          = true
+  override_special = "-_.~"
+}
+
+resource "google_sql_user" "postgres" {
+  for_each = local.active_sql_instances
+
+  project  = each.value.project_id
+  instance = google_sql_database_instance.this[each.key].name
+  name     = "postgres"
+  password = random_password.postgres[each.key].result
+  type     = "BUILT_IN"
+}
+
+resource "google_secret_manager_secret" "postgres_password" {
+  for_each = local.active_sql_instances
+
+  project   = each.value.project_id
+  secret_id = "cloudsql-postgres-password-${each.key}"
+
+  labels = merge(var.labels, { stack = each.key })
+
+  replication {
+    # Pinned to the instance's own region rather than automatic. A US secret
+    # replicated to Europe, or the reverse, would be a residency hole in the one
+    # place the org policy cannot see it — Secret Manager replication is a
+    # property of the secret, not of the project.
+    user_managed {
+      replicas {
+        location = each.value.region
+      }
+    }
+  }
+}
+
+resource "google_secret_manager_secret_version" "postgres_password" {
+  for_each = local.active_sql_instances
+
+  secret      = google_secret_manager_secret.postgres_password[each.key].id
+  secret_data = random_password.postgres[each.key].result
+}
+
+# Only the migration job's identity reads it. Per-secret, not project-wide — a
+# runtime that can read every secret in its project is one env-var mistake away
+# from the thing C6 exists to prove impossible.
+resource "google_secret_manager_secret_iam_member" "postgres_password_migrate" {
+  for_each = {
+    for sk, tgt in local.migrate_targets : sk => tgt
+  }
+
+  project   = google_secret_manager_secret.postgres_password[each.value.instance_key].project
+  secret_id = google_secret_manager_secret.postgres_password[each.value.instance_key].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime[each.value.stack].email}"
+}
+
 # The humans. Lets an owner reach the database through the Cloud SQL Auth Proxy
 # without a shared password existing anywhere — and makes each connection
 # attributable to a person, which a shared `postgres` login never can be.
