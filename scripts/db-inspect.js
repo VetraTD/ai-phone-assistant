@@ -33,10 +33,21 @@ const cfg = {
 const { poolConfig, close } = await cloudSqlPoolConfig(cfg, { connectionTimeoutMillis: 10_000 });
 const pool = new pg.Pool(poolConfig);
 
+// One line per fact, no leading newline and no leading whitespace.
+//
+// Cloud Logging dropped every indented continuation line of the first version:
+// the seven section headers arrived and not one row did, which reads as "every
+// query returned nothing" rather than "the log shipper ate the answers". The
+// seed script's unindented output had always come through fine.
+//
+// A diagnostic whose failure mode is silently losing its results is worse than
+// no diagnostic at all.
 const show = (label, rows) => {
-  console.log(`\n--- ${label}`);
-  for (const r of rows) console.log("   " + JSON.stringify(r));
-  if (!rows.length) console.log("   (none)");
+  if (!rows.length) {
+    console.log(`[inspect] ${label}: (none)`);
+    return;
+  }
+  for (const r of rows) console.log(`[inspect] ${label}: ${JSON.stringify(r)}`);
 };
 
 try {
