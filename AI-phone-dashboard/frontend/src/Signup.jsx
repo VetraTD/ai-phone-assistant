@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { signUp } from "./auth";
+// Aliased — the handler below is also `signUp`, and it would shadow this and
+// recurse. Same collision as Login.jsx.
+import { signUp as createAccount } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Signup.css";
 
@@ -17,7 +19,7 @@ export default function Signup({ onSwitchToLogin }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await signUp(email, password);
+    const { error } = await createAccount(email, password);
 
     setLoading(false);
 

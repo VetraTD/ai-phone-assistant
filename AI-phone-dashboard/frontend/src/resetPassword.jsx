@@ -49,15 +49,16 @@ export default function ResetPassword() {
   // null = still checking, true/false = answered. Three states, because
   // rendering the form while the code is unverified is how somebody types a
   // password twice into a link that expired yesterday.
-  const [codeValid, setCodeValid] = useState(null);
+  //
+  // Seeded from `code` rather than set inside the effect: with no code there is
+  // nothing to check, and answering that in the effect body is a second render
+  // for a fact already known at mount.
+  const [codeValid, setCodeValid] = useState(() => (readResetCode() ? null : false));
   const [codeEmail, setCodeEmail] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    if (!code) {
-      setCodeValid(false);
-      return undefined;
-    }
+    if (!code) return undefined;
     checkPasswordResetCode(code).then((result) => {
       if (cancelled) return;
       if (result.error) {

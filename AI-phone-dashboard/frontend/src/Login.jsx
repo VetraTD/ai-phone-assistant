@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { signIn, sendPasswordReset } from "./auth";
+// Aliased. The form handler below is also called `signIn`, and an unaliased
+// import is SHADOWED by it — the handler then calls itself with the submit
+// event as the email argument. Vite built it, the tests passed, and the only
+// symptom was a button stuck on "Signing in...".
+import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Login.css";
 
@@ -18,7 +22,7 @@ export default function Login({ onSwitchToSignup }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await signIn(email, password);
+    const { error } = await signInWithPassword(email, password);
 
     setLoading(false);
 
