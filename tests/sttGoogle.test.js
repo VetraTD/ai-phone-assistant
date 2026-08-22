@@ -167,12 +167,109 @@ describe("sttGoogle.js — Google Speech-to-Text v2 streaming", () => {
     // every multi-fragment utterance is cut in half.
     expect(onFinal).not.toHaveBeenCalled();
 
-    fake.emit("data", resultsMsg([{ text: "five five five two", isFinal: true, confidence: 0.8 }]));
+    // End of speech arms the utterance; the settling final completes it. That
+    // is the measured order — see 5b.
     fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    expect(onFinal).not.toHaveBeenCalled();
+
+    fake.emit("data", resultsMsg([{ text: "five five five two", isFinal: true, confidence: 0.8 }]));
 
     expect(onFinal).toHaveBeenCalledTimes(1);
     expect(onFinal.mock.calls[0][0]).toBe("My number is five five five two");
     expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Message ORDER, which is where this nearly shipped a call-breaking bug.
+  //
+  // Measured against the live API, Google's order for one utterance is:
+  //
+  //     interim ... interim -> SPEECH_ACTIVITY_END -> is_final
+  //
+  // The settled transcript lands roughly 190ms AFTER the end-of-speech event,
+  // not before it. Flushing on the event alone therefore flushes an EMPTY
+  // buffer, and the real transcript then waits for the NEXT utterance's event
+  // to push it out — so every turn is delivered one turn late and the
+  // assistant answers the previous question forever.
+  //
+  // Caught by running the real module against the real API in the C5b harness:
+  // 17 of 18 utterances returned no final at all while interims and
+  // SPEECH_ACTIVITY_END both arrived. No unit test with invented ordering
+  // would have found it, and it is invisible in a transcript-only comparison.
+  // -------------------------------------------------------------------------
+  it("5b. a final arriving AFTER SPEECH_ACTIVITY_END still ends that utterance", async () => {
+    const fake = createFakeStream();
+    mockStreamingRecognize.mockReturnValue(fake);
+    const onFinal = vi.fn();
+    const onUtteranceEnd = vi.fn();
+
+    await createGoogleSttStream({ callSid: "CA5b", onFinal, onUtteranceEnd });
+
+    fake.emit("data", resultsMsg([{ text: "book me in", stability: 0.9 }]));
+    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    // Nothing has been transcribed yet — there is nothing to hand over.
+    expect(onFinal).not.toHaveBeenCalled();
+
+    fake.emit("data", resultsMsg([{ text: "book me in", isFinal: true, confidence: 0.9 }]));
+
+    expect(onFinal).toHaveBeenCalledTimes(1);
+    expect(onFinal).toHaveBeenCalledWith("book me in", { confidence: 0.9 });
+    expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("5c. onUtteranceEnd fires AFTER onFinal, never before it", async () => {
+    const fake = createFakeStream();
+    mockStreamingRecognize.mockReturnValue(fake);
+    const order = [];
+
+    await createGoogleSttStream({
+      callSid: "CA5c",
+      onFinal: () => order.push("final"),
+      onUtteranceEnd: () => order.push("utteranceEnd"),
+    });
+
+    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake.emit("data", resultsMsg([{ text: "yes please", isFinal: true, confidence: 0.9 }]));
+
+    // session.js documents onUtteranceEnd as "fired after any onFinal flush",
+    // and turnManager's ladder re-arms on it. Reversed, the turn would be
+    // closed before its own words arrived.
+    expect(order).toEqual(["final", "utteranceEnd"]);
+  });
+
+  it("5d. an end-of-speech with no final ever following still re-arms the ladder", async () => {
+    vi.useFakeTimers();
+    const fake = createFakeStream();
+    mockStreamingRecognize.mockReturnValue(fake);
+    const onFinal = vi.fn();
+    const onUtteranceEnd = vi.fn();
+
+    await createGoogleSttStream({ callSid: "CA5d", onFinal, onUtteranceEnd });
+
+    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    expect(onUtteranceEnd).not.toHaveBeenCalled();
+
+    // Waiting forever for a final that is not coming is how a call goes
+    // permanently quiet: nothing downstream re-arms the silence ladder.
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(onFinal).not.toHaveBeenCalled();
+    expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("5e. two utterances in one stream do not bleed into each other", async () => {
+    const fake = createFakeStream();
+    mockStreamingRecognize.mockReturnValue(fake);
+    const onFinal = vi.fn();
+
+    await createGoogleSttStream({ callSid: "CA5e", onFinal });
+
+    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake.emit("data", resultsMsg([{ text: "first thing", isFinal: true, confidence: 0.9 }]));
+    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake.emit("data", resultsMsg([{ text: "second thing", isFinal: true, confidence: 0.9 }]));
+
+    expect(onFinal.mock.calls.map((c) => c[0])).toEqual(["first thing", "second thing"]);
   });
 
   it("6. concatenates EVERY result in one response, not just the first", async () => {
@@ -203,8 +300,8 @@ describe("sttGoogle.js — Google Speech-to-Text v2 streaming", () => {
     // Google returns confidence 0 on interims and on some finals. turnManager
     // treats a number below BARGE_MIN_CONFIDENCE as "do not interrupt", so
     // forwarding a literal 0 would make the caller unable to interrupt at all.
-    fake.emit("data", resultsMsg([{ text: "hello there", isFinal: true, confidence: 0 }]));
     fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake.emit("data", resultsMsg([{ text: "hello there", isFinal: true, confidence: 0 }]));
 
     expect(onFinal).toHaveBeenCalledWith("hello there", { confidence: undefined });
   });
@@ -217,8 +314,8 @@ describe("sttGoogle.js — Google Speech-to-Text v2 streaming", () => {
     await createGoogleSttStream({ callSid: "CA8", onFinal });
 
     fake.emit("data", resultsMsg([{ text: "book me", isFinal: true, confidence: 0.95 }]));
-    fake.emit("data", resultsMsg([{ text: "tuesday", isFinal: true, confidence: 0.42 }]));
     fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake.emit("data", resultsMsg([{ text: "tuesday", isFinal: true, confidence: 0.42 }]));
 
     expect(onFinal).toHaveBeenCalledWith("book me tuesday", { confidence: 0.42 });
   });
@@ -234,20 +331,9 @@ describe("sttGoogle.js — Google Speech-to-Text v2 streaming", () => {
     expect(onSpeechStarted).toHaveBeenCalledTimes(1);
   });
 
-  it("10. an empty utterance does not fire onFinal, but still fires onUtteranceEnd", async () => {
-    const fake = createFakeStream();
-    mockStreamingRecognize.mockReturnValue(fake);
-    const onFinal = vi.fn();
-    const onUtteranceEnd = vi.fn();
-
-    await createGoogleSttStream({ callSid: "CA10", onFinal, onUtteranceEnd });
-    fake.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
-
-    expect(onFinal).not.toHaveBeenCalled();
-    // The ladder re-arms off onUtteranceEnd. Swallowing it on a silent
-    // endpoint is how a call goes permanently quiet.
-    expect(onUtteranceEnd).toHaveBeenCalledTimes(1);
-  });
+  // 10. "an empty utterance still fires onUtteranceEnd" moved to 5d, which
+  // asserts the same property under the real message ordering: the end event
+  // arms the utterance and a timer completes it when no final ever arrives.
 
   // -------------------------------------------------------------------------
   // Speech-end reconstruction
@@ -437,8 +523,8 @@ describe("sttGoogle.js — Google Speech-to-Text v2 streaming", () => {
     await vi.advanceTimersByTimeAsync(31_000);
     expect(mockStreamingRecognize).toHaveBeenCalledTimes(2);
 
-    fake_emit_final(second, "for Tuesday");
     second.emit("data", eventMsg("SPEECH_ACTIVITY_END"));
+    fake_emit_final(second, "for Tuesday");
 
     // Whatever happens to the socket, the caller's words survive it.
     const said = onFinal.mock.calls.map((c) => c[0]).join(" ");
