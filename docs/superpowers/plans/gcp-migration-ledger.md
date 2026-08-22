@@ -38,17 +38,64 @@ are*, and it changes every session.
 > **An untargeted `terraform plan` CANNOT RUN while this holds** — it reads every resource in
 > state, including that project's. `-target` works and is how B3 was planned and applied.
 >
-> **THE UNDERLYING DEFECT IS BIGGER THAN THE SUSPENSION, and it is owner work:**
-> there are **NO Essential Contacts configured anywhere** (the API is not even enabled at the
-> org), and the billing account's only principal is `user:admin@vetratd.com` — **a mailbox the
-> owner cannot read.** `vetratd.com` mail runs on Microsoft 365, so unless M365 has a mailbox
-> or alias for `admin@`, every Google notice lands nowhere: suspensions, security notices, and
-> **the free-trial expiry ~2026-11-18 that also suspends projects.**
->   1. The reason is visible without email — the Console shows a banner on the project
->      dashboard, and the appeal is a web form
->      (`https://support.google.com/code/contact/cloud_platform_reinstatement`).
->   2. Add `admin@vetratd.com` as an alias on the licensed M365 mailbox.
->   3. Set Essential Contacts to an address the owner actually reads.
+> **THE REASON, from the appeal form itself:** an **Acceptable Use Policy / Terms of Service**
+> suspension — *"repeatedly violating"*, *"Committing repeated terms of service violations"*,
+> and *"Your project may be deleted unless you take action and submit an appeal."* **NOT
+> billing, not quota, not the free trial** — an earlier note in this file guessed an
+> unreachable billing contact might be the cause and that guess was wrong. The notice does not
+> name the specific violation; that is the generic AUP template, and the detail is in the email
+> nobody could read. **The appeal should therefore ASK what was detected.**
+>
+> **"Repeatedly" is the load-bearing word:** Google says prior notices were sent, and none were
+> ever seen. The mailbox gap is no longer a hypothesis — it already cost the warnings that
+> would have prevented this.
+>
+> **NO EVIDENCE OF COMPROMISE**, checked rather than assumed. The suspended project's audit
+> logs are exported by the org sinks into buckets in `vetra-shared`, which is healthy, so they
+> are still readable:
+>
+> ```
+> gcloud logging read 'resource.labels.project_id="vetra-us-staging-c3a3bd" AND logName:"cloudaudit.googleapis.com"' \
+>   --project=vetra-shared-c3a3bd --bucket=vetra-audit-us --location=us-central1 --view=_AllLogs
+> ```
+>
+> Distinct principals that ever acted on it: `admin@vetratd.com` (147), the project's own
+> runtime SA (45), Cloud Run's serverless robot (10), Google's `service-agent-manager` (2), and
+> system events. **`serviceAccountKeys.create`: ZERO** — the keyless design held. No unknown
+> principal, no exportable credential, and every entry is a Cloud Run deploy, a Cloud SQL
+> connect or a migration job. **That is the appeal's evidence.**
+>
+> Best guess at the trigger, unconfirmed and only Google's email can settle it: a one-day-old
+> free-trial project running a PUBLIC Cloud Run endpoint doing TELEPHONY trips automated abuse
+> heuristics readily. **The data is synthetic staging data — deletion would cost the staging
+> environment, not PHI. Do NOT rebuild under a new project id as a workaround; that reads as
+> evasion and escalates.**
+>
+> **ESSENTIAL CONTACTS: FIXED 2026-08-22.** `nithin.dodla@vetratd.com`, org node,
+> ALL categories, `validationState: VALID`. Codified in `infra/terraform/essential-contacts.tf`
+> with an import block; the adoption plans as `1 to import, 0 to add, 0 to change, 0 to
+> destroy`, and `adopt_existing_contacts` must be blanked once applied.
+>
+> **AND A TRAP FOUND BY HITTING IT: only `@vetratd.com` addresses are permitted.**
+> `constraints/essentialcontacts.managed.allowedContactDomains` is one of Google's
+> secure-by-default MANAGED constraints, applied to this org at creation with
+> `allowedDomains = ['@vetratd.com']` — **it is not ours and is in no Terraform we wrote.** A
+> personal address is refused with `Operation denied by org policy`, which reads as a Console
+> bug. Deliberately NOT relaxed: org security and legal notices for an organization handling
+> PHI should not standingly land in a personal mailbox, and a company address is the one that
+> survives somebody leaving. **There are nine other `.managed.` constraints on this org that
+> nobody has read** — expect more of these.
+>
+> **Still owner work:**
+>   1. **Submit the appeal**, and put a readable address in its own *"Additional email for
+>      notifications"* field — that gets Google's REPLY to you without touching org policy.
+>   2. **Add the cofounder** as a second Essential Contact. One contact is a single point of
+>      failure for the one class of message that carries a deadline.
+>   3. **`admin@vetratd.com` still has no mailbox.** It remains the account Google associates
+>      with the org, so add it as an alias on the licensed M365 mailbox. **Also verify
+>      `nithin.dodla@vetratd.com` actually DELIVERS** — `validationState: VALID` means Google
+>      accepted the address, not that mail arrives.
+>   4. **Payments-profile contacts are separate** from Essential Contacts and still unset.
 
 
 **Session A is DONE and PROVEN BY A REAL CALL (2026-08-22).** `voice-us-staging`
@@ -243,6 +290,8 @@ unlink or budget change · anything touching Secret Manager or real credentials 
 | **`import * as jwt from "jsonwebtoken"` exposes only `{ decode, default }` under real Node — `verify` is UNDEFINED** | 2026-08-22 (measured) | The twilio defect exactly, in a second package, and it would have made every token fail. `jwks-rsa`'s namespace *does* expose `JwksClient`, so the two CJS packages behave DIFFERENTLY under the same import form and neither is predictable from reading. Default imports throughout, a top-level guard that throws if `verify` goes missing, and Node-subprocess checks — Vite's own interop hides this class from the runner entirely. **Assume nothing about a CJS package's namespace shape; measure it in a subprocess** |
 | **`vetra-us-staging-c3a3bd` was SUSPENDED by Google**, project ACTIVE, billing enabled, billing account open | 2026-08-22 | `CONSUMER_SUSPENDED` on run, sqladmin, secretmanager and logging while `serviceusage` still answered. **An untargeted `terraform plan` cannot run at all** — it reads every resource in state. The root cause behind the root cause: **no Essential Contacts exist anywhere** and the billing account's only principal is `admin@vetratd.com`, **a mailbox nobody can read** (`vetratd.com` mail is on Microsoft 365). Every Google notice — suspension, security, and the free-trial expiry that also suspends projects — has been going nowhere the whole time |
 | **The dashboard backend's local `.env` pointed `DATABASE_URL` at the LIVE Supabase pooler** | 2026-08-22 | Anyone running the dashboard locally was reading and writing **production**, months after the data layer moved to Postgres, and `.env.example` had said `localhost:55432` the whole time. Repointed at local PG16 with the old value kept commented. It also produced a 500 that read as a code bug and was `self-signed certificate in certificate chain` from Supabase's TLS |
+| **Google applies SECURE-BY-DEFAULT `.managed.` org constraints that no Terraform of ours creates, and one of them silently blocks a fix** | 2026-08-22 | Ten org policies are set on `564252011558`; **three are B0w's and the rest arrived with the org.** `essentialcontacts.managed.allowedContactDomains` was applied at org creation with `allowedDomains = ['@vetratd.com']`, so adding a personal address as an Essential Contact fails with `Operation denied by org policy` — which reads as a Console bug and is a control working. **Expect this class again:** `iam.managed.disableServiceAccountKeyCreation`, `compute.managed.restrictProtocolForwardingCreationForTypes` and the rest are live and unread. `gcloud org-policies list --organization=` is the whole answer and takes one second |
+| **A suspended project's audit trail is still readable, because the org-node sinks export it somewhere else** | 2026-08-22 | Every API on `vetra-us-staging` returned `CONSUMER_SUSPENDED`, including logging — but B0w put the sinks at the ORG node writing into buckets in `vetra-shared`, so the history survived the suspension of the thing that produced it. **That is the property that made the sinks worth the `logging.configWriter` grant**, and it paid for itself here: it produced the evidence for the appeal (five principals, all ours or Google's own; zero service-account keys ever created). A project-local sink would have been suspended along with the project |
 | First clinic: **Excel Cardiac Care PLLC**, Texas, **ONE** covered entity across two sites (Keller 76244, Decatur 76234). Runs **athenahealth** for everything. Medicare + Medicaid. 8–5 M–F, closed weekends | 2026-08-20 | **One BAA, one `businesses` row**, location as an attribute. Not CA → no CIPA, no AB 3030. Cardiology only → 42 CFR Part 2 near-certainly `n/a`. After-hours + lunch + multi-site routing is the product. |
 
 ---
