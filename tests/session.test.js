@@ -30,6 +30,10 @@ const H = vi.hoisted(() => {
     fetchKnowledgeResolve: null,
     // monotonic source for the mocked createRequestId (see the logger mock)
     requestIdCounter: 0,
+    /** Tenant currently in scope, as withTenantSafe sets app.business_id. */
+    activeTenant: null,
+    /** Every database WRITE, with the tenant in scope when it ran. */
+    writes: [],
   };
 });
 
@@ -183,11 +187,29 @@ vi.mock("../lib/voice/utteranceCache.js", () => ({
 // ---- services --------------------------------------------------------------
 vi.mock("../services/db.js", () => ({
   isEnabled: vi.fn(() => true),
-  // Runs fn and returns what it returns. The real one wraps it in a
-  // transaction with app.business_id set; that behaviour is proven against a
-  // real database in tests/db/withTenantScoping.test.js. Here it must be
-  // transparent, because these tests are about the session, not the scoping.
-  withTenantSafe: async (_businessId, fn) => fn(),
+  // Runs fn and returns what it returns, AND tracks whether a tenant scope is
+  // open while it does.
+  //
+  // It used to be `async (_businessId, fn) => fn()` — transparent, discarding
+  // the tenant entirely. That made every write in these tests look fine while
+  // the real database refused three of them outright:
+  //
+  //   new row violates row-level security policy for table "call_transcripts"
+  //   new row violates row-level security policy for table "customer_requests"
+  //
+  // The scoping itself is proven against real Postgres in
+  // tests/db/withTenantScoping.test.js. What only THIS file can prove is that
+  // session.js opens a scope BEFORE writing, and a mock that discards the
+  // businessId cannot tell the difference.
+  withTenantSafe: async (businessId, fn) => {
+    const previous = H.activeTenant;
+    H.activeTenant = businessId ?? null;
+    try {
+      return await fn();
+    } finally {
+      H.activeTenant = previous;
+    }
+  },
   lookupBusinessByPhone: vi.fn(async () => ({ id: "biz1" })),
   loadConfig: vi.fn(() => ({
     businessName: "Test Biz",
@@ -210,10 +232,22 @@ vi.mock("../services/db.js", () => ({
   fetchBusinessKnowledge: vi.fn(async () => []),
   listIntegrationsForBusiness: vi.fn(async () => []),
   fetchCallerContext: vi.fn(async () => null),
-  addTranscriptEntry: vi.fn(async () => {}),
-  createCustomerRequest: vi.fn(async () => "req1"),
-  completeCall: vi.fn(async () => {}),
-  markCallTransferred: vi.fn(async () => {}),
+  // Every WRITE records the tenant in scope when it ran. Under FORCE row-level
+  // security an unscoped write is not slow or degraded — it is REFUSED, which
+  // in production is a silently dropped transcript.
+  addTranscriptEntry: vi.fn(async () => {
+    H.writes.push({ op: "addTranscriptEntry", tenant: H.activeTenant });
+  }),
+  createCustomerRequest: vi.fn(async () => {
+    H.writes.push({ op: "createCustomerRequest", tenant: H.activeTenant });
+    return "req1";
+  }),
+  completeCall: vi.fn(async () => {
+    H.writes.push({ op: "completeCall", tenant: H.activeTenant });
+  }),
+  markCallTransferred: vi.fn(async () => {
+    H.writes.push({ op: "markCallTransferred", tenant: H.activeTenant });
+  }),
 }));
 
 vi.mock("../services/notifications.js", () => ({
@@ -524,6 +558,8 @@ async function settleGreeting() {
 }
 
 beforeEach(() => {
+  H.writes.length = 0;
+  H.activeTenant = null;
   H.sttInstances.length = 0;
   H.ttsTurns.length = 0;
   H.audioOutInstances.length = 0;
@@ -4123,5 +4159,89 @@ describe("session.js — the call's compliance tier reaches the STT seam", () =>
     await startCall(ws, newSid());
 
     expect(H.sttInstances[0].opts.tier).toBe("standard");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every database WRITE on the voice path must happen inside a tenant scope.
+//
+// Migration 029 puts FORCE row-level security on every tenant table. A write
+// with no `app.business_id` set is not slow or partial — it is REFUSED. A real
+// call proved it:
+//
+//   new row violates row-level security policy for table "call_transcripts"
+//   new row violates row-level security policy for table "customer_requests"
+//
+// So the caller's words, and the message the take-a-message flow collected,
+// were both silently dropped. Nothing failed loudly, because every call site
+// swallows the error into a log line and carries on — which is right for a
+// phone call and terrible for noticing.
+//
+// The pickup context load was already wrapped. The PER-TURN writes were not,
+// and no test could see it because the db mock discarded the businessId.
+// ---------------------------------------------------------------------------
+describe("session.js — no database write escapes its tenant scope", () => {
+  it("transcript writes happen inside a tenant scope", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("I would like to book an appointment.");
+    await flush();
+
+    const transcripts = H.writes.filter((w) => w.op === "addTranscriptEntry");
+    expect(transcripts.length).toBeGreaterThan(0);
+    for (const w of transcripts) expect(w.tenant).toBe("biz1");
+  });
+
+  it("the take-a-message write happens inside a tenant scope", async () => {
+    // The flow does not exist until two LLM failures in a row enter it, which
+    // is exactly how a real caller reached it.
+    H.llmFactory = () =>
+      (async function* () {
+        throw new Error("llm exploded");
+      })();
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours today please.");
+    await flush();
+    await flush();
+    tm.opts.onTurnEnd("can you check my appointment please.");
+    await flush();
+    await flush();
+
+    expect(H.fallbackFlowInstances.length).toBe(1);
+    const flow = H.fallbackFlowInstances[0];
+    await flow.opts.onComplete({
+      callerName: "Nithin",
+      callbackNumber: "+14699338887",
+      message: "Please call me back.",
+    });
+    await flush();
+
+    const requests = H.writes.filter((w) => w.op === "createCustomerRequest");
+    expect(requests.length).toBeGreaterThan(0);
+    for (const w of requests) expect(w.tenant).toBe("biz1");
+  });
+
+  it("NOTHING written during a call is unscoped", async () => {
+    // The catch-all. A new writer added to session.js without a scope fails
+    // here rather than on somebody's phone.
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("Book me in for Tuesday please.");
+    await flush();
+
+    const unscoped = H.writes.filter((w) => w.tenant == null);
+    expect(unscoped).toEqual([]);
   });
 });
