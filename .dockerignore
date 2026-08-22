@@ -17,6 +17,10 @@ scripts
 # ...except the migration runner, which the Cloud Run migration job needs. The
 # Dockerfile names it explicitly; without this negation that COPY fails.
 !scripts/migrate.js
+# ...and the staging seeder, run through the same job to put one synthetic
+# business in a database that has schema and no rows. It refuses to run
+# unless the database AND instance names both contain "staging".
+!scripts/seed-staging.js
 docs
 latency-runs
 infra

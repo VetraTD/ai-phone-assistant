@@ -66,6 +66,11 @@ COPY config ./config
 # named, so the probe harness, the eval runner and the TTS A/B tooling do not
 # ship to production.
 COPY scripts/migrate.js ./scripts/migrate.js
+# Same job, different entrypoint: seeds one synthetic business into a
+# STAGING database so a test call reaches the receptionist instead of the
+# unrouted-voicemail path. Safe to ship — it refuses unless the database and
+# instance names both say staging.
+COPY scripts/seed-staging.js ./scripts/seed-staging.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:
