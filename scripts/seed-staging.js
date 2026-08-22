@@ -72,6 +72,23 @@ const { poolConfig, close } = await cloudSqlPoolConfig(cfg, { connectionTimeoutM
 const pool = new pg.Pool(poolConfig);
 const client = await pool.connect();
 
+// What the clinic is allowed to DO.
+//
+// `allowed_tasks` defaults to ["book_appointment"] alone, so cancel_appointment
+// and reschedule_appointment were never registered as tools. The model could
+// not cancel anything, and "reschedule" became a second booking — which reads
+// as the assistant ignoring the request and was really the assistant not having
+// the tool.
+//
+// All four modules, so the whole appointment lifecycle is testable rather than
+// just its first step.
+const ALLOWED_TASKS = JSON.stringify([
+  "book_appointment",
+  "check_appointment",
+  "cancel_reschedule",
+  "quote_request",
+]);
+
 // Real hours, not 24/7.
 //
 // This was open 00:00-23:59 every day, so the line would answer whenever
@@ -86,11 +103,23 @@ const client = await pool.connect();
 //
 // The line still ANSWERS out of hours — that is what after_hours_policy is
 // for. It just stops pretending it can book you in on a Sunday.
-const WEEKDAY = { open: "09:00", close: "17:00", closed: false };
+// Mon-Sat 08:00-20:00, Sunday closed.
+//
+// The first version was open 24/7, which made booking meaningless — it offered
+// a SUNDAY slot. The second was Mon-Fri 09:00-17:00, which was realistic and
+// promptly made the line untestable, because the next call happened on a
+// Saturday: booking correctly refused and fell through to take-a-message, and
+// that looked like a broken booking flow.
+//
+// This keeps BOTH properties testable. A weekday or Saturday call can book; a
+// Sunday call, or any call after 20:00 local, exercises the closed path. The
+// fixture should not be the reason a test cannot run, nor the reason a refusal
+// looks like a bug.
+const OPEN_DAY = { open: "08:00", close: "20:00", closed: false };
 const CLOSED = { open: null, close: null, closed: true };
 const HOURS = JSON.stringify({
-  mon: WEEKDAY, tue: WEEKDAY, wed: WEEKDAY, thu: WEEKDAY, fri: WEEKDAY,
-  sat: CLOSED, sun: CLOSED,
+  mon: OPEN_DAY, tue: OPEN_DAY, wed: OPEN_DAY, thu: OPEN_DAY, fri: OPEN_DAY,
+  sat: OPEN_DAY, sun: CLOSED,
 });
 
 try {
@@ -133,9 +162,10 @@ try {
     `UPDATE businesses SET
        phone_number = $2, locale = $3, compliance_tier = $4, greeting = $5,
        business_hours = $6::jsonb, voice_provider = $7, languages_spoken = $8::jsonb,
-       after_hours_policy = $9, transfer_policy = $10, notifications_enabled = false
+       after_hours_policy = $9, transfer_policy = $10, allowed_tasks = $11::jsonb,
+       notifications_enabled = false
      WHERE id = $1
-     RETURNING id, name, phone_number, compliance_tier, voice_provider`,
+     RETURNING id, name, phone_number, compliance_tier, voice_provider, allowed_tasks`,
     [
       id,
       PHONE,
@@ -151,6 +181,7 @@ try {
       JSON.stringify(["en"]),
       "take_message",
       "always",
+      ALLOWED_TASKS,
     ]
   );
   await client.query("COMMIT");
