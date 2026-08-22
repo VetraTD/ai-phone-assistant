@@ -85,3 +85,34 @@ import {
   to = google_org_policy_policy.require_shielded_vm
   id = "organizations/${var.org_id}/policies/${each.value}"
 }
+
+# ---------------------------------------------------------------------------
+# Essential Contacts created by hand on 2026-08-22, in the middle of a
+# suspension, because the project could not wait for an apply.
+#
+# Adopted rather than recreated for the same reason as everything else in this
+# file: Terraform errors on creating a contact that already exists, and a plan
+# that proposes creating one is a plan that dies. `contacts/0` is the id the API
+# assigned; read it back with
+#   gcloud essential-contacts list --organization=564252011558
+# ---------------------------------------------------------------------------
+import {
+  for_each = var.adopt_existing_contacts
+
+  to = google_essential_contacts_contact.org[each.key]
+  id = each.value
+}
+
+variable "adopt_existing_contacts" {
+  description = <<-EOT
+    Map of contact EMAIL -> existing resource id (e.g.
+    "organizations/564252011558/contacts/0"), for contacts created outside
+    Terraform.
+
+    BLANK THIS ONCE ADOPTED. Terraform errors on an import block targeting an
+    address already in state — the same documented lifecycle as
+    `adopt_existing_projects` above.
+  EOT
+  type        = map(string)
+  default     = {}
+}

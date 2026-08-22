@@ -96,6 +96,10 @@ locals {
     # `shared`. Added before the apply rather than after the third 403.
     "identitytoolkit.googleapis.com",
     "apikeys.googleapis.com",
+    # Fifth occurrence of this trap. Terraform now manages org-node Essential
+    # Contacts, so it CALLS this API through the quota project even though the
+    # contacts hang off the organization and not off any project.
+    "essentialcontacts.googleapis.com",
   ]
 
   shared_apis = concat(local.common_apis, local.terraform_quota_apis, [
