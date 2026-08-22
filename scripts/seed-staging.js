@@ -72,17 +72,35 @@ const { poolConfig, close } = await cloudSqlPoolConfig(cfg, { connectionTimeoutM
 const pool = new pg.Pool(poolConfig);
 const client = await pool.connect();
 
-/** Open 24/7 — a test line has to be answerable at the hour someone tests it. */
-const OPEN_ALL_DAY = { open: "00:00", close: "23:59", closed: false };
-const HOURS = JSON.stringify(
-  Object.fromEntries(["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => [d, OPEN_ALL_DAY]))
-);
+// Real hours, not 24/7.
+//
+// This was open 00:00-23:59 every day, so the line would answer whenever
+// somebody tested it. That worked, and it made the booking behaviour
+// meaningless: the assistant offered a SUNDAY appointment, which looked like a
+// scheduling bug and was actually the fixture saying Sunday was fine.
+//
+// A clinic's hours are load-bearing for the thing under test — after-hours
+// routing, "we're closed", refusing a weekend slot. Mon-Fri 09:00-17:00 with
+// the weekend closed matches the first real customer (Excel Cardiac Care,
+// 8-5 M-F, closed weekends) closely enough to exercise the same branches.
+//
+// The line still ANSWERS out of hours — that is what after_hours_policy is
+// for. It just stops pretending it can book you in on a Sunday.
+const WEEKDAY = { open: "09:00", close: "17:00", closed: false };
+const CLOSED = { open: null, close: null, closed: true };
+const HOURS = JSON.stringify({
+  mon: WEEKDAY, tue: WEEKDAY, wed: WEEKDAY, thu: WEEKDAY, fri: WEEKDAY,
+  sat: CLOSED, sun: CLOSED,
+});
 
 try {
   const found = await client.query("SELECT id FROM businesses WHERE phone_number = $1", [PHONE]);
   let id;
 
   if (found.rows.length) {
+    // Idempotent, and it RE-APPLIES the configuration below rather than
+    // stopping here — otherwise changing the hours means deleting the tenant
+    // by hand first.
     id = found.rows[0].id;
     console.log(`exists: ${id}`);
   } else {
