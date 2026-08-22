@@ -45,6 +45,57 @@ can hear. What is left from it is an APPLY, and the apply is a hard stop:
 > implements no part of the Speech v2 API. A covered deployment refuses to boot
 > until it is done, so this is not optional, merely un-Terraformable.
 >
+> **APPLY IN THREE STEPS, NOT ONE, AND THE REASON IS AN ORDERING TRAP.**
+> `assertSttEncryption()` runs BEFORE the port opens and refuses to start when
+> the Speech config has no CMEK key. The key does not exist until Terraform
+> creates it, and pointing Speech at it needs `npm run stt:cmek`, which cannot
+> run before the key exists. **So a single full apply deploys a `hipaa`
+> revision that refuses to boot** — Cloud Run keeps serving the old `standard`
+> revision, Terraform reports an error, and it reads exactly like the STT work
+> being broken. It is not; it is this ordering.
+>
+> **The image is already built and `image_tag` is already bumped:** `2fe7da1`,
+> digest `sha256:5f75451c…`, Cloud Build `4cb2440a` SUCCESS. Full plan at that
+> tag: **14 add / 2 change / 4 destroy** (the second change is the migration
+> job picking up the same image).
+>
+> ```sh
+> export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
+> export GOOGLE_APPLICATION_CREDENTIALS=$HOME/.gcloud-vetratd/application_default_credentials.json
+> export TF_DISABLE_PLUGIN_TLS=1
+> export SSL_CERT_FILE=/c/Users/nithi/gcloud-cacerts.pem
+> cd infra/terraform
+>
+> # STEP 1 — the key and its grants ONLY. No service change, nothing destroyed.
+> # Plan is already saved and verified: 14 to add, 0 to change, 0 to destroy.
+> terraform apply stt-step1-keys.tfplan
+> #
+> # EXPECT THIS TO FAIL ON THE FIRST RUN, then re-run it. The Speech service
+> # agent is created but not yet visible to IAM, and the error reads
+> # "Service account service-<n>@gcp-sa-speech... does not exist", which looks
+> # like a typo in an email address. Same race as google_kms_crypto_key_iam_member.sql.
+>
+> terraform output speech_cmek_keys
+>
+> # STEP 2 — point Speech at the key. Terraform cannot express this (#18878).
+> cd ../..
+> npm run stt:cmek -- --project vetra-us-staging-c3a3bd --location us-central1 --key <kms_key_name from the output above>
+> npm run stt:cmek -- --project vetra-us-staging-c3a3bd --location us-central1 --check
+>
+> # STEP 3 — the real one. Flips staging to hipaa and DESTROYS the US Deepgram
+> # secrets. Re-plan first, because steps 1 and 2 moved the state.
+> cd infra/terraform
+> terraform plan -out=stt-step3.tfplan     # expect 0 add / 2 change / 4 destroy
+> terraform apply stt-step3.tfplan
+> ```
+>
+> Then confirm it is actually serving, because that is the whole point:
+> `gcloud run services describe voice-us-staging --region us-central1` should
+> show a READY revision on image tag **2fe7da1**, its logs should carry
+> `[boot] Speech-to-Text CMEK verified:` and `stt_provider_selected` with
+> `provider: "google"`, and a test call from an allowlisted number should be
+> answered and transcribed.
+
 > **`npm run check:credentials` FAILS RIGHT NOW and is correct to.** Verified
 > live: `vetra-us-prod-c3a3bd` holds `deepgram-api-key`. The apply is what
 > fixes it. Do not add an exception.
@@ -390,6 +441,24 @@ The boot contradiction is gone: `checkSttConfig` asks the mode-shaped question
 (`standard` needs `DEEPGRAM_API_KEY`, `hipaa` needs `GOOGLE_CLOUD_PROJECT`) and
 `server.js` no longer demands a credential a covered process is forbidden to
 hold.
+
+**The boot matrix, run rather than reasoned** (2026-08-22, `assertBootConfig`
+against five environments):
+
+| Configuration | Result |
+|---|---|
+| `hipaa` + `GOOGLE_CLOUD_PROJECT`, **no Deepgram key** | **BOOTS** — the configuration that was impossible before |
+| `hipaa` + a Deepgram key present | REFUSES · `non_covered_credential_present` |
+| `hipaa` with no `GOOGLE_CLOUD_PROJECT` | REFUSES · `stt_not_configured` |
+| `hipaa` + `STT_LOCATION=global` | REFUSES · `stt_location_global` |
+| `standard` with no STT configured at all | REFUSES · `stt_not_configured` |
+
+One row boots and four refuse, each for its own reason. Before this session the
+first row was unreachable: **no value of the environment satisfied both
+`server.js` and `checkCoveredVendors` at once.** The boot also now announces
+which vendor will hear the caller, on every boot, in both modes — that is
+derived from the tier rather than configured, so it has to be visible without
+reading the routing code.
 
 > **THE DEEPGRAM BAA QUESTION IS DEAD, AND NOT BECAUSE IT WAS ANSWERED.** It was
 > never answered. It stopped mattering: the covered lane no longer needs
