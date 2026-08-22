@@ -95,3 +95,46 @@ resource "google_org_policy_policy" "resource_locations" {
 
   depends_on = [google_project_service.this]
 }
+
+
+# ---------------------------------------------------------------------------
+# Domain Restricted Sharing, relaxed for the projects that serve Twilio.
+#
+# `constraints/iam.allowedPolicyMemberDomains` is enforced by default on an org
+# created through Cloud Identity, and it is a good default: it stops anyone
+# granting a role to an account outside the organization. It also makes
+# `allUsers` an invalid member, which blocks a public Cloud Run service:
+#
+#   Error 400: One or more users named in the policy do not belong to a
+#   permitted customer, perhaps due to an organization policy.
+#
+# Twilio calls the voice webhook from its own infrastructure with no Google
+# credential, so IAM cannot be the gate and the service has to be publicly
+# invokable. The gate is Twilio's request signature instead — see the reasoning
+# on google_cloud_run_v2_service_iam_member.public_invoker.
+#
+# SCOPED PER PROJECT, not at the org. The org node keeps the restriction, so a
+# role granted to an outside account in `vetra-shared` — where the build
+# pipeline and the audit trail live — is still refused. Only the projects that
+# actually answer a phone are exempt.
+#
+# THE BETTER ANSWER, and it is deliberately not taken yet: put an HTTPS load
+# balancer in front with a serverless NEG. The LB is public, the Cloud Run
+# service stays IAM-restricted, and this constraint never has to be relaxed. It
+# needs a managed certificate and therefore a DNS change on vetratd.com, which
+# is B5's work. Revisit this the moment that exists — production especially.
+# ---------------------------------------------------------------------------
+resource "google_org_policy_policy" "allow_public_invoker" {
+  for_each = toset(local.active_regional_project_keys)
+
+  name   = "projects/${google_project.this[each.value].project_id}/policies/iam.allowedPolicyMemberDomains"
+  parent = "projects/${google_project.this[each.value].project_id}"
+
+  spec {
+    rules {
+      allow_all = "TRUE"
+    }
+  }
+
+  depends_on = [google_project_service.this]
+}

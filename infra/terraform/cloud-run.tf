@@ -46,6 +46,23 @@ variable "wire_runtime_secrets" {
   default     = false
 }
 
+variable "smtp_config" {
+  description = <<-EOT
+    Non-secret SMTP settings, as plain environment variables.
+
+    A hostname, a port and a from-address are not credentials, and putting them
+    in Secret Manager would dilute a list whose value is that everything on it
+    is genuinely sensitive. SMTP_PASS is the only secret here.
+
+    SMTP_USER is not optional: lib/bootChecks.js treats a half-configured
+    credential pair as FATAL, on the grounds that nobody sets half of one on
+    purpose and the result is email that is silently dropped. A deploy with
+    SMTP_PASS and no SMTP_USER does not start.
+  EOT
+  type        = map(string)
+  default     = {}
+}
+
 variable "staging_caller_allowlist" {
   description = <<-EOT
     E.164 numbers permitted to call a STAGING voice service. Everyone else is
@@ -207,13 +224,59 @@ resource "google_cloud_run_v2_service" "this" {
         value = trimsuffix(google_service_account.runtime[each.value.stack].email, ".gserviceaccount.com")
       }
 
-      # The compliance tier. `hipaa` makes lib/compliance.js refuse a
-      # non-covered vendor at client construction, and bootChecks refuse to
-      # start at all if such a credential is present — the second line of
-      # defence behind the secret simply not existing in this project.
+      # -------------------------------------------------------------------
+      # The compliance tier, and why STAGING is not `hipaa`.
+      #
+      # This was `hipaa` for every US stack, and the first staging deploy
+      # refused to boot on it — correctly:
+      #
+      #   FATAL non_covered_credential_present: DEEPGRAM_API_KEY is set in a
+      #   DEPLOYMENT_MODE=hipaa process. Deepgram has no BAA.
+      #
+      # That is the guard working, and it is the ledger's UNASSIGNED WORK
+      # surfacing exactly where it said it would: THE US HIPAA LANE HAS NO
+      # BAA-COVERED SPEECH-TO-TEXT. Deepgram was asked for a BAA on 2026-08-21
+      # and has not answered. Until it does, a `hipaa` process cannot hold the
+      # only STT credential this system has, so a US production service cannot
+      # serve a call at all.
+      #
+      # Staging is `standard` because staging holds no patient data — barred by
+      # rule and now enforced by CALLER_ALLOWLIST, which refuses every caller
+      # but the two test numbers. The tier that carries compliance weight is
+      # production's, and production is blocked on the BAA regardless of what
+      # staging is set to.
+      #
+      # WHAT THIS COSTS, stated rather than hidden: staging no longer rehearses
+      # the hipaa vendor guard. The merge already recorded that staging cannot
+      # rehearse the credential boundary, which is why the CI gate checks
+      # PRODUCTION directly (scripts/check-credential-boundary.js) instead of
+      # trusting staging to catch it.
+      #
+      # Flip staging to `hipaa` the moment the Deepgram answer arrives — or, if
+      # the answer is no, when Google STT v2 replaces it.
+      # -------------------------------------------------------------------
       env {
-        name  = "DEPLOYMENT_MODE"
-        value = local.stacks[each.value.stack].lane == "us" ? "hipaa" : "standard"
+        name = "DEPLOYMENT_MODE"
+        value = (
+          local.stacks[each.value.stack].lane == "us" && local.stacks[each.value.stack].env == "prod"
+          ? "hipaa"
+          : "standard"
+        )
+      }
+
+      # SMTP identity. Not secrets — a hostname, a port and an address — and
+      # keeping them out of Secret Manager keeps that list to things that are
+      # actually credentials. Only SMTP_PASS is a secret.
+      #
+      # SMTP_USER matters more than it looks: bootChecks makes a half-configured
+      # pair FATAL, so pushing SMTP_PASS without it is a service that will not
+      # start. The first deploy did exactly that.
+      dynamic "env" {
+        for_each = var.smtp_config
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
 
       # Vertex, not the Gemini Developer API. The API-key path is AI Studio,
@@ -302,6 +365,40 @@ resource "google_cloud_run_v2_service" "this" {
     google_project_iam_member.run_agent_pull_images,
     google_sql_user.runtime_iam,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# PUBLIC INVOKER. Deliberate, and this is the reasoning.
+#
+# Cloud Run denies unauthenticated requests by default, which is a good default
+# and the wrong one here: Twilio calls this webhook from its own infrastructure
+# with no Google credential, so IAM cannot be the gate. Without this binding the
+# service returns 403 to Twilio and every call fails.
+#
+# WHAT REPLACES IAM, and it is not nothing:
+#
+#   1. Twilio request signatures. `twilioValidation` in server.js verifies every
+#      request with HMAC over the exact URL and body using the auth token, and
+#      it is ON unless TWILIO_VALIDATE_SIGNATURE is explicitly "false". A
+#      request without a valid signature gets 403 before any handler runs.
+#   2. CALLER_ALLOWLIST on staging, which refuses every caller but two test
+#      numbers even if the signature is valid.
+#   3. The service holds no data of its own. Everything is behind a private-IP
+#      database that is not reachable from the internet at any price.
+#
+# Note the coupling this creates, because it is easy to break: the signature is
+# computed over the FULL URL, so BASE_URL must exactly match the URL Twilio was
+# configured with. A mismatch produces 403s that look like a credential problem
+# and are a string problem.
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
+  for_each = local.deployable_services
+
+  project  = google_cloud_run_v2_service.this[each.key].project
+  location = google_cloud_run_v2_service.this[each.key].location
+  name     = google_cloud_run_v2_service.this[each.key].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 output "cloud_run_services" {
