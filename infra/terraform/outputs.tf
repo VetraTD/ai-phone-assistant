@@ -147,3 +147,23 @@ output "cloud_sql_deferred" {
   description = "Instances in the plan that C-12 has NOT created. Empty once enable_prod_databases is on. A production database with no production traffic is $98.62/month of nothing."
   value       = [for k, v in local.cloud_sql_plan : v.instance if !contains(keys(local.active_sql_instances), k)]
 }
+
+# ---------------------------------------------------------------------------
+# B3. What the dashboard frontend needs at build time.
+#
+# Both are PUBLIC values that ship inside the JavaScript bundle. An Identity
+# Platform web API key identifies the project and authorises nothing — see
+# identity-platform.tf for why it is restricted anyway.
+# ---------------------------------------------------------------------------
+output "identity_platform" {
+  description = "Frontend build config for Identity Platform. VITE_FIREBASE_API_KEY and VITE_FIREBASE_AUTH_DOMAIN come from here."
+  value = {
+    project_id  = local.project_id_for_stack["shared"]
+    api_key     = google_apikeys_key.identity_platform_web.key_string
+    auth_domain = "${local.project_id_for_stack["shared"]}.firebaseapp.com"
+    # The unrestricted key Identity Platform creates for itself. Recorded so it
+    # is visible rather than forgotten — nothing should use it.
+    auto_created_api_key = google_identity_platform_config.auth.client[0].api_key
+  }
+  sensitive = true
+}

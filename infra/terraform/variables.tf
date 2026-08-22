@@ -234,3 +234,31 @@ variable "labels" {
     system     = "vetra-receptionist"
   }
 }
+
+# ---------------------------------------------------------------------------
+# B3.
+# ---------------------------------------------------------------------------
+variable "dashboard_domains" {
+  description = <<-EOT
+    Domains the dashboard is served from, beyond localhost and the two
+    Google-owned defaults. Identity Platform will only send a password-reset or
+    verification continue URL to an authorized domain, so a domain missing here
+    produces a reset email whose link is refused — a failure that surfaces to a
+    locked-out member of staff rather than to a deploy.
+
+    EMPTY ON PURPOSE while B5's load balancer is switched off pending DNS. Fill
+    it in the same edit that turns the LB on, and add browser_key_restrictions
+    to google_apikeys_key.identity_platform_web at the same time — see
+    identity-platform.tf.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    # A bare hostname, never a URL. Identity Platform wants "app.vetratd.com";
+    # pasting "https://app.vetratd.com/" is accepted by the API and matches
+    # nothing, which fails as a reset link that silently does not work.
+    condition     = alltrue([for d in var.dashboard_domains : can(regex("^[a-z0-9.-]+$", d))])
+    error_message = "dashboard_domains takes bare hostnames — no scheme, no path, no trailing slash."
+  }
+}

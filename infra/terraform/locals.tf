@@ -91,12 +91,16 @@ locals {
     "run.googleapis.com",
     "cloudscheduler.googleapis.com",
     "storage.googleapis.com",
+    # B3. Terraform creates the Identity Platform config and its API key, so both
+    # are calls made THROUGH the quota project even though the resources land in
+    # `shared`. Added before the apply rather than after the third 403.
+    "identitytoolkit.googleapis.com",
+    "apikeys.googleapis.com",
   ]
 
   shared_apis = concat(local.common_apis, local.terraform_quota_apis, [
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
-    "identitytoolkit.googleapis.com",
     "secretmanager.googleapis.com",
   ])
 
