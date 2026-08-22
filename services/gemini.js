@@ -272,6 +272,23 @@ export function getClient() {
   // vertexConfig for why this is a compliance boundary and not a preference.
   assertVendorAllowed("gemini-developer-api");
 
+  // No backend at all. This belongs HERE and nowhere else: getClient is the one
+  // place that knows which backend was chosen, so it is the only place that can
+  // say what that backend needs.
+  //
+  // getReplyStreaming used to carry its own copy of this check, ABOVE the call
+  // to getClient, and that copy did not know about Vertex — so a correctly
+  // configured covered deployment, which has no API key by design, threw on
+  // every turn and dropped real callers into the take-a-message script.
+  // A duplicated decision drifts from the real one; this is the real one.
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error(
+      "GEMINI_API_KEY is not set and Vertex is not enabled. Set VERTEX_ENABLED=true with " +
+        "GOOGLE_CLOUD_PROJECT and VERTEX_LOCATION (`us` or `eu`) — which is the BAA-covered " +
+        "path — or provide an API key for the Gemini Developer API."
+    );
+  }
+
   geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return geminiClient;
 }
@@ -1487,9 +1504,23 @@ export function buildUsage(usageMetadata) {
  * @yields {{ delta?: string, toolCall?: object, done?: boolean, reply?: object }}
  */
 export async function* getReplyStreaming(history, userMessage, step, intent, config, extras, { signal } = {}) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-
+  // NO API-KEY GUARD HERE, deliberately, and it used to be the opposite.
+  //
+  // This function had its own `if (!GEMINI_API_KEY) throw` ABOVE the call to
+  // getClient(). getClient() is the one place that knows a backend was chosen —
+  // on Vertex there is no API key at all, because the Gemini Developer API is
+  // not covered by the Google Cloud BAA and must not be present in a `hipaa`
+  // project. So a correctly configured covered deployment threw on EVERY turn.
+  //
+  // This is the only LLM entry point the voice pipeline uses. Two consecutive
+  // failures trip FALLBACK_FAILURE_THRESHOLD, so a real caller heard "technical
+  // difficulties" and was handed to the take-a-message script. A8 removed the
+  // same unconditional requirement from server.js's boot check and did not
+  // reach this copy; nothing caught it because the eval harness and every local
+  // run have GEMINI_API_KEY set, which makes the guard invisible off Cloud Run.
+  //
+  // getClient() still throws when NEITHER backend is configured — a deployment
+  // with no LLM must fail loudly rather than answer a call with silence.
   const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
