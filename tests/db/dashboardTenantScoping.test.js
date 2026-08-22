@@ -188,17 +188,24 @@ describeDb("the dashboard cannot read another tenant under RLS", () => {
 });
 
 describeDb("onboarding still works when there is no tenant yet", () => {
-  const NEW_STAFF = "eeee5555-eeee-4eee-8eee-eeeeeeee5555";
+  // An Identity Platform account id — 28 alphanumeric characters, NOT a uuid.
+  // It used to be a uuid here because Supabase Auth issued uuids, and the
+  // bootstrap function's `p_user_id uuid` typechecked by that coincidence
+  // alone. Migration 035 retyped it; keeping a uuid in this fixture would have
+  // kept the test green against a signup path that 500s in production.
+  const NEW_STAFF = "dashProbeAuthUid9Kk3QwZr77xy";
   const NEW_EMAIL = "dash-new@example.com";
 
   beforeEach(async () => {
-    await admin.query(`DELETE FROM users WHERE id = $1`, [NEW_STAFF]);
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [NEW_STAFF]);
+    await admin.query(`DELETE FROM users WHERE email = $1`, [NEW_EMAIL]);
     await admin.query(`DELETE FROM businesses WHERE name = 'Brand New Clinic'`);
     authState.user = { id: NEW_STAFF, email: NEW_EMAIL };
   });
 
   afterAll(async () => {
-    await admin?.query(`DELETE FROM users WHERE id = $1`, [NEW_STAFF]).catch(() => {});
+    await admin?.query(`DELETE FROM users WHERE auth_uid = $1`, [NEW_STAFF]).catch(() => {});
+    await admin?.query(`DELETE FROM users WHERE email = $1`, [NEW_EMAIL]).catch(() => {});
     await admin?.query(`DELETE FROM businesses WHERE name = 'Brand New Clinic'`).catch(() => {});
   });
 
@@ -221,7 +228,12 @@ describeDb("onboarding still works when there is no tenant yet", () => {
     expect(res.status).toBe(200);
     expect(res.body.business?.name).toBe("Brand New Clinic");
 
-    const linked = await admin.query(`SELECT business_id FROM users WHERE id = $1`, [NEW_STAFF]);
+    // Keyed on auth_uid, not id: `users.id` is generated inside the bootstrap
+    // function now and is deliberately NOT the auth account id.
+    const linked = await admin.query(
+      `SELECT business_id FROM users WHERE auth_uid = $1`,
+      [NEW_STAFF]
+    );
     expect(linked.rows[0].business_id).toBe(res.body.business.id);
   });
 

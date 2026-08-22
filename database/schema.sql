@@ -82,8 +82,20 @@ CREATE TABLE users (
   email       text UNIQUE NOT NULL,
   full_name   text,
   role        text DEFAULT 'staff',
+  -- The identity provider's account id (Identity Platform localId), migration
+  -- 035. NOT `id` above: that is this system's own staff identifier, generated
+  -- here and written into the PHI audit trail. The two were the same string
+  -- under Supabase Auth only because it issued uuids. Nullable until the user
+  -- import backfills existing rows.
+  auth_uid    text,
   created_at  timestamptz DEFAULT now()
 );
+
+-- Nullable + UNIQUE: many NULLs are allowed, which is what lets rows predating
+-- Identity Platform coexist with new ones. It is also the duplicate guard in
+-- app_create_business_for_user, because a unique index is not subject to row
+-- visibility and an unscoped SELECT under FORCE RLS is.
+CREATE UNIQUE INDEX IF NOT EXISTS users_auth_uid_key ON users (auth_uid);
 
 -- 3. Calls (one row per phone call)
 CREATE TABLE calls (
@@ -958,7 +970,7 @@ CREATE POLICY tenant_append ON phi_access_log
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION app_create_business_for_user(
-  p_user_id  uuid,
+  p_auth_uid text,
   p_email    text,
   p_name     text,
   p_timezone text
@@ -969,55 +981,61 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  -- Generated up front, because the RLS policy on `businesses` compares against
-  -- it. See migration 032: SECURITY DEFINER is not enough under FORCE ROW LEVEL
-  -- SECURITY, which applies to the table owner too.
   v_id       uuid := gen_random_uuid();
   v_previous text := current_setting('app.business_id', true);
   v_business businesses;
 BEGIN
-  IF p_user_id IS NULL OR p_email IS NULL OR p_name IS NULL OR p_timezone IS NULL THEN
+  IF p_auth_uid IS NULL OR btrim(p_auth_uid) = ''
+     OR p_email IS NULL OR p_name IS NULL OR p_timezone IS NULL THEN
     RAISE EXCEPTION 'app_create_business_for_user: all arguments are required';
   END IF;
 
-  -- Become the tenant being created, for this transaction only, so the insert
-  -- SATISFIES the policy rather than trying to bypass it.
+  -- Become the tenant being created, for the length of this transaction only.
   PERFORM set_config('app.business_id', v_id::text, true);
 
-  INSERT INTO businesses (id, name, timezone) VALUES (v_id, p_name, p_timezone)
+  -- Explicit id, because the policy compares against it. Letting the DEFAULT
+  -- generate one is exactly what made 031 unsatisfiable.
+  INSERT INTO businesses (id, name, timezone)
+  VALUES (v_id, p_name, p_timezone)
   RETURNING * INTO v_business;
 
-  -- One statement rather than the route's insert-then-update, so a users row
-  -- with a NULL business_id never exists — not even briefly, and not at all if
-  -- anything downstream fails.
-  -- THE DUPLICATE GUARD. It cannot be a SELECT above: `users` is under the same
-  -- FORCE row-level security, so with no tenant scope set that SELECT returns
-  -- no rows for a user who exists, and the guard silently stops firing. The
-  -- unique index is not subject to visibility, so ON CONFLICT works either way.
-  -- DO NOTHING rather than DO UPDATE, because updating is what silently
-  -- repoints an account at a newer tenant and strands the previous one.
-  INSERT INTO users (id, email, business_id)
-  VALUES (p_user_id, p_email, v_id)
-  ON CONFLICT (id) DO NOTHING;
+  -- THE DUPLICATE GUARD. On the auth account, not on users.id — the staff row's
+  -- id is generated here and could never collide, so keying the guard on it
+  -- after the retype would have meant no guard at all while still looking like
+  -- one.
+  --
+  -- ON CONFLICT rather than a SELECT: `users` is under FORCE row-level security
+  -- and an unscoped SELECT returns no rows for a user who definitely exists,
+  -- so the guard would silently stop firing in the case it exists for. A unique
+  -- index is not subject to visibility. DO NOTHING rather than DO UPDATE:
+  -- updating is what 031's header describes as silently repointing an account
+  -- at a newer tenant and stranding the previous one.
+  INSERT INTO users (email, business_id, auth_uid)
+  VALUES (p_email, v_id, p_auth_uid)
+  ON CONFLICT DO NOTHING;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'app_create_business_for_user: user already belongs to a business'
+    -- Rolls back the business inserted moments ago, so a refused call leaves
+    -- nothing behind. Covers BOTH unique indexes: the auth account already has
+    -- a staff row, or the email address is already taken by another account.
+    RAISE EXCEPTION 'app_create_business_for_user: this account or email already belongs to a business'
       USING ERRCODE = '23505';
   END IF;
 
-  -- Hand the caller back the scope it arrived with, so this cannot silently
-  -- repoint the rest of an in-flight transaction at the new tenant.
+  -- Hand the caller back the scope it arrived with. COALESCE because
+  -- current_setting(..., true) returns NULL when unset and set_config wants a
+  -- string; '' is what app_current_business_id() already treats as unset.
   PERFORM set_config('app.business_id', COALESCE(v_previous, ''), true);
 
   RETURN v_business;
 END;
 $$;
 
-COMMENT ON FUNCTION app_create_business_for_user(uuid, text, text, text) IS
-  'Bootstrap: creates a tenant and attaches the signing-up account to it. SECURITY DEFINER because the operation is what establishes the scope it would otherwise need. Refuses if the account already has a business.';
+COMMENT ON FUNCTION app_create_business_for_user(text, text, text, text) IS
+  'Bootstrap: creates a tenant and attaches the signing-up AUTH ACCOUNT to it. Takes the identity provider''s id as text — Identity Platform''s is not a uuid, and the previous uuid signature typechecked only because Supabase Auth happened to issue uuids. SECURITY DEFINER is not sufficient on its own because migration 029 uses FORCE ROW LEVEL SECURITY, so this generates the business id first and adopts it as the transaction-local tenant, making the insert satisfy the policy rather than bypass it. Restores the caller''s previous scope before returning.';
 
-REVOKE ALL ON FUNCTION app_create_business_for_user(uuid, text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app_create_business_for_user(uuid, text, text, text) TO vetra_app;
+REVOKE ALL ON FUNCTION app_create_business_for_user(text, text, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_create_business_for_user(text, text, text, text) TO vetra_app;
 
 -- ------------------------------------------------------------
 -- The other half: reading a business the caller has just been told they own

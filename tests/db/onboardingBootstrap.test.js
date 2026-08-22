@@ -32,7 +32,13 @@ const MIGRATOR_URL = "postgres://bootstrap_probe:probe_only@localhost:55432/vetr
 let admin;
 let asMigrator;
 
-const uuid = (n) => `${String(n).repeat(8)}-1111-4111-8111-111111111111`.slice(0, 36);
+// An Identity Platform account id, not a uuid — 28 alphanumeric characters.
+// The old signature took `p_user_id uuid` and the dashboard passed it the auth
+// provider's id, which typechecked ONLY because Supabase Auth issued uuids.
+// Identity Platform's does not, and the real error was:
+//   invalid input syntax for type uuid: "7Ziacgk6NkY3lKC6dXu3VthNO1Y2"
+// See migration 035.
+const authUid = (n) => `probeAuthUid${String(n).repeat(4)}Kk9QwZr77`.slice(0, 28);
 
 beforeAll(async () => {
   if (!url) return;
@@ -57,7 +63,7 @@ beforeAll(async () => {
   // Reassigning the function to a role shaped like that is what makes the local
   // database behave like the real one.
   await admin.query(
-    `ALTER FUNCTION app_create_business_for_user(uuid, text, text, text) OWNER TO bootstrap_probe`
+    `ALTER FUNCTION app_create_business_for_user(text, text, text, text) OWNER TO bootstrap_probe`
   );
 
   asMigrator = new pg.Client({ connectionString: MIGRATOR_URL });
@@ -69,7 +75,7 @@ afterAll(async () => {
   await asMigrator?.end().catch(() => {});
   // Hand the function back before the role can be dropped.
   await admin
-    ?.query(`ALTER FUNCTION app_create_business_for_user(uuid, text, text, text) OWNER TO vetra`)
+    ?.query(`ALTER FUNCTION app_create_business_for_user(text, text, text, text) OWNER TO vetra`)
     .catch(() => {});
   await admin?.query(`REVOKE ALL ON SCHEMA public FROM bootstrap_probe`).catch(() => {});
   await admin?.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM bootstrap_probe`).catch(() => {});
@@ -111,12 +117,12 @@ describeDb("app_create_business_for_user under FORCE row-level security", () => 
   });
 
   it("CREATES a business with no tenant scope set — the whole point of a bootstrap", async () => {
-    const userId = uuid(9);
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    const uid = authUid(9);
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
 
     const r = await asMigrator.query(
       `SELECT id, name FROM app_create_business_for_user($1,$2,$3,$4)`,
-      [userId, "bootstrap-probe@vetratd.invalid", "Bootstrap Probe Clinic", "America/Chicago"]
+      [uid, "bootstrap-probe@vetratd.invalid", "Bootstrap Probe Clinic", "America/Chicago"]
     );
 
     expect(r.rows).toHaveLength(1);
@@ -124,23 +130,43 @@ describeDb("app_create_business_for_user under FORCE row-level security", () => 
 
     // And the account is attached, in the same statement, so a users row with a
     // NULL business_id never exists.
-    const u = await admin.query(`SELECT business_id FROM users WHERE id = $1`, [userId]);
+    const u = await admin.query(`SELECT business_id, id FROM users WHERE auth_uid = $1`, [uid]);
     expect(u.rows[0].business_id).toBe(r.rows[0].id);
 
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    // `users.id` is this system's OWN identifier and is generated here — it is
+    // NOT the auth account id, and after migration 035 the two are different
+    // types. Asserted because the previous version conflated them silently.
+    expect(u.rows[0].id).not.toBe(uid);
+    expect(u.rows[0].id).toMatch(/^[0-9a-f-]{36}$/);
+
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
     await admin.query(`DELETE FROM businesses WHERE id = $1`, [r.rows[0].id]);
   });
 
+  it("REFUSES a blank or missing auth id", async () => {
+    for (const bad of ["", null]) {
+      await expect(
+        asMigrator.query(`SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`, [
+          bad,
+          "blank-probe@vetratd.invalid",
+          "Blank Clinic",
+          "UTC",
+        ])
+      ).rejects.toThrow(/all arguments are required/);
+      await asMigrator.query("ROLLBACK").catch(() => {});
+    }
+  });
+
   it("RESTORES the caller's tenant scope, so it cannot silently repoint a transaction", async () => {
-    const userId = uuid(8);
+    const uid = authUid(8);
     const caller = "44444444-4444-4444-8444-444444444444";
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
 
     await asMigrator.query("BEGIN");
     await asMigrator.query(`SELECT set_config('app.business_id', $1, true)`, [caller]);
     const made = await asMigrator.query(
       `SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`,
-      [userId, "scope-probe@vetratd.invalid", "Scope Probe Clinic", "UTC"]
+      [uid, "scope-probe@vetratd.invalid", "Scope Probe Clinic", "UTC"]
     );
     const after = await asMigrator.query(`SELECT current_setting('app.business_id', true) AS scope`);
     await asMigrator.query("COMMIT");
@@ -150,29 +176,67 @@ describeDb("app_create_business_for_user under FORCE row-level security", () => 
     // tenant while looking perfectly ordinary.
     expect(after.rows[0].scope).toBe(caller);
 
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
     await admin.query(`DELETE FROM businesses WHERE id = $1`, [made.rows[0].id]);
   });
 
-  it("still refuses to give one account a second business", async () => {
-    const userId = uuid(7);
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+  it("still refuses to give one AUTH ACCOUNT a second business", async () => {
+    // The guard moved onto auth_uid at migration 035, and it had to: users.id
+    // is generated INSIDE the function now, so a guard keyed on it could never
+    // collide — it would have been no guard at all while still looking like one.
+    const uid = authUid(7);
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
 
     const first = await asMigrator.query(
       `SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`,
-      [userId, "twice-probe@vetratd.invalid", "First Clinic", "UTC"]
+      [uid, "twice-probe@vetratd.invalid", "First Clinic", "UTC"]
     );
 
     await expect(
       asMigrator.query(`SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`, [
-        userId,
-        "twice-probe@vetratd.invalid",
+        uid,
+        "twice-probe-other@vetratd.invalid",
         "Second Clinic",
         "UTC",
       ])
     ).rejects.toThrow(/already belongs to a business/);
+    await asMigrator.query("ROLLBACK").catch(() => {});
 
-    await admin.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    // Nothing left behind by the refusal: the business inserted moments before
+    // the guard fired must roll back with it.
+    const orphans = await admin.query(
+      `SELECT count(*)::int AS n FROM businesses WHERE name = 'Second Clinic'`
+    );
+    expect(orphans.rows[0].n).toBe(0);
+
+    await admin.query(`DELETE FROM users WHERE auth_uid = $1`, [uid]);
+    await admin.query(`DELETE FROM businesses WHERE id = $1`, [first.rows[0].id]);
+  });
+
+  it("refuses a SECOND auth account claiming an email that already has a business", async () => {
+    // The other unique index, and it is the one that matters for tenant safety:
+    // migration 034 resolves a session's tenant BY EMAIL, so two auth accounts
+    // sharing one address would be two people resolving to one clinic.
+    const uid = authUid(6);
+    const other = authUid(5);
+    await admin.query(`DELETE FROM users WHERE auth_uid IN ($1,$2)`, [uid, other]);
+
+    const first = await asMigrator.query(
+      `SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`,
+      [uid, "shared-address@vetratd.invalid", "Address Clinic", "UTC"]
+    );
+
+    await expect(
+      asMigrator.query(`SELECT id FROM app_create_business_for_user($1,$2,$3,$4)`, [
+        other,
+        "shared-address@vetratd.invalid",
+        "Impostor Clinic",
+        "UTC",
+      ])
+    ).rejects.toThrow(/already belongs to a business/);
+    await asMigrator.query("ROLLBACK").catch(() => {});
+
+    await admin.query(`DELETE FROM users WHERE auth_uid IN ($1,$2)`, [uid, other]);
     await admin.query(`DELETE FROM businesses WHERE id = $1`, [first.rows[0].id]);
   });
 
