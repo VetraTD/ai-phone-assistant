@@ -151,9 +151,9 @@ try {
       await client.query("BEGIN");
       await client.query(`SELECT set_config('app.business_id', $1, true)`, [biz.rows[0].id]);
       const rows = await client.query(
-        `SELECT c.created_at, t.speaker, t.message
+        `SELECT c.started_at, t.speaker, t.message
            FROM call_transcripts t JOIN calls c ON c.id = t.call_id
-          ORDER BY c.created_at DESC, t.sequence ASC
+          ORDER BY c.started_at DESC, t.sequence ASC
           LIMIT 40`
       );
       await client.query("COMMIT");
