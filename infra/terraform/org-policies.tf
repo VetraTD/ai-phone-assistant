@@ -124,8 +124,21 @@ resource "google_org_policy_policy" "resource_locations" {
 # needs a managed certificate and therefore a DNS change on vetratd.com, which
 # is B5's work. Revisit this the moment that exists — production especially.
 # ---------------------------------------------------------------------------
+locals {
+  # The regional projects always; `shared` only when the load balancer is on,
+  # because that is the only thing that needs a public bucket there.
+  #
+  # Keeping `shared` out by default is the point of scoping this per project at
+  # all: it holds the build pipeline's deploy credentials and the audit trail's
+  # destination buckets, and an outside grant there should stay refused.
+  drs_exempt_projects = toset(concat(
+    local.active_regional_project_keys,
+    var.enable_load_balancer ? [var.stack_projects["shared"]] : [],
+  ))
+}
+
 resource "google_org_policy_policy" "allow_public_invoker" {
-  for_each = toset(local.active_regional_project_keys)
+  for_each = local.drs_exempt_projects
 
   name   = "projects/${google_project.this[each.value].project_id}/policies/iam.allowedPolicyMemberDomains"
   parent = "projects/${google_project.this[each.value].project_id}"

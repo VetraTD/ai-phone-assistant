@@ -159,6 +159,29 @@ resource "google_cloud_run_v2_service" "this" {
 
     scaling {
       # C-2 and C-11 together. Staging is 0; production voice is 1.
+      #
+      # KNOWN BENIGN DRIFT, and it is deliberately not suppressed.
+      #
+      # When min_instance_count is 0 — the API default — Cloud Run omits the
+      # field from its response, and the provider reads that as "the value I set
+      # is gone". Every plan therefore shows:
+      #
+      #   ~ scaling { - min_instance_count = 0 -> null
+      #               - manual_instance_count = 0 -> null }
+      #
+      # Applying it changes nothing and the diff comes straight back. Sending
+      # `null` instead of 0 does not help; the mismatch is between the provider
+      # and the API, not in this value.
+      #
+      # `lifecycle { ignore_changes }` would silence it and is the wrong trade:
+      # min_instance_count is C-11, the difference between a warm instance and a
+      # cold start landing on a caller, and between $0 and ~$45/month. Hiding
+      # the one field whose drift would actually matter, to tidy a cosmetic
+      # diff, is how a cost control stops being enforced.
+      #
+      # So: this module's plan is NOT clean while a service runs at min 0. Read
+      # the diff rather than trusting an empty one. It disappears for production,
+      # where min is 1.
       min_instance_count = each.value.min_instances
       max_instance_count = each.value.max_instances
     }

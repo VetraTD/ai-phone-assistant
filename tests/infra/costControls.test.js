@@ -110,6 +110,43 @@ describe("Bucket Lock is not applied yet, and that is deliberate", () => {
   });
 });
 
+describe("B5 — the load balancer is built but not switched on", () => {
+  const lb = fs.readFileSync(path.join(TF_DIR, "loadbalancer.tf"), "utf8");
+
+  it("the forwarding rule is gated, because it is the only part that bills", () => {
+    // Everything else — bucket, backend bucket, CDN config, serverless NEG,
+    // URL map, certificate — is free to define. The global forwarding rule is
+    // ~$18/month whether or not a request arrives.
+    expect(lb).toMatch(/variable "enable_load_balancer"[\s\S]*?default\s*=\s*false/);
+  });
+
+  it("public read on the SPA bucket is gated too, and that is a SECURITY gate", () => {
+    // The bucket lives in vetra-shared. Making it public requires extending the
+    // Domain Restricted Sharing exception to the project holding the build
+    // pipeline's credentials and the audit trail's destination buckets — which
+    // org-policies.tf deliberately excludes. Both wait for the toggle.
+    const i = lb.indexOf('resource "google_storage_bucket_iam_member" "spa_public_read"');
+    expect(i).toBeGreaterThan(-1);
+    expect(lb.slice(i, i + 300)).toMatch(/count\s*=\s*var\.enable_load_balancer/);
+  });
+
+  it("vercel.json's SPA rewrite is ported, not dropped", () => {
+    // vercel.json is one rule: every path returns index.html, because the
+    // client router owns the URL space. On Cloud Storage that is
+    // `not_found_page`. Losing it means every deep link 404s — and only on a
+    // refresh, so it survives casual testing.
+    expect(lb).toMatch(/not_found_page\s*=\s*"index\.html"/);
+    expect(lb).toMatch(/main_page_suffix\s*=\s*"index\.html"/);
+  });
+
+  it("the DRS exception excludes vetra-shared unless the LB is on", () => {
+    const org = fs.readFileSync(path.join(TF_DIR, "org-policies.tf"), "utf8");
+    const i = org.indexOf("drs_exempt_projects");
+    expect(i).toBeGreaterThan(-1);
+    expect(org.slice(i, i + 400)).toMatch(/var\.enable_load_balancer\s*\?/);
+  });
+});
+
 describe("the tripwires can actually see the source", () => {
   it("reads a meaningful number of .tf files", () => {
     // A path bug that silently scanned nothing would make every assertion above
