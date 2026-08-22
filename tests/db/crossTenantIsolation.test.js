@@ -102,7 +102,7 @@ beforeAll(async () => {
       id,
       `hook-${id.slice(0, 4)}`,
     ]);
-    await admin.query(`INSERT INTO users (business_id, email) VALUES ($1, $2)`, [id, `staff@${id.slice(0, 4)}.example`]);
+    await admin.query(`INSERT INTO users (business_id, email, auth_uid) VALUES ($1, $2, $3)`, [id, `staff@${id.slice(0, 4)}.example`, `authuid-${id.slice(0, 8)}`]);
   }
 });
 

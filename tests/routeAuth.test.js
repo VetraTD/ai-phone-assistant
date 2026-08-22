@@ -24,7 +24,7 @@ vi.mock("../services/db.js", () => ({
   withTenantSafe: async (_businessId, fn) => fn(),
   fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   updateBusinessPhoneNumber: (...args) => mockUpdateBusinessPhoneNumber(...args),
-  fetchUserByEmail: (...args) => mockFetchUserByEmail(...args),
+  fetchUserByAuthUid: (...args) => mockFetchUserByEmail(...args),
 }));
 
 // Only the network-touching half is replaced. bearerFromHeader stays REAL, so

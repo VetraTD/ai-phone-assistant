@@ -525,18 +525,23 @@ export function loadConfig(business, capabilityRows = null) {
  * @param {string} email
  * @returns {Promise<{ id: string, business_id: string, email: string, role: string }|null>}
  */
-export async function fetchUserByEmail(email) {
-  if (!pool || !email) return null;
-  // Through app_lookup_user_by_email (migration 029), not a plain SELECT.
+export async function fetchUserByAuthUid(authUid) {
+  if (!pool || !authUid) return null;
+  // Through app_lookup_user_by_auth_uid (migration 036), not a plain SELECT.
   //
   // This is a BOOTSTRAP read: it is how the tenant becomes known, so it cannot
   // be scoped to a tenant. Under row-level security a direct select returns
   // nothing and nobody can authenticate. The SECURITY DEFINER function is the
   // narrow, named exception — one row, pinned search_path — instead of a policy
   // that would make "forgot to scope" mean "may see everything".
-  const res = await q(`SELECT * FROM app_lookup_user_by_email($1)`, [email]);
+  //
+  // KEYED ON THE ACCOUNT ID, not the email address, since migration 036. Signup
+  // is open, so an address is something a stranger can CHOOSE: an email that has
+  // a `users` row but no identity-provider account could be claimed by anyone,
+  // who would then inherit that clinic's tenant. An account id cannot be chosen.
+  const res = await q(`SELECT * FROM app_lookup_user_by_auth_uid($1)`, [authUid]);
   if (res.error) {
-    log.error("db_error", { operation: "fetchUserByEmail", error: res.error.message });
+    log.error("db_error", { operation: "fetchUserByAuthUid", error: res.error.message });
     return null;
   }
   return one(res);

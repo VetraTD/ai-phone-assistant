@@ -114,8 +114,8 @@ beforeEach(async () => {
       [id, rows[0].id]
     );
   }
-  await admin.query(`INSERT INTO users (id, business_id, email) VALUES ($1, $2, $3)`, [STAFF_A, TENANT_A, EMAIL_A]);
-  await admin.query(`INSERT INTO users (id, business_id, email) VALUES ($1, $2, $3)`, [STAFF_B, TENANT_B, EMAIL_B]);
+  await admin.query(`INSERT INTO users (id, business_id, email, auth_uid) VALUES ($1, $2, $3, $4)`, [STAFF_A, TENANT_A, EMAIL_A, STAFF_A]);
+  await admin.query(`INSERT INTO users (id, business_id, email, auth_uid) VALUES ($1, $2, $3, $4)`, [STAFF_B, TENANT_B, EMAIL_B, STAFF_B]);
 
   authState.user = { id: STAFF_A, email: EMAIL_A };
 });

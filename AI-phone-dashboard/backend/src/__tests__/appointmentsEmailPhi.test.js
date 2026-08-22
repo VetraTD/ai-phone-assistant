@@ -49,7 +49,7 @@ describe("POST /api/appointments/email — digest content", () => {
     sendMail = vi.fn(async () => undefined);
     ({ app, poolQueryMock } = createTestApp({ mailer: { sendMail, isConfigured: () => true } }));
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
+      if (sql.includes("app_lookup_user_by_auth_uid")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
       if (sql.includes("from businesses")) {
         return Promise.resolve({ rows: [{ name: "Excel Cardiac Care", notification_email: "owner@example.com" }] });
       }
@@ -89,7 +89,7 @@ describe("POST /api/appointments/email — digest content", () => {
 
   it("says so plainly when there is nothing scheduled", async () => {
     poolQueryMock.mockImplementation((sql) => {
-      if (sql.includes("app_lookup_user_by_email")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
+      if (sql.includes("app_lookup_user_by_auth_uid")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
       if (sql.includes("from businesses")) {
         return Promise.resolve({ rows: [{ name: "Excel Cardiac Care", notification_email: "owner@example.com" }] });
       }

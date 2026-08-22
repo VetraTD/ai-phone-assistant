@@ -82,12 +82,14 @@ CREATE TABLE users (
   email       text UNIQUE NOT NULL,
   full_name   text,
   role        text DEFAULT 'staff',
-  -- The identity provider's account id (Identity Platform localId), migration
-  -- 035. NOT `id` above: that is this system's own staff identifier, generated
-  -- here and written into the PHI audit trail. The two were the same string
-  -- under Supabase Auth only because it issued uuids. Nullable until the user
-  -- import backfills existing rows.
-  auth_uid    text,
+  -- The identity provider's account id (Identity Platform localId), migrations
+  -- 035 and 036. NOT `id` above: that is this system's own staff identifier,
+  -- generated here and written into the PHI audit trail. The two were the same
+  -- string under Supabase Auth only because it issued uuids.
+  --
+  -- NOT NULL since 036, because the tenant lookup is keyed on it. A staff row
+  -- without one would be a person who cannot log in.
+  auth_uid    text NOT NULL,
   created_at  timestamptz DEFAULT now()
 );
 
@@ -594,15 +596,21 @@ CREATE TRIGGER business_directory_sync
   AFTER INSERT OR UPDATE OF phone_number OR DELETE ON businesses
   FOR EACH ROW EXECUTE FUNCTION app_sync_business_directory();
 
--- Routing only: verified login address -> tenant. The same shape as
+-- Routing only: identity-provider ACCOUNT ID -> tenant. The same shape as
 -- business_directory and for the same reason, one bootstrap along: `users` is
 -- FORCE RLS on `business_id = app_current_business_id()`, and the business_id
 -- is the very thing an authenticating request is trying to discover. NO
--- row-level security, NOT granted to vetra_app. See migration 034.
+-- row-level security, NOT granted to vetra_app. See migrations 034 and 036.
 --
--- MUST NEVER carry anything beyond an email and a business id.
+-- KEYED ON auth_uid, NOT ON EMAIL (036). Signup is open, so an address is
+-- something a stranger can CHOOSE — an address with a `users` row and no
+-- identity-provider account could be claimed by anyone, who would inherit that
+-- clinic's tenant with a valid token. An account id cannot be chosen.
+--
+-- MUST NEVER carry anything beyond an account id and a business id. It holds no
+-- personal data at all, which is the right shape for a table with no policies.
 CREATE TABLE IF NOT EXISTS user_directory (
-  email       text PRIMARY KEY,
+  auth_uid    text PRIMARY KEY,
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE
 );
 
@@ -622,25 +630,23 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    DELETE FROM user_directory WHERE email = OLD.email;
+    DELETE FROM user_directory WHERE auth_uid = OLD.auth_uid;
     RETURN OLD;
   END IF;
 
-  -- An address CHANGE must stop the old one resolving. Without this the
-  -- previous address keeps a live mapping to the tenant, and a decommissioned
+  -- An account CHANGE must stop the old one resolving, or a decommissioned
   -- login stays routable.
-  IF TG_OP = 'UPDATE' AND NEW.email IS DISTINCT FROM OLD.email THEN
-    DELETE FROM user_directory WHERE email = OLD.email;
+  IF TG_OP = 'UPDATE' AND NEW.auth_uid IS DISTINCT FROM OLD.auth_uid THEN
+    DELETE FROM user_directory WHERE auth_uid = OLD.auth_uid;
   END IF;
 
-  -- users.email is NOT NULL, which does not stop it being empty.
-  IF NEW.email IS NULL OR btrim(NEW.email) = '' THEN
+  IF NEW.auth_uid IS NULL OR btrim(NEW.auth_uid) = '' THEN
     RETURN NEW;
   END IF;
 
-  INSERT INTO user_directory (email, business_id)
-  VALUES (NEW.email, NEW.business_id)
-  ON CONFLICT (email) DO UPDATE SET business_id = EXCLUDED.business_id;
+  INSERT INTO user_directory (auth_uid, business_id)
+  VALUES (NEW.auth_uid, NEW.business_id)
+  ON CONFLICT (auth_uid) DO UPDATE SET business_id = EXCLUDED.business_id;
 
   RETURN NEW;
 END;
@@ -648,7 +654,7 @@ $$;
 
 DROP TRIGGER IF EXISTS user_directory_sync ON users;
 CREATE TRIGGER user_directory_sync
-  AFTER INSERT OR UPDATE OF email, business_id OR DELETE ON users
+  AFTER INSERT OR UPDATE OF auth_uid, business_id OR DELETE ON users
   FOR EACH ROW EXECUTE FUNCTION app_sync_user_directory();
 
 CREATE OR REPLACE FUNCTION app_lookup_business_by_phone(p_phone text)
@@ -714,10 +720,12 @@ COMMENT ON FUNCTION app_business_capabilities(uuid) IS
   'Bootstrap: one business''s capability rows, needed before a tenant is set. Configuration, not patient data.';
 
 -- Reads user_directory, adopts the tenant it finds, and only then reads `users`
--- — so the read SATISFIES the policy rather than bypassing it. The plain
--- SELECT this replaced returned ZERO rows on Cloud SQL, which meant every
--- authenticated request resolved to no business and 403'd. Migration 034.
-CREATE OR REPLACE FUNCTION app_lookup_user_by_email(p_email text)
+-- — so the read SATISFIES the policy rather than bypassing it. The plain SELECT
+-- this replaced returned ZERO rows on Cloud SQL, which meant every
+-- authenticated request resolved to no business and 403'd (migration 034), and
+-- it is keyed on the ACCOUNT ID rather than the address because an address is
+-- something a stranger can choose at an open signup (migration 036).
+CREATE OR REPLACE FUNCTION app_lookup_user_by_auth_uid(p_auth_uid text)
 RETURNS TABLE (id uuid, business_id uuid, email text, role text)
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -727,48 +735,44 @@ DECLARE
   v_business uuid;
   v_current  text := current_setting('app.business_id', true);
 BEGIN
-  IF p_email IS NULL OR btrim(p_email) = '' THEN
+  IF p_auth_uid IS NULL OR btrim(p_auth_uid) = '' THEN
     RETURN;
   END IF;
 
-  -- Qualified with `d.`, because RETURNS TABLE puts `email` and `business_id`
-  -- in scope as OUT parameters and an unqualified reference would resolve to
-  -- those rather than to the column.
+  -- Qualified with `d.`, because RETURNS TABLE puts `business_id` in scope as an
+  -- OUT parameter and an unqualified reference would resolve to it.
   SELECT d.business_id INTO v_business
     FROM user_directory d
-   WHERE d.email = p_email;
+   WHERE d.auth_uid = p_auth_uid;
 
   IF v_business IS NULL THEN
     RETURN;
   END IF;
 
   -- Adopt the discovered tenant ONLY when the caller has not already declared
-  -- one. If a scope is already set, respect it: this function must never
-  -- repoint a transaction that already knows which tenant it is working for,
-  -- and in that case the row is visible only if the user genuinely belongs to
-  -- that tenant — which is the correct answer, not a limitation.
+  -- one. This must never repoint a transaction that already knows which tenant
+  -- it is working for.
   IF v_current IS NULL OR v_current = '' THEN
     PERFORM set_config('app.business_id', v_business::text, true);
   END IF;
 
-  -- Now an ordinary, policy-satisfying read.
   RETURN QUERY
     SELECT u.id, u.business_id, u.email, u.role
       FROM users u
-     WHERE u.email = p_email
+     WHERE u.auth_uid = p_auth_uid
      LIMIT 1;
 END;
 $$;
 
-COMMENT ON FUNCTION app_lookup_user_by_email(text) IS
-  'Bootstrap: a verified login address -> the tenant it may act on. Reads user_directory, which has no row-level security and is unreadable by the application role, then adopts that tenant for the transaction so the read of `users` SATISFIES the policy instead of bypassing it. SECURITY DEFINER alone is not enough under FORCE ROW LEVEL SECURITY, and a BYPASSRLS owner is unavailable on Cloud SQL — see migration 034.';
+COMMENT ON FUNCTION app_lookup_user_by_auth_uid(text) IS
+  'Bootstrap: a verified account id -> the tenant it may act on. Replaces app_lookup_user_by_email, because an email address is something a stranger can choose at an open signup and an account id is not. Reads user_directory, which has no row-level security and is unreadable by the application role, then adopts that tenant so the read of `users` SATISFIES the policy instead of bypassing it — see migrations 034 and 036.';
 
 REVOKE ALL ON FUNCTION app_lookup_business_by_phone(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_lookup_user_by_email(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_lookup_user_by_auth_uid(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_lookup_business_by_phone(text) TO vetra_app;
 REVOKE ALL ON FUNCTION app_business_capabilities(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_business_capabilities(uuid) TO vetra_app;
-GRANT EXECUTE ON FUNCTION app_lookup_user_by_email(text) TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_lookup_user_by_auth_uid(text) TO vetra_app;
 GRANT EXECUTE ON FUNCTION app_current_business_id() TO vetra_app;
 
 -- create_appointment_if_available (migration 022) inserts into appointments,
@@ -1042,7 +1046,7 @@ GRANT EXECUTE ON FUNCTION app_create_business_for_user(text, text, text, text) T
 -- ------------------------------------------------------------
 -- GET /api/me answers "which business is this, and does it need onboarding" —
 -- and the businesses read inside it CAN be scoped, because by then
--- app_lookup_user_by_email has already produced the tenant id. No new function
+-- app_lookup_user_by_auth_uid has already produced the tenant id. No new function
 -- is needed for it; the route simply has to open a scope. Recorded here so the
 -- next person does not add a third definer function for a read that does not
 -- need one.

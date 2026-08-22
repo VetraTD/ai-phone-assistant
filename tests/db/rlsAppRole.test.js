@@ -14,7 +14,7 @@ import pg from "pg";
 // and anything that does not work here will not work there.
 //
 // Probing this before writing a line of it was worth doing: as vetra_app with
-// no tenant set, lookupBusinessByPhone returned null, fetchUserByEmail returned
+// no tenant set, lookupBusinessByPhone returned null, fetchUserByAuthUid returned
 // null, and createCall failed with "new row violates row-level security
 // policy". The app would not have answered a single call.
 
@@ -59,7 +59,7 @@ beforeEach(async () => {
     [TENANT_B, "Tenant B", "+15551110002"],
   ]) {
     await admin.query(`INSERT INTO businesses (id, name, phone_number) VALUES ($1, $2, $3)`, [id, name, phone]);
-    await admin.query(`INSERT INTO users (business_id, email) VALUES ($1, $2)`, [id, `staff-${id.slice(0, 8)}@example.com`]);
+    await admin.query(`INSERT INTO users (business_id, email, auth_uid) VALUES ($1, $2, $3)`, [id, `staff-${id.slice(0, 8)}@example.com`, `authuid-${id.slice(0, 8)}`]);
     await admin.query(`INSERT INTO business_knowledge (business_id, question, answer) VALUES ($1, 'hours', $2)`, [
       id,
       `answer for ${name}`,
@@ -86,15 +86,17 @@ describeDb("bootstrap lookups work without a tenant", () => {
     expect(biz.business_capabilities).toHaveLength(1);
   });
 
-  it("fetchUserByEmail resolves an identity to its tenant", async () => {
-    const user = await db.fetchUserByEmail(`staff-${TENANT_A.slice(0, 8)}@example.com`);
+  it("fetchUserByAuthUid resolves an identity to its tenant", async () => {
+    // By ACCOUNT ID since migration 036. It was by email until then, which was
+    // a hole: signup is open, so an address is something a stranger can choose.
+    const user = await db.fetchUserByAuthUid(`authuid-${TENANT_A.slice(0, 8)}`);
     expect(user?.business_id).toBe(TENANT_A);
   });
 
   it("neither leaks the other tenant", async () => {
     const biz = await db.lookupBusinessByPhone("+15551110001");
     expect(biz.id).not.toBe(TENANT_B);
-    const user = await db.fetchUserByEmail(`staff-${TENANT_B.slice(0, 8)}@example.com`);
+    const user = await db.fetchUserByAuthUid(`authuid-${TENANT_B.slice(0, 8)}`);
     // Found, because this is the lookup that ESTABLISHES the tenant — and it
     // returns tenant B's own row, not tenant A's.
     expect(user.business_id).toBe(TENANT_B);

@@ -127,6 +127,24 @@ export function buildPlan({ exportRows, dbUsers, existingAccounts }) {
       continue;
     }
 
+    // THE ASSUMPTION MIGRATION 036 RESTS ON, checked rather than trusted.
+    //
+    // Every path that ever created a `users` row set `users.id` from the auth
+    // provider's id, so for pre-Identity-Platform rows `users.id` IS the
+    // Supabase auth uid — which is what lets 036 backfill `auth_uid` from it
+    // with no export at all. If a row disagrees, that person's `auth_uid` is
+    // WRONG: their token would carry one id and the directory another, and they
+    // would be locked out. Safe direction, but it must not pass silently.
+    if (dbUser.auth_uid && dbUser.auth_uid !== row.id) {
+      plan.unusable.push({
+        row,
+        reason:
+          `auth_uid disagreement for ${email}: the database says ${dbUser.auth_uid}, ` +
+          `the export says ${row.id}. Migration 036 backfilled from users.id and one of them is wrong.`,
+      });
+      continue;
+    }
+
     if (existingAccounts.has(email)) {
       plan.alreadyPresent.push({ email });
       continue;

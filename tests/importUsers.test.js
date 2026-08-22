@@ -265,3 +265,43 @@ describe("verifyImport", () => {
     await expect(verifyImport({ post }, records)).rejects.toThrow(/lookup failed: 500/);
   });
 });
+
+describe("the assumption migration 036 rests on", () => {
+  // 036 backfills `auth_uid` from `users.id`, because every path that ever
+  // created a users row set that id from the auth provider. If the real export
+  // disagrees for any row, that person's auth_uid is wrong and they are locked
+  // out — the safe direction, and still not something that may pass silently.
+  const dbUsers = [{ id: uuid(1), email: "a@clinic.test", auth_uid: uuid(1) }];
+
+  it("imports when the export's id AGREES with the backfilled auth_uid", () => {
+    const plan = buildPlan({
+      exportRows: [{ id: uuid(1), email: "a@clinic.test", encrypted_password: SUPABASE_SHAPE }],
+      dbUsers,
+      existingAccounts: new Set(),
+    });
+    expect(plan.toImport).toHaveLength(1);
+    expect(plan.unusable).toHaveLength(0);
+  });
+
+  it("REFUSES when they disagree, naming both values", () => {
+    const plan = buildPlan({
+      exportRows: [{ id: "a-different-uid", email: "a@clinic.test", encrypted_password: SUPABASE_SHAPE }],
+      dbUsers,
+      existingAccounts: new Set(),
+    });
+    expect(plan.toImport).toHaveLength(0);
+    expect(plan.unusable[0].reason).toMatch(/auth_uid disagreement/);
+    expect(plan.unusable[0].reason).toContain(uuid(1));
+    expect(plan.unusable[0].reason).toContain("a-different-uid");
+  });
+
+  it("does not complain about rows that have no auth_uid yet", () => {
+    // Before 036 runs there is nothing to disagree with.
+    const plan = buildPlan({
+      exportRows: [{ id: "supa-uid-a", email: "a@clinic.test", encrypted_password: SUPABASE_SHAPE }],
+      dbUsers: [{ id: uuid(1), email: "a@clinic.test", auth_uid: null }],
+      existingAccounts: new Set(),
+    });
+    expect(plan.toImport).toHaveLength(1);
+  });
+});

@@ -63,19 +63,41 @@ function expectedFromMigrations() {
       }
     }
 
+    // IN THE ORDER THE STATEMENTS APPEAR, not all creates then all drops.
+    //
+    // This used to run the two loops separately, which is fine while a migration
+    // only ever adds or only ever removes — and wrong for one that REBUILDS.
+    // Migration 036 drops `user_directory` and immediately recreates it re-keyed,
+    // and the old code applied the CREATE first and the DROP second, concluding
+    // the table had been deleted. It reported schema.sql as wrongly containing a
+    // dropped table, which is the opposite of the truth.
+    const events = [];
     for (const t of sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
-      tables.add(t[1].toLowerCase());
-      droppedTables.delete(t[1].toLowerCase());
+      events.push({ at: t.index, kind: "create-table", name: t[1].toLowerCase() });
     }
     for (const t of sql.matchAll(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
-      droppedTables.add(t[1].toLowerCase());
-      tables.delete(t[1].toLowerCase());
+      events.push({ at: t.index, kind: "drop-table", name: t[1].toLowerCase() });
     }
     for (const i of sql.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
-      indexes.add(i[1].toLowerCase());
+      events.push({ at: i.index, kind: "create-index", name: i[1].toLowerCase() });
     }
     for (const i of sql.matchAll(/DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) {
-      indexes.delete(i[1].toLowerCase());
+      events.push({ at: i.index, kind: "drop-index", name: i[1].toLowerCase() });
+    }
+    events.sort((a, b) => a.at - b.at);
+
+    for (const e of events) {
+      if (e.kind === "create-table") {
+        tables.add(e.name);
+        droppedTables.delete(e.name);
+      } else if (e.kind === "drop-table") {
+        droppedTables.add(e.name);
+        tables.delete(e.name);
+      } else if (e.kind === "create-index") {
+        indexes.add(e.name);
+      } else {
+        indexes.delete(e.name);
+      }
     }
   }
 

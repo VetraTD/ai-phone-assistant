@@ -66,10 +66,13 @@ beforeEach(async () => {
   ]) {
     await admin.query(`INSERT INTO businesses (id, name, phone_number) VALUES ($1, $2, $3)`, [id, name, phone]);
   }
-  await admin.query(`INSERT INTO users (id, business_id, email) VALUES ($1, $2, $3)`, [
+  // auth_uid is NOT NULL since migration 036 — the tenant lookup is keyed on it,
+  // so a staff row without one is a person who cannot log in.
+  await admin.query(`INSERT INTO users (id, business_id, email, auth_uid) VALUES ($1, $2, $3, $4)`, [
     STAFF_A,
     TENANT_A,
     "audit-staff@example.com",
+    `authuid-${STAFF_A.slice(0, 8)}`,
   ]);
 
   const { rows } = await admin.query(

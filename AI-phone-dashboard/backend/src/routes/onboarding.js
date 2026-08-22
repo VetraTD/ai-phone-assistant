@@ -20,7 +20,7 @@ router.get("/api/me", authenticate, async (req, res) => {
   try {
     const authUserId = req.authUser.id;
 
-    // Through app_lookup_user_by_email (migration 029). A direct select on
+    // Through app_lookup_user_by_auth_uid (migration 036). A direct select on
     // `users` is RLS'd and returns nothing before a tenant is set, so every
     // account would have looked brand new and been sent back to onboarding —
     // which, for an existing clinic, would have offered to create a SECOND

@@ -1,5 +1,5 @@
 import { bearerFromHeader, verifyAccessToken, SESSION_MAX_AGE_CODE } from "../lib/auth/accessToken.js";
-import { fetchUserByEmail } from "../services/db.js";
+import { fetchUserByAuthUid } from "../services/db.js";
 import { log } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,10 @@ export async function requireBusinessAccess(req, res, next) {
     return res.status(401).json({ error: "Session expired", code: SESSION_MAX_AGE_CODE });
   }
 
-  const user = await fetchUserByEmail(identity.email);
+  // BY ACCOUNT ID, not by email (migration 036). Signup is open, so an address
+  // is something a stranger can choose; resolving a tenant from one would let
+  // anybody claim a staff address that has no account yet.
+  const user = await fetchUserByAuthUid(identity.uid);
   if (!user?.business_id) {
     // Authenticated against the auth backend, but carrying no staff row — a
     // signed-up account that was never attached to a business. Not a login

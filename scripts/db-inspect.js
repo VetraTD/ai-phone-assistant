@@ -98,7 +98,7 @@ try {
       await pool.query(
         `SELECT p.proname, r.rolname AS owner, r.rolsuper, r.rolbypassrls, p.prosecdef AS security_definer
            FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
-          WHERE p.proname IN ('app_lookup_business_by_phone','app_create_business_for_user','app_business_capabilities','app_lookup_user_by_email')
+          WHERE p.proname IN ('app_lookup_business_by_phone','app_create_business_for_user','app_business_capabilities','app_lookup_user_by_auth_uid')
           ORDER BY p.proname`
       )
     ).rows

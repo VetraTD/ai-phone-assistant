@@ -3,33 +3,34 @@ const pool = require("./db");
 /**
  * Get the business_id for the authenticated user (or null if unlinked).
  *
- * THROUGH app_lookup_user_by_email (migration 029), not a plain SELECT on
+ * THROUGH app_lookup_user_by_auth_uid (migration 036), not a plain SELECT on
  * `users`. This is a BOOTSTRAP read — it is how the tenant becomes known, so it
- * cannot itself be scoped to a tenant — and `users` is RLS-protected, so the
- * direct select it used to do returns nothing as the application role. Every
- * route then 403'd with "No business linked to this user", which reads as an
- * authorisation bug and is a scoping one.
+ * cannot itself be scoped to a tenant — and `users` is RLS-protected, so a
+ * direct select returns nothing as the application role. Every route then 403'd
+ * with "No business linked to this user", which reads as an authorisation bug
+ * and is a scoping one.
  *
- * KEYED ON EMAIL, where the old version keyed on the Supabase auth uid. Two
- * reasons, and the first is decisive: there is no bootstrap function for the id
- * and adding one would be a second answer to a question that already has one.
- * The second is that the voice server's requireBusinessAccess resolves an
- * identity through fetchUserByEmail, so both servers now ask the same question
- * the same way instead of drifting — the class of thing D1 exists to catch.
+ * KEYED ON THE ACCOUNT ID. It was keyed on EMAIL between migrations 029 and
+ * 036, and that was a hole: signup is open, so an address is something a
+ * stranger can CHOOSE. An address with a `users` row but no identity-provider
+ * account could be claimed by anyone signing up with it, and they would inherit
+ * that clinic's tenant with a perfectly valid token. An account id cannot be
+ * chosen.
  *
- * `users.email` is UNIQUE, and onboarding writes it from the same auth identity
- * the token carries, so the two agree by construction.
+ * The voice server's requireBusinessAccess resolves an identity the same way
+ * through fetchUserByAuthUid, so both servers ask one question one way rather
+ * than drifting — the class of thing D1 exists to catch.
  *
- * Accepts the auth user object rather than an id, so the caller cannot pass the
- * wrong one of the two fields silently.
+ * Accepts the auth user object rather than a bare id, so the caller cannot pass
+ * the wrong one of the two fields silently.
  *
  * @param {{ id?: string, email?: string }|string|null} authUser
  * @returns {Promise<string|null>}
  */
 async function getBusinessIdForUser(authUser) {
-  const email = typeof authUser === "string" ? null : authUser?.email;
-  if (!email) return null;
-  const r = await pool.query(`select business_id from app_lookup_user_by_email($1)`, [email]);
+  const authUid = typeof authUser === "string" ? null : authUser?.id;
+  if (!authUid) return null;
+  const r = await pool.query(`select business_id from app_lookup_user_by_auth_uid($1)`, [authUid]);
   return r.rows[0]?.business_id || null;
 }
 

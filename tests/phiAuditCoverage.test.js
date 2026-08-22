@@ -106,7 +106,7 @@ describe("PHI-access classification covers every data-layer export", () => {
       "fetchBusinessCapabilities",
       "fetchBusinessKnowledge",
       "lookupBusinessByPhone",
-      "fetchUserByEmail",
+      "fetchUserByAuthUid",
       "listIntegrationsForBusiness",
     ]) {
       expect(name in db.PHI_ACCESS, `${name} must not be a PHI access`).toBe(false);

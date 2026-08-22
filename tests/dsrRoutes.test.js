@@ -33,7 +33,7 @@ vi.mock("../services/db.js", () => ({
   withTenant: async (_businessId, fn) => fn(),
   exportCallerData: (...a) => mockExportCallerData(...a),
   eraseCallerData: (...a) => mockEraseCallerData(...a),
-  fetchUserByEmail: (...a) => mockFetchUserByEmail(...a),
+  fetchUserByAuthUid: (...a) => mockFetchUserByEmail(...a),
   listCallerRecordingMessages: (...a) => mockListCallerRecordingMessages(...a),
 }));
 

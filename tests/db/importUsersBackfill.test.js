@@ -67,8 +67,18 @@ afterAll(async () => {
 
 async function seedTwoStaff() {
   await admin.query(
-    `INSERT INTO users (id, business_id, email) VALUES ($1,$2,$3), ($4,$2,$5)`,
-    [USER_A, BIZ, "backfill-a@example.test", USER_B, "backfill-b@example.test"]
+    // Seeded WITH an auth_uid because 036 made it NOT NULL, then overwritten by
+    // the backfill under test — which is what the real import does to rows that
+    // 036 filled in from users.id.
+    //
+    // Separate parameters rather than `$1::text`: reusing one placeholder as
+    // both uuid and text makes Postgres refuse with "inconsistent types deduced
+    // for parameter $1".
+    `INSERT INTO users (id, business_id, email, auth_uid) VALUES ($1,$2,$3,$4), ($5,$2,$6,$7)`,
+    [
+      USER_A, BIZ, "backfill-a@example.test", USER_A,
+      USER_B, "backfill-b@example.test", USER_B,
+    ]
   );
 }
 
