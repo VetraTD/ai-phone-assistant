@@ -23,6 +23,92 @@ are*, and it changes every session.
 
 ---
 
+## NEXT SESSION — start here
+
+Two sessions remain in Lane B, in this order. **Do not combine them.** Google STT
+risks conversational quality; B3 risks login. Different failure modes, different
+gates, no shared context — one bad session should not be able to break both.
+
+### Session A — Google STT v2 for the US lane, and C5b
+
+**Why first:** the US `hipaa` lane cannot serve a call at all today. `server.js`
+exits WITHOUT a Deepgram key ("there is no fallback mode"); `lib/bootChecks.js`
+exits WITH one in hipaa mode. Those contradict, and no configuration resolves
+it. This is the migration's real blocker and it is not infrastructure.
+
+**Not a new decision** — 2026-08-19: "BAA-lane STT is Google STT v2, zero
+third-party AI BAAs to negotiate, reversible behind the sttStream.js seam."
+Do not wait on the Deepgram reply. Deepgram stays for the UK lane regardless.
+
+The seam is good: `lib/voice/sttStream.js` exports `createSttStream()`, ONE call
+site (`lib/voice/session.js` ~2609), six provider-agnostic callbacks. Select by
+lane/compliance tier, not by an env flag someone can get wrong.
+
+**The risk is turn-taking, not transcription.** 566 lines tuned to Deepgram's
+endpointing, interim and reconnect semantics, and this project's history says
+cutoffs were echo rather than endpointing. Telephony model, 8 kHz mulaw. Expect
+to re-derive endpointing rather than port a number.
+
+**Do C5b in the same session.** It is the only time both implementations exist
+side by side. Same recorded audio through both; compare word-error rate and
+`stt_ms`. Needed regardless of `us-standard`, because the HIPAA lane has no
+choice — the question is not "which" but "how much worse, and is that
+acceptable". Measurable offline; needs nobody's ears.
+
+**Gates, in order:** `npm run sim:cutoff` · `npm test` · `npm run eval` against
+A0's recorded baseline (read it, do not guess it). Sabotage-verify new guards.
+
+**Success condition, and it is objective:** staging runs `DEPLOYMENT_MODE=standard`
+ONLY because a hipaa process refuses to boot with a Deepgram credential present.
+When Google STT works, flip staging back to `hipaa` in
+`infra/terraform/cloud-run.tf` and it must boot and serve. That is the proof.
+
+**Cost:** Google STT v2 unlogged is **$0.016/min**. NEVER the "Logged" tier
+($0.012) — logged means Google may retain the audio, which for PHI is the one
+thing you must not opt into. Assert it in code, not a comment.
+
+### Session B — B3: Identity Platform, and delete supabaseClient.js
+
+Login-breaking: 13 call sites across 7 files. Wants a clean head and its own
+verification. Blocks D7, because D7's definition is cancelling Supabase.
+
+**Already decided, do not re-litigate** (2026-08-21, owner): initialise Identity
+Platform in `vetra-shared`, **US only**, **NO TENANTS** — migration 029's RLS
+already does tenant isolation and a second tenancy model has to be kept in sync
+with the first. UK auth waits until that clinic's DPA has been read. Identity
+Platform has NO data-residency control of any kind; the UK claim is a disclosed
+transfer, not enforced residency.
+
+**B1(2)** — the bcrypt import spike — follows, using synthetic Supabase-format
+hashes. A real export needs the owner's Supabase service key.
+
+### Environment — get these wrong and you lose an hour each
+
+- `terraform` is NOT on PATH:
+  `/c/Users/nithi/AppData/Local/Microsoft/WinGet/Links/terraform.exe`
+- gcloud needs `CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd`
+- **TERRAFORM DOES NOT READ `CLOUDSDK_CONFIG`.** It needs
+  `GOOGLE_APPLICATION_CREDENTIALS=$HOME/.gcloud-vetratd/application_default_credentials.json`
+  or it runs as a PERSONAL account and reports it as a missing IAM binding on
+  the right project. Also `TF_DISABLE_PLUGIN_TLS=1`.
+- ADC expires on the org's reauth window (`invalid_rapt`). The fix is
+  interactive and only the owner can do it.
+- **Deploying: build via `cloudbuild.yaml`, then BUMP `image_tag` in
+  `terraform.tfvars` to the new commit SHA.** A floating `latest` cost three
+  failed deploys in one session where the container ran previous code, and every
+  failure looked like a real bug because it was — in old code.
+- `terraform plan` is NOT clean. A Cloud Run service at `min_instance_count = 0`
+  shows a permanent phantom `scaling` diff. Read the diff; do not trust an empty
+  one.
+
+### Hard stops — these need the owner present
+
+`terraform apply` · creating or deleting any GCP project · any billing link,
+unlink or budget change · anything touching Secret Manager or real credentials ·
+**`git push`, on any branch — the repo is public.**
+
+---
+
 ## Standing facts — verified, do not re-derive
 
 | Fact | Verified | Consequence |
@@ -720,6 +806,7 @@ model changes · `Vetra-desktop` · rebuilding the marketing site (a friend owns
 
 | # | Date | Branch | Did | Left for next |
 |---|---|---|---|---|
+| 8 | 2026-08-21 | `feat/gcp-lane-b-terraform` (Lane A merged in) | **LANE B COMPLETE EXCEPT B3 AND B1(2).** B0a APPLIED (139 resources, remote state in GCS, zero drift). **B2 schema is in staging** — Cloud Build image, a Cloud Run Job with Direct VPC egress, 12 tables, 30 migrations baselined, `vetra_app` granted to the runtime identity, idempotent. **B4 deployed and serving** — secrets pushed byte-exact from a Twilio SUBACCOUNT, Cloud SQL over private IP with IAM auth, all three signature-rejection paths returning an identical 403. **B5 built with its billing part switched off.** Cloud SQL now uses **IAM database authentication**, so no database password exists for the runtime. **The caller allowlist was written down as a compensating control and had never been built** — now built and sabotage-verified. **Nine traps found by deploying rather than reading**, all in Standing facts: `CLOUDSDK_CONFIG` does not steer Terraform; a floating `latest` tag cost THREE failed deploys; C-8's own `severity < INFO` exclusion hid the first migration failure because container stdout is DEFAULT severity; an IAM DB user cannot apply a schema; Cloud Run pulls cross-project images as its SERVICE AGENT; Cloud Build defaults to the compute SA; DRS blocks `allUsers`; `validateRequest` THROWS on a malformed signature (500 where 403 belonged); and `min_instance_count = 0` drifts forever. **Owner decisions recorded:** the UK migrates too (the reason is the auth fork, not cost); Identity Platform is US-only with NO tenants; `us-standard` is not built speculatively | **THE REMAINING BLOCKER IS NOT INFRASTRUCTURE.** The US `hipaa` lane has no BAA-covered STT: `server.js` exits without a Deepgram key, `bootChecks` exits with one in hipaa mode, and staging only runs because it was set to `standard`. **Session A: Google STT v2 + C5b. Session B: B3.** See "NEXT SESSION — start here" at the top of this file. **Owner:** C5 (20 minutes and your ears, gates a $130/month decision); the quota; DNS + a dashboard backend image before B5's LB is worth switching on. Suites: root **105 files / 2049 tests** |
 | 1 | 2026-08-20 | `chore/gcp-migration-ledger` | Committed the two-region spec + superseded banners on the 2026-08-02 specs. Opened this ledger. Verified `dev` is a strict ancestor of `origin/main`. Recorded A0 preconditions (86k ElevenLabs quota, no-push window confirmed, Railway live) | **A0 baseline** — the next action. Owner starts the Day 1 list in a separate session |
 | 3 | 2026-08-20 | `fix/a1-5-unauth-endpoints` + ledger | **A1.5 shipped to a branch** (`0836165`) — 4 routes closed, 13 tests, suite 83/1707 green, voice path provably untouched. **Completed the whole owner GCP track**: org `564252011558`, billing `01C71E-7C0893-377AE9`, GCP HIPAA BAA, CDPA, both EU certs, org roles granted, ADC isolated in `~/.gcloud-vetratd` and verified. Caught: the Workspace BAA does not cover GCP; no org existed; gcloud on the wrong account; the org-role gap; Norton TLS interception; **and that the repo is PUBLIC while publishing live vulns with file:line** | **B0w** — Terraform root module against the real org/billing IDs, with per-founder IAM. Owner: **repo-private decision**, then Block 1 |
 | 7 | 2026-08-21 | `feat/gcp-lane-b-terraform` | **B0w reworked for the 4-project shape; nothing applied.** Six STACKS now derive onto four PROJECTS via `var.stack_projects` (`2503257`), so 6→4 and 4→6 are both a tfvars edit. Org-node log sinks with audit/application severed (`79cb172`). Cost controls C-1..C-11 encoded (`dd017b6`). Credential-boundary CI gate (`85e691d`). **Four things were found by doing rather than reading:** (1) **B0a's Terraform state is GONE** — the projects are live and Terraform does not know them, so a plan from empty state proposes creating projects that already exist; adopted via `import` blocks. (2) **`CLOUDSDK_CONFIG` does not steer Terraform** — every run authenticates as the PERSONAL account, and it reports as a missing IAM binding on the right project. (3) **per-stack VPCs silently broke C-4** — a Cloud SQL instance peers to one network, so merged staging could not have had a shared instance. (4) **`gemini-3.6-flash` is served by NO single Vertex region** — `VERTEX_LOCATION=us-central1`, the value in A8's own tests, would 404 at runtime. **B1 q1 CLOSED: yes, `locations/eu` serves it.** C-3 priced off the real SKU catalog: **$74.46/mo**, Postgres confirmed. Root suite **84 files / 1728 green**; 6 gates sabotage-verified | **Cloud SQL IAM DATABASE AUTH applied (`6afeadb`)** — `cloudsql.iam_authentication=on`, two passwordless users, `roles/cloudsql.instanceUser` added. **B4 no longer needs a database password in Secret Manager.** **B3's open question CLOSED, and it is bad news worth having early:** Identity Platform has **no data-location control at all** — eighteen Config fields, none a region — so `gcp.resourceLocations` cannot reach it and UK staff logins cannot be kept in the EU. Staff accounts, not patient data, so a disclosed-transfer question rather than a PHI one, but the UK claim must be reworded. **Identity Platform deliberately NOT initialised** pending that call. Earlier: **B2 STAGING APPLIED (`9edae5d`) — `vetra-us-staging` RUNNABLE: POSTGRES_16, db-g1-small, ZONAL, CMEK verified against our key, `ipv4Enabled: false` with one PRIVATE address `10.20.32.3` inside B0w's reserved peering range, `ENCRYPTED_ONLY`, backups on, zero drift. ~$27/month committed.** **The ledger's own budget precondition is now met** — and a `$200 Monthly Budget Alert` turned out to already exist, unmanaged, which this file did not know. **C-12 added:** production databases off by default, $98.62/month saved, production's half of B2's gate moved to D3. **Three applies**, each on a different trap now documented: HCL's `$$` escape, the `service_identity` -> IAM propagation race, and the quota-project API list — which had fired three times and is now one list, `terraform_quota_apis`. **B1 ② (bcrypt import spike) NOT started: it needs a real Supabase export, which is real credentials and a hard stop.** Earlier the same session: **B0a APPLIED (`2e75abe`) — 139 resources, remote state, zero drift. Lane B provisioning is unblocked; B2-B5 no longer wait on anything in B0.** The org-node sinks failed round 1 because no role `admin@vetratd.com` holds carries `logging.sinks.create` at the org — which is the property that makes them worth having. **`VERTEX_LOCATION` fixed on `feat/gcp-lane-a` (`f25fc6d`)**: `global` refused at client construction, single regions announced, every `us-central1` fixture corrected, sabotage-verified, 101 files / 1984 tests green. **The credential gate was broken and only running it live showed it** — its project fallback read the variable this session emptied, and its tfvars parser built a RegExp in a template literal where a backslash-s collapses to a bare s; both failed SAFE. Now verified against `vetra-us-prod-c3a3bd`: 0 secrets, boundary holds. **NEXT: B2** (Cloud SQL from `terraform output cloud_sql_plan`, Direct VPC egress, no Redis) and **B3**. Owner: Deepgram BAA reply; the free-trial clock, ~2026-11-18. Was: ~~`terraform plan` BLOCKED on `invalid_rapt`~~ — **CLEARED in-session; plan ran clean, `7 import / 127 add / 4 change / 0 destroy`, nothing applied** (`913006c`). **NEXT: the adoption apply, owner present.** Then blank `adopt_existing_projects` and `adopt_existing_org_policies` (Terraform errors on an import block targeting an address already in state), then `terraform init -migrate-state` to the GCS bucket — which is the whole reason this session had to write `imports.tf`. Was: needs an interactive `CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud auth application-default login`, then re-plan with `GOOGLE_APPLICATION_CREDENTIALS` set. Then the **adoption apply** (owner present), then blank the two `adopt_existing_*` vars and migrate state to GCS. **A8's `VERTEX_LOCATION` needs changing to `us`/`eu` on `feat/gcp-lane-a`** — not done here, wrong branch. Owner: the quota, the Deepgram BAA reply |
