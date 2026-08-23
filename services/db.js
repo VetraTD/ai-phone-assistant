@@ -223,18 +223,30 @@ export function recordPhiAccess(record) {
     // non-covered deployment — an unscoped access is not a compliance defect,
     // and the ratchet this codebase already runs (A1.6, A6) only tightens.
     //
-    // The volume matters too, and it is what makes an ungated version wrong
-    // rather than merely noisy. Some PHI writes happen per TURN — a transcript
-    // entry is one — and services/db.js's own rule is "wrap a unit of work,
-    // never a call", so those writes are outside withTenant BY DESIGN. An
-    // ungated line would therefore fire on every turn of every call, forever,
-    // reporting intended behaviour as a fault. An alarm that is always on is
-    // one nobody reads.
+    // ------------------------------------------------------------------
+    // O32 IS CLOSED, AND THIS COMMENT USED TO SAY THE OPPOSITE.
+    // ------------------------------------------------------------------
+    // It said per-turn writes were outside withTenant BY DESIGN, that an
+    // ungated line would fire on every turn of every call, and that the fix
+    // was still owed. All three stopped being true and the comment did not,
+    // which made it the most confidently wrong text in this file: it described
+    // an accepted gap that had already been closed, for a different reason,
+    // by somebody fixing something else.
     //
-    // KNOWN GAP, recorded rather than papered over: in `hipaa` mode those
-    // per-turn writes still need a home. The fix is B2's — wrap each one in its
-    // own short unit of work, which is three extra statements on a path already
-    // measured at 2,611 ms p50 — not a change to this line.
+    // What closed it: the live-call scoping fix wrapped every per-turn write in
+    // lib/voice/session.js (`scopedWrite`) in its own SHORT unit of work,
+    // because under FORCE row-level security an unscoped write is REFUSED
+    // rather than merely unaudited. The audit row came along for free — one row
+    // per unit of work, on a connection that is already checked out. The cost
+    // O32 priced at "three extra statements on a path measured at 2,611 ms p50"
+    // is not on that path either: every one of those writes is fire-and-forget,
+    // so none of it is inside the turn loop.
+    //
+    // The last genuinely unscoped PHI write was the degraded voicemail file,
+    // and it is now lib/degradedVoicemail.js, scoped and covered by a test that
+    // runs as the unprivileged role. So this branch is no longer expected to
+    // fire at all — reaching it means somebody added a PHI write with no unit
+    // of work around it, which is exactly what it should announce.
     if (IS_HIPAA_MODE) {
       log.error("phi_access_unaudited", {
         operation: record.operation,

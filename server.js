@@ -5,6 +5,7 @@ import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
 import { verifyTwilioSignature } from "./lib/twilioSignature.js";
+import { fileDegradedVoicemail } from "./lib/degradedVoicemail.js";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/db.js";
@@ -459,36 +460,20 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
       : null;
 
     if (business) {
-      const message = `Voicemail recording: ${recordingUrl}`;
-      const id = await db.createCustomerRequest({
-        businessId: business.id,
-        requestType: "message",
-        callbackNumber: callerNumber,
-        message,
+      // Extracted to lib/degradedVoicemail.js (ledger O32). It was inline, and
+      // that is how it stayed the LAST unscoped PHI write in the system after
+      // every other one had been wrapped: `createCustomerRequest` ran with no
+      // tenant scope, which on Cloud SQL means the INSERT is refused outright
+      // and in `hipaa` mode means a PHI write with nowhere to record itself.
+      // Behind a plain function it can be run by a test as the unprivileged
+      // role, under the row-level security that is the point.
+      await fileDegradedVoicemail({
+        deps: { db, notifications, log, captureException },
+        business,
+        callerNumber,
+        recordingUrl,
+        callSid,
       });
-      if (id) {
-        notifications
-          .notifyCustomerRequest({
-            businessId: business.id,
-            customerRequest: {
-              request_type: "message",
-              caller_name: null,
-              callback_number: callerNumber,
-              message,
-              preferred_time: null,
-            },
-            call: { callerNumber },
-          })
-          .catch(() => {});
-        const config = db.loadConfig(business);
-        notifications
-          .sendCallerSms(config, callerNumber, "message_received", {
-            name_part: "",
-            business: config.businessName,
-            sla: notifications.MESSAGE_SLA_TEXT,
-          })
-          .catch((err) => log.error("sms_followup_failed", { callSid, kind: "message_received", reason: err?.message }));
-      }
     } else {
       // No business row, so there is nowhere to file this. The recording URL
       // goes in the log line so a real caller's message is recoverable by hand

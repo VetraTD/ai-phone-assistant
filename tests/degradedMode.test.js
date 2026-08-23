@@ -12,10 +12,20 @@ const mockCreateCustomerRequest = vi.fn();
 const mockNotifyCustomerRequest = vi.fn(async () => {});
 const mockSendCallerSms = vi.fn(async () => {});
 
+// Ledger O32. The voicemail write ran with NO TENANT SCOPE, which against the
+// local superuser works and against Cloud SQL is a refused INSERT reported as
+// a 200. The fake records which tenant the scope was opened for, and the write
+// only runs inside it — so a regression that dropped the scope would show up
+// here as "createCustomerRequest was never called" rather than passing quietly.
+// The real refusal is exercised against a real database in
+// tests/db/degradedVoicemail.test.js; this is the wiring.
+const mockWithTenantSafe = vi.fn(async (businessId, fn) => (businessId ? fn() : null));
+
 vi.mock("../services/db.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   createCustomerRequest: (...args) => mockCreateCustomerRequest(...args),
+  withTenantSafe: (...args) => mockWithTenantSafe(...args),
   loadConfig: (business) => (business ? { businessName: business.name || "Test Biz", smsFollowupEnabled: false, smsTemplates: {} } : null),
 }));
 
@@ -232,6 +242,12 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
 
     expect(res.status).toBe(200);
     expect(mockLookupBusinessByPhone).toHaveBeenCalledWith("+15550001111");
+    // The write is inside a unit of work scoped to the tenant it belongs to.
+    expect(mockWithTenantSafe).toHaveBeenCalledWith(
+      "biz-123",
+      expect.any(Function),
+      expect.objectContaining({ operation: "createCustomerRequest", callSid: "CA_vm_1" })
+    );
     expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         businessId: "biz-123",
