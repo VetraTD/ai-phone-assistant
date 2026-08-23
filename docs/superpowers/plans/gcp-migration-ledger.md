@@ -587,6 +587,7 @@ unlink or budget change · anything touching Secret Manager or real credentials 
 | **The dashboard was never even UPLOADED to Cloud Build.** `.gcloudignore` excludes `AI-phone-dashboard` outright | 2026-08-22 | So "cloudbuild.yaml does not build the dashboard image" was the symptom and not the cause — a build step added to that config would have failed on a Dockerfile it could not find. Submitted as its own source root instead (`gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml`), which keeps the voice image's tarball from carrying a dashboard it does not use, and keeps the two `image_tag`s independent so a dashboard change does not mint a new voice tag |
 | **`infra/terraform/terraform.tfvars` IS GITIGNORED, so every pin in it lives on ONE DISK and is invisible to review** | 2026-08-23 | Correct — it holds real org and billing ids — and it has a cost nobody had priced: **`dashboard_image_tag` was never set for its entire life**, because `terraform.tfvars.example` did not mention it, so nothing ever prompted anyone to set it and it silently used its `latest` default. The example file is the ONLY tracked description of what the real one must contain, which makes an omission there a permanent, invisible default rather than a documentation gap. Both tags are now in the example with the build commands and the migrate-job ordering warning. **The general rule: anything required in the ignored file must appear in the tracked example, or it will eventually be unset and nobody will be able to see that from the repository** |
 | **`roles/storage.objectAdmin` DOES NOT GRANT `storage.buckets.get`, so it cannot publish with `gcloud storage rsync`** | 2026-08-23 (measured, after failing on it twice) | `loadbalancer.tf`'s own comment names the first publish failure as *"does not have storage.buckets.get access"* — and then grants `objectAdmin`, whose permission list contains `storage.objects.list` and **no `storage.buckets.*` at all**. **The recorded fix never addressed the recorded symptom**, and the second attempt failed with the byte-identical error months later, because the grant had been written, believed, and never exercised. `rsync` reads the bucket's own metadata before it touches an object, so object permissions alone can never be enough. Fixed by adding **`roles/storage.legacyBucketReader`** alongside — the narrowest predefined role carrying `storage.buckets.get`, and it deliberately carries neither `buckets.update` nor `buckets.setIamPolicy`, so the property the original comment cared about still holds: the deployer manages OBJECTS and cannot rewrite the bucket's policy. ("legacy" is Google's ACL-era naming, not a deprecation.) **A permission named in a comment is not a permission granted by the role beneath it** |
+| **BOTH PRODUCTION PROJECTS ARE EMPTY — everything that exists is staging** | 2026-08-23 (`gcloud run services list` + `sql instances list`, both prod projects) | Zero Cloud Run services and zero Cloud SQL instances in `vetra-us-prod` AND `vetra-uk-prod`. This is C-12 working as designed (~$98.62/month deferred), and it has a consequence Lane D does not state: **D3 says `pg_dump` / `pg_restore` and presumes a target instance that has never been created.** Building production is an unlisted step inside the cutover, and a cost decision rather than a task. **The related scoping question nobody has answered: Lane C says "per region" four times and `enable_uk_resources = false`**, so C2/C3/C4/D5 cannot complete as written. Recommendation recorded at Lane D: finish US-only, leave `vetra-uk-prod` dormant, make UK its own customer-triggered lane. **This does not reopen the prod US/UK split**, which stays non-negotiable — only when the UK half gets built |
 | **The SPA is PUBLISHED and NOT REACHABLE, and those are different milestones** | 2026-08-23 | 28 objects in `vetra-dashboard-c3a3bd`, and the bundle is correctly built: the staging API URL is in the `App` and `Contact` chunks, the Identity Platform auth domain is in `Login`, and the `localhost:3001` fallback appears nowhere. **But the bucket is not public and `enable_load_balancer` is false**, so nothing serves it. That is the deliberate C-cost gate, not an oversight — and the ledger already records the better answer: a CDN backend bucket forces its objects public and drags the Domain Restricted Sharing exception into the project holding the audit trail, whereas **Firebase Hosting sidesteps it completely and is free**. **Choosing between them is an owner decision and the last thing standing between a deployed dashboard and a usable one** |
 | **`npm run eval`'s "36/37 hard" IS NOT A STABLE NUMBER, and the failure's IDENTITY carries no information** | 2026-08-23 (2 full runs + 14 targeted) | Two full runs both scored **36/37 — and a DIFFERENT scenario failed each time**: `third-party-privacy` on 2026-08-22, `reschedule-two-appointments` on 2026-08-23. Targeted repetition then showed `reschedule-two-appointments` failing **1 in 7** even with this session's changes reverted. **So the aggregate is stable while its composition is not**, and this file's recorded gate — "34/37 or worse is a regression" — rests on a noise band that has never been measured. A single run cannot distinguish a real regression from a coin landing badly, and reading the failing scenario's NAME as a signal is reading noise. **Measure the band (5 full runs) before anyone clears a release on this suite.** |
 | **THREE CONSECUTIVE FAILURES LOOKED DETERMINISTIC AND WERE A COIN LANDING HEADS THREE TIMES** | 2026-08-23 | `reschedule-two-appointments` failed 3/3, which was reported as "consistent, not variance". Extending the same command to 7 runs produced passes on runs 4, 5 and 7. **The conclusion was wrong and only the extra runs revealed it.** At `temperature: 0.4` three samples is not evidence of determinism, and the instinct to stop once a run of results agrees is exactly what produced it. Related in kind to the three negative signature tests that agreed for months while the subsystem was entirely off |
@@ -1097,7 +1098,7 @@ The serialization point. No amount of speed in A or B moves it. Book it as a blo
 
 | # | Verification | Status | Needs | Evidence |
 |---|---|---|---|---|
-| **C1** | Vertex live — `npm run eval` ×2 per mode, `npm run eval:compare` | `todo` | Real money (~10 runs) | |
+| **C1** | Vertex live — `npm run eval` ×2 per mode, `npm run eval:compare` | `todo` — **AND THE METHOD AS WRITTEN CANNOT WORK, established 2026-08-23** | Real money (~10 runs), **plus the noise band measured FIRST** | **Two runs cannot distinguish a Vertex regression from noise.** Two full runs on 2026-08-23 both scored 36/37 hard with a DIFFERENT scenario failing each, and `reschedule-two-appointments` fails ~1-in-7 on its own. So `eval:compare` over 2 runs would produce a confident answer with nothing behind it — worse than not running it. **Prerequisite: 5 full runs to measure the real band**, then size C1's run count off that. See Standing facts |
 | **C2** | Live call **per region** against a dev Twilio number, before prod webhooks move | `todo` | Owner's phone | |
 | **C3** | **≥5 concurrent calls per region** — the callState proof. Watch audio-pump starvation, event-loop lag | `todo` | Owner + deployed Cloud Run | |
 | **C4** | Latency vs the **A0** baseline | `todo` | Deployed stack | |
@@ -1134,6 +1135,30 @@ O21/O22, and whatever Block 1 has not closed.
 ---
 
 ## Lane D — cutover · 1–2 days
+
+> **⚠ THERE IS NO PRODUCTION TO CUT OVER TO. Verified 2026-08-23:** `vetra-us-prod`
+> and `vetra-uk-prod` both list **zero Cloud Run services and zero Cloud SQL
+> instances**. Everything that exists is staging.
+>
+> That is C-12 working as designed — production databases were deferred to save
+> ~$98.62/month — but it means **this table has an unlisted step inside it**. D3
+> says `pg_dump` / `pg_restore`, which presumes a target instance; there is
+> none. Something has to BUILD production first, and that is a cost decision
+> rather than a task. Sequence it immediately before D3 so the meter starts as
+> late as possible, and expect the first production start to need debugging for
+> the same reason every first start in this file has.
+>
+> **AND A SCOPING DECISION THE OWNER HAS NOT MADE.** Lane C says "per region"
+> four times (C2, C3, C4, D5) and `enable_uk_resources = false`, so the UK stack
+> does not exist and those verifications cannot complete as written.
+>
+> **Recommended: finish the migration US-ONLY.** The first clinic is Texas,
+> there is no UK customer, and the UK lane exists for GDPR customers who do not
+> yet exist. `vetra-uk-prod` stays dormant and unbilled — the posture
+> `vetra-uk-staging` is already in. Redefine D7 as *"the US receptionist runs on
+> GCP and Railway is cancelled"* and make UK its own lane triggered by a UK
+> customer. **This is not the prod US/UK split being reopened** — that split
+> stays non-negotiable; this is only about WHEN the UK half gets built.
 
 | # | Step | Status | Evidence |
 |---|---|---|---|
