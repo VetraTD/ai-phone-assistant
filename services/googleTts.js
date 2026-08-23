@@ -67,15 +67,24 @@ function stripWavHeader(buffer) {
  * @param {string} text      - Plain text to speak
  * @param {string} voiceName - Google voice name, e.g. "en-US-Chirp3-HD-Aoede"
  * @param {string|null} callSid - Optional call ID for logging
+ * @param {{ bypassCache?: boolean }} [opts] - measurement harnesses only
  * @returns {Promise<Buffer>} Raw mulaw audio bytes (no container/header)
+ *
+ * `bypassCache` exists because the cache silently invalidates a measurement.
+ * Synthesizing the same line twice to sample the variance returns the SAME
+ * BYTES the second time, at 0 ms — so repeats look perfectly consistent
+ * whatever the synthesizer actually does, and a harness reports n=2 while
+ * holding n=1. Found by noticing `synth 0ms` in a repeat run. Never set on the
+ * call path: the cache is a real latency win there and the repetition is the
+ * point.
  */
-export async function synthesizeMulaw(text, voiceName, callSid = null) {
+export async function synthesizeMulaw(text, voiceName, callSid = null, opts = {}) {
   const cacheKey = crypto
     .createHash("sha256")
     .update("mulaw|" + voiceName + "|" + text)
     .digest("hex");
 
-  if (audioCache.has(cacheKey)) {
+  if (!opts.bypassCache && audioCache.has(cacheKey)) {
     log.debug("tts_cache_hit", { callSid, text: text.slice(0, 40) });
     return audioCache.get(cacheKey);
   }

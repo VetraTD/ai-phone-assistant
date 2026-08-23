@@ -8,7 +8,7 @@ import { VOICE_CATALOG } from "../config/voices.js";
 import { READBACK_LINES } from "../lib/tts/readbackScript.js";
 import { toSpeakable } from "../lib/voice/speakableText.js";
 import { createSttStream } from "../lib/voice/sttStream.js";
-import { wordErrorRate } from "../lib/sttEval/wer.js";
+import { wordErrorRate, corpusWordErrorRate } from "../lib/sttEval/wer.js";
 import { mulawToWav } from "../lib/audio/wav.js";
 
 // ---------------------------------------------------------------------------
@@ -63,6 +63,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VOICES = {
   google: { id: process.env.GOOGLE_TTS_VOICE || "en-US-Chirp3-HD-Aoede" },
   elevenlabs: VOICE_CATALOG[0],
+  elevenlabs_turbo: VOICE_CATALOG[0],
   cartesia: { id: process.env.CARTESIA_VOICE_ID || "a0e99841-438c-4a64-b679-ae501e7d6091" },
   inworld: { id: process.env.INWORLD_VOICE_ID || "Ashley" },
   gemini: { id: process.env.GEMINI_TTS_VOICE || "Kore" },
@@ -79,6 +80,11 @@ function parseArgs(argv) {
     stt: opt("--stt", "standard") === "google" ? "hipaa" : "standard",
     outDir: opt("--out", path.join("eval", "results", "tts-readback")),
     only: opt("--only", null),
+    // Repeats, because a single synthesis + a single readback is one sample of
+    // a stochastic process. The first version of this harness ran n=1 and drew
+    // a vendor conclusion from it, which is exactly the mistake this file's
+    // whole subject matter is about.
+    repeat: Math.max(1, Number(opt("--repeat", "1")) || 1),
   };
 }
 
@@ -134,7 +140,8 @@ async function readBack(mulaw, tier, label) {
 
 async function main() {
   const opts = parseArgs(process.argv);
-  const lines = opts.only ? READBACK_LINES.filter((l) => l.label === opts.only) : READBACK_LINES;
+  const wanted = opts.only ? new Set(opts.only.split(",").map((x) => x.trim())) : null;
+  const lines = wanted ? READBACK_LINES.filter((l) => wanted.has(l.label)) : READBACK_LINES;
   if (!lines.length) throw new Error(`no line matches --only ${opts.only}`);
 
   for (const name of opts.providers) {
@@ -149,6 +156,7 @@ async function main() {
     console.log(`\n=== ${providerName} — ${provider.label} ===`);
 
     for (const line of lines) {
+     for (let rep = 0; rep < opts.repeat; rep++) {
       // What production actually hands to TTS.
       const spoken = toSpeakable(line.text);
 
@@ -164,7 +172,7 @@ async function main() {
         continue;
       }
 
-      const wavPath = path.join(opts.outDir, `${providerName}-${line.label}.wav`);
+      const wavPath = path.join(opts.outDir, `${providerName}-${line.label}${rep ? `-r${rep}` : ""}.wav`);
       fs.writeFileSync(wavPath, mulawToWav(mulaw));
 
       const back = await readBack(mulaw, opts.stt, `${providerName}-${line.label}`);
@@ -199,6 +207,7 @@ async function main() {
       console.log(
         `  ${line.label.padEnd(20)} wer ${String(wer.toFixed(2)).padStart(5)}   synth ${String(ttfaMs).padStart(5)}ms   audio ${String((mulaw.length / 8000).toFixed(1)).padStart(4)}s${flag}`
       );
+     }
     }
   }
 
