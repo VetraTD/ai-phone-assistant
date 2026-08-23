@@ -154,3 +154,32 @@ essential_contacts = {
 #   gcloud essential-contacts list --organization=<org id>
 # BLANK THIS ONCE APPLIED, same documented lifecycle as adopt_existing_projects.
 adopt_existing_contacts = {}
+
+# ---------------------------------------------------------------------------
+# Image tags — PIN BOTH, NEVER LEAVE EITHER UNSET
+# ---------------------------------------------------------------------------
+# Missing from this file until 2026-08-23, which is exactly how
+# `dashboard_image_tag` came to be unset in the real tfvars for its whole life:
+# nothing here said it existed, so nothing prompted anyone to set it, and it
+# fell back to its `latest` default. A floating tag has already cost three
+# failed deploys where the container ran previous code and every failure looked
+# like a real bug, because it was — in old code. It also makes a revision
+# nobody can reproduce: "what was running on Tuesday" has no answer.
+#
+# The two are separate because the images have independent lifecycles: a
+# dashboard change should not mint a new voice revision, or vice versa.
+#
+# Build, verify the image CONTAINS what you think (the tag is a hand-typed
+# `_TAG` substitution on a source tarball, not a git ref — reading one has
+# already produced a wrong answer here), then bump.
+#
+#   gcloud builds submit --config=cloudbuild.yaml #     --project=vetra-shared-c3a3bd #     --service-account=projects/vetra-shared-c3a3bd/serviceAccounts/vetra-deployer@vetra-shared-c3a3bd.iam.gserviceaccount.com #     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+#   gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml ...
+#
+# ⚠ `image_tag` ALSO DRIVES THE MIGRATE JOB, not just the voice service, so one
+# apply moves both — and updating a job does not RUN it. Apply the job on its
+# own with -target, execute it, and only then apply the rest. Skipping that
+# order serves code against a schema that has not been migrated yet.
+image_tag           = "0000000"
+dashboard_image_tag = "0000000"
