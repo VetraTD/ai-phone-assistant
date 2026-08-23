@@ -1,0 +1,162 @@
+# Build the dashboard SPA and publish it to the Cloud Storage bucket B5 created.
+#
+# ---------------------------------------------------------------------------
+# The last missing piece of the dashboard path
+# ---------------------------------------------------------------------------
+#
+# B5 created the bucket, the CDN backend, the URL map and the certificate. What
+# it did not create was anything that BUILDS the site or PUTS FILES IN THE
+# BUCKET — so the bucket has existed and been empty since 2026-08-21, and
+# `enable_load_balancer` would have switched on a CDN in front of nothing.
+#
+# ---------------------------------------------------------------------------
+# Running it
+# ---------------------------------------------------------------------------
+#
+#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit AI-phone-dashboard/frontend \
+#     --config=cloudbuild.frontend.yaml \
+#     --project=vetra-shared-c3a3bd \
+#     --service-account=projects/vetra-shared-c3a3bd/serviceAccounts/vetra-deployer@vetra-shared-c3a3bd.iam.gserviceaccount.com \
+#     --substitutions=_API_URL=https://dashboard-api-us-staging-536266051432.us-central1.run.app,_FIREBASE_API_KEY=...,_FIREBASE_PROJECT=vetra-shared-c3a3bd
+#
+# The SOURCE DIRECTORY argument matters for the same reason it does for the
+# dashboard backend: the repository .gcloudignore excludes `AI-phone-dashboard`
+# outright, so submitting from the root uploads nothing useful.
+#
+# ---------------------------------------------------------------------------
+# EVERY VALUE HERE IS BAKED IN AT BUILD TIME AND IS PUBLIC
+# ---------------------------------------------------------------------------
+#
+# Vite substitutes VITE_* at build time and the result ships inside the
+# JavaScript bundle. There is no runtime configuration for a static site, which
+# means two things: the API URL and the Identity Platform key are compiled in
+# and a change to either needs a rebuild, and NOTHING SECRET MAY BE PASSED HERE.
+#
+# An Identity Platform web API key is public by design — it identifies the
+# project and authorises nothing, and Terraform restricts it to identitytoolkit
+# so a copy lifted out of the bundle cannot be spent on Vertex or Speech. Read
+# the values with `terraform output -json identity_platform`.
+# ---------------------------------------------------------------------------
+
+substitutions:
+  _BUCKET: vetra-dashboard-c3a3bd
+  # The dashboard backend's Cloud Run URL. Deterministic in the current format —
+  # https://SERVICE-PROJECTNUMBER.REGION.run.app — which is what lets this be
+  # built BEFORE the service exists, rather than needing a deploy, a read and a
+  # rebuild.
+  _API_URL: ""
+  _FIREBASE_API_KEY: ""
+  _FIREBASE_PROJECT: vetra-shared-c3a3bd
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # -------------------------------------------------------------------------
+  # Refuse to build a bundle that points nowhere.
+  #
+  # With VITE_API_URL empty the app falls back to http://localhost:3001 — see
+  # src/api.js — and every request from a deployed dashboard goes to the
+  # VIEWER'S OWN MACHINE. That fails as a connection error in a browser console
+  # and looks like the backend being down, so it is refused here where the cause
+  # is obvious.
+  # -------------------------------------------------------------------------
+  - id: check-substitutions
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        fail=0
+        if [ -z "${_API_URL}" ]; then
+          echo "FAIL: _API_URL is empty. The bundle would call http://localhost:3001."
+          fail=1
+        fi
+        if [ -z "${_FIREBASE_API_KEY}" ]; then
+          echo "FAIL: _FIREBASE_API_KEY is empty. Nobody could sign in."
+          fail=1
+        fi
+        exit $fail
+
+  - id: install
+    name: node:22-slim
+    entrypoint: npm
+    args: ["ci", "--no-audit", "--no-fund"]
+    waitFor: [check-substitutions]
+
+  - id: build
+    name: node:22-slim
+    entrypoint: npm
+    env:
+      - VITE_API_URL=${_API_URL}
+      - VITE_FIREBASE_API_KEY=${_FIREBASE_API_KEY}
+      - VITE_FIREBASE_AUTH_DOMAIN=${_FIREBASE_PROJECT}.firebaseapp.com
+      - VITE_FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT}
+    args: ["run", "build"]
+    waitFor: [install]
+
+  # -------------------------------------------------------------------------
+  # Prove the bundle carries what it was built with.
+  #
+  # A mistyped substitution name does not fail a Vite build — it produces a
+  # bundle with the fallback baked in, which deploys cleanly and then cannot
+  # reach the API or sign anybody in. Grepping the output is the only place that
+  # is cheap to catch.
+  # -------------------------------------------------------------------------
+  - id: verify-bundle
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if ! grep -rqF "${_API_URL}" dist/assets/*.js; then
+          echo "FAIL: the API URL is not in the bundle — VITE_API_URL did not reach the build."
+          exit 1
+        fi
+        if grep -rqF "localhost:3001" dist/assets/*.js; then
+          echo "FAIL: the localhost fallback is in the bundle."
+          exit 1
+        fi
+        if ! grep -rqF "${_FIREBASE_PROJECT}" dist/assets/*.js; then
+          echo "FAIL: the Identity Platform project is not in the bundle."
+          exit 1
+        fi
+        echo "bundle carries the API URL and the auth project"
+    waitFor: [build]
+
+  # -------------------------------------------------------------------------
+  # Publish, with cache headers that differ by file and have to.
+  #
+  # Vite fingerprints every asset (index-BG3vjkMw.js), so those are immutable
+  # and may be cached for a year. `index.html` is NOT fingerprinted and is the
+  # file that points at the current asset names — cached, a browser keeps asking
+  # for assets that no longer exist and the dashboard breaks for exactly the
+  # people who used it most recently.
+  #
+  # Uploaded in that order deliberately: assets first, so index.html never
+  # references a file that is not there yet.
+  # -------------------------------------------------------------------------
+  - id: publish-assets
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud storage rsync dist gs://${_BUCKET} --recursive --delete-unmatched-destination-objects \
+          --exclude='index\.html' \
+          --cache-control='public, max-age=31536000, immutable'
+    waitFor: [verify-bundle]
+
+  - id: publish-index
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud storage cp dist/index.html gs://${_BUCKET}/index.html \
+          --cache-control='no-cache, max-age=0'
+        echo "published to gs://${_BUCKET}"
+    waitFor: [publish-assets]
+
+timeout: 1200s

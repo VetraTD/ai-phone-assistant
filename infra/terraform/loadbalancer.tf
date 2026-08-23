@@ -132,6 +132,28 @@ resource "google_storage_bucket" "spa" {
 }
 
 # ---------------------------------------------------------------------------
+# The pipeline needs to be able to PUT FILES IN IT.
+#
+# Added 2026-08-22, and its absence is why the bucket had been empty since it
+# was created: B5 built the bucket, the CDN backend, the URL map and the
+# certificate, and nothing that fills any of them. The first publish failed with
+#
+#   vetra-deployer@... does not have storage.buckets.get access
+#
+# SCOPED TO THIS BUCKET, not granted on the project. shared.tf is explicit that
+# the deployer's reach stops at Artifact Registry push and Cloud Run deploy, and
+# that it must not hold storage.admin — the audit trail's log buckets live in
+# this same project, and a role that can write the site could otherwise rewrite
+# the record of who deployed it. objectAdmin rather than admin for the same
+# reason: it may manage OBJECTS and cannot change the bucket's own policy.
+# ---------------------------------------------------------------------------
+resource "google_storage_bucket_iam_member" "spa_publisher" {
+  bucket = google_storage_bucket.spa.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# ---------------------------------------------------------------------------
 # Public read on the SPA bucket. GATED, and this one is a security decision
 # rather than a cost one.
 #
