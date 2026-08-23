@@ -103,18 +103,33 @@ runs `DEPLOYMENT_MODE=hipaa` and answers the phone: Google STT v2, Google TTS,
 Vertex, no Deepgram / ElevenLabs / Gemini-API credential anywhere in the
 project. A caller booked and rescheduled an appointment on it.
 
-**NEXT: the dashboard Cloud Run SERVICE.** Its image is built and its database
-path is fixed (see B4). What remains is Terraform — a service per region, Direct
-VPC egress, Cloud SQL over private IP with IAM auth, and
-`IDENTITY_PLATFORM_PROJECT_ID` so B3's auth works there. `deployable_services`
-in cloud-run.tf filters to `/voice` with a comment saying the dashboard image is
-not built yet; that comment is now stale and the filter is the edit.
+**THE WHOLE DASHBOARD PATH IS NOW WRITTEN, and three of its four pieces were
+missing rather than broken.** Written 2026-08-22, none of it applied:
 
-**It cannot be verified until the suspension clears.** Neither project can run
-it today: staging has the only database and is suspended, production is healthy
-and has no database because C-12 defers it to D3. So expect the service to need
-debugging the first time it actually starts — the history in this file is unkind
-to unverified deploys.
+| piece | state |
+|---|---|
+| backend image | **BUILT.** In Artifact Registry, four guards passing |
+| backend can reach the database | **FIXED.** It never could — see Standing facts |
+| backend Cloud Run service | written, plans as 1 to add |
+| SPA build + publish | written, builds and verifies; publish needs one IAM grant |
+
+**WHAT REMAINS IS ONE APPLY AND A REBUILD, in this order:**
+
+1. Apply. Three things: the dashboard Cloud Run service, the bucket-scoped
+   `objectAdmin` for `vetra-deployer`, and the Essential Contacts adoption.
+2. `gcloud builds submit AI-phone-dashboard/frontend --config=cloudbuild.frontend.yaml`
+   with `_API_URL` and `_FIREBASE_API_KEY` — the publish step is what the IAM
+   grant unblocks.
+3. Set `dashboard_image_tag` in tfvars to the built SHA. It defaults to `latest`,
+   which is the trap that cost three failed deploys.
+
+**NONE OF IT CAN BE VERIFIED UNTIL THE SUSPENSION CLEARS.** Staging has the only
+database and is suspended; production is healthy and has no database because
+C-12 defers it to D3. Even a TARGETED plan fails on refresh, because the service
+depends on a secret in the suspended project — `-refresh=false` is what produced
+the plans above. **Expect the first real start to need debugging**; this file's
+history is unkind to unverified deploys, and today already found two blockers by
+reading rather than deploying.
 
 Previously: **B3 is the next session, and it is the last Lane B item that is not
 deliberately deferred.** What else remains: **B1 ②** (bcrypt import spike) is
