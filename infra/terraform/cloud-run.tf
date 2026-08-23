@@ -385,6 +385,34 @@ resource "google_cloud_run_v2_service" "this" {
         }
       }
 
+      # -------------------------------------------------------------------
+      # Token verification for this service's STAFF routes.
+      # -------------------------------------------------------------------
+      # The voice server is not only a webhook target. Behind
+      # requireBusinessAccess it also serves the two data-subject-rights
+      # endpoints — GET  /api/businesses/:id/callers/:phone/export (Art. 15)
+      # and DELETE /api/businesses/:id/callers/:phone (Art. 17) — plus the
+      # Twilio number routes.
+      #
+      # Without this, `lib/bootChecks.js` announces `auth_not_configured` and
+      # every one of those routes returns 401 to everybody. That went unnoticed
+      # because CALLS ARE COMPLETELY UNAFFECTED: the phone works, and the
+      # statutory endpoints behind it do not. Found 2026-08-23 by reading a boot
+      # notice, not by any test.
+      #
+      # `shared`, NOT `each.value.project`, and this is the same trap the
+      # dashboard's copy documents: Identity Platform lives in vetra-shared, the
+      # token's `aud` is that project and its `iss` is
+      # https://securetoken.google.com/<that project>, and `securetoken` is ONE
+      # signer shared by every Firebase project on earth. This value is the only
+      # thing between us and a token minted in a stranger's free project.
+      # Pointing it at the running project would fail every request while
+      # looking like a deploy that changed nothing about auth.
+      env {
+        name  = "IDENTITY_PLATFORM_PROJECT_ID"
+        value = local.project_id_for_stack["shared"]
+      }
+
       # Caller-facing SMS. Emitted only for a stack that has a number, so an
       # unset stack keeps the channel off loudly (`sms_channel_off` at boot)
       # rather than shipping an empty string that Twilio would reject per

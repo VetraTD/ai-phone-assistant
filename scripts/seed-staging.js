@@ -39,6 +39,21 @@ const NAME = process.env.SEED_BUSINESS_NAME || "Vetra Staging Test Clinic";
 const EMAIL = process.env.SEED_USER_EMAIL || "staging-test@vetratd.invalid";
 const USER_ID = process.env.SEED_USER_ID || "7a1e9c40-5b2d-4e18-9f33-000000000001";
 
+// Caller-facing SMS follow-ups, off unless asked for (migration 017's default,
+// and O25's gate sits on top of it).
+//
+// Here because there is NO OTHER WAY IN. The staging Cloud SQL instance is
+// private-IP only, so a workstation cannot reach it; every path runs through
+// this job. Flipping one boolean by hand meant Cloud SQL Studio in a browser
+// and remembering that `businesses` is under FORCE row-level security, where an
+// unscoped UPDATE matches zero rows and reports success. That is a trap to walk
+// into once, not every time somebody wants to test the consent gate.
+//
+//   gcloud run jobs execute vetra-migrate-us-staging --region=us-central1 \
+//     --project=vetra-us-staging-c3a3bd \
+//     --args=scripts/seed-staging.js --update-env-vars=SEED_SMS_FOLLOWUP=true
+const SMS_FOLLOWUP = process.env.SEED_SMS_FOLLOWUP === "true";
+
 const database = process.env.CLOUD_SQL_DATABASE || "";
 const instance = process.env.CLOUD_SQL_INSTANCE || "";
 
@@ -163,9 +178,9 @@ try {
        phone_number = $2, locale = $3, compliance_tier = $4, greeting = $5,
        business_hours = $6::jsonb, voice_provider = $7, languages_spoken = $8::jsonb,
        after_hours_policy = $9, transfer_policy = $10, allowed_tasks = $11::jsonb,
-       notifications_enabled = false
+       notifications_enabled = false, sms_followup_enabled = $12
      WHERE id = $1
-     RETURNING id, name, phone_number, compliance_tier, voice_provider, allowed_tasks`,
+     RETURNING id, name, phone_number, compliance_tier, voice_provider, allowed_tasks, sms_followup_enabled`,
     [
       id,
       PHONE,
@@ -182,6 +197,7 @@ try {
       "take_message",
       "always",
       ALLOWED_TASKS,
+      SMS_FOLLOWUP,
     ]
   );
   await client.query("COMMIT");
