@@ -1,0 +1,141 @@
+# Build the DASHBOARD BACKEND image and push it to the shared Artifact Registry.
+#
+# ---------------------------------------------------------------------------
+# Why this is a second config and not more steps in cloudbuild.yaml
+# ---------------------------------------------------------------------------
+#
+# Two reasons, and the first is decisive.
+#
+# THE SOURCE ROOT IS DIFFERENT. The repository's .gcloudignore excludes
+# `AI-phone-dashboard` outright, so the dashboard has never even been UPLOADED
+# to Cloud Build — which is the real reason this image has never existed, rather
+# than a missing build step. Un-excluding it would put the whole dashboard into
+# every voice build's tarball for no benefit. So this directory is submitted as
+# its own source root, and one submit cannot do that for two different roots.
+#
+# THE LIFECYCLES ARE DIFFERENT. `image_tag` is pinned per service in tfvars, and
+# a floating tag already cost three failed deploys. Building both images on
+# every submit would mint a new voice tag for a dashboard-only change — noise in
+# exactly the mechanism that exists to make deploys reproducible.
+#
+# ---------------------------------------------------------------------------
+# Running it
+# ---------------------------------------------------------------------------
+#
+#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit AI-phone-dashboard/backend \
+#     --config=cloudbuild.dashboard.yaml \
+#     --project=vetra-shared-c3a3bd \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# Note the SOURCE DIRECTORY argument. Without it gcloud uploads the repository
+# root, where .gcloudignore drops the dashboard and the build fails on a
+# Dockerfile it cannot find.
+#
+# Norton and the `--mount=type=secret` accommodation work exactly as they do for
+# the voice image — see cloudbuild.yaml's header. Cloud Build has no Norton,
+# passes no secret, and the mount reduces to a plain `npm ci`.
+# ---------------------------------------------------------------------------
+
+substitutions:
+  _REGION: us-central1
+  _REPO: vetra
+  _IMAGE: dashboard
+  # Overridden with the git SHA. `dev` is a deliberately unhelpful default: an
+  # untagged build should be obviously untagged rather than quietly overwriting
+  # something meaningful.
+  _TAG: dev
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+
+steps:
+  # BuildKit, explicitly — the Dockerfile uses `RUN --mount=type=secret`, which
+  # the classic builder fails on rather than ignores.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --cache-from=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+
+  # -------------------------------------------------------------------------
+  # ACTUALLY LOAD THE APP, rather than syntax-checking one file.
+  #
+  # The voice image uses `node --check server.js` and its comment claims that
+  # catches "a file the Dockerfile forgot to COPY". IT DOES NOT. `node --check`
+  # parses the single file it is given and never resolves an import or a
+  # require — verified by pointing it at a file requiring a module that does not
+  # exist, which it passes. A missing COPY would sail through and crash-loop on
+  # Cloud Run, which is precisely the failure the step exists to prevent.
+  #
+  # A real `require()` of the entry point loads the WHOLE module tree, so a file
+  # left out of the image fails here. It is safe to do because src/server.js
+  # guards `app.listen` behind `require.main === module` — required rather than
+  # run, it binds no port — and because nothing at module scope needs a secret:
+  # the pool is constructed without connecting and the token verifier is only
+  # built when IDENTITY_PLATFORM_PROJECT_ID is set. Confirmed by loading it with
+  # no environment at all.
+  #
+  # Still not a boot test. It proves the image is complete and importable, not
+  # that it can reach a database.
+  # -------------------------------------------------------------------------
+  - id: smoke-load
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args: ["-e", "require('/app/src/server.js'); console.log('module tree loaded, no port bound');"]
+    waitFor: [build]
+
+  # -------------------------------------------------------------------------
+  # The test suite must NOT be in the image.
+  #
+  # The Dockerfile copies `src` wholesale and then `rm -rf src/__tests__`,
+  # because .dockerignore alone fails open. This asserts the removal actually
+  # happened — a production image shipping 90 tests and their fixtures is the
+  # kind of thing nobody notices until an audit asks.
+  # -------------------------------------------------------------------------
+  - id: verify-no-tests
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        if [ -d src/__tests__ ]; then
+          echo "FAIL: src/__tests__ is in the image."
+          exit 1
+        fi
+        echo "no test suite in the image"
+    waitFor: [build]
+
+  # -------------------------------------------------------------------------
+  # devDependencies must NOT be in the image either.
+  #
+  # `npm ci --omit=dev` is one flag away from shipping vitest, supertest and
+  # their transitive trees into production. Asserted rather than trusted, for
+  # the same reason as above: the failure is silent and only grows.
+  # -------------------------------------------------------------------------
+  - id: verify-no-dev-deps
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        for pkg in vitest supertest nodemon; do
+          if [ -d "node_modules/$pkg" ]; then
+            echo "FAIL: devDependency '$pkg' is in the runtime image."
+            exit 1
+          fi
+        done
+        echo "no devDependencies in the image"
+    waitFor: [build]
+
+timeout: 1200s

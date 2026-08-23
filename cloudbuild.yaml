@@ -69,28 +69,59 @@ steps:
   # -------------------------------------------------------------------------
   # Prove the image can actually start before it is allowed to be `latest`.
   #
-  # `node --check` parses server.js and every module it would load at import
-  # time without opening a socket, a database connection or a Twilio client. It
-  # catches the failure that costs the most to discover later: an image that
-  # builds, pushes, deploys, and then crash-loops on Cloud Run because a file
-  # the Dockerfile forgot to COPY is imported at module scope.
+  # ~~`node --check` parses server.js and every module it would load at import
+  # time.~~ CORRECTED 2026-08-22: IT DOES NOT, AND NEVER DID. `node --check`
+  # syntax-checks the ONE file it is handed and never resolves an import or a
+  # require. Verified by pointing it at a file requiring a module that does not
+  # exist, which it passes cleanly.
   #
-  # It is a syntax and presence check, not a boot test. A real boot needs the
-  # secrets B4 has not populated yet.
+  # So the failure this step was written to catch — an image that builds,
+  # pushes, deploys and then crash-loops on Cloud Run because a file the
+  # Dockerfile forgot to COPY is imported at module scope — WOULD HAVE SAILED
+  # THROUGH IT. The guard described the right risk and did not cover it.
+  #
+  # A real dynamic import loads the whole module tree, so a missing file fails
+  # here. It is safe because server.js guards `assertBootConfig()`, the pool and
+  # `app.listen` behind `NODE_ENV !== "test"` — the same door its own test
+  # harness uses — so imported this way it binds no port and opens no
+  # connection.
+  #
+  # THE DUMMY VALUES ARE NOT CONFIGURATION. server.js exits at module scope
+  # without GEMINI_API_KEY (or the Vertex trio) and BASE_URL, before any of the
+  # NODE_ENV guards are reached. They exist only to get past those two checks so
+  # the imports resolve; nothing here reaches a vendor, and a real boot still
+  # needs the secrets from Secret Manager.
+  #
+  # Proven against the dashboard image, where the same change turned a passing
+  # build into a failing one the moment a source directory went missing.
   # -------------------------------------------------------------------------
   - id: smoke
     name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
     entrypoint: node
-    args: ["--check", "server.js"]
+    env:
+      - NODE_ENV=test
+      - GEMINI_API_KEY=not-a-real-key
+      - BASE_URL=https://example.invalid
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/server.js'); console.log('module tree loaded, no port bound');"
     waitFor: [build]
 
   # The migration runner ships in this image too, so it gets the same treatment.
   # A migration job that fails to parse is discovered here, not at D3 with a
   # production restore half-finished.
+  #
+  # Imported rather than --check'd, for the reason above. scripts/migrate.js
+  # does its work inside main() behind an argv check, so importing it resolves
+  # every module without connecting to anything.
   - id: smoke-migrate
     name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
     entrypoint: node
-    args: ["--check", "scripts/migrate.js"]
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/scripts/migrate.js'); console.log('migration runner loaded');"
     waitFor: [build]
 
   # The migration files have to BE in the image. A `COPY database ./database`
