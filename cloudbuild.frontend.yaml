@@ -40,13 +40,29 @@
 
 substitutions:
   _BUCKET: vetra-dashboard-c3a3bd
-  # The dashboard backend's Cloud Run URL. Deterministic in the current format —
-  # https://SERVICE-PROJECTNUMBER.REGION.run.app — which is what lets this be
-  # built BEFORE the service exists, rather than needing a deploy, a read and a
-  # rebuild.
+  # The dashboard backend's Cloud Run URL.
+  #
+  # ⚠ IT IS NOT DERIVABLE. This file used to claim the format was
+  # "deterministic — https://SERVICE-PROJECTNUMBER.REGION.run.app — which is
+  # what lets this be built BEFORE the service exists". That is FALSE for these
+  # projects. The live services are
+  #
+  #   https://dashboard-api-us-staging-7aaa2qfltq-uc.a.run.app
+  #   https://voice-us-staging-7aaa2qfltq-uc.a.run.app
+  #
+  # — the opaque-hash form, where the hash belongs to the PROJECT and the
+  # project number (536266051432) appears nowhere. Google issues one form or the
+  # other per project and does not let you pick. A bundle built from the guessed
+  # format compiles, deploys, verifies clean, and calls a hostname that does not
+  # resolve. Read the real value:
+  #
+  #   gcloud run services describe dashboard-api-us-staging --region=us-central1   #     --project=vetra-us-staging-c3a3bd --format='value(status.url)'
   _API_URL: ""
   _FIREBASE_API_KEY: ""
   _FIREBASE_PROJECT: vetra-shared-c3a3bd
+  # Firebase Hosting site id. Defaults to the project id, which is what the
+  # default site is always named.
+  _HOSTING_SITE: vetra-shared-c3a3bd
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -158,5 +174,55 @@ steps:
           --cache-control='no-cache, max-age=0'
         echo "published to gs://${_BUCKET}"
     waitFor: [publish-assets]
+
+  # -------------------------------------------------------------------------
+  # AND THE STEP THAT ACTUALLY SERVES IT.
+  #
+  # The bucket above is NOT the serving path. The owner chose Firebase Hosting
+  # on 2026-08-23 over the Cloud CDN + load balancer: $0 against ~$18/month, no
+  # DNS record needed, and no `allUsers` binding on a bucket sitting in the same
+  # project as the audit trail. The bucket publish is kept anyway, and
+  # deliberately: `enable_load_balancer` is still a live option for retiring the
+  # VOICE service's public invoker, and a bucket left to rot behind that toggle
+  # would serve a stale bundle the day somebody flips it. Writing twelve small
+  # files twice is a cheaper way to hold that property than a comment asking
+  # someone to remember.
+  #
+  # NOT `firebase deploy`. firebase-tools keeps its own credential store, it
+  # takes precedence over GOOGLE_APPLICATION_CREDENTIALS, and on the workstation
+  # this was written on it was signed in as a PERSONAL Gmail account - so the
+  # CLI authenticated as the wrong identity and failed with "Failed to get
+  # Firebase project ... make sure the project exists", which names the wrong
+  # cause entirely. scripts/deploy-hosting.js resolves a token explicitly and
+  # has no store to be signed into; in here it reads the metadata server, so it
+  # runs as this build's service account.
+  #
+  # WARNING - THIS STEP HAS NEVER RUN IN CLOUD BUILD. The deploy path itself IS
+  # proven: the live site was published with this exact script from the
+  # workstation. What is unproven is this step, because
+  # `roles/firebasehosting.admin` for vetra-deployer is a Terraform change that
+  # has not been applied yet (shared.tf). Until that apply lands this fails with
+  # a 403, and the first build after it is what proves the grant.
+  #
+  # The script lives under AI-phone-dashboard/frontend/scripts/ rather than the
+  # repository's root scripts/ for one concrete reason: this build's SOURCE ROOT
+  # is AI-phone-dashboard/frontend, so /workspace holds that directory and
+  # nothing above it. A root-level script simply would not be there, and the
+  # step would fail on a missing file that exists perfectly well in the repo.
+  # -------------------------------------------------------------------------
+  - id: publish-hosting
+    name: node:22-slim
+    entrypoint: node
+    args:
+      - /workspace/scripts/deploy-hosting.js
+      - --dir
+      - /workspace/dist
+      - --config
+      - /workspace/firebase.json
+      - --project
+      - ${_FIREBASE_PROJECT}
+      - --site
+      - ${_HOSTING_SITE}
+    waitFor: [verify-bundle]
 
 timeout: 1200s

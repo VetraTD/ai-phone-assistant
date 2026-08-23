@@ -196,3 +196,29 @@ dashboard_image_tag = "0000000"
 twilio_sms_from = {
   # "us-staging" = "+1XXXXXXXXXX"
 }
+
+# ---------------------------------------------------------------------------
+# dashboard_domains — THE ORIGIN THE DASHBOARD IS SERVED FROM
+# ---------------------------------------------------------------------------
+# Bare hostnames, no scheme, no trailing slash. Two things read it:
+#
+#   1. Identity Platform's authorized_domains — a reset link sent to a domain
+#      that is not here is refused, which surfaces to a locked-out member of
+#      staff rather than to a deploy.
+#   2. THE DASHBOARD API'S CORS ALLOW-LIST, and this is the half that bites.
+#      The backend's built-in default is vetratd.com and www. The SPA is served
+#      from Firebase Hosting at <shared-project>.web.app, which is neither — so
+#      leaving this empty produces a dashboard that LOADS, renders its sign-in
+#      form, and is refused on every API call behind it. The login page makes no
+#      API call, so nothing looks wrong until somebody actually signs in.
+#
+# Measured in a browser rather than reasoned about:
+#
+#   Access to fetch at '.../api/me' from origin
+#   'https://vetra-shared-c3a3bd.web.app' has been blocked by CORS policy
+#
+# The `.web.app` origin is ALSO one of the Google-owned defaults written into
+# authorized_domains, so identity-platform.tf wraps the concat in `distinct()`.
+# Without that the same domain goes out twice, the API stores it once, and every
+# later plan shows a diff that applying never resolves.
+dashboard_domains = ["vetra-shared-c3a3bd.web.app"]

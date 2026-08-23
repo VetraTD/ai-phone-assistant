@@ -200,10 +200,25 @@ resource "google_cloud_run_v2_service" "dashboard" {
       # -------------------------------------------------------------------
       # CORS. A browser calls this from another origin, so the list matters.
       #
-      # Built from `dashboard_domains`, which is EMPTY until B5's load balancer
-      # has DNS. The backend's own default is vetratd.com and www — see
-      # src/server.js — so an empty list here leaves that default in place
-      # rather than admitting everybody.
+      # Built from `dashboard_domains`. The backend's own default is
+      # vetratd.com and www — see src/server.js — so an empty list here leaves
+      # that default in place rather than admitting everybody.
+      #
+      # AND THAT DEFAULT IS WHY THIS IS NOT OPTIONAL ANY MORE. The SPA is
+      # served from Firebase Hosting at `<shared>.web.app` (2026-08-23), which
+      # is not vetratd.com, so with `dashboard_domains` empty the deployed
+      # dashboard loads, renders its sign-in form, and is refused on every
+      # single API call. Measured in a real browser rather than reasoned about:
+      #
+      #   Access to fetch at '.../api/me' from origin
+      #   'https://vetra-shared-c3a3bd.web.app' has been blocked by CORS policy
+      #
+      # It is invisible until somebody signs in — the login page makes no API
+      # call — so the page looks completely healthy while nothing behind it
+      # works. Note the failure shape at the server end too: `cors` passes an
+      # Error to its callback for a rejected origin and Express turns that into
+      # a **500**, not a 403, so the logs read as a server fault rather than a
+      # policy decision. Same class as the twilio signature finding.
       # -------------------------------------------------------------------
       dynamic "env" {
         for_each = length(var.dashboard_domains) > 0 ? [1] : []

@@ -246,10 +246,23 @@ variable "dashboard_domains" {
     produces a reset email whose link is refused — a failure that surfaces to a
     locked-out member of staff rather than to a deploy.
 
-    EMPTY ON PURPOSE while B5's load balancer is switched off pending DNS. Fill
-    it in the same edit that turns the LB on, and add browser_key_restrictions
-    to google_apikeys_key.identity_platform_web at the same time — see
-    identity-platform.tf.
+    IT IS ALSO THE ONLY SOURCE OF THE DASHBOARD API'S CORS ALLOW-LIST
+    (cloud-run-dashboard.tf), and that is the half with teeth. The backend
+    defaults to vetratd.com and www; the SPA is served from Firebase Hosting at
+    `<shared>.web.app`, which is neither. Leave this empty and the deployed
+    dashboard renders its sign-in form and is refused on every API call —
+    verified in a browser, not inferred.
+
+    NO LONGER EMPTY ON PURPOSE. It was, while B5's load balancer waited on DNS;
+    the owner chose Firebase Hosting instead on 2026-08-23, which needs no DNS,
+    so the reason for leaving it blank is gone. Set it to the hosting origin.
+
+    STILL OUTSTANDING, and deliberately not bundled into that change:
+    browser_key_restrictions on google_apikeys_key.identity_platform_web. The
+    referrer is now a known value rather than a guess, so it is finally
+    possible — but it is hardening that is not required to serve the dashboard,
+    and adding an untestable failure mode to the one apply that has to succeed
+    is how a working deploy becomes a locked-out clinic. See identity-platform.tf.
   EOT
   type        = list(string)
   default     = []

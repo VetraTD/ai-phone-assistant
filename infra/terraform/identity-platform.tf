@@ -39,14 +39,23 @@ resource "google_identity_platform_config" "auth" {
   # defaults are written out. Dropping `localhost` breaks the dev flow; dropping
   # the two Google-owned ones breaks the hosted action handler that sends the
   # reset email's link somewhere at all.
-  authorized_domains = concat(
+  #
+  # `distinct` because the SPA is served from THIS PROJECT'S Firebase Hosting
+  # site, so `<shared>.web.app` is both a Google-owned default written above and
+  # the value `dashboard_domains` has to carry — it is the origin the dashboard
+  # backend's CORS list is built from (cloud-run-dashboard.tf), and that list has
+  # no defaults to fall back on. Without `distinct` the concat sends the same
+  # domain twice, the API stores it once, and every subsequent plan shows a diff
+  # that applying does not resolve — the same permanent-phantom shape as
+  # `min_instance_count = 0`, and worth avoiding rather than living with.
+  authorized_domains = distinct(concat(
     [
       "localhost",
       "${local.project_id_for_stack["shared"]}.firebaseapp.com",
       "${local.project_id_for_stack["shared"]}.web.app",
     ],
     var.dashboard_domains,
-  )
+  ))
 
   sign_in {
     # Email and password. That is the entire product need, and every other

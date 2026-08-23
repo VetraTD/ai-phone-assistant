@@ -119,6 +119,34 @@ resource "google_project_iam_member" "deployer_read_source" {
   member  = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# Publishing the dashboard SPA to Firebase Hosting.
+#
+# The owner chose Firebase Hosting over the Cloud CDN + load balancer on
+# 2026-08-23: it is $0 against ~$18/month, it needs no DNS record to be usable
+# (the site answers on `<project>.web.app` immediately), and it does NOT require
+# the SPA bucket to be readable by `allUsers` — so the Domain Restricted Sharing
+# exception stays out of THIS project, which is the one holding the audit trail.
+# That last point is the security argument and it is the reason the CDN path is
+# still gated behind `enable_load_balancer` rather than deleted: the LB retires
+# the VOICE service's allUsers invoker, which is a different problem for a day
+# when there is production traffic to justify the meter.
+#
+# firebasehosting.admin is the narrowest predefined role that can create a
+# version, upload files and cut a release. It reaches firebasehosting.*
+# resources and nothing else — notably not the log buckets in this project,
+# which is the same boundary deployer_read_source is drawn against.
+#
+# NOTE: the Firebase project and its default Hosting site ALREADY EXIST. They
+# arrived with Identity Platform at B3 — enabling identitytoolkit through the
+# Firebase path creates both — so nothing here creates them and there is no
+# `google_firebase_project` resource to write. Verified against the live API,
+# which returns `resources.hostingSite: vetra-shared-c3a3bd`.
+resource "google_project_iam_member" "deployer_publish_hosting" {
+  project = local.project_id_for_stack["shared"]
+  role    = "roles/firebasehosting.admin"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 # ---------------------------------------------------------------------------
 # Cross-project image pulls.
 #
