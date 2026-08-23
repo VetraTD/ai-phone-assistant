@@ -255,3 +255,135 @@ describeDb("an unauthenticated request never reaches the database", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §164.312(b) — the DASHBOARD's half of the PHI-access audit trail.
+//
+// O29 built this for the voice server and stopped there. Found 2026-08-23 by
+// running the C8 probe against the live deployment: 15 authenticated
+// tenant-scoped API calls produced ZERO phi_access entries, while
+// voice-us-staging emits them normally.
+//
+// That is the wrong way round. O29 audits the RECEPTIONIST writing transcripts.
+// The dashboard is the only place a HUMAN BEING reads a transcript, an
+// appointment or a caller's phone number, and §164.312(b) exists principally to
+// detect inappropriate access BY WORKFORCE MEMBERS. The automated path was
+// covered and the human path was not.
+//
+// These run against real Postgres as vetra_app, because the dashboard's own
+// suite fakes withTenant transparently — asserting there would prove things
+// about the fake.
+// ---------------------------------------------------------------------------
+describeDb("the dashboard records PHI access (§164.312(b))", () => {
+  const readAuditRows = async () =>
+    (
+      await admin.query(
+        `SELECT actor_type, actor_id, action, operations, resources, resource_ids, row_count
+           FROM phi_access_log WHERE business_id = $1 ORDER BY occurred_at`,
+        [TENANT_A]
+      )
+    ).rows;
+
+  /**
+   * Wait for `n` audit rows, up to a bound.
+   *
+   * NOT test tidiness — it exists because of a real property the first version
+   * of these tests raced and lost: the handler calls `res.json()` INSIDE the
+   * transaction, so supertest's request resolves BEFORE the audit row is
+   * inserted and committed. The response genuinely precedes the audit write.
+   *
+   * Bounded, so a row that never arrives still fails the test rather than
+   * hanging or passing.
+   */
+  const auditRows = async (n = 1) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await readAuditRows();
+      if (rows.length >= n) return rows;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return readAuditRows();
+  };
+
+  it("writes one audit row when staff LIST CALLS", async () => {
+    const res = await request(app).get("/api/calls");
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor_type).toBe("user");
+    expect(rows[0].actor_id).toBe(STAFF_A);
+    expect(rows[0].action).toBe("read");
+    expect(rows[0].resources).toContain("calls");
+  });
+
+  it("writes one audit row when staff LIST APPOINTMENTS", async () => {
+    const res = await request(app).get("/api/appointments");
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe("read");
+    expect(rows[0].resources).toContain("appointments");
+  });
+
+  // The difference between an audit trail and a query log. A staff member
+  // changing the business's greeting has touched no patient data, and a trail
+  // that records it drowns the accesses that matter.
+  it("writes NO audit row for a non-PHI route", async () => {
+    const res = await request(app).get("/api/knowledge").query({ businessId: TENANT_A });
+    expect(res.status).toBe(200);
+    // No wait to lose a race against: this asserts a row NEVER appears, so a
+    // deliberate pause is what makes the assertion mean anything.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(await readAuditRows()).toHaveLength(0);
+  });
+
+  // Without this the row says "somebody read appointments" and cannot say
+  // through WHICH endpoint — and `operations` is exactly the field the voice
+  // server uses for that.
+  it("records WHICH route was used, not just which table", async () => {
+    await request(app).get("/api/calls");
+    const rows = await auditRows(1);
+    expect(rows[0].operations).toContain("GET /api/calls");
+  });
+
+  // O29's whole reason for a GIN index on resource_ids is to answer "who
+  // accessed THIS record". A dashboard row with no id cannot answer it, and
+  // reading one specific call is the case where the id is known for certain.
+  it("records the ROW ID when a route names one, so 'who read this record' is answerable", async () => {
+    const { rows: callRows } = await admin.query(
+      `SELECT id FROM calls WHERE business_id = $1 LIMIT 1`,
+      [TENANT_A]
+    );
+    const callId = callRows[0].id;
+
+    const res = await request(app).get(`/api/calls/${callId}`);
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows(1);
+    expect(rows[0].resource_ids).toContain(callId);
+  });
+
+  // row_count has to be the number of records actually disclosed. The first
+  // version set it to the length of resource_ids, so a list of twenty
+  // appointments was recorded as row_count 0 — an auditor reading that would
+  // conclude nothing was read. A wrong count in an audit trail is worse than an
+  // absent one, because it is believed.
+  it("records HOW MANY records were disclosed, not how many ids it happened to know", async () => {
+    const res = await request(app).get("/api/appointments").query({ range: "upcoming" });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+
+    const rows = await auditRows(1);
+    expect(rows[0].row_count).toBe(1);
+  });
+
+  // One row per UNIT OF WORK, not per statement. /api/calls runs several
+  // queries; a per-statement trail would make one staff member opening one page
+  // look like a dozen accesses.
+  it("writes ONE row per request, not one per statement", async () => {
+    await request(app).get("/api/calls");
+    await request(app).get("/api/calls");
+    expect(await auditRows(2)).toHaveLength(2);
+  });
+});

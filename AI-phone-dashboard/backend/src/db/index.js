@@ -148,9 +148,10 @@ function query(text, params) {
  * @template T
  * @param {string} businessId
  * @param {() => Promise<T>} fn
+ * @param {{ access?: {action: string, resources: string[], operations?: string[]}|null, actorId?: string|null, resourceIds?: string[], rowCount?: number|(() => number), requestId?: string|null }} [opts]
  * @returns {Promise<T>}
  */
-async function withTenant(businessId, fn) {
+async function withTenant(businessId, fn, opts = {}) {
   if (!businessId) throw new Error("withTenant: businessId is required");
   if (!pool) {
     // Same guard as query(). This path takes a client from the pool directly
@@ -158,18 +159,92 @@ async function withTenant(businessId, fn) {
     throw new Error("database pool is not ready — init() must be awaited before serving");
   }
 
+  const access = opts.access || null;
+  let committed = false;
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.business_id', $1, true)", [businessId]);
     const result = await tenantContext.run({ client, businessId }, fn);
+
+    // Inside the transaction, before COMMIT, on the connection that is already
+    // scoped — so the row satisfies its own RLS policy and costs no extra
+    // checkout. services/db.js does exactly this and for the same reason.
+    //
+    // If the INSERT fails, the whole unit of work rolls back — deliberately,
+    // and the voice server's withTenantSafe softening does not apply here,
+    // because a member of staff seeing an error is not a patient hearing
+    // silence.
+    //
+    // BUT DO NOT OVERSTATE WHAT THAT BUYS, because the first version of this
+    // comment did. "An access that cannot be audited is one that should not
+    // have happened" is the intent and it is NOT what the rollback achieves:
+    // the handler calls `res.json()` INSIDE this transaction, so the response —
+    // the actual disclosure — has already left the process by the time this
+    // INSERT runs. Proven by a test that raced it and lost.
+    //
+    // A rollback undoes the DATABASE work. It cannot un-send a response. What
+    // actually covers the disclosure is the stdout copy emitted in `finally`
+    // below, which records the ATTEMPT even when the row rolled back — which is
+    // precisely why there are two destinations rather than one.
+    //
+    // Buffering the response until after COMMIT would close the gap properly
+    // and is a much larger change to every handler; recorded rather than
+    // improvised.
+    if (access) {
+      await client.query(
+        `INSERT INTO phi_access_log
+           (business_id, actor_type, actor_id, action, operations, resources, resource_ids, row_count, request_id, call_sid)
+         VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8, NULL)`,
+        [
+          businessId,
+          opts.actorId ?? null,
+          access.action,
+          access.operations || [],
+          access.resources,
+          opts.resourceIds || [],
+          // A THUNK, read after the handler has run. The count is not known
+          // when withTenant is called — the handler has not produced a
+          // response yet — so passing a number here would always capture 0.
+          typeof opts.rowCount === "function" ? opts.rowCount() : (opts.rowCount ?? 0),
+          opts.requestId ?? null,
+        ]
+      );
+    }
+
     await client.query("COMMIT");
+    committed = true;
     return result;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
+    // THE DURABLE COPY, and the reason there are two destinations.
+    //
+    // Emitted in `finally`, so it survives a rollback that takes the table row
+    // with it: an ATTEMPTED access is recorded even when no committed record of
+    // it exists. On Cloud Run this goes to stdout, which the vetra-logging
+    // project's sink collects under different IAM — so a compromised runtime
+    // can stop writing to the trail and cannot erase what it already wrote.
+    if (access) {
+      console.log(
+        JSON.stringify({
+          event: "phi_access",
+          businessId,
+          actorType: "user",
+          actorId: opts.actorId ?? null,
+          action: access.action,
+          operations: access.operations || [],
+          resources: access.resources,
+          resourceIds: opts.resourceIds || [],
+          requestId: opts.requestId ?? null,
+          committed,
+          severity: "INFO",
+        })
+      );
+    }
   }
 }
 
