@@ -164,6 +164,54 @@ try {
     } finally {
       client.release();
     }
+
+    // ---------------------------------------------------------------------
+    // O25 checkpoint 1: did the consent gate actually WRITE a row?
+    //
+    // Added 2026-08-23 after a pre-flight found this script could not answer
+    // it. O25's four checkpoints are: a row in `sms_consents` carrying the
+    // number, the call id, the script and its version; the log showing the
+    // gate OPENED rather than `sms_followup_blocked_no_consent`; an ATTEMPTED
+    // message in Twilio; and finally a text that arrives. Two and three are
+    // readable from Cloud Logging and the Twilio console after the call — this
+    // one was not readable at all, because nothing in the image queried the
+    // table. Discovering that AFTER the test call would have wasted it, since
+    // fixing it needs a rebuild, a tag bump and an apply.
+    //
+    // Scoped, like the transcripts above: `sms_consents` is under row-level
+    // security, so an unscoped read returns zero rows and reads as "nobody ever
+    // consented" rather than "you did not set a tenant".
+    //
+    // THE NUMBER IS MASKED TO ITS LAST FOUR. Enough to confirm the row is bound
+    // to the caller who actually rang — which is the whole evidentiary point —
+    // without putting a full phone number into Cloud Logging, where the rest of
+    // this design deliberately keeps caller identifiers out of.
+    const consentClient = await pool.connect();
+    try {
+      await consentClient.query("BEGIN");
+      await consentClient.query(`SELECT set_config('app.business_id', $1, true)`, [biz.rows[0].id]);
+      const consents = await consentClient.query(
+        `SELECT created_at, right(phone_number, 4) AS number_last4, call_id,
+                granted, script_version, source, left(script, 60) AS script_head
+           FROM sms_consents
+          ORDER BY created_at DESC
+          LIMIT 10`
+      );
+      await consentClient.query("COMMIT");
+      show("sms_consents (newest first) — O25 checkpoint 1", consents.rows);
+    } catch (err) {
+      // A missing table is a MIGRATION fact, not a crash. If 037 has not run on
+      // this database, say so in the words that name the actual problem.
+      await consentClient.query("ROLLBACK").catch(() => {});
+      show("sms_consents", [
+        {
+          error: err?.message,
+          hint: "42P01 here means migration 037 has not run on THIS database — check with --args=scripts/migrate.js,--status",
+        },
+      ]);
+    } finally {
+      consentClient.release();
+    }
   }
 } catch (err) {
   console.error("inspect failed:", err?.message || err);
