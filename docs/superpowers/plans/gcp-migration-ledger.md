@@ -143,83 +143,77 @@ are*, and it changes every session.
 >   4. **Payments-profile contacts are separate** from Essential Contacts and still unset.
 
 
-### ▶ NEXT SESSION STARTS HERE — one apply, one phone call
+### ▶ NEXT SESSION STARTS HERE — the apply is DONE; one phone call is outstanding
 
-**THE DASHBOARD IS SERVED.** `https://vetra-shared-c3a3bd.web.app/app` renders
-its sign-in page. SPA routing, cache headers and the bundle's baked-in API URL
-and auth domain are all verified by request, not by reading.
+**APPLIED 2026-08-23, owner directing, from the saved plan `session12.tfplan` so
+what applied is exactly what was reviewed.** `1 to add, 3 to change, 0 to
+destroy`, and all four verified against the live resources afterwards rather
+than from the apply's own output:
 
-**IT CANNOT FETCH ANYTHING YET, AND THAT IS ONE APPLY.** `dashboard_domains` is
-now set in tfvars; applying it puts `CORS_ORIGINS` on the dashboard service.
-Until then every API call from the hosted origin is refused — measured in a real
-browser, and invisible until somebody signs in, because the login page makes no
-API call.
+| Resource | State |
+|---|---|
+| `voice-us-staging-00021-fvh` | `voice:ff52ea4`, Ready |
+| `dashboard-api-us-staging-00002-zj8` | `dashboard:ff52ea4`, Ready, **`CORS_ORIGINS` set** |
+| `vetra-migrate-us-staging` | `voice:ff52ea4` — carries the `sms_consents` reader |
+| `roles/firebasehosting.admin` | granted to `vetra-deployer` |
 
-**THE THREE THINGS THAT NEED YOU, IN VALUE ORDER:**
+**Both images verified by INSPECTING THEM, never by reading a tag** — the tag is
+a hand-typed `_TAG` substitution on a source tarball and reading one has already
+produced a wrong answer in this file. `voice:ff52ea4` carries `sms_consents` ×5
+in `db-inspect.js`; `dashboard:ff52ea4` carries `phiAudit.js`, `classifyRoute`
+wired into `withTenantHandler`, `phi_access_log` in `db/index.js`, and the Cloud
+SQL connector.
 
-1. **A DASHBOARD REBUILD, THEN `terraform apply`** — in that order, because the
-   apply is what moves the image.
+**WHAT IS NOW PROVEN IN PRODUCTION, each by using the thing rather than reading
+it:**
 
-   The apply carries three things: `CORS_ORIGINS` from `dashboard_domains`
-   (makes the dashboard usable), `roles/firebasehosting.admin` for
-   `vetra-deployer` (makes the Cloud Build publish step work — it has never run
-   and will 403 until this lands), and the `distinct()` fix on
-   `authorized_domains` (avoids a permanent phantom diff).
+  - **The dashboard can call its API.** Preflight from the hosting origin
+    returns **204** with the right `Access-Control-Allow-Origin`, where it
+    returned **500** before. In a real browser the page's own `fetch` now gets
+    **401** — CORS passed, the token was simply bogus — where it previously
+    threw `Failed to fetch`. `vetratd.com` still allowed; `evil.example` still
+    refused, so the list did not simply widen.
+  - **§164.312(b) IS LIVE ON THE HUMAN PATH.** One authenticated `GET
+    /api/calls` produced exactly one entry:
+    `user · <auth uid> · read · GET /api/calls · calls · committed=True`.
+    **And `GET /api/knowledge` produced none**, so the not-PHI half of the
+    classification is verified in production too. This morning the dashboard
+    emitted zero entries of any kind.
+  - **The voice service boots clean on the new revision**: `hipaa`, Google STT
+    v2, CMEK verified, `db_backend`, and **neither `sms_channel_off` nor
+    `auth_not_configured`**. Only `scripts/` changed between `001bdfb` and
+    `ff52ea4` and nothing in the runtime imports them, so this revision is
+    behaviourally identical to the one that has been answering the phone.
+  - **The checkpoint-1 reader runs.** `db-inspect.js` printed
+    `sms_consents (newest first) — O25 checkpoint 1: (none)` and exited 0. It
+    did NOT raise `42P01`, so the table exists and is readable — the reader is
+    proven BEFORE the call rather than after it. `(none)` is the correct
+    baseline: nothing has consented yet.
+  - **`sms_followup_enabled: true`**, re-read from the row after the apply
+    rather than assumed to have survived it.
 
-   **AND THE DASHBOARD IMAGE NOW HAS TO MOVE WITH IT**, which it did not when
-   this line was first written: the §164.312(b) audit trail for the dashboard is
-   committed and runs nowhere. Build it, verify the image CONTAINS what you
-   think (`docker run --entrypoint sh <digest> -c 'ls ...'` — the tag is a
-   hand-typed substitution, not a git ref), bump `dashboard_image_tag`, then
-   apply:
+**THE ONE THING OUTSTANDING: THE PHONE CALL.** Dial staging from
+`+14699338887`, book something, and say YES when it offers a text.
 
-   ```
-   gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml      --project=vetra-shared-c3a3bd      --service-account=projects/vetra-shared-c3a3bd/serviceAccounts/vetra-deployer@vetra-shared-c3a3bd.iam.gserviceaccount.com      --substitutions=_TAG=$(git rev-parse --short HEAD)
-   ```
+  - **checkpoint 1** — `gcloud run jobs execute vetra-migrate-us-staging
+    --region=us-central1 --project=vetra-us-staging-c3a3bd
+    --args=scripts/db-inspect.js`, then read the `sms_consents` line. Expect a
+    row with the last four digits, the call id, the script and its version.
+  - **checkpoint 2** — Cloud Logging: the gate OPENING rather than
+    `sms_followup_blocked_no_consent`.
+  - **checkpoint 3** — Twilio's message log shows an **ATTEMPTED** message. **A
+    30034 there is the gate WORKING.** No attempt at all is the gate failing.
+  - **checkpoint 4** — waits on toll-free verification and Twilio funding.
 
-   **Re-plan without `-refresh=false` first.** Expect the documented
-   `min_instance_count = 0` phantom; read the diff rather than trusting an empty
-   one.
+**THEN, IN VALUE ORDER:** ask Google what was detected · toll-free verification
++ fund Twilio ($0.00) · C5 (your ears, ~1.3 s/turn) · the repo-private decision
+· O31 · production, built immediately before D3 with **C7 as that build**.
 
-2. **Call staging from `+14699338887`.** Everything below the O25 gate is now
-   green: `sms_followup_enabled` is TRUE on the staging clinic (read back from
-   the row, not assumed), `TWILIO_SMS_FROM=+18176326969` is on the live
-   revision, and the allowlist contains your number. **What the call can prove
-   today:** checkpoint 2, the gate OPENING rather than
-   `sms_followup_blocked_no_consent`, from Cloud Logging; and checkpoint 3, an
-   ATTEMPTED message in Twilio, where a **30034 is the gate WORKING**.
-   **Checkpoint 1 — the `sms_consents` row itself — needs this session's
-   `db-inspect.js` change BUILT AND APPLIED first.** It was missing entirely,
-   and finding that before the call rather than after is the only reason the
-   call is not wasted.
-
-3. **Ask Google what was detected**, and **toll-free verification + fund
-   Twilio**. Unchanged, both pure lead time, and the trial expiry ~2026-11-18 is
-   a second trigger already queued.
-
-**WHAT IS NOW KNOWN THAT WAS NOT:**
-
-- **The eval band is 35-37 of 37**, mean 36.0, measured over five runs of
-  identical code. `36/37` was a mode, not a number. Three scenarios carry the
-  whole band; 34 never failed once.
-- **`eval:compare` reports a regression on 17 of 20 ordered pairs of those five
-  runs — an 85% false-alarm rate on code that did not change.** C1's method
-  cannot answer C1's question and resizing the run count would not have helped,
-  because it takes exactly two files. Use `scripts/eval-band.js`.
-- **The dashboard backend emitted no PHI-access audit record at all** —
-  §164.312(b) covered the receptionist writing transcripts and not the human
-  reading them, which is the wrong way round. **Now built, and running
-  nowhere**: it needs the rebuild in step 1. Three of my own claims about it
-  were wrong and the tests caught each one — read the C8 row, the corrections
-  are the useful part.
-- **`npm test` fails if `DATABASE_URL` is set**, and the documented db gate sets
-  it. Pre-existing, reproduced on HEAD. Run the root gate with it UNSET; a lone
-  `toolTimeout` failure is this, not you.
-- **C7 needs you.** A restore test needs a target instance; there is none, and
-  creating one is an apply and a meter.
-
-**RECOMMENDATION ON THE TWO QUESTIONS YOU ASKED — see "Answers to the owner's
-two questions" immediately below Lane D.**
+**Small and now unblocked:** `DASHBOARD_URL` is unset, which the boot log
+announces — owner notifications say "open the dashboard" without linking to it,
+and there is now a dashboard to link to. `browser_key_restrictions` on the
+Identity Platform web key is also finally possible, the referrer being a known
+value at last.
 
 ---
 
