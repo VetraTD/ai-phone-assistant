@@ -99,28 +99,58 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     });
   });
 
-  describe("2. phone-number spacing", () => {
+  describe("2. phone-number grouping", () => {
+    // SEPARATED BY HYPHENS, NOT SPACES, since 2026-08-22, and the reason is a
+    // measurement rather than a preference: a space-grouped number LOSES A
+    // DIGIT through Google Cloud TTS.
+    //
+    //   sent "817 580 3291"  ->  Deepgram   heard "817583291"   (3 of 3 runs)
+    //                        ->  Google STT heard "817 583291"
+    //   sent "817-580-3291"  ->  both       heard all ten digits
+    //
+    // Two independent recognisers, so it is the synthesizer and not the
+    // instrument. ElevenLabs is also better with hyphens (2 of 2 correct,
+    // against 1 of 2 with spaces), and the UK form is unaffected either way
+    // (en-GB, 2 of 2 both separators) — so one separator serves both lanes.
+    //
+    // A dropped digit in a callback number is the single worst thing a
+    // receptionist can get wrong: the caller writes down a number that does not
+    // ring. Reproduce with `npm run tts:readback`.
     it("groups a bare 10-digit number as 3-3-4", () => {
-      expect(toSpeakable("Call us at 5551234567.")).toBe("Call us at 555 123 4567.");
+      expect(toSpeakable("Call us at 5551234567.")).toBe("Call us at 555-123-4567.");
     });
     it("groups a dashed 10-digit number as 3-3-4", () => {
-      expect(toSpeakable("Call us at 555-123-4567.")).toBe("Call us at 555 123 4567.");
+      expect(toSpeakable("Call us at 555-123-4567.")).toBe("Call us at 555-123-4567.");
     });
     it("groups a dotted 10-digit number as 3-3-4", () => {
-      expect(toSpeakable("Call us at 555.123.4567.")).toBe("Call us at 555 123 4567.");
+      expect(toSpeakable("Call us at 555.123.4567.")).toBe("Call us at 555-123-4567.");
     });
     it("drops the US country code from an 11-digit number and groups 3-3-4", () => {
       // Previously grouped blindly by 3s into "155 512 345 67", which a TTS
       // engine reads as an unintelligible mumble instead of a phone number.
-      expect(toSpeakable("Dial 15551234567 to reach us.")).toBe("Dial 555 123 4567 to reach us.");
+      expect(toSpeakable("Dial 15551234567 to reach us.")).toBe("Dial 555-123-4567 to reach us.");
     });
     it("handles the E.164 form stored in the database, consuming the plus", () => {
       expect(toSpeakable("Call us back at +18175803291 anytime.")).toBe(
-        "Call us back at 817 580 3291 anytime."
+        "Call us back at 817-580-3291 anytime."
       );
     });
     it("groups an 11-digit number NOT starting with 1 by 3s (no country code to strip)", () => {
-      expect(toSpeakable("Dial 25551234567 now.")).toBe("Dial 255 512 345 67 now.");
+      expect(toSpeakable("Dial 25551234567 now.")).toBe("Dial 255-512-345-67 now.");
+    });
+    it("NEVER emits a space-separated group — that is the form that loses a digit", () => {
+      // The property, asserted directly rather than implied by the examples
+      // above: whatever the shape of the number, no group boundary may be a
+      // space.
+      for (const input of [
+        "Call us at 5551234567.",
+        "Call us back at +18175803291 anytime.",
+        "Dial 25551234567 now.",
+      ]) {
+        const out = toSpeakable(input);
+        const number = out.match(/[\d-]{7,}/)?.[0] ?? "";
+        expect(number, input).not.toMatch(/\d \d/);
+      }
     });
     it("leaves short digit runs (under 10) untouched", () => {
       expect(toSpeakable("It costs 12345 dollars.")).toBe("It costs 12345 dollars.");
@@ -137,8 +167,27 @@ describe("lib/voice/speakableText.js — toSpeakable", () => {
     it("expands whole-dollar $N", () => {
       expect(toSpeakable("It costs $5.")).toBe("It costs 5 dollars.");
     });
-    it("expands $N.NN", () => {
-      expect(toSpeakable("It costs $5.50.")).toBe("It costs 5 dollars 50.");
+    it("expands $N.NN into dollars AND cents", () => {
+      // Was "5 dollars 50", which a synthesizer reads as "five dollars fifty" —
+      // ambiguous at best, and "$150.00" came out as "150 dollars 00", spoken
+      // as "one hundred fifty dollars zero zero". A fee read wrong is a wrong
+      // fee, not a wrong-sounding one.
+      expect(toSpeakable("It costs $5.50.")).toBe("It costs 5 dollars and 50 cents.");
+    });
+    it("says nothing about cents when there are none", () => {
+      expect(toSpeakable("It costs $150.00.")).toBe("It costs 150 dollars.");
+    });
+    it("does not read a leading zero in the cents", () => {
+      // "05 cents" is spoken "zero five cents".
+      expect(toSpeakable("It costs $150.05.")).toBe("It costs 150 dollars and 5 cents.");
+    });
+    it("says ONE cent, not one cents", () => {
+      expect(toSpeakable("It costs $150.01.")).toBe("It costs 150 dollars and 1 cent.");
+    });
+    it("does the same for pounds and euros", () => {
+      expect(toSpeakable("It costs £5.50.")).toBe("It costs 5 pounds and 50 pence.");
+      expect(toSpeakable("It costs £150.00.")).toBe("It costs 150 pounds.");
+      expect(toSpeakable("It costs €5.50.")).toBe("It costs 5 euros and 50 cents.");
     });
     it("expands his/her to his or her", () => {
       expect(toSpeakable("Ask his/her preference.")).toBe("Ask his or her preference.");

@@ -2615,7 +2615,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         try {
           // The business's own main_phone (+18175803291), spoken as digit
           // groups — NOT the transfer target (+15551234567) and not raw E.164.
-          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817 580 3291 anytime. Have a great day. Goodbye.";
+          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817-580-3291 anytime. Have a great day. Goodbye.";
           const cachedGoodbye = Buffer.from([5, 5]);
           // Google-voiced entry present, but the EL business looks it up under
           // its EL voiceId — a warm-EL miss — so the goodbye is spoken live in

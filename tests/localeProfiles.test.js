@@ -137,24 +137,28 @@ describe("locale-aware speech", () => {
     const { toSpeakable } = await import("../lib/voice/speakableText.js");
     // Today: "442 079 460 958", an unintelligible mumble.
     const spoken = toSpeakable("+442079460958", { profile: getProfile("en-GB") });
-    expect(spoken).toBe("020 7946 0958");
+    // Hyphen-separated since 2026-08-22 — a SPACE-grouped number loses a digit
+    // through Google Cloud TTS, confirmed by two independent recognisers. The UK
+    // form reads correctly either way; one separator serves both lanes. See
+    // lib/voice/speakableText.js PHONE_GROUP_SEPARATOR.
+    expect(spoken).toBe("020-7946-0958");
   });
 
   it("groups a UK mobile as 5 then 6", async () => {
     const { toSpeakable } = await import("../lib/voice/speakableText.js");
-    expect(toSpeakable("+447700900123", { profile: getProfile("en-GB") })).toBe("07700 900123");
+    expect(toSpeakable("+447700900123", { profile: getProfile("en-GB") })).toBe("07700-900123");
   });
 
   it("leaves US numbers byte-identical", async () => {
     const { toSpeakable } = await import("../lib/voice/speakableText.js");
-    expect(toSpeakable("+18175803291")).toBe("817 580 3291");
-    expect(toSpeakable("+18175803291", { profile: getProfile("en-US") })).toBe("817 580 3291");
+    expect(toSpeakable("+18175803291")).toBe("817-580-3291");
+    expect(toSpeakable("+18175803291", { profile: getProfile("en-US") })).toBe("817-580-3291");
   });
 
   it("reads pounds and euros, not just dollars", async () => {
     const { toSpeakable } = await import("../lib/voice/speakableText.js");
-    expect(toSpeakable("That's £85.50 including parts.")).toBe("That's 85 pounds 50 including parts.");
+    expect(toSpeakable("That's £85.50 including parts.")).toBe("That's 85 pounds and 50 pence including parts.");
     expect(toSpeakable("It's €40.")).toBe("It's 40 euros.");
-    expect(toSpeakable("That's $85.50.")).toBe("That's 85 dollars 50.");
+    expect(toSpeakable("That's $85.50.")).toBe("That's 85 dollars and 50 cents.");
   });
 });
