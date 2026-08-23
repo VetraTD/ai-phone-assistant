@@ -96,6 +96,39 @@ steps:
     waitFor: [build]
 
   # -------------------------------------------------------------------------
+  # The Cloud SQL connector must BE in the image.
+  #
+  # src/db/index.js requires it LAZILY, inside init(), so the DATABASE_URL path
+  # never pays to load it — the voice server measured a comparable Google client
+  # at 694 ms of import time, and that lands on a cold start. The cost of that
+  # choice is that `smoke-load` cannot see it: a missing dependency would only
+  # surface when init() runs, on Cloud Run, as a service that starts and then
+  # exits. So it is asserted here instead.
+  #
+  # Without the connector this backend cannot reach the database AT ALL: the
+  # instance is private-IP only and has no password, so there is no connection
+  # string that would work.
+  #
+  # THE MODULE IS REQUIRED BY ABSOLUTE PATH, and the first version of this step
+  # was wrong for a reason worth writing down: Cloud Build runs a step with its
+  # working directory set to /workspace, NOT the image's WORKDIR. A BARE
+  # specifier therefore resolves from a directory with no node_modules and fails
+  # with "Cannot find module" — which reads as a missing dependency and is a
+  # missing cwd. It failed twice, including on a --no-cache rebuild, before the
+  # cause was the guard rather than the image.
+  #
+  # cloudSqlPool.js requires the connector at module scope, so loading it by
+  # absolute path exercises the real resolution path from /app/src/db.
+  # -------------------------------------------------------------------------
+  - id: verify-cloudsql-connector
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args:
+      - -e
+      - "require('/app/src/db/cloudSqlPool.js'); console.log('cloud sql connector present');"
+    waitFor: [build]
+
+  # -------------------------------------------------------------------------
   # The test suite must NOT be in the image.
   #
   # The Dockerfile copies `src` wholesale and then `rm -rf src/__tests__`,

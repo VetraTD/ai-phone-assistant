@@ -47,10 +47,69 @@ function sslConfig() {
   return process.env.DATABASE_URL ? { rejectUnauthorized: true } : false;
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: sslConfig(),
-});
+// ---------------------------------------------------------------------------
+// TWO WAYS TO HAVE A POOL, and only one of them can be built at module load.
+//
+// DATABASE_URL is a string: the pool exists immediately, and every local run
+// and every existing test keeps working with no init step and no change.
+//
+// Cloud SQL is not. The instance is PRIVATE IP ONLY with no password — B2
+// created no `google_sql_user`, because a password in a Terraform resource is a
+// password in state — so the connector has to fetch ephemeral certificates
+// before a socket exists. That is asynchronous, so `init()` below builds it and
+// src/server.js awaits that BEFORE the port opens.
+//
+// Until 2026-08-22 only the first path existed, which meant this backend could
+// not reach a GCP database at all: there was no connection string that would
+// have worked. See src/db/cloudSqlPool.js.
+// ---------------------------------------------------------------------------
+let pool = process.env.CLOUD_SQL_INSTANCE
+  ? null
+  : new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: sslConfig(),
+    });
+
+let closeConnector = null;
+
+/**
+ * Build the Cloud SQL pool, if this deployment uses one.
+ *
+ * A no-op on the DATABASE_URL path, so server.js can await it unconditionally
+ * and no caller has to know which kind of database it has.
+ *
+ * Idempotent: a second call returns the pool already built rather than opening
+ * a second connector, because a supervisor restarting a partially-initialised
+ * process is a real thing and leaking a connector per attempt is how a service
+ * runs out of file descriptors slowly.
+ */
+async function init() {
+  if (pool) return pool;
+
+  const { cloudSqlConfig, cloudSqlPoolConfig } = require("./cloudSqlPool");
+  const cfg = cloudSqlConfig();
+  if (!cfg) {
+    // CLOUD_SQL_INSTANCE was set at module load and is gone now — only
+    // reachable if something mutated the environment mid-process. Refuse rather
+    // than silently building a DATABASE_URL pool that points somewhere else.
+    throw new Error("CLOUD_SQL_INSTANCE disappeared between module load and init()");
+  }
+
+  const { poolConfig, close } = await cloudSqlPoolConfig(cfg, {
+    max: Number.parseInt(process.env.DB_POOL_MAX || "10", 10),
+  });
+  pool = new Pool(poolConfig);
+  closeConnector = close;
+  return pool;
+}
+
+/** Release the connector's timers and sockets. Tests and shutdown only. */
+async function close() {
+  await pool?.end().catch(() => {});
+  await closeConnector?.();
+  pool = null;
+  closeConnector = null;
+}
 
 const tenantContext = new AsyncLocalStorage();
 
@@ -61,6 +120,12 @@ const tenantContext = new AsyncLocalStorage();
  */
 function query(text, params) {
   const runner = tenantContext.getStore()?.client ?? pool;
+  if (!runner) {
+    // Reached only when a Cloud SQL deployment serves a request before init()
+    // resolved. Named, because the alternative is `Cannot read properties of
+    // null (reading 'query')` on a route, which reads as a bug in that route.
+    throw new Error("database pool is not ready — init() must be awaited before serving");
+  }
   return runner.query(text, params);
 }
 
@@ -87,6 +152,11 @@ function query(text, params) {
  */
 async function withTenant(businessId, fn) {
   if (!businessId) throw new Error("withTenant: businessId is required");
+  if (!pool) {
+    // Same guard as query(). This path takes a client from the pool directly
+    // rather than going through query(), so it needs its own.
+    throw new Error("database pool is not ready — init() must be awaited before serving");
+  }
 
   const client = await pool.connect();
   try {
@@ -108,4 +178,19 @@ function currentTenant() {
   return tenantContext.getStore()?.businessId ?? null;
 }
 
-module.exports = { query, withTenant, currentTenant, pool };
+// `pool` is a GETTER, not the value.
+//
+// It used to be the Pool itself, exported once at module load. On the Cloud SQL
+// path there is no pool at module load, so a plain property would have captured
+// `null` forever and every consumer holding it would have kept a null after
+// init() replaced it.
+module.exports = {
+  query,
+  withTenant,
+  currentTenant,
+  init,
+  close,
+  get pool() {
+    return pool;
+  },
+};

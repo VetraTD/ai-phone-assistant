@@ -169,9 +169,27 @@ app.use((err, req, res, next) => {
 // supertest can exercise `app` without binding a real port.
 if (require.main === module) {
   const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => {
-    console.log("Dashboard backend running on port " + PORT);
-  });
+
+  // THE DATABASE BEFORE THE PORT, not after.
+  //
+  // On Cloud SQL the pool cannot be built at module load — the connector
+  // fetches ephemeral certificates first — so it is built here and awaited
+  // before anything can be served. A service that is listening and cannot reach
+  // its database is worse than one that has not started: it returns 500s that
+  // look like application bugs, and a load balancer marks it healthy.
+  //
+  // A no-op on the DATABASE_URL path, where the pool already exists.
+  require("./db")
+    .init()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log("Dashboard backend running on port " + PORT);
+      });
+    })
+    .catch((err) => {
+      console.error("Refusing to start: the database pool could not be built —", err?.message);
+      process.exit(1);
+    });
 }
 
 module.exports = app;
