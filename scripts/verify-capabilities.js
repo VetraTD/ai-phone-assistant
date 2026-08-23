@@ -11,6 +11,16 @@
  * READ-ONLY against the database. It checks whether migration 020 has been run
  * and otherwise works from in-memory rows, so it never writes to your data.
  *
+ * The migration check asks the CATALOG, not the table, and that is the whole
+ * point of it. Migration 029 put FORCE row-level security on
+ * business_capabilities, so `select ... from business_capabilities limit 1`
+ * with no tenant scope returns ZERO ROWS rather than an error — meaning a
+ * naive check cannot tell "the migration has not been run" from "the migration
+ * has been run and you are not scoped to a tenant". It would print a clean
+ * "not readable, go run 020" against a database where 020 ran months ago.
+ * `to_regclass` and `pg_class.relrowsecurity` have no row-level security on
+ * them and answer the question that was actually being asked.
+ *
  *   node scripts/verify-capabilities.js              # self-contained fixtures
  *   node scripts/verify-capabilities.js +18175803291 # a REAL business
  *
@@ -21,6 +31,7 @@
  */
 
 import "dotenv/config";
+import pg from "pg";
 import { loadConfig, isEnabled } from "../services/db.js";
 import { buildCallTools, buildIntegrationTools, buildDbAppointmentTools, buildStaticSystemPrefix } from "../services/gemini.js";
 import { executeToolCall } from "../services/tools.js";
@@ -43,18 +54,39 @@ function check(condition, pass, fail) {
 // ---------------------------------------------------------------------------
 head("1. Migration 020");
 
-if (!isEnabled()) {
-  dim("Supabase not configured in .env — skipping the live check.");
+if (!isEnabled() || !process.env.DATABASE_URL) {
+  dim("DATABASE_URL not set — skipping the live check. Everything below is in-memory.");
 } else {
-  const { createClient } = await import("@supabase/supabase-js");
-  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-  const { error } = await sb.from("business_capabilities").select("business_id").limit(1);
-  if (error) {
-    no(`business_capabilities not readable: ${error.message}`);
-    dim("Run database/020_business_capabilities.sql in the Supabase SQL editor.");
-    dim("Everything below still works — the dual-read falls back to allowed_tasks.");
-  } else {
-    ok("business_capabilities exists and is readable");
+  // Its own client rather than services/db.js, which exposes no general query
+  // and should not start doing so for a script.
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await client.connect();
+    const { rows } = await client.query(
+      `SELECT to_regclass('public.business_capabilities') IS NOT NULL AS present,
+              coalesce((SELECT relrowsecurity FROM pg_class
+                         WHERE oid = to_regclass('public.business_capabilities')), false) AS rls`
+    );
+    if (!rows[0].present) {
+      no("business_capabilities does not exist");
+      dim("Run: npm run db:migrate  (database/020_business_capabilities.sql)");
+      dim("Everything below still works — the dual-read falls back to allowed_tasks.");
+      failures++;
+    } else {
+      ok("business_capabilities exists");
+      // Said out loud because the next person WILL open a SQL client, select
+      // from it, get nothing, and conclude the data is gone. It is not; they
+      // are unscoped. `SELECT set_config('app.business_id', '<uuid>', false);`
+      // first.
+      if (rows[0].rls) {
+        dim("row-level security is ON — an unscoped SELECT returns zero rows, not an error");
+      }
+    }
+  } catch (err) {
+    no(`could not reach the database: ${err.message}`);
+    failures++;
+  } finally {
+    await client.end().catch(() => {});
   }
 }
 

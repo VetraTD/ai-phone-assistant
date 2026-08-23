@@ -7,9 +7,13 @@
  * because someone typed a bad regex into a settings box.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
-vi.mock("@supabase/supabase-js", () => ({ createClient: vi.fn(() => null) }));
+// A vi.mock of the Supabase client used to stand here, and it is gone with the
+// package. services/db.js has connected to Postgres directly since A3, so the
+// mock was insulating this suite from an import that no longer existed.
+// tests/supabaseGone.test.js keeps it gone — and caught this comment naming the
+// package literally, which is the scan working.
 
 const { loadConfig, normalizeAllowedTasks, CORE_TASKS } = await import("../services/db.js");
 const { validateCapabilityConfig } = await import("../lib/capabilities/configSchema.js");
