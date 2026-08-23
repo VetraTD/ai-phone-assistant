@@ -153,6 +153,32 @@ resource "google_storage_bucket_iam_member" "spa_publisher" {
   member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# AND THE SECOND HALF, without which the first one does nothing useful.
+#
+# The comment above names `storage.buckets.get` as the exact error the first
+# publish failed on — and `roles/storage.objectAdmin` DOES NOT GRANT IT.
+# Measured, not assumed: objectAdmin's permission list contains
+# `storage.objects.list` and no `storage.buckets.*` at all. So the recorded fix
+# never addressed the recorded symptom, and the second publish attempt failed
+# with the identical error on 2026-08-23 — the grant had been written, believed
+# and never exercised.
+#
+# `gcloud storage rsync` reads the bucket's own metadata before it touches an
+# object, so object permissions alone can never be enough for it.
+#
+# legacyBucketReader is the narrowest predefined role that carries
+# `storage.buckets.get` (plus `storage.objects.list`, which rsync also needs to
+# diff). It deliberately does NOT carry `storage.buckets.update` or
+# `storage.buckets.setIamPolicy`, so the property the comment above cares about
+# still holds: the deployer may manage OBJECTS and cannot change the bucket's
+# own policy. "legacy" is Google's naming for the ACL-era roles, not a
+# deprecation warning.
+resource "google_storage_bucket_iam_member" "spa_publisher_bucket_read" {
+  bucket = google_storage_bucket.spa.name
+  role   = "roles/storage.legacyBucketReader"
+  member = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 # ---------------------------------------------------------------------------
 # Public read on the SPA bucket. GATED, and this one is a security decision
 # rather than a cost one.
