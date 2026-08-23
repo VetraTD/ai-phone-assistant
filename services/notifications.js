@@ -3,6 +3,8 @@ import twilio from "twilio";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { isValidE164 } from "../lib/validate.js";
+import { normalizePhoneNumber } from "../lib/phone.js";
+import { smsTemplateProblem } from "../lib/smsConsent.js";
 import * as db from "./db.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -291,14 +293,26 @@ export async function notifyCallMissed({ businessId, call, status }) {
 export const MESSAGE_SLA_TEXT = "as soon as possible";
 
 /** Default caller SMS templates, keyed by kind. Overridable per business via
- * businesses.sms_templates (loadConfig's config.smsTemplates). */
+ * businesses.sms_templates (loadConfig's config.smsTemplates).
+ *
+ * THEY NO LONGER PROMISE A REPLY, and that is a bug fix rather than a wording
+ * preference. Two of the three used to say "Reply to this number" / "Reply
+ * here", and NO INBOUND SMS ROUTE EXISTS ANYWHERE IN THIS REPO — a patient who
+ * replied to change an appointment got silence, from a clinic, about their own
+ * care. The promise was also wrong about the number: these are sent from the
+ * single global TWILIO_SMS_FROM, not from the number the caller dialled, so
+ * "this number" named a line nobody answers.
+ *
+ * Building the inbound route is the real fix and it is a feature, not a
+ * sentence — see ledger O25. Until it exists, the honest text points the caller
+ * at the phone line that IS answered. */
 export const DEFAULT_SMS_TEMPLATES = {
   appointment_confirmation:
-    "Hi {name}, your appointment with {business} is confirmed for {datetime}. Reply to this number if you need to change it.",
+    "Hi {name}, your appointment with {business} is confirmed for {datetime}. Call us back if you need to change it.",
   message_received:
     "Hi{name_part}, we got your message at {business} — someone will get back to you {sla}. Thanks for calling!",
   missed_call:
-    "Sorry we missed your call at {business}! Reply here or call back anytime and we'll help you right away.",
+    "Sorry we missed your call at {business}! Call us back anytime and we'll help you right away.",
 };
 
 /** Replace {key} placeholders in a template with vars[key] (blank if missing). */
@@ -309,11 +323,134 @@ function interpolateTemplate(template, vars) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Held texts (ledger O25)
+// ---------------------------------------------------------------------------
+// The ordering problem, and why a buffer rather than a stricter prompt.
+//
+// The confirmation text is sent from the appointments pack's onEffect, the
+// instant the booking succeeds. But the natural way a receptionist talks is
+// "you're all set for Tuesday at three — would you like a text confirmation?",
+// which puts the consent AFTER the send. With a gate and nothing else, the
+// confirmation text would be refused for every caller, forever, and the feature
+// would be dead while looking configured.
+//
+// Instructing the model to ask first is necessary and not sufficient: a prompt
+// is a request, never a guarantee (capabilities/_contract.js), and the failure
+// is silent. So a text refused for want of consent is HELD, and released if the
+// answer arrives during the same call.
+//
+// In-process and short-lived on purpose. The hold and the release both happen
+// inside one WebSocket session, which is pinned to one instance for the life of
+// the call, so a process-local map is the correct scope rather than a
+// compromise — the same reasoning lib/voice/metrics.js's ring buffer already
+// runs on. The two paths that CANNOT be released this way (the missed-call
+// text-back and the degraded voicemail webhook) are HTTP callbacks that may
+// land on any instance, and neither has an in-call consent moment to wait for
+// anyway.
+//
+// It holds a rendered message body, which for appointment_confirmation contains
+// a name and a time. That is PHI in memory — already true of every turn of the
+// call — bounded here by a five-minute expiry and a hard cap on entries.
+
+const HELD_SMS_TTL_MS = 5 * 60_000;
+const HELD_SMS_MAX_KEYS = 500;
+const HELD_SMS_MAX_PER_KEY = 3;
+
+/** @type {Map<string, Array<{ body: string, kind: string, expiresAt: number }>>} */
+const heldCallerSms = new Map();
+
+function heldKey(businessId, toNumber) {
+  return `${businessId}|${normalizePhoneNumber(toNumber) || toNumber}`;
+}
+
+function holdCallerSms(businessId, toNumber, kind, body) {
+  if (!businessId) return;
+  const key = heldKey(businessId, toNumber);
+  const now = Date.now();
+  const queue = (heldCallerSms.get(key) || []).filter((h) => h.expiresAt > now);
+  queue.push({ body, kind, expiresAt: now + HELD_SMS_TTL_MS });
+  // Oldest first out, so a caller who books and then leaves a message keeps the
+  // message rather than the stale booking text if both overflow.
+  while (queue.length > HELD_SMS_MAX_PER_KEY) queue.shift();
+  heldCallerSms.set(key, queue);
+  // Map insertion order is oldest-first, so the first key is the coldest.
+  while (heldCallerSms.size > HELD_SMS_MAX_KEYS) {
+    const oldest = heldCallerSms.keys().next().value;
+    heldCallerSms.delete(oldest);
+  }
+}
+
 /**
- * Text the CALLER (not the business owner) a follow-up SMS. Gated on
- * businessConfig.smsFollowupEnabled and a valid, non-anonymous caller
- * number — Twilio reports withheld/blocked caller IDs as non-E.164 strings
- * (e.g. "anonymous"), which isValidE164 already rejects. Never throws.
+ * Send the texts that were refused for want of consent, now that it exists.
+ *
+ * Called by capabilities/smsConsent.js after a grant is recorded. Takes the
+ * tenant and the number rather than reading state, so it is callable from the
+ * one place that knows consent just changed and from nowhere else.
+ *
+ * Deliberately re-checks nothing: the caller has just written the grant, and
+ * re-reading it would race its own transaction. What it does check is the
+ * expiry, so a grant arriving after the call has moved on releases nothing.
+ *
+ * @param {string} businessId
+ * @param {string} toNumber
+ * @returns {Promise<number>} how many were sent
+ */
+export async function releaseHeldCallerSms(businessId, toNumber) {
+  if (!businessId || !isValidE164(toNumber)) return 0;
+  const key = heldKey(businessId, toNumber);
+  const queue = heldCallerSms.get(key);
+  if (!queue?.length) return 0;
+  heldCallerSms.delete(key);
+
+  const now = Date.now();
+  let sent = 0;
+  for (const held of queue) {
+    if (held.expiresAt <= now) continue;
+    try {
+      await sendSms({ to: toNumber, body: held.body });
+      sent += 1;
+    } catch (err) {
+      log.error("sms_followup_failed", { message: err?.message, kind: held.kind });
+      captureException(err, { context: "notifications.releaseHeldCallerSms", kind: held.kind });
+    }
+  }
+  if (sent) log.info("sms_followup_released", { businessId, count: sent });
+  return sent;
+}
+
+/** Test seam: forget every held text. Never called by the server. */
+export function _clearHeldCallerSms() {
+  heldCallerSms.clear();
+}
+
+/**
+ * Text the CALLER (not the business owner) a follow-up SMS.
+ *
+ * FOUR GATES, in cost order, and the last one is the point of ledger O25.
+ *
+ *   1. businessConfig.smsFollowupEnabled — the tenant's own switch, off by
+ *      default since migration 017.
+ *   2. A valid, non-anonymous caller number. Twilio reports withheld caller IDs
+ *      as non-E.164 strings ("anonymous"), which isValidE164 already rejects.
+ *   3. A known template kind.
+ *   4. RECORDED EXPRESS CONSENT from this caller, to this tenant, for this
+ *      number. Without it the message is held rather than sent.
+ *
+ * Gate 4 closes two exposures with one question. `appointment_confirmation`
+ * puts a patient name, a clinic name and an appointment time in an unencrypted
+ * SMS: lawful because the individual asked for that channel (45 CFR 164.522(b)),
+ * and unlawful — or at least undefended — without the asking. The same answer
+ * is TCPA prior express consent, where the exposure is $500-$1,500 per message
+ * with no cap. See database/037_sms_consent.sql.
+ *
+ * FAILS CLOSED IN EVERY DIRECTION. No tenant on the config, no database, a
+ * failed lookup, an unscoped read that matched nothing under row-level
+ * security: each returns a falsy consent and each blocks the send. The gate
+ * cannot tell those apart and deliberately does not try — "we could not
+ * establish consent" and "there is no consent" are the same decision.
+ *
+ * Never throws.
  *
  * @param {object} businessConfig - loadConfig() output for the business
  * @param {string} toNumber - caller's number (state.callerNumber / req.body.From)
@@ -329,9 +466,45 @@ export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
     return;
   }
   try {
+    // The override is re-validated HERE and not only in the dashboard, because
+    // businesses.sms_templates can also be written by an operator with a SQL
+    // client and the dashboard validator is not in that path. An override that
+    // fails falls back to the built-in default rather than blocking the send:
+    // the default is known-safe, and refusing to text at all would punish the
+    // caller for the owner's typo.
     const overrides = businessConfig.smsTemplates || {};
-    const chosen = typeof overrides[kind] === "string" && overrides[kind].trim() ? overrides[kind] : template;
-    await sendSms({ to: toNumber, body: interpolateTemplate(chosen, vars) });
+    const override =
+      typeof overrides[kind] === "string" && overrides[kind].trim() ? overrides[kind] : null;
+    let chosen = template;
+    if (override) {
+      const problem = smsTemplateProblem(kind, override);
+      if (problem) {
+        log.error("sms_template_rejected", { kind, reason: problem, severity: "warn" });
+      } else {
+        chosen = override;
+      }
+    }
+    const body = interpolateTemplate(chosen, vars);
+
+    const businessId = businessConfig.businessId || null;
+    const consent = businessId
+      ? await db.withTenantSafe(businessId, () => db.latestSmsConsent(businessId, toNumber), {
+          operation: "latestSmsConsent",
+        })
+      : null;
+    if (!consent?.granted) {
+      // Held, not dropped — see the note above holdCallerSms. The log line
+      // carries no phone number: this is the path that exists to protect one.
+      holdCallerSms(businessId, toNumber, kind, body);
+      log.info("sms_followup_blocked_no_consent", {
+        businessId,
+        kind,
+        reason: consent ? "declined" : "no_record",
+      });
+      return;
+    }
+
+    await sendSms({ to: toNumber, body });
   } catch (err) {
     log.error("sms_followup_failed", { message: err?.message, kind });
     captureException(err, { context: "notifications.sendCallerSms", kind });

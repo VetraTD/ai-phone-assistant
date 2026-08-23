@@ -42,7 +42,15 @@ afterAll(async () => {
   await db?.close();
 });
 
-/** One call with a transcript, an appointment and a request, for one number. */
+/**
+ * One call with a transcript, an appointment, a request and an SMS-consent row,
+ * for one number.
+ *
+ * The consent row (migration 037) is spelled a FIFTH way on purpose, for the
+ * same reason the other four differ: it is a phone number stored by a different
+ * code path, and an erasure that matched only the spelling Twilio sends would
+ * leave it behind and report success.
+ */
 async function seedCaller({ business, callSid, callerNumber, apptPhone, requestPhone, name, notes, message, summary }) {
   const { rows } = await admin.query(
     `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, summary)
@@ -63,6 +71,11 @@ async function seedCaller({ business, callSid, callerNumber, apptPhone, requestP
     `INSERT INTO customer_requests (business_id, call_id, request_type, caller_name, callback_number, message, notes)
      VALUES ($1, $2, 'message', $3, $4, $5, $6)`,
     [business, callId, name, requestPhone, message, notes]
+  );
+  await admin.query(
+    `INSERT INTO sms_consents (business_id, call_id, phone_number, granted, script, script_version)
+     VALUES ($1, $2, $3, true, 'Can I send you a text confirmation?', 'test.1')`,
+    [business, callId, callerNumber]
   );
   return callId;
 }
@@ -150,7 +163,7 @@ describeDb("Art. 15 export", () => {
 
   it("is empty, not an error, for a caller with no history", async () => {
     const data = await db.exportCallerData(BUSINESS, "+15550000000");
-    expect(data).toEqual({ calls: [], transcripts: [], appointments: [], customerRequests: [] });
+    expect(data).toEqual({ calls: [], transcripts: [], appointments: [], customerRequests: [], smsConsents: [] });
   });
 });
 
@@ -164,6 +177,7 @@ describeDb("Art. 17 erasure", () => {
     expect(after.calls).toEqual([]);
     expect(after.appointments).toEqual([]);
     expect(after.customerRequests).toEqual([]);
+    expect(after.smsConsents).toEqual([]);
   });
 
   it("leaves no trace of the content anywhere in the tenant's tables", async () => {
@@ -198,7 +212,7 @@ describeDb("Art. 17 erasure", () => {
 
   it("reports what it erased", async () => {
     const counts = await db.eraseCallerData(BUSINESS, SUBJECT);
-    expect(counts).toEqual({ transcripts: 1, calls: 1, appointments: 1, customerRequests: 1 });
+    expect(counts).toEqual({ transcripts: 1, calls: 1, appointments: 1, customerRequests: 1, smsConsents: 1 });
   });
 
   it("does not touch another caller at the same tenant", async () => {
@@ -220,6 +234,6 @@ describeDb("Art. 17 erasure", () => {
 
   it("is a no-op that reports zeros for a caller with no history", async () => {
     const counts = await db.eraseCallerData(BUSINESS, "+15550000000");
-    expect(counts).toEqual({ transcripts: 0, calls: 0, appointments: 0, customerRequests: 0 });
+    expect(counts).toEqual({ transcripts: 0, calls: 0, appointments: 0, customerRequests: 0, smsConsents: 0 });
   });
 });

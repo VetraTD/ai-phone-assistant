@@ -937,6 +937,68 @@ CREATE POLICY tenant_append ON phi_access_log
 -- audit record needs to change after the fact.
 
 -- ============================================================
+-- Migration 037: express consent for caller-facing SMS (ledger O25)
+-- ============================================================
+-- See database/037_sms_consent.sql for the full reasoning. In short: the
+-- caller-facing SMS templates carry a patient name and an appointment time
+-- over an unsecured channel, to a number the caller ID supplied. HIPAA permits
+-- that when the individual has REQUESTED the channel (45 CFR 164.522(b)), and
+-- TCPA requires prior express consent for the same message. Both are the same
+-- event, so the receptionist asks in the call and the answer is recorded here.
+--
+-- One row per ANSWER. The most recent row for (business_id, phone_number) is
+-- the current state, so a later granted=false REVOKES an earlier grant.
+-- Revocation is an INSERT, never an UPDATE — which is why UPDATE is revoked
+-- and no UPDATE policy exists. DELETE is granted, unlike phi_access_log,
+-- because the table holds a phone number and an Art. 17 erasure has to reach
+-- it.
+
+CREATE TABLE IF NOT EXISTS sms_consents (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id    uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  -- SET NULL, not CASCADE: consent outlives the conversation it was given in.
+  call_id        uuid REFERENCES calls(id) ON DELETE SET NULL,
+  phone_number   text NOT NULL,
+  granted        boolean NOT NULL,
+  -- The disclosure the receptionist was REQUIRED to give, not a recording of
+  -- what it actually said — call_transcripts is the record of the words.
+  script         text NOT NULL,
+  script_version text NOT NULL,
+  source         text NOT NULL DEFAULT 'voice' CHECK (source IN ('voice')),
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE sms_consents IS
+  'Express consent to receive SMS, captured in the call. One row per answer; the most recent row for (business_id, phone_number) is the current state and a later granted=false revokes an earlier grant. Gates services/notifications.js sendCallerSms. Closes both the PHI-in-SMS exposure and TCPA prior express consent.';
+
+-- The gate's only query, run before every caller-facing SMS.
+CREATE INDEX IF NOT EXISTS idx_sms_consents_lookup
+  ON sms_consents (business_id, phone_number, created_at DESC);
+
+GRANT SELECT, INSERT, DELETE ON sms_consents TO vetra_app;
+REVOKE UPDATE ON sms_consents FROM vetra_app;
+
+ALTER TABLE sms_consents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sms_consents FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_read ON sms_consents;
+DROP POLICY IF EXISTS tenant_append ON sms_consents;
+DROP POLICY IF EXISTS tenant_erase ON sms_consents;
+
+CREATE POLICY tenant_read ON sms_consents
+  FOR SELECT USING (business_id = app_current_business_id());
+
+CREATE POLICY tenant_append ON sms_consents
+  FOR INSERT WITH CHECK (business_id = app_current_business_id());
+
+-- Erasure only. Art. 17 has to be able to reach this table; nothing else does.
+CREATE POLICY tenant_erase ON sms_consents
+  FOR DELETE USING (business_id = app_current_business_id());
+
+-- Deliberately absent: any policy FOR UPDATE. A consent record that can be
+-- edited after the fact is not evidence. Revocation is a new row.
+
+-- ============================================================
 -- Migration 031: the onboarding bootstrap
 -- ============================================================
 -- Migration 029 solved the READ bootstrap — how a dialled number or an

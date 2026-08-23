@@ -17,6 +17,7 @@ const {
   ELEVENLABS_VOICE_IDS,
   SMS_TEMPLATE_KINDS,
   SMS_TEMPLATE_MAX_LENGTH,
+  SMS_TEMPLATE_PLACEHOLDERS,
   DAY_KEYS,
   ALLOWED_TIMEZONES,
 } = require("./constants");
@@ -196,6 +197,24 @@ function validateSmsTemplates(value) {
     if (typeof tpl !== "string") return { error: `.${kind} must be a string` };
     if (tpl.length > SMS_TEMPLATE_MAX_LENGTH) {
       return { error: `.${kind} must be ${SMS_TEMPLATE_MAX_LENGTH} characters or fewer` };
+    }
+    // Ledger O25 defect 3: this field was owner-writable with no guard beyond a
+    // length cap. The placeholder allowlist is the enforceable part — it stops
+    // an override pulling an identifier into a message that never carried one.
+    // It is not a PHI detector; see the note in constants.js. The send-time
+    // half of the same check lives in services/notifications.js, because this
+    // column can also be written by an operator with a SQL client and this
+    // validator is not in that path.
+    const allowed = SMS_TEMPLATE_PLACEHOLDERS[kind] || [];
+    const used = [...new Set([...tpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))];
+    const unknown = used.filter((ph) => !allowed.includes(ph));
+    if (unknown.length) {
+      return {
+        error:
+          `.${kind} uses placeholders this message does not carry: ` +
+          `${unknown.map((ph) => `{${ph}}`).join(", ")}. ` +
+          `Available: ${allowed.map((ph) => `{${ph}}`).join(", ")}`,
+      };
     }
     const trimmed = tpl.trim();
     if (trimmed) out[kind] = trimmed;

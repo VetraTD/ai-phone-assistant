@@ -331,6 +331,60 @@ describe("PUT /api/business/:id/settings", () => {
       const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
       expect(updateCall[1][0]).toEqual({ message_received: "Got it!" });
     });
+
+    // Ledger O25 defect 3. This column reaches an unencrypted SMS addressed to
+    // a patient, and until now the only guard on it was a length cap. The
+    // allowlist is not a PHI detector — no check can tell that "your
+    // chemotherapy appointment" discloses more than "your appointment" — but it
+    // does stop an override pulling an identifier into a message that never
+    // carried one.
+    it("sms_templates: rejects a placeholder the kind does not carry", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { missed_call: "Hi {name}, we missed you at {business}." } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/\{name\}/);
+      expect(res.body.error).toMatch(/missed_call/);
+    });
+
+    // The paired acceptance. Without it this suite would pass just as happily
+    // against a validator that rejected every override.
+    it("sms_templates: accepts an override that stays inside the vocabulary", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({
+          sms_templates: {
+            appointment_confirmation: "{name}, you are booked at {business} for {datetime}.",
+            missed_call: "We missed you at {business}.",
+          },
+        });
+
+      expect(res.status).toBe(200);
+      const updateCall = poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+      expect(updateCall[1][0]).toEqual({
+        appointment_confirmation: "{name}, you are booked at {business} for {datetime}.",
+        missed_call: "We missed you at {business}.",
+      });
+    });
+
+    it("sms_templates: a placeholder allowed for one kind is still rejected for another", async () => {
+      mockOwnership();
+
+      const res = await request(app)
+        .put(`/api/business/${BUSINESS_ID}/settings`)
+        .set("Authorization", "Bearer test-token")
+        .send({ sms_templates: { message_received: "Booked for {datetime}" } });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/\{datetime\}/);
+    });
   });
 
   it("forbids updating a business the authenticated user doesn't own", async () => {

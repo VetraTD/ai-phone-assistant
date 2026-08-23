@@ -450,6 +450,12 @@ function applyCapabilityRows(rows, allowedTasks, businessId) {
 export function loadConfig(business, capabilityRows = null) {
   if (!business) {
     return {
+      // Null on the unrouted path, and callers must treat it that way. The
+      // caller-facing SMS gate (services/notifications.js) reads it to find the
+      // tenant's consent records; no tenant means no consent record can be
+      // found, which fails the gate closed. That is the correct answer for a
+      // call this system could not route to a business at all.
+      businessId: null,
       businessName: "our office",
       greeting: DEFAULT_GREETING,
       _hasCustomGreeting: false,
@@ -487,6 +493,11 @@ export function loadConfig(business, capabilityRows = null) {
   const { capabilities, allowedTasks } = applyCapabilityRows(rows, baseTasks, business.id);
 
   return {
+    // Carried on the config because the caller-facing SMS gate needs a tenant
+    // and `sendCallerSms` is handed a config, not a business row. Everything
+    // else on this object is settings; this one is identity, and it is here so
+    // that four call sites do not each have to thread a second argument.
+    businessId: business.id,
     businessName: business.name || "our office",
     greeting: business.greeting || DEFAULT_GREETING,
     _hasCustomGreeting: !!business.greeting,
@@ -1279,6 +1290,106 @@ export async function createCustomerRequest({
   return requestId;
 }
 
+// ---------------------------------------------------------------------------
+// Caller-facing SMS consent (migration 037, ledger O25)
+// ---------------------------------------------------------------------------
+// The store behind the gate in services/notifications.js. Two functions, and
+// the asymmetry between them is the design:
+//
+//   recordSmsConsent   appends an answer. A refusal is an answer too, and a
+//                      later one supersedes an earlier one, so revocation needs
+//                      no second function and no UPDATE.
+//   latestSmsConsent   reads the current state. Exactly one row, ordered by
+//                      time, exact match on the number.
+//
+// Both are tenant-scoped like everything else here, which means both must run
+// inside a withTenant scope on Cloud SQL — an unscoped read under FORCE row
+// level security returns ZERO ROWS rather than an error, and zero rows here
+// reads as "this caller never consented". That failure is silent, indistinguishable
+// from an honest refusal, and fails in the safe direction, which is the only
+// reason it is survivable.
+// ---------------------------------------------------------------------------
+
+/**
+ * Record a caller's answer to the SMS consent question.
+ *
+ * @param {object} params
+ * @param {string} params.businessId
+ * @param {string|null} [params.callId] - the call the answer was given on
+ * @param {string} params.phoneNumber - E.164; normalised here, not by the caller
+ * @param {boolean} params.granted - false records a refusal or a revocation
+ * @param {string} params.script - the disclosure the receptionist was required to give
+ * @param {string} params.scriptVersion
+ * @returns {Promise<string|null>} the new row id, or null if it could not be written
+ */
+export async function recordSmsConsent({
+  businessId,
+  callId = null,
+  phoneNumber,
+  granted,
+  script,
+  scriptVersion,
+}) {
+  if (!pool || !businessId || !phoneNumber) return null;
+  // Normalised on the way in AND on the way out (latestSmsConsent), so the gate
+  // compares like with like. The alternative — a suffix match, as
+  // exportCallerData uses — is deliberately loose, and loose on a consent gate
+  // means texting somebody who never agreed.
+  const normalized = normalizePhoneNumber(phoneNumber);
+  if (!normalized) return null;
+
+  const res = await q(
+    `INSERT INTO sms_consents
+       (business_id, call_id, phone_number, granted, script, script_version, source)
+     VALUES ($1, $2, $3, $4, $5, $6, 'voice') RETURNING id`,
+    [businessId, callId || null, normalized, !!granted, script, scriptVersion]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "recordSmsConsent", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "sms_consents", op: "insert" });
+    return null;
+  }
+  const consentId = one(res).id;
+  noteAccess("recordSmsConsent", { resourceIds: [consentId], rowCount: 1 });
+  return consentId;
+}
+
+/**
+ * The current SMS-consent state for one number, for one tenant.
+ *
+ * Returns null when nothing has ever been recorded — which the gate must treat
+ * exactly as it treats a refusal. "No answer" and "no" are different facts and
+ * the same decision.
+ *
+ * @param {string} businessId
+ * @param {string} phoneNumber
+ * @returns {Promise<{ id: string, granted: boolean, script: string, script_version: string, created_at: string }|null>}
+ */
+export async function latestSmsConsent(businessId, phoneNumber) {
+  if (!pool || !businessId || !phoneNumber) return null;
+  const normalized = normalizePhoneNumber(phoneNumber);
+  if (!normalized) return null;
+
+  const res = await q(
+    `SELECT id, granted, script, script_version, created_at
+       FROM sms_consents
+      WHERE business_id = $1 AND phone_number = $2
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    [businessId, normalized]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "latestSmsConsent", error: res.error.message });
+    // NOT a null-because-nothing-found. The caller cannot tell these apart from
+    // the return value alone, which is why the gate treats every falsy answer
+    // as "do not send" rather than branching on the reason.
+    return null;
+  }
+  const row = one(res);
+  noteAccess("latestSmsConsent", { resourceIds: row ? [row.id] : [], rowCount: row ? 1 : 0 });
+  return row;
+}
+
 /**
  * Fetch caller context for personalization — recent call history and upcoming appointments.
  * Used to inject "returning caller" context into the AI prompt and to power
@@ -1522,7 +1633,7 @@ function phoneMatch(col, param) {
  *
  * @param {string} businessId
  * @param {string} phone
- * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array}|null>}
+ * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array, smsConsents: Array}|null>}
  */
 /**
  * The recording URLs this tenant holds for one caller.
@@ -1617,10 +1728,31 @@ export async function exportCallerData(businessId, phone) {
     return null;
   }
 
+  // Migration 037. A consent record is a phone number plus a decision the data
+  // subject made, so it is theirs to receive. The suffix match is right here for
+  // the same reason it is wrong in the gate: an export answers "everything you
+  // hold about me", and missing a row because it was stored in a different
+  // format would be the failure.
+  const consents = await q(
+    `SELECT id, call_id, phone_number, granted, script, script_version, source, created_at
+       FROM sms_consents
+      WHERE business_id = $1 AND ${phoneMatch("phone_number", 2)}
+      ORDER BY created_at ASC`,
+    [businessId, phone]
+  );
+  if (consents.error) {
+    log.error("db_error", { operation: "exportCallerData.smsConsents", error: consents.error.message });
+    return null;
+  }
+
   noteAccess("exportCallerData", {
     resourceIds: calls.rows.map((c) => c.id),
     rowCount:
-      calls.rows.length + transcripts.rows.length + appointments.rows.length + requests.rows.length,
+      calls.rows.length +
+      transcripts.rows.length +
+      appointments.rows.length +
+      requests.rows.length +
+      consents.rows.length,
   });
 
   return {
@@ -1628,6 +1760,7 @@ export async function exportCallerData(businessId, phone) {
     transcripts: transcripts.rows,
     appointments: appointments.rows,
     customerRequests: requests.rows,
+    smsConsents: consents.rows,
   };
 }
 
@@ -1648,6 +1781,18 @@ export async function exportCallerData(businessId, phone) {
  *                     Same reasoning: the slot was occupied, and that fact
  *                     belongs to the clinic.
  *   customer_requests KEPT, with every free-text and identifying field nulled.
+ *   sms_consents      DELETED outright (migration 037). The row is a phone
+ *                     number and a decision about that phone number; null out
+ *                     the number and nothing meaningful is left, so there is no
+ *                     non-personal residue to keep. Deleting it also fails the
+ *                     SMS gate closed for that number afterwards, which is the
+ *                     right end state for somebody who asked to be forgotten.
+ *                     THE COST, recorded rather than hidden: it destroys the
+ *                     evidence that the caller consented to texts already sent.
+ *                     Flagged to counsel in the ledger (O18) — an erasure right
+ *                     and a records-of-consent obligation genuinely point in
+ *                     opposite directions here, and that is not a developer's
+ *                     call to make.
  *
  * ONE TRANSACTION. A partial erasure is the worst outcome available: it reports
  * success, satisfies nobody, and leaves the controller believing a request was
@@ -1667,7 +1812,7 @@ export async function exportCallerData(businessId, phone) {
  *
  * @param {string} businessId
  * @param {string} phone
- * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number}|null>}
+ * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number, smsConsents: number}|null>}
  */
 export async function eraseCallerData(businessId, phone) {
   if (!pool || !businessId || !phone) return null;
@@ -1734,6 +1879,12 @@ export async function eraseCallerData(businessId, phone) {
       [businessId, phone]
     );
 
+    const sc = await client.query(
+      `DELETE FROM sms_consents
+        WHERE business_id = $1 AND ${phoneMatch("phone_number", 2)}`,
+      [businessId, phone]
+    );
+
     if (!scoped) await client.query("COMMIT");
 
     const counts = {
@@ -1741,13 +1892,14 @@ export async function eraseCallerData(businessId, phone) {
       calls: c.rowCount,
       appointments: a.rowCount,
       customerRequests: r.rowCount,
+      smsConsents: sc.rowCount,
     };
     // The audit trail an erasure needs, carrying no phone number — the thing
     // being erased must not be written to a log in the act of erasing it.
     log.info("dsr_erasure_completed", { businessId, ...counts });
     noteAccess("eraseCallerData", {
       resourceIds: callIds,
-      rowCount: t.rowCount + c.rowCount + a.rowCount + r.rowCount,
+      rowCount: t.rowCount + c.rowCount + a.rowCount + r.rowCount + sc.rowCount,
     });
     return counts;
   } catch (err) {

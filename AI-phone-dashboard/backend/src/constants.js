@@ -52,6 +52,26 @@ const SMS_TEMPLATE_KINDS = ["appointment_confirmation", "message_received", "mis
 // most two segments after placeholder interpolation is roughly accounted for.
 const SMS_TEMPLATE_MAX_LENGTH = 320;
 
+// Which {placeholders} each template kind may use. Source of truth: root repo
+// lib/smsConsent.js SMS_TEMPLATE_PLACEHOLDERS, and tests/smsTemplateParity.test.js
+// in the ROOT suite fails when these two copies drift.
+//
+// This is NOT a PHI detector, and calling it one would be the dangerous
+// mistake. No check can tell that "your chemotherapy appointment" discloses
+// more than "your appointment", and a clinical-keyword denylist would be false
+// confidence in the one message that leaves this system addressed to a patient.
+// What it CAN do is bound the identifiers the system itself substitutes in, so
+// an override cannot pull a field into a message that never carried one.
+//
+// The guard that actually protects the caller is consent (ledger O25,
+// database/037_sms_consent.sql): nothing is sent to anyone who has not asked
+// for it, whatever the owner typed into the template.
+const SMS_TEMPLATE_PLACEHOLDERS = {
+  appointment_confirmation: ["name", "business", "datetime"],
+  message_received: ["name_part", "business", "sla"],
+  missed_call: ["business"],
+};
+
 // Source of truth: database/014_business_hours_weekly.sql.
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -72,6 +92,7 @@ module.exports = {
   ELEVENLABS_VOICE_IDS,
   SMS_TEMPLATE_KINDS,
   SMS_TEMPLATE_MAX_LENGTH,
+  SMS_TEMPLATE_PLACEHOLDERS,
   DAY_KEYS,
   ALLOWED_TIMEZONES,
 };
