@@ -18,6 +18,11 @@
  *   book_appointment                 <- appointments
  *   record_customer_request          <- messages
  *   request_transfer                 <- transfer
+ *   record_sms_consent               <- sms_consent, and ONLY when the tenant
+ *                                       has caller text follow-ups switched
+ *                                       on. Every tenant has them off today,
+ *                                       so it contributes nothing to the
+ *                                       default snapshots.
  *   <webhook integration tools>      <- engine (the generic escape hatch)
  *   <athena OR db appointment tools> <- appointments.adapterTools
  *
@@ -29,6 +34,7 @@ import appointments from "./appointments.js";
 import messages from "./messages.js";
 import transfer from "./transfer.js";
 import quotes from "./quotes.js";
+import smsConsent from "./smsConsent.js";
 
 /**
  * Registry order. Governs two things at once:
@@ -41,7 +47,7 @@ import quotes from "./quotes.js";
  *
  * @type {import("./_contract.js").CapabilityPack[]}
  */
-const PACKS = [appointments, messages, quotes, transfer];
+const PACKS = [appointments, messages, quotes, transfer, smsConsent];
 
 const BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 

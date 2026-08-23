@@ -178,6 +178,8 @@ const BUILTIN_TOOL_NAMES = [
   "record_quote_request",
   // transfer pack
   "request_transfer",
+  // sms_consent pack
+  "record_sms_consent",
 ];
 
 router.get("/api/integrations/definitions", (req, res) => {

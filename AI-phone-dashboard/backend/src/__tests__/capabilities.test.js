@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
 import { createTestApp } from "./harness.js";
+import schemas from "../generated/capabilitySchemas.json" with { type: "json" };
 
 const BUSINESS_ID = "22222222-2222-2222-2222-222222222222";
 const OTHER_BUSINESS_ID = "33333333-3333-3333-3333-333333333333";
@@ -90,8 +91,15 @@ describe("capability settings", () => {
         .set("Authorization", "Bearer test-token");
 
       expect(res.status).toBe(200);
-      // appointments, messages, quotes, transfer (the info-only packs were removed).
-      expect(res.body.capabilities.length).toBe(4);
+      // Derived from the generated schema, not a hand-counted number. It was 4
+      // (appointments, messages, quotes, transfer) and went to 5 when the
+      // sms_consent pack landed; a literal here fails on the day a capability
+      // is added, which is the day it is least useful to be arguing with a
+      // test. What is worth asserting is that EVERY pack gets a row.
+      expect(res.body.capabilities.length).toBe(schemas.capabilities.length);
+      expect(res.body.capabilities.map((c) => c.capability_id).sort()).toEqual(
+        schemas.capabilities.map((c) => c.id).sort()
+      );
       expect(res.body.capabilities.every((c) => c.configured === false)).toBe(true);
     });
 

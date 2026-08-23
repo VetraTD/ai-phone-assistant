@@ -9,6 +9,7 @@ import {
   countScheduledOverlapping,
   listScheduledBetween,
   getAppointmentById,
+  recordSmsConsent,
   withTenantSafe,
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
@@ -78,6 +79,9 @@ const CAPABILITY_DEPS = {
   },
   get updateAppointment() {
     return updateAppointment;
+  },
+  get recordSmsConsent() {
+    return recordSmsConsent;
   },
   get executeIntegration() {
     return executeIntegration;

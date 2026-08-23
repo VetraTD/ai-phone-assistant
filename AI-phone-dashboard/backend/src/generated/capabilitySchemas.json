@@ -136,6 +136,14 @@
       "core": true,
       "adapterKind": null,
       "configSchema": null
+    },
+    {
+      "id": "sms_consent",
+      "label": "Text confirmations",
+      "description": "The receptionist asks permission before texting a caller, and records the answer. Only used when caller text follow-ups are switched on in Settings; texts are never sent without a recorded yes.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": null
     }
   ],
   "adapters": {
