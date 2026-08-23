@@ -86,6 +86,44 @@ variable "staging_caller_allowlist" {
   }
 }
 
+variable "twilio_sms_from" {
+  description = <<-EOT
+    The number caller-facing SMS is SENT FROM, per stack. E.164.
+
+    Per stack rather than global because each stack authenticates as a different
+    Twilio account, and OUTBOUND SMS REQUIRES THE `From` NUMBER TO BELONG TO THE
+    AUTHENTICATING ACCOUNT. Staging holds a SUBACCOUNT's credentials, so a
+    production number here fails with Twilio 21606 — "not a valid, SMS-capable
+    inbound phone number ... for your account" — which reads as a bad number and
+    is a wrong account.
+
+    Unset means the channel is OFF, and that is a supported state rather than a
+    misconfiguration: services/notifications.js `sendSms` returns early with
+    `twilio_sms_from_missing`, and lib/bootChecks announces `sms_channel_off` at
+    boot so it is visible instead of silent.
+
+    ---------------------------------------------------------------------------
+    SETTING THIS DOES NOT MEAN A TEXT ARRIVES
+    ---------------------------------------------------------------------------
+    A US long code needs A2P 10DLC registration, and a toll-free number needs
+    toll-free verification, before carriers accept traffic at all. Twilio shows
+    this per number as Traffic Status: `Messaging disabled`, INDEPENDENTLY of
+    `Voice enabled` — the same number can answer calls and refuse to text.
+    Unregistered sends fail with 30034.
+
+    So this variable makes the send ATTEMPT possible and observable. Whether the
+    message is delivered is O23a's question, not this one, and conflating the two
+    is how a working consent gate gets debugged for an afternoon.
+  EOT
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for n in values(var.twilio_sms_from) : can(regex("^\\+[1-9][0-9]{1,14}$", n))])
+    error_message = "Every value must be E.164 (+ then 1-15 digits). Twilio rejects anything else as a `From`."
+  }
+}
+
 variable "cloud_run_concurrency" {
   description = <<-EOT
     Requests per instance. Low, because a voice request is not a request: the
@@ -344,6 +382,18 @@ resource "google_cloud_run_v2_service" "this" {
         content {
           name  = "CALLER_ALLOWLIST"
           value = join(",", var.staging_caller_allowlist)
+        }
+      }
+
+      # Caller-facing SMS. Emitted only for a stack that has a number, so an
+      # unset stack keeps the channel off loudly (`sms_channel_off` at boot)
+      # rather than shipping an empty string that Twilio would reject per
+      # message, at send time, on the phone path.
+      dynamic "env" {
+        for_each = lookup(var.twilio_sms_from, each.value.stack, "") != "" ? [1] : []
+        content {
+          name  = "TWILIO_SMS_FROM"
+          value = var.twilio_sms_from[each.value.stack]
         }
       }
 

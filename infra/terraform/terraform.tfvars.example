@@ -183,3 +183,16 @@ adopt_existing_contacts = {}
 # order serves code against a schema that has not been migrated yet.
 image_tag           = "0000000"
 dashboard_image_tag = "0000000"
+
+# The number caller-facing SMS is sent FROM, per stack. E.164, and it must belong
+# to the Twilio account THAT STACK authenticates as — staging uses a subaccount,
+# so a production number here fails with 21606 and reads as a bad number.
+#
+# Unset = channel off, which is supported and announced at boot as
+# `sms_channel_off`. Setting it does NOT mean a text arrives: a US long code
+# needs A2P 10DLC and a toll-free number needs verification, shown per number in
+# Twilio as Traffic Status `Messaging disabled` — independently of `Voice
+# enabled`, so the same number can answer calls and refuse to text.
+twilio_sms_from = {
+  # "us-staging" = "+1XXXXXXXXXX"
+}
