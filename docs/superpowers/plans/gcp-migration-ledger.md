@@ -241,11 +241,18 @@ standing fact. That decouples C7 from the cost decision entirely.
    `scripts/c4-latency-report.js` turns C4 into one command run after the C2/C3
    calls, so the owner's call session produces C4's evidence for free. Nothing
    else to build for it.
-5. The sub-processor register and retention schedule the DPIA needs.
+5. ~~The sub-processor register and retention schedule~~ — **DRAFTED
+   (`ca4a9c3`).** Both in `docs/compliance/`. Two findings came out of writing
+   them: **Twilio's BAA is unsigned and is a hard gate on a real patient call**,
+   and **nothing expires from the database** — there is no retention job at all.
 
    (`browser_key_restrictions` came OFF this list on 2026-08-24 — closed as
    deliberately-not-done under "Deferred by decision", with the reasoning. It
    had been read as outstanding work for three sessions.)
+
+**THE UNATTENDED QUEUE IS NOW EMPTY.** Everything left in Lane C needs the owner:
+one apply, one call session, one ADC reauth. See the deploy runbook and the C7
+runbook under Lane C — both are written out step by step.
 
 **Needs the owner:** the two decisions above · ADC reauth to unblock C1 ·
 C2/C3 (live + concurrent calls) · C5 (their ears, ~1.3 s/turn) · funding Twilio
@@ -1592,6 +1599,8 @@ listing what counsel must confirm, all ending with what has never been exercised
 | `incident-response-and-breach-notification.md` | the incident response plan **and** the breach runbook | **O26** |
 | `access-authorisation-and-termination.md` | §164.308(a)(3)(ii)(B)/(C), (a)(4)(ii)(B)/(C) | **O21** |
 | `workforce-training.md` | §164.308(a)(5) + TX HB 300 §181.101 | **O22** |
+| `sub-processor-register.md` | who processes PHI on our behalf, per lane; feeds the DPIA and Art. 30 | 2026-08-24 |
+| `retention-schedule.md` | how long each data class is kept, and what erasure actually reaches | 2026-08-24 |
 
 **"72-hour ICO breach runbook" was the wrong name for the thing on this list, and that
 was the whole of O26.** It is the UK clock and it was the only one written down; there
@@ -1599,7 +1608,27 @@ are three, they start at different moments, and the 72 hours is not the shortest
 draft carries all three in one table.
 
 Still to draft: HHS SRA Tool risk analysis · **DPIA** · Art. 30 Records of Processing ·
-the wider policy set · contingency plan · sub-processor register · retention schedule.
+the wider policy set · contingency plan. ~~sub-processor register · retention schedule~~
+**both drafted 2026-08-24.**
+
+**TWO THINGS THE REGISTER SURFACED that were not being tracked as compliance items.**
+**(1) Twilio's BAA is not signed** — O5, `wip` since 2026-08-21 — and Twilio is the ONE
+non-Google sub-processor that touches PHI, since the caller's number and the audio both
+pass through it. Nothing in the Google relationship covers that, so it is a hard gate on
+carrying a real patient call and belongs on the same line as the LLC and cyber liability
+rather than in a vendor queue. **(2) Sentry is not out of scope**, as this file's
+"cancel at D7" framing implied: it receives errors with context filtered to seven
+non-identifying keys — a filter `lib/sentry.js` added *because* recipient addresses, a
+subject line naming a patient and caller numbers were previously being sent — and the
+residual is the exception MESSAGE, which no allow-list filters.
+
+**AND THE RETENTION SCHEDULE'S BLUNT FINDING: there is no retention job, so nothing
+expires and every transcript ever recorded is still in the database.** A schedule with
+no enforcement is a policy document. The 90-day transcript clock is the first thing to
+build, and the draft carries the three traps it will hit — a committed script through
+the migrate job, per-tenant scoping under FORCE RLS where an unscoped DELETE matches
+zero rows **and reports success**, and logging what was deleted, because a purge with no
+record is indistinguishable from one that never ran.
 Workforce training **records** start empty — the curriculum exists, the sessions have not
 happened.
 
