@@ -642,12 +642,51 @@ async function runMatrixMode(scenarios, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Backend preflight
+// ---------------------------------------------------------------------------
+
+/**
+ * Fail fast, before 37 scenarios start, if no LLM backend is configured.
+ *
+ * This ASKS `getClient()` instead of re-deriving its rules, and that is the
+ * whole point of the function. The check it replaces read:
+ *
+ *     if (!process.env.GEMINI_API_KEY) { ...refuse... }
+ *
+ * which is a second copy of a decision `services/gemini.js` already owns, and
+ * it had drifted from it. A Vertex deployment has NO API KEY BY DESIGN — the
+ * Google Cloud BAA does not cover the Gemini Developer API — so that guard
+ * refused to start the exact configuration C1 exists to measure, while having
+ * no effect whatsoever on which backend a started run would use.
+ *
+ * It is the fourth appearance of this shape here. The third lived in
+ * `getReplyStreaming`, above its own call to `getClient`, and threw on every
+ * turn of a correctly configured covered deployment; the surviving check in
+ * `getClient` carries a comment explaining why it belongs there and nowhere
+ * else. Calling `getClient()` is also cheap and side-effect-free relative to
+ * the run: it constructs the client the run was going to construct anyway,
+ * just early enough that the failure costs nothing.
+ *
+ * @param {() => unknown} [resolve] - test seam; defaults to getClient.
+ * @returns {string|null} the reason to refuse, or null to proceed.
+ */
+export function preflightBackend(resolve = getClient) {
+  try {
+    resolve();
+    return null;
+  } catch (err) {
+    return err?.message || String(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 async function main() {
-  if (!process.env.GEMINI_API_KEY) {
-    console.error("GEMINI_API_KEY is not set. Add it to your .env before running `npm run eval`.");
+  const backendProblem = preflightBackend();
+  if (backendProblem) {
+    console.error(backendProblem);
     process.exitCode = 1;
     return;
   }
