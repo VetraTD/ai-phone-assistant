@@ -157,9 +157,15 @@ function isObviouslyLocal(url) {
  * a Cloud Run Job that skips it succeeds and then hangs until its timeout,
  * which reads as a stuck migration and is not one.
  *
+ * Exported so scripts/c8-rls-proof.js reaches the database the same way this
+ * file does. Duplicating the two branches there would be a second copy of a
+ * decision this one owns, and this repository has already paid for that class
+ * twice — see preflightBackend in eval/run.js and the GEMINI_API_KEY check it
+ * replaced.
+ *
  * @returns {Promise<{ client: import("pg").Client, close: () => Promise<void>, describe: string, isLocal: boolean }>}
  */
-async function connect() {
+export async function connect() {
   // Configuration report, before anything can fail on it.
   //
   // A migration that cannot connect gives you one line from `pg` — "client
