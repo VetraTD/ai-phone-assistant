@@ -24,6 +24,15 @@ scripts
 # ...and the read-only inspector, for questions only the real database can
 # answer — the instances are private-IP only, so there is no psql from a laptop.
 !scripts/db-inspect.js
+# ...and Lane C's two verification entrypoints, which run through the same job
+# for the same reason. BOTH of these had to be added in TWO places — a COPY in
+# the Dockerfile and a negation here — and the Dockerfile alone is not enough:
+# with the COPY present and the negation missing, the build fails with
+# `"/scripts/c7-restore-parity.js": not found`, which reads as a missing file
+# in the repository rather than an excluded build context. Found by building
+# the image rather than by reading about it.
+!scripts/c8-rls-proof.js
+!scripts/c7-restore-parity.js
 docs
 latency-runs
 infra

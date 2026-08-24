@@ -90,6 +90,7 @@
  * PHI, and a row-count check would call that a complete success.
  */
 
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { connect } from "./migrate.js";
 import { cloudSqlConfig, cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
@@ -458,4 +459,12 @@ async function main() {
   if (fails.length) process.exitCode = 1;
 }
 
-await main();
+// Guarded so the Cloud Build smoke step can IMPORT this file to prove its whole
+// module tree resolves inside the image, without running it against a database.
+// Same shape as scripts/migrate.js and eval/run.js — and the reason it matters
+// here is that these two scripts are the ONLY things in the image that nothing
+// else imports, so a forgotten COPY would surface as "Cannot find module" in
+// front of the owner during a scheduled verification rather than in a build.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  await main();
+}

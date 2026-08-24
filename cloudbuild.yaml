@@ -124,6 +124,26 @@ steps:
       - "await import('/app/scripts/migrate.js'); console.log('migration runner loaded');"
     waitFor: [build]
 
+  # Lane C's verification scripts ship in this image too, and they are the only
+  # things in it that nothing else imports — so a forgotten COPY in the
+  # Dockerfile is invisible to every test in the repository and would surface as
+  # `Cannot find module` during a scheduled verification with the owner present.
+  # That is exactly what happened to both of these once.
+  #
+  # Imported rather than run: each guards its `main()` behind an
+  # argv[1] === import.meta.url check, so importing resolves the whole module
+  # tree — including lib/db/schemaFingerprint.js, which c7 needs and which
+  # arrives via `COPY lib` rather than by being named — without touching a
+  # database.
+  - id: smoke-verifiers
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); console.log('lane C verifiers loaded');"
+    waitFor: [build]
+
   # The migration files have to BE in the image. A `COPY database ./database`
   # that silently matched nothing would leave a job that connects, finds zero
   # migrations, reports "Nothing to apply", and exits 0 — a green run that did

@@ -123,6 +123,7 @@
  * cascade of isolation failures and is one script bug.
  */
 
+import { pathToFileURL } from "node:url";
 import { connect } from "./migrate.js";
 
 const STRUCTURE_ONLY = process.argv.includes("--structure-only");
@@ -637,4 +638,12 @@ async function seedOneRow(client, t, tenantId, parentIds) {
   return { ok: true, id: r.rows[0]?.id };
 }
 
-await main();
+// Guarded so the Cloud Build smoke step can IMPORT this file to prove its whole
+// module tree resolves inside the image, without running it against a database.
+// Same shape as scripts/migrate.js and eval/run.js — and the reason it matters
+// here is that these two scripts are the ONLY things in the image that nothing
+// else imports, so a forgotten COPY would surface as "Cannot find module" in
+// front of the owner during a scheduled verification rather than in a build.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  await main();
+}

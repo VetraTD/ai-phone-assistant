@@ -74,6 +74,18 @@ COPY scripts/seed-staging.js ./scripts/seed-staging.js
 # Read-only. Answers questions about what the REAL database allows, which the
 # local dev container cannot be trusted to represent — it is more permissive.
 COPY scripts/db-inspect.js ./scripts/db-inspect.js
+# Lane C's two verification entrypoints. Same job, same reason as the three
+# above: staging's Cloud SQL is private-IP only, so a check that has to run
+# against the real database has to travel in the image.
+#
+# These were written, committed, sabotage-verified and documented in a runbook
+# while being absent from this file — which would have surfaced as
+# `Cannot find module` in front of the owner during a scheduled verification,
+# because nothing else in the repo imports them and no test could have noticed.
+# The build now imports both (cloudbuild.yaml, smoke-verifiers) so the next
+# omission fails a build instead.
+COPY scripts/c8-rls-proof.js ./scripts/c8-rls-proof.js
+COPY scripts/c7-restore-parity.js ./scripts/c7-restore-parity.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:
