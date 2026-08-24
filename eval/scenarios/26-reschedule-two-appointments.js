@@ -34,9 +34,43 @@ export default {
     },
   },
   extrasPatch: { callerPhone: CALLER_PHONE },
+  // THE IDS MUST BE REAL UUIDs, AND THAT IS NOT COSMETIC.
+  //
+  // `appointments.id` is `uuid PRIMARY KEY DEFAULT gen_random_uuid()` in
+  // database/schema.sql, and both tool declarations describe the parameter as
+  // "UUID of the appointment" (capabilities/appointments.js:241, :263). This
+  // fixture used to seed "appt-keep" / "appt-move" — so the model was told the
+  // argument was a UUID, handed something that plainly was not one, and
+  // SYNTHESISED a UUID rather than echoing what the lookup returned. One run
+  // produced `apt-22222222-2222-2222-2222-222222222222`; another passed the
+  // string "Wednesday, August 26, 2026 at 2:00 PM" as an id.
+  //
+  // A fabricated id then resolves to no row, and `appointmentBelongsToCaller`
+  // returns false for a missing row exactly as it does for someone else's — so
+  // the caller was told "I can only make changes to appointments booked under
+  // your number" about an appointment booked under their number, and the model
+  // degraded to taking a message.
+  //
+  // Measured 2026-08-24, 5 runs per arm, same code, only these two ids changed:
+  //
+  //            hard pass    first appointment_id correct
+  //   old ids     2/5                 1/5
+  //   uuids       5/5                 5/5
+  //
+  // Fisher one-sided via scripts/eval-band.js: hard pass p=0.0833 (NOT
+  // significant — the documented n=5 limit), first-id-correct p=0.0238
+  // (significant). The aggregate could not see what the mechanism could.
+  //
+  // This scenario was one of the three carrying the whole 35-37 noise band, and
+  // the band was being read as model non-determinism. It was a fixture.
+  //
+  // WHAT THIS DOES NOT FIX, so nobody reads the green as more than it is: the
+  // model can still invent an id — services/gemini.js:818's comment records it
+  // doing so on a real call, where ids ARE uuids. The fixture inflated the
+  // rate; it did not create the failure.
   seedAppointments: [
-    { id: "appt-keep", client_name: "Priya Nair", client_phone: CALLER_PHONE, scheduled_at: KEEP, status: "scheduled" },
-    { id: "appt-move", client_name: "Priya Nair", client_phone: CALLER_PHONE, scheduled_at: MOVE, status: "scheduled" },
+    { id: "7f3a1c62-9d4e-4b18-a5c0-2e6b8d91f4a7", client_name: "Priya Nair", client_phone: CALLER_PHONE, scheduled_at: KEEP, status: "scheduled" },
+    { id: "b28e5d10-6c37-4a92-8f15-3d70ae4c1b96", client_name: "Priya Nair", client_phone: CALLER_PHONE, scheduled_at: MOVE, status: "scheduled" },
   ],
   caller: {
     mode: "persona",
