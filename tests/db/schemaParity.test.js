@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
+import { schemaFingerprint, IGNORED_TABLES } from "../../lib/db/schemaFingerprint.js";
 
 // ---------------------------------------------------------------------------
 // database/schema.sql is the FRESH-INSTALL path. Nothing runs the numbered
@@ -31,8 +32,6 @@ const describeDb = url ? describe : describe.skip;
 const SCHEMA_SQL = path.resolve(fileURLToPath(new URL("../../database/schema.sql", import.meta.url)));
 const SCRATCH_DB = "vetra_schema_parity_probe";
 
-// Objects that exist only because of HOW a database was built, not what it is.
-const IGNORED_TABLES = new Set(["schema_migrations"]);
 
 let migrated;
 let fresh;
@@ -44,58 +43,12 @@ function siblingUrl(database) {
   return u.toString();
 }
 
-async function objects(client) {
-  const tables = await client.query(`
-    SELECT c.relname AS name, c.relrowsecurity, c.relforcerowsecurity
-      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND c.relkind = 'r'
-     ORDER BY 1`);
-
-  const columns = await client.query(`
-    SELECT table_name || '.' || column_name || ' ' || data_type ||
-           CASE WHEN is_nullable = 'NO' THEN ' NOT NULL' ELSE '' END AS sig
-      FROM information_schema.columns
-     WHERE table_schema = 'public'
-     ORDER BY 1`);
-
-  // pg_get_functiondef renders the function as Postgres itself understands it,
-  // so whitespace and comment differences are gone and a changed body is not.
-  const functions = await client.query(`
-    SELECT p.proname AS name, pg_get_functiondef(p.oid) AS def
-      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'public'
-     ORDER BY 1, 2`);
-
-  const triggers = await client.query(`
-    SELECT c.relname || '.' || t.tgname AS name, pg_get_triggerdef(t.oid) AS def
-      FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND NOT t.tgisinternal
-     ORDER BY 1`);
-
-  const policies = await client.query(`
-    SELECT tablename || '.' || policyname AS name,
-           coalesce(qual, '') || ' | ' || coalesce(with_check, '') AS def
-      FROM pg_policies WHERE schemaname = 'public'
-     ORDER BY 1`);
-
-  const grants = await client.query(`
-    SELECT table_name || ' ' || privilege_type AS sig
-      FROM information_schema.role_table_grants
-     WHERE table_schema = 'public' AND grantee = 'vetra_app'
-     ORDER BY 1`);
-
-  const keep = (n) => !IGNORED_TABLES.has(n.split(/[. ]/)[0]);
-
-  return {
-    tables: tables.rows.filter((r) => keep(r.name)),
-    columns: columns.rows.map((r) => r.sig).filter(keep),
-    functions: new Map(functions.rows.map((r) => [r.name, r.def])),
-    triggers: new Map(triggers.rows.filter((r) => keep(r.name)).map((r) => [r.name, r.def])),
-    policies: new Map(policies.rows.filter((r) => keep(r.name)).map((r) => [r.name, r.def])),
-    grants: grants.rows.map((r) => r.sig).filter(keep),
-  };
-}
+// The fingerprint itself lives in lib/db/schemaFingerprint.js, because
+// scripts/c7-restore-parity.js asks the identical question of a RESTORED
+// instance against the one its backup came from. Two copies of "are these two
+// databases the same thing" would drift, and this suite is what keeps the
+// shared one honest.
+const objects = (client) => schemaFingerprint(client, IGNORED_TABLES);
 
 beforeAll(async () => {
   if (!url) return;
