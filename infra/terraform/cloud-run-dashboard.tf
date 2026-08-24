@@ -228,6 +228,18 @@ resource "google_cloud_run_v2_service" "dashboard" {
         }
       }
 
+      # The dashboard backend links to itself in the Art. 15 appointment export
+      # mail (routes/appointments.js), which is the one dashboard route that
+      # moves PHI out of the system — so the link matters more here than on the
+      # voice side, not less.
+      dynamic "env" {
+        for_each = var.dashboard_url != "" ? [1] : []
+        content {
+          name  = "DASHBOARD_URL"
+          value = var.dashboard_url
+        }
+      }
+
       # SMTP, for the contact form and the digest. Not credentials — a
       # hostname, a port and an address. SMTP_PASS is the only secret and comes
       # from Secret Manager below.

@@ -425,6 +425,22 @@ resource "google_cloud_run_v2_service" "this" {
         }
       }
 
+      # Where an owner notification tells them to go. Emitted only when set, so
+      # an unset stack keeps bootChecks' `dashboard_url_missing` notice rather
+      # than shipping an empty string that would render as a link to nowhere.
+      #
+      # Not derived from dashboard_domains[0]: that list is an unordered
+      # allow-list for CORS and Identity Platform, and giving its first element
+      # a second meaning would make adding a domain silently repoint every
+      # notification. The variable's own validation checks the two agree.
+      dynamic "env" {
+        for_each = var.dashboard_url != "" ? [1] : []
+        content {
+          name  = "DASHBOARD_URL"
+          value = var.dashboard_url
+        }
+      }
+
       # `us`/`eu`, never a single region and never `global`. Probed 2026-08-21:
       # no single Vertex region serves gemini-3.6-flash, and `global` routes
       # anywhere on earth, which voids the residency claim.

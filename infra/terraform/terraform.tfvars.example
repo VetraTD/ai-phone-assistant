@@ -222,3 +222,29 @@ twilio_sms_from = {
 # Without that the same domain goes out twice, the API stores it once, and every
 # later plan shows a diff that applying never resolves.
 dashboard_domains = ["vetra-shared-c3a3bd.web.app"]
+
+# ---------------------------------------------------------------------------
+# dashboard_url — WHAT OWNER NOTIFICATIONS LINK TO
+# ---------------------------------------------------------------------------
+# Reaches DASHBOARD_URL on both the voice service and the dashboard backend.
+#
+# services/notifications.js carries no caller or patient information by design —
+# email and SMS are not covered channels — so the message says which business
+# and what KIND of thing happened, and the link is the entire usable content.
+# Leave this unset and every notification says "Open your Vetra dashboard for
+# the details" while naming no dashboard. lib/bootChecks.js announces that at
+# boot as a notice, deliberately not a fatal: a notification with a weak link is
+# still worth sending.
+#
+# INCLUDE THE PATH. Firebase Hosting rewrites `**` to index.html and the SPA
+# routes client-side: `/` is the marketing Landing page, `/app` is the
+# dashboard. A bare origin sends a member of staff who clicked "you have a new
+# appointment" to a marketing page.
+#
+# The host must appear in dashboard_domains above, and Terraform checks that at
+# plan time rather than trusting it — the two are edited in different places for
+# different reasons, and a URL whose origin is missing from the CORS allow-list
+# produces a link that loads a sign-in form and is then refused on every API
+# call. That surfaces to staff, in an email, as a dashboard that is broken.
+dashboard_url = "https://vetra-shared-c3a3bd.web.app/app"
+

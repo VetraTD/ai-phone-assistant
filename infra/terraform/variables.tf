@@ -238,6 +238,56 @@ variable "labels" {
 # ---------------------------------------------------------------------------
 # B3.
 # ---------------------------------------------------------------------------
+variable "dashboard_url" {
+  description = <<-EOT
+    The address owner notifications link to, INCLUDING the path.
+
+    `services/notifications.js` deliberately carries no caller or patient
+    information — email and SMS are not covered channels, so the message says
+    which business and what KIND of thing happened, and the details stay behind
+    authentication. That makes the link the entire usable content of the
+    notification. Without it the text reads "Open your Vetra dashboard for the
+    details" and names no dashboard, which `lib/bootChecks.js` announces at boot
+    as a notice rather than a fatal.
+
+    The dashboard BACKEND reads it too, for the Art. 15 appointment export mail
+    (`routes/appointments.js`), so both services get it.
+
+    IT MUST CARRY `/app`, AND A BARE ORIGIN IS WRONG RATHER THAN MERELY UGLY.
+    Firebase Hosting rewrites `**` to index.html and the SPA routes client-side:
+    `/` is the marketing Landing page and `/app` is the dashboard. A link to the
+    origin drops a member of staff who clicked "you have a new appointment" onto
+    a marketing page.
+
+    The host must also appear in `dashboard_domains`, and that is checked below
+    rather than trusted. The two are independent settings that have to agree:
+    `dashboard_domains` is the CORS allow-list for the dashboard API, so a
+    DASHBOARD_URL pointing at an origin missing from it produces a link that
+    loads a sign-in form and is then refused on every API call — which surfaces
+    to a member of staff, in an email, as a dashboard that is simply broken.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.dashboard_url == "" || can(regex("^https://[^/]+/.+", var.dashboard_url))
+    error_message = "dashboard_url must be an https:// URL WITH a path — e.g. https://<host>/app. The bare origin serves the marketing page, not the dashboard."
+  }
+
+  validation {
+    # Cross-variable validation, which needs Terraform >= 1.9 — already required
+    # in versions.tf. The check exists because these two settings are edited in
+    # different places for different reasons and nothing else would notice them
+    # disagreeing until a clinic reported a broken link.
+    condition = (
+      var.dashboard_url == "" ||
+      !can(regex("^https://([^/]+)/", var.dashboard_url)) ||
+      contains(var.dashboard_domains, regex("^https://([^/]+)/", var.dashboard_url)[0])
+    )
+    error_message = "dashboard_url's host is not in dashboard_domains, so the dashboard API would refuse it on CORS. Add the host there, or point this at one that is already listed."
+  }
+}
+
 variable "dashboard_domains" {
   description = <<-EOT
     Domains the dashboard is served from, beyond localhost and the two
