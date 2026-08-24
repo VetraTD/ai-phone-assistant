@@ -135,12 +135,40 @@ resource "google_identity_platform_config" "auth" {
 # `identitytoolkit` and nothing else, so it cannot be turned on Vertex, Speech
 # or Cloud Storage.
 #
-# NOT restricted by HTTP referrer, and that is a gap rather than an oversight:
-# the dashboard has no domain yet. B5's load balancer is built and switched off
-# pending DNS, so any referrer list written today would be a guess that either
-# blocks the real domain later or is quietly widened until it means nothing.
-# `var.dashboard_domains` is the seam — populate it at B5/D-lane and add
-# browser_key_restrictions in the same edit.
+# NOT restricted by HTTP referrer, and as of 2026-08-24 that is a DECISION
+# rather than a gap. This comment used to say "populate var.dashboard_domains
+# and add browser_key_restrictions in the same edit". That domain is now known
+# (`vetra-shared-c3a3bd.web.app`), so the stated precondition is met — and
+# working through what the restriction would actually buy says not to add it:
+#
+#   1. THE THREAT IS ALREADY CLOSED BY api_targets. The reason this key is
+#      restricted at all is that it ships inside a public JavaScript bundle and
+#      a copy must not be spendable on Vertex or Speech. `api_targets =
+#      identitytoolkit.googleapis.com` is what stops that, and it is already
+#      here. A referrer list adds only "cannot be called from somebody else's
+#      web page".
+#
+#   2. AND IT DOES NOT RELIABLY ADD EVEN THAT. A `Referer` header is set by the
+#      client. A browser sets it honestly; anything that is not a browser sets
+#      whatever it likes. So the restriction deters casual reuse from another
+#      site and does nothing against a scripted caller, which is the attacker
+#      that would matter given signup is open.
+#
+#   3. THE LIST WOULD HAVE TO INCLUDE localhost, WHICH MAKES IT COSMETIC.
+#      AI-phone-dashboard/frontend/.env carries THIS key, there is no auth
+#      emulator, and so local development signs in against real Identity
+#      Platform. Exclude localhost and both founders lose local sign-in; include
+#      it and anyone can serve a page from localhost.
+#
+#   4. It would also need `vetra-shared-c3a3bd.firebaseapp.com` and not just the
+#      `.web.app` origin, because that is the configured `authDomain` — the kind
+#      of detail that is discovered by locking everybody out.
+#
+# The honest version of this hardening is TWO KEYS: a referrer-restricted one
+# that ships, and an unrestricted development one that never does. That is a
+# real improvement and it is not free — a second `google_apikeys_key`, a
+# frontend env change, and an apply whose failure mode is a locked-out clinic.
+# Recorded as available rather than done, at the owner's direction 2026-08-24.
 # ---------------------------------------------------------------------------
 resource "google_apikeys_key" "identity_platform_web" {
   project      = local.project_id_for_stack["shared"]

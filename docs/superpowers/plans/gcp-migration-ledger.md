@@ -241,8 +241,11 @@ standing fact. That decouples C7 from the cost decision entirely.
    `scripts/c4-latency-report.js` turns C4 into one command run after the C2/C3
    calls, so the owner's call session produces C4's evidence for free. Nothing
    else to build for it.
-5. `browser_key_restrictions` on the Identity Platform web key.
-6. The sub-processor register and retention schedule the DPIA needs.
+5. The sub-processor register and retention schedule the DPIA needs.
+
+   (`browser_key_restrictions` came OFF this list on 2026-08-24 — closed as
+   deliberately-not-done under "Deferred by decision", with the reasoning. It
+   had been read as outstanding work for three sessions.)
 
 **Needs the owner:** the two decisions above · ADC reauth to unblock C1 ·
 C2/C3 (live + concurrent calls) · C5 (their ears, ~1.3 s/turn) · funding Twilio
@@ -1577,6 +1580,7 @@ record): <https://claude.ai/code/artifact/3cb492c1-924a-4546-a4d3-524a7be0d61a> 
 | **Clinic BAA signature** | Day before go-live |
 | **athenahealth partner application** | After **Lane C**, so the security review describes the GCP stack |
 | **`us-standard` ElevenLabs lane** | First non-healthcare US customer. A third tfvars file, not a refactor |
+| **`browser_key_restrictions` on the Identity Platform web key** | **CLOSED 2026-08-24 as deliberately-not-done, the way O31 was.** Its stated precondition (a known dashboard domain) is now met, and working the reasoning through says no: `api_targets = identitytoolkit` already closes the threat this key was restricted for, a `Referer` is set by the client so the restriction deters casual reuse and not a script, and the list would have to include `localhost` — the same key is in the frontend's `.env` with no auth emulator, so both founders sign in against real Identity Platform locally. Include localhost and it is cosmetic; exclude it and local development breaks. **Trigger to revisit: wanting the honest version, which is TWO keys** — a referrer-restricted one that ships and an unrestricted dev one that never does. Also needs `…firebaseapp.com`, the configured `authDomain`, not just the `.web.app` origin |
 
 ### Compliance paperwork — parallel, ~2–3 weeks, Claude drafts / owner adopts
 
