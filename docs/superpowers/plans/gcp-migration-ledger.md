@@ -224,10 +224,16 @@ standing fact. That decouples C7 from the cost decision entirely.
    under Lane C. **C7 is now ~10 minutes with the owner present and costs about
    four cents.** It is the cheapest remaining Lane C item and no longer waits on
    anything.
-2. `DASHBOARD_URL` is unset — owner notifications say "open the dashboard"
+2. **ONE DEPLOY UNBLOCKS THREE LANE C HALVES** — `scripts/c8-rls-proof.js` and
+   `scripts/c7-restore-parity.js` are now IN the image (`6be6bad`; they were
+   not, and nothing in the repo could have said so), and the dashboard's
+   PHI-access audit logging is still code-only. A rebuild + both `image_tag`
+   bumps + one apply makes C7 runnable, C8's RLS half runnable, and C8's audit
+   half live. Owner present: it is an apply.
+3. `DASHBOARD_URL` is unset — owner notifications say "open the dashboard"
    without linking to one that now exists.
-3. `browser_key_restrictions` on the Identity Platform web key.
-4. The sub-processor register and retention schedule the DPIA needs.
+4. `browser_key_restrictions` on the Identity Platform web key.
+5. The sub-processor register and retention schedule the DPIA needs.
 
 **Needs the owner:** the two decisions above · ADC reauth to unblock C1 ·
 C2/C3 (live + concurrent calls) · C5 (their ears, ~1.3 s/turn) · funding Twilio
@@ -693,6 +699,7 @@ unlink or budget change · anything touching Secret Manager or real credentials 
 | **THE SCHEMA SAYS THE ROUTING TABLES ARE "NOT GRANTED TO vetra_app". THEY ARE GRANTED `arwd` — READ AND WRITE** | 2026-08-24 (measured on PG16 by `scripts/c8-rls-proof.js`; mechanism confirmed in `pg_default_acl`) | `business_directory` and `user_directory` deliberately carry NO row-level security, and the security argument written above each of them — twice, in the schema — IS the grant: *"NO row-level security, and NOT granted to vetra_app — only the SECURITY DEFINER function below reads it"*, therefore *"a table without RLS is not a cross-tenant window"*. Measured: `has_table_privilege('vetra_app', 'business_directory', 'SELECT')` is **true**, and the ACL on both is **`vetra_app=arwd/vetra`** — select, insert, update AND delete. **The mechanism:** each table carries `REVOKE ALL … FROM PUBLIC`, which does not touch a grant made directly to a NAMED role, and migration 029's `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vetra_app` grants every table created afterwards — which 033 and 034/036 both are. `pg_default_acl` shows `vetra_app=arwd/vetra` outright. **Consequence:** the role the runtime inherits can read a scope-free map of every tenant's dialled numbers and every user's account id, and can rewrite the rows that decide which tenant a caller and a login resolve to — the same tables whose own comments warn that a stale row *"sends a caller to the wrong tenant"* and *"would resolve somebody's login"* to the wrong one. **Not a live leak** — nothing but the definer functions queries them — so this is a defence-in-depth failure and a false claim in the design rather than an active breach. **The same shape as the `roles/storage.objectAdmin` finding: a permission named in a comment is not a permission granted by the role beneath it.** Whether Cloud SQL is affected is UNVERIFIED and is exactly what the script answers once it is in an image. **PARKED** |
 | **A SECURITY CHECK RUNNING AS THE APPLICATION ROLE CANNOT USE `information_schema` FOR CONSTRAINTS** | 2026-08-24 | `information_schema.constraint_column_usage` is restricted to constraints on tables the current user **OWNS**. `c8-rls-proof.js` runs as `vetra_app`, which owns nothing, so it returned an EMPTY SET and `call_transcripts` was reported as unseedable while its one foreign key sat right there in `pg_constraint`. **A privilege-filtered view answers "there are no constraints" rather than "you may not look", and those two read identically** — the same shape as an unscoped read under FORCE RLS returning zero rows. Use `pg_catalog` for anything a security check depends on |
 | **C7 IS NOT THE PRODUCTION BUILD, AND THIS FILE'S OWN RECOMMENDATION TO MAKE IT ONE WAS WRONG** | 2026-08-24 (re-derived at the owner's instruction, then verified against `gcloud`) | The recorded reasoning was that *"a restore test and a `pg_restore` into a new production instance are the same exercise, so doing them together costs one instance and one meter start instead of two."* **They are not the same exercise.** C7 restores a **Cloud SQL automated backup** — a managed, instance-level artefact — to prove the backup is good, which is what §164.308(a)(7)(ii)(D) asks for. D3 runs a **cross-vendor logical `pg_dump` from Supabase into `pg_restore`**, which proves the data moved. Different source, different mechanism, different claim: a successful D3 says nothing about whether a Cloud SQL backup restores. **And C7 does not need production at all.** It needs *an* instance with automated backups, and staging has been taking them since B2. Verified in `gcloud`: `sql backups restore` restores to a NEW instance when addressed by backup name, and `sql instances clone` creates an independent copy — **neither is a `terraform apply`**, so the hard stop this file attaches to C7 is avoidable, and a `db-g1-small` for an hour is roughly $0.04 rather than a cost decision. The parity check afterwards can run through the migrate job with `--update-env-vars=CLOUD_SQL_INSTANCE=<scratch>`, which this file already establishes is EXECUTION-SCOPED and therefore needs no rebuild and no apply. **So: C7 today against staging, cheap, owner present only for the spend and the delete. Build production immediately before D3 for the meter and first-start-debugging reasons, which are the real ones. Then repeat C7 against production's OWN backup once it has taken one — the strongest form of the evidence, and the only one genuinely about production.** What is still missing is the parity script itself |
+| **A SCRIPT WRITTEN TO RUN THROUGH THE MIGRATE JOB HAS TO BE ADDED IN TWO PLACES, AND NOTHING IN THE REPOSITORY CAN TELL YOU IT WAS NOT** | 2026-08-24 (found by building the image, after both scripts were committed, sabotage-verified and written into a runbook) | `scripts/c8-rls-proof.js` and `scripts/c7-restore-parity.js` were both **absent from the image they exist to run in**. The Dockerfile uses an explicit file list rather than `COPY . .` — deliberately, since that is what keeps `.env`, the test suite and `docs/` out of a production image, and it fails closed — so a new job entrypoint needs a `COPY` line. **It also needs a second edit: `.dockerignore` excludes `scripts` wholesale with one negation per shipped file**, so the COPY alone fails the build with `"/scripts/c7-restore-parity.js": not found`, which reads as a missing file in the repository rather than an excluded build context. **Nothing could have caught it:** these scripts are the only things in the image that nothing else imports, so no test references them and the existing `smoke` / `smoke-migrate` steps do not reach them. It would have surfaced as `Cannot find module` during a scheduled verification with the owner present. Closed by a `smoke-verifiers` build step that IMPORTS both — which also proves `lib/db/schemaFingerprint.js` arrived, since that one ships via `COPY lib` rather than by being named — and by guarding each script's `main()` behind `argv[1] === import.meta.url` so importing resolves the tree without touching a database. **Sabotage-verified against a real local build rather than argued: with one COPY removed the image BUILDS FINE and the new step exits 1 with `ERR_MODULE_NOT_FOUND`.** Also confirmed in the other direction, because a guard applied wrongly would make both scripts silently no-op, which is worse than the bug it fixes. **Local `docker build` needs `--secret id=cacert,src=$HOME/gcloud-cacerts.pem`** or `npm ci` dies on Norton's TLS interception |
 | First clinic: **Excel Cardiac Care PLLC**, Texas, **ONE** covered entity across two sites (Keller 76244, Decatur 76234). Runs **athenahealth** for everything. Medicare + Medicaid. 8–5 M–F, closed weekends | 2026-08-20 | **One BAA, one `businesses` row**, location as an attribute. Not CA → no CIPA, no AB 3030. Cardiology only → 42 CFR Part 2 near-certainly `n/a`. After-hours + lunch + multi-site routing is the product. |
 
 ---
@@ -1192,8 +1199,20 @@ The serialization point. No amount of speed in A or B moves it. Book it as a blo
 
 **Why this is not a cost decision.** A `db-g1-small` is ~$0.037/hour. The
 instance lives for the length of one restore plus one script. Delete it and the
-meter stops. Nothing here is a `terraform apply`, so nothing touches state and
-nothing redeploys the service under test.
+meter stops.
+
+**⚠ CORRECTED 2026-08-24: THERE IS ONE APPLY, AND IT IS NOT THE ONE THIS FILE
+WARNED ABOUT.** Creating and deleting the scratch instance genuinely needs no
+Terraform — that part stands. But the parity script has to BE in the image the
+job runs, and the job's image is pinned by `image_tag`. So step 0 is a rebuild,
+an `image_tag` bump and an apply, and that apply moves the VOICE SERVICE too.
+
+**Do not spend that apply on C7 alone.** The same deploy is what
+`scripts/c8-rls-proof.js` needs to run where the PHI is, and what C8's
+dashboard-side PHI-access audit logging needs in order to run at all. **One
+deploy closes the packaging half of C7 and both open halves of C8.** Sequence it
+once, deliberately, with the migrate-job ordering rule this file already
+records: `-target` the job, execute it, then apply the rest.
 
 ```bash
 export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
