@@ -154,7 +154,21 @@ that are real but not on the D7 path get RECORDED AND PARKED.
 
 ---
 
-**THE ONE THING TO DO: BUILD PRODUCTION.** Both prod projects are still empty —
+**⚠ THE AGENDA CHANGED ON 2026-08-25 AND THIS BLOCK IS THE SECOND VERSION.**
+It said "build production", meaning US production. **Do not.** A UK clinic and
+UK business came onto the radar the same day, and building US production starts
+a ~$98.62/month meter on the lane that may not be first. **Read Lane U before
+deciding anything**, and read the Twilio pricing standing fact that sits behind
+it: HIPAA on Twilio is **$2,000/month**, which is a US-only cost that GDPR does
+not impose.
+
+**THE ONE THING TO DO: SETTLE UK vs US.** The demand signal is UK — someone has
+demo'd the product and given advice. The US list is real and static. Lane U is
+written, costed and gated on a customer commit; it needs no application code
+changes at all. **Ask whether the UK clinic is NHS or PRIVATE first** — that one
+answer can double the estimate.
+
+**IF US STILL WINS, the old agenda applies:** both prod projects are still empty —
 zero Cloud Run, zero Cloud SQL, re-verified 2026-08-25. **D3 says
 `pg_dump`/`pg_restore` and presumes a target that has never existed**, so
 nothing from D3 onward can start. Everything else in Lane D is short and mostly
@@ -1517,6 +1531,136 @@ holds), and `vetra-uk-prod` stays dormant and unbilled.
 
 **Rollback at any point: repoint Twilio webhooks back at Railway.** No live tenants, no divergent
 data, no one-way door.
+
+---
+
+## Lane U — UK · **CONDITIONAL, NOT STARTED** · opened 2026-08-25
+
+> **⚠ GATED ON A CUSTOMER COMMIT, DELIBERATELY.** The UK leads are warm — one
+> person has demo'd the product and given advice, plus a friend's dad and
+> several more — and none of them is signed. **Do not build this stack on
+> optimism.** The trigger is the same one LLC formation already uses: a first
+> verbal commit. Building a second stack for leads that also do not convert is
+> the expensive version of this mistake.
+
+### The structural point: THIS IS NOT A MIGRATION
+
+Lane D exists to move an EXISTING production — `pg_dump` Supabase, restore it,
+repoint Twilio, warm-hold a week, cancel the old stack. **A new UK clinic has
+none of that.** Empty database, new number, nothing to cut over from.
+
+**So D3, D4, D6 and D7 do not apply at all.** Railway keeps serving the US
+family clinic, untouched. Lane U is a greenfield deploy of infrastructure that
+is already written and has now been applied cleanly three times.
+
+That is the difference between "4–5 sessions plus a one-week hold" and roughly
+three sessions.
+
+### Why UK is cheaper as well as faster — every clause verified, not assumed
+
+| | US (covered) | UK (GDPR) |
+|---|---|---|
+| Twilio compliance | **$2,000/mo** standalone HIPAA | **$0** — standard Art. 28 DPA |
+| STT | Google STT v2, forced | **Deepgram**, EU endpoint |
+| TTS | Google, `tts_ttfb_ms` p50 **1,408 ms** | **ElevenLabs, 92 ms** |
+| SMS | A2P 10DLC / toll-free verification | no equivalent maze |
+| Code path | `hipaa` — 7 defects between "deployed" and "answers the phone" | `standard` — the path already serving production |
+
+**C5 resolves itself.** That gate is a blind TTS A/B worth ~1.3 s/turn, and it
+exists only because `hipaa` mode refuses ElevenLabs. On this lane it does not
+arise.
+
+### What is ALREADY BUILT for UK — more than expected, checked 2026-08-25
+
+  - **`DEPLOYMENT_MODE` derives itself:** `lane == "us" ? "hipaa" : "standard"`
+    (`cloud-run.tf`). UK gets `standard`, so Deepgram and ElevenLabs are
+    permitted with **no code change**.
+  - **`DEEPGRAM_REGION` derives itself:** `lane == "uk" ? "eu" : "us"`, and
+    `sttDeepgram.js` points that at `wss://api.eu.deepgram.com`. Covered by
+    `tests/deepgramRegion.test.js`.
+  - **`VERTEX_LOCATION` derives itself** to `eu`, and B1 confirmed by live probe
+    that `locations/eu` serves `gemini-3.6-flash`.
+  - **`uk-prod` and `uk-staging` stacks are fully defined** in `locals.tf` with
+    `region = var.uk_region` (europe-west2) and `locations = eu_locations`.
+  - **`deepgram-api-key` and `elevenlabs-api-key` already exist in
+    `secrets.tf`**, annotated UK-ONLY.
+  - **`vetra-uk-prod-c3a3bd` exists and is empty.**
+  - **Shared and therefore free:** Identity Platform, the dashboard, every
+    migration, RLS, PHI-access audit logging, the eval harness, and all three
+    verification scripts (`c7-restore-parity`, `c8-rls-proof`,
+    `c4-latency-report`).
+
+**The UK lane needs no application code changes at all.** The work is config,
+credentials, and verification.
+
+### Cost — derived, not estimated
+
+`sql.tf` carries the arithmetic for the prod tier `db-custom-2-7680`:
+
+```
+(2 vCPU x $0.0413/hr  +  7.5 GB x $0.007/hr) x 730 hrs  =  $98.62 / month
+```
+
+That is ONE instance, and it is sized for real multi-tenant traffic. A single
+pilot clinic does not need it — `us-staging` runs the identical schema on
+`db-g1-small`.
+
+| Shape | Cloud SQL | All in, incl. keeping `us-staging` |
+|---|---|---|
+| **Pilot: `db-g1-small`** | ~$27 | **~$75–95/mo** |
+| Prod tier as configured | $98.62 | ~$145–165/mo |
+
+**Recommendation: build at `db-g1-small` and resize when traffic justifies it** —
+resizing Cloud SQL is a restart, not a migration. **Caveat:** `cloud_sql_tier`
+is keyed `prod`/`staging`, not per stack, so lowering `prod` also lowers it for
+US prod whenever that is built. Harmless while US prod does not exist; write it
+down so nobody inherits a pilot-sized production database by accident.
+
+### The phases
+
+| # | Step | Needs | Notes |
+|---|---|---|---|
+| **U1** | `enable_uk_resources = true`, confirm `uk_region = europe-west2`, set `cloud_sql_tier.prod` | — | One tfvars edit. `active_regional_stacks` gates on this. |
+| **U2** | Deepgram + ElevenLabs keys into Secret Manager | **Owner — hard stop** | Both secrets are already declared; only the values are missing. |
+| **U3** | `terraform apply` | **Owner — hard stop** | Creates the UK VPC, Cloud SQL in europe-west2, both Cloud Run services, the migrate job. Read the plan; expect the documented `min_instance_count` phantom. |
+| **U4** | Migrate job with `--init-if-empty` | — | Builds the schema from scratch on an empty instance. C7 has now proven that exact path works. |
+| **U5** | UK Twilio number, webhook at the UK voice service, media edge **IE1** | Owner | Twilio confirmed regional media edges 2026-08-25, so call audio stays in Europe. |
+| **U6** | Verify with instruments that already exist | Owner's phone | `c8-rls-proof` and `c7-restore-parity` run through the migrate job; `c4-latency-report` runs from a workstation; C2 is a phone call. **C5 does not arise.** |
+| **U7** | GDPR paperwork | Owner + counsel | Sub-processor register and retention schedule are DRAFTED. DPIA, Art. 30 and the clinic DPA are not. |
+
+### What does NOT carry over from the US lane
+
+Stated so nobody re-does work that has no purpose here:
+
+  - **The $2,000/month Twilio HIPAA fee**, and the BAA negotiation behind it
+  - **Toll-free verification and 10DLC** — and with them, O25's deadline
+  - **C6's credential boundary in its US form.** It INVERTS: Deepgram and
+    ElevenLabs are the correct vendors here, and `checkCoveredVendors` only
+    refuses them in `hipaa` mode
+  - **Google STT v2, CMEK on Speech, `assertSttEncryption`** — all HIPAA
+    machinery
+  - **The LLC as a HIPAA prerequisite.** Liability may still argue for an
+    entity; the BAA no longer does
+
+### Open questions — the first one can double the estimate
+
+  - **NHS or PRIVATE?** The single biggest unknown. NHS brings DSPT and DTAC,
+    which is a materially heavier lift than a private dental practice or private
+    GP. **Ask before planning anything else.**
+  - **ICO registration.** UK controllers and processors generally must register
+    and pay the data protection fee. Cheap, easy to forget, embarrassing to miss.
+  - **Art. 27 UK representative.** A US entity processing UK patient data may
+    need one. The UK cofounder may resolve it — a solicitor's five minutes.
+  - **Where does ElevenLabs process audio?** Deepgram's EU endpoint is wired and
+    tested; ElevenLabs' residency is UNVERIFIED and belongs in the DPIA before
+    it is claimed.
+  - **Identity Platform still has no residency control.** Staff logins are a
+    DISCLOSED TRANSFER under Google's DPA. It must be worded that way and never
+    as residency — that fact is unchanged and it is the one place the two-region
+    design cannot be enforced.
+  - **`uk-staging` is merged into the `us-staging` PROJECT** (`stack_projects`).
+    Fine while it holds synthetic data; decide deliberately before any real UK
+    data touches it.
 
 ---
 
