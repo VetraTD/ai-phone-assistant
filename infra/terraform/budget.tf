@@ -33,15 +33,61 @@
 # Who gets the mail
 # ---------------------------------------------------------------------------
 #
-# No `all_updates_rule` and no notification channel: with `threshold_rules`
-# alone, Cloud Billing emails the billing account's Administrators and Users
-# directly. That is the right list today (one person), it needs no Pub/Sub topic
-# or Monitoring channel to exist first, and it cannot silently break because
-# somebody deleted a channel in another project.
+# ORIGINALLY: no `all_updates_rule` and no notification channel, on the grounds
+# that Cloud Billing already emails the billing account's Administrators and
+# Users, that this needs nothing to exist first, and that it cannot silently
+# break because somebody deleted a channel in another project.
 #
-# When there is a second founder on the billing account they get it too, which
-# is the correct default for a cost alarm.
+# EVERY CLAUSE OF THAT WAS TRUE AND THE CONCLUSION WAS STILL WRONG, corrected
+# 2026-08-25. The billing account has exactly one principal —
+# `admin@vetratd.com` — and that is a mailbox the owner cannot read, because
+# vetratd.com mail runs on Microsoft 365 and nobody opens that box. So the
+# alarm has been firing into a void: not broken, just unheard, which is the
+# worse failure because nothing reports it.
+#
+# It cannot be fixed by adding a person to the billing account either. Both
+# routes are closed, and each closure is a control working:
+#
+#   nithin.dodla@vetratd.com  `INVALID_ARGUMENT: User ... does not exist` —
+#                             a valid M365 mailbox is not a Google account, and
+#                             IAM needs the latter.
+#   nithinjd06@gmail.com      `constraints/iam.allowedPolicyMemberDomains` —
+#                             Domain Restricted Sharing refusing to let a
+#                             consumer account hold billing admin on this org.
+#                             Relaxing that at the org node to receive an email
+#                             would be a bad trade.
+#
+# A Monitoring notification channel needs no Google account and no org-policy
+# exception: it emails an address. `nithin.dodla@vetratd.com` is the address to
+# use because it is PROVEN — Google's suspension-lifted notice arrived there,
+# which is delivery rather than configuration.
+#
+# `disable_default_iam_recipients` stays false, so the billing admins keep
+# getting it too. This adds a recipient rather than replacing one.
+#
+# The original objection still stands and is answered rather than dismissed: a
+# deleted channel would break this silently. The channel is Terraform-managed,
+# so deleting it shows up as drift on the next plan — which is the same answer
+# this config uses everywhere else.
 # ---------------------------------------------------------------------------
+
+variable "budget_alert_emails" {
+  description = <<-EOT
+    Addresses that receive budget alerts, IN ADDITION to the billing account's
+    own administrators.
+
+    These become Monitoring notification channels, which is the only route that
+    works here: an IAM grant needs a Google account, and the addresses that
+    matter are Microsoft 365 mailboxes with no Cloud Identity behind them.
+
+    USE AN ADDRESS SOMEBODY HAS DEMONSTRABLY RECEIVED MAIL AT. The reason this
+    variable exists is that the previous arrangement mailed a real, correctly
+    configured address that nobody opens, and there is no difference between
+    that and no alarm at all.
+  EOT
+  type        = list(string)
+  default     = []
+}
 
 variable "budget_monthly_amount" {
   description = <<-EOT
@@ -99,6 +145,27 @@ variable "budget_thresholds" {
 # ---------------------------------------------------------------------------
 # 1. The runaway alarm. Resets every month.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Notification channels. One per address, in the shared project because that is
+# where the billing and org-level plumbing already lives.
+# ---------------------------------------------------------------------------
+resource "google_monitoring_notification_channel" "budget" {
+  for_each = toset(var.budget_alert_emails)
+
+  project      = local.project_id_for_stack["shared"]
+  display_name = "Budget alerts — ${each.value}"
+  type         = "email"
+
+  labels = {
+    email_address = each.value
+  }
+
+  # A channel that exists and is disabled is the same void this change exists
+  # to close, so it is pinned on rather than left to a console toggle.
+  enabled = true
+}
+
 resource "google_billing_budget" "monthly" {
   billing_account = var.billing_account
   display_name    = "Vetra — monthly spend"
@@ -131,6 +198,16 @@ resource "google_billing_budget" "monthly" {
   }
 
   depends_on = [google_project_service.this]
+
+  # Adds the channels ALONGSIDE the billing account's own admins —
+  # disable_default_iam_recipients stays false on purpose.
+  dynamic "all_updates_rule" {
+    for_each = length(var.budget_alert_emails) > 0 ? [1] : []
+    content {
+      monitoring_notification_channels = [for c in google_monitoring_notification_channel.budget : c.id]
+      disable_default_iam_recipients   = false
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -182,4 +259,14 @@ resource "google_billing_budget" "trial_credit" {
   }
 
   depends_on = [google_project_service.this]
+
+  # Adds the channels ALONGSIDE the billing account's own admins —
+  # disable_default_iam_recipients stays false on purpose.
+  dynamic "all_updates_rule" {
+    for_each = length(var.budget_alert_emails) > 0 ? [1] : []
+    content {
+      monitoring_notification_channels = [for c in google_monitoring_notification_channel.budget : c.id]
+      disable_default_iam_recipients   = false
+    }
+  }
 }

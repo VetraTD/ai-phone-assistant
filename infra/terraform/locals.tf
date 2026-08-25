@@ -91,6 +91,12 @@ locals {
     "run.googleapis.com",
     "cloudscheduler.googleapis.com",
     "storage.googleapis.com",
+    # The budget notification channels. Terraform CALLS the Monitoring API to
+    # create them, so it belongs on this list even though it is already enabled
+    # on vetra-shared for other reasons — the standing rule is that this list
+    # covers every API Terraform calls, not every API the project runs, and it
+    # has fired as a 403 naming the quota project three times already.
+    "monitoring.googleapis.com",
     # B3. Terraform creates the Identity Platform config and its API key, so both
     # are calls made THROUGH the quota project even though the resources land in
     # `shared`. Added before the apply rather than after the third 403.
