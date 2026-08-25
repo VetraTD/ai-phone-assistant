@@ -225,24 +225,69 @@ async function main() {
       record("preflight", "vetra_app role exists", false, "migration 029 has not run on this database");
       throw new Error("cannot continue without the application role");
     }
-    await client.query("SET LOCAL ROLE vetra_app");
+
+    // SET ROLE IS A MEANS, NOT THE REQUIREMENT — and the first version of this
+    // file confused the two, which cost its first real run.
+    //
+    // On Cloud SQL the migrate job connects as `postgres`, which is NOT a
+    // member of vetra_app, so `SET LOCAL ROLE vetra_app` is refused outright:
+    // `permission denied to set role "vetra_app"`. Locally `vetra` is a
+    // superuser and SET ROLE always works, so the failure could only ever
+    // appear where it mattered.
+    //
+    // The requirement is that the EFFECTIVE role cannot bypass row-level
+    // security. On Cloud SQL `postgres` already satisfies it — measured on the
+    // live instance: `superuser=false, bypassrls=false`, because Google keeps
+    // BYPASSRLS for `cloudsqladmin` alone — and it OWNS the tables, which under
+    // FORCE row security is still fully subject to every policy.
+    //
+    // So: prefer vetra_app, fall back to whatever we are, and let the assertion
+    // below decide. Which role actually ran is reported everywhere, because it
+    // changes what a pass means.
+    let ranAs = "vetra_app";
+    const setRole = await attempt(client, "SET LOCAL ROLE vetra_app");
+    if (!setRole.ok) {
+      ranAs = null; // resolved from current_user below
+      record(
+        "preflight",
+        "drop to the application role",
+        null,
+        `cannot SET ROLE vetra_app (${setRole.code}) — falling back to the connected role, ` +
+          "which is correct as long as it cannot bypass RLS"
+      );
+    }
 
     const eff = await client.query(
       "SELECT current_user AS who, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
     );
     const { who, rolsuper, rolbypassrls } = eff.rows[0];
-    const usable = who === "vetra_app" && !rolsuper && !rolbypassrls;
+    ranAs = who;
+    const usable = !rolsuper && !rolbypassrls;
     record(
       "preflight",
       "effective role cannot bypass row-level security",
       usable,
-      `${who} superuser=${rolsuper} bypassrls=${rolbypassrls}`
+      `running as ${who} — superuser=${rolsuper} bypassrls=${rolbypassrls}`
     );
     if (!usable) {
       // Refusing here is the point. Reporting "isolated" from a role that
       // bypasses the mechanism under test is worse than reporting nothing,
       // because it would be believed.
       throw new Error("every assertion below would be vacuous — refusing to report a pass");
+    }
+
+    // What a pass means depends on which role produced it, so say so once,
+    // loudly, rather than leaving the reader to infer it from a line above.
+    const isAppRole = who === "vetra_app";
+    if (!isAppRole) {
+      record(
+        "preflight",
+        "SCOPE OF THIS RUN",
+        null,
+        `running as ${who}, not vetra_app. RLS POLICIES are fully exercised — FORCE binds the ` +
+          "table owner too. The GRANT surface is NOT: this role has broader privileges, so any " +
+          "check that depends on vetra_app being REFUSED is skipped rather than passed"
+      );
     }
 
     // -------------------------------------------------------------------
@@ -283,6 +328,21 @@ async function main() {
       // nobody is granted is not a cross-tenant window. That is the property
       // worth checking, and it is checked by trying it.
       if (row.table_name in NOT_APP_REACHABLE) {
+        // This check asks whether vetra_app is REFUSED. Asking it as any other
+        // role answers a different question and answers it wrongly: `postgres`
+        // OWNS these tables and can obviously read them, so running this as
+        // postgres would report a correct system as a cross-tenant window.
+        // Skip rather than pass, and say which.
+        if (!isAppRole) {
+          record(
+            "structure",
+            `${row.table_name}: unreachable by the application role`,
+            null,
+            `NOT EXERCISED as ${who} — this asks whether vetra_app is refused, and ${who} ` +
+              "owns the table. Needs a run as vetra_app to answer"
+          );
+          continue;
+        }
         const reach = await attempt(client, `SELECT 1 FROM ${quoteIdent(row.table_name)} LIMIT 1`);
         record(
           "structure",
