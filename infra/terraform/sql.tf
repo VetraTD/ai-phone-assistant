@@ -45,28 +45,81 @@
 # WHAT THIS DEFERS, stated rather than hidden: B2's gate is "schema diffed
 # against Supabase, identical, both regions". With this off, that gate is met
 # for staging at B2 and for production at D3, where `pg_restore` creates the
-# data the diff would compare. Flipping this to true is one line and one apply.
+# data the diff would compare.
+#
+# ---------------------------------------------------------------------------
+# U1, 2026-08-25 — THIS WAS A SINGLE GLOBAL BOOL AND THAT COUPLED THE LANES.
+#
+# `enable_prod_databases = true` created the production database in EVERY prod
+# project at once, because the filter below was `!has_prod || the_bool`. With
+# Lane U wanting ONE production instance in `uk-prod`, that bool would also
+# have built `us-prod`'s — two instances, ~$197/month, for one wanted database.
+#
+# There is no dodge through staging, which is the part that is not obvious:
+# `var.stack_projects` merges `uk-staging` into the `us-staging` PROJECT, and a
+# Cloud SQL instance belongs to a project. `uk-staging` therefore gets a
+# DATABASE on the us-central1 instance — UK rows in Iowa. `uk-prod` is the only
+# shape in this module with EU residency.
+#
+# The whole six-project split exists so the lanes can be built, billed and
+# credentialed independently. One bool that turns them on together is that
+# design leaking. It is now a LIST OF PROJECT KEYS.
+#
+# Fails safe: the default is `[]`, which is exactly the old `false`, and the
+# variable is not set in tfvars until somebody deliberately names a project.
 # ---------------------------------------------------------------------------
 variable "enable_prod_databases" {
   description = <<-EOT
-    Whether to create Cloud SQL instances for PRODUCTION stacks. Default false.
+    Which PRODUCTION projects get a Cloud SQL instance, by project key
+    (`us-prod`, `uk-prod`). Default `[]` — none.
 
-    Off is not a deferral of the decision — the decision is that a production
-    database with no production traffic is $98.62/month of nothing. Turn it on
-    at D3, when there is a dump to restore into it.
+    Empty is not a deferral of the decision. The decision is that a production
+    database with no production traffic is $98.62/month of nothing at the
+    configured prod tier. Name a project here when it has traffic to serve or a
+    dump to restore into.
+
+    NAMING ONE DOES NOT NAME THE OTHER, and that is the point of the list.
+    Lane U builds `uk-prod` while `us-prod` stays deferred at D3.
 
     Staging is unaffected and always created: it is what the schema work, the
     RLS negative tests and the restore rehearsal all run against.
   EOT
-  type        = bool
-  default     = false
+  type        = list(string)
+  default     = []
+
+  validation {
+    # A key that is not a project silently does NOTHING — the filter below just
+    # never matches it — which is the vacuous-pass shape this repository keeps
+    # paying for. `enable_prod_databases = ["uk_prod"]` would plan zero changes
+    # and read as "the UK database already exists".
+    condition = alltrue([
+      for k in var.enable_prod_databases : contains(values(var.stack_projects), k)
+    ])
+    error_message = "enable_prod_databases must name PROJECT keys from stack_projects (e.g. \"uk-prod\"). An unknown key would be silently ignored."
+  }
+
+  validation {
+    # And a key that IS a project but holds no prod stack is equally a no-op:
+    # staging instances are created unconditionally, so listing `us-staging`
+    # changes nothing while looking like it enabled something.
+    #
+    # `endswith(sk, "-prod")` is a proxy for `local.stacks[sk].env == "prod"` —
+    # variable validation cannot read locals. The proxy can only ever REJECT a
+    # legitimate value if the stack keys are renamed, which is a loud failure,
+    # not a silent one.
+    condition = alltrue([
+      for k in var.enable_prod_databases :
+      anytrue([for sk, pk in var.stack_projects : endswith(sk, "-prod") if pk == k])
+    ])
+    error_message = "enable_prod_databases may only name projects that hold a PRODUCTION stack. Staging instances are always created; listing one does nothing."
+  }
 }
 
 locals {
   # The plan, minus anything C-12 has switched off.
   active_sql_instances = {
     for k, v in local.cloud_sql_plan : k => v
-    if !local.projects[k].has_prod || var.enable_prod_databases
+    if !local.projects[k].has_prod || contains(var.enable_prod_databases, k)
   }
 
   # Flattened databases, so `google_sql_database` can for_each over them.

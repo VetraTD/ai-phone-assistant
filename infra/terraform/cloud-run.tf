@@ -162,13 +162,25 @@ locals {
     && var.wire_runtime_secrets
   }
 
-  # Cloud Run's URL is deterministic in the current format —
-  # https://SERVICE-PROJECTNUMBER.REGION.run.app — which resolves what would
-  # otherwise be circular: server.js needs BASE_URL to build the Twilio webhook
-  # URLs it prints and serves, and BASE_URL is the service's own address.
+  # Cloud Run's URL in the format https://SERVICE-PROJECTNUMBER.REGION.run.app,
+  # which resolves what would otherwise be circular: server.js needs BASE_URL to
+  # build the Twilio webhook URLs it prints and serves, and BASE_URL is the
+  # service's own address.
   #
   # Composing it beats a two-phase apply (deploy, read the URI, apply again),
   # which leaves a window where the service is running with a placeholder.
+  #
+  # ⚠ IT IS NOT THE ONLY URL, AND `.uri` RETURNS THE OTHER ONE. Verified on the
+  # live service 2026-08-25 — `run.googleapis.com/urls` lists BOTH the
+  # project-number form above and an opaque-hash form
+  # (`voice-us-staging-7aaa2qfltq-uc.a.run.app`), and `status.url` — which is
+  # what `google_cloud_run_v2_service.uri` and the console show — is the HASH.
+  # Both hostnames serve the same revision, so the difference is invisible until
+  # the Twilio signature is checked, which is computed over the exact URL string.
+  # THE WEBHOOK MUST BE THE VALUE BELOW. See the cloud_run_services output.
+  #
+  # This corrects the ledger's standing fact that Cloud Run here issues "one
+  # form or the other per project and does not let you choose": it issues both.
   service_base_url = {
     for k, v in local.cloud_run_scaling : k =>
     "https://${v.service}-${google_project.this[var.stack_projects[v.stack]].number}.${v.region}.run.app"
@@ -449,6 +461,32 @@ resource "google_cloud_run_v2_service" "this" {
         value = local.stacks[each.value.stack].lane == "uk" ? "eu" : "us"
       }
 
+      # -----------------------------------------------------------------------
+      # WHICH DEEPGRAM ENDPOINT THE AUDIO GOES TO. Added at U1, 2026-08-25, and
+      # it had NEVER BEEN SET BY ANY TERRAFORM.
+      #
+      # `lib/voice/sttDeepgram.js` reads DEEPGRAM_REGION and defaults it to
+      # "us", so a UK service without this streams every caller's audio to
+      # `wss://api.deepgram.com` — processed in the United States. Its own
+      # docstring says the value is "set per Cloud Run service in B4"; B4 set
+      # STT_LOCATION, VERTEX_LOCATION and DEEPGRAM_API_KEY and not this one.
+      #
+      # NOTHING WOULD HAVE SURFACED IT. `tests/deepgramRegion.test.js` proves
+      # `deepgramEnvironment()` returns the EU host when the variable is "eu" —
+      # the function, not the caller, and never that anything sets the variable.
+      # Calls would connect, transcribe and sound correct, and the residency
+      # claim the whole UK lane is built on would be false. The same shape as
+      # eval/run.js's guard: green tests around a function nothing invoked.
+      #
+      # `eu` is the only value that switches; anything else falls through to the
+      # US host, so this is written as an explicit two-way choice rather than
+      # passed through from a variable somebody could set to "uk" or "gb".
+      # -----------------------------------------------------------------------
+      env {
+        name  = "DEEPGRAM_REGION"
+        value = local.stacks[each.value.stack].lane == "uk" ? "eu" : "us"
+      }
+
       dynamic "env" {
         for_each = var.wire_runtime_secrets ? {
           for name, cfg in var.runtime_secrets : name => cfg
@@ -524,13 +562,38 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
 }
 
 output "cloud_run_services" {
-  description = "Deployed services and their URLs."
+  description = <<-EOT
+    Deployed services and their URLs.
+
+    ⚠ `uri` IS NOT THE URL TO PUT IN TWILIO. `twilio_webhook_base` is.
+
+    A Cloud Run service here answers on TWO hostnames — verified on the live
+    us-staging service, whose `run.googleapis.com/urls` annotation lists both:
+
+      https://voice-us-staging-536266051432.us-central1.run.app   project-number
+      https://voice-us-staging-7aaa2qfltq-uc.a.run.app            opaque hash
+
+    Both resolve, so a mistake here does not fail as a 404. `uri` returns the
+    HASH form. `BASE_URL` in the container is the PROJECT-NUMBER form, because
+    that is the one this module can compose before the service exists.
+
+    The Twilio signature is an HMAC over the FULL request URL, and server.js
+    rebuilds that URL as `BASE_URL + req.originalUrl`. Configure the webhook
+    with the hash form and every signature comparison is over a different
+    string: 403 on every call, including genuine ones, reading as a bad auth
+    token. That is the failure this repository has already had once from a
+    signature path that refused everything.
+  EOT
   value = {
     for k, v in google_cloud_run_v2_service.this : k => {
       name          = v.name
       uri           = v.uri
       min_instances = v.template[0].scaling[0].min_instance_count
       secrets_wired = var.wire_runtime_secrets
+
+      # What BASE_URL is set to inside the container, and therefore the only
+      # host Twilio may be pointed at. Voice webhook: <this>/twilio/voice.
+      twilio_webhook_base = local.service_base_url[k]
     }
   }
 }

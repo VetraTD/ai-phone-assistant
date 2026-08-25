@@ -89,16 +89,46 @@ adopt_existing_org_policies = []  # EMPTIED 2026-08-21 after the adoption apply
 # these are the ones worth stating explicitly because the value IS the decision.
 # ---------------------------------------------------------------------------
 
-# C-1. There is no UK clinic. The PROJECT exists either way — that is settled —
-# but nothing goes inside it until one signs. Lane C's UK gates need this ON
-# temporarily: flip it, apply, run the gates, destroy the UK resources, keep the
-# project and the state.
-enable_uk_resources = false
+# C-1. WHICH UK stacks get resources, by STACK key. Default [] — neither.
+# The projects exist either way; this governs what goes inside them.
+#
+# ⚠ DO NOT ADD "uk-staging" CASUALLY. It is merged into the `us-staging`
+# project, so activating it rewrites that project's VPC description, which
+# FORCES THE NETWORK TO BE REPLACED, which cascades into replacing the staging
+# Cloud SQL instance. Staging carries no deletion protection. See the note above
+# the variable in cost-controls.tf. Its database would also live on the
+# us-central1 instance, so it buys no EU residency either.
+#
+# enable_uk_resources = ["uk-prod"]
+enable_uk_resources = []
+
+# C-12. WHICH production projects get a Cloud SQL instance, by PROJECT key —
+# `us-prod`, `uk-prod`. Default `[]` (none), which is what defers ~$98.62/month
+# per instance until there is traffic or a dump to restore.
+#
+# It is a LIST, not a bool, precisely so naming one lane does not build the
+# other's database as well. An unknown key is REFUSED at plan time rather than
+# silently ignored — see the validations in sql.tf.
+#
+# enable_prod_databases = ["uk-prod"]
 
 # C-5. Regional roughly doubles the instance cost, and HA is not a HIPAA
 # requirement — §164.308(a)(7) is satisfied by PITR + backups + C7's restore
 # test. Buy it when downtime costs more than the second instance.
 cloud_sql_high_availability = false
+
+# Machine tier, keyed by ENVIRONMENT and NOT by stack. Defaults are
+# prod = "db-custom-2-7680" ($98.62/mo) and staging = "db-g1-small" (~$27/mo).
+#
+# ⚠ Lowering `prod` for a pilot lowers it for EVERY production project,
+# including one built later. Raise it in the same edit that adds a second
+# project to enable_prod_databases, or real production inherits a pilot's tier.
+# Resizing Cloud SQL is a restart, not a migration.
+#
+# cloud_sql_tier = {
+#   prod    = "db-g1-small"
+#   staging = "db-g1-small"
+# }
 
 # C-3. Postgres, not Memorystore. The shared call-state slice is three scalars
 # written at call boundaries with zero per-turn reads.
@@ -127,6 +157,11 @@ owner_principals = [
 shared_only_principals = []
 
 # us_region = "us-central1"
+
+# London. Worth setting EXPLICITLY once the UK lane is built rather than
+# leaving it to the default: this value becomes the Cloud SQL region, the Cloud
+# Run region and the Secret Manager replica location, and a default nobody has
+# read is a poor place for a data-residency claim to live.
 # uk_region = "europe-west2"
 
 # ---------------------------------------------------------------------------

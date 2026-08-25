@@ -29,9 +29,46 @@
 # ---------------------------------------------------------------------------
 # C-1 — UK resources behind a toggle. Default OFF.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# U1, 2026-08-25 — THIS WAS A BOOL TOO, AND `= true` PLANNED A DESTROY OF THE
+# STAGING DATABASE. Read this before changing it back.
+#
+# As one bool it turned on BOTH UK stacks. `uk-staging` is merged into the
+# `us-staging` PROJECT by var.stack_projects, and network.tf composes the VPC's
+# `description` from the sorted list of ACTIVE stacks in the project. Adding
+# uk-staging rewrote that string:
+#
+#   "Private network for us-staging. ..."
+#     -> "Private network for uk-staging, us-staging. ..."
+#
+# `description` on google_compute_network FORCES REPLACEMENT. The replacement
+# cascades down everything anchored to the network id:
+#
+#   google_compute_network.this["us-staging"]              must be replaced
+#     -> google_compute_global_address.private_services    must be replaced
+#     -> google_service_networking_connection.private_...  must be replaced
+#     -> google_sql_database_instance.this["us-staging"]   MUST BE REPLACED
+#
+# That last line is the only Cloud SQL instance in the estate: eight tenants,
+# migration head 037, the phi_access_log, and C7's evidence. Staging is not
+# production, so `deletion_protection` is false on it by design (it is keyed to
+# has_prod) — nothing would have stopped the apply. A ONE-WORD CHANGE TO A
+# DESCRIPTION STRING DESTROYS THE DATABASE.
+#
+# Two second-order reasons uk-staging is the wrong thing to want anyway, and
+# either alone is enough: its Cloud SQL DATABASE lands on the us-central1
+# instance, because an instance belongs to a project — UK rows in Iowa — and its
+# Cloud Run service would sit in europe-west2 reaching across regions to it.
+# `uk-prod` is the only shape in this module with EU residency.
+#
+# So this is now a LIST OF UK STACK KEYS. `["uk-prod"]` builds the UK lane and
+# does not touch the us-staging project at all: every UK resource is a create in
+# a project that is empty today.
+# ---------------------------------------------------------------------------
 variable "enable_uk_resources" {
   description = <<-EOT
-    Whether to provision RESOURCES for the UK stacks. Default false.
+    Which UK STACKS get resources provisioned, by stack key (`uk-prod`,
+    `uk-staging`). Default `[]` — neither.
 
     THE PROJECTS ARE NOT AFFECTED. `vetra-uk-prod` is created either way — that
     is settled and not reopened, because the project is the credential and
@@ -40,17 +77,32 @@ variable "enable_uk_resources" {
     IAM, log sinks, and (via cloud_sql_plan / cloud_run_scaling) the database
     and services B2 and B4 create.
 
-    Off is the honest default. There is no UK clinic. Provisioned naively the UK
-    stack is $150-250/month against a $300 trial credit that expires ~2026-11-18,
-    and the migration's own runway is the first thing it would eat.
+    ⚠ ADDING "uk-staging" PLANS A DESTROY OF THE STAGING CLOUD SQL INSTANCE.
+    See the comment above this variable for the chain; it is not obvious and it
+    is not recoverable by re-applying.
+
+    Empty is the honest default. Provisioned naively the UK stack is
+    $150-250/month against a $300 trial credit that expires ~2026-11-18, and the
+    migration's own runway is the first thing it would eat. `["uk-prod"]` at
+    db-g1-small is ~$75-95/month, which is Lane U's decided shape.
 
     Lane C's UK gates (C2 live call per region, C3 concurrency per region) need
-    this ON. The sequence is: flip it on, apply, run the gates, `terraform
-    destroy` the UK resources, keep the state and the project. Proven, and not
-    idling. A clinic signing is then an `apply`, not a project.
+    a UK stack ON. The sequence is: name it here, apply, run the gates,
+    `terraform destroy` the UK resources, keep the state and the project. A
+    clinic signing is then an `apply`, not a project.
   EOT
-  type        = bool
-  default     = false
+  type        = list(string)
+  default     = []
+
+  validation {
+    # An unknown key is a silent no-op — the filter in locals.tf simply never
+    # matches it — so `["uk_prod"]` would plan zero UK resources and read as
+    # "the UK stack already exists".
+    condition = alltrue([
+      for k in var.enable_uk_resources : contains(["uk-prod", "uk-staging"], k)
+    ])
+    error_message = "enable_uk_resources must name UK stack keys: \"uk-prod\" and/or \"uk-staging\". An unknown key would be silently ignored."
+  }
 }
 
 # ---------------------------------------------------------------------------

@@ -251,9 +251,15 @@ locals {
     for k, v in local.stacks : k => v if contains(["us", "uk"], v.lane)
   }
 
+  # C-1, per UK STACK rather than per lane. `enable_uk_resources` is a list of
+  # stack keys precisely so `uk-prod` can be built without `uk-staging` — see
+  # the long note above the variable in cost-controls.tf. Naming uk-staging here
+  # adds a stack to the us-staging project, which rewrites that project's VPC
+  # description, which forces the network to be replaced, which replaces the
+  # Cloud SQL instance under it.
   active_regional_stacks = {
     for k, v in local.regional_stacks : k => v
-    if v.lane != "uk" || var.enable_uk_resources
+    if v.lane != "uk" || contains(var.enable_uk_resources, k)
   }
 
   # Distinct PROJECTS holding at least one active regional stack. Used for the

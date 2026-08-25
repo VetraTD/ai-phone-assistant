@@ -106,7 +106,7 @@ output "cloud_run_scaling" {
 output "cost_controls" {
   description = "The switches, in one place, so a plan can be read against the ledger's C-table without opening four files."
   value = {
-    c1_uk_resources_enabled = var.enable_uk_resources
+    c1_uk_stacks_enabled = var.enable_uk_resources
     c2_staging_min_instances = min([
       for k, v in local.cloud_run_scaling : v.min_instances if endswith(v.stack, "-staging")
     ]...)
@@ -144,7 +144,7 @@ output "cloud_sql_instances" {
 }
 
 output "cloud_sql_deferred" {
-  description = "Instances in the plan that C-12 has NOT created. Empty once enable_prod_databases is on. A production database with no production traffic is $98.62/month of nothing."
+  description = "Instances in the plan that C-12 has NOT created. A project leaves this list by being named in enable_prod_databases, one at a time — a production database with no production traffic is $98.62/month of nothing at the prod tier."
   value       = [for k, v in local.cloud_sql_plan : v.instance if !contains(keys(local.active_sql_instances), k)]
 }
 
