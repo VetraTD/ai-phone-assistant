@@ -162,11 +162,17 @@ deciding anything**, and read the Twilio pricing standing fact that sits behind
 it: HIPAA on Twilio is **$2,000/month**, which is a US-only cost that GDPR does
 not impose.
 
-**THE ONE THING TO DO: SETTLE UK vs US.** The demand signal is UK — someone has
-demo'd the product and given advice. The US list is real and static. Lane U is
-written, costed and gated on a customer commit; it needs no application code
-changes at all. **Ask whether the UK clinic is NHS or PRIVATE first** — that one
-answer can double the estimate.
+**THE DECISION IS MADE: UK. GO TO LANE U AND START AT U1.** The demand signal is
+UK — someone has demo'd the product and given advice — against a US list that is
+real and static. **The owner chose to build ahead of a signed customer,
+knowingly, and the NHS-vs-private question will not be answered first.** Neither
+is re-litigated; both are recorded at the top of Lane U with the reasoning.
+
+**U1 IS NOT THE TFVARS EDIT IT LOOKS LIKE.** `enable_prod_databases` is one
+global bool, so flipping it builds the US prod database too — ~$197/month for
+one wanted instance — and building UK *staging* instead does not dodge it,
+because `stack_projects` merges `uk-staging` into the `us-staging` PROJECT whose
+instance is in **us-central1**. Make the flag granular first.
 
 **IF US STILL WINS, the old agenda applies:** both prod projects are still empty —
 zero Cloud Run, zero Cloud SQL, re-verified 2026-08-25. **D3 says
@@ -1534,14 +1540,22 @@ data, no one-way door.
 
 ---
 
-## Lane U — UK · **CONDITIONAL, NOT STARTED** · opened 2026-08-25
+## Lane U — UK · **DECIDED 2026-08-25. BUILD IT. START AT U1.** · opened 2026-08-25
 
-> **⚠ GATED ON A CUSTOMER COMMIT, DELIBERATELY.** The UK leads are warm — one
-> person has demo'd the product and given advice, plus a friend's dad and
-> several more — and none of them is signed. **Do not build this stack on
-> optimism.** The trigger is the same one LLC formation already uses: a first
-> verbal commit. Building a second stack for leads that also do not convert is
-> the expensive version of this mistake.
+> **THE OWNER DECIDED TO BUILD AHEAD OF A SIGNED CUSTOMER, KNOWINGLY.** The
+> recommendation was to gate this on a first verbal commit, the same trigger LLC
+> formation uses. That was raised, considered and overridden — **do not re-litigate
+> it in the next session.**
+>
+> **The argument for building anyway is real: the stack is a SALES ASSET.** A UK
+> lead who can ring a UK number and hear ElevenLabs at 92 ms is a far better demo
+> than a US stack at 1,408 ms, and ~$75–95/month is defensible as marketing spend.
+> One person has already demo'd the product and given advice; there are a friend's
+> dad and several more leads behind them.
+>
+> **ALSO SETTLED: the NHS-vs-private question will not be answered before the
+> build, and does not block it.** It changes U7's paperwork — DSPT and DTAC if
+> NHS — and not the infrastructure. Build first, find out later.
 
 ### The structural point: THIS IS NOT A MIGRATION
 
@@ -1620,13 +1634,47 @@ down so nobody inherits a pilot-sized production database by accident.
 
 | # | Step | Needs | Notes |
 |---|---|---|---|
-| **U1** | `enable_uk_resources = true`, confirm `uk_region = europe-west2`, set `cloud_sql_tier.prod` | — | One tfvars edit. `active_regional_stacks` gates on this. |
+| **U1** | **Make `enable_prod_databases` GRANULAR FIRST**, then `enable_uk_resources = true`, `uk_region = europe-west2`, `cloud_sql_tier.prod = "db-g1-small"` | — | **START HERE. `enable_prod_databases` is one global bool** — `if !has_prod || enable_prod_databases` — so turning it on creates the prod database in EVERY prod project, `us-prod` as well as `uk-prod`, at ~$197/month for one wanted instance. **And building UK STAGING instead does not dodge it:** `stack_projects` merges `uk-staging` into the `us-staging` PROJECT, whose instance is in **us-central1** — UK data in Iowa. So `uk-prod` is the only shape with EU residency. Change the bool to a list of project keys (`enable_prod_databases = ["uk-prod"]`), which fails safe when empty and is not set in tfvars today, so nothing breaks. **The six-project split exists to keep the lanes independent and this one flag couples them** |
 | **U2** | Deepgram + ElevenLabs keys into Secret Manager | **Owner — hard stop** | Both secrets are already declared; only the values are missing. |
 | **U3** | `terraform apply` | **Owner — hard stop** | Creates the UK VPC, Cloud SQL in europe-west2, both Cloud Run services, the migrate job. Read the plan; expect the documented `min_instance_count` phantom. |
 | **U4** | Migrate job with `--init-if-empty` | — | Builds the schema from scratch on an empty instance. C7 has now proven that exact path works. |
 | **U5** | UK Twilio number, webhook at the UK voice service, media edge **IE1** | Owner | Twilio confirmed regional media edges 2026-08-25, so call audio stays in Europe. |
 | **U6** | Verify with instruments that already exist | Owner's phone | `c8-rls-proof` and `c7-restore-parity` run through the migrate job; `c4-latency-report` runs from a workstation; C2 is a phone call. **C5 does not arise.** |
 | **U7** | GDPR paperwork | Owner + counsel | Sub-processor register and retention schedule are DRAFTED. DPIA, Art. 30 and the clinic DPA are not. |
+
+### U1–U7 IS NOT "READY". What each milestone actually buys
+
+Asked directly 2026-08-25 and worth writing down, because the infrastructure is
+the part that looks like progress and is not the part a clinic judges.
+
+| Milestone | What you have |
+|---|---|
+| **U1–U4** | A UK stack that boots. One session, probably. |
+| **U1–U6** | **Demo-ready.** A UK number a lead can ring, on the fast voice stack. This is the sales asset. |
+| **+ a quality pass** | **Pilot-ready.** See below — the parked defects are the gap, not the infrastructure. |
+| **+ U7 + an integration** | Something a clinic keeps using after the pilot. |
+
+**THREE THINGS SIT OUTSIDE U1–U7, and this file already says D7 is not the end
+of the product:**
+
+  1. **The parked defects, and one is caller-facing.** The **spelling livelock**
+     asked "could you spell your last name?" **nine times in nine consecutive
+     turns**, in 2 of 5 runs, with every hard assert green. That is the one a
+     patient notices. Then O25 (fired unasked on two real calls), the
+     not-found/not-yours conflation, reschedule's missing confirm-before-write,
+     and the routing-table grant.
+  2. **The 14% no-reply rate.** A0 measured 12 of 84 turns timing out with no
+     reply. It predates the migration and the migration does not fix it. The
+     2026-08-25 calls showed **0 of 15**, which is encouraging and is not a
+     sample.
+  3. **No practice-management integration.** Appointments land in Vetra's own
+     table, so staff re-key every booking. The US version of this is
+     athenahealth; **the UK equivalent is UNKNOWN — Dentally, SOE/Exact, EMIS,
+     SystmOne? — and it may be what decides whether a clinic keeps you after the
+     pilot.** Ask early.
+
+**Recommended order:** build the stack (it is the sales asset), then a quality
+pass led by the spelling livelock, then the PMS question.
 
 ### What does NOT carry over from the US lane
 
@@ -1942,6 +1990,7 @@ model changes · `Vetra-desktop` · rebuilding the marketing site (a friend owns
 
 | # | Date | Branch | Did | Left for next |
 |---|---|---|---|---|
+| 14 | 2026-08-25 | `feat/gcp-lane-b-terraform` | **LANE C WENT 2 -> 6 OF 10, AND THEN THE TARGET MOVED.** Two applies landed. **C7 done: 13/13, restore wall clock 341 s**, scratch instance deleted and verified — and its drift itemised as `calls -2, appointments -1, sms_consents -1, phi_access_log -47`, **exactly the two live calls made that morning**, cross-validating an audit count taken independently from Cloud Logging. **C8 done: 58 passed, 0 failed against Cloud SQL**, after its preflight caught that `SET ROLE` was the means and not the requirement. **C4 done free off the call session** — v2v p50 3,140 vs A0's 2,980 and **-23% vs the covered lane**, 0 of 15 turns with no reply. **C2 done:** the reschedule succeeded against real UUIDs, supporting the fixture hypothesis, while `text_channel_tool_call` fired live and `outbound_sanitized` caught it. `DASHBOARD_URL` wired. **The cost alarm was found firing into a mailbox nobody opens**; both IAM fixes were refused by controls working correctly, so it now goes through a Monitoring channel to a PROVEN address. **THEN TWILIO PRICED HIPAA AT $2,000/MONTH** and a UK clinic came onto the radar, which inverts the US-only recommendation. | **BUILD UK. Lane U is written, costed and DECIDED** — start at U1, which is a Terraform design fix rather than a tfvars edit. Owner: Deepgram + ElevenLabs secrets, the apply, a UK Twilio number. **U1-U6 is demo-ready, not pilot-ready** — the spelling livelock, the 14% no-reply rate and the missing PMS integration are the gap. Still open: activate full billing before 2026-11-18, 175 unpushed commits on a public repo whose main still carries unauthenticated PHI endpoints. |
 | 13 | 2026-08-24 | `feat/gcp-lane-b-terraform` | **FOUR ITEMS CLOSED, NOTHING APPLIED TO GCP, AND TWO OF THIS FILE'S OWN CONCLUSIONS CORRECTED.** **(1) SMTP:** the smoke test passes — against **Gmail**, because nothing in the repo or tfvars is configured for M365 at all, so the D2 unknown it exists to answer is untouched; `npm run smtp-smoke` does not exist either. A credential-free probe shows `smtp.office365.com:587` still advertises `AUTH LOGIN`, so what is left is per-tenant and needs a credential (hard stop). **(2) C1 (`307e85b`):** `eval/run.js` refused to start without `GEMINI_API_KEY` — the FOURTH copy of a check placed above `getClient`, and a pure false blocker since it does not affect which backend runs. Fixed via `preflightBackend()`, which asks `getClient` instead of re-deriving it. **Seven unit tests stayed green when the old guard was restored to `main()`**, so two subprocess tests on the real CLI carry the actual proof. **C1 still cannot run: ADC reauth is expired and only the owner can clear it.** **(3) The three standing advisory failures, diagnosed — three different root causes.** `impatient-booker` is a rubric asking about a condition the fixture never produces, judged by a schema with no "not applicable". `long-call-memory` hides a **livelock: nine identical spelling requests in nine consecutive turns, in 2 of 5 runs, with every hard assert green**. `reschedule-two-appointments` was **never flaky** — the fixture seeded non-UUID ids against a declaration promising a UUID, so the model invented them (`apt-22222222-…`, and once a date string as an id); re-seeded, **2/5 → 5/5** (`a304906`). **(4) C8's RLS layer is a committed script** (`5dba36d`): 58 assertions, 11 of 11 tables, one transaction always rolled back, sabotage-verified five ways — **and it found that `business_directory` / `user_directory` are granted `arwd` to `vetra_app` while the schema states twice that they are not, which is the whole security argument for those tables having no RLS**. Gates green throughout: root 118/2283, test:db 178, sim:cutoff 2, dashboard 126 + 36. | **Two owner decisions: when production gets built, and ADC reauth for C1.** **C7 re-derived and the previous recommendation reversed** — it is NOT the production build, needs no apply, and can run against staging for pennies today; the missing piece is a parity script, which is the obvious next unattended task. Four findings PARKED at the owner's direction: the spelling livelock, the not-found/not-yours conflation, reschedule's missing confirm-before-write, and the routing-table grant. O25 remains parked. |
 | 11j | 2026-08-23 | `feat/gcp-lane-b-terraform` | **SESSION CLOSE: LANE B'S LAST CODE-SIDE PIECE IS DONE.** Rebuilt `voice:001bdfb` (verified by inspecting the image, not the tag), then ONE apply carrying both the new image and the voice service's `IDENTITY_PLATFORM_PROJECT_ID` — `0 added, 3 changed, 0 destroyed`. Checked first that the image carried no new migration, so the job/service ordering hazard did not apply. `voice-us-staging-00020-zgf` Ready, `GET /` 200, and **both `auth_not_configured` and `sms_channel_off` are gone from the boot notices** — two controls confirming themselves rather than being asserted. **The SPA is built and published**, 28 objects, with the staging API URL in the App/Contact chunks, the auth domain in Login, and no `localhost:3001` anywhere. **Publishing cost one more IAM finding**: `roles/storage.objectAdmin` does not grant `storage.buckets.get` — which `loadbalancer.tf`'s own comment names as the exact error the FIRST publish failed on, so the recorded fix had never addressed the recorded symptom and the second attempt failed identically. Fixed with `legacyBucketReader`, which still cannot rewrite the bucket policy. | **NOTHING SERVES THE SPA YET, and that is the top of the next session**: the bucket is private and `enable_load_balancer` is false. Cloud CDN + LB costs money and forces the DRS exception into the project holding the audit trail; **Firebase Hosting is free and sidesteps it**, and this file already favours it. Owner decision. **The first O25 test is still outstanding** but is now one job execution — `--args=scripts/seed-staging.js --update-env-vars=SEED_SMS_FOLLOWUP=true` — rather than hand-SQL against a FORCE-RLS table. **Parked with reasoning recorded:** the eval noise band, the pack's prompt footprint, the remaining compliance drafts. **Still unanswered: what Google detected.** |
 | 11g–i | 2026-08-23 | `feat/gcp-lane-b-terraform` | **APPLIED `TWILIO_SMS_FROM`, FIXED THE VOICE AUTH GAP, AND THEN THE FIRST O25 TEST CALL TURNED INTO AN INVESTIGATION.** The apply landed (`0 add, 2 change, 0 destroy`) and `sms_channel_off` cleared — but the same boot log carried `auth_not_configured`, meaning the voice service had NEVER had `IDENTITY_PLATFORM_PROJECT_ID`, so both DSR endpoints answered 401 to everybody. Invisible because calls are unaffected: the phone works and the statutory endpoints behind it do not. Fixed in config. **Then the test call asked no consent question**, and the audit trail settled why — `latestSmsConsent` never appears, so the flag was still false; not a cache (there is none, and the Gemini cache is content-addressed), most likely Cloud SQL Studio not carrying session state so `set_config` was gone when the UPDATE ran and FORCE RLS matched zero rows AND REPORTED SUCCESS. **The owner also reported worse call quality; the numbers said otherwise** (`voice_to_voice_ms` p50 3,757 vs the recorded 4,084), and `tts_fallback` turned out to mean "Google TTS rather than ElevenLabs", which in hipaa mode is the intended path. **Chasing it found something worse than a regression: the eval baseline is composition-unstable.** Two full runs both scored 36/37 with a different scenario failing each; the loser fails ~1-in-7 with this session's changes reverted. 16 targeted runs. **One correction made mid-investigation:** 3/3 failures were called "consistent, not variance" and seven runs showed passes on 4, 5 and 7. `scripts/seed-staging.js` gained `SEED_SMS_FOLLOWUP` because staging's database is private-IP only and there is no other way in. | **The sms_consent pack MAY cost one borderline eval scenario (3/7 vs 6/7, p≈0.27) — recorded, deliberately not reverted**, because it has zero functional effect while `sms_followup_enabled` is false everywhere and reverting reopens the only live PHI exposure to chase p=0.27. Revisit when SMS goes live; the fix if it proves out is conditional registration. **Newly written down: the live receptionist runs `thinkingBudget: 0`**, so every tool declaration and guardrail line is taken out of a model with no reasoning headroom — adding one more small thing to the prompt is not free. |
