@@ -154,9 +154,16 @@ that are real but not on the U-path get RECORDED AND PARKED.
 
 ---
 
-**U1 DONE 2026-08-25, commit `d54002e`, NOTHING APPLIED.** The plan is
-`46 to add, 2 to change, 0 to destroy`, saved at `infra/terraform/u1.tfplan`.
-**Re-plan before applying it** — a saved plan goes stale the moment state moves.
+**U1 DONE 2026-08-25 (`d54002e`), U1b DONE (`329c45d`).** The remaining plan is
+**`41 to add, 3 to change, 0 to destroy`** — 46 minus the five secrets now
+applied. **Re-plan before applying**; a saved plan goes stale the moment state
+moves. The 3 changes are all in-place on `us-staging`: the two documented
+`min_instance_count` phantoms, `DEEPGRAM_REGION=us` added to the voice service
+(a no-op value that still spins a revision), and the SQL backup location
+moving `us` -> `us-central1`.
+
+**WHAT HAS BEEN APPLIED, all free: three widened org policies and five empty
+secrets. Nothing that costs money.**
 
 **⚠ THE FIRST DRAFT OF THIS EDIT PLANNED A DESTROY OF THE STAGING DATABASE, and
 the instruction to make it came from this file.** `enable_uk_resources = true`
@@ -179,32 +186,44 @@ nothing would have stopped it. **BOTH bools are now lists**, and
 
 **WHAT THE OWNER HAS TO DO, IN THIS ORDER. The order is not negotiable.**
 
-  1. **U2 — five secret VALUES in `vetra-uk-prod-c3a3bd`, not two.** This file
-     said "Deepgram + ElevenLabs; both secrets are already declared, only the
-     values are missing". **That is true of the us-staging project and wrong
-     for a new project.** `uk-prod` has no runtime secret at all today, and
-     `terraform output secrets_awaiting_values` lists all five:
-     `deepgram-api-key`, `elevenlabs-api-key`, `smtp-password`,
-     `twilio-account-sid`, `twilio-auth-token`.
+  1. ~~**U2 — five secret VALUES**~~ — **HALF DONE 2026-08-25. The five secrets
+     EXIST; four are still empty and each empty one blocks the apply.**
 
-     **AND THERE IS A CHICKEN-AND-EGG: the secrets do not EXIST until the apply
-     creates them.** So U2 cannot precede U3 outright. The sequence is the same
-     shape as the migrate-job ordering already recorded here:
+     This file said "Deepgram + ElevenLabs; both secrets are already declared,
+     only the values are missing". **True of the us-staging project and wrong
+     for a new one** — `uk-prod` had no runtime secret at all, because
+     `smtp-password`, `twilio-account-sid` and `twilio-auth-token` are
+     `lanes = ["us","uk"]` and get created per project.
+
+     **DONE:** the containers (`terraform apply -target=
+     'google_secret_manager_secret.runtime'`, 5 added, all replicated to
+     `europe-west2`), and **`smtp-password`, copied from `us-staging` and
+     verified by byte-length rather than by printing it.**
+
+     **STILL EMPTY — the apply fails at `google_cloud_run_v2_service.this
+     ["uk-prod/voice"]` until all four have a version**, because Cloud Run
+     refuses a revision referencing a secret with none:
 
      ```
-     terraform apply -target='google_secret_manager_secret.runtime'
-     printf '%s' 'VALUE' | gcloud secrets versions add deepgram-api-key        --project=vetra-uk-prod-c3a3bd --data-file=-      # x5
-     terraform apply u1.tfplan   # after a fresh plan
+     export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
+     printf '%s' 'VALUE' | gcloud secrets versions add SECRET \
+       --project=vetra-uk-prod-c3a3bd --data-file=-
      ```
+     `deepgram-api-key` · `elevenlabs-api-key` · `twilio-account-sid` ·
+     `twilio-auth-token`
 
-     Skip it and the voice service creation FAILS: Cloud Run refuses a revision
-     referencing a secret with no version. That is the `secrets_awaiting_values`
-     output's entire purpose.
+     **THE TWILIO PAIR IS THE COFOUNDER'S UK ACCOUNT** (owner, 2026-08-25), so
+     staging's were deliberately NOT copied. The pair must belong to whichever
+     account owns the UK number: `var.twilio_sms_from`'s comment records why for
+     outbound, and the same holds for the signature the webhook validates. **Two
+     questions for the cofounder are on the critical path** — does that account
+     already hold a UK number, and is it personal or company? A shared personal
+     login is the audit-trail problem this file already records for
+     `admin@vetratd.com`, and it is cheaper to fix before it is load-bearing.
 
-     **The Twilio pair must be the account that will own the UK number.**
-     `var.twilio_sms_from`'s comment already records why — outbound requires the
-     `From` to belong to the authenticating account — and the same is true of
-     the webhook credentials that validate the signature.
+     **The chicken-and-egg is now recorded rather than a trap:** the secrets do
+     not exist until Terraform makes them, so a value can never be pushed before
+     the first apply. Target the secrets, fill them, then apply the rest.
 
   2. **U3 — `terraform apply`.** Expect **two** first-apply failures, both
      documented and both fixed by re-applying:
