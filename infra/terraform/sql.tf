@@ -280,7 +280,30 @@ resource "google_sql_database_instance" "this" {
       # point in time, and the write-ahead logs are not free.
       point_in_time_recovery_enabled = each.value.point_in_time_recovery
       transaction_log_retention_days = each.value.point_in_time_recovery ? 7 : null
-      location                       = startswith(each.value.region, "europe") ? "eu" : "us"
+
+      # ---------------------------------------------------------------------
+      # BACKUPS LIVE IN THE INSTANCE'S OWN REGION, not in a multi-region.
+      #
+      # This was `startswith(region, "europe") ? "eu" : "us"`, and for the UK
+      # lane that is the Brexit trap one level down: `eu` is Google's EUROPEAN
+      # UNION multi-region, so a London instance's backups would have sat
+      # OUTSIDE the UK. A database in London whose every backup is in the EU
+      # answers "where is my data" with a footnote, and the backups are a full
+      # copy of the same PHI.
+      #
+      # Pinning to the region keeps the claim true end to end and matches what
+      # `gcp.resourceLocations` polices, which is regions rather than the
+      # jurisdiction anyone means by them.
+      #
+      # WHAT THIS COSTS, stated rather than hidden: a multi-region backup
+      # survives one region failing and a regional one does not. That is an
+      # availability trade, and it is the same one C-5 already makes for the
+      # instance itself — ZONAL, on the reasoning that §164.308(a)(7) asks for
+      # backup and recovery rather than for uptime. Buying multi-region
+      # durability for the backups of a zonal instance would be protecting the
+      # copy better than the original.
+      # ---------------------------------------------------------------------
+      location = each.value.region
 
       backup_retention_settings {
         retained_backups = each.value.backup_retention_days

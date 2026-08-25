@@ -23,8 +23,57 @@ locals {
   # gcp.resourceLocations constraint. They are the enforcement behind the entire
   # two-region design: with them, creating a resource in the wrong continent is
   # an API rejection rather than a code review someone has to catch.
+  #
+  # ⚠ THE CONSTRAINT IS ENFORCED PER SERVICE, AND CLOUD LOGGING IS NOT ONE OF
+  # THEM. Two log buckets already sit in `europe-west2` inside `vetra-shared`,
+  # whose location set has never permitted it — so they were created despite the
+  # policy rather than because of it. Verified 2026-08-25 while chasing the
+  # Brexit finding below. So this is a real control with a coverage gap, and the
+  # gap is invisible: the services it does not cover fail open and silently.
+  # Do not read "the org policy enforces the two-region design" as universal.
   us_locations = ["in:us-locations"]
   eu_locations = ["in:eu-locations"]
+
+  # ---------------------------------------------------------------------------
+  # THE UK IS NOT IN `in:eu-locations`, AND THAT SENTENCE IS THE WHOLE COMMENT.
+  #
+  # Found 2026-08-25 by the first apply that ever tried to create something in a
+  # UK project. It failed:
+  #
+  #   Constraint constraints/gcp.resourceLocations violated for
+  #   [orgpolicy:projects/693741698596] attempting to create a secret in
+  #   [europe-west2]
+  #
+  # `in:eu-locations` is Google's value group for the EUROPEAN UNION.
+  # `europe-west2` is LONDON. The UK left the EU, so Google's EU group does not
+  # contain it — measured rather than inferred: the effective policy on
+  # `uk-prod` expands to 66 values, 36 of them `europe-west*`, and NOTHING
+  # matching `west2` appears anywhere in the list. What is allowed is
+  # europe-west1/3/4/8/9/10/12 — Belgium, Frankfurt, Netherlands, Milan, Paris,
+  # Berlin, Turin — every one of them an EU member state.
+  #
+  # This blocked EVERY regional resource in the UK lane, not just the secret the
+  # apply happened to reach first: Cloud SQL, Cloud Run, the KMS key ring and
+  # the subnet would each have been refused in turn. It has been latent since
+  # B0w wrote the org policies and was unreachable while
+  # `enable_uk_resources` was off.
+  #
+  # THE CHOICE MADE, 2026-08-25, by the owner: keep London and widen the group,
+  # rather than move the stack to europe-west1. Moving would have needed no
+  # policy change at all and costs ~10 ms — but it turns the answer to "where is
+  # my data" from "London" into "Belgium, which the UK recognises as adequate",
+  # and the UK residency claim is what makes this lane a sales asset. This file
+  # already carries one claim that had to be downgraded to a disclosed transfer
+  # (Identity Platform); a second voluntary downgrade to avoid a one-line edit
+  # is a poor trade.
+  #
+  # THIS IS NOT THE CONSTRAINT BEING WEAKENED. Its job is to make "a UK resource
+  # in America" an API rejection rather than a code review, and it still does
+  # that: `in:europe-west2-locations` adds London and nothing else. The group
+  # was a B0w default chosen before anyone had thought about Brexit, not a
+  # decision being overridden.
+  # ---------------------------------------------------------------------------
+  uk_locations = ["in:eu-locations", "in:europe-west2-locations"]
 
   common_apis = [
     "cloudresourcemanager.googleapis.com",
@@ -145,7 +194,7 @@ locals {
       lane      = "uk"
       env       = "prod"
       region    = var.uk_region
-      locations = local.eu_locations
+      locations = local.uk_locations
       apis      = local.regional_apis
       phi       = true
     }
@@ -154,7 +203,7 @@ locals {
       lane      = "uk"
       env       = "staging"
       region    = var.uk_region
-      locations = local.eu_locations
+      locations = local.uk_locations
       apis      = local.regional_apis
       phi       = false
     }
@@ -168,7 +217,7 @@ locals {
       # service pulling an image from a US registry is fine, because container
       # images are not patient data. Constraining it to one continent would
       # force a second registry for no safety gain.
-      locations = concat(local.us_locations, local.eu_locations)
+      locations = concat(local.us_locations, local.uk_locations)
       apis      = local.shared_apis
       phi       = false
     }
@@ -180,7 +229,7 @@ locals {
       # Both continents, deliberately, because this stack holds TWO regional
       # sets of log buckets rather than one. UK logs landing in a US bucket
       # would be a transfer, so the sinks are split by origin — see logging.tf.
-      locations = concat(local.us_locations, local.eu_locations)
+      locations = concat(local.us_locations, local.uk_locations)
       apis      = local.logging_apis
       phi       = false
     }
