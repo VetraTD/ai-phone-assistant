@@ -141,7 +141,7 @@ steps:
     args:
       - --input-type=module
       - -e
-      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); console.log('lane C verifiers loaded');"
+      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); await import('/app/scripts/import-tenant.js'); console.log('lane C verifiers + tenant import loaded');"
     waitFor: [build]
 
   # The migration files have to BE in the image. A `COPY database ./database`

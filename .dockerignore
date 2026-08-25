@@ -33,6 +33,7 @@ scripts
 # the image rather than by reading about it.
 !scripts/c8-rls-proof.js
 !scripts/c7-restore-parity.js
+!scripts/import-tenant.js
 docs
 latency-runs
 infra
