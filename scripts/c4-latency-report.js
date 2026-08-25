@@ -73,7 +73,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
@@ -168,10 +168,26 @@ async function main() {
       return;
     }
     console.log(`querying: ${gcloudCommand()}\n`);
-    const out = execFileSync("gcloud", [
-      "logging", "read", buildFilter(),
-      `--project=${PROJECT}`, "--format=json", "--limit=5000",
-    ], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    // Spawning gcloud on Windows takes two goes to get right, and this file
+    // needed both. `gcloud` is a `.cmd` shim, so execFileSync("gcloud") fails
+    // with a bare ENOENT that reads as "not installed" while it is on PATH and
+    // working. Naming `gcloud.cmd` then fails with EINVAL, because Node 22
+    // refuses to spawn a .cmd or .bat without a shell (CVE-2024-27980).
+    //
+    // So a shell it is, which means the filter — which contains double quotes
+    // and spaces — has to be quoted rather than passed as an argv element. Both
+    // failures were found running this against real calls, not in review.
+    const out =
+      process.platform === "win32"
+        ? execSync(
+            `gcloud logging read "${buildFilter().replace(/"/g, '\\"')}" ` +
+              `--project=${PROJECT} --format=json --limit=5000`,
+            { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
+          )
+        : execFileSync("gcloud", [
+            "logging", "read", buildFilter(),
+            `--project=${PROJECT}`, "--format=json", "--limit=5000",
+          ], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     entries = JSON.parse(out);
   }
 
