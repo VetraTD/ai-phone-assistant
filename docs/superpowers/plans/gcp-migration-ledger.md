@@ -184,6 +184,42 @@ to `has_prod` and is therefore **false** — correct for staging, and it means
 nothing would have stopped it. **BOTH bools are now lists**, and
 `enable_uk_resources = ["uk-prod"]` touches the us-staging project not at all.
 
+**▶ THE ONLY THING BETWEEN HERE AND A WORKING DEMO: REPOINT THE NUMBER.**
+
+`+441372656055` (cofounder's Twilio account, verified live) still has its voice
+webhook on **Railway**. Point it at:
+
+```
+https://voice-uk-prod-693741698596.europe-west2.run.app/twilio/voice
+```
+
+**NOT the `…-nw.a.run.app` form.** Both hostnames resolve; the signature is an
+HMAC over the exact URL, so the wrong one 403s every call including genuine
+ones. `terraform output cloud_run_services` labels them.
+
+**VERIFIED WITHOUT A HANDSET, each with a negative control:** signed webhook
+200 / tampered 403 / unsigned 403; Deepgram key accepted at the EU endpoint
+(400 on junk body) and REFUSED for a bogus key (401); ElevenLabs 200 with the
+tenant's `voice_id` resolving to "Alice — Clear, Engaging Educator";
+`gemini-3.6-flash` at `locations/eu` in the UK project 200 with a bogus model
+404. Every field of the tenant round-trips, JSONB included, proven by running
+the real payload through local PG16.
+
+**STILL UNPROVEN AND ONLY A CALL CAN CLOSE IT: no audio has ever crossed this
+stack.** No media-stream WebSocket has been opened, nothing transcribed,
+nothing synthesised. This file's own record is seven defects between "deployed"
+and "answers the phone". **The owner should ring it once before the cofounder
+does.**
+
+**THREE DIFFERENCES FROM RAILWAY, all by decision rather than defect:** no
+appointment history (config-only import, so `check_appointment` correctly finds
+nothing while booking works), no SMS (`TWILIO_SMS_FROM` unset, number is
+voice-only), and no dashboard user for the tenant (deliberate — a synthetic
+`auth_uid` would strand the cofounder's real signup later, and no
+join-an-existing-business flow exists).
+
+---
+
 **WHAT THE OWNER HAS TO DO, IN THIS ORDER. The order is not negotiable.**
 
   1. ~~**U2 — five secret VALUES**~~ — **HALF DONE 2026-08-25. The five secrets
