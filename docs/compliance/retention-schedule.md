@@ -88,6 +88,35 @@ days. That is normal, it is what almost every processor does, and it should be
 
 ---
 
+## Data held by sub-processors, which this schedule originally missed
+
+**Found 2026-08-25, from a Twilio sales email rather than from review** — which
+is worth saying, because a retention schedule that stops at our own database is
+describing half the problem to counsel.
+
+| Data | Where | Twilio default | What to set |
+|---|---|---|---|
+| **Call recordings** | Twilio | **UNLIMITED** | `<Record>` is live on the degraded-mode voicemail path, so these fire when the AI pipeline fails. Low volume, high sensitivity. Set a deletion policy and delete the existing backlog. |
+| Debugger logs / Console metadata | Twilio | vendor-managed | Twilio states these carry metadata — numbers, message SIDs — and not PHI or audio. Purge before HIPAA activation regardless. |
+| Message bodies | Twilio | vendor-managed | Confirm against the retention terms in the BAA when it is signed. |
+
+**A BAA does not reach backwards.** Twilio's own guidance is to purge
+non-compliant historical data — test recordings and Debugger logs accumulated
+across months of development — BEFORE HIPAA is enabled on the account. That is a
+concrete pre-launch task, not hygiene advice.
+
+**Recording encryption** is available at $0.015 per encrypted recording minute
+using our own RSA key pair. At this volume the cost is negligible; the reason to
+take it is that it puts the recordings beyond the vendor rather than merely
+inside their retention policy.
+
+> **The general rule this exposes:** every sub-processor in
+> `sub-processor-register.md` needs a retention row here. The register answers
+> *who holds data*; this file has to answer *for how long*, and until now it
+> only answered it for data we hold ourselves.
+
+---
+
 ## What is not built
 
 The blunt version, so nobody reads this schedule as a description of the system:
