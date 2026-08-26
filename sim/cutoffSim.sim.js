@@ -52,6 +52,8 @@ const H = vi.hoisted(() => ({
   ttsChunkFrames: 1,
   /** Every turnManager.handleFinal decision, with the rule that fired. */
   finalDecisions: [],
+  /** Every turnManager.handleInterim decision, with the rule that fired. */
+  interimDecisions: [],
   /** Live audioOut instances, so the probe can ask whether audio was audible. */
   audioOuts: [],
 }));
@@ -164,6 +166,15 @@ vi.mock("../lib/voice/turnManager.js", async (importActual) => {
         handleFinal: (text, meta) => {
           const decision = tm.handleFinal(text, meta);
           H.finalDecisions.push({ text, meta, ...decision });
+          return decision;
+        },
+        // Interims decide barge-in FIRST — a final only arrives after
+        // endpointing plus network, so whatever the interim path refuses is
+        // overlap the caller actually sits through. Captured separately
+        // because session.js discards this return value.
+        handleInterim: (text, meta) => {
+          const decision = tm.handleInterim(text, meta);
+          H.interimDecisions.push({ text, meta, ...decision });
           return decision;
         },
       };
@@ -621,11 +632,33 @@ describe("cutoff simulation", () => {
   // The measurement is whether the assistant's TTS turn was aborted, which is
   // exactly what a barge-in does to it.
   // -------------------------------------------------------------------------
-  async function runBargeProbe({ burstMs, text, confidence, endpointMs = 150 }) {
+  async function runBargeProbe({ burstMs, text, confidence, endpointMs = 150, via = "final", env = null }) {
+    // turnManager reads its thresholds into module-level constants at import,
+    // and freshSession() re-imports the whole graph — so env set here, before
+    // that call, is what the scenario actually runs under.
+    const restoreEnv = [];
+    if (env) {
+      for (const [key, value] of Object.entries(env)) {
+        restoreEnv.push([key, process.env[key]]);
+        process.env[key] = value;
+      }
+    }
+    try {
+      return await runBargeProbeInner({ burstMs, text, confidence, endpointMs, via });
+    } finally {
+      for (const [key, value] of restoreEnv) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  async function runBargeProbeInner({ burstMs, text, confidence, endpointMs, via }) {
     H.sttInstances.length = 0;
     H.ttsTurns.length = 0;
     H.assistantAudioAtMs.length = 0;
     H.finalDecisions.length = 0;
+    H.interimDecisions.length = 0;
     H.audioOuts.length = 0;
     H.llmTtfbMs = 200;
     H.ttsTtfbMs = 40;
@@ -697,7 +730,11 @@ describe("cutoff simulation", () => {
     const clockAtFinal = clock;
     const audioOut = H.audioOuts[H.audioOuts.length - 1];
     const audibleAtFinal = !!audioOut?.isPlaying?.(150);
-    stt.opts.onFinal?.(text, { confidence });
+    // An interim is what arrives FIRST on a real call — a final only lands
+    // after Deepgram's endpointing window plus network. Anything the interim
+    // path refuses is overlap the caller actually hears.
+    if (via === "interim") stt.opts.onInterim?.(text, { confidence });
+    else stt.opts.onFinal?.(text, { confidence });
     await vi.advanceTimersByTimeAsync(50);
 
     return {
@@ -708,7 +745,10 @@ describe("cutoff simulation", () => {
       sinceAudioMs: audioAtMs === null ? null : clockAtFinal - audioAtMs,
       turnsAtFinal: H.ttsTurns.length,
       audibleAtFinal,
-      decision: H.finalDecisions[H.finalDecisions.length - 1] || null,
+      decision:
+        (via === "interim"
+          ? H.interimDecisions[H.interimDecisions.length - 1]
+          : H.finalDecisions[H.finalDecisions.length - 1]) || null,
     };
   }
 
@@ -751,6 +791,89 @@ describe("cutoff simulation", () => {
     // SELF-TEST, non-negotiable. If the assistant was not actually audible when
     // the transcript landed, "not cut off" is meaningless — every row would
     // pass for the wrong reason, and the table would read as a finding.
+    for (const r of rows) {
+      expect(r.playingBefore, `${r.name}: the reply never produced audio, so this proves nothing`).toBe(true);
+      expect(r.audibleAtFinal, `${r.name}: assistant was not audible, so there was nothing to cut off`).toBe(true);
+    }
+    for (const r of rows) {
+      expect(r.aborted, `${r.name}: expected ${r.expectAbort ? "a barge-in" : "no barge-in"}`).toBe(r.expectAbort);
+    }
+  }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // SHORT-BAND BARGE-IN — how long the caller talks before anything reacts.
+  //
+  // Reported by the Digile Media owner as "delayed response when callers speak
+  // over the AI, resulting in unnatural overlap". The interim path required
+  // FOUR words; at this file's own ~320ms/word that is 1.2-1.6s of both
+  // parties talking before the assistant so much as considers stopping.
+  //
+  // Four was not arbitrary: echoGuard.classify() cannot judge anything shorter
+  // (bigram similarity is meaningless under 4 tokens), so a shorter interim
+  // had no defence against the assistant's own voice returning off a
+  // speakerphone. The question this table answers is therefore NOT "can we
+  // react sooner" — obviously we can — but "does reacting sooner let the
+  // assistant interrupt itself again".
+  //
+  // The assistant says "Sure, I can help with that." in this sim, so the echo
+  // case below is its own words, verbatim, not a stub.
+  // -------------------------------------------------------------------------
+  it("cuts in on a short interim once the flag is set, but never on its own echo", async () => {
+    const ON = { VOICE_BARGE_MIN_WORDS: "2" };
+    const cases = [
+      // The baseline: today's behavior. Two words is below the four-word gate,
+      // so the caller keeps talking and the assistant keeps going.
+      // voicedRunMs tracks the length of the burst itself, so a burst of N ms
+      // has to clear the bar in ms directly.
+      { name: "2 words, flag OFF", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.95, env: null, expectAbort: false },
+      // The same utterance, the same burst, with the flag on. This is the
+      // whole point, and the only variable that moved.
+      { name: "2 words, flag ON", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.95, env: ON, expectAbort: true },
+      // The failure the four-word gate existed to prevent. "i can" is
+      // contained in "Sure, I can help with that." — classify() cannot see
+      // this (too short), so isShortEcho is the only thing standing here.
+      { name: "own echo 'i can', flag ON", via: "interim", burstMs: 700, text: "i can", confidence: 0.95, env: ON, expectAbort: false },
+      // The raised bar the flag pays for its speed with, and the sharpest row
+      // in the table: 300ms of voice is well clear of the 220ms the cough
+      // probe above uses, and clears the normal 250ms gate too — so this is
+      // NOT rejected as a noise burst. It is rejected only because the short
+      // band asks for 350ms. Same speech, different bar.
+      { name: "2 words, weak voice, flag ON", via: "interim", burstMs: 300, text: "next tuesday", confidence: 0.95, env: ON, expectAbort: false },
+      // Low STT confidence in the short band, same reasoning: 0.65 clears the
+      // normal 0.6 bar and misses the short band's 0.75.
+      { name: "2 words, low confidence, flag ON", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.65, env: ON, expectAbort: false },
+      // ...and the half that must not regress: a full-length interim is
+      // unaffected by any of this.
+      { name: "5 words, flag ON", via: "interim", burstMs: 900, text: "actually can we make it wednesday", confidence: 0.91, env: ON, expectAbort: true },
+      // Control for the two rows above: with the raised bars disabled and
+      // ONLY the word gate lowered, the same weak-voice utterance is admitted.
+      // That is what proves rows 4 and 5 are rejected by the bars rather than
+      // by the word count — without it, "no cut" there is ambiguous.
+      { name: "2 words, bars disabled", via: "interim", burstMs: 300, text: "next tuesday", confidence: 0.65, env: { VOICE_BARGE_MIN_WORDS: "2", VOICE_BARGE_SHORT_MIN_VOICED_MS: "0", VOICE_BARGE_SHORT_MIN_CONFIDENCE: "0" }, expectAbort: true },
+    ];
+
+    const rows = [];
+    for (const c of cases) {
+      rows.push({ ...c, ...(await runBargeProbe(c)) });
+    }
+
+    console.log("\n  SHORT-BAND BARGE-IN — did the caller get the floor?\n");
+    console.log("  case                                expected     actual   ok   audible  decision");
+    console.log("  " + "-".repeat(86));
+    for (const r of rows) {
+      const ok = r.aborted === r.expectAbort ? "yes" : "NO";
+      console.log(
+        `  ${r.name.padEnd(34)} ${(r.expectAbort ? "cut" : "no cut").padEnd(11)} ${(r.aborted ? "cut" : "no cut").padEnd(8)} ${ok.padEnd(4)} ${(r.audibleAtFinal ? "yes" : "NO ").padEnd(8)} ${(r.decision ? `${r.decision.action}/${r.decision.reason ?? "-"}` : "none")}`
+      );
+    }
+    console.log("");
+    console.log("  Rows 1 and 2 are the SAME utterance. The only difference is the flag,");
+    console.log("  which is the evidence that the flag is what moved the behavior. Row 3 is");
+    console.log("  the assistant's own words: if it ever reads 'cut', the four-word gate was");
+    console.log("  load-bearing after all and this change must be reverted.\n");
+
+    // Same non-negotiable self-test as the probe above: "not cut off" proves
+    // nothing unless there was audio playing to cut off in the first place.
     for (const r of rows) {
       expect(r.playingBefore, `${r.name}: the reply never produced audio, so this proves nothing`).toBe(true);
       expect(r.audibleAtFinal, `${r.name}: assistant was not audible, so there was nothing to cut off`).toBe(true);

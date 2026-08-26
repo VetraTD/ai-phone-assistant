@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTurnManager, BACKCHANNELS, INTERRUPT_CUES } from "../lib/voice/turnManager.js";
 
 // voicedRunMs defaults to a value comfortably above BARGE_MIN_VOICED_MS (250),
@@ -640,5 +640,142 @@ describe("turnManager.js — bargeInAllowed gate (uninterruptible greeting)", ()
     const tm = createTurnManager({ ...deps, now: () => 1000 });
 
     expect(tm.handleFinal("actually can we make it Wednesday instead").action).toBe("interrupt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Short-band barge-in — how fast the caller can take the floor.
+//
+// The interim path required FOUR words before it would cut the assistant off,
+// which at normal speech rate is 1.2-1.6s of two people talking at once. The
+// threshold was 4 because echoGuard.classify() cannot judge anything shorter
+// (bigram similarity is meaningless under 4 tokens), so a shorter interim had
+// no defence against the assistant's own voice returning off a speakerphone.
+//
+// isShortEcho() is that defence — exact token containment, already trusted on
+// the FINAL path — and it was simply never wired to interims.
+// ---------------------------------------------------------------------------
+const BAND_ENV_KEYS = [
+  "VOICE_BARGE_MIN_WORDS",
+  "VOICE_BARGE_SHORT_MIN_VOICED_MS",
+  "VOICE_BARGE_SHORT_MIN_CONFIDENCE",
+  "VOICE_ECHO_MIN_TOKENS",
+  "VOICE_ECHO_SHORT_TOKENS",
+];
+const bandOriginalEnv = Object.fromEntries(BAND_ENV_KEYS.map((k) => [k, process.env[k]]));
+
+/** Re-import turnManager with a fresh env — its thresholds are module-level constants. */
+async function loadTurnManagerWith(env = {}) {
+  for (const key of BAND_ENV_KEYS) delete process.env[key];
+  Object.assign(process.env, env);
+  vi.resetModules();
+  return (await import("../lib/voice/turnManager.js")).createTurnManager;
+}
+
+/**
+ * echoGuard stub. `minTokens` mirrors the real module's option so turnManager
+ * can derive its own word threshold from it rather than hardcoding 4 — today
+ * the two are coupled only by a comment.
+ */
+function makeEchoGuard({ minTokens = 4, shortEcho = false, classifyEcho = false } = {}) {
+  return {
+    minTokens,
+    classify: vi.fn(() =>
+      classifyEcho ? { isEcho: true, reason: "echo", ratio: 0.9, novel: 0 } : { isEcho: false },
+    ),
+    isShortEcho: vi.fn(() => shortEcho),
+  };
+}
+
+describe("turnManager.js — short-band barge-in", () => {
+  afterEach(() => {
+    for (const key of BAND_ENV_KEYS) {
+      if (bandOriginalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = bandOriginalEnv[key];
+    }
+    vi.resetModules();
+  });
+
+  it("defers a two-word non-cue interim by default — merging changes nothing", async () => {
+    const createTM = await loadTurnManagerWith({});
+    const deps = makeDeps({ voicedRunMs: 800 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard(), now: () => 1000 });
+
+    expect(tm.handleInterim("next tuesday", { confidence: 0.95 })).toEqual({ action: "defer" });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("cuts in on a two-word non-cue interim once VOICE_BARGE_MIN_WORDS=2", async () => {
+    const createTM = await loadTurnManagerWith({ VOICE_BARGE_MIN_WORDS: "2" });
+    const deps = makeDeps({ voicedRunMs: 800 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard(), now: () => 1000 });
+
+    expect(tm.handleInterim("next tuesday", { confidence: 0.95 })).toEqual({ action: "interrupt" });
+    expect(deps.onInterrupt).toHaveBeenCalledWith("next tuesday");
+  });
+
+  it("suppresses a short interim that is the assistant's own words coming back", async () => {
+    // "No problem, I can get that booked" off a speakerphone returns as the
+    // two-word interim "no problem". classify() refuses it (under 4 tokens),
+    // and " no " is an INTERRUPT_CUE, so on the interim path this reached
+    // triggerInterrupt with nothing left to check it.
+    const createTM = await loadTurnManagerWith({});
+    const deps = makeDeps({ voicedRunMs: 800 });
+    const echoGuard = makeEchoGuard({ shortEcho: true });
+    const tm = createTM({ ...deps, echoGuard, now: () => 1000 });
+
+    expect(tm.handleInterim("no problem", { confidence: 0.95 })).toEqual({
+      action: "ignore",
+      reason: "echo_short",
+    });
+    expect(deps.onInterrupt).not.toHaveBeenCalled();
+    expect(echoGuard.isShortEcho).toHaveBeenCalled();
+  });
+
+  it("holds a newly-admitted short interim to a higher sustained-voice bar", async () => {
+    // 300ms clears the normal 250ms bar but not the short-band 350ms one.
+    const createTM = await loadTurnManagerWith({ VOICE_BARGE_MIN_WORDS: "2" });
+    const deps = makeDeps({ voicedRunMs: 300 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard(), now: () => 1000 });
+
+    expect(tm.handleInterim("next tuesday", { confidence: 0.95 })).toEqual({
+      action: "ignore",
+      reason: "no_vad",
+    });
+  });
+
+  it("holds a newly-admitted short interim to a higher confidence bar", async () => {
+    // 0.65 clears the normal 0.6 bar but not the short-band 0.75 one.
+    const createTM = await loadTurnManagerWith({ VOICE_BARGE_MIN_WORDS: "2" });
+    const deps = makeDeps({ voicedRunMs: 800 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard(), now: () => 1000 });
+
+    expect(tm.handleInterim("next tuesday", { confidence: 0.65 })).toEqual({
+      action: "ignore",
+      reason: "low_confidence",
+    });
+  });
+
+  it("leaves one-word interrupt cues on the ORIGINAL gates, not the stricter ones", async () => {
+    // Below both short-band bars, above both normal ones. A genuine urgent
+    // "stop" must still cut through — the stricter bars apply only to the
+    // band the flag newly admits.
+    const createTM = await loadTurnManagerWith({ VOICE_BARGE_MIN_WORDS: "2" });
+    const deps = makeDeps({ voicedRunMs: 300 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard(), now: () => 1000 });
+
+    expect(tm.handleInterim("stop", { confidence: 0.65 })).toEqual({ action: "interrupt" });
+  });
+
+  it("derives its word threshold from echoGuard.minTokens instead of hardcoding 4", async () => {
+    // With classify() needing 5 tokens, a 4-word interim can no longer be
+    // echo-checked at all. Hardcoding 4 opens an unguarded band exactly there.
+    const createTM = await loadTurnManagerWith({ VOICE_ECHO_MIN_TOKENS: "5" });
+    const deps = makeDeps({ voicedRunMs: 800 });
+    const tm = createTM({ ...deps, echoGuard: makeEchoGuard({ minTokens: 5 }), now: () => 1000 });
+
+    expect(tm.handleInterim("i need to reschedule", { confidence: 0.95 })).toEqual({
+      action: "defer",
+    });
   });
 });
