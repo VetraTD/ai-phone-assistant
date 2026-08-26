@@ -21,3 +21,17 @@ latency-runs/
 # visual record, but they are build output, not source.
 /v-*.png
 /landing-*.png
+# Every other .env variant, not just the bare one. .env.staging sat untracked
+# in a PUBLIC repo carrying a live TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN —
+# one `git add -A` from publishing working credentials for the account the
+# phone numbers are billed against.
+.env.*
+!.env.example
+# Terraform state. It records service-account identities, resource ids and
+# whatever values passed through the apply, and it is regenerated per
+# environment, so it is never something to commit. NOT `infra/` wholesale:
+# infra/ is genuinely tracked on the GCP lane branches, and ignoring the
+# directory would silently swallow new .tf files there.
+*.tfstate
+*.tfstate.*
+
