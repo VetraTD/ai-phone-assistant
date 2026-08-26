@@ -34,4 +34,10 @@ latency-runs/
 # directory would silently swallow new .tf files there.
 *.tfstate
 *.tfstate.*
+# Terraform plan files embed resource attribute values in PLAINTEXT, including
+# ones that came from secrets, so a .tfplan is a credential-shaped artifact even
+# though it looks like a build product. Provider binaries are hundreds of MB of
+# vendored .exe and are re-fetched by `terraform init`.
+*.tfplan
+.terraform/
 
