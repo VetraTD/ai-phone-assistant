@@ -188,6 +188,28 @@ export function replyMatchesBeforeTool(ctx, regex, toolName) {
   );
 }
 
+/**
+ * At most `max` receptionist replies match `regex` across the whole call.
+ *
+ * The "never" and "somewhere" variants cannot express a cap, and a cap is
+ * exactly what some behaviours need: asking the caller to spell their name
+ * ONCE is correct receptionist craft, asking nine times in nine consecutive
+ * turns is the livelock the suite caught with every other hard assert green.
+ * A rule that is right once and wrong repeatedly needs a counting assert.
+ *
+ * @param {object} ctx - scenario run context
+ * @param {RegExp} regex - tested against each reply
+ * @param {number} max - the most matching replies allowed
+ */
+export function replyMatchesAtMost(ctx, regex, max) {
+  const matches = collectReplies(ctx).filter((r) => regex.test(r));
+  return ok(
+    matches.length <= max,
+    `replyMatchesAtMost(${regex}, ${max})`,
+    `${matches.length} matching reply(ies)${matches.length > max ? `; first: "${truncate(matches[0])}"` : ""}`
+  );
+}
+
 export function replyNeverMatches(ctx, regex) {
   const replies = collectReplies(ctx);
   const offender = replies.find((r) => regex.test(r));

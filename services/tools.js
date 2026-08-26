@@ -211,6 +211,18 @@ export async function executeToolCall(fc, ctx) {
           const cfg = capabilityConfig(ctx?.config, pack.id);
           const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {
+            // The refusal throws fc.args away — including a name the caller
+            // already said out loud and the model already had. Keeping it is
+            // half the cure for the re-asking loops: a booking refused for a
+            // missing DOB must not also cost us the name, or the next turn
+            // asks for the name again (and then asks it to be spelled again).
+            //
+            // Merged with whatever the pack already recorded, because the
+            // capabilityState merge in lib/capabilities/effects.js is shallow
+            // AT THE CAPABILITY LEVEL: writing `callerFacts` replaces the
+            // whole map rather than adding to it.
+            const heardName = callerNameFromArgs(fc.args);
+            const priorFacts = ctx?.capabilityState?.[pack.id]?.callerFacts || {};
             return {
               functionResponse: {
                 id: fc.id,
@@ -220,6 +232,13 @@ export async function executeToolCall(fc, ctx) {
               stateEffects: {
                 toolResult: { name: fc.name, success: false, message: check.message },
                 toolCallEvent: { name: fc.name, args: fc.args },
+                ...(heardName && !priorFacts.Name
+                  ? {
+                      capabilityState: {
+                        [pack.id]: { callerFacts: { ...priorFacts, Name: heardName } },
+                      },
+                    }
+                  : {}),
               },
             };
           }
@@ -229,6 +248,26 @@ export async function executeToolCall(fc, ctx) {
       return executeWebhookTool(fc, ctx);
     }
   }
+}
+
+/**
+ * The caller's name as the model supplied it on a write tool, whatever that
+ * tool calls the parameter.
+ *
+ * Two spellings exist across the packs and are not going to be unified: the
+ * appointment tools carry `client_name` (it is the client of the business),
+ * the message/quote/EHR tools carry `caller_name`. lib/capabilities/requirements.js
+ * bridges them for the `name` requirement via paramAliases; this is the same
+ * bridge for the refusal path.
+ *
+ * @param {object} [args] - the model's tool arguments
+ * @returns {string|null} trimmed name, or null when absent/blank/not a string
+ */
+function callerNameFromArgs(args) {
+  const raw = args?.client_name ?? args?.caller_name;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed || null;
 }
 
 /**

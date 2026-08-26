@@ -822,6 +822,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   guardrails += appointmentsEnabled
     ? `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?". Example: "Are you looking to book a new appointment, or reschedule an existing one?"\n`
     : `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?".\n`;
+  // A caller who answers half of what was asked used to get silence: the model
+  // waited for the rest of an answer that was never coming, because the caller
+  // had chosen not to answer, had not heard the second half, or had simply
+  // forgotten it. Reported from a real test call. The fix for the CAUSE is not
+  // stacking questions in the first place (see each pack's step guidance); this
+  // is the recovery for when it happens anyway.
+  guardrails += `- If the caller answers only part of what you asked, or answers one question and not another, take what they gave you, acknowledge it, and ask only for what is still missing. Never wait in silence for the rest, and never re-ask something they have already answered.\n`;
 
   // Policy bullets — what the business does and doesn't allow.
   guardrails += `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;
@@ -1036,6 +1043,23 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     sections.push(factsSection);
   }
 
+  // The spelling cap, stated as an accomplished fact rather than as a rule.
+  //
+  // The prompt already carries "ask this at most once" and the model still
+  // asked nine turns running, because a rule about the past is something it
+  // has to remember, while a fact in the tail is something it can read. The
+  // counter lives in lib/voice/session.js; this only reports it.
+  //
+  // Emits nothing when false, which is what keeps every existing tail snapshot
+  // byte-identical — the same empty-case contract as KNOWN CALLER FACTS.
+  if (extras?.spellingAlreadyAsked) {
+    sections.push(
+      `=== ALREADY ASKED ===\n` +
+        `You have already asked this caller to spell something on this call. Do not ask again, ` +
+        `for any name or detail, for the rest of the call — use what you have and move on.`,
+    );
+  }
+
   return sections.join("\n\n");
 }
 
@@ -1111,7 +1135,9 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
           ? `As soon as you understand, name it on the intent line, `
           : `As soon as you understand, call set_call_intent with the appropriate intent, `) +
         `then start helping in the same turn. Keep this response to 1–2 sentences. ` +
-        `Acknowledge the caller's request and ask the first relevant question.`
+        `Acknowledge the caller's request and ask the first relevant question — ONE question, not two. ` +
+        `In particular, do not pair an open "how can I help you?" with a second, more specific question in ` +
+        `the same turn: if you are going to offer concrete options, offer them on their own.`
       );
 
     case "gather_details": {

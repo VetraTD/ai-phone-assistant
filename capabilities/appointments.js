@@ -535,12 +535,15 @@ function bookingGuidance(config, now, canCheck) {
   if (canCheck) {
     return (
       `Your task: Help the caller book, checking the calendar before you collect any details. ` +
-      `One question at a time:\n` +
-      `1. Ask whether they prefer mornings or afternoons, and if any days don't work (business hours: ${businessHoursStr}).\n` +
-      `2. As soon as the caller names a specific time, say something like "one moment while I check that" and call check_appointment_availability with that time IN THE SAME response.\n` +
-      `3. If it comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
-      `4. Only once a free time is agreed, collect the caller's details (their name, and anything else you're required to ask for), then read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
-      `5. Do NOT call book_appointment until the caller clearly confirms. The system re-checks availability at booking time; if it reports the slot is full, call check_appointment_availability again and offer another time.`
+      `Ask ONE thing per turn — never put two questions in the same response:\n` +
+      `1. Ask whether they prefer mornings or afternoons (business hours: ${businessHoursStr}).\n` +
+      `2. If they have not already named a day, ask as a SEPARATE question whether any days don't work for them.\n` +
+      `3. As soon as the caller names a specific time, say something like "one moment while I check that" and call check_appointment_availability with that time IN THE SAME response.\n` +
+      `4. If it comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
+      `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away.\n` +
+      `6. If there is anything else you are REQUIRED to collect, ask for it one item per turn. If nothing else is required, go straight to the read-back — do not invent extra questions such as asking for a phone number you were not told to collect.\n` +
+      `7. Read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
+      `8. Do NOT call book_appointment until the caller clearly confirms. The system re-checks availability at booking time; if it reports the slot is full, call check_appointment_availability again and offer another time.`
     );
   }
 
@@ -800,7 +803,7 @@ function validateBookingTime(rawScheduledAt, config, deps) {
 // exactly once before the first name-bearing booking read-back, and the caller
 // is never asked to spell again for the rest of the call.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- Before the first read-back of a booking that includes the caller's name, confirm the spelling of their name once: ask them to spell it — e.g. "Just to make sure I have it right, could you spell your last name?" — and read the letters back to confirm you have it right. Ask this at most once. If the caller spells it, use that spelling; if they decline, ignore the request, or just answer with something else, proceed with the name exactly as you heard it — never ask them to spell it a second time. Once you have moved past this step, treat the name as settled and do not raise spelling again for the rest of the call.\n`;
+  `- When the caller gives you their name, repeat it back once in your very next sentence — "Thanks, Marcus — ..." — so that a mishearing surfaces immediately instead of being written into the booking. Only if they correct you, or you are still not confident you have it right, ask them to spell the ONE part you are unsure of — their first name or their surname, not both — and read the letters back. Ask for a spelling at most once in the entire call: if the caller spells it, use that spelling; if they decline, ignore the request, or just answer with something else, proceed with the name exactly as you heard it. Once you have moved past this, treat the name as settled and never raise spelling again.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a

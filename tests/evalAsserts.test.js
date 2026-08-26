@@ -23,6 +23,7 @@ import {
   replySomewhereMatches,
   replyMatchesBeforeTool,
   replyNeverMatches,
+  replyMatchesAtMost,
   turnsAtMost,
   toolNotCalledBeforeTurn,
   finalIntentIsOneOf,
@@ -261,5 +262,30 @@ describe("toolNotCalledBeforeTurn", () => {
       expect(finalIntentIsOneOf({}, ["take_message"]).pass).toBe(false);
       expect(finalIntentIsOneOf(undefined, ["take_message"]).pass).toBe(false);
     });
+  });
+});
+
+describe("replyMatchesAtMost", () => {
+  /** Three replies, two of which ask the caller to spell something. */
+  const spellCtx = () => ({
+    turns: [
+      { caller: "it's Aoife", reply: "Could you spell that for me?", toolCalls: [] },
+      { caller: "no need", reply: "Of course. And a callback number?", toolCalls: [] },
+      { caller: "555", reply: "Sorry, could you spell your last name?", toolCalls: [] },
+    ],
+  });
+
+  it("passes at the cap", () => {
+    expect(replyMatchesAtMost(spellCtx(), /spell/i, 2).pass).toBe(true);
+  });
+
+  it("fails above the cap — the shape of the nine-turn spelling livelock", () => {
+    const res = replyMatchesAtMost(spellCtx(), /spell/i, 1);
+    expect(res.pass).toBe(false);
+    expect(res.detail).toMatch(/2 matching/);
+  });
+
+  it("passes when nothing matches at all", () => {
+    expect(replyMatchesAtMost(spellCtx(), /parking/i, 0).pass).toBe(true);
   });
 });
