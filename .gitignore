@@ -40,4 +40,10 @@ latency-runs/
 # vendored .exe and are re-fetched by `terraform init`.
 *.tfplan
 .terraform/
+# tfvars is per-environment input, not source. This one carries the billing
+# account id, org id and owner email addresses — no credential today, but it is
+# the file that would grow one. Untracked on every branch, so ignoring it
+# changes nothing except that a stray `git add -A` can no longer publish it.
+*.tfvars
+!*.tfvars.example
 
