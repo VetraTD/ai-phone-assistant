@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { shouldAbortForResume } from "../lib/voice/session.js";
+import { shouldAbortForResume, isWriteTool } from "../lib/voice/session.js";
 
 /** The ordinary case: a turn is being prepared and nothing has been heard yet. */
 const base = {
@@ -83,5 +83,29 @@ describe("shouldAbortForResume", () => {
 
   it("treats a zero cap as disabled", () => {
     expect(shouldAbortForResume({ ...base, maxAborts: 0 })).toBe(false);
+  });
+});
+
+describe("isWriteTool — only a write blocks the recovery", () => {
+  it("treats caller-visible writes as writes", () => {
+    for (const t of ["book_appointment", "cancel_appointment_db", "reschedule_appointment_db", "record_customer_request", "record_quote_request"]) {
+      expect(isWriteTool(t), t).toBe(true);
+    }
+  });
+
+  it("treats lookups as reads", () => {
+    // The bug this fixes: check_appointment_availability fires early in every
+    // booking, and latching on it blocked the resume recovery for the rest of
+    // the turn. A live call produced exactly that — one answer to the first
+    // sentence, then immediately a second answer to the continuation.
+    for (const t of ["check_appointment_availability", "get_caller_appointments_from_db"]) {
+      expect(isWriteTool(t), t).toBe(false);
+    }
+  });
+
+  it("fails SAFE on an unknown tool", () => {
+    // A missed recovery is a worse call; a duplicate booking is a worse day.
+    expect(isWriteTool("some_webhook_tool")).toBe(true);
+    expect(isWriteTool("")).toBe(false);
   });
 });
