@@ -521,6 +521,22 @@ export function isBusinessOpen(config) {
  */
 function buildCallerContextSection(callerContext, timezone, profile, rules = []) {
   if (!callerContext) return "";
+
+  // Re-filter at RENDER time, not just at fetch time.
+  //
+  // The snapshot is taken once when the call connects, with upcomingOnly, and
+  // is then reused for the whole call. On a long call an appointment can elapse
+  // between pickup and the turn being built — and this block would keep
+  // asserting it, and the "already has an upcoming appointment, do NOT offer to
+  // book another" rule keeps firing off it. Cheap to recheck, and "upcoming"
+  // should mean upcoming now rather than upcoming when we answered.
+  const nowMs = Date.now();
+  const upcoming = (callerContext.upcomingAppointments || []).filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > nowMs;
+  });
+  callerContext = { ...callerContext, upcomingAppointments: upcoming };
+
   if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
 
   let ctx = `=== CALLER CONTEXT ===\n`;
