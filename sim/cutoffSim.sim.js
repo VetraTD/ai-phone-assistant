@@ -326,9 +326,12 @@ async function runCall({
   midSentencePunctuated = true,
   interCallerGapMs = 1200,
   holdNoPunctMs,
+  holdTrailingMs,
 }) {
   if (holdNoPunctMs === undefined) delete process.env.VOICE_HOLD_NO_PUNCT_MS;
   else process.env.VOICE_HOLD_NO_PUNCT_MS = String(holdNoPunctMs);
+  if (holdTrailingMs === undefined) delete process.env.VOICE_HOLD_TRAILING_MS;
+  else process.env.VOICE_HOLD_TRAILING_MS = String(holdTrailingMs);
   H.sttInstances.length = 0;
   H.ttsTurns.length = 0;
   H.assistantAudioAtMs.length = 0;
@@ -459,11 +462,25 @@ async function runCall({
       cutoffs.push({ label: u.label, msIntoUtterance: hit.atMs - u.startedAt, remainingMs: u.endedAt - hit.atMs });
     }
   }
+  // How long the caller waited for an answer, per utterance.
+  //
+  // Without this the table is trivially gameable: hold every final for three
+  // seconds and the cutoff count goes to zero, which reads as a total win while
+  // making the product markedly worse. Any change that drives cutoffs down MUST
+  // be read next to what it cost in latency — especially on the fluent control,
+  // which has no cutoffs to fix and therefore should pay nothing.
+  const latencies = [];
+  for (const u of utterances) {
+    const reply = H.assistantAudioAtMs.find((a) => a.createdAtMs >= u.endedAt);
+    if (reply) latencies.push(reply.atMs - u.endedAt);
+  }
+
   const rules = {};
   for (const h of H.holdCalls) rules[h.rule] = (rules[h.rule] || 0) + 1;
   return {
     utterances,
     cutoffs,
+    latencies,
     replies: H.assistantAudioAtMs.length,
     turnsTaken: H.ttsTurns.length,
     audioAt: [...H.assistantAudioAtMs],
@@ -528,7 +545,17 @@ describe("cutoff simulation", () => {
       { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500 },
       { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900 },
 
+      // THE FIX UNDER TEST. Identical to "punctuated finals @150ms" in every
+      // respect except VOICE_HOLD_TRAILING_MS, so the flag is the only
+      // variable and the pair is the evidence. The cutoffs in that row are
+      // fragments ending on "book", "get", "having" — words the conjunction
+      // and lead-in lists cannot see — and smart_format punctuates them, so
+      // without this they reach terminal_punctuation and get a zero hold.
+      { name: "punctuated + trailing 800", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
       { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150 },
+      // The control's own paired row: the fix must cost a fluent caller
+      // NOTHING, because they have no cutoffs to fix. Watch the reply column.
+      { name: "fluent + trailing 800", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
     ];
 
     // DETECTOR SELF-TEST, first and non-negotiable. An instrument that reports
@@ -559,7 +586,7 @@ describe("cutoff simulation", () => {
 
     const rows = [];
     for (const s of scenarios) {
-      const { utterances, cutoffs, replies, rules } = await runCall(s);
+      const { utterances, cutoffs, replies, rules, latencies } = await runCall(s);
       rows.push({
         name: s.name,
         turns: utterances.length,
@@ -567,17 +594,18 @@ describe("cutoff simulation", () => {
         cutoffs: cutoffs.length,
         rate: pct(cutoffs.length, utterances.length),
         medianRemaining: median(cutoffs.map((c) => c.remainingMs)),
+        medianLatency: median(latencies),
         labels: cutoffs.map((c) => c.label).join(", ") || "—",
         rules: Object.entries(rules).map(([k, v]) => `${k}:${v}`).join(" ") || "none",
       });
     }
 
     console.log("\n  CUTOFF SIMULATION — assistant audio starting while the caller is still speaking\n");
-    console.log("  scenario                          turns  cutoffs   rate   talked-over  where");
-    console.log("  " + "-".repeat(84));
+    console.log("  scenario                          turns  cutoffs   rate   talked-over   reply  where");
+    console.log("  " + "-".repeat(92));
     for (const r of rows) {
       console.log(
-        `  ${r.name.padEnd(32)} ${String(r.turns).padStart(5)} ${String(r.cutoffs).padStart(8)}  ${r.rate.padStart(6)}  ${String(r.medianRemaining + "ms").padStart(11)}  ${r.labels}`
+        `  ${r.name.padEnd(32)} ${String(r.turns).padStart(5)} ${String(r.cutoffs).padStart(8)}  ${r.rate.padStart(6)}  ${String(r.medianRemaining + "ms").padStart(11)}  ${String(r.medianLatency + "ms").padStart(6)}  ${r.labels}`
       );
     }
     console.log("");
@@ -613,6 +641,82 @@ describe("cutoff simulation", () => {
     console.log("  fixes should not be trusted to have fixed anything.\n");
 
     expect(rows.length).toBe(scenarios.length);
+
+    // ---- ASSERTIONS, not decoration ----------------------------------------
+    //
+    // Until 2026-08-27 the only assertion in this test was the row count above.
+    // The 50%-cutoff row was PRINTED and never checked, so any regression to
+    // the turn-taking subsystem shipped green. The warnings below were
+    // console.log too. An instrument that cannot fail is not a gate, and this
+    // is the subsystem that has already caused two production incidents.
+
+    // The fluent control is the harness's own credibility check. Fluent speech
+    // has no mid-sentence pause, so nothing can finalize mid-utterance and
+    // there is nothing to talk over. A non-zero control means the simulation is
+    // wrong, and every other number here becomes unquotable.
+    expect(
+      control?.cutoffs,
+      "fluent control recorded a cutoff — the harness is mismodelling, not the product",
+    ).toBe(0);
+
+    // A knob whose branch never executed cannot have been measured. This caught
+    // a version where the sweep silently did nothing.
+    expect(
+      branchNeverRan,
+      "classifyHold's no_terminal_punctuation branch never ran in the unpunctuated sweep — the scripted pauses are not producing the final it exists for",
+    ).toBe(false);
+
+    // The detector must be able to DETECT. A hesitant script with punctuated
+    // mid-sentence finals is the reproduction of the reported bug; if this ever
+    // reads zero it is far likelier that the harness broke than that the bug
+    // fixed itself. Proving the negative requires proving the positive first.
+    const punctuated = rows.find((r) => r.name.startsWith("punctuated finals @150"));
+    expect(
+      punctuated,
+      "the punctuated@150ms scenario is the bug reproduction and must exist",
+    ).toBeDefined();
+
+    // Latency guard. Driving cutoffs to zero by holding every final for three
+    // seconds would look like a total win in the cutoff column and be a worse
+    // product. The fluent control has no cutoffs to fix, so it must not pay for
+    // anyone else's fix — this is the number that catches that trade.
+    expect(
+      control.medianLatency,
+      `fluent control reply latency regressed to ${control.medianLatency}ms — a turn-taking fix is being paid for by every fluent caller`,
+    ).toBeLessThan(2_000);
+
+    // ---- VOICE_HOLD_TRAILING_MS, as a matched pair -------------------------
+    // Same script, same pauses, same endpointing. The flag is the only
+    // difference, which is what makes this evidence rather than a coincidence.
+    const trailingOff = rows.find((r) => r.name === "punctuated finals @150ms");
+    const trailingOn = rows.find((r) => r.name === "punctuated + trailing 800");
+    expect(trailingOn, "the trailing-hold scenario must exist").toBeDefined();
+
+    expect(
+      trailingOn.cutoffs,
+      `VOICE_HOLD_TRAILING_MS did not reduce cutoffs (${trailingOff.cutoffs} -> ${trailingOn.cutoffs}) — the fix is not working`,
+    ).toBeLessThan(trailingOff.cutoffs);
+
+    // Branch-ran evidence. A row can improve for the wrong reason; this says
+    // the rule under test is the one that fired.
+    expect(
+      trailingOn.rules.includes("trailing_incomplete"),
+      "trailing_incomplete never fired, so this row cannot be crediting the flag",
+    ).toBe(true);
+
+    // The cost side, and the reason the fluent script is run twice. A fluent
+    // caller has no cutoffs to fix, so the fix must be INVISIBLE to them: the
+    // rule must never fire, and their wait must not move.
+    const fluentOn = rows.find((r) => r.name === "fluent + trailing 800");
+    expect(fluentOn.cutoffs, "the flag introduced a cutoff on fluent speech").toBe(0);
+    expect(
+      fluentOn.rules.includes("trailing_incomplete"),
+      "trailing_incomplete fired on FLUENT speech — the word list is too broad and is taxing finished turns",
+    ).toBe(false);
+    expect(
+      fluentOn.medianLatency,
+      `fluent callers now wait ${fluentOn.medianLatency}ms vs ${control.medianLatency}ms with the flag off`,
+    ).toBeLessThanOrEqual(control.medianLatency);
   }, 120_000);
 
   // -------------------------------------------------------------------------
