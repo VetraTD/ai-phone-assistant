@@ -16,6 +16,8 @@
 import { describe, it, expect } from "vitest";
 import internalAdapter from "../adapters/scheduling/internal.js";
 import { makeFakeDeps } from "../lib/harness/fakeDeps.js";
+import { executeToolCall } from "../services/tools.js";
+import { loadConfig } from "../services/supabase.js";
 
 const BUSINESS = "biz-past";
 const CALLER = "+15551234567";
@@ -80,5 +82,63 @@ describe("fakeDeps honours upcomingOnly", () => {
       upcomingOnly: true,
     });
     expect(upcoming.map((a) => a.client_name)).toEqual(["Future"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hard-name spelling gate. Lives here rather than in its own file because
+// it shares the executeToolCall plumbing exercised above.
+// ---------------------------------------------------------------------------
+
+describe("hard names are spelled before they become a record", () => {
+  const config = () =>
+    loadConfig({
+      id: "b-name",
+      name: "Testwork Dental",
+      timezone: "America/Chicago",
+      allowed_tasks: ["take_message"],
+      business_capabilities: [{ capability_id: "messages", enabled: true, config: {} }],
+    });
+
+  const call = (caller_name) => ({
+    id: "fc-1",
+    name: "record_customer_request",
+    args: { request_type: "message", caller_name, callback_number: "+15551234567" },
+  });
+
+  it("refuses once and asks for the spelling", async () => {
+    const res = await executeToolCall(call("Venkateshwaria Ayalavarapu"), {
+      config: config(),
+      capabilityState: {},
+      callerPhone: "+15551234567",
+      spellingAlreadyAsked: false,
+    });
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(res.functionResponse.response.message).toMatch(/spell/i);
+    // Addressed to the model, not the caller — the "[not caller speech]" marker
+    // is what stops it being read aloud verbatim on a text-free turn.
+    expect(res.functionResponse.response.message).toMatch(/\[not caller speech\]/);
+  });
+
+  it("lets an ordinary name straight through", async () => {
+    const res = await executeToolCall(call("Joe Smith"), {
+      config: config(),
+      capabilityState: {},
+      callerPhone: "+15551234567",
+      spellingAlreadyAsked: false,
+    });
+    expect(res.functionResponse.response.success).toBe(true);
+  });
+
+  it("does not ask twice — the call gets one spelling request, then proceeds", async () => {
+    // The anti-livelock guarantee. A caller who declines to spell must still
+    // be able to leave a message.
+    const res = await executeToolCall(call("Venkateshwaria Ayalavarapu"), {
+      config: config(),
+      capabilityState: {},
+      callerPhone: "+15551234567",
+      spellingAlreadyAsked: true,
+    });
+    expect(res.functionResponse.response.success).toBe(true);
   });
 });

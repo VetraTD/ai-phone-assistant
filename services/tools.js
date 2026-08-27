@@ -15,6 +15,17 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
+import { looksHardToSpell } from "../lib/nameQuality.js";
+
+/**
+ * Ask for a spelling before writing a hard-to-transcribe name into a record.
+ *
+ * ON by default: the cost is one refused tool call per call at most (the gate
+ * opens once the call's single spelling request is spent), and the thing it
+ * protects is the row the business keeps. `false` turns it off without a
+ * deploy if it proves more friction than it is worth.
+ */
+const CONFIRM_HARD_NAMES = process.env.VOICE_CONFIRM_HARD_NAMES !== "false";
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -208,6 +219,39 @@ export async function executeToolCall(fc, ctx) {
         // receptionist finding the record it needs in order to ask the caller
         // about it — locking the door and the key inside.
         if ((pack.actionTools || []).includes(fc.name)) {
+          // Confirm the spelling of a hard name BEFORE it becomes a record.
+          //
+          // A live call stored "Venkateshwaria Ayalavarapu" as "Venkateshwaria
+          // Ayalla Varpu". The assistant DID say the surname back — and it made
+          // no difference, because a spoken read-back cannot convey spelling:
+          // the two sound nearly identical. Only letters catch a letter error,
+          // and the business keeps that row.
+          //
+          // Refused once, not looped: the gate opens as soon as the call has
+          // spent its spelling request (counted in lib/voice/replyState.js), so
+          // a caller who declines to spell is never asked twice and the booking
+          // still completes. Same fail-closed, one-reason-at-a-time shape as
+          // checkRequirements below.
+          const hardName = CONFIRM_HARD_NAMES && !ctx?.spellingAlreadyAsked
+            ? callerNameFromArgs(fc.args)
+            : null;
+          if (hardName && looksHardToSpell(hardName)) {
+            const message =
+              `[not caller speech] Before recording "${hardName}", confirm the spelling: ask the caller to ` +
+              `spell it, read the letters back, then try again. Ask this only once — if they decline or ` +
+              `just answer with something else, proceed with the name exactly as you heard it.`;
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: { success: false, message },
+              },
+              stateEffects: {
+                toolResult: { name: fc.name, success: false, message },
+                toolCallEvent: { name: fc.name, args: fc.args },
+              },
+            };
+          }
           const cfg = capabilityConfig(ctx?.config, pack.id);
           const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {
