@@ -521,6 +521,22 @@ export function isBusinessOpen(config) {
  */
 function buildCallerContextSection(callerContext, timezone, profile, rules = []) {
   if (!callerContext) return "";
+
+  // Re-filter at RENDER time, not just at fetch time.
+  //
+  // The snapshot is taken once when the call connects, with upcomingOnly, and
+  // is then reused for the whole call. On a long call an appointment can elapse
+  // between pickup and the turn being built — and this block would keep
+  // asserting it, and the "already has an upcoming appointment, do NOT offer to
+  // book another" rule keeps firing off it. Cheap to recheck, and "upcoming"
+  // should mean upcoming now rather than upcoming when we answered.
+  const nowMs = Date.now();
+  const upcoming = (callerContext.upcomingAppointments || []).filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > nowMs;
+  });
+  callerContext = { ...callerContext, upcomingAppointments: upcoming };
+
   if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
 
   let ctx = `=== CALLER CONTEXT ===\n`;
@@ -949,7 +965,11 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     afterHours += `The office is currently CLOSED. `;
     switch (effectivePolicy) {
       case "offer_callback":
-        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Ask for their name, number, and preferred callback time.`;
+        // "Ask for their name, number, and preferred callback time" — three
+        // asks in one instruction, and the model duly delivered all three in a
+        // single breath. Reported from a live call as the assistant still
+        // stacking questions, and after-hours is a common path to land on.
+        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
         break;
       case "book_later":
         afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
@@ -1754,6 +1774,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Call-scoped counterparts, both read only by end_call's gate.
         completedActionThisCall: !!extras?.completedActionThisCall || completedActionThisTurn,
         callerTurnCount: Number(extras?.callerTurnCount) || 0,
+        // Has this call already spent its one spelling request? Read by the
+        // hard-name gate in services/tools.js, which must never ask twice.
+        spellingAlreadyAsked: !!extras?.spellingAlreadyAsked,
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,

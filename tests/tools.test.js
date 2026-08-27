@@ -427,7 +427,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     // { clientPhone }, not a bare string — previously the bare-string second
     // arg silently disabled the phone filter inside listAppointmentsByCaller,
     // leaking every business's appointments to any caller.
-    expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+    expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567", upcomingOnly: true });
     expect(stateEffects.capabilityState.appointments.selectedAppointmentId).toBe("appt-9");
   });
 
@@ -441,7 +441,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
     await executeToolCall(fc, baseCtx);
 
-    expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+    expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567", upcomingOnly: true });
   });
 
   it("get_caller_appointments_from_db: message lists times in LOCAL time, not raw UTC (spoken-time fix)", async () => {
@@ -1168,7 +1168,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       const { stateEffects } = await executeToolCall(fc, ctx);
 
-      expect(fakeListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+      expect(fakeListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567", upcomingOnly: true });
       expect(mockListAppointmentsByCaller).not.toHaveBeenCalled();
       expect(stateEffects.capabilityState.appointments.selectedAppointmentId).toBe("fake-appt");
     });
@@ -1179,7 +1179,7 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       await executeToolCall(fc, baseCtx);
 
-      expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567" });
+      expect(mockListAppointmentsByCaller).toHaveBeenCalledWith("biz-1", { clientPhone: "+15551234567", upcomingOnly: true });
     });
   });
 

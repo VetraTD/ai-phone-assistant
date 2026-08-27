@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   buildSystemInstruction,
   buildStaticSystemPrefix,
@@ -8,6 +8,16 @@ import {
 import { FIXTURES } from "./fixtures/businessConfigs.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
+
+// A fixed wall-clock time that is always in the FUTURE.
+//
+// These fixtures used to hardcode "2026-08-01T10:00:00", which was ahead of
+// today when they were written and quietly slid into the past. Nothing failed
+// until buildCallerContextSection started re-filtering elapsed appointments at
+// render time — at which point the block under test rendered nothing and four
+// assertions broke for a reason that had nothing to do with the code.
+// Relative dates cannot rot this way.
+const FUTURE_APPT = new Date(Date.now() + 7 * 86_400_000).toISOString();
 
 const config = {
   businessName: "Acme Dental",
@@ -26,7 +36,7 @@ const extras = {
   callerContext: {
     callCount: 2,
     lastCallSummary: "booked a cleaning",
-    upcomingAppointments: [{ scheduled_at: "2026-08-01T10:00:00", client_name: "Jane" }],
+    upcomingAppointments: [{ scheduled_at: FUTURE_APPT, client_name: "Jane" }],
   },
   transferAllowed: true,
   integrations: [{ enabled: true, provider: "athenahealth" }],
@@ -261,7 +271,7 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
   const callerA = {
     callCount: 4,
     lastCallSummary: "asked about a crown replacement",
-    upcomingAppointments: [{ scheduled_at: "2026-08-01T10:00:00", client_name: "Jane Okafor" }],
+    upcomingAppointments: [{ scheduled_at: FUTURE_APPT, client_name: "Jane Okafor" }],
   };
   const callerB = {
     callCount: 1,
@@ -315,10 +325,26 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
     // 12:05Z is 1:05pm in London during BST. This is the reported bug's
     // instant: read back as "2:05 PM" it means the write was corrupted, read
     // back as "1:05 PM" the pipeline is honest.
+    //
+    // A SPECIFIC instant, not a relative one: the whole point is what this
+    // exact time renders as in BST, so a floating date would test nothing.
+    // The clock is frozen just before it instead, which is also what stops the
+    // fixture rotting — buildCallerContextSection now drops appointments that
+    // have already elapsed, so an unfrozen past instant renders nothing at all
+    // and these assertions would fail for a reason unrelated to timezones.
+    const UK_APPT = "2026-08-10T12:05:00.000Z";
     const ukCaller = {
       callCount: 2,
-      upcomingAppointments: [{ scheduled_at: "2026-08-10T12:05:00.000Z", client_name: "Josh" }],
+      upcomingAppointments: [{ scheduled_at: UK_APPT, client_name: "Josh" }],
     };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-10T08:00:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
     it("speaks 12:05Z as 1:05 PM for a Europe/London business, in BST", () => {
       const tail = buildDynamicTail("identify_intent", null, ukConfig, {
@@ -344,7 +370,7 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
       // and BOTH read paths have to say it that way or the caller hears two
       // different renderings of one row.
       expect(tail).toContain(
-        speakableDateTime("2026-08-10T12:05:00.000Z", "Europe/London", resolveProfile(ukConfig))
+        speakableDateTime(UK_APPT, "Europe/London", resolveProfile(ukConfig))
       );
       expect(tail).toMatch(/the 10th of August/);
     });
@@ -359,7 +385,7 @@ describe("gemini.js — static prefix is cache-safe and caller-free", () => {
         callerContext: ukCaller,
       });
 
-      expect(tail).toContain(speakableDateTime("2026-08-10T12:05:00.000Z", undefined, resolveProfile(noTz)));
+      expect(tail).toContain(speakableDateTime(UK_APPT, undefined, resolveProfile(noTz)));
     });
   });
 
