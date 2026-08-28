@@ -2383,12 +2383,26 @@ Art. 30 record, alongside Identity Platform and ElevenLabs. **Re-probe `europe-w
 HOST monthly for a 3.x arrival** — that is the trigger to revisit, and it is one tfvars line plus
 the baseUrl rule.
 
-**Code change still OUTSTANDING — not made in the Phase 1 session, so `feat/gcp-2` still matches
-its verified state.** `services/gemini.js:175` must stop refusing `global`, and the comment block
-at 150-171 and 224-229 must be rewritten to say what is now true rather than what
-`:countTokens` suggested. `.env.example`'s `VERTEX_LOCATION` block says "NEVER `global`" and needs
-the same treatment. Do this in Phase 2, or Phase 4 applies a config the service refuses to boot
-with.
+**Code change DONE — commit `5f129f8`, made 2026-08-28 at the owner's request.** Five files:
+`services/gemini.js`, `.env.example`, and the three test files that asserted the old contract.
+
+**The load-bearing part was not the relaxed refusal.** `VERTEX_MULTI_REGIONS` became
+`VERTEX_GLOBAL_HOST_LOCATIONS` and now includes `global`, because
+**`global-aiplatform.googleapis.com` returns 404** (probed). Relaxing the guard WITHOUT extending
+the `baseUrl` override would have failed on the first turn of the first call — the exact incident
+that override exists to prevent (`Invalid hostname: us-aiplatform.googleapis.com`, every turn).
+A real region still keeps the SDK-derived host: that host is the only thing that pins one, and
+forcing the global host there would unpin it while the config still read `europe-west2`.
+
+`VERTEX_FORBIDDEN_LOCATIONS` is **kept and empty** — the refusal POINT (one construction site) is
+the valuable part, and adding an entry makes a refusal real again.
+
+`eval/run.js`'s `preflightBackend` needed no change: it reports whatever `getClient` throws, so it
+inverted with the guard. Its test did.
+
+Gates re-run because this changes runtime behaviour: **2352 / 191 / 3 / 126 / 36, and 129 snapshot
+tests with ZERO snapshots moved** — the last is the one that matters, since it proves the change
+touched backend selection and not the prompt.
 
 **Probe method trap, recorded because it silently produced a fully wrong result table.** PowerShell
 `Invoke-WebRequest` sends `Expect: 100-continue`, and through the local TLS interception every
