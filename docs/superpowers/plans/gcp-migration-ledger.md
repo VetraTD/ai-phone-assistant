@@ -3220,6 +3220,49 @@ failed: attempt 1 had a single contact on a mailbox nobody read.
 added.** This is enforced by a validation rule, not advisory, and it is deliberately not something a
 session can fix on the owner's behalf — it needs a real second person's address.
 
+### Owner precondition work done 2026-08-28 — first GCP contact of attempt 2
+
+**The 19 quota APIs are ENABLED on the bootstrap project `project-b147bdfa-d267-426a-8c7`, and
+verified rather than assumed: 19/19 present, none missing** (42 total on the project, the rest being
+Google's defaults plus `aiplatform` from the P1 probe). That is precondition 1, closed.
+
+**⚠ The ledger said "the WHOLE `local.terraform_quota_apis` list (19 APIs)" and that local is
+FOURTEEN.** The 19 is its union with `local.common_apis`, which is exactly what the README's command
+lists — checked programmatically against both, nothing missing, nothing extra. Enabling only the 14
+would have restarted the 403 cycle the precondition exists to prevent. Corrected in place above.
+
+**Essential contacts set to `nithin.dodla@vetratd.com` and `josh.tite@vetratd.com`**, which closes
+the hard gate: `terraform console` now evaluates the module unaided, having refused to before.
+
+### ⚠ PRECONDITION 6 IS HALF BLOCKED — `@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN
+
+**Measured, not inferred.** Both IAM grants were attempted and both were refused by Google:
+
+```
+INVALID_ARGUMENT: User josh.tite@vetratd.com does not exist.
+INVALID_ARGUMENT: User nithin.dodla@vetratd.com does not exist.
+```
+
+`gcloud organizations describe 208508072539` returns **no `directoryCustomerId`** — the org was
+auto-provisioned at signup and has no Cloud Identity or Workspace directory behind it. So
+`@vetratd.com` addresses are mailboxes somewhere, and they are **not Google accounts**.
+
+**The distinction that matters, and it is why one half worked and the other did not:**
+
+| | Needs a Google account? | Status |
+|---|---|---|
+| **Essential Contacts** | **No** — a plain address | ✅ both set, gate closed |
+| **IAM** (billing admin, org admin, project Owner) | **Yes** | ❌ refused, `does not exist` |
+
+**Current billing IAM is `user:vetratd@gmail.com` and nothing else** — read off the account, not
+assumed. That is precisely the single point of failure precondition 6 exists to remove, and it is
+still open: one suspended Gmail is still total loss.
+
+**This does not block the apply. It blocks the thing that makes the apply survivable.** Resolving it
+needs a real Google account for the cofounder — an existing Gmail is instant and free; putting Cloud
+Identity on `vetratd.com` would make `@vetratd.com` real identities and give proper offboarding, and
+the migration path for an org that currently has NO directory has not been verified here.
+
 ### Gates
 
 `terraform fmt -check -recursive` **exit 0** · `terraform validate` **Success** · `npm test`
