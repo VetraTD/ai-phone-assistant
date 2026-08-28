@@ -2833,8 +2833,11 @@ sessions, so MEASURE, do not cite.** Remember `cachedContent` is mutually exclus
 
 Phase 4 is the first apply and needs the owner present.
 
-1. **Enable the WHOLE `local.terraform_quota_apis` list (19 APIs) on the bootstrap project BEFORE
-   the first apply.** The command is in the README's bootstrap section. This trap fired five times
+1. **Enable the WHOLE 19-API list on the bootstrap project BEFORE the first apply.** ⚠ **Corrected
+   2026-08-28: `local.terraform_quota_apis` alone is FOURTEEN.** The 19 is the union of it and
+   `local.common_apis`, and that union is exactly what the README's `gcloud services enable` command
+   lists — verified programmatically, nothing missing, nothing extra. **Enabling only the 14 restarts
+   the 403 cycle this precondition exists to prevent.** Use the README command verbatim.** The command is in the README's bootstrap section. This trap fired five times
    in attempt 1 and again on 2026-08-28, always as a 403 naming the quota project that reads as a
    permissions problem: `Cloud Resource Manager API has not been used in project ... or it is
    disabled`. Verify with `gcloud services list --enabled`, do not assume.
