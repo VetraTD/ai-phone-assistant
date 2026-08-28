@@ -248,9 +248,22 @@ uk_region = "europe-west2"
 #
 # ⚠ SET AT LEAST TWO. The module refuses exactly one, because one contact on one
 # mailbox is the shape that already failed.
+# SET 2026-08-28 by the owner. Two, because the config refuses exactly one and
+# because one contact is a single point of failure for precisely the class of
+# message that arrives with a deadline attached.
+#
+# ⚠ THESE ONLY WORK IF SOMEBODY READS THEM. Attempt 1 did not fail for lack of a
+# contact — it had one, on a mailbox nobody read, and the notices preceding the
+# suspension went unseen. The address that is DEMONSTRABLY read today is
+# vetratd@gmail.com; whether these two are monitored is an assumption, not a
+# verified fact, and it is the assumption the whole control rests on.
+#
+# An Essential Contact is a plain address and needs no Google account, which is
+# why these differ from the IAM principals: an @vetratd.com IAM binding needs a
+# real Google identity, and this org has no Cloud Identity directory.
 essential_contacts = {
-  "vetratd@gmail.com" = {}
-  # "cofounder@example.com" = { categories = ["ALL"] }
+  "nithin.dodla@vetratd.com" = {}
+  "josh.tite@vetratd.com"    = {}
 }
 
 # Contacts created outside Terraform, to be ADOPTED rather than recreated —
