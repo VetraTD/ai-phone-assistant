@@ -2329,10 +2329,73 @@ Phase 1's requirement was that nothing moves. These are real and they are for la
 
 | # | Finding | Where | Phase |
 |---|---|---|---|
-| P1 | **`VERTEX_LOCATION=global` is REFUSED BY LIVE CODE.** The plan's 2026-08-28 decision is `global` with `gemini-3.6-flash`, on measured availability. But `services/gemini.js:175` declares `VERTEX_FORBIDDEN_LOCATIONS` as exactly `["global"]` and **throws** at client construction, and `.env.example` documents "NEVER global" at length. This is code, not a comment — attempt 1 decided the opposite and enforced it. **The decision cannot ship until this is changed, and changing it is a residency-posture change that needs writing down, not a one-line edit.** | `services/gemini.js:175,224-229,294-296`; `.env.example` | 2 or 3 |
+| P1 | **RESOLVED 2026-08-28 — see the P1 section below; decision is `global`, disclosed.** Original finding: **`VERTEX_LOCATION=global` is REFUSED BY LIVE CODE.** The plan's 2026-08-28 decision is `global` with `gemini-3.6-flash`, on measured availability. But `services/gemini.js:175` declares `VERTEX_FORBIDDEN_LOCATIONS` as exactly `["global"]` and **throws** at client construction, and `.env.example` documents "NEVER global" at length. This is code, not a comment — attempt 1 decided the opposite and enforced it. **The decision cannot ship until this is changed, and changing it is a residency-posture change that needs writing down, not a one-line edit.** | `services/gemini.js:175,224-229,294-296`; `.env.example` | 2 or 3 |
 | P2 | **Build reporting dies on Cloud Run.** `GET /` reports the build SHA from `RAILWAY_GIT_COMMIT_SHA`, falling back to `GIT_COMMIT_SHA`. **Railway injects the first; Cloud Run injects neither.** Unless Terraform or Cloud Build passes `GIT_COMMIT_SHA` at deploy time, every deployed service reports "Build: unknown" — and attempt 1 records that "is my fix live?" already cost a wasted test call once | `server.js:276-277` | 2 |
 | P3 | 68 files under `.playwright-mcp/` are **tracked AND gitignored** on `main`, `dev` and lane-b alike. Pre-existing on both parents, identical count, **not caused by this merge**. Cosmetic; noted so a future session does not mistake it for merge damage | `.playwright-mcp/` | any |
 | P4 | **The root suite is not hermetic — it changes result on an env var.** `tests/toolTimeout.test.js` asserts `reason_code === "TIMEOUT"` and gets `UNAVAILABLE` whenever `DATABASE_URL` is set in the shell, which it will be for anyone who just ran `npm run test:db` in the same terminal. **Verified pre-existing: `feat/gcp-lane-b-terraform` fails it identically, and the file is lane-b's verbatim — the merge did not touch it.** The canonical root-suite run is with `DATABASE_URL` UNSET, which is the documented property `vitest.db.config.js` says is worth protecting; that run is green at 2350. Recorded, not fixed, per the record-and-park rule | `tests/toolTimeout.test.js:47-60` | any |
+
+---
+
+## P1 RESOLVED 2026-08-28 — measured, and it corrects the standing record twice
+
+**Decision: `VERTEX_LOCATION=global`, and the inference leg is disclosed as an international
+transfer.** Taken by the owner 2026-08-28 after the probe below.
+
+Probed live against the scratch project `project-b147bdfa-d267-426a-8c7` with `:generateContent`
+(`maxOutputTokens=5`), not `:countTokens`, and with controls on both the model name and the
+location. **`:countTokens` is NOT a valid availability signal — it returned 200 for
+`locations/europe-west2` + `gemini-3.6-flash`, which `:generateContent` on the regional host
+refuses.** Attempt 1's table was built on `:countTokens`.
+
+| Call shape | Region actually pinned? | `gemini-3.6-flash` |
+|---|---|---|
+| `europe-west2-aiplatform.googleapis.com` (regional host) | **YES** | **404** |
+| `aiplatform.googleapis.com` + `locations/europe-west2` | **NO** | 200, real reply |
+| `aiplatform.googleapis.com` + `locations/eu` | **NO** | 200, real reply |
+| `eu-aiplatform.googleapis.com` | — | **400, host does not exist** |
+
+**Correction 1 — `eu` and `global` are the same call, and nothing established otherwise.** Both go
+through `aiplatform.googleapis.com`. The control is decisive: **`locations/madeup-region-9`
+returned `200 SERVED`**, and so did `locations/asia-northeast1`, while an empty location returned
+400. The path segment is **not validated**, so a 200 on `locations/eu` is **not evidence of EU
+processing**. This does not prove `eu` is ignored — Google may honour real regions and fall back
+only for garbage — but a residency claim must be positively evidenced, and by probe this one
+cannot be. **`services/gemini.js` refusing `global` while permitting `eu` is therefore a
+distinction that was never established.** Attempt 1's LLM-leg residency posture rested on it.
+
+**Correction 2 — London's regional host serves exactly ONE model, and the earlier "404 in
+europe-west2" was the regional HOST, not the region.** On
+`europe-west2-aiplatform.googleapis.com`: `gemini-2.5-flash` **200**; `gemini-3.6-flash`,
+`gemini-2.5-flash-lite`, `gemini-2.5-pro` and the bogus control all **404**. So genuine UK-pinned
+inference is available, and only with `gemini-2.5-flash` — which scored 17-18/20 against
+3.6-flash's 19/20 on the 2026-07-24 matrix, and has no in-region fallback.
+
+**The 2026-08-28 finding "`eu` is not a Vertex host at all — `Invalid hostname:
+eu-aiplatform.googleapis.com`" is reproduced here as the 400 above and is a real observation with
+the wrong conclusion drawn from it.** The multi-regions are reached on the global host with the
+location in the path; `services/gemini.js:232-249` already documented this and already carries the
+`baseUrl` override for it.
+
+**What the decision costs, stated plainly:** the inference call leaves the UK and the EU. Caller
+data at rest (Cloud SQL), audio transcription (Deepgram `api.eu.deepgram.com`), secrets, KMS and
+compute all remain in `europe-west2`. The transfer needs a line in the privacy notice **and** the
+Art. 30 record, alongside Identity Platform and ElevenLabs. **Re-probe `europe-west2`'s REGIONAL
+HOST monthly for a 3.x arrival** — that is the trigger to revisit, and it is one tfvars line plus
+the baseUrl rule.
+
+**Code change still OUTSTANDING — not made in the Phase 1 session, so `feat/gcp-2` still matches
+its verified state.** `services/gemini.js:175` must stop refusing `global`, and the comment block
+at 150-171 and 224-229 must be rewritten to say what is now true rather than what
+`:countTokens` suggested. `.env.example`'s `VERTEX_LOCATION` block says "NEVER `global`" and needs
+the same treatment. Do this in Phase 2, or Phase 4 applies a config the service refuses to boot
+with.
+
+**Probe method trap, recorded because it silently produced a fully wrong result table.** PowerShell
+`Invoke-WebRequest` sends `Expect: 100-continue`, and through the local TLS interception every
+request came back **417 with a Google "Sorry..." HTML page — including the control**. It reads like
+an API answer. Set `[System.Net.ServicePointManager]::Expect100Continue = $false`. Always probe
+with a control that MUST fail; the 417 table was only recognisable as garbage because the bogus
+model did not 404.
 
 ---
 
