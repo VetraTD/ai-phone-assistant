@@ -2331,7 +2331,7 @@ Phase 1's requirement was that nothing moves. These are real and they are for la
 |---|---|---|---|
 | P1 | **RESOLVED 2026-08-28 — see the P1 section below; decision is `global`, disclosed.** Original finding: **`VERTEX_LOCATION=global` is REFUSED BY LIVE CODE.** The plan's 2026-08-28 decision is `global` with `gemini-3.6-flash`, on measured availability. But `services/gemini.js:175` declares `VERTEX_FORBIDDEN_LOCATIONS` as exactly `["global"]` and **throws** at client construction, and `.env.example` documents "NEVER global" at length. This is code, not a comment — attempt 1 decided the opposite and enforced it. **The decision cannot ship until this is changed, and changing it is a residency-posture change that needs writing down, not a one-line edit.** | `services/gemini.js:175,224-229,294-296`; `.env.example` | 2 or 3 |
 | P2 | **Build reporting dies on Cloud Run.** `GET /` reports the build SHA from `RAILWAY_GIT_COMMIT_SHA`, falling back to `GIT_COMMIT_SHA`. **Railway injects the first; Cloud Run injects neither.** Unless Terraform or Cloud Build passes `GIT_COMMIT_SHA` at deploy time, every deployed service reports "Build: unknown" — and attempt 1 records that "is my fix live?" already cost a wasted test call once | `server.js:276-277` | 2 |
-| P3 | 68 files under `.playwright-mcp/` are **tracked AND gitignored** on `main`, `dev` and lane-b alike. Pre-existing on both parents, identical count, **not caused by this merge**. Cosmetic; noted so a future session does not mistake it for merge damage | `.playwright-mcp/` | any |
+| P3 | **⚠ RECLASSIFIED 2026-08-28 — NOT cosmetic. The files hold REAL CALLER PHONE NUMBERS and the repo is PUBLIC. See "P3 — RECLASSIFIED" below.** Original finding: 68 files under `.playwright-mcp/` are **tracked AND gitignored** on `main`, `dev` and lane-b alike. Pre-existing on both parents, identical count, **not caused by this merge**. Cosmetic; noted so a future session does not mistake it for merge damage | `.playwright-mcp/` | any |
 | P4 | **The root suite is not hermetic — it changes result on an env var.** `tests/toolTimeout.test.js` asserts `reason_code === "TIMEOUT"` and gets `UNAVAILABLE` whenever `DATABASE_URL` is set in the shell, which it will be for anyone who just ran `npm run test:db` in the same terminal. **Verified pre-existing: `feat/gcp-lane-b-terraform` fails it identically, and the file is lane-b's verbatim — the merge did not touch it.** The canonical root-suite run is with `DATABASE_URL` UNSET, which is the documented property `vitest.db.config.js` says is worth protecting; that run is green at 2350. Recorded, not fixed, per the record-and-park rule | `tests/toolTimeout.test.js:47-60` | any |
 
 ---
@@ -2632,6 +2632,138 @@ untracked and gitignored: `git ls-files infra/terraform` is **26**, and no `.tfs
 P4 (`tests/toolTimeout.test.js` is non-hermetic — run the root suite with `DATABASE_URL` UNSET or a
 green suite looks like a regression). P1 and P2 are both **RESOLVED**: P1 in `5f129f8`, P2 in this
 phase's `eb2e63e`.
+
+---
+
+## Attempt 2 — BUSINESS READINESS GATES. Not phases, and the phases do not close all of them
+
+**Written 2026-08-28 in the Phase 2 session, from a question the phase list cannot answer: "after all
+the phases, is this ready to sell?" The answer is no, and the reason is that the plan is a MIGRATION
+plan. It moves what exists onto GCP correctly. It was never scoped to make a business sellable, and
+it says so — it carries an explicit out-of-scope list.**
+
+Five gates. They do not unlock together, and **the one that blocks selling today is not blocked by
+any phase.**
+
+### Gate A — can answer a call for one clinic · **ALREADY OPEN**
+
+A paying clinic was still answering on Railway through the August suspension (attempt-1 status
+line). **So the question is not "when can we start selling" — it is "when can we sell to customer #2
+without it being a favour somebody personally babysits."** Everything below is about that.
+
+### Gate B — safe to sell · **PARTLY OPEN, and what remains is not a phase**
+
+Five risks were knowingly accepted on `main` when the website rebuild was reverted. **They were
+recorded as live on `main`, and nobody had re-checked them against `feat/gcp-2`.** Checked
+2026-08-28:
+
+| # | Risk | On `main` | On `feat/gcp-2` |
+|---|---|---|---|
+| 1 | `phone-numbers/buy` + `/available` unauthenticated — a business UUID provisions a Twilio number billed to the owner | **LIVE**, `server.js:622`, no middleware | **FIXED.** `requireBusinessAccess` on both (`server.js:876,906`), plus `withTenantSafe` under RLS |
+| 2 | `POST /api/contact` loses every submission when Brevo is unset | route absent from root `server.js` | **MOVED**, not lost — `AI-phone-dashboard/backend/src/server.js:85` with a rate limiter. Whether mail sends is DEPLOY CONFIG, unverifiable from code |
+| 3 | 68 `.playwright-mcp/` files tracked in git, holding **real caller phone numbers**, in a **public** repo | **LIVE** | **STILL LIVE — 68 files, unchanged** |
+| 4 | Self-serve signup live, against the stated concierge-only intent | LIVE (Supabase) | **STILL LIVE**, now on Identity Platform — `frontend/src/auth.js:157` `createUserWithEmailAndPassword` |
+| 5 | `axios` pinned to a version with 18 high-severity CVEs, `react-router` needing a v8 migration | as recorded | **LIKELY RESOLVED** — `axios ^1.13.5`, `react-router-dom ^7.13.1`. No audit was run, so this is *not* evidenced |
+
+**CUTOVER CLOSES #1 BY ITSELF.** That is worth stating because it inverts the intuition: the
+migration is not neutral on security, it is the fix for the worst code-level item. **#3 and #4 it
+does not touch.**
+
+**#3 is the one with a clock on it, and the ledger previously under-rated it — see the P3
+correction below.**
+
+> `.playwright-mcp/calls-2026-07-22.csv` is tracked and its header is
+> `Date,Caller,Status,Duration (s),Sentiment,Summary`, with rows carrying full E.164 caller numbers.
+> `git remote get-url origin` is `https://github.com/VetraTD/ai-phone-assistant.git` — public.
+> This is personal data of real callers, published. `git rm` does not fix it; the data stays in
+> history, and the repo being public means "delete it now" is not the same as "it was never seen".
+> **This is an owner decision with a legal dimension, not a code task, and it is live independent of
+> everything else in this ledger.**
+
+**#4 is a business decision, not a bug.** The recorded intent is concierge onboarding, no self-serve.
+The code still offers self-serve. One of the two should change; today they disagree, and the code
+wins because the code is what runs.
+
+### Gate C — verified · **PHASE 5 CLOSES IT, and it is more load-bearing than it looks**
+
+**The receptionist in `feat/gcp-2` is a union of work, much of which has never answered a real
+phone.** Checked 2026-08-28:
+
+- `fix/live-call-defects-2026-08` — **merged and deployed 2026-08-04**, hand-tested with Josh on real
+  handsets. Real acoustic echo remains never verified, by design: no probe has a microphone.
+- `fix/receptionist-feedback-2026-08` — the four Digile Media complaints. Recorded as **"Not
+  deployed. Not committed unless the owner asked since."** It IS in `feat/gcp-2` (every branch is;
+  verified this session — only `chore/gcp-migration-ledger` is unmerged and it is redundant).
+  **It has never answered a real phone.**
+- The greeting-discard / appointment-guard work — partly live, with migration 026's value recorded as
+  unmeasured.
+
+**These are prompt and turn-taking changes, which is precisely the category the test suite stays
+green through.** 2352 passing tests say the code does what the tests say. They do not say the
+receptionist sounds right. **Phase 5's live call is the first genuine test of a batch of fixes that
+has been accumulating since early August.** Treat it as a product gate, not a migration gate.
+
+### Gate D — sellable to a clinic that asks questions · **PHASE 6, PLUS ONE THING NO PHASE OWNS**
+
+Phase 6 delivers ROPA, DPIA, privacy notice, ICO registration, and a UK-residency claim that is now
+defensible end to end (Cloud SQL, Deepgram EU, KMS, secrets and compute all `europe-west2`; the
+Vertex inference leg disclosed as an international transfer).
+
+**Missing and in no phase: a customer-facing DPA.** Under GDPR Art. 28 this business is a PROCESSOR
+for every clinic it serves, and a written contract is not optional — it is the clinic's obligation as
+controller as much as this one's. The sub-processor register answers a different question. **The
+first prospect with a compliance officer asks for a DPA, and "we have a sub-processor register" is
+not the answer to it.** Owner work, with drafting lead time, and it can start today.
+
+### Gate E — sellable REPEATEDLY · **NO PHASE OWNS ANY OF THIS**
+
+| Missing | Why it bites |
+|---|---|
+| **Uptime alerting** | `budget.tf` alerts on COST. Nothing alerts on the voice service being down. For a business that IS the customer's phone, the failure mode is learning from the customer. The single highest-value thing not on any list |
+| **Twilio concurrent-calls and CPS** | New accounts start low. The raise request has lead time and is owner work. Phase 3b DOCUMENTS the binding cap; nothing raises it |
+| **A2P 10DLC / UK sender registration** | Mentioned in tfvars comments, owned by nobody. A number can answer calls and refuse to text, shown separately in Twilio |
+| **Onboarding customer #2** | Phase 5 recreates ONE demo tenant via `scripts/import-tenant.js`. There is no path for a new clinic that does not involve the owner running a script |
+| **Support rota** | The owner is the on-call, alone. Same single point of failure as the billing account |
+| **Rollback past one week** | Phase 6 keeps Railway warm for one week, then retires Railway and Supabase. A problem surfacing in week three has no path back |
+| **Graceful degradation at the vendor cap** | Explicitly out of scope in the plan. Caller 11 when ElevenLabs caps at 10 is undefined behaviour |
+
+### Two product risks that are not gates, and that no phase improves
+
+- **Measured voice-to-voice p50 is 3,062 ms.** That is the product's core feel. Phase 5 only checks it
+  has not REGRESSED against the Railway baseline — nothing in the plan makes it faster. Whether 3s is
+  sellable is a market question this ledger cannot answer, but **no claim about pickup speed belongs
+  on the website** until it is.
+- **`cpu_idle = true` is unmeasured.** If turn one after an idle gap is audibly worse on a real call,
+  the fix is one bool and ~$70/month, which is the entire estate budget. **Found in Phase 5, on a
+  handset, not before.**
+
+### Outside this repo entirely, and therefore outside this ledger's ability to track
+
+Pricing, sales pipeline, customer contracts, insurance, and who answers when it breaks at 02:00.
+Roughly half of "business ready", none of it visible here. Recorded so that a green ledger is never
+mistaken for a ready business.
+
+### The shortest honest path
+
+1. **Gate B item #3** — the published caller data. Owner decision, has a clock, blocked by nothing.
+2. **Gate B item #4** — make the code and the concierge-only intent agree.
+3. **Phases 3 → 6**, in order, one per session.
+4. **In parallel, because they have lead times and do not wait on code:** Twilio CPS raise, DPA
+   drafting, ICO registration, cofounder as Owner on billing.
+5. **Then uptime alerting**, before customer #2 rather than after.
+
+---
+
+## P3 — RECLASSIFIED 2026-08-28. It was recorded as cosmetic and it is not
+
+The Phase 1 parked table describes P3 as "68 files under `.playwright-mcp/` are tracked AND
+gitignored ... Cosmetic". **That was written about the TRACKING, and nobody read what is inside the
+files.** One of them, `calls-2026-07-22.csv`, holds real caller phone numbers, and the repository is
+public.
+
+**The tracked-vs-gitignored observation is still correct and still not merge damage.** What is wrong
+is the severity. See Gate B above. Left unfixed here under the record-and-park rule — it is an owner
+decision with a legal dimension, and `git rm` is not a fix.
 
 ---
 
