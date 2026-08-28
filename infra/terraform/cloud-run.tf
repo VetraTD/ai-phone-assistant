@@ -298,6 +298,38 @@ resource "google_cloud_run_v2_service" "this" {
       }
 
       # -------------------------------------------------------------------
+      # C-3 / Phase 3a. Where the shared call-state slice lives.
+      #
+      # `var.call_state_store` has existed since attempt 1 and reached NOTHING
+      # but `local.cloud_sql_plan` and an output. A variable that is validated,
+      # documented, defaulted to "postgres" and never rendered onto the service
+      # is not a setting — it is a comment that typechecks.
+      #
+      # This is the same failure shape as DEEPGRAM_REGION below, and that one is
+      # worth re-reading: the variable existed, a test proved the FUNCTION
+      # returned the EU host, and nothing set the env var, so every caller's
+      # audio would have gone to the US while the tests stayed green.
+      #
+      # Unset, `lib/callState.js` defaults to the in-process Map. On more than
+      # one instance that is the live bug Phase 3a exists to close:
+      # `/twilio/status` lands on an instance that never held the WebSocket,
+      # reads empty state, and silently produces no call summary, no missed-call
+      # notification, and a spam tag on every short call where the caller spoke.
+      # Nothing logs an error. So a missing value here does not fail the deploy,
+      # it un-does the phase.
+      #
+      # Passed through verbatim rather than mapped: `lib/callState.js` accepts
+      # "postgres" and "memorystore" — this module's vocabulary — alongside "pg"
+      # and "memory", precisely so the value that is correct HERE is also correct
+      # THERE. It refuses anything else at boot rather than guessing, because
+      # guessing "memory" is the silent failure above.
+      # -------------------------------------------------------------------
+      env {
+        name  = "CALL_STATE_STORE"
+        value = var.call_state_store
+      }
+
+      # -------------------------------------------------------------------
       # The compliance tier. `standard` EVERYWHERE, ON BOTH LANES.
       #
       # ATTEMPT 1 SET THIS PER LANE — `us` was `hipaa`, `uk` was `standard` —

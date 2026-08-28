@@ -70,9 +70,18 @@ bootstrap_project_id = "project-b147bdfa-d267-426a-8c7"
 # this empty and a fresh suffix is generated on the first apply, which is
 # correct exactly once and a liability from then on.
 #
-# Phase 4: pick one, write it here, and write it in the ledger, BEFORE the apply
-# that creates the projects. The example below is a placeholder and is not real.
-project_id_suffix = "REPLACE"
+# PINNED 2026-08-28 in Phase 4 prep, BEFORE the first apply, and recorded in the
+# ledger's Phase 4 section as well as here. Two copies on purpose: if this file
+# is lost the ledger still names the projects, and that is the exact failure
+# that killed B0a.
+#
+#   vetra-uk-edc8ca    vetra-us-edc8ca    vetra-core-edc8ca
+#
+# DO NOT CHANGE IT AFTER THE FIRST APPLY. Project IDs are immutable, so editing
+# this does not rename anything — it asks Terraform to CREATE THREE NEW PROJECTS
+# and orphan the old ones, which stay billable and hold an undeletable KMS key
+# ring.
+project_id_suffix = "edc8ca"
 
 # ---------------------------------------------------------------------------
 # THE ESTATE. THREE STACKS, THREE PROJECTS.
@@ -332,9 +341,16 @@ twilio_sms_from = {
 # Without that the same domain goes out twice, the API stores it once, and every
 # later plan shows a diff that applying never resolves.
 #
-# ⚠ FILL THIS IN AT PHASE 4, once the core project ID is known. The site's apex
-# domain belongs to the friend's rebuild; GCP serves only `app.<domain>`.
-dashboard_domains = ["vetra-core-REPLACE.web.app"]
+# FILLED IN 2026-08-28 in Phase 4 prep. This stopped needing the apply: pinning
+# `project_id_suffix` above makes the core project ID DETERMINISTIC, so the
+# Firebase default domain is knowable before anything exists.
+#
+# ⚠ STILL TO ADD when DNS is decided: the custom `app.<domain>` origin. The
+# site's apex domain belongs to the friend's rebuild; GCP serves only the
+# dashboard. Until that entry is here, the custom domain gets the CORS failure
+# described above — which the sign-in PAGE does not trigger, because it makes no
+# API call, so nothing looks wrong until somebody signs in.
+dashboard_domains = ["vetra-core-edc8ca.web.app"]
 
 # ---------------------------------------------------------------------------
 # dashboard_url — WHAT OWNER NOTIFICATIONS LINK TO
@@ -357,4 +373,4 @@ dashboard_domains = ["vetra-core-REPLACE.web.app"]
 # The host must appear in dashboard_domains above, and Terraform checks that at
 # plan time rather than trusting it — the two are edited in different places for
 # different reasons.
-dashboard_url = "https://vetra-core-REPLACE.web.app/app"
+dashboard_url = "https://vetra-core-edc8ca.web.app/app"
