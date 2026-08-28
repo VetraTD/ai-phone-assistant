@@ -714,6 +714,22 @@ export function isBusinessOpen(config) {
  */
 function buildCallerContextSection(callerContext, timezone, profile, rules = []) {
   if (!callerContext) return "";
+
+  // Re-filter at RENDER time, not just at fetch time.
+  //
+  // The snapshot is taken once when the call connects, with upcomingOnly, and
+  // is then reused for the whole call. On a long call an appointment can elapse
+  // between pickup and the turn being built — and this block would keep
+  // asserting it, and the "already has an upcoming appointment, do NOT offer to
+  // book another" rule keeps firing off it. Cheap to recheck, and "upcoming"
+  // should mean upcoming now rather than upcoming when we answered.
+  const nowMs = Date.now();
+  const upcoming = (callerContext.upcomingAppointments || []).filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > nowMs;
+  });
+  callerContext = { ...callerContext, upcomingAppointments: upcoming };
+
   if (!(callerContext.callCount > 0 || callerContext.upcomingAppointments?.length > 0)) return "";
 
   let ctx = `=== CALLER CONTEXT ===\n`;
@@ -1015,6 +1031,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   guardrails += appointmentsEnabled
     ? `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?". Example: "Are you looking to book a new appointment, or reschedule an existing one?"\n`
     : `- When the caller's intent is genuinely unclear, ask exactly ONE specific clarifying question framed with two concrete options rather than an open-ended "what do you mean?".\n`;
+  // A caller who answers half of what was asked used to get silence: the model
+  // waited for the rest of an answer that was never coming, because the caller
+  // had chosen not to answer, had not heard the second half, or had simply
+  // forgotten it. Reported from a real test call. The fix for the CAUSE is not
+  // stacking questions in the first place (see each pack's step guidance); this
+  // is the recovery for when it happens anyway.
+  guardrails += `- If the caller answers only part of what you asked, or answers one question and not another, take what they gave you, acknowledge it, and ask only for what is still missing. Never wait in silence for the rest, and never re-ask something they have already answered.\n`;
 
   // Policy bullets — what the business does and doesn't allow.
   guardrails += `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;
@@ -1135,7 +1158,11 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     afterHours += `The office is currently CLOSED. `;
     switch (effectivePolicy) {
       case "offer_callback":
-        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Ask for their name, number, and preferred callback time.`;
+        // "Ask for their name, number, and preferred callback time" — three
+        // asks in one instruction, and the model duly delivered all three in a
+        // single breath. Reported from a live call as the assistant still
+        // stacking questions, and after-hours is a common path to land on.
+        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
         break;
       case "book_later":
         afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
@@ -1229,6 +1256,23 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     sections.push(factsSection);
   }
 
+  // The spelling cap, stated as an accomplished fact rather than as a rule.
+  //
+  // The prompt already carries "ask this at most once" and the model still
+  // asked nine turns running, because a rule about the past is something it
+  // has to remember, while a fact in the tail is something it can read. The
+  // counter lives in lib/voice/session.js; this only reports it.
+  //
+  // Emits nothing when false, which is what keeps every existing tail snapshot
+  // byte-identical — the same empty-case contract as KNOWN CALLER FACTS.
+  if (extras?.spellingAlreadyAsked) {
+    sections.push(
+      `=== ALREADY ASKED ===\n` +
+        `You have already asked this caller to spell something on this call. Do not ask again, ` +
+        `for any name or detail, for the rest of the call — use what you have and move on.`,
+    );
+  }
+
   return sections.join("\n\n");
 }
 
@@ -1304,7 +1348,9 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
           ? `As soon as you understand, name it on the intent line, `
           : `As soon as you understand, call set_call_intent with the appropriate intent, `) +
         `then start helping in the same turn. Keep this response to 1–2 sentences. ` +
-        `Acknowledge the caller's request and ask the first relevant question.`
+        `Acknowledge the caller's request and ask the first relevant question — ONE question, not two. ` +
+        `In particular, do not pair an open "how can I help you?" with a second, more specific question in ` +
+        `the same turn: if you are going to offer concrete options, offer them on their own.`
       );
 
     case "gather_details": {
@@ -1935,6 +1981,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Call-scoped counterparts, both read only by end_call's gate.
         completedActionThisCall: !!extras?.completedActionThisCall || completedActionThisTurn,
         callerTurnCount: Number(extras?.callerTurnCount) || 0,
+        // Has this call already spent its one spelling request? Read by the
+        // hard-name gate in services/tools.js, which must never ask twice.
+        spellingAlreadyAsked: !!extras?.spellingAlreadyAsked,
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,

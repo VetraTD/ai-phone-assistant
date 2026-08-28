@@ -3240,6 +3240,78 @@ describe("session.js — v2 pipeline orchestrator", () => {
         vi.useRealTimers();
       }
     });
+
+    // -----------------------------------------------------------------------
+    // The caller was not finished. Reported from a live call: they pause
+    // mid-thought, the pipeline reads the pause as end-of-turn and starts
+    // preparing a reply, they carry on, and the two collide.
+    //
+    // Before this, the continuation was QUEUED and answered as a separate
+    // turn, so one sentence produced two answers. The generator here hangs
+    // having yielded NOTHING, which is the silent thinking gap exactly.
+    // -----------------------------------------------------------------------
+    it("16h. a caller who resumes mid-thought gets ONE answer to the whole sentence", async () => {
+      vi.useFakeTimers();
+      try {
+        H.llmFactory = () => makeGen([], { hang: true });
+        await startFakeTimerCall("MZ16h");
+        const tm = H.turnManagerInstances[0];
+
+        tm.opts.onTurnEnd("I'd like to book.");
+        await vi.advanceTimersByTimeAsync(10);
+        const afterFirst = runLlmTurn.mock.calls.length;
+        expect(afterFirst).toBe(1);
+
+        // The rest of the sentence, arriving while the reply is still being
+        // prepared and nothing has been spoken.
+        H.llmFactory = () => makeGen([
+          { type: "delta", text: "Sure." },
+          { type: "done", reply: { text: "Sure.", toolResults: [] } },
+        ]);
+        tm.opts.onTurnEnd("an appointment for Tuesday.");
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        // Exactly one further turn, carrying BOTH halves in order — not two
+        // turns, and not the continuation on its own.
+        expect(runLlmTurn.mock.calls.length).toBe(afterFirst + 1);
+        const text = runLlmTurn.mock.calls.at(-1)[0].userText;
+        expect(text).toContain("book");
+        expect(text).toContain("Tuesday");
+        expect(text.indexOf("book")).toBeLessThan(text.indexOf("Tuesday"));
+
+        // The discarded half must not resurface later as a fresh utterance.
+        const settled = runLlmTurn.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(runLlmTurn.mock.calls.length).toBe(settled);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("16i. does not discard the turn once a tool round has started", async () => {
+      // The money case: that turn may already have written a booking, and a
+      // tool completing after the abort is never salvaged into the merged
+      // turn's history — so the merged turn would book a second one.
+      vi.useFakeTimers();
+      try {
+        H.llmFactory = () => makeGen([{ type: "toolCall", name: "book_appointment" }], { hang: true });
+        await startFakeTimerCall("MZ16i");
+        const tm = H.turnManagerInstances[0];
+
+        tm.opts.onTurnEnd("book me for Tuesday.");
+        await vi.advanceTimersByTimeAsync(10);
+        const before = runLlmTurn.mock.calls.length;
+
+        tm.opts.onTurnEnd("at ten in the morning.");
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        // Queued, exactly as before this change: no new turn was started to
+        // replace the one holding a live tool round.
+        expect(runLlmTurn.mock.calls.length).toBe(before);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // -------------------------------------------------------------------------

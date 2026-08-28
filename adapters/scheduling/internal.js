@@ -51,7 +51,26 @@ export default {
    */
   async lookupByCaller(ctx) {
     if (!ctx.businessId || !ctx.callerPhone) return [];
-    return ctx.deps.listAppointmentsByCaller(ctx.businessId, { clientPhone: ctx.callerPhone });
+    // upcomingOnly, and this line is the whole of a live bug.
+    //
+    // Nothing ever transitions an elapsed appointment out of status
+    // 'scheduled' — there is no sweeper — so without this the query returns
+    // every appointment the caller has EVER had, oldest first. On a real call
+    // the assistant found one from a past date and asked whether to book the
+    // new one "in addition to your existing appointments".
+    //
+    // The booking guard was never the problem: it reads callerContext and
+    // filters correctly (see upcomingForCaller). It is this tool path that fed
+    // the model past rows, described them as the caller's, and let it reason
+    // aloud from them.
+    //
+    // "Your appointments" means the ones still ahead of you. A caller who
+    // wants to discuss a visit that already happened is asking the business a
+    // question, not managing a booking.
+    return ctx.deps.listAppointmentsByCaller(ctx.businessId, {
+      clientPhone: ctx.callerPhone,
+      upcomingOnly: true,
+    });
   },
 
   async book(ctx, { clientName, clientPhone, scheduledAt, notes, lengthMinutes, capacity }) {

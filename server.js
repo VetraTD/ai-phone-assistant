@@ -261,10 +261,28 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 // --- Root: confirm server is running ---
+// Which build is this?
+//
+// Added after a staging deploy sat two rounds of fixes behind for twenty
+// minutes without anyone being able to tell. Railway redeploys the CURRENT
+// commit whenever an environment variable changes, so the dashboard read
+// "deployed 19 minutes ago" while serving week-old code — and a test call was
+// spent against it before the mismatch was spotted.
+//
+// The commit is not a secret (the repo is public, and a deploy's SHA leaks
+// through behaviour anyway), and it turns "is my fix live?" into one curl
+// instead of an inference from feature fingerprints. Falls back gracefully off
+// Railway, where the variable simply does not exist.
+const BUILD_SHA = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || null;
+const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH || null;
+
 app.get("/", (req, res) => {
   res.type("text/plain");
+  const build = BUILD_SHA
+    ? `\nBuild: ${BUILD_SHA.slice(0, 7)}${BUILD_BRANCH ? ` (${BUILD_BRANCH})` : ""}`
+    : `\nBuild: unknown`;
   res.send(
-    `AI phone assistant is running.\nVoice webhook: ${VOICE_URL}\nStatus callback: ${STATUS_URL}`
+    `AI phone assistant is running.\nVoice webhook: ${VOICE_URL}\nStatus callback: ${STATUS_URL}${build}`
   );
 });
 

@@ -28,3 +28,29 @@ latency-runs/
 /v-*.png
 /landing-*.png
 eval/results/tts-readback/
+# Every other .env variant, not just the bare one. .env.staging sat untracked
+# in a PUBLIC repo carrying a live TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN —
+# one `git add -A` from publishing working credentials for the account the
+# phone numbers are billed against.
+.env.*
+!.env.example
+# Terraform state. It records service-account identities, resource ids and
+# whatever values passed through the apply, and it is regenerated per
+# environment, so it is never something to commit. NOT `infra/` wholesale:
+# infra/ is genuinely tracked on the GCP lane branches, and ignoring the
+# directory would silently swallow new .tf files there.
+*.tfstate
+*.tfstate.*
+# Terraform plan files embed resource attribute values in PLAINTEXT, including
+# ones that came from secrets, so a .tfplan is a credential-shaped artifact even
+# though it looks like a build product. Provider binaries are hundreds of MB of
+# vendored .exe and are re-fetched by `terraform init`.
+*.tfplan
+.terraform/
+# tfvars is per-environment input, not source. This one carries the billing
+# account id, org id and owner email addresses — no credential today, but it is
+# the file that would grow one. Untracked on every branch, so ignoring it
+# changes nothing except that a stray `git add -A` can no longer publish it.
+*.tfvars
+!*.tfvars.example
+
