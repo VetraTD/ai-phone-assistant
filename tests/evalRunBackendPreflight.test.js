@@ -99,11 +99,21 @@ describe("preflightBackend", () => {
     expect(msg).toMatch(/Refusing to fall back/);
   });
 
-  it("REFUSES VERTEX_LOCATION=global, which would void the residency claim", () => {
+  it("ACCEPTS VERTEX_LOCATION=global — it is what this deployment runs", () => {
     process.env.VERTEX_ENABLED = "true";
     process.env.GOOGLE_CLOUD_PROJECT = "vetra-us-staging-c3a3bd";
     process.env.VERTEX_LOCATION = "global";
-    expect(preflightBackend()).toBeTruthy();
+    // Inverted 2026-08-28. This used to assert a refusal, on the belief that
+    // `global` routed worldwide while `eu` did not. Probed with
+    // :generateContent, both reach aiplatform.googleapis.com and that host
+    // returned 200 for `locations/madeup-region-9` — the path location is not
+    // validated, so `eu` was never evidence of EU processing. The refusal was
+    // enforcing an unmeasured distinction. See services/gemini.js above
+    // VERTEX_GLOBAL_HOST_LOCATIONS.
+    //
+    // This preflight has no opinion of its own; it reports whatever getClient
+    // throws, so it inverts with the guard rather than alongside it.
+    expect(preflightBackend()).toBeNull();
   });
 
   // ---- the drift guard ----------------------------------------------------

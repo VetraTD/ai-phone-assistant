@@ -159,20 +159,24 @@ describe("explicit caching survives the move", () => {
 });
 
 // ---------------------------------------------------------------------------
-// VERTEX_LOCATION, probed rather than assumed (2026-08-21).
+// VERTEX_LOCATION. RE-PROBED 2026-08-28 with `:generateContent`, because the
+// 2026-08-21 table was built on `:countTokens` and that endpoint is not an
+// availability signal — it 200s for europe-west2 + gemini-3.6-flash, which the
+// europe-west2 host refuses.
 //
-// `:countTokens` against the real org, with a bogus model name as the control:
-// locations/eu 200, locations/us 200, locations/global 200, us-central1 404,
-// europe-west2 404, europe-west4 404.
+// THE HOST DECIDES RESIDENCY, THE PATH LOCATION DOES NOT. `locations/madeup-
+// region-9` on aiplatform.googleapis.com returned 200 SERVED. So `us`, `eu` and
+// `global` are one call to one unpinned host, and only a REAL region pins
+// anything — europe-west2-aiplatform.googleapis.com serves gemini-2.5-flash and
+// 404s gemini-3.6-flash, 2.5-flash-lite and 2.5-pro.
 //
-// NO SINGLE REGION SERVES gemini-3.6-flash. The fixtures in this file used to
-// say `us-central1`, which reads as obviously correct, sits next to the US
-// Cloud Run service, and would have 404'd on the first turn of the first call.
+// `global` is therefore no longer refused: the refusal was enforcing a
+// distinction between `eu` and `global` that had never been measured.
 // ---------------------------------------------------------------------------
 describe("VERTEX_LOCATION", () => {
   const base = { VERTEX_ENABLED: "true", GOOGLE_CLOUD_PROJECT: "p" };
 
-  it.each(["us", "eu"])("%s is a served multi-region and is usable", async (location) => {
+  it.each(["us", "eu", "global"])("%s reaches the global host and is usable", async (location) => {
     const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
     const cfg = vertexConfig();
     expect(cfg.usable).toBe(true);
@@ -180,13 +184,24 @@ describe("VERTEX_LOCATION", () => {
     expect(cfg.unproven).toBe(false);
   });
 
-  it.each(["global", "GLOBAL", "Global"])("%s is REFUSED — it routes worldwide", async (location) => {
-    const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
-    const cfg = vertexConfig();
-    expect(cfg.forbidden).toBe(true);
-    // Not merely flagged. UNUSABLE, so getClient throws rather than quietly
-    // building a client that can send a UK caller's utterance to Iowa.
-    expect(cfg.usable).toBe(false);
+  it.each(["global", "GLOBAL", "Global"])(
+    "%s is no longer refused, and case does not change that",
+    async (location) => {
+      const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
+      const cfg = vertexConfig();
+      expect(cfg.forbidden).toBe(false);
+      expect(cfg.usable).toBe(true);
+      // Not "unproven" either. It is the value this deployment is designed to
+      // run, chosen by the owner on 2026-08-28 with the transfer disclosed.
+      expect(cfg.unproven).toBe(false);
+    }
+  );
+
+  it("nothing is forbidden today, and the mechanism is still wired up", async () => {
+    const { VERTEX_FORBIDDEN_LOCATIONS } = await load({ ...base, VERTEX_LOCATION: "global" });
+    // Empty by decision, not by accident. If this ever gains an entry, the
+    // getClient guard below must still refuse it at client construction.
+    expect(VERTEX_FORBIDDEN_LOCATIONS).toEqual([]);
   });
 
   it.each(["us-central1", "europe-west2", "europe-west4"])(
@@ -195,20 +210,28 @@ describe("VERTEX_LOCATION", () => {
       const { vertexConfig } = await load({ ...base, VERTEX_LOCATION: location });
       const cfg = vertexConfig();
       expect(cfg.unproven).toBe(true);
-      // A1.2's line: fatal is for "the operator asked for one thing and would
-      // get another". `global` is that case. A single region is a plausible
-      // deliberate choice for some future model, so it is announced loudly and
-      // allowed.
+      // A real region is the ONLY thing that pins one, so it may be exactly
+      // right for some future model. What it cannot promise is that today's
+      // GEMINI_MODEL is served there — europe-west2 has one Gemini and it is
+      // not the one this system runs. Announced loudly, allowed.
       expect(cfg.usable).toBe(true);
     }
   );
 
-  it("getClient refuses global at CLIENT CONSTRUCTION, not at provider selection", async () => {
+  it("getClient builds a client for global instead of throwing", async () => {
     const gemini = await load({ ...base, VERTEX_LOCATION: "global" });
-    expect(() => gemini.getClient()).toThrow(/routes requests to whichever region/i);
-    // And it built nothing. A guard that throws after construction has already
-    // handed the SDK the location it was supposed to reject.
-    expect(constructed).toEqual([]);
+    expect(() => gemini.getClient()).not.toThrow();
+    // And it MUST carry the global-host override: measured 2026-08-28,
+    // global-aiplatform.googleapis.com (what the SDK derives) returns 404, so
+    // relaxing the refusal without this would fail on the first turn.
+    expect(constructed).toEqual([
+      {
+        vertexai: true,
+        project: "p",
+        location: "global",
+        httpOptions: { baseUrl: "https://aiplatform.googleapis.com" },
+      },
+    ]);
   });
 
   it("getClient accepts a multi-region and passes it through", async () => {

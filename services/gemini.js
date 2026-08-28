@@ -149,30 +149,57 @@ let geminiClient = null;
  * ---------------------------------------------------------------------------
  */
 /**
- * Vertex serving locations, and why this list is so short.
+ * Vertex serving locations. RE-MEASURED 2026-08-28, because the earlier table
+ * was measuring the wrong thing.
  *
- * Probed live against the org on 2026-08-21, with `:countTokens` (free, no
- * generation) and a bogus model name as the control:
+ * The 2026-08-21 table came from `:countTokens`, and THAT ENDPOINT IS NOT AN
+ * AVAILABILITY SIGNAL — it returns 200 for europe-west2 + `gemini-3.6-flash`,
+ * which the europe-west2 host refuses. Re-probed with `:generateContent`
+ * (maxOutputTokens=5) and controls on BOTH the model name and the location:
  *
- *   locations/eu             200      locations/us             200
- *   locations/global         200      us-central1              404
- *   europe-west2             404      europe-west4             404
+ *   HOST                                     pins a region?   gemini-3.6-flash
+ *   europe-west2-aiplatform.googleapis.com   YES              404
+ *   aiplatform.googleapis.com  (any path)    NO               200
+ *   eu-aiplatform.googleapis.com             —                400, no such host
  *
- * `gemini-3.6-flash` IS NOT SERVED BY ANY SINGLE REGION. Same for
- * `gemini-3-flash-preview` and `gemini-2.5-flash`. The two-region design
- * assumed each lane would call a single-region endpoint next to its Cloud Run
- * service; that endpoint does not exist for this model.
+ * THE HOST DECIDES RESIDENCY. THE LOCATION IN THE PATH DOES NOT. The control
+ * that settles it: `locations/madeup-region-9` on the global host returned
+ * 200 SERVED, and so did `locations/asia-northeast1`, while an EMPTY location
+ * returned 400. The path segment is not validated, so a 200 on `locations/eu`
+ * is NOT evidence of EU processing.
  *
- * So the only two usable values are the `us` and `eu` MULTI-REGIONS — and
- * `global`, which is the trap. `global` routes to whichever region has capacity
- * ANYWHERE ON EARTH. It returns 200, it is faster to reach, and it silently
- * voids the residency claim that the entire two-project split exists to make
- * true. It is refused below.
+ * That corrects this file's own previous reasoning: `eu` and `global` are the
+ * SAME CALL to the SAME HOST. Refusing one while permitting the other drew a
+ * line nobody had established. `global` is no longer refused — see
+ * VERTEX_FORBIDDEN_LOCATIONS — and `global` is the honest label for what this
+ * deployment actually does.
+ *
+ * What genuine UK-pinned inference would cost, measured on the regional host:
+ * europe-west2 serves `gemini-2.5-flash` and 404s `gemini-3.6-flash`,
+ * `gemini-2.5-flash-lite` and `gemini-2.5-pro`. 2.5-flash scored 17-18/20
+ * against 3.6-flash's 19/20 on the 2026-07-24 matrix, and London offers no
+ * in-region fallback. Put to the owner 2026-08-28 and declined: behaviour
+ * parity won, and the inference leg is a DISCLOSED international transfer
+ * (privacy notice + Art. 30). RE-PROBE THE europe-west2 REGIONAL HOST MONTHLY
+ * for a 3.x arrival — that is the trigger to revisit, and it is one tfvars
+ * line plus the host rule below.
+ *
+ * These three are reached on the GLOBAL host. None of them pins a region, and
+ * the SDK derives the wrong hostname for all three — `us-`, `eu-` and
+ * `global-aiplatform.googleapis.com` all fail (404, 400, 404 respectively).
  */
-export const VERTEX_MULTI_REGIONS = Object.freeze(["us", "eu"]);
+export const VERTEX_GLOBAL_HOST_LOCATIONS = Object.freeze(["us", "eu", "global"]);
 
-/** Routes worldwide. 200s happily. Never allowed here. */
-export const VERTEX_FORBIDDEN_LOCATIONS = Object.freeze(["global"]);
+/**
+ * Deliberately EMPTY, and kept rather than deleted.
+ *
+ * It held `global` until 2026-08-28, on the belief that `global` routed
+ * worldwide while `eu` did not. The probe above shows both reach the same host
+ * and neither is region-pinned, so the refusal was enforcing a distinction
+ * that had never been measured. The mechanism stays wired up — see `forbidden`
+ * below — so a location CAN be refused the moment there is evidence for it.
+ */
+export const VERTEX_FORBIDDEN_LOCATIONS = Object.freeze([]);
 
 export function vertexConfig(env = process.env) {
   const project = (env.GOOGLE_CLOUD_PROJECT || "").trim();
@@ -185,12 +212,14 @@ export function vertexConfig(env = process.env) {
 
   const forbidden = VERTEX_FORBIDDEN_LOCATIONS.includes(location.toLowerCase());
 
-  // A single region is a plausible deliberate choice for some future model, so
-  // it is announced rather than refused — A1.2's line: fatal only when the
-  // operator asked for one thing and would get another. `global` IS that case:
-  // the operator asked for a region-constrained deployment and would get
-  // worldwide routing.
-  const unproven = !!location && !forbidden && !VERTEX_MULTI_REGIONS.includes(location.toLowerCase());
+  // A single region IS genuinely region-pinned — that is the one thing the
+  // 2026-08-28 probe established in its favour — but it serves a narrow model
+  // set, and europe-west2 serves exactly one Gemini. So it is announced rather
+  // than refused: A1.2's line is that fatal is for "the operator asked for one
+  // thing and would get another", and here they would get precisely the
+  // pinning they asked for, possibly without a model to run on it.
+  const unproven =
+    !!location && !forbidden && !VERTEX_GLOBAL_HOST_LOCATIONS.includes(location.toLowerCase());
 
   return {
     enabled,
@@ -219,13 +248,17 @@ export function getClient() {
   // Refused at CLIENT CONSTRUCTION, not at provider selection — the same rule
   // A6 established for vendor guards. There is one place a Vertex client comes
   // into existence, and putting the check anywhere else leaves doors beside it.
+  // VERTEX_FORBIDDEN_LOCATIONS is empty as of 2026-08-28, so this cannot fire
+  // today. The branch is kept because the refusal POINT is the valuable part:
+  // there is exactly one place a Vertex client comes into existence, and a
+  // guard anywhere else leaves doors beside it. Adding a location to that list
+  // is all it takes to make a refusal real again.
   if (vertex.forbidden) {
     throw new Error(
-      `VERTEX_LOCATION="${vertex.location}" routes requests to whichever region has ` +
-        "capacity anywhere in the world, which voids the data-residency commitment both " +
-        "deployments are built on. Set `us` (HIPAA lane) or `eu` (UK lane). " +
-        "Note that no SINGLE region serves gemini-3.6-flash — us-central1 and europe-west2 " +
-        "both 404 — so a multi-region value is the only working choice, not merely the safe one."
+      `VERTEX_LOCATION="${vertex.location}" is on VERTEX_FORBIDDEN_LOCATIONS and this ` +
+        "process refuses to build a client for it. See the location table above " +
+        "services/gemini.js VERTEX_GLOBAL_HOST_LOCATIONS for what each value actually does — " +
+        "note that only a REAL region pins one, and it pins a narrow model set with it."
     );
   }
 
@@ -256,31 +289,40 @@ export function getClient() {
     // different HOST than the SDK assumes. Both facts are required to make one
     // working call.
     //
-    // Overridden ONLY for the multi-regions. A single region keeps the SDK's
-    // derived host, because forcing the global one there would quietly move
-    // traffic out of a pinned region — the residency control the two-region
-    // design rests on.
-    const multiRegion = VERTEX_MULTI_REGIONS.includes(vertex.location.toLowerCase());
+    // Overridden for every location the global host serves — `us`, `eu` AND
+    // `global`. `global` was added 2026-08-28: measured,
+    // global-aiplatform.googleapis.com returns 404, so relaxing the refusal
+    // WITHOUT this line would have failed on the first turn of the first call,
+    // which is the exact bug this override already exists to fix.
+    //
+    // A REAL region still keeps the SDK's derived host, because that host is
+    // the only thing that actually pins a region. Forcing the global one there
+    // would silently unpin it while the config still read `europe-west2` —
+    // residency theatre, which is worse than no claim at all.
+    const globalHost = VERTEX_GLOBAL_HOST_LOCATIONS.includes(vertex.location.toLowerCase());
 
     geminiClient = new GoogleGenAI({
       vertexai: true,
       project: vertex.project,
       location: vertex.location,
-      ...(multiRegion ? { httpOptions: { baseUrl: "https://aiplatform.googleapis.com" } } : {}),
+      ...(globalHost ? { httpOptions: { baseUrl: "https://aiplatform.googleapis.com" } } : {}),
     });
     log.info("gemini_backend", { backend: "vertex", project: vertex.project, location: vertex.location });
 
-    // Announced loudly rather than refused: a single region may be right for
-    // some future model. It is not right for any model this system runs today,
-    // and silence here would surface as a 404 mid-call.
+    // Announced loudly rather than refused: a single region is the only way to
+    // pin one, and that may be exactly right for some future model. It is not
+    // right for the model this system runs today, and silence here would
+    // surface as a 404 mid-call.
     if (vertex.unproven) {
       log.error("vertex_location_unproven", {
         location: vertex.location,
         severity: "warn",
-        expected: VERTEX_MULTI_REGIONS.join(" | "),
+        expected: VERTEX_GLOBAL_HOST_LOCATIONS.join(" | "),
         reason:
-          "No single Vertex region serves gemini-3.6-flash (probed 2026-08-21: us-central1, " +
-          "europe-west2 and europe-west4 all 404). Expect a 404 on the first turn.",
+          "A single region is genuinely pinned but serves a narrow model set. Probed " +
+          "2026-08-28 on europe-west2-aiplatform.googleapis.com: gemini-2.5-flash serves, " +
+          "gemini-3.6-flash / 2.5-flash-lite / 2.5-pro all 404. Expect a 404 on the first " +
+          "turn unless GEMINI_MODEL is one this region actually serves.",
       });
     }
     return geminiClient;
@@ -292,7 +334,9 @@ export function getClient() {
   if (vertex.enabled) {
     throw new Error(
       "VERTEX_ENABLED is set but GOOGLE_CLOUD_PROJECT and/or VERTEX_LOCATION are not. " +
-        "VERTEX_LOCATION must be `us` or `eu` — no single region serves this model. " +
+        "VERTEX_LOCATION should be `global` (what this deployment runs, and the honest label " +
+        "for it) — `us` and `eu` reach the same unpinned host, and a real region such as " +
+        "`europe-west2` IS pinned but serves only gemini-2.5-flash. " +
         "Refusing to fall back to the Gemini Developer API, which the Google Cloud BAA does not cover."
     );
   }

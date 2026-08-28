@@ -97,23 +97,26 @@ describe("getReplyStreaming on Vertex", () => {
     expect(H.constructed[0].apiKey).toBeUndefined();
   });
 
-  it("pins the MULTI-REGION hostname, which the SDK derives wrongly", async () => {
+  it("pins the GLOBAL-HOST hostname, which the SDK derives wrongly", async () => {
     // The SDK builds `{location}-aiplatform.googleapis.com`. That is right for a
-    // real region and WRONG for the `us`/`eu` multi-regions, which are served by
-    // the global hostname with the location in the path. Measured against the
-    // live API:
+    // real region and WRONG for `us`, `eu` and `global`, all of which are served
+    // by the bare global hostname with the location in the path. Measured
+    // against the live API:
     //
     //   us-aiplatform.googleapis.com           -> 404
+    //   eu-aiplatform.googleapis.com           -> 400, no such host
+    //   global-aiplatform.googleapis.com       -> 404      (probed 2026-08-28)
     //   aiplatform.googleapis.com              -> 200
     //   us-central1-aiplatform.googleapis.com  -> 404
     //
     // A real call failed on exactly this, AFTER the API-key guard was removed:
     //   400 INVALID_ARGUMENT "Invalid hostname: us-aiplatform.googleapis.com"
     //
-    // It completes B1's finding. It was not enough to learn that no single
-    // region serves the model; the multi-region value needs a different HOST
-    // than the SDK assumes, and nothing said so until a caller hit it.
-    for (const loc of ["us", "eu"]) {
+    // `global` joined the list on 2026-08-28, when the refusal was relaxed.
+    // That is the whole reason this test covers it: relaxing the refusal
+    // WITHOUT the host override would have reproduced the incident above on the
+    // first turn of the first call.
+    for (const loc of ["us", "eu", "global"]) {
       for (const k of ENV) delete process.env[k];
       process.env.VERTEX_ENABLED = "true";
       process.env.GOOGLE_CLOUD_PROJECT = "p";
