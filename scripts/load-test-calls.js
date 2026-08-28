@@ -59,9 +59,13 @@
  *   --hold <ms>      how long to keep each socket open (default 10000)
  *   --audio          stream silent mulaw at Twilio's real 20ms cadence
  *   --observe-db     sample pg_stat_activity during the run (needs DATABASE_URL)
+ *   --no-token       open the socket with NO per-call token. Every leg should be
+ *                    refused; this is how you check P10 is still closed
  *   --confirm        required for a non-loopback target
  */
+import "dotenv/config";
 import { WebSocket } from "ws";
+import { mintMediaStreamToken } from "../lib/mediaStreamToken.js";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -78,6 +82,7 @@ const RAMP_MS = Number.parseInt(opt("ramp", "0"), 10);
 const HOLD_MS = Number.parseInt(opt("hold", "10000"), 10);
 const SEND_AUDIO = flag("audio");
 const OBSERVE_DB = flag("observe-db");
+const NO_TOKEN = flag("no-token");
 
 const isLoopback = /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/)/.test(URL_);
 if (!isLoopback && !flag("confirm")) {
@@ -122,7 +127,14 @@ function runLeg(i) {
 
     const callSid = `CAload${String(i).padStart(4, "0")}${Date.now().toString(36)}`;
     const streamSid = `MZload${String(i).padStart(4, "0")}`;
-    const ws = new WebSocket(URL_);
+
+    // P10: the upgrade now needs a per-call token, minted the same way
+    // /twilio/voice mints it. Passing --no-token is how you verify the hole is
+    // still closed — every leg should come back refused, and BEFORE the fix
+    // every leg was accepted.
+    const token = NO_TOKEN ? null : mintMediaStreamToken(callSid);
+    const url = token ? `${URL_}/${encodeURIComponent(token)}` : URL_;
+    const ws = new WebSocket(url);
     let audioTimer = null;
     let holdTimer = null;
 
@@ -265,6 +277,15 @@ async function main() {
       "NOTE: without --business the server cannot resolve a tenant, so each leg exercises\n" +
         "      the socket, the start frame and the failure path — not a full call. That is a\n" +
         "      useful measurement and it is not the same measurement. Say which one you ran.\n"
+    );
+  }
+
+  if (NO_TOKEN) {
+    console.log("--no-token: every leg should be REFUSED. Any accepted socket means P10 is open.\n");
+  } else if (!mintMediaStreamToken("CAprobe")) {
+    console.log(
+      "NOTE: no TWILIO_AUTH_TOKEN or MEDIA_STREAM_SECRET here, so no token can be minted. Legs\n" +
+        "      will be refused unless the target runs with TWILIO_VALIDATE_SIGNATURE=false.\n"
     );
   }
 

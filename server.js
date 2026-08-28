@@ -21,6 +21,13 @@ import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
 import { assertBootConfig } from "./lib/bootChecks.js";
+import {
+  mintMediaStreamToken,
+  verifyMediaStreamToken,
+  tokenFromPath,
+  mediaStreamTokenRequired,
+  mediaStreamTokenAvailable,
+} from "./lib/mediaStreamToken.js";
 import { sttProviderFor } from "./lib/voice/sttStream.js";
 import { assertSttEncryption } from "./lib/voice/sttGoogle.js";
 import { callerAllowlist, callerAllowed, buildRefusedTwiml } from "./lib/callerAllowlist.js";
@@ -437,8 +444,20 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       );
     }
 
-    const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
-    log.info("media_stream_initiated", { callSid });
+    // P10: the socket now carries a per-call credential.
+    //
+    // In the PATH, not a query string — Twilio does not carry a
+    // `<Stream url="...">` query string through to the websocket handshake, and
+    // a `?token=` form arrives empty (see probeUpgradeAllowed, which was bitten
+    // by exactly this). The token is minted here because this is the one place
+    // that has already proved the request came from Twilio: `twilioValidation`
+    // ran on this route.
+    const streamToken = mintMediaStreamToken(callSid);
+    const wsUrl =
+      BASE_URL.replace(/^http/, "ws") +
+      "/twilio/media-stream" +
+      (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
+    log.info("media_stream_initiated", { callSid, authenticated: streamToken !== null });
     // escapeXml on both: every other TwiML site in this codebase escapes its
     // interpolations, and an unescaped attribute value is an XML-injection hole
     // even when the only writer is Twilio.
@@ -1096,6 +1115,31 @@ export function selectPipelineHandler() {
 /** Websocket path for the latency probe's scripted-caller leg. */
 const PROBE_WS_PATH = "/twilio/probe-stream";
 
+/** Websocket path Twilio Media Streams connects to. The token follows it. */
+const MEDIA_WS_PATH = "/twilio/media-stream";
+
+/**
+ * May this upgrade become a call, and which call is it allowed to be?
+ *
+ * Exported for the test that matters most: the one asserting a GOOD token is
+ * ACCEPTED. This file already carries the scar — `verifyTwilioSignature` was
+ * broken for the life of a deployment and rejected EVERY request, and three
+ * negative tests plus a source scan all passed, because nothing ever asserted
+ * the positive case. "Correctly refuses bad input" and "refuses everything"
+ * are indistinguishable without it.
+ *
+ * @param {string} pathname
+ * @returns {{ ok: boolean, callSid: string|null, reason: string|null }}
+ */
+export function mediaStreamUpgradeVerdict(pathname, env = process.env) {
+  if (!mediaStreamTokenRequired(env)) {
+    // Dev, and the same switch that turns off signature validation. Announced
+    // at boot rather than only here, so it cannot be the quiet default.
+    return { ok: true, callSid: null, reason: "enforcement_disabled" };
+  }
+  return verifyMediaStreamToken(tokenFromPath(pathname, MEDIA_WS_PATH), { env });
+}
+
 /**
  * Is this upgrade allowed to become a probe leg?
  *
@@ -1131,8 +1175,27 @@ function attachWebSocket(httpServer) {
     // Only accept upgrades on the media-stream path
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname;
-    if (pathname === "/twilio/media-stream") {
+    if (pathname === MEDIA_WS_PATH || pathname.startsWith(`${MEDIA_WS_PATH}/`)) {
+      // P10. This path used to accept ANY upgrade — no signature, no token —
+      // while /twilio/probe-stream below it required one. Each accepted socket
+      // costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and ten
+      // of them exhaust the measured 10-concurrent ElevenLabs cap that real
+      // callers share, so the hole was a bill and an outage as well as a data
+      // question.
+      const verdict = mediaStreamUpgradeVerdict(pathname);
+      if (!verdict.ok) {
+        log.error("media_stream_upgrade_refused", { reason: verdict.reason, ip: req.socket?.remoteAddress });
+        // 403 before the handshake completes. Nothing is allocated: no
+        // Deepgram connection, no tenant lookup, no spend.
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
+        // The other half of the control. Without this, ONE valid token would
+        // authorise a session for any other call the caller cared to name in
+        // the `start` frame. null when enforcement is off.
+        ws.authorizedCallSid = verdict.callSid;
         selectPipelineHandler()(ws, req);
       });
     } else if (
@@ -1204,7 +1267,27 @@ if (process.env.NODE_ENV !== "test") {
       `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
     );
     const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
-    console.log(`Media Streams (WebSocket): ${wsUrl}`);
+    console.log(`Media Streams (WebSocket): ${wsUrl}/<per-call token>`);
+    // Announced at boot, because a subsystem that is off must say so — the
+    // difference between "protected" and "open to anyone who knows the URL" is
+    // otherwise invisible until somebody finds it.
+    if (!mediaStreamTokenRequired()) {
+      console.error(
+        "[boot] WARNING media-stream upgrades are NOT authenticated " +
+          "(TWILIO_VALIDATE_SIGNATURE=false). Anyone who knows this URL can open a call, spend " +
+          "vendor credit and consume the concurrency cap. Expected in dev, never in production."
+      );
+    } else if (!mediaStreamTokenAvailable()) {
+      // Fail-closed, so this is a total outage rather than a silent hole — and
+      // it must be legible as such, since "no calls connect" otherwise reads as
+      // a Twilio or networking fault.
+      console.error(
+        "[boot] FATAL-ish media-stream tokens are REQUIRED but no signing key exists " +
+          "(set TWILIO_AUTH_TOKEN, or MEDIA_STREAM_SECRET). Every upgrade will be refused with 403."
+      );
+    } else {
+      console.log("[boot] media-stream upgrades require a per-call token.");
+    }
     if (TRANSFER_NUMBER) {
       console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
     } else {
