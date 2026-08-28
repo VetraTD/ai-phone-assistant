@@ -2767,7 +2767,11 @@ decision with a legal dimension, and `git rm` is not a fix.
 
 ---
 
-## Attempt 2 — NEXT SESSION: Phase 3, concurrency and cost
+## Attempt 2 — the Phase 3 BRIEF, kept for the record. SUPERSEDED by the Phase 3 section below
+
+**Phase 3 is CLOSED — see "Phase 3 — CLOSED 2026-08-28" below for what was actually done, which
+differs from this brief in three places. The "Phase 4 preconditions" list at the end of this
+section is NOT superseded and is still the live checklist.**
 
 **Do not start Phase 3 work in the Phase 2 session.** Open Phase 3 by reading this section, the
 Phase 2 section above, and the plan's Phase 3 list. **Phase 3 is APPLICATION code — `lib/`,
@@ -2893,9 +2897,195 @@ plan's Phase 2 list. `infra/terraform/`, configuration only, no new resources:
 
 ---
 
+## Phase 3 — CLOSED 2026-08-28 · branch `feat/gcp-2` · commits `f3a7680`, `bb63652`, `8810538`
+
+**Goal: concurrency and cost, in APPLICATION code.** No `infra/terraform/` changes, no GCP
+contact, no apply, nothing pushed, `main` untouched.
+
+**Verifying before doing changed the answer three times, and the plan's Phase 3 list was stale in
+two places.** `services/gemini.js:1212-1216` (the `cachedContentTokenCount` reference) is wrong —
+it is at **1594-1595 and 2135-2137**. `scripts/migrate.js`'s own header says 26 migration files;
+there are 36, and `npm run db:status` read **`applied: 36, pending: none`**, so the new migration
+is **038** and the number was read rather than assumed. The eval suite is **40 scenarios, not 37**.
+
+### 3a — `createPgStore()`, and a second bug that only a real store could expose
+
+`createPgStore()` sits behind the identical `CallStateStore` interface, selected by
+`CALL_STATE_STORE`, on new migration **038** (`applied: 37, pending: none`, read back).
+
+**It takes `services/db.js`'s existing pool rather than opening its own.** That is P7-shaped, not
+tidiness: `instances × DB_POOL_MAX` under `max_connections` is the constraint Phase 4 has to size
+against, and a store with its own pool would silently double the left-hand side for three scalars
+written at call boundaries.
+
+**`call_state` has NO row-level security and NO grant to `vetra_app`**, matching
+`business_directory`'s category exactly: it is read BEFORE the tenant is known, because it is how
+the tenant becomes known. A `business_id = app_current_business_id()` policy would return zero rows
+to the status handler and **defeat the fix while looking careful**. Access is via SECURITY DEFINER
+functions, so the application role cannot enumerate. `app_call_state_merge` **RAISES on any key
+outside `SHARED_FIELDS`** — the property the whole cost argument rests on (nothing written per
+turn) is now enforced by the database rather than described in a comment.
+
+**THE POSTGRES STORE FOUND A PRE-EXISTING BUG, and it is the same bug in a new costume.** Both
+boundary writes are fire-and-forget: `session.js:3145` publishes the whole slice at pickup —
+carrying `sawCallerFinal: false` — and `session.js:1614` latches it true. A Map and a file complete
+synchronously and therefore in issue order. **A connection pool does not.** A caller who speaks over
+the greeting can produce latch-then-pickup, and the pickup write puts the latch back to false,
+**re-tagging a short real call as spam through the fix for it**. `writeShared` now serialises per
+call SID. Deliberately NOT a latch in SQL: that would make the two stores behave differently, at
+which point `CALL_STATE_STORE` is not a switch but a behaviour change.
+
+The cross-process contract moved to `tests/helpers/callStateCrossProcessSuite.js` and runs **twice** —
+the file stand-in in the root suite, and **two genuine pools in two OS processes** against Postgres.
+**Two sabotage cases, because a test that cannot fail is not evidence:** remove the boundary write
+and the cold process must lose `businessId`; bypass the write queue and the latch must be lost.
+A third guard asserts the `REVOKE` actually held — which is how P9 below was found.
+
+### 3b — capacity, and the cap is real and it is not GCP
+
+`scripts/load-test-calls.js` opens N real media-stream WebSockets speaking Twilio's own frame
+sequence. Full table in **`docs/capacity.md`**, with every row labelled MEASURED / RECORDED /
+UNKNOWN.
+
+**THE BINDING CONSTRAINT TODAY IS ELEVENLABS AT 10 CONCURRENT**, and the vendor said so itself in a
+1008 close reason under load rather than it being read off a pricing page:
+`"maximum of 10 concurrent requests"`. **The knee is exactly at the cap:**
+
+| Concurrent calls | Served | EL refusals | Time to first audio |
+|---|---|---|---|
+| 10 | 10/10 | 0 | **p50 762 ms**, max 838 ms |
+| 20 | 20/20 | 10 | p50 729 ms, **p95 4,632 ms** |
+| 30 | 30/30 | 20 | **p50 4,617 ms**, max **8,393 ms** |
+
+**Gate E records "Caller 11 when ElevenLabs caps at 10 is undefined behaviour". It is not
+undefined.** No call is dropped and no socket is refused: the greeting falls back to the Google
+Chirp3 voice, so the caller hears **four to eight seconds of silence and then a different voice**,
+and the breaker then opens for 60 s and gives that treatment to everyone. Defined, and bad.
+
+**A methodological trap worth carrying:** the first 30-call run reported *"15 of 30 legs got no
+audio"*, which reads as dropped calls. Raising `--hold` from 5 s to 20 s brought all 30 in. **The
+failure mode is latency, not loss, and a load test that stops watching too early reports the wrong
+failure.**
+
+**MEASURED, and it is the term everybody guesses: ONE INSTANCE REACHES `DB_POOL_MAX`.**
+`pg_stat_activity` showed **10** connections at 10 concurrent calls, and **10** at 20 and at 30 —
+the pool caps and calls queue. So `instances × DB_POOL_MAX` is **not** a pessimistic bound; it is
+reached at roughly `DB_POOL_MAX` concurrent calls per instance.
+
+Deepgram sustained **30 concurrent streams, zero errors** — a floor, not its cap. **Twilio
+concurrent calls and CPS, and Vertex QPM, are left UNKNOWN rather than estimated**; these runs used
+the AI Studio key, so they say nothing about Vertex quota at all. **The Cloud SQL row is an explicit
+Phase 4 fill-in** — the instance does not exist (P7).
+
+### 3c — the hit rate, and a gate that was a coin flip
+
+**The contradiction in the record has an explanation, and it is not that anyone measured badly.**
+
+**On the REAL prompt: 86.9% and 86.7% of prompt tokens served from cache, ZERO misses in 407
+turns**, across two full eval runs. The older figures — "94%" in `.env.example`, "98.8%" in
+`services/geminiCache.js` — were measured against **synthetic filler whose dynamic tail is tiny**.
+The real prompt has a real tail, so it caches less. **They never disagreed about the same prompt;
+they measured different prompts.** `.env.example` corrected.
+
+**`scripts/verify-explicit-cache.js`'s function-calling gate was not a measurement.** It sent ONE
+request per arm, with **no uncached control at all**, and printed a verdict. Adding a control
+produced `BROKEN — uncached calls the tool, cached does not` and then, on the very next run, **its
+exact inverse**. `temperature: 0` is not deterministic for whether this model emits a function call,
+so a single-shot two-arm comparison is **a coin flip dressed as a verdict** — and it would have
+killed or shipped the feature on noise, whichever way it landed first. It now runs N trials per arm
+and compares rates. At 8 trials: **uncached 3/8, cached 4/8. Indistinguishable.**
+
+**So tool calling is NOT broken under a cache, and mutual exclusivity is not what blocks this.**
+`services/gemini.js:1687-1693` already works around it by putting `tools` inside the cache, and that
+works. The standing note in this ledger and in the memory naming exclusivity as "the real obstacle"
+is **superseded**.
+
+Eval, **two runs per mode**, judged against the spread rather than a single pair:
+
+| | hard | judge | p50 total-turn |
+|---|---|---|---|
+| OFF | 37/40, 40/40 | 34, 34 | 2,155 ms, 1,915 ms |
+| ON | 39/40, 39/40 | 32, 37 | 1,990 ms, 2,030 ms |
+
+**Every metric overlaps, and the within-arm spread (judge 32-37 on ON alone) exceeds any
+between-arm difference.** No latency win, corroborating the documented "TTFT is flat in prompt
+size".
+
+**`GEMINI_EXPLICIT_CACHE` STAYS OFF — and the reason has changed.** Not "tools break under a
+cache", which is measured false. It is that two runs per mode can only show *no harm was detected*,
+not that it is safe. What this session removed is a false blocker and a contradictory number; what
+remains is a cost decision needing the band procedure, not another single pair.
+
+### Gates — pasted, not claimed. `DATABASE_URL` UNSET for the root suite (P4)
+
+| Gate | Phase 2 baseline | Phase 3 | Why it moved |
+|---|---|---|---|
+| `npm test` | 2352 / 125 files | **2362 / 126** | +7 `callStateStoreSelection.test.js`, +3 sabotage/ordering |
+| `npm run test:db` | 191 / 15 files | **211 / 16** | +20, the new `callStatePgStore.test.js` |
+| `npm run db:status` | applied 36 | **applied: 37, pending: none** | migration 038, read back |
+| `npm run sim:cutoff` | 3 passed | **3 passed** | — |
+| dashboard backend | 126 / 13 | **126 / 13** | unchanged |
+| dashboard frontend | 36 / 6 | **36 / 6** | unchanged |
+| prompt snapshots | — | **ZERO moved** | 3a is not a prompt change |
+
+Two gates failed first and both were the gate working. `tests/phiAuditCoverage.test.js` refused the
+new `getPool` export until it was classified; `tests/db/schemaParity.test.js` refused `schema.sql`
+until its copy of `app_call_state_merge` was **byte-identical** to the migration's, because Postgres
+stores the function body verbatim and a three-line comment difference is a different function.
+
+---
+
+## Attempt 2 — parked in PHASE 3. P5-P8 carried forward unchanged; P9-P12 are new
+
+**P5, P6, P7 and P8 all still stand exactly as written in the Phase 2 section above.** P7 in
+particular is now *half* answered: the left-hand side is measured (see 3b), the right-hand side
+still needs the instance.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P9 | **A control this ledger relies on does not exist.** Migration 033's own `COMMENT ON TABLE` says `business_directory` is *"deliberately NOT granted to vetra_app — only the SECURITY DEFINER bootstrap function reads it"*. **It is granted.** Measured: `business_directory grants to vetra_app: INSERT,SELECT,UPDATE,DELETE`. Cause: 029's `ALTER DEFAULT PRIVILEGES ... GRANT ... TO vetra_app` grants **every table created afterwards**, and 033 only revoked `FROM PUBLIC`. So the application role can enumerate every tenant's phone number, and the comment says it cannot. **Migration 038 does not repeat the mistake** (explicit `REVOKE ... FROM vetra_app`, with a test asserting it held) — but 033 is untouched under record-and-park. One `REVOKE` plus a test; the risk is that the claim is *written down as a control* | `database/033_phone_directory_bootstrap.sql:69`, `database/029_row_level_security.sql` | ask first |
+| P10 | **`/twilio/media-stream` accepts any WebSocket upgrade, with no authentication of any kind.** `server.js:1134` checks only the path — no Twilio signature, no token, unlike `/twilio/probe-stream` right beside it which requires `DEBUG_TOKEN`. `businessPhone` then arrives in attacker-controlled `customParameters`. **This is not theoretical: `scripts/load-test-calls.js` opened 30 concurrent calls against a real tenant with no credential.** Each socket costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and consumes the **10-concurrent ElevenLabs cap**, so an unauthenticated caller can both spend money and deny service to real callers. Twilio cannot send headers, so the fix is the same shape as the probe path's: a token in the URL, issued per call by `/twilio/voice` | `server.js:1130-1140` | ask first — security, not migration |
+| P11 | `scripts/migrate.js`'s header comment says *"26 plain-SQL files"*. There are 37. A comment, but it is the file a new operator reads to understand the migration story | `scripts/migrate.js:12` | any |
+| P12 | **The recorded eval noise band is stale.** The ledger says "35-37 of 37"; the suite is now **40 scenarios**, and four runs this session gave hard 37, 40, 39, 39. Anyone judging against 37 will read a normal run as a regression | `eval/`, ledger | any |
+
+---
+
+## Attempt 2 — NEXT SESSION: Phase 4, provision. **THE OWNER MUST BE PRESENT**
+
+**Phase 4 is the first apply and the first GCP contact of attempt 2.** Open it by reading the Phase
+2 section (what the module now describes), this Phase 3 section, and **the "Phase 4 preconditions"
+list in the superseded Phase 3 brief above — all nine of them still stand and none has been done.**
+
+Three things Phase 3 hands to Phase 4 specifically:
+
+1. **`DB_POOL_MAX` and `max_instance_count` are still unset, and now half the arithmetic is
+   measured.** One instance reaches `DB_POOL_MAX` (10 by default) at about that many concurrent
+   calls. Read `max_connections` off the instance, subtract a reserve for the migrate job, the
+   dashboard backend and `superuser_reserved_connections`, then divide. **Do not raise either from a
+   guess** — that is still P7.
+2. **`CALL_STATE_STORE` must be set to `pg` on Cloud Run, and `var.call_state_store` does not do it
+   yet.** The Terraform variable exists and is already `"postgres"`, but it only reaches
+   `local.cloud_sql_plan` and an output — **nothing renders it into a service environment variable.**
+   The application accepts `postgres` as well as `pg` precisely so that whichever word gets wired
+   through works. **Left as a Phase 4 item rather than fixed here, because Phase 3 must not touch
+   `infra/terraform/`.** A deployment that misses this runs the in-process Map on multiple instances,
+   which is exactly the silent bug Phase 3a existed to close.
+3. **Migration 038 must be applied by the migrate job before the new store is selected**, or the
+   first boundary write fails against a missing table. The store degrades rather than crashing (the
+   write is fire-and-forget and logged), so the symptom is a silent return of the original bug.
+
+### What Phase 4 must NOT do
+
+- **Do not fix P9 or P10 during the apply.** Both are real, both are security-shaped, and both are
+  owner decisions under the record-and-park rule. P10 in particular becomes materially more urgent
+  the moment a public Cloud Run URL exists — raise it, do not silently bundle it.
+
+---
+
 ## Attempt 2 — session log
 
 | # | Date | Branch | Did | Left for next |
 |---|---|---|---|---|
 | A2-1 | 2026-08-28 | `feat/gcp-2` | **PHASE 1 CLOSED.** Branched off `feat/gcp-lane-b-terraform`, merged `dev` in, commit `62b87c2`. Only 2 of 23 overlapping files conflicted textually; the 21 silent auto-merges were verified line-by-line in both directions and are clean. **Two integration breaks that produced no conflict:** three dev-ADDED test files importing the `services/supabase.js` that lane-b deletes, and three env vars dev reads that lane-b's `envInventory` gate demands be documented. All 110 prompt snapshots deleted and regenerated; the diff against both parents is 100% attributable, so **the receptionist's prompt is the exact union of the two branches**. Five suites green: 2350 / 191 / 3 / 126 / 36. Final verification also turned up **P4**, a pre-existing non-hermetic root-suite test, confirmed on lane-b and left parked. **Nothing pushed, `main` untouched, no GCP contact.** | **Phase 2 — reshape Terraform.** Start with P1 (`VERTEX_LOCATION=global` is refused by `services/gemini.js:175`) and the uniform-bucket-level-access audit, both BEFORE any apply |
 | A2-2 | 2026-08-28 | `feat/gcp-2` | **PHASE 2 CLOSED — commit `eb2e63e`, 17 files, +1,123/-626, all under `infra/terraform/`.** The module now describes three stacks in three projects (`uk`, `us`, `core`) instead of attempt 1's six-and-four. **Project keys stopped being stack keys**, which forced `local.projects` to derive `display` and `region` from its members — `region` uses `one(distinct(...))` so a future two-region merge fails loudly instead of silently picking a lane. **Item 3 was re-derived and REVERSED: the org log sink STAYS**, because the "convert to per-project sinks" item was written under the no-org assumption the plan itself already voids, and per-project sinks are deletable by the admin the design defends against. **Two bugs the brief implied but did not name:** `enable_uk_resources` gated only the UK, so DARK `us-prod` was unconditionally active and the first apply would have built a ~$98/mo Cloud SQL instance and an undeletable KMS key ring — replaced with symmetric `var.active_stacks`; and `DEPLOYMENT_MODE` was hard-coded `hipaa` per lane against the locked `standard`-everywhere decision — now `var.deployment_mode`, which also gates `speech.tf`. `cpu_idle = true` (false is ~$70/mo = the whole budget, and the cost is UNMEASURED). P2 resolved: `GIT_COMMIT_SHA` on both services. UBLA needed no change — both GCS buckets already set it and `logging.tf` creates **Cloud Logging** buckets, which the constraint does not reach. Gates: fmt exit 0, validate Success, **npm test 2352/125 unchanged**, and the derived model plus **six deliberately-failed validations** checked in `terraform console`. **One disclosure: the first `init -backend=false` reached GCS** — it reuses the cached backend, and the residue named the deleted `vetra-tfstate-c3a3bd`; 403, nothing read, cache moved aside. **Nothing pushed, `main` untouched, nothing created.** | **Phase 3 — concurrency and cost.** Application code only, no Terraform, no GCP. Start with 3a: `lib/callStateStore.js` is an in-process Map and that is a LIVE correctness bug the single instance is hiding. Park anything Terraform-shaped. Four new findings P5-P8 recorded above; **P7 is why `max_instance_count`/`DB_POOL_MAX` were left alone — `max_connections` is unmeasured** |
+| A2-3 | 2026-08-28 | `feat/gcp-2` | **PHASE 3 CLOSED — commits `f3a7680`, `bb63652`, `8810538`. Application code only; `infra/terraform/` untouched, no GCP contact, nothing pushed, `main` untouched.** **3a:** `createPgStore()` on migration **038**, selected by `CALL_STATE_STORE`, sharing `services/db.js`'s pool so shared call state costs **zero extra connections** (P7). `call_state` has no RLS and no grant to `vetra_app` — it is read before the tenant is known, so a tenant policy would return zero rows and defeat the fix while looking careful — and `app_call_state_merge` **RAISES on any field outside SHARED_FIELDS**, enforcing the property the no-Memorystore costing rests on. **The Postgres store then exposed a PRE-EXISTING bug the Map was hiding:** both boundary writes are fire-and-forget, and a pool does not preserve issue order, so the pickup write (carrying `sawCallerFinal:false`) could land after the latch and re-tag a short real call as spam — through the fix for it. `writeShared` now serialises per call SID; deliberately not a latch in SQL, which would make the two stores behave differently. Contract extracted and run **twice**, file store and **two real pools in two OS processes**, with **two sabotage cases**. **3b:** `scripts/load-test-calls.js` + `docs/capacity.md`. **The binding cap is ElevenLabs at 10 concurrent, quoted from the vendor's own 1008 close reason**, and the knee is exactly there: p50 762ms at N=10, p50 4,617ms and max 8,393ms at N=30. **Gate E's "caller 11 is undefined behaviour" is now measured and is not undefined** — nothing is dropped, the greeting falls back to the Google voice after 4-8s of silence, and the breaker then does that to everyone for 60s. **Also measured: ONE INSTANCE REACHES `DB_POOL_MAX`** (10 connections at 10, 20 and 30 concurrent calls), so `instances × DB_POOL_MAX` is reached, not pessimistic. Deepgram >30 with zero errors; Twilio and Vertex left **UNKNOWN rather than estimated**; **Cloud SQL row left as an explicit Phase 4 fill-in**. **3c:** hit rate **measured on the real prompt at 86.9% / 86.7%, zero misses in 407 turns** — and the contradictory record is explained, because "94%" and "98.8%" were measured on **synthetic filler with a tiny dynamic tail**. **The function-calling gate was a coin flip:** one request per arm, no control; adding a control gave BROKEN and then its exact inverse on the next run. Now N trials per arm — **uncached 3/8, cached 4/8, indistinguishable, so tool calling is NOT broken under a cache and mutual exclusivity is not the blocker.** Eval two runs per mode: every metric overlaps, within-arm spread exceeds between-arm. **Stays OFF, for a new reason.** Gates: **2362/126, 211/16, applied 37 pending none, sim 3, dashboards 126/13 and 36/6, ZERO snapshots moved** | **Phase 4 — provision. THE OWNER MUST BE PRESENT.** All nine Phase 4 preconditions still stand and none is done. Three handoffs from Phase 3: size `DB_POOL_MAX`/`max_instance_count` from `max_connections` read off the instance (P7, half-measured now); **`var.call_state_store` is not wired to a service env var, so `CALL_STATE_STORE=pg` would not reach Cloud Run**; and 038 must be applied before the store is selected. **New parked P9-P12 — P9 (a control migration 033 claims and does not have) and P10 (`/twilio/media-stream` takes no authentication at all) are security-shaped: raise them, do not bundle them into the apply** |
