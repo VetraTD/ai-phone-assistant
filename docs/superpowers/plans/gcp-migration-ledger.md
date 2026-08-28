@@ -3044,7 +3044,7 @@ still needs the instance.
 | # | Finding | Where | Phase |
 |---|---|---|---|
 | P9 | **A control this ledger relies on does not exist.** Migration 033's own `COMMENT ON TABLE` says `business_directory` is *"deliberately NOT granted to vetra_app — only the SECURITY DEFINER bootstrap function reads it"*. **It is granted.** Measured: `business_directory grants to vetra_app: INSERT,SELECT,UPDATE,DELETE`. Cause: 029's `ALTER DEFAULT PRIVILEGES ... GRANT ... TO vetra_app` grants **every table created afterwards**, and 033 only revoked `FROM PUBLIC`. So the application role can enumerate every tenant's phone number, and the comment says it cannot. **Migration 038 does not repeat the mistake** (explicit `REVOKE ... FROM vetra_app`, with a test asserting it held) — but 033 is untouched under record-and-park. One `REVOKE` plus a test; the risk is that the claim is *written down as a control* | `database/033_phone_directory_bootstrap.sql:69`, `database/029_row_level_security.sql` | ask first |
-| P10 | **`/twilio/media-stream` accepts any WebSocket upgrade, with no authentication of any kind.** `server.js:1134` checks only the path — no Twilio signature, no token, unlike `/twilio/probe-stream` right beside it which requires `DEBUG_TOKEN`. `businessPhone` then arrives in attacker-controlled `customParameters`. **This is not theoretical: `scripts/load-test-calls.js` opened 30 concurrent calls against a real tenant with no credential.** Each socket costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and consumes the **10-concurrent ElevenLabs cap**, so an unauthenticated caller can both spend money and deny service to real callers. Twilio cannot send headers, so the fix is the same shape as the probe path's: a token in the URL, issued per call by `/twilio/voice` | `server.js:1130-1140` | ask first — security, not migration |
+| P10 | **RESOLVED 2026-08-28 on `feat/gcp-2`, commit `60d1afa` — at the owner's request, and `main` IS STILL EXPOSED. See the P10 section below.** Original finding: **`/twilio/media-stream` accepts any WebSocket upgrade, with no authentication of any kind.** `server.js:1134` checks only the path — no Twilio signature, no token, unlike `/twilio/probe-stream` right beside it which requires `DEBUG_TOKEN`. `businessPhone` then arrives in attacker-controlled `customParameters`. **This is not theoretical: `scripts/load-test-calls.js` opened 30 concurrent calls against a real tenant with no credential.** Each socket costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and consumes the **10-concurrent ElevenLabs cap**, so an unauthenticated caller can both spend money and deny service to real callers. Twilio cannot send headers, so the fix is the same shape as the probe path's: a token in the URL, issued per call by `/twilio/voice` | `server.js:1130-1140` | ask first — security, not migration |
 | P11 | `scripts/migrate.js`'s header comment says *"26 plain-SQL files"*. There are 37. A comment, but it is the file a new operator reads to understand the migration story | `scripts/migrate.js:12` | any |
 | P12 | **The recorded eval noise band is stale.** The ledger says "35-37 of 37"; the suite is now **40 scenarios**, and four runs this session gave hard 37, 40, 39, 39. Anyone judging against 37 will read a normal run as a regression | `eval/`, ledger | any |
 
@@ -3079,6 +3079,60 @@ Three things Phase 3 hands to Phase 4 specifically:
 - **Do not fix P9 or P10 during the apply.** Both are real, both are security-shaped, and both are
   owner decisions under the record-and-park rule. P10 in particular becomes materially more urgent
   the moment a public Cloud Run URL exists — raise it, do not silently bundle it.
+
+---
+
+## P10 RESOLVED 2026-08-28 — and `main` is still exposed
+
+**Fixed on `feat/gcp-2` at the owner's request** (commit `60d1afa`), immediately after Phase 3
+closed, because the finding turned out not to be a Phase 4 concern: `origin/main:server.js:837`
+carries the identical unauthenticated upgrade, Railway autodeploys `main`, and that URL is public.
+**It was live in production while it was being written down as a Phase 4 item.**
+
+`/twilio/voice` mints a per-call token into the `<Stream url>`; the upgrade verifies it before the
+handshake completes; `session.js` checks the token's call SID against the `start` frame.
+
+**Four design points, each of which is load-bearing rather than stylistic:**
+
+- **A signed token, not a stored nonce.** The whole premise of Phase 3 is more than one instance, so
+  a nonce written by the instance serving `/twilio/voice` and read by the instance taking the
+  upgrade is **the same cross-instance problem `call_state` exists to solve** — and it would put a
+  synchronous database read on the pickup path, which is the one path where latency is the product.
+- **The token is in the PATH.** Twilio does not carry a `<Stream url="...">` query string through to
+  the websocket handshake; a `?token=` form arrives EMPTY and the upgrade fails with a 31920 that
+  reads like a broken endpoint. Not a guess — `probeUpgradeAllowed` records being bitten by exactly
+  this, and this follows the shape that already works.
+- **The signing key is DERIVED from `TWILIO_AUTH_TOKEN`** by HMAC with a fixed label, so **nothing
+  needs provisioning in Secret Manager or Terraform** — which Phase 3 must not touch — and it cannot
+  ship half-configured. A subkey, so leaking one does not hand over the other. `MEDIA_STREAM_SECRET`
+  overrides it for rotation.
+- **Enforcement is tied to `TWILIO_VALIDATE_SIGNATURE`.** Same threat model, same question, one
+  switch — it must not be possible to disable one while believing the other still holds. Boot
+  announces which way it is set, **including the fail-closed case** where tokens are required and no
+  key exists, because "no call connects" otherwise reads as a Twilio or networking fault.
+
+**Verified end to end against a running server, both directions, and the negative case first:**
+
+| Run | Result |
+|---|---|
+| `--no-token` (the exploit) | **0/5 sockets opened, 5 refused**, `Unexpected server response: 403` |
+| minted token | **5/5 opened, 5/5 got audio**, p50 **685 ms** — no latency cost against the 762 ms baseline |
+| valid token, swapped call SID | upgrade accepted, then **closed 1008 `call sid does not match token`** |
+
+**The refusal costs nothing:** those 5 refusals produced **zero `stt_open` and zero
+`media_stream_start`**, so an unauthenticated attempt now allocates no vendor resource at all.
+
+**The first unit test asserts a GOOD token is ACCEPTED, deliberately and first.** `server.js`
+already shipped a `verifyTwilioSignature` that rejected EVERY request for the life of a deployment
+while three negative tests and a source scan stayed green — because nothing ever asserted the
+positive case, and "correctly refuses bad input" and "refuses everything" are the same suite without
+it.
+
+### What is NOT fixed
+
+**`main` is unchanged and still open.** Nothing was pushed. The exposure closes when the migration
+cuts over, or sooner if the owner decides to carry this to `main` on its own branch — which is a
+decision about touching the production line mid-migration, not a technical one.
 
 ---
 
