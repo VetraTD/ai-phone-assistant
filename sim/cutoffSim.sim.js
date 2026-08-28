@@ -52,6 +52,8 @@ const H = vi.hoisted(() => ({
   ttsChunkFrames: 1,
   /** Every turnManager.handleFinal decision, with the rule that fired. */
   finalDecisions: [],
+  /** Every turnManager.handleInterim decision, with the rule that fired. */
+  interimDecisions: [],
   /** Live audioOut instances, so the probe can ask whether audio was audible. */
   audioOuts: [],
 }));
@@ -164,6 +166,15 @@ vi.mock("../lib/voice/turnManager.js", async (importActual) => {
         handleFinal: (text, meta) => {
           const decision = tm.handleFinal(text, meta);
           H.finalDecisions.push({ text, meta, ...decision });
+          return decision;
+        },
+        // Interims decide barge-in FIRST — a final only arrives after
+        // endpointing plus network, so whatever the interim path refuses is
+        // overlap the caller actually sits through. Captured separately
+        // because session.js discards this return value.
+        handleInterim: (text, meta) => {
+          const decision = tm.handleInterim(text, meta);
+          H.interimDecisions.push({ text, meta, ...decision });
           return decision;
         },
       };
@@ -315,9 +326,12 @@ async function runCall({
   midSentencePunctuated = true,
   interCallerGapMs = 1200,
   holdNoPunctMs,
+  holdTrailingMs,
 }) {
   if (holdNoPunctMs === undefined) delete process.env.VOICE_HOLD_NO_PUNCT_MS;
   else process.env.VOICE_HOLD_NO_PUNCT_MS = String(holdNoPunctMs);
+  if (holdTrailingMs === undefined) delete process.env.VOICE_HOLD_TRAILING_MS;
+  else process.env.VOICE_HOLD_TRAILING_MS = String(holdTrailingMs);
   H.sttInstances.length = 0;
   H.ttsTurns.length = 0;
   H.assistantAudioAtMs.length = 0;
@@ -448,11 +462,25 @@ async function runCall({
       cutoffs.push({ label: u.label, msIntoUtterance: hit.atMs - u.startedAt, remainingMs: u.endedAt - hit.atMs });
     }
   }
+  // How long the caller waited for an answer, per utterance.
+  //
+  // Without this the table is trivially gameable: hold every final for three
+  // seconds and the cutoff count goes to zero, which reads as a total win while
+  // making the product markedly worse. Any change that drives cutoffs down MUST
+  // be read next to what it cost in latency — especially on the fluent control,
+  // which has no cutoffs to fix and therefore should pay nothing.
+  const latencies = [];
+  for (const u of utterances) {
+    const reply = H.assistantAudioAtMs.find((a) => a.createdAtMs >= u.endedAt);
+    if (reply) latencies.push(reply.atMs - u.endedAt);
+  }
+
   const rules = {};
   for (const h of H.holdCalls) rules[h.rule] = (rules[h.rule] || 0) + 1;
   return {
     utterances,
     cutoffs,
+    latencies,
     replies: H.assistantAudioAtMs.length,
     turnsTaken: H.ttsTurns.length,
     audioAt: [...H.assistantAudioAtMs],
@@ -517,7 +545,17 @@ describe("cutoff simulation", () => {
       { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500 },
       { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900 },
 
+      // THE FIX UNDER TEST. Identical to "punctuated finals @150ms" in every
+      // respect except VOICE_HOLD_TRAILING_MS, so the flag is the only
+      // variable and the pair is the evidence. The cutoffs in that row are
+      // fragments ending on "book", "get", "having" — words the conjunction
+      // and lead-in lists cannot see — and smart_format punctuates them, so
+      // without this they reach terminal_punctuation and get a zero hold.
+      { name: "punctuated + trailing 800", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
       { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150 },
+      // The control's own paired row: the fix must cost a fluent caller
+      // NOTHING, because they have no cutoffs to fix. Watch the reply column.
+      { name: "fluent + trailing 800", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
     ];
 
     // DETECTOR SELF-TEST, first and non-negotiable. An instrument that reports
@@ -548,7 +586,7 @@ describe("cutoff simulation", () => {
 
     const rows = [];
     for (const s of scenarios) {
-      const { utterances, cutoffs, replies, rules } = await runCall(s);
+      const { utterances, cutoffs, replies, rules, latencies } = await runCall(s);
       rows.push({
         name: s.name,
         turns: utterances.length,
@@ -556,17 +594,18 @@ describe("cutoff simulation", () => {
         cutoffs: cutoffs.length,
         rate: pct(cutoffs.length, utterances.length),
         medianRemaining: median(cutoffs.map((c) => c.remainingMs)),
+        medianLatency: median(latencies),
         labels: cutoffs.map((c) => c.label).join(", ") || "—",
         rules: Object.entries(rules).map(([k, v]) => `${k}:${v}`).join(" ") || "none",
       });
     }
 
     console.log("\n  CUTOFF SIMULATION — assistant audio starting while the caller is still speaking\n");
-    console.log("  scenario                          turns  cutoffs   rate   talked-over  where");
-    console.log("  " + "-".repeat(84));
+    console.log("  scenario                          turns  cutoffs   rate   talked-over   reply  where");
+    console.log("  " + "-".repeat(92));
     for (const r of rows) {
       console.log(
-        `  ${r.name.padEnd(32)} ${String(r.turns).padStart(5)} ${String(r.cutoffs).padStart(8)}  ${r.rate.padStart(6)}  ${String(r.medianRemaining + "ms").padStart(11)}  ${r.labels}`
+        `  ${r.name.padEnd(32)} ${String(r.turns).padStart(5)} ${String(r.cutoffs).padStart(8)}  ${r.rate.padStart(6)}  ${String(r.medianRemaining + "ms").padStart(11)}  ${String(r.medianLatency + "ms").padStart(6)}  ${r.labels}`
       );
     }
     console.log("");
@@ -602,6 +641,82 @@ describe("cutoff simulation", () => {
     console.log("  fixes should not be trusted to have fixed anything.\n");
 
     expect(rows.length).toBe(scenarios.length);
+
+    // ---- ASSERTIONS, not decoration ----------------------------------------
+    //
+    // Until 2026-08-27 the only assertion in this test was the row count above.
+    // The 50%-cutoff row was PRINTED and never checked, so any regression to
+    // the turn-taking subsystem shipped green. The warnings below were
+    // console.log too. An instrument that cannot fail is not a gate, and this
+    // is the subsystem that has already caused two production incidents.
+
+    // The fluent control is the harness's own credibility check. Fluent speech
+    // has no mid-sentence pause, so nothing can finalize mid-utterance and
+    // there is nothing to talk over. A non-zero control means the simulation is
+    // wrong, and every other number here becomes unquotable.
+    expect(
+      control?.cutoffs,
+      "fluent control recorded a cutoff — the harness is mismodelling, not the product",
+    ).toBe(0);
+
+    // A knob whose branch never executed cannot have been measured. This caught
+    // a version where the sweep silently did nothing.
+    expect(
+      branchNeverRan,
+      "classifyHold's no_terminal_punctuation branch never ran in the unpunctuated sweep — the scripted pauses are not producing the final it exists for",
+    ).toBe(false);
+
+    // The detector must be able to DETECT. A hesitant script with punctuated
+    // mid-sentence finals is the reproduction of the reported bug; if this ever
+    // reads zero it is far likelier that the harness broke than that the bug
+    // fixed itself. Proving the negative requires proving the positive first.
+    const punctuated = rows.find((r) => r.name.startsWith("punctuated finals @150"));
+    expect(
+      punctuated,
+      "the punctuated@150ms scenario is the bug reproduction and must exist",
+    ).toBeDefined();
+
+    // Latency guard. Driving cutoffs to zero by holding every final for three
+    // seconds would look like a total win in the cutoff column and be a worse
+    // product. The fluent control has no cutoffs to fix, so it must not pay for
+    // anyone else's fix — this is the number that catches that trade.
+    expect(
+      control.medianLatency,
+      `fluent control reply latency regressed to ${control.medianLatency}ms — a turn-taking fix is being paid for by every fluent caller`,
+    ).toBeLessThan(2_000);
+
+    // ---- VOICE_HOLD_TRAILING_MS, as a matched pair -------------------------
+    // Same script, same pauses, same endpointing. The flag is the only
+    // difference, which is what makes this evidence rather than a coincidence.
+    const trailingOff = rows.find((r) => r.name === "punctuated finals @150ms");
+    const trailingOn = rows.find((r) => r.name === "punctuated + trailing 800");
+    expect(trailingOn, "the trailing-hold scenario must exist").toBeDefined();
+
+    expect(
+      trailingOn.cutoffs,
+      `VOICE_HOLD_TRAILING_MS did not reduce cutoffs (${trailingOff.cutoffs} -> ${trailingOn.cutoffs}) — the fix is not working`,
+    ).toBeLessThan(trailingOff.cutoffs);
+
+    // Branch-ran evidence. A row can improve for the wrong reason; this says
+    // the rule under test is the one that fired.
+    expect(
+      trailingOn.rules.includes("trailing_incomplete"),
+      "trailing_incomplete never fired, so this row cannot be crediting the flag",
+    ).toBe(true);
+
+    // The cost side, and the reason the fluent script is run twice. A fluent
+    // caller has no cutoffs to fix, so the fix must be INVISIBLE to them: the
+    // rule must never fire, and their wait must not move.
+    const fluentOn = rows.find((r) => r.name === "fluent + trailing 800");
+    expect(fluentOn.cutoffs, "the flag introduced a cutoff on fluent speech").toBe(0);
+    expect(
+      fluentOn.rules.includes("trailing_incomplete"),
+      "trailing_incomplete fired on FLUENT speech — the word list is too broad and is taxing finished turns",
+    ).toBe(false);
+    expect(
+      fluentOn.medianLatency,
+      `fluent callers now wait ${fluentOn.medianLatency}ms vs ${control.medianLatency}ms with the flag off`,
+    ).toBeLessThanOrEqual(control.medianLatency);
   }, 120_000);
 
   // -------------------------------------------------------------------------
@@ -621,11 +736,33 @@ describe("cutoff simulation", () => {
   // The measurement is whether the assistant's TTS turn was aborted, which is
   // exactly what a barge-in does to it.
   // -------------------------------------------------------------------------
-  async function runBargeProbe({ burstMs, text, confidence, endpointMs = 150 }) {
+  async function runBargeProbe({ burstMs, text, confidence, endpointMs = 150, via = "final", env = null }) {
+    // turnManager reads its thresholds into module-level constants at import,
+    // and freshSession() re-imports the whole graph — so env set here, before
+    // that call, is what the scenario actually runs under.
+    const restoreEnv = [];
+    if (env) {
+      for (const [key, value] of Object.entries(env)) {
+        restoreEnv.push([key, process.env[key]]);
+        process.env[key] = value;
+      }
+    }
+    try {
+      return await runBargeProbeInner({ burstMs, text, confidence, endpointMs, via });
+    } finally {
+      for (const [key, value] of restoreEnv) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  async function runBargeProbeInner({ burstMs, text, confidence, endpointMs, via }) {
     H.sttInstances.length = 0;
     H.ttsTurns.length = 0;
     H.assistantAudioAtMs.length = 0;
     H.finalDecisions.length = 0;
+    H.interimDecisions.length = 0;
     H.audioOuts.length = 0;
     H.llmTtfbMs = 200;
     H.ttsTtfbMs = 40;
@@ -697,7 +834,11 @@ describe("cutoff simulation", () => {
     const clockAtFinal = clock;
     const audioOut = H.audioOuts[H.audioOuts.length - 1];
     const audibleAtFinal = !!audioOut?.isPlaying?.(150);
-    stt.opts.onFinal?.(text, { confidence });
+    // An interim is what arrives FIRST on a real call — a final only lands
+    // after Deepgram's endpointing window plus network. Anything the interim
+    // path refuses is overlap the caller actually hears.
+    if (via === "interim") stt.opts.onInterim?.(text, { confidence });
+    else stt.opts.onFinal?.(text, { confidence });
     await vi.advanceTimersByTimeAsync(50);
 
     return {
@@ -708,7 +849,10 @@ describe("cutoff simulation", () => {
       sinceAudioMs: audioAtMs === null ? null : clockAtFinal - audioAtMs,
       turnsAtFinal: H.ttsTurns.length,
       audibleAtFinal,
-      decision: H.finalDecisions[H.finalDecisions.length - 1] || null,
+      decision:
+        (via === "interim"
+          ? H.interimDecisions[H.interimDecisions.length - 1]
+          : H.finalDecisions[H.finalDecisions.length - 1]) || null,
     };
   }
 
@@ -751,6 +895,89 @@ describe("cutoff simulation", () => {
     // SELF-TEST, non-negotiable. If the assistant was not actually audible when
     // the transcript landed, "not cut off" is meaningless — every row would
     // pass for the wrong reason, and the table would read as a finding.
+    for (const r of rows) {
+      expect(r.playingBefore, `${r.name}: the reply never produced audio, so this proves nothing`).toBe(true);
+      expect(r.audibleAtFinal, `${r.name}: assistant was not audible, so there was nothing to cut off`).toBe(true);
+    }
+    for (const r of rows) {
+      expect(r.aborted, `${r.name}: expected ${r.expectAbort ? "a barge-in" : "no barge-in"}`).toBe(r.expectAbort);
+    }
+  }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // SHORT-BAND BARGE-IN — how long the caller talks before anything reacts.
+  //
+  // Reported by the Digile Media owner as "delayed response when callers speak
+  // over the AI, resulting in unnatural overlap". The interim path required
+  // FOUR words; at this file's own ~320ms/word that is 1.2-1.6s of both
+  // parties talking before the assistant so much as considers stopping.
+  //
+  // Four was not arbitrary: echoGuard.classify() cannot judge anything shorter
+  // (bigram similarity is meaningless under 4 tokens), so a shorter interim
+  // had no defence against the assistant's own voice returning off a
+  // speakerphone. The question this table answers is therefore NOT "can we
+  // react sooner" — obviously we can — but "does reacting sooner let the
+  // assistant interrupt itself again".
+  //
+  // The assistant says "Sure, I can help with that." in this sim, so the echo
+  // case below is its own words, verbatim, not a stub.
+  // -------------------------------------------------------------------------
+  it("cuts in on a short interim once the flag is set, but never on its own echo", async () => {
+    const ON = { VOICE_BARGE_MIN_WORDS: "2" };
+    const cases = [
+      // The baseline: today's behavior. Two words is below the four-word gate,
+      // so the caller keeps talking and the assistant keeps going.
+      // voicedRunMs tracks the length of the burst itself, so a burst of N ms
+      // has to clear the bar in ms directly.
+      { name: "2 words, flag OFF", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.95, env: null, expectAbort: false },
+      // The same utterance, the same burst, with the flag on. This is the
+      // whole point, and the only variable that moved.
+      { name: "2 words, flag ON", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.95, env: ON, expectAbort: true },
+      // The failure the four-word gate existed to prevent. "i can" is
+      // contained in "Sure, I can help with that." — classify() cannot see
+      // this (too short), so isShortEcho is the only thing standing here.
+      { name: "own echo 'i can', flag ON", via: "interim", burstMs: 700, text: "i can", confidence: 0.95, env: ON, expectAbort: false },
+      // The raised bar the flag pays for its speed with, and the sharpest row
+      // in the table: 300ms of voice is well clear of the 220ms the cough
+      // probe above uses, and clears the normal 250ms gate too — so this is
+      // NOT rejected as a noise burst. It is rejected only because the short
+      // band asks for 350ms. Same speech, different bar.
+      { name: "2 words, weak voice, flag ON", via: "interim", burstMs: 300, text: "next tuesday", confidence: 0.95, env: ON, expectAbort: false },
+      // Low STT confidence in the short band, same reasoning: 0.65 clears the
+      // normal 0.6 bar and misses the short band's 0.75.
+      { name: "2 words, low confidence, flag ON", via: "interim", burstMs: 700, text: "next tuesday", confidence: 0.65, env: ON, expectAbort: false },
+      // ...and the half that must not regress: a full-length interim is
+      // unaffected by any of this.
+      { name: "5 words, flag ON", via: "interim", burstMs: 900, text: "actually can we make it wednesday", confidence: 0.91, env: ON, expectAbort: true },
+      // Control for the two rows above: with the raised bars disabled and
+      // ONLY the word gate lowered, the same weak-voice utterance is admitted.
+      // That is what proves rows 4 and 5 are rejected by the bars rather than
+      // by the word count — without it, "no cut" there is ambiguous.
+      { name: "2 words, bars disabled", via: "interim", burstMs: 300, text: "next tuesday", confidence: 0.65, env: { VOICE_BARGE_MIN_WORDS: "2", VOICE_BARGE_SHORT_MIN_VOICED_MS: "0", VOICE_BARGE_SHORT_MIN_CONFIDENCE: "0" }, expectAbort: true },
+    ];
+
+    const rows = [];
+    for (const c of cases) {
+      rows.push({ ...c, ...(await runBargeProbe(c)) });
+    }
+
+    console.log("\n  SHORT-BAND BARGE-IN — did the caller get the floor?\n");
+    console.log("  case                                expected     actual   ok   audible  decision");
+    console.log("  " + "-".repeat(86));
+    for (const r of rows) {
+      const ok = r.aborted === r.expectAbort ? "yes" : "NO";
+      console.log(
+        `  ${r.name.padEnd(34)} ${(r.expectAbort ? "cut" : "no cut").padEnd(11)} ${(r.aborted ? "cut" : "no cut").padEnd(8)} ${ok.padEnd(4)} ${(r.audibleAtFinal ? "yes" : "NO ").padEnd(8)} ${(r.decision ? `${r.decision.action}/${r.decision.reason ?? "-"}` : "none")}`
+      );
+    }
+    console.log("");
+    console.log("  Rows 1 and 2 are the SAME utterance. The only difference is the flag,");
+    console.log("  which is the evidence that the flag is what moved the behavior. Row 3 is");
+    console.log("  the assistant's own words: if it ever reads 'cut', the four-word gate was");
+    console.log("  load-bearing after all and this change must be reverted.\n");
+
+    // Same non-negotiable self-test as the probe above: "not cut off" proves
+    // nothing unless there was audio playing to cut off in the first place.
     for (const r of rows) {
       expect(r.playingBefore, `${r.name}: the reply never produced audio, so this proves nothing`).toBe(true);
       expect(r.audibleAtFinal, `${r.name}: assistant was not audible, so there was nothing to cut off`).toBe(true);
