@@ -3136,6 +3136,101 @@ decision about touching the production line mid-migration, not a technical one.
 
 ---
 
+## Phase 4 PREP — done 2026-08-28, commit `78ddb61`. **THE APPLY HAS NOT RUN.**
+
+Configuration only. Nothing applied, no GCP contact, nothing pushed. Three of the nine
+preconditions closed, plus a fourth that stopped being blocked, plus one that turned out to be a
+**hard gate on the owner**.
+
+### **`project_id_suffix` = `edc8ca`. WRITE THIS DOWN; IT IS THE THING B0a LOST.**
+
+```
+vetra-uk-edc8ca      vetra-us-edc8ca      vetra-core-edc8ca
+```
+
+Pinned in `terraform.tfvars.example` and here, deliberately in two places: if the tfvars is lost the
+ledger still names the projects. **Evaluated, not assumed** — `terraform console` returns
+`local.project_suffix = "edc8ca"` and the three IDs above. **Sabotage-verified:** with the pin
+removed the same expression returns `(known after apply)`, so the pin is what makes the names
+knowable at all.
+
+**Do not change it after the first apply.** Project IDs are immutable, so editing it does not rename
+anything — it asks Terraform to create three NEW projects and orphan the old ones, which stay
+billable and hold a KMS key ring that can never be deleted.
+
+### Precondition 2 — the residue is gone, and it was worse than "stale"
+
+Deleted: `terraform.tfvars`, `terraform.tfstate`, `terraform.tfstate.backup`, 20 `.tfplan` files,
+and a **263 MB** `.terraform/`. All untracked, so all backed up before deletion.
+`.terraform.lock.hcl` is TRACKED and was KEPT — it pins provider versions.
+
+**Verified as attempt-1 before deleting rather than assumed**, and this is the part that matters:
+
+| | `terraform.tfvars` (deleted) | `terraform.tfvars.example` (tracked, kept) |
+|---|---|---|
+| org | `564252011558` — **dead** | `208508072539` — live |
+| billing | `01C71E-7C0893-377AE9` — **dead** | `01DB07-24C0F8-391DCC` — live |
+| suffix | `c3a3bd` — **dead** | now `edc8ca` |
+
+**`terraform.tfvars` is auto-loaded by every `plan`.** Phase 4's first plan would have run against
+the SUSPENDED estate and silently overridden everything Phase 2 wrote into the example — a plan that
+looks fine and names projects that do not exist.
+
+**Evidence the cached-backend trap is closed:** `terraform init -backend=false` now completes
+without reaching GCS. In Phase 2 the same command reached for the deleted `vetra-tfstate-c3a3bd`
+bucket, because `.terraform/terraform.tfstate` cached it.
+
+### `CALL_STATE_STORE` now actually reaches the service
+
+`var.call_state_store` has existed since attempt 1 and reached **nothing but `local.cloud_sql_plan`
+and an output**. A variable that is validated, documented, defaulted to `"postgres"` and never
+rendered onto the service **is not a setting — it is a comment that typechecks.**
+
+Unset, `lib/callState.js` defaults to the in-process Map, so this omission would have **quietly
+un-done Phase 3a**: on more than one instance, no call summary, no missed-call notification, and a
+spam tag on every short call where the caller spoke — with nothing logged.
+
+**It is the same failure shape as `DEEPGRAM_REGION`, which `cloud-run.tf` already records:** the
+variable existed, a test proved the FUNCTION returned the EU host, and nothing set the env var, so
+every caller's audio would have gone to the US with the suite green. Passed through verbatim,
+because `lib/callState.js` accepts this module's vocabulary (`postgres`) alongside its own (`pg`).
+
+### Precondition 8 closed early, because the suffix made it knowable
+
+`dashboard_domains` and `dashboard_url` said "fill in once the core project ID is known". Pinning
+the suffix makes that ID deterministic, so both are now real (`vetra-core-edc8ca.web.app`). **Still
+outstanding: the custom `app.<domain>` origin, once DNS is decided** — without it that origin gets
+the CORS failure, and the sign-in PAGE does not trigger it because it makes no API call, so nothing
+looks wrong until somebody signs in.
+
+### ⚠ PRECONDITION 6 IS A HARD GATE, AND IT IS THE OWNER'S
+
+`terraform console` refused to evaluate until `essential_contacts` was overridden:
+
+```
+Set either zero essential contacts (and know that Google's suspension, billing and
+security notices reach nobody) or at least TWO. Exactly one is the shape that already
+failed: attempt 1 had a single contact on a mailbox nobody read.
+```
+
+**The example still holds exactly ONE contact, so Phase 4 cannot even `plan` until a second is
+added.** This is enforced by a validation rule, not advisory, and it is deliberately not something a
+session can fix on the owner's behalf — it needs a real second person's address.
+
+### Gates
+
+`terraform fmt -check -recursive` **exit 0** · `terraform validate` **Success** · `npm test`
+**2377 / 127 unchanged**.
+
+### Still outstanding for Phase 4 — with the owner
+
+Preconditions **1** (enable the 19 `terraform_quota_apis` on the bootstrap project), **6** (second
+essential contact AND cofounder as Owner on billing), **4**, **5**, **7** and **9** are unchanged.
+Real credential values are needed in the session itself, because Secret Manager is in the
+dependency chain.
+
+---
+
 ## Attempt 2 — session log
 
 | # | Date | Branch | Did | Left for next |
