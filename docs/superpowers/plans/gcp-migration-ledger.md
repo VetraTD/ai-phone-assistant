@@ -3270,6 +3270,46 @@ needs a real Google account for the cofounder — an existing Gmail is instant a
 Identity on `vetratd.com` would make `@vetratd.com` real identities and give proper offboarding, and
 the migration path for an org that currently has NO directory has not been verified here.
 
+### PARTIAL FIX APPLIED 2026-08-28 — a second ACCOUNT, not yet a second PERSON
+
+**Asked whether Josh having the `vetratd@gmail.com` password counts. It does not, and the reason is
+the shape of what actually happened.** The failure mode is **the account being suspended**, not the
+person being unreachable — Google killed `admin@vetratd.com` and scoped it to the owner. A second
+person holding the password to a dead account has nothing. Two keyholders on one account is one
+account.
+
+It is also unattributable: every audit entry reads `vetratd@gmail.com` and no query can say which
+human acted. This estate is heading for ICO registration and a processor DPA, and `logging.tf` and
+migration 029 both exist to make "who did this" answerable — a shared login gives that back.
+
+So `nithinjd06@gmail.com` was granted instead, and **read back rather than assumed**:
+
+```
+roles/billing.admin                       user:nithinjd06@gmail.com   (+ vetratd@gmail.com)
+roles/resourcemanager.organizationAdmin   user:nithinjd06@gmail.com   (+ vetratd@gmail.com)
+```
+
+`organizationAdmin` is the break-glass half: it can set IAM on the org and its projects, so this
+account can restore any access `vetratd@gmail.com` loses. Project-level Owner is not granted because
+the projects do not exist yet — that is the Phase 4 half of precondition 6.
+
+**What this genuinely fixes:** losing `vetratd@gmail.com` — suspension, lockout, a forgotten
+recovery phone — no longer loses the estate.
+
+**What it does NOT fix, stated plainly so nobody reads this row as closed:**
+
+- It is **the same human**. Redundancy against account loss, not against the owner being
+  unavailable. The support rota is still one person (Gate E).
+- **Attempt 1's suspension was scoped to the OWNER** — *"detected for multiple projects you own"* —
+  and the cause was never disclosed. If Google's enforcement attaches to a person rather than an
+  account, a second account belonging to that same person **may not survive it either**. This
+  mitigation is therefore unproven against the precise event it is insuring against.
+- `iam.tf` manages only `google_organization_iam_member` for a service account, which is additive,
+  so these manual bindings will not drift and Terraform will not remove them. Equally, **Terraform
+  does not manage them, so nothing re-creates them** if they are ever removed by hand.
+
+**Precondition 6 stays OPEN.** It closes when a Google account belonging to Josh holds these roles.
+
 ### Gates
 
 `terraform fmt -check -recursive` **exit 0** · `terraform validate` **Success** · `npm test`
