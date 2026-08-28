@@ -8,12 +8,15 @@
 // It prints what it can recover, and the test asserts that is enough to run
 // the three things the status handler does: the summary, the missed-call
 // notification, and the spam tag.
-import { createFileStore } from "./fileCallStateStore.js";
+//
+// argv: <kind> <target> <callSid>
 import * as callState from "../../lib/callState.js";
+import { storeForKind } from "./callStateStoreForKind.mjs";
 
-const [, , storeFile, callSid] = process.argv;
+const [, , kind, target, callSid] = process.argv;
 
-callState.setStore(createFileStore(storeFile));
+const { store, close } = await storeForKind(kind, target);
+callState.setStore(store);
 
 // Proof this really is a cold process: local state for this call is empty.
 const local = callState.getState(callSid);
@@ -26,3 +29,5 @@ process.stdout.write(
     shared,
   })
 );
+
+await close();

@@ -1,25 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { fileURLToPath } from "url";
-import { createMemoryStore, sharedSlice, SHARED_FIELDS } from "../lib/callStateStore.js";
+import * as callState from "../lib/callState.js";
+import { createMemoryStore, sharedSlice } from "../lib/callStateStore.js";
+import { crossProcessCallStateSuite } from "./helpers/callStateCrossProcessSuite.js";
 
-// A4's gate: the status handler works on a DIFFERENT PROCESS.
+// The cross-process contract itself lives in helpers/callStateCrossProcessSuite.js
+// and is run twice: here against the file stand-in, and in
+// tests/db/callStatePgStore.test.js against two genuine Postgres pools. One
+// contract, two backends — a second copy written to match whatever the Postgres
+// store happens to do would prove nothing about the two being interchangeable,
+// which is the entire claim `CALL_STATE_STORE` makes.
 //
-// Two real OS processes, one file between them. Process A does what the live
-// session does at a call boundary; process B is a cold instance that has never
-// seen the call, which on Cloud Run is the ordinary case — /twilio/status is a
-// plain HTTP POST and the load balancer sends it wherever there is capacity.
-//
-// Two processes rather than two store handles in one, because the failure this
-// guards against is precisely the one a single-process test cannot see: state
-// that looks shared while it is really just the same Map.
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const WRITER = path.join(HERE, "helpers", "callStateWriter.mjs");
-const READER = path.join(HERE, "helpers", "callStateReader.mjs");
+// This half stays in the ROOT suite deliberately. It needs no container, and a
+// correctness gate that only runs when Docker is up is a gate that stops
+// running.
 
 let storeFile;
 
@@ -31,68 +27,79 @@ afterEach(() => {
   fs.rmSync(path.dirname(storeFile), { recursive: true, force: true });
 });
 
-function runWriter(callSid, payload) {
-  execFileSync(process.execPath, [WRITER, storeFile, callSid, JSON.stringify(payload)], { stdio: "pipe" });
-}
+crossProcessCallStateSuite({
+  label: "file store",
+  kind: "file",
+  target: () => storeFile,
+  readRaw: async (callSid) => {
+    const text = fs.readFileSync(storeFile, "utf8");
+    return { keys: Object.keys(JSON.parse(text)[callSid] ?? {}), text };
+  },
+});
 
-function runReader(callSid) {
-  const out = execFileSync(process.execPath, [READER, storeFile, callSid], { stdio: "pipe" }).toString();
-  return JSON.parse(out);
-}
+// ---------------------------------------------------------------------------
+// Write ordering, which only became a question once the store went async.
+//
+// Two boundary writers, neither aware of the other: the pickup write publishes
+// the whole slice (sawCallerFinal:false at that moment), and the latch
+// publishes sawCallerFinal:true on the caller's first utterance. Against a Map
+// they complete in issue order because they complete immediately. Against a
+// connection pool they do not, and pickup-lands-last puts the latch back to
+// false — which tags a short REAL call as spam, the exact failure the shared
+// store exists to prevent.
+// ---------------------------------------------------------------------------
+describe("writeShared ordering", () => {
+  /**
+   * A store that resolves its FIRST merge slowly and its second immediately —
+   * the reordering a pool produces, made deterministic.
+   */
+  function createReorderingStore() {
+    const values = new Map();
+    let n = 0;
+    return {
+      async get(sid) {
+        return values.get(sid) ?? null;
+      },
+      async merge(sid, patch) {
+        await new Promise((r) => setTimeout(r, n++ === 0 ? 40 : 0));
+        values.set(sid, { ...(values.get(sid) ?? {}), ...patch });
+      },
+      async delete(sid) {
+        values.delete(sid);
+      },
+    };
+  }
 
-describe("call state across two processes", () => {
-  it("a cold process recovers the call row and the tenant", () => {
-    runWriter("CA_cross_1", { dbCallId: "call-db-1", businessId: "biz-1", sawCallerFinal: true });
+  it("the latch survives a store that resolves writes out of order", async () => {
+    const store = createReorderingStore();
+    callState.setStore(store);
 
-    const { localHadNothing, shared } = runReader("CA_cross_1");
+    // Exactly what session.js does, in exactly that order.
+    callState.writeShared("CA_order", { dbCallId: "d", businessId: "b", sawCallerFinal: false });
+    callState.writeShared("CA_order", { sawCallerFinal: true });
 
-    // Without this the rest proves nothing: it confirms process B genuinely
-    // has no local state for the call and is reading the store.
-    expect(localHadNothing).toBe(true);
-    expect(shared).toEqual({ dbCallId: "call-db-1", businessId: "biz-1", sawCallerFinal: true });
+    await callState.flushShared("CA_order");
+    expect(await store.get("CA_order")).toEqual({ dbCallId: "d", businessId: "b", sawCallerFinal: true });
   });
 
-  // The three things /twilio/status does with what it recovers.
-  it("dbCallId survives — so the summary can be generated", () => {
-    runWriter("CA_cross_summary", { dbCallId: "call-db-2", businessId: "biz-2", sawCallerFinal: true });
-    expect(runReader("CA_cross_summary").shared.dbCallId).toBe("call-db-2");
+  // SABOTAGE. The same two writes with the queue bypassed — proof the assertion
+  // above is testing the queue and not the store. If this ever goes green, the
+  // test above has stopped meaning anything.
+  it("SABOTAGE: without the queue those same two writes lose the latch", async () => {
+    const store = createReorderingStore();
+
+    await Promise.all([
+      store.merge("CA_order_raw", { dbCallId: "d", businessId: "b", sawCallerFinal: false }),
+      store.merge("CA_order_raw", { sawCallerFinal: true }),
+    ]);
+
+    expect((await store.get("CA_order_raw")).sawCallerFinal).toBe(false);
   });
 
-  it("businessId survives — so the missed-call notification can be sent", () => {
-    runWriter("CA_cross_missed", { dbCallId: "call-db-3", businessId: "biz-3", sawCallerFinal: false });
-    expect(runReader("CA_cross_missed").shared.businessId).toBe("biz-3");
-  });
-
-  // The one that actually broke. sawCallerFinal is set live, in memory, the
-  // moment STT delivers a caller final — and the whole reason it exists is to
-  // beat the fire-and-forget transcript insert. If it does not cross the
-  // process boundary, a short real call reads as zero caller turns AND
-  // sawCallerFinal=false, and gets tagged spam.
-  it("sawCallerFinal survives — so a short real call is not tagged as spam", () => {
-    runWriter("CA_cross_spam", { dbCallId: "call-db-4", businessId: "biz-4", sawCallerFinal: true });
-    expect(runReader("CA_cross_spam").shared.sawCallerFinal).toBe(true);
-  });
-
-  it("a genuinely silent call still reads false, so spam detection still fires", () => {
-    runWriter("CA_cross_silent", { dbCallId: "call-db-5", businessId: "biz-5", sawCallerFinal: false });
-    expect(runReader("CA_cross_silent").shared.sawCallerFinal).toBe(false);
-  });
-
-  it("a call the writer never saw comes back empty rather than throwing", () => {
-    runWriter("CA_other", { dbCallId: "x", businessId: "y", sawCallerFinal: true });
-    expect(runReader("CA_never_happened").shared).toEqual({});
-  });
-
-  // The negative half, and the more important one: nothing unserialisable
-  // leaks into the store. The writer deliberately puts a fake WebSocket, an
-  // audio queue and a full conversation history on local state before writing.
-  it("writes nothing but the three shared fields — no socket, no audio, no history", () => {
-    runWriter("CA_cross_slice", { dbCallId: "call-db-6", businessId: "biz-6", sawCallerFinal: true });
-
-    const raw = fs.readFileSync(storeFile, "utf8");
-    expect(raw).not.toContain("websocket");
-    expect(raw).not.toContain("a whole conversation");
-    expect(Object.keys(JSON.parse(raw).CA_cross_slice).sort()).toEqual([...SHARED_FIELDS].sort());
+  afterEach(() => {
+    // Every other test in this file runs child processes and is unaffected, but
+    // leaving a fake store installed in this one would be a trap for the next.
+    callState.setStore(createMemoryStore());
   });
 });
 

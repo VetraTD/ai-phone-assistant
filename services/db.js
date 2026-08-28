@@ -101,6 +101,28 @@ export function isEnabled() {
 }
 
 /**
+ * The pool itself, for the one caller that needs to run its own SQL.
+ *
+ * Exported reluctantly and narrowly. `lib/callStateStore.js`'s Postgres store
+ * must not open a SECOND pool: `instances x DB_POOL_MAX` under the instance's
+ * `max_connections` is the binding capacity constraint on this system, and a
+ * store with its own pool would double the left-hand side of it for three
+ * scalars written at call boundaries. Sharing this one means shared call state
+ * costs zero additional connections.
+ *
+ * Not a general escape hatch. Anything that reads tenant data goes through
+ * `withTenant`, which is what sets `app.business_id` and makes row-level
+ * security apply — a raw pool connection is UNSCOPED, and `call_state` is
+ * usable this way only because it deliberately has no policy on it (it is read
+ * before the tenant is known; see database/038_call_state.sql).
+ *
+ * @returns {import("pg").Pool | null}
+ */
+export function getPool() {
+  return pool;
+}
+
+/**
  * Bring up the pool against Cloud SQL, if that is how this deployment connects.
  *
  * DATABASE_URL builds a pool synchronously at module load, which is why the

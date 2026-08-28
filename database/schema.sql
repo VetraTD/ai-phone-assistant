@@ -1112,3 +1112,137 @@ GRANT EXECUTE ON FUNCTION app_create_business_for_user(text, text, text, text) T
 -- is needed for it; the route simply has to open a scope. Recorded here so the
 -- next person does not add a third definer function for a read that does not
 -- need one.
+
+-- ============================================================
+-- Migration 038: shared call state, so `/twilio/status` works on a second instance
+-- ============================================================
+-- The full reasoning is in database/038_call_state.sql and is not repeated
+-- here. The short version, because a fresh install gets this file and not that
+-- one: `/twilio/status` is a plain HTTP POST, so on more than one instance it
+-- lands somewhere that never held the WebSocket. Without a shared store it
+-- reads empty state and silently produces no summary, no missed-call
+-- notification, and a spam tag on every short call where the caller did speak.
+--
+-- NO row-level security and NO grant to vetra_app, for the same reason as
+-- business_directory: this is read BEFORE the tenant is known, because it is
+-- how the tenant becomes known. Access is through the SECURITY DEFINER
+-- functions below, so the application role cannot enumerate the table.
+--
+-- The REVOKE is explicit because migration 029's ALTER DEFAULT PRIVILEGES
+-- grants every later table to vetra_app automatically.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS call_state (
+  call_sid         text PRIMARY KEY,
+  db_call_id       text,
+  business_id      text,
+  saw_caller_final boolean,
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS call_state_updated_at_idx ON call_state (updated_at);
+
+COMMENT ON TABLE call_state IS
+  'Cross-instance call-state slice: the three scalars /twilio/status reads. Deliberately has NO row-level security and is deliberately NOT granted to vetra_app — only the SECURITY DEFINER functions below reach it, because the status handler must read this BEFORE it knows the tenant. Written at call boundaries only, never per turn: that is what makes Postgres sufficient here instead of Memorystore. Must never carry anything beyond SHARED_FIELDS (lib/callStateStore.js), which app_call_state_merge enforces.';
+
+REVOKE ALL ON call_state FROM PUBLIC;
+REVOKE ALL ON call_state FROM vetra_app;
+
+CREATE OR REPLACE FUNCTION app_call_state_merge(p_call_sid text, p_patch jsonb)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  unknown_keys text;
+BEGIN
+  IF p_call_sid IS NULL OR btrim(p_call_sid) = '' THEN
+    RAISE EXCEPTION 'app_call_state_merge: call_sid is required';
+  END IF;
+
+  -- The design constraint, enforced. See section 1: this table is only free
+  -- because nothing in it is written per turn, and the way that stops being
+  -- true is a fourth field arriving quietly.
+  SELECT string_agg(k, ', ') INTO unknown_keys
+  FROM jsonb_object_keys(p_patch) AS k
+  WHERE k NOT IN ('dbCallId', 'businessId', 'sawCallerFinal');
+
+  IF unknown_keys IS NOT NULL THEN
+    RAISE EXCEPTION
+      'app_call_state_merge: refusing unknown shared field(s): %. The shared slice is dbCallId, businessId, sawCallerFinal and is written at call boundaries only — see database/038_call_state.sql', unknown_keys;
+  END IF;
+
+  INSERT INTO call_state AS cs (call_sid, db_call_id, business_id, saw_caller_final, updated_at)
+  VALUES (
+    p_call_sid,
+    p_patch ->> 'dbCallId',
+    p_patch ->> 'businessId',
+    (p_patch ->> 'sawCallerFinal')::boolean,
+    now()
+  )
+  ON CONFLICT (call_sid) DO UPDATE SET
+    db_call_id       = CASE WHEN p_patch ? 'dbCallId'       THEN EXCLUDED.db_call_id       ELSE cs.db_call_id       END,
+    business_id      = CASE WHEN p_patch ? 'businessId'     THEN EXCLUDED.business_id      ELSE cs.business_id      END,
+    saw_caller_final = CASE WHEN p_patch ? 'sawCallerFinal' THEN EXCLUDED.saw_caller_final ELSE cs.saw_caller_final END,
+    updated_at       = now();
+END;
+$$;
+
+COMMENT ON FUNCTION app_call_state_merge(text, jsonb) IS
+  'Merge the shared call-state slice. Absent key = leave alone; explicit null = set null. Raises on any key outside SHARED_FIELDS.';
+
+CREATE OR REPLACE FUNCTION app_call_state_get(p_call_sid text, p_ttl_seconds integer)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  result jsonb;
+BEGIN
+  SELECT jsonb_strip_nulls(jsonb_build_object(
+           'dbCallId', cs.db_call_id,
+           'businessId', cs.business_id,
+           'sawCallerFinal', cs.saw_caller_final
+         ))
+    INTO result
+    FROM call_state cs
+   WHERE cs.call_sid = p_call_sid
+     AND cs.updated_at > now() - make_interval(secs => p_ttl_seconds);
+
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_call_state_delete(p_call_sid text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  DELETE FROM call_state WHERE call_sid = p_call_sid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_call_state_prune(p_ttl_seconds integer)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  removed integer;
+BEGIN
+  DELETE FROM call_state
+   WHERE updated_at <= now() - make_interval(secs => p_ttl_seconds);
+  GET DIAGNOSTICS removed = ROW_COUNT;
+  RETURN removed;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION app_call_state_merge(text, jsonb)   TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_call_state_get(text, integer)   TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_call_state_delete(text)         TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_call_state_prune(integer)       TO vetra_app;

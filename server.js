@@ -1170,6 +1170,18 @@ if (process.env.NODE_ENV !== "test") {
   // A no-op unless CLOUD_SQL_INSTANCE is set.
   await db.initCloudSqlPool();
 
+  // AFTER the pool, because the Postgres store shares it rather than opening a
+  // second one — `instances x DB_POOL_MAX` under the instance's
+  // `max_connections` is the capacity constraint that binds this system, and
+  // call state must not move that number.
+  //
+  // Before the port opens, like everything else here: CALL_STATE_STORE=pg
+  // without a database throws, and it has to throw at boot. A process that
+  // starts with the wrong store answers calls flawlessly and loses the summary,
+  // the missed-call notification and the spam decision on every call whose
+  // status callback lands on another instance — with nothing in the logs.
+  callState.initCallStateStore({ pool: db.getPool() });
+
   // The covered lane's encryption control, verified against the live API
   // before the port opens rather than trusted from configuration.
   //
