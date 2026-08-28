@@ -37,9 +37,21 @@
 locals {
   # Only the lanes that actually run Google STT. The UK keeps Deepgram, so
   # provisioning a key ring there would cost money for a service that never
-  # calls it — and a key ring cannot be deleted, ever.
+  # calls it — and A KEY RING CANNOT BE DELETED, EVER.
+  #
+  # ⚠ THE `deployment_mode` TERM IS LOAD-BEARING AND IS NEW IN ATTEMPT 2.
+  # Google STT v2 exists here for ONE reason: a `hipaa` process may not hold a
+  # Deepgram credential, so the covered lane needed BAA-covered ears. Attempt 2
+  # runs `standard` everywhere (no GCP BAA, US healthcare closed on Twilio's
+  # $2,000/month), and a `standard` US lane transcribes with Deepgram like the
+  # UK does. Without this term, merely LIGHTING `us-prod` in var.active_stacks
+  # would provision a key ring, a rotating key and its IAM grants for a service
+  # that never calls Speech — and the key ring is the one resource in this
+  # module that is genuinely permanent. Terraform will remove one from state
+  # and report success, leaving a name that can never be used again.
   speech_stacks = {
-    for sk, sv in local.active_regional_stacks : sk => sv if sv.lane == "us"
+    for sk, sv in local.active_regional_stacks : sk => sv
+    if sv.lane == "us" && var.deployment_mode == "hipaa"
   }
 }
 

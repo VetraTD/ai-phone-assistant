@@ -60,8 +60,57 @@ variable "image_tag" {
   default     = "latest"
 }
 
+# ---------------------------------------------------------------------------
+# P2 — THE BUILD SHA. Cloud Run injects nothing; Railway injected it for free.
+#
+# `server.js` reports the running build on `GET /`:
+#
+#   const BUILD_SHA = process.env.RAILWAY_GIT_COMMIT_SHA
+#                  || process.env.GIT_COMMIT_SHA || null;
+#
+# RAILWAY INJECTS THE FIRST AND CLOUD RUN INJECTS NEITHER, so after cutover
+# every deployed service reports `Build: unknown` and "is my fix live?" goes
+# back to being inferred from feature fingerprints. That inference has already
+# been wrong once, and the recorded cost was a wasted test call spent against a
+# revision running previous code — the same failure `dashboard_image_tag`'s own
+# warning describes, arriving through a different door.
+#
+# So Terraform supplies it, on both services and on the migration job.
+# ---------------------------------------------------------------------------
+variable "git_commit_sha" {
+  description = <<-EOT
+    The commit the deployed images were built from, surfaced to the container as
+    `GIT_COMMIT_SHA`.
+
+    LEAVE IT EMPTY unless you have to. Empty means "use the image tag", and the
+    documented build command substitutes `_TAG=$(git rev-parse --short HEAD)`,
+    so the tag IS the commit under the normal workflow — and one value that
+    cannot drift beats two that can.
+
+    SET IT ONLY IF YOU TAG BY SOMETHING ELSE (`v1.4.2`, a build number). Then
+    this is the commit and the tag is the release name.
+
+    ⚠ IF YOU SET IT, IT IS NOW YOURS TO BUMP. A stale value here is worse than
+    no value at all: `Build: unknown` sends someone to check, while a confident
+    wrong SHA ends the investigation with the wrong answer. That is exactly the
+    failure this variable exists to stop, pointed the other way.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.git_commit_sha == "" || can(regex("^[0-9a-f]{7,40}$", var.git_commit_sha))
+    error_message = "git_commit_sha must be 7-40 lowercase hex characters (a git SHA), or empty to fall back to the image tag."
+  }
+}
+
 locals {
   voice_image = "${var.us_region}-docker.pkg.dev/${local.project_id_for_stack["shared"]}/${google_artifact_registry_repository.images.repository_id}/voice:${var.image_tag}"
+
+  # One resolved value per image, because the two images have independent
+  # lifecycles and therefore independent commits.
+  voice_build_sha     = var.git_commit_sha != "" ? var.git_commit_sha : var.image_tag
+  dashboard_build_sha = var.git_commit_sha != "" ? var.git_commit_sha : var.dashboard_image_tag
 
   # One migration job per database, because a job runs one `migrate.js` against
   # one connection. Merged staging with the UK toggle on would have two

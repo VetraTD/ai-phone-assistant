@@ -10,22 +10,41 @@
 # assumption about apply ordering.
 # ---------------------------------------------------------------------------
 
-# No downloadable service-account keys, anywhere in the organization.
+# ---------------------------------------------------------------------------
+# `iam.disableServiceAccountKeyCreation` IS NOT MANAGED HERE, AND THAT IS THE
+# DECISION. The control is ON; Terraform is not the thing holding it on.
 #
-# A JSON key is a long-lived credential that survives password changes, session
-# revocation and offboarding, and it is the single most common way cloud
-# credentials end up in a git repository. Workloads here use the metadata server
-# and Workload Identity instead, which is both safer and less work.
-resource "google_org_policy_policy" "disable_sa_key_creation" {
-  name   = "organizations/${var.org_id}/policies/iam.disableServiceAccountKeyCreation"
-  parent = "organizations/${var.org_id}"
-
-  spec {
-    rules {
-      enforce = "TRUE"
-    }
-  }
-}
+# Attempt 1 declared it, because attempt 1's org was created by hand and had
+# nothing set. Attempt 2's org was AUTO-PROVISIONED by Google at signup and
+# arrived with six secure-by-default managed policies already enforced, this
+# among them (probed 2026-08-28):
+#
+#   iam.disableServiceAccountKeyCreation
+#   iam.disableServiceAccountKeyUpload
+#   iam.automaticIamGrantsForDefaultServiceAccounts
+#   storage.uniformBucketLevelAccess
+#   compute.restrictProtocolForwardingCreationForTypes
+#   compute.setNewProjectDefaultToZonalDNSOnly
+#
+# Declaring a resource for a policy Google already set makes Terraform fight a
+# policy it did not create: an apply that reports a change where nothing
+# changed, and a `terraform destroy` that would REMOVE A SECURITY CONTROL
+# nobody in this repo turned on. Managing it would be strictly worse than
+# leaving it, and the reason for the control is unchanged — a JSON key is a
+# long-lived credential that survives password changes, session revocation and
+# offboarding, and it is the most common way cloud credentials reach a git
+# repository. Workloads here use the metadata server instead.
+#
+# THE OTHER FIVE ARE THE SAME CASE and are equally not declared. The two below
+# ARE declared because Google did NOT set them.
+#
+# ⚠ `storage.uniformBucketLevelAccess` IS ENFORCED, which is why every
+# google_storage_bucket in this module sets `uniform_bucket_level_access = true`
+# (loadbalancer.tf, shared.tf) and why no google_storage_bucket_acl or
+# google_storage_default_object_acl resource exists anywhere in it. An
+# ACL-based bucket is refused AT APPLY TIME, and `terraform plan` does not
+# evaluate org policy, so a clean plan says nothing about it.
+# ---------------------------------------------------------------------------
 
 # No default VPC on new projects.
 #
@@ -67,17 +86,24 @@ resource "google_org_policy_policy" "require_shielded_vm" {
 # bucket except somebody remembering. Here, creating a UK resource outside the
 # EU is an API rejection.
 #
-# THE MERGE COSTS EXACTLY THIS, IN ONE PLACE. `local.projects` derives a merged
-# project's allowed locations as the UNION of its stacks', so the staging
-# project — hosting both lanes — permits both continents and is therefore NOT
-# region-pinned. That is unavoidable: one project, one policy. It is why the
-# compensating-control table backs staging residency with a rule (probe/test
-# numbers only, no production Twilio credentials) rather than an enforcement,
-# and why `us-prod` and `uk-prod` are forbidden from ever sharing — a validation
-# on var.stack_projects, not a note.
+# ATTEMPT 2 GETS THIS FOR FREE, WHERE ATTEMPT 1 PAID FOR IT. Every project now
+# holds exactly one stack, so no project takes the UNION of two lanes'
+# locations, and the pin on `uk` is real rather than compensated for by a rule.
+# Attempt 1's merged staging project permitted both continents and its residency
+# was backed by a written rule (probe numbers only, no production Twilio
+# credentials) instead of an enforcement. That gap is closed by the shape.
 #
-# Restoring `uk-staging` to its own project restores the pin with no code change:
-# the union collapses back to one continent on its own.
+# It reopens the moment two stacks are pointed at one project in
+# var.stack_projects — `local.projects` unions their locations, which is the
+# only safe direction to combine them and is also strictly weaker. `us-prod`
+# and `uk-prod` are forbidden from ever sharing by a validation on that
+# variable, not by a note.
+#
+# ⚠ AND THE VALUE GROUPS DO NOT MEAN WHAT THEY LOOK LIKE. `in:eu-locations` is
+# Google's group for the EUROPEAN UNION and does NOT contain `europe-west2`,
+# because the UK left. `local.uk_locations` must stay
+# ["in:eu-locations", "in:europe-west2-locations"]. `terraform plan` DOES NOT
+# EVALUATE ORG POLICY, so the only way to catch this is to read it.
 # ---------------------------------------------------------------------------
 resource "google_org_policy_policy" "resource_locations" {
   for_each = local.projects

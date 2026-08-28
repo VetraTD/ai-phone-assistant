@@ -27,81 +27,81 @@
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# C-1 — UK resources behind a toggle. Default OFF.
+# C-1 — WHICH REGIONAL STACKS GET RESOURCES. Default: the UK only.
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# U1, 2026-08-25 — THIS WAS A BOOL TOO, AND `= true` PLANNED A DESTROY OF THE
-# STAGING DATABASE. Read this before changing it back.
+# ATTEMPT 2 REPLACED `enable_uk_resources` WITH THIS, AND THE REPLACEMENT IS NOT
+# COSMETIC. The old variable gated the UK lane and nothing else, because in
+# attempt 1 the US was live and the UK was the lane being held back. Attempt 2
+# inverts the polarity — the UK is the only market and `us-prod` is DARK — and
+# under a UK-only gate `us-prod` stayed unconditionally ACTIVE. The first apply
+# would have built a VPC, a Cloud SQL instance (~$98/month, more than the whole
+# budget) and a Google STT KMS key ring THAT CAN NEVER BE DELETED, for a lane
+# nobody is serving. A gate named after one lane stops being a gate the moment
+# the other lane is the one you want held back.
 #
-# As one bool it turned on BOTH UK stacks. `uk-staging` is merged into the
-# `us-staging` PROJECT by var.stack_projects, and network.tf composes the VPC's
-# `description` from the sorted list of ACTIVE stacks in the project. Adding
-# uk-staging rewrote that string:
+# ---------------------------------------------------------------------------
+# U1, 2026-08-25 — THIS WAS A BOOL, AND `= true` PLANNED A DESTROY OF A
+# DATABASE. The estate that happened on is gone; THE MECHANISM IS NOT, and it
+# is why this is a list of stack keys rather than a bool or a lane name.
+#
+# network.tf composes a VPC's `description` from the sorted list of ACTIVE
+# stacks in its project. Activating a second stack in an existing project
+# rewrote that string:
 #
 #   "Private network for us-staging. ..."
 #     -> "Private network for uk-staging, us-staging. ..."
 #
-# `description` on google_compute_network FORCES REPLACEMENT. The replacement
-# cascades down everything anchored to the network id:
+# `description` on google_compute_network FORCES REPLACEMENT, and the
+# replacement cascades down everything anchored to the network id:
 #
-#   google_compute_network.this["us-staging"]              must be replaced
-#     -> google_compute_global_address.private_services    must be replaced
-#     -> google_service_networking_connection.private_...  must be replaced
-#     -> google_sql_database_instance.this["us-staging"]   MUST BE REPLACED
+#   google_compute_network.this[...]                       must be replaced
+#     -> google_compute_global_address.private_services     must be replaced
+#     -> google_service_networking_connection.private_...   must be replaced
+#     -> google_sql_database_instance.this[...]             MUST BE REPLACED
 #
-# That last line is the only Cloud SQL instance in the estate: eight tenants,
-# migration head 037, the phi_access_log, and C7's evidence. Staging is not
-# production, so `deletion_protection` is false on it by design (it is keyed to
-# has_prod) — nothing would have stopped the apply. A ONE-WORD CHANGE TO A
-# DESCRIPTION STRING DESTROYS THE DATABASE.
+# A ONE-WORD CHANGE TO A DESCRIPTION STRING DESTROYS THE DATABASE UNDER IT.
 #
-# Two second-order reasons uk-staging is the wrong thing to want anyway, and
-# either alone is enough: its Cloud SQL DATABASE lands on the us-central1
-# instance, because an instance belongs to a project — UK rows in Iowa — and its
-# Cloud Run service would sit in europe-west2 reaching across regions to it.
-# `uk-prod` is the only shape in this module with EU residency.
-#
-# So this is now a LIST OF UK STACK KEYS. `["uk-prod"]` builds the UK lane and
-# does not touch the us-staging project at all: every UK resource is a create in
-# a project that is empty today.
+# Attempt 2 does not expose that trap TODAY, because every project holds exactly
+# one stack and adding the other lane creates a new project rather than
+# rewriting an existing VPC's description. IT COMES BACK the moment two stacks
+# are ever pointed at one project in var.stack_projects. Read a plan for
+# `google_compute_network ... must be replaced` before applying one, always.
 # ---------------------------------------------------------------------------
-variable "enable_uk_resources" {
+variable "active_stacks" {
   description = <<-EOT
-    Which UK STACKS get resources provisioned, by stack key (`uk-prod`,
-    `uk-staging`). Default `[]` — neither.
+    Which REGIONAL stacks get resources provisioned, by stack key (`uk-prod`,
+    `us-prod`). Default `["uk-prod"]` — the UK lane only.
 
-    THE PROJECTS ARE NOT AFFECTED. `vetra-uk-prod` is created either way — that
-    is settled and not reopened, because the project is the credential and
-    residency boundary and an empty project costs nothing. This toggle governs
-    what goes INSIDE it: VPC, subnet, peering range, runtime service account,
-    IAM, log sinks, and (via cloud_sql_plan / cloud_run_scaling) the database
-    and services B2 and B4 create.
+    THE PROJECTS ARE NOT AFFECTED. All three are created either way; that is
+    settled and not reopened, because a project is the credential and residency
+    boundary and an empty project costs nothing. This governs what goes INSIDE
+    them: VPC, subnet, peering range, runtime service account, IAM, secrets, and
+    (via cloud_sql_plan / cloud_run_scaling) the database and Cloud Run services.
 
-    ⚠ ADDING "uk-staging" PLANS A DESTROY OF THE STAGING CLOUD SQL INSTANCE.
-    See the comment above this variable for the chain; it is not obvious and it
-    is not recoverable by re-applying.
+    `us-prod` is DARK on purpose. The US lane is built and tested and provisioned
+    nowhere — there is no GCP BAA, Twilio's is $2,000/month, and US healthcare is
+    closed. Adding "us-prod" here is the one line that lights it, and it costs a
+    Cloud SQL instance from the moment it is applied.
 
-    Empty is the honest default. Provisioned naively the UK stack is
-    $150-250/month against a $300 trial credit that expires ~2026-11-18, and the
-    migration's own runway is the first thing it would eat. `["uk-prod"]` at
-    db-g1-small is ~$75-95/month, which is Lane U's decided shape.
-
-    Lane C's UK gates (C2 live call per region, C3 concurrency per region) need
-    a UK stack ON. The sequence is: name it here, apply, run the gates,
-    `terraform destroy` the UK resources, keep the state and the project. A
-    clinic signing is then an `apply`, not a project.
+    ⚠ NAMING BOTH LANES ROUGHLY DOUBLES THE BILL and buys nothing while the US
+    has no customers. The budget is ~$55-80/month for the whole estate.
   EOT
   type        = list(string)
-  default     = []
+  default     = ["uk-prod"]
 
   validation {
-    # An unknown key is a silent no-op — the filter in locals.tf simply never
-    # matches it — so `["uk_prod"]` would plan zero UK resources and read as
-    # "the UK stack already exists".
+    # An unknown key is a SILENT no-op — the filter in locals.tf simply never
+    # matches it — so `["uk_prod"]` would plan zero resources and read as "the
+    # UK stack already exists".
     condition = alltrue([
-      for k in var.enable_uk_resources : contains(["uk-prod", "uk-staging"], k)
+      for k in var.active_stacks : contains(["uk-prod", "us-prod"], k)
     ])
-    error_message = "enable_uk_resources must name UK stack keys: \"uk-prod\" and/or \"uk-staging\". An unknown key would be silently ignored."
+    error_message = "active_stacks must name regional stack keys: \"uk-prod\" and/or \"us-prod\". An unknown key would be silently ignored."
+  }
+
+  validation {
+    condition     = length(var.active_stacks) > 0
+    error_message = "active_stacks cannot be empty — with no regional stack active the module provisions three empty projects and nothing that answers a phone. If that is genuinely what you want, say so by commenting out the resources rather than by emptying this."
   }
 }
 
@@ -118,10 +118,31 @@ variable "enable_uk_resources" {
 # with the dashboard's settings page. Four warm services were being bought to
 # solve a problem exactly one of them has.
 #
-# `cpu_idle = false` is Cloud Run's "CPU always allocated". It pairs with
-# min_instances = 1: a warm instance with throttled CPU is not warm, because the
-# first request still waits for the CPU to be un-throttled. Buying one without
-# the other buys nothing.
+# ---------------------------------------------------------------------------
+# ⚠ `cpu_idle` IS THE BUDGET, AND ATTEMPT 2 REVERSES ATTEMPT 1'S ANSWER HERE.
+#
+# `cpu_idle = false` is Cloud Run's "CPU always allocated". Attempt 1 paired it
+# with min_instances = 1 on the reasoning that a warm instance with throttled
+# CPU is not warm, because the first request still waits for the CPU to be
+# un-throttled — buying one without the other buys nothing.
+#
+# The reasoning is sound and the price is not affordable. `min_instances = 1`
+# with `cpu_idle = false` is ~$70/month ON THAT LINE ALONE, against a whole-
+# estate budget of ~$55-80/month. It is not a line item; it IS the budget.
+#
+# SO: `min_instances = 1` with `cpu_idle = true`. The instance stays resident —
+# no container start, no Node boot, no module graph, no pool construction — and
+# what is given up is the CPU un-throttle on the first request after an idle
+# gap. That is a fraction of a cold start, not a cold start.
+#
+# WHAT THIS BUYS IS UNMEASURED AND MUST NOT BE WRITTEN DOWN AS MEASURED. The
+# only honest test is a live call after an idle period, watching the FIRST turn
+# rather than a steady-state p50 — the whole effect is on the first request and
+# a warm harness would average it away. Measured p50 today is 3,062 ms end to
+# end, so a several-hundred-millisecond regression on turn one is inside the
+# noise of every instrument currently pointed at this and would be invisible to
+# all of them. If turn one is audibly worse on a real call, the fix is one bool
+# and ~$70/month, and that is a decision to take with the recording in hand.
 # ---------------------------------------------------------------------------
 variable "cloud_run_services" {
   description = <<-EOT
@@ -351,7 +372,13 @@ locals {
         # C-2 is the `sv.env == "prod"` half; C-11 is the `cfg.warm_in_prod`
         # half. Both must be true to buy a warm instance.
         min_instances = (sv.env == "prod" && cfg.warm_in_prod) ? 1 : 0
-        cpu_idle      = !(sv.env == "prod" && cfg.warm_in_prod)
+
+        # ALWAYS TRUE. See the long note above this variable block: attempt 1
+        # set this to `false` alongside min_instances = 1, and that pairing is
+        # ~$70/month, which is the entire estate budget. Kept as a field rather
+        # than inlined into cloud-run.tf so reversing it after a live call is
+        # one line here and not a hunt through the service definition.
+        cpu_idle = true
 
         max_instances   = sv.env == "prod" ? var.cloud_run_max_instances.prod : var.cloud_run_max_instances.staging
         timeout_seconds = var.cloud_run_timeout_seconds

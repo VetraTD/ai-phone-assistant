@@ -63,28 +63,17 @@ variable "smtp_config" {
   default     = {}
 }
 
-variable "staging_caller_allowlist" {
-  description = <<-EOT
-    E.164 numbers permitted to call a STAGING voice service. Everyone else is
-    answered with "this number is not in service" and hung up on.
-
-    Empty by default, which refuses every caller. That is deliberate: staging
-    shares a Twilio account with production, and the cost of an over-restrictive
-    staging service is a tester adding their own number, while the cost of an
-    open one is a real patient's speech reaching an environment outside the
-    production retention and backup story.
-
-    Never set for production — the variable is only read on staging services,
-    and an allowlist in production would refuse real callers.
-  EOT
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for n in var.staging_caller_allowlist : can(regex("^\\+[1-9][0-9]{1,14}$", n))])
-    error_message = "Every entry must be E.164 (+ then 1-15 digits). Twilio delivers `From` in E.164, so anything else can never match and would produce an allowlist that admits nobody."
-  }
-}
+# ---------------------------------------------------------------------------
+# `staging_caller_allowlist` LIVED HERE AND IS GONE, along with the staging
+# stacks it gated. Recorded rather than silently deleted, because the control it
+# implemented is still the right one if a shared-account environment ever comes
+# back: a non-production voice service on the SAME Twilio account as the
+# production number must refuse every caller but a named test list, or a patient
+# misdialling by one digit reaches a build with no residency guarantee and no
+# production retention story. Attempt 2 has no such environment — staging is
+# local Docker Postgres, which no phone number points at — so the variable had
+# exactly one reader (`env == "staging"`) that can no longer be true.
+# ---------------------------------------------------------------------------
 
 variable "twilio_sms_from" {
   description = <<-EOT
@@ -254,10 +243,13 @@ resource "google_cloud_run_v2_service" "this" {
           cpu    = "1"
           memory = "1Gi"
         }
-        # `cpu_idle = false` is CPU always allocated, and it is paired with
-        # min_instances = 1 deliberately: a warm instance with throttled CPU is
-        # not warm, because the first request still waits for the CPU to be
-        # un-throttled. Buying one without the other buys nothing.
+        # ALWAYS `true` in attempt 2, and the reasoning is entirely in
+        # cost-controls.tf above `variable "cloud_run_services"`. Short
+        # version: `cpu_idle = false` alongside min_instances = 1 is ~$70/month
+        # on this line, against a whole-estate budget of ~$55-80. The instance
+        # still stays resident; what is given up is the CPU un-throttle on the
+        # first request after an idle gap, which is a fraction of a cold start
+        # and is UNMEASURED. Verify on a live call, on turn ONE, not on a p50.
         cpu_idle = each.value.cpu_idle
       }
 
@@ -276,6 +268,14 @@ resource "google_cloud_run_v2_service" "this" {
       env {
         name  = "BASE_URL"
         value = local.service_base_url[each.key]
+      }
+
+      # P2. Cloud Run injects no build metadata at all, so `GET /` would report
+      # `Build: unknown` on every deployed revision. See the long note above
+      # `variable "git_commit_sha"` in migrate-job.tf.
+      env {
+        name  = "GIT_COMMIT_SHA"
+        value = local.voice_build_sha
       }
 
       # No DATABASE_URL. The runtime connects through the Cloud SQL connector
@@ -298,34 +298,34 @@ resource "google_cloud_run_v2_service" "this" {
       }
 
       # -------------------------------------------------------------------
-      # The compliance tier. EVERY US STACK IS `hipaa` AGAIN, staging included.
+      # The compliance tier. `standard` EVERYWHERE, ON BOTH LANES.
       #
-      # It was not. The first staging deploy refused to boot on `hipaa`:
+      # ATTEMPT 1 SET THIS PER LANE — `us` was `hipaa`, `uk` was `standard` —
+      # and that whole branch is dead config describing a market this business
+      # is not in. THERE IS NO GCP BAA and there is not going to be one for
+      # this: Twilio's BAA is $2,000/month, which closes US healthcare on its
+      # own, and without Twilio covered the rest of the chain is moot.
       #
-      #   FATAL non_covered_credential_present: DEEPGRAM_API_KEY is set in a
-      #   DEPLOYMENT_MODE=hipaa process. Deepgram has no BAA.
+      # `DEPLOYMENT_MODE=hipaa` STAYS IN THE CODE AND IN THE TESTS AND IS
+      # DEPLOYED NOWHERE. That is deliberate and it is not dead weight: the
+      # covered-vendor guard, the credential-boundary refusal and the CMEK
+      # assertions are all still exercised by the suite, so the posture can be
+      # switched on later without rebuilding it. What is NOT paid for is
+      # running it — Google STT v2, CMEK-on-speech and a second speech vendor.
       #
-      # That was the guard working, and it was the ledger's UNASSIGNED WORK
-      # surfacing exactly where it said it would: the US lane had no
-      # BAA-covered speech-to-text. Staging was dropped to `standard` to get a
-      # service up at all, and the recorded cost was that staging stopped
-      # rehearsing the hipaa vendor guard.
+      # Both lanes therefore run the same stack: Deepgram + ElevenLabs + Vertex.
       #
-      # Google STT v2 now exists behind the sttStream.js seam, so the covered
-      # lane HAS ears and the Deepgram credential is no longer in a US project
-      # at all — `deepgram-api-key` is UK-only in secrets.tf. Nothing here waits
-      # on the Deepgram BAA any more; that answer would change the UK lane's
-      # options and nothing about this line.
-      #
-      # THIS FLIP IS THE MIGRATION'S OBJECTIVE PROOF. Staging ran `standard`
-      # ONLY because a hipaa process refused to boot with a Deepgram credential
-      # present. If a `hipaa` staging service boots and serves a call, the
-      # blocker is gone — and if it does not, no amount of passing tests says
-      # otherwise.
+      # ⚠ SETTING `deployment_mode = "hipaa"` IS NOT A ONE-LINE CHANGE, however
+      # much this looks like one. A hipaa process REFUSES TO BOOT with a
+      # Deepgram credential present (`checkCoveredVendors`), and secrets.tf
+      # still scopes `deepgram-api-key` and `elevenlabs-api-key` to the UK lane
+      # only — so flipping this while lighting `us-prod` produces a US service
+      # that either crash-loops or has no ears and no voice. See the parked
+      # finding in the Phase 2 ledger section.
       # -------------------------------------------------------------------
       env {
         name  = "DEPLOYMENT_MODE"
-        value = local.stacks[each.value.stack].lane == "us" ? "hipaa" : "standard"
+        value = var.deployment_mode
       }
 
       # A SINGLE region, never `global`. lib/voice/sttGoogle.js refuses `global`
@@ -368,33 +368,6 @@ resource "google_cloud_run_v2_service" "this" {
       env {
         name  = "GOOGLE_CLOUD_PROJECT"
         value = each.value.project
-      }
-
-      # -------------------------------------------------------------------
-      # The staging caller allowlist. THE COMPENSATING CONTROL FOR THE MERGE.
-      #
-      # The control table says staging must never take production Twilio
-      # credentials — "probe/test numbers only, backed by a boot-time refusal
-      # for any caller number outside the test allowlist". Staging is about to
-      # be handed the same Twilio ACCOUNT the production number lives on, so a
-      # patient misdialling by one digit could otherwise reach a staging build:
-      # the one environment whose residency cannot be enforced and whose
-      # database sits outside the production backup and retention story.
-      #
-      # Set on staging, UNSET in production. Absence means no restriction, and
-      # that direction matters — a control that fails closed in production would
-      # refuse real callers, which is the outage this exists to prevent causing.
-      #
-      # An empty list on staging is not a mistake either: it refuses everyone
-      # until somebody adds the tester's number, which is the correct default
-      # for an environment nobody should be dialling by accident.
-      # -------------------------------------------------------------------
-      dynamic "env" {
-        for_each = local.stacks[each.value.stack].env == "staging" ? [1] : []
-        content {
-          name  = "CALLER_ALLOWLIST"
-          value = join(",", var.staging_caller_allowlist)
-        }
       }
 
       # -------------------------------------------------------------------

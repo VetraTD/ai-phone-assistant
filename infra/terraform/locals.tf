@@ -1,18 +1,32 @@
 # ---------------------------------------------------------------------------
-# Stacks, and the projects they land in.
+# Stacks, and the projects they land in.  ATTEMPT 2 SHAPE — three of each.
 #
 # There are two levels here and keeping them straight is the whole file:
 #
-#   STACK    a logical unit — "the UK staging environment". Six of them, fixed
-#            by the design, described once below rather than six times.
+#   STACK    a logical unit — "the UK production environment". THREE of them:
+#            `uk-prod`, `us-prod`, `shared`.
 #
 #   PROJECT  a GCP billing, quota and IAM boundary. Derived from the stacks by
-#            `var.stack_projects`. Six of them when that map is the identity;
-#            four when two stacks are told to share.
+#            `var.stack_projects`. THREE of them: `uk`, `us`, `core`.
 #
-# They were 1:1 until the billing account's 5-linked-project cap forced two of
-# the no-PHI stacks to share. Deriving projects from stacks rather than writing
-# them out means the collapse and the restore are both a tfvars edit.
+# WHAT CHANGED FROM ATTEMPT 1, and why the old shape is not coming back:
+#
+#   * The STAGING stacks are GONE, not merged. There is no GCP staging estate
+#     any more — staging is local Docker PG16 (`npm run db:up`) plus production.
+#     A staging stack was ~$27/month of Cloud SQL to rehearse against, and the
+#     local database rehearses the same schema for nothing.
+#   * The LOGGING stack is GONE, folded into `core`. It only ever held sink
+#     destinations, and a fourth project to hold two log buckets is a project
+#     to pay attention to for no isolation gain — the org sink already cannot
+#     be deleted by a project admin, which was the actual control (logging.tf).
+#   * PROJECT KEYS ARE NO LONGER STACK KEYS. `uk-prod` lands in project `uk`,
+#     `shared` lands in project `core`. Project IDs are built from the PROJECT
+#     key (projects.tf), so this is what makes them `vetra-uk-<suffix>` rather
+#     than `vetra-uk-prod-<suffix>`. Nothing below may index `local.stacks`
+#     with a project key — see the `projects` derivation.
+#   * The 5-linked-project cap that forced attempt 1's 6 -> 4 collapse is gone:
+#     the billing account is PAID. Three projects is a design decision now, not
+#     a quota workaround.
 #
 # Projects are SIBLINGS under the organization. GCP has no such thing as a
 # sub-project; nesting is done with folders, which hold no resources.
@@ -25,11 +39,15 @@ locals {
   # an API rejection rather than a code review someone has to catch.
   #
   # ⚠ THE CONSTRAINT IS ENFORCED PER SERVICE, AND CLOUD LOGGING IS NOT ONE OF
-  # THEM. Two log buckets already sit in `europe-west2` inside `vetra-shared`,
-  # whose location set has never permitted it — so they were created despite the
-  # policy rather than because of it. Verified 2026-08-25 while chasing the
-  # Brexit finding below. So this is a real control with a coverage gap, and the
-  # gap is invisible: the services it does not cover fail open and silently.
+  # THEM. Measured on attempt 1's estate (2026-08-25, projects since deleted —
+  # the OBSERVATION survives, the estate does not): two Cloud Logging buckets
+  # sat in `europe-west2` inside a project whose location set had never
+  # permitted it, so they were created despite the policy rather than because
+  # of it. This is a real control with a coverage gap, and the gap is
+  # invisible: the services it does not cover fail open and SILENTLY.
+  #
+  # It matters again here, and in the safe direction: `core` holds a London log
+  # bucket (logging.tf) and its location set permits both continents anyway.
   # Do not read "the org policy enforces the two-region design" as universal.
   us_locations = ["in:us-locations"]
   eu_locations = ["in:eu-locations"]
@@ -54,9 +72,10 @@ locals {
   #
   # This blocked EVERY regional resource in the UK lane, not just the secret the
   # apply happened to reach first: Cloud SQL, Cloud Run, the KMS key ring and
-  # the subnet would each have been refused in turn. It has been latent since
-  # B0w wrote the org policies and was unreachable while
-  # `enable_uk_resources` was off.
+  # the subnet would each have been refused in turn. It was latent from the day
+  # the org policies were written and unreachable while the UK lane was gated
+  # off — so it surfaced on the FIRST apply that ever tried to build the UK,
+  # which in attempt 2 is the first apply that matters.
   #
   # THE CHOICE MADE, 2026-08-25, by the owner: keep London and widen the group,
   # rather than move the stack to europe-west1. Moving would have needed no
@@ -163,12 +182,8 @@ locals {
     "secretmanager.googleapis.com",
   ])
 
-  logging_apis = concat(local.common_apis, [
-    "storage.googleapis.com",
-  ])
-
   # -------------------------------------------------------------------------
-  # The six stacks.
+  # The three stacks. Two regional lanes plus the control plane.
   # -------------------------------------------------------------------------
   stacks = {
     us-prod = {
@@ -180,15 +195,6 @@ locals {
       apis      = local.regional_apis
       phi       = true
     }
-    us-staging = {
-      display   = "Vetra US Staging"
-      lane      = "us"
-      env       = "staging"
-      region    = var.us_region
-      locations = local.us_locations
-      apis      = local.regional_apis
-      phi       = false
-    }
     uk-prod = {
       display   = "Vetra UK Prod"
       lane      = "uk"
@@ -198,39 +204,26 @@ locals {
       apis      = local.regional_apis
       phi       = true
     }
-    uk-staging = {
-      display   = "Vetra UK Staging"
-      lane      = "uk"
-      env       = "staging"
-      region    = var.uk_region
-      locations = local.uk_locations
-      apis      = local.regional_apis
-      phi       = false
-    }
     shared = {
-      display = "Vetra Shared"
+      display = "Vetra Core"
       lane    = "shared"
       env     = "shared"
       region  = var.us_region
-      # Both continents. This stack holds Artifact Registry, Cloud Build and
-      # Identity Platform, and it serves BOTH regional stacks — a UK Cloud Run
-      # service pulling an image from a US registry is fine, because container
-      # images are not patient data. Constraining it to one continent would
-      # force a second registry for no safety gain.
+      # Both continents, for TWO reasons now that the logging stack is folded
+      # in here:
+      #
+      #   1. Artifact Registry, Cloud Build and Identity Platform serve BOTH
+      #      regional stacks — a UK Cloud Run service pulling an image from a
+      #      US registry is fine, because container images are not patient
+      #      data. Constraining it to one continent would force a second
+      #      registry for no safety gain.
+      #   2. It holds TWO regional sets of log buckets, not one. UK logs
+      #      landing in a US bucket would be a transfer, so the sinks are split
+      #      by origin and each destination bucket sits in its own region —
+      #      see logging.tf. Permitting only one continent here would refuse
+      #      the London bucket.
       locations = concat(local.us_locations, local.uk_locations)
       apis      = local.shared_apis
-      phi       = false
-    }
-    logging = {
-      display = "Vetra Logging"
-      lane    = "logging"
-      env     = "logging"
-      region  = var.us_region
-      # Both continents, deliberately, because this stack holds TWO regional
-      # sets of log buckets rather than one. UK logs landing in a US bucket
-      # would be a transfer, so the sinks are split by origin — see logging.tf.
-      locations = concat(local.us_locations, local.uk_locations)
-      apis      = local.logging_apis
       phi       = false
     }
   }
@@ -254,10 +247,18 @@ locals {
 
   projects = {
     for pk, members in local.stacks_in_project : pk => {
-      # A project named after a stack takes that stack's display name, unless
-      # overridden. A project hosting more than one stack should be overridden —
-      # see var.project_display_names.
-      display = lookup(var.project_display_names, pk, local.stacks[pk].display)
+      # ⚠ NOTHING IN THIS BLOCK MAY WRITE `local.stacks[pk]`.
+      #
+      # Until attempt 2 the project keys WERE stack keys, so `local.stacks[pk]`
+      # resolved and two attributes were read that way. They are not any more —
+      # `uk-prod` lives in project `uk`, `shared` lives in project `core` — and
+      # `local.stacks["core"]` does not exist. Every attribute here is derived
+      # from `members`, which is the set of stacks actually in this project.
+      #
+      # A project takes the display name of its sole stack unless overridden.
+      # A project hosting more than one stack SHOULD be overridden — see
+      # var.project_display_names, whose default names all three.
+      display = lookup(var.project_display_names, pk, local.stacks[members[0]].display)
 
       # `lane`/`env` become labels. A merged project genuinely has no single
       # value for either, and saying so is better than picking one: a console
@@ -265,7 +266,16 @@ locals {
       lane = length(members) == 1 ? local.stacks[members[0]].lane : "multi"
       env  = length(members) == 1 ? local.stacks[members[0]].env : "multi"
 
-      region    = local.stacks[pk].region
+      # `one()` rather than a first-stack-wins pick: it returns the single
+      # element of a one-element list and ERRORS on more than one. Today every
+      # project holds exactly one stack, so this is that stack's region. If a
+      # future merge ever puts two stacks with different regions in one
+      # project, this fails loudly at plan time instead of silently
+      # provisioning the Cloud SQL instance, the secrets and the Cloud Run
+      # services of one lane into the other lane's region — which is the exact
+      # "first-stack-wins shortcut" the block above warns against, and which a
+      # `members[0]` would have done quietly.
+      region    = one(distinct([for sk in members : local.stacks[sk].region]))
       locations = distinct(flatten([for sk in members : local.stacks[sk].locations]))
       apis      = distinct(flatten([for sk in members : local.stacks[sk].apis]))
       phi       = anytrue([for sk in members : local.stacks[sk].phi])
@@ -289,26 +299,34 @@ locals {
   }
 
   # -------------------------------------------------------------------------
-  # Regional stacks — the four that serve calls and hold a VPC. `shared` and
-  # `logging` have no network of their own.
+  # Regional stacks — the two that serve calls and hold a VPC. `shared` has no
+  # network of its own.
   #
   # `active_regional_stacks` is the same set minus anything C-1 has switched
-  # off. Everything that provisions per-stack infrastructure iterates over the
-  # ACTIVE set; everything that describes the design iterates over all four.
+  # off. Everything that PROVISIONS per-stack infrastructure iterates over the
+  # ACTIVE set; everything that DESCRIBES the design iterates over both.
   # -------------------------------------------------------------------------
   regional_stacks = {
     for k, v in local.stacks : k => v if contains(["us", "uk"], v.lane)
   }
 
-  # C-1, per UK STACK rather than per lane. `enable_uk_resources` is a list of
-  # stack keys precisely so `uk-prod` can be built without `uk-staging` — see
-  # the long note above the variable in cost-controls.tf. Naming uk-staging here
-  # adds a stack to the us-staging project, which rewrites that project's VPC
-  # description, which forces the network to be replaced, which replaces the
-  # Cloud SQL instance under it.
+  # ⚠ C-1 IS NOW SYMMETRIC, AND THE ASYMMETRY IT REPLACED WAS A LIVE COST BUG.
+  #
+  # This used to read `if v.lane != "uk" || contains(var.enable_uk_resources, k)`
+  # — a gate on the UK only, because in attempt 1 the US was the live lane and
+  # the UK was the one being held back. ATTEMPT 2 INVERTS THE POLARITY: the UK
+  # is the only live market and `us-prod` is DARK. Under the old expression
+  # `us-prod` was unconditionally active, so the first apply would have built
+  # the entire US lane for a market nobody is serving: a VPC, a Cloud SQL
+  # instance (~$98/month on its own — more than the whole budget), and a KMS
+  # key ring for Google STT that CANNOT EVER BE DELETED (speech.tf).
+  #
+  # `var.active_stacks` names the regional stacks to provision, in either lane.
+  # Lighting the US is one tfvars line, which is exactly what the plan promises,
+  # and holding a lane back no longer depends on which lane it happens to be.
   active_regional_stacks = {
     for k, v in local.regional_stacks : k => v
-    if v.lane != "uk" || contains(var.enable_uk_resources, k)
+    if contains(var.active_stacks, k)
   }
 
   # Distinct PROJECTS holding at least one active regional stack. Used for the

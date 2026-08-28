@@ -1,10 +1,20 @@
 variable "org_id" {
-  description = "GCP organization ID for vetratd.com. Numeric, not the domain."
+  description = <<-EOT
+    GCP organization ID. Numeric, not a domain.
+
+    ATTEMPT 2: `208508072539` (`vetratd-org`), which NOBODY CREATED — Google
+    auto-provisions an organization for a new account at signup, with six
+    secure-by-default policies already set on it. Probed 2026-08-28; the
+    account holds `roles/resourcemanager.organizationAdmin` on it.
+
+    This is not the attempt-1 org. `564252011558` and every project under it
+    were suspended on 2026-08-25 and are gone.
+  EOT
   type        = string
 
   validation {
     condition     = can(regex("^[0-9]{6,}$", var.org_id))
-    error_message = "org_id must be the numeric organization ID (e.g. 564252011558), not the domain name."
+    error_message = "org_id must be the numeric organization ID (e.g. 208508072539), not the domain name."
   }
 }
 
@@ -23,15 +33,22 @@ variable "bootstrap_project_id" {
     The project Terraform's own API calls are billed and quota'd against. It is
     NOT where resources land.
 
-    Today this is `vetra-shared`, which is where it was always going to end up:
-    the trial-signup project (`ultra-glyph-506120-v5`) was only ever a stand-in
-    for the window before the six projects existed, and that window has closed.
-    Pointing it at `shared` early removes the ordering trap in O3c, where
-    deleting the bootstrap project breaks every subsequent Terraform run.
+    ATTEMPT 2 ORDERING, and it is the reverse of where attempt 1 ended up:
+    NONE OF THE THREE PROJECTS EXIST YET, so the first apply cannot route its
+    own API calls through one of them. It points at the scratch project until
+    `core` exists, then moves — README, "After the first apply".
 
-    Whatever this points at needs each API Terraform calls through it ENABLED on
-    it — see the bootstrap section of the README. That failure reads as a
-    permissions problem and is not.
+    ⚠ WHATEVER THIS POINTS AT NEEDS EVERY API IN `local.terraform_quota_apis`
+    ENABLED ON IT, BEFORE THE FIRST APPLY. Not "the ones you think you need" —
+    the whole list. The failure is a 403 that NAMES THIS PROJECT and reads as a
+    permissions problem:
+
+      Cloud Resource Manager API has not been used in project ... or it is
+      disabled
+
+    Attempt 1 recorded this trap FIVE separate times, each time as a separate
+    failed apply dying on a different missing API, and it fired again on
+    2026-08-28. Enabling an API is free. See the README's bootstrap section.
   EOT
   type        = string
 }
@@ -66,69 +83,116 @@ variable "project_id_suffix" {
 }
 
 # ---------------------------------------------------------------------------
-# The stack -> project map. This is the 6/4 dial.
+# The stack -> project map.
 #
-# A STACK is a logical unit — "the UK staging environment". A PROJECT is a GCP
-# billing and IAM boundary. They were 1:1 until the billing account's 5-project
-# cap forced two of them to share, and the whole point of this variable is that
-# the collapse and the restore are a tfvars edit rather than a module rewrite.
+# A STACK is a logical unit — "the UK production environment". A PROJECT is a
+# GCP billing, quota and IAM boundary.
 #
-# The DEFAULT here is the six-project target, because that is the design. The
-# four-project reality is an override in terraform.tfvars, which is where a
-# temporary shape belongs — and deleting two lines from that file is the entire
-# restore.
+# ATTEMPT 2: THREE STACKS, THREE PROJECTS, AND THE KEYS ARE NO LONGER THE SAME
+# STRINGS. `uk-prod` lands in project `uk`, `us-prod` in `us`, `shared` in
+# `core`. Project IDs are built from the PROJECT key (projects.tf), so this map
+# is what makes them `vetra-uk-<suffix>` instead of `vetra-uk-prod-<suffix>`.
 #
-# What the merge is allowed to touch: only projects the spec already calls
-# "No PHI". `us-prod` and `uk-prod` never share with anything, ever. That
-# separation is the credential boundary — `voice-us` holds no ElevenLabs key —
-# and Cloud SQL instances and Identity Platform tenants cannot be moved between
-# projects afterwards, so a prod merge would be close to permanent.
+# In attempt 1 this variable was a DIAL: six stacks, and pointing two of them at
+# one project was the 6 -> 4 collapse the billing account's 5-linked-project cap
+# forced. THAT CAP IS GONE — the billing account is paid. What is left is the
+# indirection itself, which is still worth having: it is the seam that lets a
+# stack move between projects without a module rewrite, and it is the reason
+# `local.projects` derives a project's attributes as the UNION of its stacks.
+#
+# What a merge may NEVER touch: `us-prod` and `uk-prod`. A validation below
+# refuses it. That split is the credential boundary — a US project holds no
+# ElevenLabs key — and Cloud SQL instances and Identity Platform tenants cannot
+# be moved between projects afterwards, so it would be close to permanent.
 # ---------------------------------------------------------------------------
 variable "stack_projects" {
   description = <<-EOT
-    Which project each stack lives in. Keys are the six stacks; values are the
-    project each one is provisioned into.
+    Which project each stack lives in. Keys are the three stacks; values are the
+    project key each one is provisioned into.
 
-    Identity map = six projects. Point two stacks at one project and they share
-    it — that is the 6 -> 4 collapse, and reverting it is deleting the override.
-
-    Merging a stack does NOT delete the project it vacated. An unbilled project
-    costs nothing and does not consume the billing quota, so the vacated ones
-    are the restore path: relink, do not recreate.
+    The default is the attempt-2 estate and is meant to be used as-is. Point two
+    stacks at one project and they share it, with the sharing project taking the
+    UNION of their locations, APIs and PHI flag — never the intersection.
   EOT
   type        = map(string)
 
   default = {
-    us-prod    = "us-prod"
-    us-staging = "us-staging"
-    uk-prod    = "uk-prod"
-    uk-staging = "uk-staging"
-    shared     = "shared"
-    logging    = "logging"
+    uk-prod = "uk"
+    us-prod = "us"
+    shared  = "core"
   }
 
   validation {
     condition = length(setsubtract(
-      ["us-prod", "us-staging", "uk-prod", "uk-staging", "shared", "logging"],
+      ["uk-prod", "us-prod", "shared"],
       keys(var.stack_projects)
     )) == 0
-    error_message = "stack_projects must name all six stacks: us-prod, us-staging, uk-prod, uk-staging, shared, logging."
+    error_message = "stack_projects must name all three stacks: uk-prod, us-prod, shared."
   }
 
   validation {
-    condition     = alltrue([for v in values(var.stack_projects) : contains(keys(var.stack_projects), v)])
-    error_message = "Every stack must map to a project key that is itself one of the six stack keys — the project inherits that stack's ID and default display name."
+    condition = length(setsubtract(
+      keys(var.stack_projects),
+      ["uk-prod", "us-prod", "shared"]
+    )) == 0
+    error_message = "stack_projects may name ONLY uk-prod, us-prod and shared. A stack key with no entry in local.stacks fails later, deep inside a for-expression, with an error that names neither this variable nor the typo."
+  }
+
+  # Attempt 1 asserted here that every value must itself be a KEY of this map,
+  # because back then a project inherited its namesake stack's display name and
+  # region. It does not any more — `local.projects` derives both from the stacks
+  # actually in the project — so that assertion is void and would refuse the
+  # correct default. What still has to hold is that the value can be part of a
+  # project ID: `<prefix>-<value>-<suffix>` must be a legal, DNS-shaped name.
+  validation {
+    condition     = alltrue([for v in values(var.stack_projects) : can(regex("^[a-z][a-z0-9-]{0,20}[a-z0-9]$", v))])
+    error_message = "Every project key must be lowercase alphanumerics and hyphens, starting with a letter — it is spliced into the project ID as <prefix>-<key>-<suffix>, and a project ID is IMMUTABLE."
   }
 
   # The credential boundary, as a validation rather than a comment. A merge that
   # put a prod stack in a shared project would silently undo the one property
-  # the six-project split exists to make structural.
+  # the split exists to make structural.
   validation {
     condition = alltrue([
       for s in ["us-prod", "uk-prod"] :
       length([for k, v in var.stack_projects : k if v == var.stack_projects[s]]) == 1
     ])
-    error_message = "us-prod and uk-prod must each have a project to themselves. The prod split is the credential boundary — voice-us holding no ElevenLabs key — and Cloud SQL and Identity Platform cannot be moved between projects afterwards."
+    error_message = "us-prod and uk-prod must each have a project to themselves. The prod split is the credential boundary — a US project holding no ElevenLabs key — and Cloud SQL and Identity Platform cannot be moved between projects afterwards."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# The compliance tier the deployed services run in.
+# ---------------------------------------------------------------------------
+variable "deployment_mode" {
+  description = <<-EOT
+    `standard` or `hipaa`, passed to every voice service as `DEPLOYMENT_MODE`.
+
+    `standard` ON BOTH LANES, and that is the decision rather than a default
+    nobody revisited. There is NO GCP BAA. US healthcare is closed on Twilio's
+    $2,000/month BAA, which no amount of Google configuration reaches around,
+    so a covered US lane would be a compliance claim resting on an uncovered
+    telephony leg.
+
+    `hipaa` STAYS IN THE CODE AND IN THE TESTS AND IS DEPLOYED NOWHERE. The
+    covered-vendor guard, the credential boundary and the CMEK assertions are
+    all still exercised by the suite; what is not paid for is running them.
+
+    ⚠ THIS IS NOT A ONE-LINE FLIP, whatever the type suggests. Setting `hipaa`:
+      * makes the voice service REFUSE TO BOOT if a Deepgram credential is
+        present (`checkCoveredVendors`) — so the US lane needs Google STT v2,
+        which needs the CMEK key ring speech.tf provisions and the out-of-band
+        `npm run stt:cmek` PATCH that no Terraform resource can replace;
+      * leaves `elevenlabs-api-key` scoped UK-only in secrets.tf, so a covered
+        US service has no voice either.
+    Read the parked finding in the Phase 2 ledger section before trying it.
+  EOT
+  type        = string
+  default     = "standard"
+
+  validation {
+    condition     = contains(["standard", "hipaa"], var.deployment_mode)
+    error_message = "deployment_mode must be \"standard\" or \"hipaa\". lib/bootChecks.js accepts no other value and exits on one it does not recognise."
   }
 }
 
@@ -154,15 +218,23 @@ variable "project_deletion_policy" {
 
 variable "project_display_names" {
   description = <<-EOT
-    Display-name overrides, keyed by PROJECT (not stack). A project hosting two
-    stacks should say so — the console is where someone forms their mental model
-    of what is running, and "Vetra US Staging" quietly hides a UK stack.
+    Display names, keyed by PROJECT (not stack).
 
-    Unlike the project ID, the display name is mutable. Absent an entry, a
-    project takes the display name of the stack it is named after.
+    This stopped being an "override" in attempt 2 and became the primary source.
+    Project keys are no longer stack keys, so the fallback — the display name of
+    the project's sole stack — would name a project `uk` "Vetra UK Prod", which
+    is the old estate's vocabulary in the one place someone forms their mental
+    model of what is running. The default below names all three.
+
+    Unlike the project ID, the display name is MUTABLE, so getting it wrong is
+    cheap. Keep it that way: a project hosting more than one stack must say so.
   EOT
   type        = map(string)
-  default     = {}
+  default = {
+    uk   = "Vetra UK"
+    us   = "Vetra US (dark)"
+    core = "Vetra Core"
+  }
 }
 
 variable "adopt_existing_projects" {

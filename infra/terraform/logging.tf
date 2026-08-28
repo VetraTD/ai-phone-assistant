@@ -2,7 +2,7 @@
 # Logging: aggregated at the ORG node, split into two streams.
 #
 # ---------------------------------------------------------------------------
-# 1. Why the sinks moved to the organization
+# 1. Why the sinks are at the ORGANIZATION, and why attempt 2 KEPT THEM THERE
 # ---------------------------------------------------------------------------
 #
 # §164.312(b) asks for audit controls, and the answer to "who touched patient
@@ -12,15 +12,41 @@
 # trail, and nothing downstream can tell the difference between "no events" and
 # "no longer sending".
 #
-# That was already a weak point. The 6 -> 4 merge makes it a real one, because
-# the destination now lives in `vetra-shared`, alongside Cloud Build's deploy
-# credentials. Anything that compromises the build pipeline is one project-admin
-# step away from the trail that would record it.
-#
 # `google_logging_organization_sink` is created at the org node with
 # `include_children = true`. A project admin cannot delete it, cannot edit its
 # filter, and cannot exclude their own project from it. Only an Organization
-# Admin can, and that is one identity, audited separately.
+# Admin can, and that is one identity, audited separately. `include_children`
+# also captures a project created NEXT MONTH without anyone remembering to wire
+# it up — a property a per-project sink cannot have at all.
+#
+# ---------------------------------------------------------------------------
+# THE PHASE 2 DECISION, TAKEN ON THE MERITS AND WRITTEN DOWN: KEEP THE ORG SINK.
+# ---------------------------------------------------------------------------
+#
+# The attempt-2 plan carried an item reading "org sink becomes per-project sinks
+# into the core bucket". THAT ITEM WAS WRITTEN UNDER A FALSE PREMISE — it dates
+# from the days when attempt 2 was believed to have NO organization, and a sink
+# needs an org node to hang off. On 2026-08-28 a probe found Google had
+# AUTO-PROVISIONED one at signup (`vetratd-org`, `208508072539`, ACTIVE), and
+# the plan's own correction table lists "org-level log sinks" under "work as
+# originally designed". The premise is void, so the item is void with it.
+#
+# Converting anyway would have cost the entire control above and bought
+# nothing: per-project sinks are deletable by the very project admin the design
+# is defending against, they do not cover a project created later, and no
+# compensating control at the project level recovers either property. A weaker
+# control adopted to satisfy a superseded plan item is worse than no change at
+# all, because the plan would then read as satisfied.
+#
+# WHAT DID CHANGE is only the DESTINATION. The `logging` stack is gone, so the
+# buckets move to `shared` — which is now the `core` project. Three references,
+# all `local.project_id_for_stack["shared"]`, all below.
+#
+# WHAT THIS NEEDS AT APPLY TIME, and it is not a code change: creating a sink at
+# the org node requires `logging.sinks.create` ON THE ORG, which no default role
+# carries. iam.tf grants it and every sink below `depends_on` that grant.
+# Without it the first apply fails on all four sinks with a 403 that reads as a
+# broken configuration.
 #
 # ---------------------------------------------------------------------------
 # 2. Why two streams and not one — and why NOTHING here is Bucket-Locked
@@ -61,12 +87,24 @@
 # filter is its NEGATION, so a project nobody remembered to list is captured
 # rather than silently dropped.
 #
-# KNOWN CONSEQUENCE OF THE MERGE, recorded rather than hidden: `uk-staging`
-# shares a project with `us-staging`, and log routing can only see the project.
-# UK staging logs therefore land in the US bucket. That is acceptable only
-# because staging is barred from receiving production Twilio credentials and
-# real caller data at all — the same rule the residency story already rests on —
-# and it reverts the moment `uk-staging` gets its project back.
+# ATTEMPT 1 HAD A KNOWN LEAK HERE AND ATTEMPT 2 DOES NOT. Under the 6 -> 4
+# merge `uk-staging` shared a project with `us-staging`, and LOG ROUTING CAN
+# ONLY SEE THE PROJECT — so UK staging logs landed in the US bucket, backed by a
+# written rule rather than by the routing. Every project now holds exactly one
+# lane, so `eu_only_project_ids` below is exact and the split is enforced by the
+# filter instead of promised by a note.
+#
+# It comes back the instant two lanes share a project. The derivation guards
+# that direction correctly: a project is EU-only when ALL its stacks are UK, so
+# a mixed project falls to the US sink rather than being wrongly claimed as EU.
+#
+# NOTE WHAT THESE BUCKETS ARE. `google_logging_project_bucket_config` is a CLOUD
+# LOGGING bucket, NOT a GCS bucket — no `uniform_bucket_level_access` argument
+# exists on it, and the `storage.uniformBucketLevelAccess` org constraint does
+# not reach it. That constraint IS enforced org-wide and it applies to the two
+# real `google_storage_bucket` resources in this module (loadbalancer.tf spa,
+# shared.tf tfstate), both of which already set it. This file adds no GCS
+# bucket, so it needs nothing.
 # ---------------------------------------------------------------------------
 
 variable "audit_log_retention_days" {
@@ -213,15 +251,19 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Destinations. Log buckets in the logging project — which, under the merge, is
-# the shared project.
+# Destinations. Cloud Logging buckets in the `shared` stack — the `core`
+# project. There is no separate logging project any more: a fourth project to
+# hold two log buckets is one more thing to pay attention to for no isolation
+# gain, because the control that matters is the ORG sink a project admin cannot
+# touch, not which project the bytes land in.
 #
-# Note again: no `locked` argument. See the header.
+# Note again: NO `locked` ARGUMENT, on either stream. See the header — locking
+# is audit-only, later, owner-present, and deliberately not one `apply` away.
 # ---------------------------------------------------------------------------
 resource "google_logging_project_bucket_config" "sink_target" {
   for_each = local.sink_matrix
 
-  project        = local.project_id_for_stack["logging"]
+  project        = local.project_id_for_stack["shared"]
   location       = each.value.region
   bucket_id      = "vetra-${each.value.stream_key}-${each.value.region_key}"
   retention_days = each.value.stream.retention_days
@@ -247,7 +289,7 @@ resource "google_logging_organization_sink" "aggregated" {
 
   include_children = true
 
-  destination = "logging.googleapis.com/projects/${local.project_id_for_stack["logging"]}/locations/${each.value.region}/buckets/${google_logging_project_bucket_config.sink_target[each.key].bucket_id}"
+  destination = "logging.googleapis.com/projects/${local.project_id_for_stack["shared"]}/locations/${each.value.region}/buckets/${google_logging_project_bucket_config.sink_target[each.key].bucket_id}"
 
   # EU sinks take the named EU projects; US sinks take everything else. The
   # negation is deliberate — a new project defaults to being captured, which is
@@ -283,7 +325,7 @@ resource "google_logging_organization_sink" "aggregated" {
 resource "google_project_iam_member" "sink_writer" {
   for_each = local.sink_matrix
 
-  project = local.project_id_for_stack["logging"]
+  project = local.project_id_for_stack["shared"]
   role    = "roles/logging.bucketWriter"
   member  = google_logging_organization_sink.aggregated[each.key].writer_identity
 }

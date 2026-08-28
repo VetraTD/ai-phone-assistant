@@ -1,14 +1,17 @@
 # ---------------------------------------------------------------------------
 # Billing budgets. THE PRECONDITION FOR EVERYTHING THAT COSTS MONEY.
 #
-# The ledger states it plainly and it had not been done: "Set a billing budget
-# alert on 01C71E-7C0893-377AE9 before Lane B provisions anything. Free, two
-# minutes, and it is the only thing that reports a min-instances=1 nobody meant
-# to create while it quietly burns the credit. Sessions are being run
-# unattended; this is the guardrail for that."
+# The rule, which attempt 1 wrote down and then did not do until it nearly
+# mattered: set a billing budget alert on the billing account BEFORE anything
+# with a meter is provisioned. Free, two minutes, and it is the only thing that
+# reports a `min_instances = 1` nobody meant to create while it quietly burns
+# the credit. Sessions are run unattended; this is the guardrail for that.
 #
-# Everything applied so far has been free, so nothing was at risk. B2 is the
-# first thing with a meter, which makes this the last honest moment to add it.
+# ATTEMPT 2 RAISES THE STAKES RATHER THAN LOWERING THEM. The account is PAID
+# (01DB07-24C0F8-391DCC) — trial credit burns down first and then THE CARD TAKES
+# OVER. Attempt 1's worst case was an expired trial; this one's is a bill.
+# Everything before Cloud SQL is free, so the last honest moment to wire this is
+# the apply before the database exists.
 #
 # In Terraform rather than clicked into the console, for the same reason as the
 # org-level IAM grant: a threshold somebody set once in a browser is a number
@@ -39,11 +42,18 @@
 # break because somebody deleted a channel in another project.
 #
 # EVERY CLAUSE OF THAT WAS TRUE AND THE CONCLUSION WAS STILL WRONG, corrected
-# 2026-08-25. The billing account has exactly one principal —
-# `admin@vetratd.com` — and that is a mailbox the owner cannot read, because
-# vetratd.com mail runs on Microsoft 365 and nobody opens that box. So the
-# alarm has been firing into a void: not broken, just unheard, which is the
-# worse failure because nothing reports it.
+# 2026-08-25. The billing account had exactly one principal — `admin@vetratd.com`
+# — and that was a mailbox the owner could not read, because vetratd.com mail ran
+# on Microsoft 365 and nobody opened that box. So the alarm had been firing into
+# a void: not broken, just unheard, which is the worse failure because nothing
+# reports it.
+#
+# ⚠ THE SHAPE HAS NOT CHANGED IN ATTEMPT 2 AND IT IS THE SAME SINGLE POINT OF
+# FAILURE. `vetratd@gmail.com` is one principal on one mailbox, and there is no
+# second super-admin on this org — one suspended account is total loss, which is
+# exactly what happened on 2026-08-25. The mitigation is people, not Terraform:
+# add the cofounder to the billing account and to `essential_contacts`. The
+# module now REFUSES a single essential contact for this reason.
 #
 # It cannot be fixed by adding a person to the billing account either. Both
 # routes are closed, and each closure is a control working:

@@ -106,17 +106,27 @@ output "cloud_run_scaling" {
 output "cost_controls" {
   description = "The switches, in one place, so a plan can be read against the ledger's C-table without opening four files."
   value = {
-    c1_uk_stacks_enabled = var.enable_uk_resources
-    c2_staging_min_instances = min([
-      for k, v in local.cloud_run_scaling : v.min_instances if endswith(v.stack, "-staging")
-    ]...)
-    c3_call_state_store      = var.call_state_store
-    c4_staging_sql_instances = length([for pk, p in local.cloud_sql_plan : pk if !local.projects[pk].has_prod])
-    c5_high_availability     = var.cloud_sql_high_availability
-    c6_vpc_egress            = var.cloud_run_vpc_egress
-    c8_log_exclusions        = keys(var.log_exclusions)
-    c8_app_log_retention     = var.application_log_retention_days
-    c11_warm_services        = [for k, v in local.cloud_run_scaling : v.service if v.min_instances > 0]
+    c1_active_stacks = var.active_stacks
+
+    # C-2 WAS `min([... if endswith(v.stack, "-staging")]...)` AND IT WOULD NOW
+    # CRASH. With the staging stacks removed that list is empty, and `min()`
+    # with no arguments is an error, not zero — an output nobody reads taking
+    # down `terraform plan`. Replaced with the number the control actually
+    # asserts: how many warm instances are being bought.
+    c2_min_instances_total = sum(concat([0], [for k, v in local.cloud_run_scaling : v.min_instances]))
+
+    c3_call_state_store  = var.call_state_store
+    c4_sql_instances     = length(keys(local.cloud_sql_plan))
+    c5_high_availability = var.cloud_sql_high_availability
+    c6_vpc_egress        = var.cloud_run_vpc_egress
+    c8_log_exclusions    = keys(var.log_exclusions)
+    c8_app_log_retention = var.application_log_retention_days
+    c11_warm_services    = [for k, v in local.cloud_run_scaling : v.service if v.min_instances > 0]
+
+    # ~$70/month if this is ever false. See cost-controls.tf.
+    c11_cpu_always_allocated = [for k, v in local.cloud_run_scaling : v.service if !v.cpu_idle]
+
+    deployment_mode = var.deployment_mode
   }
 }
 

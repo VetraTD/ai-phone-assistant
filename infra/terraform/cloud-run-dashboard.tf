@@ -135,6 +135,16 @@ resource "google_cloud_run_v2_service" "dashboard" {
         value = "production"
       }
 
+      # P2, same reasoning as the voice service. Cloud Run injects no build
+      # metadata, so without this the dashboard reports `Build: unknown` too —
+      # and the dashboard image is the one that already cost three failed
+      # deploys running previous code behind a floating tag. See the note above
+      # `variable "git_commit_sha"` in migrate-job.tf.
+      env {
+        name  = "GIT_COMMIT_SHA"
+        value = local.dashboard_build_sha
+      }
+
       # -------------------------------------------------------------------
       # The database, through the Cloud SQL connector.
       #

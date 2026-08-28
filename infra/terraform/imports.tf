@@ -51,21 +51,17 @@ import {
 
 # Org-node policies. The import ID is the full policy resource name.
 #
-# Note there are three of these in org-policies.tf and they are separate
+# Note there are TWO of these in org-policies.tf and they are separate
 # resources rather than a for_each, so the mapping is written out. A
-# `for_each` over an import block cannot target three differently-named
-# addresses, and inventing a `local.org_policies` map purely to make it
-# possible would restructure working config for one adoption apply.
-import {
-  for_each = toset([
-    for c in var.adopt_existing_org_policies : c
-    if c == "iam.disableServiceAccountKeyCreation"
-  ])
-
-  to = google_org_policy_policy.disable_sa_key_creation
-  id = "organizations/${var.org_id}/policies/${each.value}"
-}
-
+# `for_each` over an import block cannot target differently-named addresses,
+# and inventing a `local.org_policies` map purely to make it possible would
+# restructure working config for one adoption apply.
+#
+# THERE WAS A THIRD, FOR `iam.disableServiceAccountKeyCreation`, AND IT IS GONE
+# WITH THE RESOURCE. Google already enforces that constraint on this org, so
+# the module does not declare it and there is nothing to adopt — see the note
+# at the top of org-policies.tf. Naming it in `adopt_existing_org_policies` is
+# now a silent no-op rather than an import.
 import {
   for_each = toset([
     for c in var.adopt_existing_org_policies : c
@@ -94,7 +90,7 @@ import {
 # file: Terraform errors on creating a contact that already exists, and a plan
 # that proposes creating one is a plan that dies. `contacts/0` is the id the API
 # assigned; read it back with
-#   gcloud essential-contacts list --organization=564252011558
+#   gcloud essential-contacts list --organization=<org id>
 # ---------------------------------------------------------------------------
 import {
   for_each = var.adopt_existing_contacts
@@ -106,7 +102,7 @@ import {
 variable "adopt_existing_contacts" {
   description = <<-EOT
     Map of contact EMAIL -> existing resource id (e.g.
-    "organizations/564252011558/contacts/0"), for contacts created outside
+    "organizations/<org id>/contacts/0"), for contacts created outside
     Terraform.
 
     BLANK THIS ONCE ADOPTED. Terraform errors on an import block targeting an

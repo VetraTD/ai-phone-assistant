@@ -18,42 +18,58 @@ terraform {
     }
   }
 
-  # State lives in the bucket this module creates (shared.tf). That sounds
-  # circular and is not: the FIRST apply runs on local state, creates the
-  # bucket, and then `terraform init -migrate-state` moves state into it.
+  # ---------------------------------------------------------------------------
+  # STATE. The backend block is COMMENTED OUT, and that is the correct state for
+  # a phase-4 first apply rather than an oversight.
   #
-  # DO THIS. B0a ran on local state, created six projects and three org
-  # policies, and the state file is gone — not on the workstation anywhere. The
-  # resources outlived Terraform's knowledge of them, and recovering that costs
-  # an adoption apply (imports.tf). With two founders it is doubly not optional:
-  # local state means only one machine can ever apply without clobbering the
-  # other's view.
+  # It cannot be otherwise: the state bucket is a resource THIS MODULE CREATES
+  # (shared.tf), so the first apply necessarily runs on LOCAL state, creates the
+  # bucket, and only then can `terraform init -migrate-state` move state into
+  # it. An active backend block naming a bucket that does not exist fails at
+  # `init`, before anything can create it.
   #
-  # LIVE since 2026-08-21, immediately after the adoption apply created the
-  # bucket. The local state file it was migrated from is now dead weight; do not
-  # resurrect it.
-  backend "gcs" {
-    bucket = "vetra-tfstate-c3a3bd"
-    prefix = "root"
-  }
+  # It named `vetra-tfstate-c3a3bd` until attempt 2. THAT BUCKET IS GONE with
+  # the rest of the attempt-1 estate, and so is the state in it. Attempt 2
+  # starts from a fresh bucket in `core`, with a fresh suffix.
+  #
+  # ⚠ DO THE MIGRATION. Do not leave it. B0a ran on local state, created six
+  # projects and three org policies, and the state file is gone — not on the
+  # workstation anywhere. The resources outlived Terraform's knowledge of them,
+  # and recovering that cost an adoption apply (imports.tf). With two founders
+  # it is doubly not optional: local state means only one machine can ever apply
+  # without clobbering the other's view.
+  #
+  # PHASE 4, after the first apply:
+  #   1. read `tfstate_bucket` from the outputs
+  #   2. uncomment the block below and paste the name in
+  #   3. terraform init -migrate-state
+  #
+  # backend "gcs" {
+  #   bucket = "vetra-tfstate-<suffix>"
+  #   prefix = "root"
+  # }
+  # ---------------------------------------------------------------------------
 }
 
 # `billing_project` is the project Terraform's own API calls are billed and
 # quota'd against — it is NOT where resources land.
 #
-# This now points at `vetra-shared`, not at the trial-signup project. The
-# bootstrap project was only ever a stand-in for the window before the six
-# projects existed, and that window closed when they were created. Repointing
-# early also defuses O3c's ordering trap, where deleting the bootstrap project
-# breaks every subsequent Terraform run — the README used to say "repoint before
-# deleting, not after", which is a rule someone has to remember at the exact
-# moment they are busy deleting something.
+# ⚠ IT MUST HAVE EVERY API IN `local.terraform_quota_apis` ENABLED ON IT BEFORE
+# THE FIRST APPLY, even though the resources land elsewhere entirely. Skipping
+# that fails with a 403 SERVICE_DISABLED that NAMES THIS PROJECT and reads like
+# a permissions problem:
 #
-# THE QUOTA PROJECT MUST HAVE EACH API ENABLED that Terraform calls through it,
-# even though the resources land elsewhere. `vetra-shared` had NOTHING enabled
-# and had to be bootstrapped by hand — see the README. Skipping that fails with
-# a 403 SERVICE_DISABLED naming this project, which reads like a permissions
-# problem and is not.
+#   Cloud Resource Manager API has not been used in project ... or it is
+#   disabled
+#
+# Attempt 1 recorded this trap FIVE times, each as a separate failed apply on a
+# different missing API, and it fired again on 2026-08-28. Enable the WHOLE
+# list in one go — see the README's bootstrap section. Enabling an API is free.
+#
+# ATTEMPT 2 ORDERING: none of the three projects exist at the first apply, so
+# this points at the scratch project, and moves to `core` afterwards. Repoint
+# BEFORE deleting anything, never after: Terraform routes every call through
+# this project, so deleting it first breaks every subsequent run.
 provider "google" {
   billing_project       = var.bootstrap_project_id
   user_project_override = true

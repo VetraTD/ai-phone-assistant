@@ -1,129 +1,185 @@
 # Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
 #
 # Everything here is an identifier, not a credential — none of it grants access
-# on its own. It is gitignored anyway, because this repository is public and
+# on its own. It is gitignored anyway, because this repository is PUBLIC and
 # there is no reason to publish a map of the account.
+#
+# ---------------------------------------------------------------------------
+# THIS FILE DESCRIBES ATTEMPT 2'S ESTATE. THREE PROJECTS, UK-FIRST.
+# ---------------------------------------------------------------------------
+# Attempt 1's estate — org 564252011558, billing 01C71E-7C0893-377AE9, every
+# `*-c3a3bd` project — was SUSPENDED BY GOOGLE ON 2026-08-25 for an AUP
+# violation scoped to the owner, cause never disclosed, and is gone. If you find
+# a `c3a3bd` anywhere, it is stale and it points at nothing.
+#
+# The local `terraform.tfvars`, `terraform.tfstate` and ~20 `.tfplan` files in
+# this directory are attempt-1 residue. DO NOT REUSE THEM. Phase 4 starts from a
+# fresh state bucket and a fresh project suffix.
+# ---------------------------------------------------------------------------
 
-# vetratd.com. Numeric, not the domain. Confirm with:
-#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud organizations list
-org_id = "564252011558"
-
+# `vetratd-org`, which NOBODY CREATED — Google auto-provisions an organization
+# for a new account at signup. Probed 2026-08-28; ACTIVE, no directoryCustomerId
+# (so it is NOT Cloud Identity / Workspace), and the owning account holds
+# `roles/resourcemanager.organizationAdmin` on it.
+#
 # Confirm with:
-#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud billing accounts list
-billing_account = "01C71E-7C0893-377AE9"
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud organizations list
+org_id = "208508072539"
 
+# PAID, not a trial (upgraded 2026-08-28 — trial credit burns down first, then
+# the card takes over). That upgrade removes two things at once: the trial-expiry
+# suspension event, and the 5-LINKED-PROJECT CAP that forced attempt 1's 6 -> 4
+# collapse. Three projects is a design decision now, not a quota workaround.
+#
+# Confirm with:
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud billing accounts list
+billing_account = "01DB07-24C0F8-391DCC"
+
+# ---------------------------------------------------------------------------
+# bootstrap_project_id — THE QUOTA PROJECT, AND THE TRAP THAT FIRED SIX TIMES
+# ---------------------------------------------------------------------------
 # The project Terraform routes its own API calls through for quota and billing.
+# It is NOT where resources land.
 #
-# This is `vetra-shared`, NOT the trial-signup project. The signup project was a
-# stand-in for the window before the six projects existed; that window closed.
-# Pointing here also removes O3c's trap, where deleting the signup project
-# breaks every future Terraform run.
+# ⚠ EVERY API IN `local.terraform_quota_apis` (locals.tf) MUST BE ENABLED ON IT
+# BEFORE THE FIRST APPLY. Not the ones you think you need — the whole list, in
+# one `gcloud services enable`. The failure is a 403 that NAMES THIS PROJECT and
+# reads as a permissions problem:
 #
-# IT NEEDS THE APIS ENABLED ON IT. See the README's bootstrap section — a fresh
-# project has none, and the failure reads as a permissions problem.
-bootstrap_project_id = "vetra-shared-c3a3bd"
-
-# Project IDs are IMMUTABLE and carry this suffix. It used to be a random value
-# that existed only in Terraform state — and when B0a's state was lost, the
-# config could no longer name its own projects. Pin it.
-project_id_suffix = "c3a3bd"
+#   Cloud Resource Manager API has not been used in project ... or it is disabled
+#
+# Attempt 1 recorded this five separate times, each a different failed apply
+# dying on a different missing API, and it fired AGAIN on 2026-08-28. The README
+# bootstrap section has the command. Enabling an API is free.
+#
+# ORDERING, and it is the reverse of where attempt 1 ended up: none of the three
+# projects exist at the first apply, so this points at the SCRATCH project
+# (Google's auto-created "My First Project", already parented to the org and
+# kept deliberately as a probe target). After the first apply, repoint it at
+# `core` — BEFORE deleting anything, never after, because Terraform routes every
+# call through it.
+bootstrap_project_id = "project-b147bdfa-d267-426a-8c7"
 
 # ---------------------------------------------------------------------------
-# THE 6 -> 4 COLLAPSE. This block is the whole thing.
-#
-# The billing account caps at 5 linked projects and the trial-signup project
-# holds one, leaving 4. Rather than defer the UK stack or buy support, two
-# stacks the spec already calls "No PHI" were merged into projects that exist:
-#
-#   uk-staging -> us-staging   one staging project, both regions
-#   logging    -> shared       log sinks land in the shared project
-#
-# `vetra-uk-staging-c3a3bd` and `vetra-logging-c3a3bd` STILL EXIST, UNBILLED.
-# Do not delete them. An unbilled project costs nothing and does not touch the
-# billing quota, so they are the restore path: relink, do not recreate.
-#
-# THE RESTORE IS DELETING TWO LINES FROM THIS BLOCK. When a slot frees — the
-# quota is granted, or the signup project is deleted per O2e — take `logging`
-# out first (sink configuration only, cheapest), then `uk-staging`.
-#
-# Omit the block entirely and the module's default is the six-project target.
-#
-# What the merge may NEVER touch: `us-prod` and `uk-prod`. A validation on this
-# variable refuses it. That split is the credential boundary — `voice-us` holds
-# no ElevenLabs key — and Cloud SQL instances and Identity Platform tenants
-# cannot be moved between projects afterwards, so it would be close to
-# permanent.
+# project_id_suffix — PIN IT BEFORE THE FIRST APPLY, NOT AFTER
 # ---------------------------------------------------------------------------
+# Project IDs are IMMUTABLE and carry this suffix: `vetra-<key>-<suffix>`.
+#
+# It used to be a `random_id` that existed only in Terraform state — and when
+# B0a's state was lost, THE CONFIG COULD NO LONGER NAME ITS OWN PROJECTS. Leave
+# this empty and a fresh suffix is generated on the first apply, which is
+# correct exactly once and a liability from then on.
+#
+# Phase 4: pick one, write it here, and write it in the ledger, BEFORE the apply
+# that creates the projects. The example below is a placeholder and is not real.
+project_id_suffix = "REPLACE"
+
+# ---------------------------------------------------------------------------
+# THE ESTATE. THREE STACKS, THREE PROJECTS.
+# ---------------------------------------------------------------------------
+# A STACK is a logical unit; a PROJECT is a GCP billing, quota and IAM boundary.
+# Attempt 2 keeps them 1:1 and the KEYS ARE DIFFERENT STRINGS on purpose —
+# project IDs are built from the PROJECT key, so this is what makes them
+# `vetra-uk-<suffix>` rather than `vetra-uk-prod-<suffix>`.
+#
+#   uk-prod -> uk     europe-west2 (London). THE ONLY LIVE STACK.
+#   us-prod -> us     us-central1. DARK — built, tested, provisioned nowhere.
+#   shared  -> core   control plane: registry, build, Identity Platform, logs.
+#
+# STAGING AND LOGGING STACKS ARE REMOVED, NOT MERGED. Staging is local Docker
+# PG16 (`npm run db:up`) plus production; a GCP staging stack was ~$27/month of
+# Cloud SQL to rehearse a schema the local database rehearses for nothing. The
+# logging stack held two log buckets and is folded into `core`, because the
+# control that matters is the ORG sink no project admin can delete (logging.tf),
+# not which project the bytes land in.
+#
+# The module's default IS this map, so the block is here to be read rather than
+# because it has to be set. Omit it and you get the same thing.
 stack_projects = {
-  us-prod    = "us-prod"
-  us-staging = "us-staging"
-  uk-prod    = "uk-prod"
-  uk-staging = "us-staging" # MERGED — restore by deleting this line's override
-  shared     = "shared"
-  logging    = "shared"     # MERGED — restore this one FIRST
+  uk-prod = "uk"
+  us-prod = "us"
+  shared  = "core"
 }
 
-# A merged project should say so in the console. Matches the display name the
-# project already carries.
-project_display_names = {
-  us-staging = "Vetra Staging - US and UK"
-  shared     = "Vetra Shared - Log Sinks"
-}
+# The module defaults these to "Vetra UK" / "Vetra US (dark)" / "Vetra Core".
+# Override only if the console should say something else.
+# project_display_names = {
+#   uk   = "Vetra UK"
+#   us   = "Vetra US (dark)"
+#   core = "Vetra Core"
+# }
 
 # ---------------------------------------------------------------------------
-# ADOPTION — DONE 2026-08-21. Both emptied, and they stay empty.
+# ADOPTION — EMPTY, AND FOR ATTEMPT 2 THEY SHOULD STAY EMPTY.
+# ---------------------------------------------------------------------------
+# These exist because B0a applied partially and lost its local state, leaving
+# real projects Terraform did not know about. Attempt 2 creates everything from
+# nothing, so there is nothing to adopt.
 #
-# B0a applied partially and its local state was lost. The four projects and
-# three org policies were adopted back with import blocks rather than recreated,
-# and that apply has succeeded — `terraform plan` now reports no changes.
+# ⚠ DO NOT HAND-CREATE THE THREE PROJECTS. That is precisely how attempt 1 ended
+# up in import-block adoption. Terraform creates them in Phase 4.
 #
 # Left in place, empty, because the next state loss is cheaper for the mechanism
 # already being here: refill them, plan, apply. See imports.tf.
-# ---------------------------------------------------------------------------
-adopt_existing_projects = {}   # EMPTIED 2026-08-21 after the adoption apply
+adopt_existing_projects = {}
 
-adopt_existing_org_policies = []  # EMPTIED 2026-08-21 after the adoption apply
+# `iam.disableServiceAccountKeyCreation` IS NO LONGER ADOPTABLE — Google already
+# enforces it on this org, so the module does not declare it and naming it here
+# is a silent no-op. See the note at the top of org-policies.tf.
+adopt_existing_org_policies = []
 
 # ---------------------------------------------------------------------------
 # Cost controls. See cost-controls.tf for the reasoning behind each default;
 # these are the ones worth stating explicitly because the value IS the decision.
 # ---------------------------------------------------------------------------
 
-# C-1. WHICH UK stacks get resources, by STACK key. Default [] — neither.
-# The projects exist either way; this governs what goes inside them.
+# C-1. WHICH REGIONAL STACKS GET RESOURCES. The projects are created either way;
+# this governs what goes INSIDE them — VPC, Cloud SQL, Cloud Run, secrets, IAM.
 #
-# ⚠ DO NOT ADD "uk-staging" CASUALLY. It is merged into the `us-staging`
-# project, so activating it rewrites that project's VPC description, which
-# FORCES THE NETWORK TO BE REPLACED, which cascades into replacing the staging
-# Cloud SQL instance. Staging carries no deletion protection. See the note above
-# the variable in cost-controls.tf. Its database would also live on the
-# us-central1 instance, so it buys no EU residency either.
+# ⚠ ADDING "us-prod" IS THE ONE LINE THAT LIGHTS THE US LANE, and it costs a
+# Cloud SQL instance (~$98/month, more than the whole estate budget) plus a VPC
+# from the moment it is applied. There is no GCP BAA and US healthcare is closed
+# on Twilio's $2,000/month BAA, so there is nothing to serve there yet.
 #
-# enable_uk_resources = ["uk-prod"]
-enable_uk_resources = []
+# This replaced `enable_uk_resources`, which gated the UK only — under that
+# variable `us-prod` was unconditionally active, which is backwards now that the
+# UK is the live market.
+active_stacks = ["uk-prod"]
+
+# The compliance tier passed to every voice service as DEPLOYMENT_MODE.
+#
+# `standard` on BOTH lanes. `hipaa` stays in the code and in the tests and is
+# deployed NOWHERE — see the long note above the variable in variables.tf, and
+# read the parked finding in the ledger before changing it. It is not the
+# one-line flip it looks like.
+deployment_mode = "standard"
 
 # C-12. WHICH production projects get a Cloud SQL instance, by PROJECT key —
-# `us-prod`, `uk-prod`. Default `[]` (none), which is what defers ~$98.62/month
-# per instance until there is traffic or a dump to restore.
+# now `uk`, `us`. Default `[]` (none), which defers ~$98.62/month per instance
+# until there is traffic or a dump to restore.
 #
 # It is a LIST, not a bool, precisely so naming one lane does not build the
 # other's database as well. An unknown key is REFUSED at plan time rather than
 # silently ignored — see the validations in sql.tf.
 #
-# enable_prod_databases = ["uk-prod"]
+# enable_prod_databases = ["uk"]
 
 # C-5. Regional roughly doubles the instance cost, and HA is not a HIPAA
 # requirement — §164.308(a)(7) is satisfied by PITR + backups + C7's restore
 # test. Buy it when downtime costs more than the second instance.
 cloud_sql_high_availability = false
 
-# Machine tier, keyed by ENVIRONMENT and NOT by stack. Defaults are
-# prod = "db-custom-2-7680" ($98.62/mo) and staging = "db-g1-small" (~$27/mo).
+# Machine tier, keyed by ENVIRONMENT. Defaults are prod = "db-custom-2-7680"
+# ($98.62/mo) and staging = "db-g1-small" (~$27/mo).
 #
-# ⚠ Lowering `prod` for a pilot lowers it for EVERY production project,
-# including one built later. Raise it in the same edit that adds a second
-# project to enable_prod_databases, or real production inherits a pilot's tier.
-# Resizing Cloud SQL is a restart, not a migration.
+# ⚠ THE `staging` KEY IS NOW UNREACHABLE — every stack is prod, so `has_prod` is
+# always true. It is kept so restoring a non-prod stack does not need a type
+# change, and it is dead config today. Do not read it as describing anything
+# that exists.
+#
+# ⚠ Lowering `prod` for a pilot lowers it for EVERY production project. Raise it
+# in the same edit that adds a second project to enable_prod_databases, or real
+# production inherits a pilot's tier. Resizing Cloud SQL is a restart.
 #
 # cloud_sql_tier = {
 #   prod    = "db-g1-small"
@@ -131,7 +187,8 @@ cloud_sql_high_availability = false
 # }
 
 # C-3. Postgres, not Memorystore. The shared call-state slice is three scalars
-# written at call boundaries with zero per-turn reads.
+# written at call boundaries with zero per-turn reads, which is not worth
+# $70-100/month of Memorystore.
 call_state_store = "postgres"
 
 # C-6. Never a Serverless VPC Access connector — those are real VMs at ~$30-40
@@ -141,47 +198,50 @@ cloud_run_vpc_egress = "direct"
 # ---------------------------------------------------------------------------
 # Principals.
 # ---------------------------------------------------------------------------
-
-# Full access to every project, including the ones that hold PHI.
+# ⚠ `admin@vetratd.com` IS SUSPENDED AND IS NOT COMING BACK. Do not put it here.
+#
+# ⚠ AND DO NOT LEAVE THIS AS ONE ACCOUNT. There is no second super-admin on this
+# org, so one suspended Gmail is total loss — which is not hypothetical, it is
+# what happened on 2026-08-25. ADD THE COFOUNDER AS OWNER ON ALL THREE PROJECTS
+# AND ON THE BILLING ACCOUNT ON DAY 0.
 owner_principals = [
-  "user:admin@vetratd.com",
+  "user:vetratd@gmail.com",
 ]
 
-# Access to the shared project ONLY — Artifact Registry and Cloud Build. Never
-# to a project that can hold patient data.
+# Access to the `core` project ONLY — Artifact Registry and Cloud Build. Never
+# to a project that can hold caller data.
 #
-# Empty today: the cofounder does not access Google Cloud (ledger O20). If that
-# changes, add them HERE rather than sharing admin@vetratd.com — shared
-# credentials make audit logs unattributable and fail §164.312(a)(2)(i) and
-# §164.312(b) at the same time.
+# If the cofounder needs CI access, add them HERE rather than sharing one login:
+# shared credentials make audit logs unattributable and fail §164.312(a)(2)(i)
+# and §164.312(b) at the same time.
 shared_only_principals = []
 
 # us_region = "us-central1"
 
-# London. Worth setting EXPLICITLY once the UK lane is built rather than
-# leaving it to the default: this value becomes the Cloud SQL region, the Cloud
-# Run region and the Secret Manager replica location, and a default nobody has
-# read is a poor place for a data-residency claim to live.
-# uk_region = "europe-west2"
+# London. Worth setting EXPLICITLY rather than leaving to the default: this
+# value becomes the Cloud SQL region, the Cloud Run region, the backup location
+# and the Secret Manager replica location, and a default nobody has read is a
+# poor place for a data-residency claim to live.
+uk_region = "europe-west2"
 
 # ---------------------------------------------------------------------------
 # Essential Contacts — who Google tells when something is wrong.
+# ---------------------------------------------------------------------------
+# THIS WAS EMPTY UNTIL A SUSPENSION. Google said the 2026-08-25 suspension was
+# for REPEATED violations, meaning earlier notices had been sent; none were ever
+# seen, because with no contacts configured they went to the org owner's mailbox
+# and nobody was reading it.
 #
-# THIS WAS EMPTY UNTIL A SUSPENSION, and the notices that would have warned us
-# had already been sent to a mailbox nobody was reading. Treat it as required,
-# not optional: the free-trial expiry warns through the same channel and
-# suspends projects.
+# The `@vetratd.com`-only wall was an ATTEMPT-1 ORG CONSTRAINT and does not
+# apply here — `essentialcontacts.managed.allowedContactDomains` reads
+# `enforce: false` on this org, so a Gmail is accepted. It has to be: the
+# vetratd.com mailbox is suspended.
 #
-# @vetratd.com ONLY. `essentialcontacts.managed.allowedContactDomains` is one of
-# Google's secure-by-default managed constraints on this org, and a personal
-# address is refused at apply time with "Operation denied by org policy". The
-# variable validates the domain so you find out at plan time instead.
-#
-# ADD THE COFOUNDER. One contact is a single point of failure for the one class
-# of message that arrives with a deadline attached.
+# ⚠ SET AT LEAST TWO. The module refuses exactly one, because one contact on one
+# mailbox is the shape that already failed.
 essential_contacts = {
-  "someone@vetratd.com" = {}
-  # "cofounder@vetratd.com" = { categories = ["ALL"] }
+  "vetratd@gmail.com" = {}
+  # "cofounder@example.com" = { categories = ["ALL"] }
 }
 
 # Contacts created outside Terraform, to be ADOPTED rather than recreated —
@@ -194,42 +254,57 @@ adopt_existing_contacts = {}
 # Image tags — PIN BOTH, NEVER LEAVE EITHER UNSET
 # ---------------------------------------------------------------------------
 # Missing from this file until 2026-08-23, which is exactly how
-# `dashboard_image_tag` came to be unset in the real tfvars for its whole life:
-# nothing here said it existed, so nothing prompted anyone to set it, and it
-# fell back to its `latest` default. A floating tag has already cost three
-# failed deploys where the container ran previous code and every failure looked
-# like a real bug, because it was — in old code. It also makes a revision
-# nobody can reproduce: "what was running on Tuesday" has no answer.
+# `dashboard_image_tag` came to be unset for its whole life: nothing here said it
+# existed, so nothing prompted anyone to set it, and it fell back to its `latest`
+# default. A floating tag already cost three failed deploys where the container
+# ran previous code and every failure looked like a real bug — because it was, in
+# old code. It also makes a revision nobody can reproduce: "what was running on
+# Tuesday" has no answer.
 #
 # The two are separate because the images have independent lifecycles: a
 # dashboard change should not mint a new voice revision, or vice versa.
 #
-# Build, verify the image CONTAINS what you think (the tag is a hand-typed
-# `_TAG` substitution on a source tarball, not a git ref — reading one has
-# already produced a wrong answer here), then bump.
+# Build, verify the image CONTAINS what you think (the tag is a hand-typed `_TAG`
+# substitution on a source tarball, not a git ref — reading one has already
+# produced a wrong answer here), then bump.
 #
-#   gcloud builds submit --config=cloudbuild.yaml #     --project=vetra-shared-c3a3bd #     --service-account=projects/vetra-shared-c3a3bd/serviceAccounts/vetra-deployer@vetra-shared-c3a3bd.iam.gserviceaccount.com #     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --project=<core project id> \
+#     --service-account=projects/<core>/serviceAccounts/vetra-deployer@<core>.iam.gserviceaccount.com \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD)
 #
 #   gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml ...
 #
 # ⚠ `image_tag` ALSO DRIVES THE MIGRATE JOB, not just the voice service, so one
-# apply moves both — and updating a job does not RUN it. Apply the job on its
-# own with -target, execute it, and only then apply the rest. Skipping that
-# order serves code against a schema that has not been migrated yet.
+# apply moves both — and updating a job does not RUN it. Apply the job on its own
+# with -target, execute it, and only then apply the rest. Skipping that order
+# serves code against a schema that has not been migrated yet.
 image_tag           = "0000000"
 dashboard_image_tag = "0000000"
 
+# P2 — THE BUILD SHA. Cloud Run injects no build metadata; Railway injected
+# RAILWAY_GIT_COMMIT_SHA for free, so `GET /` reported the running build there
+# and would report `Build: unknown` here.
+#
+# LEAVE THIS EMPTY. Empty means "use the image tag", and the build command above
+# substitutes `_TAG=$(git rev-parse --short HEAD)` — so the tag IS the commit and
+# one value that cannot drift beats two that can. Set it ONLY if you tag by
+# something else (a release name, a build number), and then it is yours to bump:
+# a stale SHA here ends an investigation with the wrong answer, which is worse
+# than `Build: unknown` sending someone to check.
+# git_commit_sha = ""
+
 # The number caller-facing SMS is sent FROM, per stack. E.164, and it must belong
-# to the Twilio account THAT STACK authenticates as — staging uses a subaccount,
-# so a production number here fails with 21606 and reads as a bad number.
+# to the Twilio account THAT STACK authenticates as.
 #
 # Unset = channel off, which is supported and announced at boot as
-# `sms_channel_off`. Setting it does NOT mean a text arrives: a US long code
-# needs A2P 10DLC and a toll-free number needs verification, shown per number in
-# Twilio as Traffic Status `Messaging disabled` — independently of `Voice
-# enabled`, so the same number can answer calls and refuse to text.
+# `sms_channel_off`. Setting it does NOT mean a text arrives: a UK number needs
+# the sender registered, a US long code needs A2P 10DLC and a toll-free number
+# needs verification — shown per number in Twilio as Traffic Status `Messaging
+# disabled`, INDEPENDENTLY of `Voice enabled`, so the same number can answer
+# calls and refuse to text.
 twilio_sms_from = {
-  # "us-staging" = "+1XXXXXXXXXX"
+  # "uk-prod" = "+44XXXXXXXXXX"
 }
 
 # ---------------------------------------------------------------------------
@@ -242,21 +317,24 @@ twilio_sms_from = {
 #      staff rather than to a deploy.
 #   2. THE DASHBOARD API'S CORS ALLOW-LIST, and this is the half that bites.
 #      The backend's built-in default is vetratd.com and www. The SPA is served
-#      from Firebase Hosting at <shared-project>.web.app, which is neither — so
+#      from Firebase Hosting at <core-project>.web.app, which is neither — so
 #      leaving this empty produces a dashboard that LOADS, renders its sign-in
 #      form, and is refused on every API call behind it. The login page makes no
 #      API call, so nothing looks wrong until somebody actually signs in.
 #
 # Measured in a browser rather than reasoned about:
 #
-#   Access to fetch at '.../api/me' from origin
-#   'https://vetra-shared-c3a3bd.web.app' has been blocked by CORS policy
+#   Access to fetch at '.../api/me' from origin 'https://<project>.web.app'
+#   has been blocked by CORS policy
 #
 # The `.web.app` origin is ALSO one of the Google-owned defaults written into
 # authorized_domains, so identity-platform.tf wraps the concat in `distinct()`.
 # Without that the same domain goes out twice, the API stores it once, and every
 # later plan shows a diff that applying never resolves.
-dashboard_domains = ["vetra-shared-c3a3bd.web.app"]
+#
+# ⚠ FILL THIS IN AT PHASE 4, once the core project ID is known. The site's apex
+# domain belongs to the friend's rebuild; GCP serves only `app.<domain>`.
+dashboard_domains = ["vetra-core-REPLACE.web.app"]
 
 # ---------------------------------------------------------------------------
 # dashboard_url — WHAT OWNER NOTIFICATIONS LINK TO
@@ -264,22 +342,19 @@ dashboard_domains = ["vetra-shared-c3a3bd.web.app"]
 # Reaches DASHBOARD_URL on both the voice service and the dashboard backend.
 #
 # services/notifications.js carries no caller or patient information by design —
-# email and SMS are not covered channels — so the message says which business
-# and what KIND of thing happened, and the link is the entire usable content.
-# Leave this unset and every notification says "Open your Vetra dashboard for
-# the details" while naming no dashboard. lib/bootChecks.js announces that at
-# boot as a notice, deliberately not a fatal: a notification with a weak link is
-# still worth sending.
+# email and SMS are not covered channels — so the message says which business and
+# what KIND of thing happened, and the link is the entire usable content. Leave
+# this unset and every notification says "Open your Vetra dashboard for the
+# details" while naming no dashboard. lib/bootChecks.js announces that at boot as
+# a notice, deliberately not a fatal: a notification with a weak link is still
+# worth sending.
 #
 # INCLUDE THE PATH. Firebase Hosting rewrites `**` to index.html and the SPA
-# routes client-side: `/` is the marketing Landing page, `/app` is the
-# dashboard. A bare origin sends a member of staff who clicked "you have a new
-# appointment" to a marketing page.
+# routes client-side: `/` is the marketing Landing page, `/app` is the dashboard.
+# A bare origin sends a member of staff who clicked "you have a new appointment"
+# to a marketing page.
 #
 # The host must appear in dashboard_domains above, and Terraform checks that at
 # plan time rather than trusting it — the two are edited in different places for
-# different reasons, and a URL whose origin is missing from the CORS allow-list
-# produces a link that loads a sign-in form and is then refused on every API
-# call. That surfaces to staff, in an email, as a dashboard that is broken.
-dashboard_url = "https://vetra-shared-c3a3bd.web.app/app"
-
+# different reasons.
+dashboard_url = "https://vetra-core-REPLACE.web.app/app"

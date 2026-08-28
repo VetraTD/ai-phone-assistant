@@ -112,8 +112,10 @@ resource "google_project_iam_member" "runtime_pull_images" {
 # Discovered by the apply, and the failure is the design working rather than a
 # gap in it. The four aggregated sinks in logging.tf are created at the ORG
 # node, and creating one needs `logging.sinks.create` ON THE ORGANIZATION.
-# `admin@vetratd.com` holds Organization Admin, Folder Admin, Project Creator
-# and Org Policy Admin — and NONE of them carry it:
+# The owner holds Organization Admin, Folder Admin, Project Creator and Org
+# Policy Admin — and NONE of them carry it. Measured on attempt 1's org, which
+# is why the id below is the dead one; the ROLE FACT is what survives, and it
+# will fire identically on 208508072539:
 #
 #   Error 403: Permission 'logging.sinks.create' denied on resource
 #   '//logging.googleapis.com/organizations/564252011558/sinks/vetra-audit-eu'
