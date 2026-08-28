@@ -2413,7 +2413,328 @@ model did not 404.
 
 ---
 
-## Attempt 2 — NEXT SESSION: Phase 2, reshape Terraform
+## Phase 2 — CLOSED 2026-08-28 · branch `feat/gcp-2` · commit `eb2e63e`
+
+**Goal: make `infra/terraform/` describe the estate that exists instead of the one Google deleted.**
+Configuration only. **No GCP contact, no apply, no plan against a real backend, nothing created,
+nothing pushed, `main` untouched.** 17 files, +1,123 / -626, all under `infra/terraform/`.
+
+### Six of the seven briefed items were verified before being done; two of them changed
+
+Phase 2's list was written partly under the no-org assumption, corrected 2026-08-28. Re-deriving
+rather than executing changed the answer twice and confirmed it five times.
+
+| # | Briefed | Verified as | Done |
+|---|---|---|---|
+| 1 | `org_id = "208508072539"`; drop `disable_sa_key_creation` | Correct. Google set it, plus five more secure-by-default policies | tfvars + `org-policies.tf` |
+| 2 | `stack_projects` 6 → 3, staging and logging REMOVED | Correct, and it forced a derivation fix — see below | `variables.tf`, `locals.tf` |
+| 3 | logging.tf — convert org sink to per-project? | **NO. The premise is void** — see below | destination repointed only |
+| 4 | `min_instances = 1` with `cpu_idle = true` | Correct; `false` is ~$70/mo = the whole budget | `cost-controls.tf` |
+| 5 | P2 — pass `GIT_COMMIT_SHA` at deploy time | Correct. Nothing in the module set it | `migrate-job.tf` + both services |
+| 6 | `terraform_quota_apis` on the bootstrap project | **The README's list was INCOMPLETE — 8 of 19** | README rewritten; Phase 4 action |
+| — | `uniform_bucket_level_access` audit | **Already satisfied, and logging.tf was never the place** | nothing to change |
+
+### Item 3 — the org sink STAYS, and this is the reasoning
+
+**Decision: keep `google_logging_organization_sink`. Do not convert to per-project sinks.**
+
+The plan item was written when attempt 2 was believed to have **no organization**, and a sink needs
+an org node to hang off. The probe on 2026-08-28 found one — `vetratd-org`, `208508072539`, ACTIVE,
+auto-provisioned at signup — and **the plan's own correction table already lists "org-level log
+sinks" under "work as originally designed".** The premise is void, so the item is void.
+
+Converting anyway would have cost the whole control and bought nothing:
+
+- a per-project sink is deletable by **the very project admin the design defends against**, which is
+  the §164.312(b) weakness `logging.tf` was written to close;
+- `include_children = true` captures a project created next month with nobody remembering to wire it
+  up — a property per-project sinks cannot have at all;
+- no compensating control at the project level recovers either.
+
+**A weaker control adopted to satisfy a superseded plan item is worse than no change, because the
+plan then reads as satisfied.** Written into `logging.tf`'s header, not just here.
+
+Only the DESTINATION moved: three `local.project_id_for_stack["logging"]` → `["shared"]`, i.e. the
+`core` project.
+
+**And the bucket-lock warning did not apply, for a reason worth recording.** `logging.tf` creates
+`google_logging_project_bucket_config` — a **Cloud Logging** bucket, not a GCS bucket. It has no
+`uniform_bucket_level_access` argument and the `storage.uniformBucketLevelAccess` constraint does not
+reach it. The plan's instruction to "check logging.tf" for that constraint is a category error. The
+module's only two `google_storage_bucket` resources are `loadbalancer.tf:89` (SPA) and
+`shared.tf:208` (tfstate); **both already set it, and there is no `google_storage_bucket_acl` or
+`google_storage_default_object_acl` anywhere in the module.** Nothing to change. The audit-only lock
+split was already correct and no `locked` argument was added.
+
+### Two things the reshape IMPLIED that nothing on the list spelled out
+
+Both are cost or correctness bugs that a `terraform plan` would have rendered as ordinary creates.
+
+**A. `enable_uk_resources` gated one lane, and attempt 2 reversed which lane needs gating.**
+
+`locals.tf` read `if v.lane != "uk" || contains(var.enable_uk_resources, k)` — a gate on the UK,
+because in attempt 1 the US was live and the UK was held back. **Attempt 2 inverts the polarity: the
+UK is the only market and `us-prod` is DARK — and under that expression `us-prod` was
+unconditionally ACTIVE.** The first apply would have built, for a lane nobody is serving:
+
+- a VPC, subnet, peering range and runtime service account;
+- a Cloud SQL instance at ~$98/month — **more than the entire $55-80/month estate budget**;
+- a Google STT KMS **key ring, which can never be deleted**. Terraform removes one from state and
+  reports success, leaving a name that can never be used again.
+
+Replaced with `var.active_stacks` (list of regional stack keys, default `["uk-prod"]`), symmetric in
+both lanes, plus a validation refusing an empty list. **A gate named after one lane stops being a
+gate the moment the other lane is the one you want held back.**
+
+**B. `DEPLOYMENT_MODE` was hard-coded per lane, and the US branch is a market this business is not in.**
+
+`cloud-run.tf` set `local.stacks[stack].lane == "us" ? "hipaa" : "standard"`. The locked decision is
+`standard` on **both** lanes: there is no GCP BAA, and US healthcare is closed on Twilio's
+$2,000/month BAA regardless of what Google signs. New `var.deployment_mode`, default `"standard"`,
+which **also gates `speech.tf`** — so lighting `us-prod` under `standard` cannot silently provision
+the permanent key ring for a Speech API that lane will never call.
+
+### The derivation fix that made three-projects possible at all
+
+`local.projects` read `local.stacks[pk].display` and `local.stacks[pk].region` — legal only while
+project keys WERE stack keys. They are not any more (`uk-prod` → `uk`, `shared` → `core`), and
+`local.stacks["core"]` does not exist. Project IDs are built from the PROJECT key
+(`projects.tf:23`), which is exactly what makes them `vetra-uk-<suffix>` rather than
+`vetra-uk-prod-<suffix>`, so the rename is load-bearing and not cosmetic.
+
+Both now derive from `members`. **`region` uses `one(distinct([...]))` rather than `members[0]`**:
+`one()` returns the single element and **errors on more than one**. A future two-region merge fails
+loudly at plan time instead of provisioning one lane's database, secrets and services into the other
+lane's region — which is the "first-stack-wins shortcut" that same block warns against, and which
+`members[0]` would have done silently.
+
+`var.stack_projects`'s old validation asserted every value must itself be a KEY of the map. **That
+assertion existed only to keep `local.stacks[pk]` legal, and it would now refuse the correct
+default.** Replaced with a project-ID-shape regex, plus a new validation refusing unknown stack keys
+— an unrecognised key otherwise fails deep inside a for-expression with an error naming neither the
+variable nor the typo.
+
+### Everything else that changed, and why
+
+| File | Change |
+|---|---|
+| `versions.tf` | **`backend "gcs"` COMMENTED OUT.** It named the deleted `vetra-tfstate-c3a3bd`, and the state bucket is a resource this module creates — so the first apply necessarily runs on local state, then `init -migrate-state`. The README already documented that sequence and the code disagreed with it |
+| `outputs.tf` | `c2_staging_min_instances` was `min([... if endswith(v.stack, "-staging")]...)`. **With staging gone that list is empty and `min()` with no arguments is an ERROR, not zero** — an output nobody reads taking down `plan`. Replaced with `c2_min_instances_total`, and added `c11_cpu_always_allocated` |
+| `essential-contacts.tf` | The `@vetratd.com`-only regex was an **attempt-1 ORG constraint**; it reads `enforce: false` here, and that mailbox is suspended. A validation demanding a domain nobody can receive on would have refused every reachable address. Now validates shape only — **and refuses EXACTLY ONE contact**, because one contact on one unread mailbox is the shape that already failed |
+| `cloud-run.tf` | `staging_caller_allowlist` and its `dynamic "env"` removed — its only reader was `env == "staging"`, which can no longer be true. Why the control existed is recorded in place, not deleted |
+| `cost-controls.tf` | `cpu_idle = true`, unconditionally. The u1 VPC-description-forces-replacement chain is **kept and re-scoped**: attempt 2 does not expose it today (one stack per project) and it returns the instant two stacks share one |
+| `budget.tf`, `iam.tf`, `imports.tf`, `locals.tf` | Comments that named dead identifiers **as current** rewritten. `budget.tf` now says the paid account raises the stakes rather than lowering them: attempt 1's worst case was an expired trial, this one's is a card |
+| `README.md` | Rewritten for three projects. Adds the full 19-API bootstrap list, `TF_DISABLE_PLUGIN_TLS=1` with its actual failure text, `~/.gcloud-vetra2`, and a plan-invisible-traps section |
+
+`c3a3bd` still appears five times — `shared.tf:143,164`, `identity-platform.tf:141,163`,
+`cloud-run-dashboard.tf:224` — **all inside `#` comments quoting real attempt-1 API output as
+evidence.** Left verbatim on purpose: rewriting a quoted measurement falsifies the evidence. No live
+value anywhere in the module names a deleted resource.
+
+### Traps checked and found ALREADY CORRECT — verified, not assumed
+
+- **`in:eu-locations` does not contain `europe-west2`.** `local.uk_locations` still reads
+  `["in:eu-locations", "in:europe-west2-locations"]`, confirmed by evaluating it. Now stated in
+  `org-policies.tf` and the README as well, with the reminder that **`plan` does not evaluate org
+  policy**, so this is only ever caught by reading.
+- **Cloud SQL backups.** `sql.tf:306` already pins `backup_configuration.location` to
+  `each.value.region`, with the comment explaining that `eu` is EU-only and a London instance's
+  backups would sit outside the UK.
+- **The two Cloud Run URL forms.** `service_base_url` still composes the project-number form and
+  `twilio_webhook_base` still carries it; `.uri` is still only reported alongside its warning.
+- **VPC description forces replacement.** Preserved, re-scoped, and now in the README's bite list.
+
+### Gates — pasted, not claimed
+
+```
+$ terraform fmt -check -recursive infra/terraform
+fmt exit=0
+
+$ terraform init -backend=false && terraform validate
+Terraform has been successfully initialized!
+Success! The configuration is valid.
+
+$ npm test
+ Test Files  125 passed (125)
+      Tests  2352 passed (2352)
+   Duration  30.10s
+```
+
+**2352 is unchanged from the P1 commit, which is the assertion that matters** — Phase 2 touched no
+application code, and `git status` confirms all 17 modified files are under `infra/terraform/`.
+
+**`validate` does not evaluate locals, so it is not sufficient on its own.** The derived model was
+evaluated in `terraform console` (local only, no backend, no credentials):
+
+```
+local.project_keys              ["core", "uk", "us"]
+keys(local.stacks)              ["shared", "uk-prod", "us-prod"]
+keys(local.active_regional_stacks)  ["uk-prod"]          <- us-prod is DARK
+keys(local.speech_stacks)       []                       <- no KMS key ring
+local.uk_locations              ["in:eu-locations", "in:europe-west2-locations"]
+local.projects["uk"]            region=europe-west2, has_prod=true, locations both groups
+local.projects["us"]            region=us-central1,  locations ["in:us-locations"]
+local.projects["core"]          region=us-central1,  locations both continents
+```
+
+**Every new validation was made to fail on purpose, because a guard nobody has seen refuse is not a
+guard:**
+
+| Input | Result |
+|---|---|
+| `us-prod` and `uk-prod` in one project | REFUSED — "the credential boundary" |
+| `stack_projects` naming `logging` | REFUSED — "may name ONLY uk-prod, us-prod and shared" |
+| `active_stacks = ["uk-staging"]` | REFUSED — "must name regional stack keys" |
+| `active_stacks = []` | REFUSED — "cannot be empty" |
+| exactly one essential contact | REFUSED — "or at least TWO" |
+| two contacts, one a Gmail | **ACCEPTED** — the positive control |
+
+### One thing to disclose: terraform DID reach GCS once, and it was the residue
+
+The first `terraform init -backend=false` **contacted Google Cloud Storage.** `-backend=false` reuses
+the *previously configured* backend, and `.terraform/terraform.tfstate` still cached attempt 1's
+`gs://vetra-tfstate-c3a3bd`:
+
+```
+Error: Failed to open state file at gs://vetra-tfstate-c3a3bd/root/default.tfstate:
+googleapi: got HTTP response code 403 ... nithinjd06@gmail.com does not have
+storage.objects.get access ... (or it may not exist)
+```
+
+**It was a read of a bucket that no longer exists, by the wrong identity, and it was refused.**
+Nothing was read, written or created; no attempt-2 project was touched. The cache was moved to the
+scratchpad and every gate after that ran clean.
+
+**The lesson is about the residue, not the command.** `-backend=false` is not a promise of no network
+— it declines to *configure* a backend, and happily reuses one already cached. **And
+`terraform.tfvars` is auto-loaded by every `plan`:** with the residue in place, `validate` picked up
+attempt 1's six-entry `stack_projects` and would have failed the new validation for reasons having
+nothing to do with the config. It was moved aside for the gates and **restored afterwards**, so the
+directory is as it was found.
+
+**Phase 4 must delete all three classes of residue deliberately before its first `init`** —
+`terraform.tfstate`, `terraform.tfvars`, `.terraform/`, and the ~20 `.tfplan` files. Confirmed still
+untracked and gitignored: `git ls-files infra/terraform` is **26**, and no `.tfstate`, `.tfvars` or
+`.tfplan` is tracked (only `terraform.tfvars.example`).
+
+---
+
+## Attempt 2 — parked in PHASE 2, not fixed. Ask before pulling any in
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P5 | **Lighting `us-prod` gives it no ears and no voice.** `secrets.tf` scopes `deepgram-api-key` and `elevenlabs-api-key` to `lanes = ["uk"]`, encoding attempt 1's decision that a `hipaa` US lane may hold neither. Under `deployment_mode = "standard"` the US lane needs BOTH. It is a variable default, so the fix is a tfvars override rather than a code change — but nothing says so at the point of use, and the failure is a US service that boots and cannot hear. Harmless while `us-prod` is dark; a landmine the day it is lit | `secrets.tf:73-80` | 4, with the US |
+| P6 | **`cloud_sql_tier.staging`, `cloud_run_max_instances.staging` and `cloud_sql_backup_retention_days.staging` are now unreachable.** Every stack is prod, so `has_prod` is always true. Kept rather than removed because deleting them ripples into six expressions and the tfvars example for no behavioural gain, and restoring a non-prod stack would need the type back. Marked as dead in the tfvars example. Do not read them as describing anything that exists | `cost-controls.tf` | any |
+| P7 | **`max_instance_count` and `DB_POOL_MAX` deliberately NOT touched**, though the plan's Phase 2 list names them. Both must be sized from the provisioned instance's `max_connections`, and **that number is unmeasured** — the plan itself says read it off the instance and do not assume. Raising a ceiling from a guess is how `instances × DB_POOL_MAX` quietly exceeds what Cloud SQL will accept | `cost-controls.tf`, Phase 3b | 3 or 4 |
+| P8 | **The tfstate bucket sits in `us_region`** (`shared.tf:210`), on a UK-first estate. State holds resource metadata, not caller data, and `core` permits both continents, so this is not a residency finding — but it is a default nobody re-derived after the market flipped. One line if it should be London | `shared.tf:210` | any |
+
+**Still open from Phase 1:** P3 (68 `.playwright-mcp/` files tracked AND gitignored, cosmetic) and
+P4 (`tests/toolTimeout.test.js` is non-hermetic — run the root suite with `DATABASE_URL` UNSET or a
+green suite looks like a regression). P1 and P2 are both **RESOLVED**: P1 in `5f129f8`, P2 in this
+phase's `eb2e63e`.
+
+---
+
+## Attempt 2 — NEXT SESSION: Phase 3, concurrency and cost
+
+**Do not start Phase 3 work in the Phase 2 session.** Open Phase 3 by reading this section, the
+Phase 2 section above, and the plan's Phase 3 list. **Phase 3 is APPLICATION code — `lib/`,
+`migrations/`, `scripts/` — not `infra/terraform/`.** It needs nothing from GCP.
+
+**3a. Postgres-backed call state — the one real correctness fix, and it is a live bug on `main`.**
+`lib/callStateStore.js` exports `createMemoryStore()` and nothing else, and the store is an
+**in-process Map**. `/twilio/status` is a plain HTTP POST, so the moment a second Cloud Run instance
+exists it lands on an instance that does not hold the WebSocket, reads empty state, and silently
+produces: **no call summary, no missed-call notification, and every short call tagged as spam**
+because `sawCallerFinal` reads false on a caller who spoke. This is not a capacity limit; it is
+wrong behaviour that today's single instance hides.
+
+Add `createPgStore()` behind the identical `CallStateStore` interface. New migration: `call_state`
+(`call_sid` PK, `db_call_id`, `business_id`, `saw_caller_final`, `updated_at`) with TTL cleanup.
+Selection by `CALL_STATE_STORE=pg|memory` — `var.call_state_store` is already `"postgres"` in the
+tfvars example and already threaded to `local.cloud_sql_plan`.
+
+**`SHARED_FIELDS` is three scalars written at CALL BOUNDARIES ONLY, never per turn**, so this adds
+zero latency to the turn loop and needs no Memorystore ($70-100/month avoided — and
+`redis.googleapis.com` is deliberately absent from `local.regional_apis` so nobody enables it "just
+in case").
+
+Test it as a genuine cross-process case: two independent pools, one writes, the other reads.
+**Sabotage-verify** — remove the write and the status handler must lose `businessId`. A test that
+cannot fail is not evidence; see the cutoff simulator that printed a 50% failure rate and passed
+green.
+
+**3b. Capacity, honestly. Cloud Run is not the ceiling.** Bind order:
+
+1. Shared state — fixed by 3a.
+2. **Cloud SQL connections.** `instances × DB_POOL_MAX` must stay under the instance's
+   `max_connections`. **READ THAT VALUE OFF THE PROVISIONED INSTANCE; DO NOT ASSUME IT.** This is
+   why Phase 2 parked P7 and left `max_instance_count` and `DB_POOL_MAX` alone — the instance does
+   not exist yet, so both numbers would have been guesses.
+3. **Vendor caps — the actual wall.** ElevenLabs concurrent-request cap per plan tier, Deepgram
+   concurrent streams, **Twilio concurrent calls and CPS (new accounts start low, and the raise
+   request has lead time and is owner work)**, Vertex QPM. One of these binds long before GCP does.
+
+Ship `scripts/load-test-calls.js` opening N real concurrent media-stream WebSockets, and a written
+capacity table naming the current binding vendor cap and the cost to raise it.
+
+**3c. Latency and cost, measured.** `services/geminiCache.js` is written and gated off behind
+`GEMINI_EXPLICIT_CACHE`. The LLM is ~42% of the turn. **Read `cachedContentTokenCount`
+(`services/gemini.js:1212-1216`) before and after — the recorded hit rate is contradictory across
+sessions, so MEASURE, do not cite.** Remember `cachedContent` is mutually exclusive with BOTH
+`systemInstruction` and `tools`, which is the real obstacle.
+
+### What Phase 3 must NOT do
+
+- **No `infra/terraform/` changes.** Phase 2 closed it and Phase 4 applies it. If Phase 3 finds a
+  Terraform problem, park it here.
+- **No GCP contact, no apply.** Phase 3 needs none.
+- **Never push, never touch `main`** — `main` is production, Railway autodeploys from it, and the
+  repo is public.
+- **Run the root suite with `DATABASE_URL` UNSET** (P4), or a green suite reads as a regression.
+
+### Phase 4 preconditions, collected here so they are not rediscovered
+
+Phase 4 is the first apply and needs the owner present.
+
+1. **Enable the WHOLE `local.terraform_quota_apis` list (19 APIs) on the bootstrap project BEFORE
+   the first apply.** The command is in the README's bootstrap section. This trap fired five times
+   in attempt 1 and again on 2026-08-28, always as a 403 naming the quota project that reads as a
+   permissions problem: `Cloud Resource Manager API has not been used in project ... or it is
+   disabled`. Verify with `gcloud services list --enabled`, do not assume.
+2. **Delete the attempt-1 residue in `infra/terraform/` before the first `init`** —
+   `terraform.tfstate`, `terraform.tfvars`, `.terraform/`, ~20 `.tfplan` files. `terraform.tfvars`
+   is auto-loaded by every `plan`, and `.terraform/terraform.tfstate` caches the dead GCS backend
+   and made `init` reach for it during Phase 2.
+3. **Pin `project_id_suffix` in tfvars and write it in this ledger BEFORE the apply that creates the
+   projects.** Left empty it is a `random_id` living only in state, and losing state renames every
+   project — which is exactly what happened to B0a.
+4. **Do not hand-create the three projects.** Terraform creates them. Hand-creating is how attempt 1
+   ended up in import-block adoption.
+5. **`backend "gcs"` in `versions.tf` is commented out and must stay so for the first apply.** The
+   state bucket is a resource this module creates. After the apply: read `tfstate_bucket` from the
+   outputs, uncomment, paste the name, `terraform init -migrate-state`. **Do it — do not leave it.**
+6. **Add the cofounder as Owner on all three projects and on the billing account on day 0**, and as
+   a second essential contact. There is no second super-admin on this org, so one suspended account
+   is total loss — which is not hypothetical.
+7. **Read the plan for `must be replaced` before applying any of it.** A one-word change to a VPC
+   `description` forces network replacement, which cascades into destroying the Cloud SQL instance.
+8. **Fill in `dashboard_domains` and `dashboard_url`** once the `core` project ID exists. Both are
+   placeholders. Leaving them produces a dashboard that loads, renders its sign-in form, and is
+   refused by CORS on every call behind it — and the sign-in page makes no API call, so nothing looks
+   wrong until somebody signs in.
+9. **Neither `terraform plan` nor `validate` evaluates org policy.** `in:eu-locations` not containing
+   `europe-west2`, and `storage.uniformBucketLevelAccess` being enforced, are both invisible to a
+   clean plan. Both are currently correct in the config; a clean plan is not what says so.
+
+---
+
+## Attempt 2 — the Phase 2 BRIEF, kept for the record. SUPERSEDED by the Phase 2 section above
+
+**This is what Phase 2 was told to do, before doing it. Two items changed on re-derivation and
+one was a category error — see "Phase 2 — CLOSED" above for what was actually done and why.**
+Kept rather than deleted so the difference between the brief and the result stays legible.
+
 
 **Do not start Phase 2 work in the Phase 1 session.** Open Phase 2 by reading this section and the
 plan's Phase 2 list. `infra/terraform/`, configuration only, no new resources:
@@ -2445,3 +2766,4 @@ plan's Phase 2 list. `infra/terraform/`, configuration only, no new resources:
 | # | Date | Branch | Did | Left for next |
 |---|---|---|---|---|
 | A2-1 | 2026-08-28 | `feat/gcp-2` | **PHASE 1 CLOSED.** Branched off `feat/gcp-lane-b-terraform`, merged `dev` in, commit `62b87c2`. Only 2 of 23 overlapping files conflicted textually; the 21 silent auto-merges were verified line-by-line in both directions and are clean. **Two integration breaks that produced no conflict:** three dev-ADDED test files importing the `services/supabase.js` that lane-b deletes, and three env vars dev reads that lane-b's `envInventory` gate demands be documented. All 110 prompt snapshots deleted and regenerated; the diff against both parents is 100% attributable, so **the receptionist's prompt is the exact union of the two branches**. Five suites green: 2350 / 191 / 3 / 126 / 36. Final verification also turned up **P4**, a pre-existing non-hermetic root-suite test, confirmed on lane-b and left parked. **Nothing pushed, `main` untouched, no GCP contact.** | **Phase 2 — reshape Terraform.** Start with P1 (`VERTEX_LOCATION=global` is refused by `services/gemini.js:175`) and the uniform-bucket-level-access audit, both BEFORE any apply |
+| A2-2 | 2026-08-28 | `feat/gcp-2` | **PHASE 2 CLOSED — commit `eb2e63e`, 17 files, +1,123/-626, all under `infra/terraform/`.** The module now describes three stacks in three projects (`uk`, `us`, `core`) instead of attempt 1's six-and-four. **Project keys stopped being stack keys**, which forced `local.projects` to derive `display` and `region` from its members — `region` uses `one(distinct(...))` so a future two-region merge fails loudly instead of silently picking a lane. **Item 3 was re-derived and REVERSED: the org log sink STAYS**, because the "convert to per-project sinks" item was written under the no-org assumption the plan itself already voids, and per-project sinks are deletable by the admin the design defends against. **Two bugs the brief implied but did not name:** `enable_uk_resources` gated only the UK, so DARK `us-prod` was unconditionally active and the first apply would have built a ~$98/mo Cloud SQL instance and an undeletable KMS key ring — replaced with symmetric `var.active_stacks`; and `DEPLOYMENT_MODE` was hard-coded `hipaa` per lane against the locked `standard`-everywhere decision — now `var.deployment_mode`, which also gates `speech.tf`. `cpu_idle = true` (false is ~$70/mo = the whole budget, and the cost is UNMEASURED). P2 resolved: `GIT_COMMIT_SHA` on both services. UBLA needed no change — both GCS buckets already set it and `logging.tf` creates **Cloud Logging** buckets, which the constraint does not reach. Gates: fmt exit 0, validate Success, **npm test 2352/125 unchanged**, and the derived model plus **six deliberately-failed validations** checked in `terraform console`. **One disclosure: the first `init -backend=false` reached GCS** — it reuses the cached backend, and the residue named the deleted `vetra-tfstate-c3a3bd`; 403, nothing read, cache moved aside. **Nothing pushed, `main` untouched, nothing created.** | **Phase 3 — concurrency and cost.** Application code only, no Terraform, no GCP. Start with 3a: `lib/callStateStore.js` is an in-process Map and that is a LIVE correctness bug the single instance is hiding. Park anything Terraform-shaped. Four new findings P5-P8 recorded above; **P7 is why `max_instance_count`/`DB_POOL_MAX` were left alone — `max_connections` is unmeasured** |
