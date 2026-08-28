@@ -112,32 +112,94 @@ const TOOLS = [
   },
 ];
 
+const ASK =
+  "My name is Jordan Lee. Book me for Tuesday the 12th of August 2026 at 10am. " +
+  "Call the tool, do not just say you will.";
+
+const SYSTEM_FOR_CONTROL = `You are a receptionist for Acme Dental.\n\n${filler(4200)}`;
+
+/**
+ * THE CONTROL, and this probe was wrong without it.
+ *
+ * "The model did not call the tool" has two possible causes and they lead to
+ * opposite decisions: the cache broke function calling (explicit caching is
+ * dead for every tool-bearing business), or this prompt simply does not elicit
+ * a tool call (the probe is broken and the feature is fine). One run of the
+ * cached case cannot tell them apart, and the ledger already records a
+ * measurement session that produced a fully wrong table for exactly this reason.
+ *
+ * So the identical tools and the identical message are sent BOTH ways. The
+ * uncached arm MUST produce a tool call; if it does not, the verdict below is
+ * about the question, not about caching.
+ */
+/**
+ * N TRIALS PER ARM, not one, and this was learned the hard way.
+ *
+ * The first version of this gate sent one request per arm and reported a
+ * verdict. Run twice in a row it produced BROKEN and then its exact inverse
+ * (uncached failed, cached succeeded) — so `temperature: 0` is NOT
+ * deterministic for whether this model emits a function call, and a single-shot
+ * comparison of two arms is a coin flip dressed as a measurement. It would have
+ * killed or shipped a feature on noise, in whichever direction it landed first.
+ *
+ * A rate is the smallest honest unit here.
+ */
+const TRIALS = Number.parseInt(process.env.CACHE_GATE_TRIALS || "5", 10);
+
+async function askWith(config, label) {
+  let called = 0;
+  let failed = 0;
+  let cachedTokens = null;
+  let promptTokens = null;
+
+  for (let i = 0; i < TRIALS; i++) {
+    try {
+      const res = await ai.models.generateContent({ model: MODEL, contents: ASK, config });
+      if ((res.functionCalls || []).length > 0) called++;
+      cachedTokens = res.usageMetadata?.cachedContentTokenCount ?? cachedTokens;
+      promptTokens = res.usageMetadata?.promptTokenCount ?? promptTokens;
+    } catch (err) {
+      failed++;
+      if (i === 0) console.log(`   ${label.padEnd(10)} request failed: ${err?.message}`);
+    }
+  }
+
+  console.log(
+    `   ${label.padEnd(10)} called the tool ${called}/${TRIALS}` +
+      (failed ? ` (${failed} request errors)` : "") +
+      `   cachedContentTokenCount: ${cachedTokens}  promptTokenCount: ${promptTokens}`
+  );
+  return { called, failed, rate: called / TRIALS, cachedTokens, promptTokens };
+}
+
 let toolVerdict = "not run";
 const toolCache = await tryCreate("with-tools", 4200, { tools: TOOLS });
 
 if (toolCache.ok) {
-  try {
-    const res = await ai.models.generateContent({
-      model: MODEL,
-      contents:
-        "My name is Jordan Lee. Book me for Tuesday the 12th of August 2026 at 10am. " +
-        "Call the tool, do not just say you will.",
-      config: { cachedContent: toolCache.cache.name, temperature: 0 },
-    });
-    const calls = res.functionCalls || [];
-    const cachedTokens = res.usageMetadata?.cachedContentTokenCount ?? null;
-    console.log(`   functionCalls: ${JSON.stringify(calls)}`);
-    console.log(`   cachedContentTokenCount: ${cachedTokens}`);
-    console.log(`   promptTokenCount: ${res.usageMetadata?.promptTokenCount ?? null}`);
-    toolVerdict = calls.length > 0 ? "WORKS" : "BROKEN — model did not call the tool";
-  } catch (err) {
-    toolVerdict = `ERROR — ${err?.message}`;
-    console.log(`   request failed: ${err?.message}`);
+  const control = await askWith(
+    { systemInstruction: SYSTEM_FOR_CONTROL, tools: TOOLS, temperature: 0 },
+    "UNCACHED"
+  );
+  const cached = await askWith({ cachedContent: toolCache.cache.name, temperature: 0 }, "CACHED");
+
+  if (control.rate === 0) {
+    toolVerdict =
+      `INCONCLUSIVE — the UNCACHED control called the tool 0/${TRIALS} times, so this probe is ` +
+      "measuring the prompt, not the cache";
+  } else if (cached.rate === 0) {
+    toolVerdict = `BROKEN — uncached ${control.called}/${TRIALS}, cached 0/${TRIALS}. The cache is the difference`;
+  } else if (cached.rate < control.rate) {
+    toolVerdict =
+      `DEGRADED — uncached ${control.called}/${TRIALS}, cached ${cached.called}/${TRIALS}. ` +
+      "Tool calling still happens under a cache but less often; N is small, so treat this as " +
+      "a reason to measure on the real prompt rather than as a number";
+  } else {
+    toolVerdict = `WORKS — uncached ${control.called}/${TRIALS}, cached ${cached.called}/${TRIALS}`;
   }
 }
 console.log(`\n   -> VERDICT: ${toolVerdict}`);
-if (toolVerdict !== "WORKS") {
-  console.log("   -> If this is not WORKS, explicit caching is dead for tool-bearing businesses.");
+if (toolVerdict.startsWith("BROKEN")) {
+  console.log("   -> Explicit caching is dead for tool-bearing businesses, which is every one.");
 }
 
 // ---------------------------------------------------------------------------
