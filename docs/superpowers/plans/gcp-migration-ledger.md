@@ -3231,8 +3231,15 @@ FOURTEEN.** The 19 is its union with `local.common_apis`, which is exactly what 
 lists — checked programmatically against both, nothing missing, nothing extra. Enabling only the 14
 would have restarted the 403 cycle the precondition exists to prevent. Corrected in place above.
 
-**Essential contacts set to `nithin.dodla@vetratd.com` and `josh.tite@vetratd.com`**, which closes
-the hard gate: `terraform console` now evaluates the module unaided, having refused to before.
+**Essential contacts set to `nithinjd06@gmail.com` and `josh.tite@vetratd.com`**, which closes the
+hard gate: `terraform console` now evaluates the module unaided, having refused to before.
+
+`nithin.dodla@vetratd.com` was the owner's first choice and was swapped for the Gmail once the
+finding below landed. **The swap is not required by the config** — an Essential Contact needs no
+Google account and the `@vetratd.com` address was perfectly valid as a contact. It is better for the
+reason the control actually exists: `nithinjd06@gmail.com` is an inbox the owner demonstrably reads,
+and attempt 1 failed with a contact configured, on a mailbox nobody read. `josh.tite@vetratd.com`
+stays and remains valid; whether it is monitored is still an assumption.
 
 ### ⚠ PRECONDITION 6 IS HALF BLOCKED — `@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN
 

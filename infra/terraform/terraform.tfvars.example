@@ -254,16 +254,17 @@ uk_region = "europe-west2"
 #
 # ⚠ THESE ONLY WORK IF SOMEBODY READS THEM. Attempt 1 did not fail for lack of a
 # contact — it had one, on a mailbox nobody read, and the notices preceding the
-# suspension went unseen. The address that is DEMONSTRABLY read today is
-# vetratd@gmail.com; whether these two are monitored is an assumption, not a
-# verified fact, and it is the assumption the whole control rests on.
+# suspension went unseen. `nithinjd06@gmail.com` is the owner's own inbox and is
+# read; whether `josh.tite@vetratd.com` is monitored is still an assumption
+# rather than a verified fact, and that assumption is what the second half of
+# this control rests on.
 #
 # An Essential Contact is a plain address and needs no Google account, which is
 # why these differ from the IAM principals: an @vetratd.com IAM binding needs a
 # real Google identity, and this org has no Cloud Identity directory.
 essential_contacts = {
-  "nithin.dodla@vetratd.com" = {}
-  "josh.tite@vetratd.com"    = {}
+  "nithinjd06@gmail.com"  = {}
+  "josh.tite@vetratd.com" = {}
 }
 
 # Contacts created outside Terraform, to be ADOPTED rather than recreated —
