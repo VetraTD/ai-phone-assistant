@@ -4,7 +4,16 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
-import * as twilio from "twilio";
+// DEFAULT import, not `import * as`. The twilio package is CJS, so a namespace
+// import puts the SDK's functions on `.default` and leaves `twilio.validateRequest`
+// UNDEFINED -- which made twilioValidation throw a TypeError on every request that
+// carried a signature, and the central error handler turned that into a 500.
+//
+// It was invisible because TWILIO_VALIDATE_SIGNATURE was "false" in production, so
+// the function never ran. Turning it on turned every real call into
+// "an application error has occurred". Measured 2026-08-29 on staging: unsigned -> 403
+// (that branch returns before the throw), signed -> 500, every endpoint.
+import twilio from "twilio";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/supabase.js";
