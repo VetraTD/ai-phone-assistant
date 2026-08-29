@@ -4,8 +4,12 @@ Everything below is verified offline (1832 unit tests, 3 new eval scenarios, the
 cutoff sim). None of it has answered a phone. These are the calls that decide
 whether it ships.
 
-Dial **+1 817 601 1171** (Bright Side / Brightwork Dentistry, Twilio account B).
-Do **not** dial +1 817 632 6969.
+Dial the staging test number used in the previous rounds — **+1 817 601 1171**,
+on Twilio account B, the account whose token GCP does NOT hold. A number from
+the other account 403s on every call. Do **not** dial +1 817 632 6969.
+
+Confirm the number against Twilio before the first call; this one is carried
+from earlier sessions, not from anything in the repo.
 
 ## Before the first call — two Railway settings
 
@@ -15,8 +19,9 @@ Do **not** dial +1 817 632 6969.
 | `VOICE_HOLD_TRAILING_MS` | **800** | Round 2's headline fix ships at 0 and does nothing unless set. Confirm it survived. |
 | `VOICE_INTENT_MARKER` | **true** | Worth ~900ms. Confirm on the service Railway actually deploys, not the other one. |
 
-Check the deploy is the commit you think it is: `GET /api/health` reports the
-running commit (added on `dev` as `cc9b362`).
+Check the deploy is the commit you think it is: **`curl https://<staging-host>/`**
+prints `Build: <sha> (<branch>)`. Railway redeploys the CURRENT commit whenever an
+env var changes, so "deployed 2 minutes ago" is not evidence your fix is live.
 
 ---
 
