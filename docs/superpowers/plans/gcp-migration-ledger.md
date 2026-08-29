@@ -3330,7 +3330,7 @@ dependency chain.
 
 ---
 
-## Attempt 2 — NEXT SESSION: Phase 5, verify. **THE OWNER, THEIR PHONE AND THEIR EARS**
+## Attempt 2 — the Phase 5 BRIEF, kept for the record. SUPERSEDED by the Phase 5 section below
 
 **Phase 4 is CLOSED and the estate is live.** Phase 5 is the true serialization point of this plan:
 it needs a real handset and a person listening, and nothing in it can be done unattended.
@@ -3714,6 +3714,396 @@ and `main` IS STILL EXPOSED.** **P8 is now confirmed fact:** the state bucket is
 
 ---
 
+---
+
+## Phase 5 — PARTLY CLOSED 2026-08-29 · branch `feat/gcp-2` · **THE FIRST TRAFFIC THE ESTATE HAS EVER SERVED**
+
+**Eight of the nine gates are closed with pasted evidence. GATE 4 — THE LIVE CALL — IS OPEN AND
+STAYS OPEN**, because the owner has no UK handset and the one thing a probe cannot do is listen. A
+friend on a UK handset dials `+441372656055` next session; the number is **already repointed at GCP
+and deliberately left that way**. Gate 9b (DSR) is **BLOCKED, and the blocker is itself a finding**
+(P25).
+
+Nothing pushed. `main` untouched. No Terraform apply and no new revision — **every measurement below
+is against the same serving revision `voice-uk-prod-00001-r6c` that Phase 4 closed on**, which is
+precisely why `DEBUG_ENDPOINTS`/`DEBUG_TOKEN` were NOT switched on to make probing easier.
+
+### THE LIVE-CALL PROBLEM WAS A TWO-ACCOUNT PROBLEM, AND MEASURING IT CHANGED THE ANSWER
+
+The plan says "repoint `+441372656055`". The owner opened the session saying they have no access to
+UK numbers, only a US Twilio number. Both Twilio accounts were then read rather than assumed:
+
+| | Account A `AC1828…43b6` | Account B `AC7253…ab09` |
+|---|---|---|
+| Where its auth token lives | **GCP Secret Manager `twilio-auth-token`, on the live revision** | the repo's local `.env` |
+| Numbers | **`+441372656055`** → was Railway prod | `+18176011171` → Railway staging, `+18175803291` → Railway prod |
+| State | Full, active, £18.40 | Full, active, $8.58 |
+
+**Twilio signs a webhook with the auth token of the account that OWNS the number.** The owner's US
+number is on the account whose token GCP does *not* hold, so pointing it at GCP would have produced
+**403 on every request** — indistinguishable from P20's broken validator, which is the exact
+confusion this phase exists to prevent. Three options were put to the owner (buy a US number on
+account A, ~$1.15/mo; swap the deployed secret to account B; repoint the UK number). **The owner
+supplied a fourth and better one: a friend in the UK dials the real number.** It removes every
+caveat at once — same account, same token, real UK carrier, real handset — and costs nothing. The UK
+number was confirmed demo/owner-only, so repointing moves no real traffic.
+
+Repointed by API 18:38:32Z, read back:
+
+```
+voice_url        https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/voice
+status_callback  https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/status
+revert           https://ai-phone-assistant-production-2300.up.railway.app/twilio/{voice,status}
+```
+
+**Also measured, because the owner asked whether ANY number would work:** nothing in the stack is
+bound to `+441372656055`. Any number on account A works given three things — same account (the
+signature), its webhook pointed at `twilio_webhook_base` (buying does NOT do this; the app's own
+`services/twilioNumbers.js:54-64` sets it at purchase time, the console does not), and a
+`businesses.phone_number` holding the exact E.164 string (`app_lookup_business_by_phone` matches
+exactly; migration 024's trigger strips whitespace). **UK numbers are already unblocked on that
+account** — GB local numbers need `address_requirements: local`, and the account holds a
+**twilio-approved UK regulatory bundle** plus two validated GB addresses. No lead time.
+
+### Gate 1 — Deepgram EU, smoke-tested BEFORE anything dialled
+
+The deployed key is **byte-identical** to the local one (`sha256 f33ec34067fc`), so this tests what
+production uses. Driven through the REAL seam (`createSttStream`, the same call `session.js` makes):
+
+```
+DEEPGRAM_REGION=eu, 10 recorded utterances   10/10 final, 0 noFinal, WER 0.0000 norm, stt p50 270ms
+REST api.eu.deepgram.com + deployed key      HTTP 200, "Hi. I'd like to book an appointment.",
+                                             remote 3.64.4.20 (Frankfurt)
+NEGATIVE CONTROL garbage key, EU host        HTTP 401 INVALID_AUTH        <- the test can fail
+same key, US host                            HTTP 200, remote 4.20.80.211 <- different host, so
+                                                                            `eu` is a real routing change
+```
+
+**Left unproven at that point, and stated as such:** egress from INSIDE the container. The driven
+calls below then settled it, because they transcribed.
+
+### Gate 2 — Twilio signature. POSITIVE CONTROL FIRST, and P20's trap reproduced live
+
+`feat/gcp-2` fixed this INDEPENDENTLY of `main` (`f494567`, `lib/twilioSignature.js`, default
+import). **`eeab359` is NOT an ancestor of this branch** — two separate fixes for one bug. P20's
+lesson is that reading the import proves nothing, so it was run under Node:
+
+```
+NODE NATIVE ESM  import * as twilio -> validateRequest  undefined   <- the bug, still reproducible
+NODE NATIVE ESM  default import     -> validateRequest  function    <- the fix, under Node not vitest
+
+LIVE, against voice-uk-prod-00001-r6c:
+  SIGNED (positive control FIRST)     HTTP 200 + TwiML
+  TAMPERED signature                  HTTP 403
+  UNSIGNED (no header)                HTTP 403
+  SIGNED FOR THE `.uri` HOST          HTTP 403   <- the URL trap is REAL, and BASE_URL is the right one
+```
+
+The signature was computed independently (raw HMAC-SHA1 over Twilio's documented string), not with
+the SDK, so the code under test cannot sign and verify itself into agreement. Local controls ran
+first: good accepted, tampered/short/absent/wrong-URL all rejected.
+
+**The 200 also proved two things nothing had asked for:** the service reaches Cloud SQL — the body
+was the `no_business_found` voicemail, which is only reachable when the lookup SUCCEEDS and returns
+nothing, since a lookup FAILURE takes a different branch — and `+44` selected the **en-GB** profile
+(`Polly.Amy`), so `countryFromE164` works on the live service.
+
+### Gate 3 — tenant import, and it failed first on a column deleted ten migrations ago
+
+Source of truth was the live Supabase row: **`Digile Media`, `dabd2c51-…`, `+441372656055`,
+`+447426704500`, `Europe/London`, ElevenLabs voice `Xb7hH8MSUJpSbSDYk0k2`**. The payload was built
+and base64'd entirely inside Python, never through a Windows console, because `custom_instructions`
+carries non-ASCII and a cp1252 round-trip would have silently corrupted the receptionist's prompt.
+
+**First execution FAILED: `column "voice_style" of relation "businesses" does not exist`.** Migration
+002 added it, **migration 012 dropped it**, and `scripts/import-tenant.js`'s `BUSINESS_FIELDS` still
+names it — so the import dies against any source database that still has the column, which Supabase
+does. Parked as **P21**. The value was null, so it was removed from the payload rather than fixing
+code under record-and-park.
+
+```
+created tenant 55c7c8c4-2c33-463c-875a-7f16d6bcc17e
+  capability appointments: enabled=true
+EVIDENCE  id=55c7c8c4-…  name=Digile Media  phone=+441372656055  tz=Europe/London
+EVIDENCE  business_directory routes +441372656055 -> 55c7c8c4-…
+```
+
+23 fields carried; 9 did not (5 empty address fields, `country` null, `id`/`created_at` regenerated,
+and **`default_language`, which has no target column**). `locale` was left NULL **deliberately**:
+`resolveVoiceLocale` then derives **en-GB** from the `+44` number, and inventing config is not
+importing it. Read back INSIDE the transaction under RLS by the script itself. **No env drift on the
+job definition afterwards — verified, 0 occurrences.**
+
+Re-probing the signed webhook after the import returned
+`<Connect><Stream url="wss://…/twilio/media-stream/<token>">` instead of the unrouted voicemail: the
+tenant routes, and P10's per-call token is in the path.
+
+### Gate 5 — concurrency, and it proved MORE than the gate asked for
+
+`scripts/load-test-calls.js` opens sockets and streams SILENCE, so it never produces a turn and never
+sends a status callback. The gate's assertion — *all 10 resolve `businessId` in `/twilio/status`* —
+therefore needed its second half driven separately: ten signed status callbacks, then the answer read
+out of the structured logs.
+
+```
+10 concurrent sockets   10/10 opened, greeting first-frame 267-508ms, 616-684 audio frames each
+10 signed callbacks     10/10 HTTP 200
+businessId resolved     10/10  -> 55c7c8c4-2c33-463c-875a-7f16d6bcc17e
+```
+
+**4 of the 10 status callbacks landed on a DIFFERENT Cloud Run instance than the one that served the
+socket, and every one still resolved `businessId`.** That is Phase 3a's Postgres call-state store
+working in production against the exact case an in-process Map fails — and fails *silently*, looking
+identical in every test. Instances seen: `bb9ad845`, `e1bc1ec4` (`max_instances` = 2, so it scaled to
+the ceiling under 10 concurrent).
+
+**Zero log entries above WARNING for the whole session** — no ElevenLabs 1008, no breaker trip, no
+Deepgram error, no DB error. **N=10 is served clean**, and N=10 is the documented vendor cap.
+
+### Gate 6 — latency, and the FIRST attempt at it measured the probe instead of the service
+
+Two instrument problems had to be solved before any number here meant anything, and the first nearly
+entered this ledger as a production defect:
+
+1. **`finishTurn()` runs from the Twilio MARK HANDLER** (`session.js:3389`). Twilio echoes a
+   `turn-<n>-done` mark back once the audio queued before it has finished playing. A driver that
+   ignores marks produces turns that complete and never emit a latency sample — **9 turns completed,
+   2 logged.** That is the PROBE's fault, not the service's. With a paced mark echo added: **8
+   samples from 3 calls.** Written down because the failure reads exactly like "the server stopped
+   instrumenting", and the next person to write a driver will hit it.
+2. **Turn 0's `playout_ms` and `true_v2v_ms` are NEGATIVE on every call** (-25756, -26909, -26124;
+   turns 1+ clean). Marks are first-write-wins per turn, and the GREETING's first frame is written
+   inside turn 0's window, so it claims `first_frame_wire`. Server-side, so a real call will do it
+   too — the live call can confirm. **P24**, and it matters because `lib/probe/report.js:96` prefers
+   `true_v2v_ms` for its headline, so a run dominated by first turns reports an impossibly fast
+   number.
+
+**Baseline taken FIRST, and it is the committed one:** `eval/a0-baseline.json`, captured 2026-08-20
+on Railway over 12 calls / 84 turns. Railway production's own `/api/debug/latency` is **404**
+(`Build: eeab359`), so a fresh Railway baseline was not obtainable; the recorded one is the baseline
+of record and its provenance is stated rather than implied.
+
+```
+metric                      GCP (8 turns)   A0 Railway (84 turns)
+voice_to_voice_ms p50            2825            2980     <- 155ms FASTER, no regression
+true_v2v_ms p50 (turns 1+)       3143            4022
+llm_ttfb_ms p50                  2516             —       <- Gemini dominates the budget
+llm_tool_ms p50                  1571             —
+stt_endpoint_ms p50               460             —
+tts_ttfb_ms p50                   101             —
+```
+
+**Fair in the way that matters, weak in another.** Fair: both `voice_to_voice_ms` figures are
+IN-PROCESS marks (`speech_end -> first_audio_sent`), so neither includes a carrier leg and the
+caller's geography cannot bias it — which is also why a US number would have been an acceptable
+instrument for this gate. Weak: 8 turns against 84, on clean synthetic audio, so `stt_endpoint_ms` is
+optimistic against a real handset.
+
+### `cpu_idle` — MEASURED AT LAST, and the first measurement was a FALSE ALARM
+
+The ledger has carried `cpu_idle = true` as UNMEASURED since Phase 2, with `false` costing ~$70/mo —
+the entire estate budget — and the stated test being "turn ONE after an idle gap, never a p50".
+Measured here with two cold/warm pairs, each cold call preceded by a **~22 minute forced idle gap**
+and followed immediately by a warm control on the same instance:
+
+```
+                  greeting_ttfa    llm_ttfb (turn 0)   voice_to_voice (turn 0)
+pair 1  COLD          523ms             6797ms                2596ms
+        warm          275ms             1952ms                2195ms
+pair 2  COLD          500ms             2531ms                2642ms
+        warm          271ms             1972ms                2281ms
+```
+
+**The first pair's `llm_ttfb` of 6797ms did NOT reproduce** — 2531ms on the second cold call against
+1952/1972 warm, and against a warm turn-0 range of 1952-3895ms across six calls. Reporting 6797 as
+"the cold-start penalty" off one sample would have been wrong, and this repository has already been
+burned by exactly that (the cache probe that gave opposite verdicts on consecutive N=1 runs). It is
+recorded as a one-off, not a law.
+
+**What reproduces, tightly, in both pairs:** greeting first-audio **500-523ms cold vs 271-275ms
+warm** (~240ms), and turn-0 `voice_to_voice_ms` ~350-400ms worse cold. Both sub-half-second. The
+warm greeting figure is corroborated by ten more samples from the concurrency run (267-508ms under
+N=10 load).
+
+**Reading, and it is deliberately not a verdict:** on this evidence `cpu_idle = true` costs a quarter
+of a second on the greeting and under half a second on turn one, which does not justify ~$70/mo — but
+the ledger's own criterion is *"if turn one after an idle gap is audibly worse on a real call"*, and
+audibly is a judgement a probe cannot make. **The friend's cold call decides it.** If it sounds fine,
+close the item; the fix stays one bool and one apply.
+
+### Gate 7 — RLS against Cloud SQL, and the pass is NARROWER than "58/58"
+
+```
+58 passed, 1 failed, 6 noted. Nothing was persisted — the transaction was rolled back.
+FAILURE: structure :: call_state: RLS enabled AND forced -> enabled=false forced=false policies=0
+```
+
+**The failure is Phase 3a's deliberate design, not a hole.** Migration 038 does
+`REVOKE ALL ON call_state FROM vetra_app` and grants only the four SECURITY DEFINER functions,
+because call state is read BEFORE the tenant is known. `c8-rls-proof.js` discovers tenant-scoped
+tables by looking for a `business_id` column, `call_state` has one, and no exemption list names it.
+**P22** — one line in `NOT_APP_REACHABLE`, whose existing wording already matches 038's design.
+
+**The narrower point, and it is the one that matters:** the run connected **as `postgres`, not
+`vetra_app`** — `cannot SET ROLE vetra_app (42501)` — and the script says so itself: *"RLS POLICIES
+are fully exercised — FORCE binds the table owner too. The GRANT surface is NOT."* So this is a
+**policy-complete, grant-incomplete** pass. **P9 is a GRANT finding, so this run can neither confirm
+nor clear it on Cloud SQL.** Recorded as **P23** rather than allowed to read as a clean 58/58.
+
+### Gate 8 — eval, judged against the band and not against a single run
+
+**39/40 hard**, 34/40 judge (advisory), 212 turns, 1 MAX_TOKENS truncation (0.5%). **Inside the
+37-40 band (P12)** — the ledger's old "35-37 of 37" remains stale and unused. The single hard failure
+is `no-invented-appointment`, and it fired *after* a real `check_appointment_availability` tool call
+returned that exact slot: the assertion is a regex over reply text and cannot tell a grounded slot
+from an invented one. Recorded, not fixed.
+
+### Gate 9a — restore, measured on the clock and then TORN DOWN
+
+PITR clone of `vetra-uk` to a throwaway `vetra-uk-restore-probe`, recovery point **18:50Z, chosen to
+sit AFTER the 18:37Z tenant import** so the restore had something falsifiable to carry.
+
+```
+CLONE operation, the API's own timestamps  591s (9m51s)   18:51:31.982Z -> 19:01:23.122Z
+end-to-end from the command                640s (10m40s)  — gcloud's own --wait GAVE UP at 592s with
+                                                            "taking longer than expected" while the
+                                                            operation was still running
+teardown (protection off + delete)         108s
+CONTENT  applied: 37, pending: none
+CONTENT  updated existing tenant 55c7c8c4-…  (matched on +441372656055)
+         business_directory routes +441372656055 -> 55c7c8c4-…
+```
+
+The content proof is the strong half: re-running the import against the clone reported **"updated
+existing tenant"** with the **same id**, so the row written at 18:37 and its directory entry both
+came back.
+
+**Drift, itemised.** Identical: tier, region, POSTGRES_16, disk, **the same CMEK key**,
+private-IP-only, backups + PITR in `europe-west2`, `phi: true`, deletion protection. Different:
+**zone `europe-west2-a` -> `europe-west2-c`**; a **new server CA** (`65174ac7…` -> `0d937e19…`, so
+anything pinning the cert must refetch); a **different instance service account** (which opened the
+same CMEK key regardless); `settingsVersion` 3 -> 2; and name/IP.
+
+**What this gate does NOT prove, and it is the expensive half: the data comes back, but there is no
+path back into service.** The restored instance has a different name and IP, is **not in `tfstate`**,
+and nothing in the repository documents recovery. A real incident means repointing
+`CLOUD_SQL_INSTANCE` on two Cloud Run services and the migrate job, or a rename dance, plus
+reconciling Terraform state. That is the hour nobody has costed. **P26.**
+
+### Gate 9b — DSR, BLOCKED, and the blocker is the finding
+
+Art. 15 export and Art. 17 erasure are HTTP routes behind `requireBusinessAccess`, which requires an
+Identity Platform session. **`scripts/import-tenant.js` creates the business and deliberately NO
+dashboard user** — its own header says attaching one later "needs a flow that does not exist yet",
+and migration 036 keys the tenant lookup on `auth_uid`. So **an imported tenant cannot exercise its
+own subject-access rights through the product**, and nobody can on its behalf without inventing that
+flow or rebuilding the image with a new script. Not forced. **P25**, and it is Gate-D-shaped: the
+first clinic that asks for a subject access request has no path.
+
+### Gates run before committing — pasted, root suite with `DATABASE_URL` UNSET (P4)
+
+**`npm install` WAS required** — `node_modules` held `main`'s dependency set and `npm run eval` died
+on `Cannot find package 'pg'`, exactly the symptom the brief predicted.
+
+```
+npm test                          2377 / 127 files   ✓ target
+npm run test:db                    211 / 16 files    ✓ target   (DATABASE_URL SET)
+npm run sim:cutoff                   3 passed        ✓ target
+dashboard backend                  126 / 13          ✓ target
+dashboard frontend                  36 / 6           ✓ target
+terraform fmt -check -recursive      exit 0          ✓
+terraform validate                   Success         ✓
+```
+
+Nothing moved, in either direction.
+
+---
+
+## Attempt 2 — parked in PHASE 5. P5-P20 carried forward; P21-P26 are new
+
+**RESOLVED and now closed: P7** (Phase 4, `max_connections` = 50 measured), **P10** and **P19** and
+**P20** (all closed in production, verified six ways, commit `99adfd0`). **P5, P6, P8, P9, P11-P18
+stand exactly as written.** **P12's band — 37-40 of 40 — was used this phase and held (39/40).**
+
+**P9 deserves one line of new information:** `c8-rls-proof.js` EXCLUDES `business_directory` from
+isolation testing on the stated grounds that it is *"granted to nobody"* — which is precisely the
+claim P9 measured as false. So the isolation suite skips the one table the application role can
+actually read, and P23 below means this phase could not settle it on Cloud SQL either.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P21 | **The tenant importer names a column that migration 012 DELETED, and it fails the whole import.** `BUSINESS_FIELDS` includes `voice_style`; migration 002 added that column and **012 dropped it**. Any source database that still has it — Supabase production does — makes the import die with `column "voice_style" of relation "businesses" does not exist`, after the payload has been built and the job has run. The script handles the opposite case gracefully (unknown fields in the payload are ignored with a warning); it does not handle its own allow-list being ahead of the schema. Measured this phase: first execution failed, second succeeded with the field removed. No application code reads `voice_style` anywhere. **One-word fix, and it will hit again at D3 when the US clinic moves** | `scripts/import-tenant.js:70-97` | ask first |
+| P22 | **A deliberate design decision reads as a FAIL in the RLS proof.** `c8-rls-proof.js` discovers tenant-scoped tables by looking for a `business_id` column. Migration 038's `call_state` has one, and no exemption list names it — so the structure check reports `call_state: RLS enabled AND forced -> enabled=false forced=false policies=0` as a failure. 038 does exactly this ON PURPOSE (`REVOKE ALL ON call_state FROM vetra_app`, four SECURITY DEFINER functions granted instead) because call state is read BEFORE the tenant is known. The mechanism worked as designed — it caught a new table — but the gate now cannot be read as pass/fail without a human explaining it every time. **One line in `NOT_APP_REACHABLE`, whose existing wording already describes 038's design word for word** | `scripts/c8-rls-proof.js:143`, `database/038_call_state.sql:104` | ask first |
+| P23 | **THE CLOUD SQL RLS RUN CANNOT TEST THE GRANT SURFACE, AND P9 IS A GRANT FINDING.** The migrate job connects as `postgres`; `SET ROLE vetra_app` fails with 42501, so the run falls back to the connected role. The script is honest about it — *"RLS POLICIES are fully exercised ... The GRANT surface is NOT: this role has broader privileges, so any check that depends on `vetra_app` being REFUSED is skipped rather than passed"* — and reports it as a `[note]`, not a failure. **Consequence: "RLS 58/58 against Cloud SQL" means policies, not grants**, and the two have already been different facts once (the reason C8 exists at all). Closing it needs `vetra_app` membership for the job's role, which is a migration | `scripts/c8-rls-proof.js` preflight, Cloud SQL roles | ask first |
+| P24 | **TURN 0'S TIMINGS ARE CONTAMINATED BY THE GREETING ON EVERY CALL, AND ONE OF THE CONTAMINATED ONES IS THE HEADLINE NUMBER.** Marks are first-write-wins per turn, and the GREETING's audio is produced inside turn 0's window, so it claims marks that belong to the turn's own reply. Measured on 6 of 6 driven calls: `playout_ms` -25756, -26909, -26124, -27571, -24334, -23811 and `true_v2v_ms` ≈ -21000 to -23000; on the cold call **`tts_ttfb_ms` was -4202** as well, so `tts_first_byte` is claimed too — the contamination is not limited to `first_frame_wire`. Turns 1+ are clean (playout 0, true_v2v ~3.1-3.6s), and `voice_to_voice_ms` stays sane on turn 0 (`first_audio_sent` is evidently marked on the turn's own path). **`lib/probe/report.js:96` PREFERS `true_v2v_ms` over `voice_to_voice_ms` for its headline**, so any run weighted toward first turns reports an impossibly fast — or negative — voice-to-voice figure. Server-side, so real calls will do it too; the live call can confirm. Fix is to scope the greeting's marks outside turn 0, or to start turn indexing after it | `lib/voice/metrics.js:249-251`, `lib/probe/report.js:96` | ask first |
+| P25 | **AN IMPORTED TENANT CANNOT EXERCISE ART. 15 OR ART. 17 AT ALL.** Both DSR routes sit behind `requireBusinessAccess`, which needs an Identity Platform session, and migration 036 keys the tenant lookup on `auth_uid`. `scripts/import-tenant.js` creates the business and **deliberately no dashboard user** — its own header records the consequence: *"the imported tenant has no dashboard user. Attaching one later needs a flow that does not exist yet."* So Phase 5's DSR gate could not be run at all against the tenant Phase 5 imported, and more importantly **a real clinic migrated by import has no path to serve a subject access request**. Not a bug in either file; a missing flow that only shows up when the two are combined, which is exactly what a migration does. Gate D — the first prospect with a compliance officer asks for this | `scripts/import-tenant.js` header, `server.js:740`, migration 036 | 6 |
+| P26 | **THE RESTORE BRINGS THE DATA BACK AND HAS NO PATH BACK INTO SERVICE.** Measured this phase: a PITR clone takes **591s**, carries all 37 migrations and the tenant row, and matches the source on tier, region, CMEK key, private-IP-only and backup configuration. But it lands with a **different name, a different private IP, a different zone (`europe-west2-a` -> `-c`), a fresh server CA, and it is NOT IN `tfstate`.** Recovery therefore means repointing `CLOUD_SQL_INSTANCE` on two Cloud Run services and the migrate job, or a rename dance, plus reconciling Terraform state — and **nothing in this repository documents any of that**. The gate as written ("wall clock, drift itemised") measures the half that works. Also worth knowing: `gcloud`'s own `--wait` **gave up at 592s** and printed "taking longer than expected" while the operation was still running, so an operator watching the CLI would reasonably conclude the restore had failed | runbook that does not exist, `infra/terraform/` | 6 |
+
+**One thing that is NOT a finding, recorded so the next person does not lose an hour to it:**
+`finishTurn()` runs from the Twilio **mark handler** (`session.js:3389`), and Twilio only echoes a
+mark back once the audio queued before it has finished playing. Any probe that drives
+`/twilio/media-stream` directly must **echo marks back, paced by the audio it received**, or turns
+complete and emit no `turn_latency` at all — 9 turns completed and 2 logged, which reads exactly like
+the server having stopped instrumenting. The service was fine; the probe was wrong.
+
+---
+
+## Attempt 2 — NEXT SESSION: finish Gate 4, then PHASE 6. **THE FRIEND'S HANDSET FIRST**
+
+**Phase 5 left exactly one gate open, and it is the product gate, not a migration gate.**
+
+### Start here
+
+1. **THE LIVE CALL, and it is already set up.** `+441372656055` is repointed at
+   `twilio_webhook_base` and the `Digile Media` tenant is imported and routing. A friend on a **UK
+   handset** dials it. **Call 1 must be the COLD one** — `cpu_idle = true` only shows on turn one
+   after an idle gap, and a second call spends the evidence for ~15 minutes.
+   - Book an appointment on call 1. Reschedule it on call 2. Barge in and cough on call 3.
+   - Listen for: time-to-first-word after the caller stops; dead air over ~2s; being cut off; whether
+     it says "Digile Media" and sounds **British**; whether the booking and reschedule actually
+     completed.
+   - **This is the first real test of receptionist work accumulated since early August** — the four
+     Digile Media complaints, the turn-taking work, the greeting/appointment guard. **None of it has
+     ever answered a phone**, and prompt and turn-taking changes are exactly the category a green
+     suite stays green through. Treat a bad call as a finding, not a surprise.
+2. **Confirm P24 on that call** — does turn 0 report a negative `true_v2v_ms` with a real caller? The
+   driven calls say it will.
+3. **Then revert or keep the repoint deliberately**, and say which. The revert is one API call.
+
+### What the next session must NOT do
+
+- **Do not read Phase 5's 8-turn latency sample as the last word.** It says "no regression against
+  A0" and it does, but it is 8 turns of clean synthetic audio against A0's 84 through real carriers.
+- **Do not light `us-prod`, do not change `project_id_suffix`, do not fix P9 or P18 blind.** All
+  unchanged from Phase 4, all still true.
+
+### Then Phase 6 — cutover and compliance pack
+
+DNS split (`app.<domain>`), and **P18 is a Phase 6 decision that now has a date**: the dashboard
+frontend is served nowhere and `DASHBOARD_URL` on the live service is a 404. Railway warm for one
+week. Compliance pack: six documents exist and need review, ROPA/DPIA/privacy notice still to write,
+ICO registration to file. **P25 belongs in this phase too** — a clinic with no dashboard user cannot
+serve a DSR, and that is a compliance commitment, not a nicety.
+
+### Still open and OWNER-ONLY, carried forward unchanged
+
+- **⚠ PRECONDITION 6.** Closes when a Google account belonging to **JOSH** holds `billing.admin` and
+  `organizationAdmin`. `@vetratd.com` addresses are NOT Google identities — measured, the org has no
+  `directoryCustomerId`. `nithinjd06@gmail.com` is a second ACCOUNT, not a second PERSON.
+- **Twilio concurrent-calls and CPS raise.** Still UNKNOWN, never measured, has lead time. Phase 5
+  now shows N=10 served clean with zero vendor refusals, which is the ElevenLabs cap — Twilio's own
+  limit is still unmeasured and is the next one up the raise order.
+- **A customer-facing DPA** (Art. 28). No phase owns it; drafting has lead time.
+- **M365 shared mailbox** before the first real clinic. The From address must not become
+  `@vetratd.com` while the host is Gmail.
+- **Gate B item #3** — `.playwright-mcp/` holds real caller phone numbers in a PUBLIC repo. Has a
+  clock, blocked by nothing, owned by no phase.
+- **Uptime alerting.** `budget.tf` alerts on COST only. Nothing alerts on the voice service being
+  down, and Phase 5 proved the service can serve 10 concurrent callers — which also means it can stop
+  serving them without anyone being told.
+
+---
+
 ## Attempt 2 — session log
 
 | # | Date | Branch | Did | Left for next |
@@ -3723,3 +4113,4 @@ and `main` IS STILL EXPOSED.** **P8 is now confirmed fact:** the state bucket is
 | A2-3 | 2026-08-28 | `feat/gcp-2` | **PHASE 3 CLOSED — commits `f3a7680`, `bb63652`, `8810538`. Application code only; `infra/terraform/` untouched, no GCP contact, nothing pushed, `main` untouched.** **3a:** `createPgStore()` on migration **038**, selected by `CALL_STATE_STORE`, sharing `services/db.js`'s pool so shared call state costs **zero extra connections** (P7). `call_state` has no RLS and no grant to `vetra_app` — it is read before the tenant is known, so a tenant policy would return zero rows and defeat the fix while looking careful — and `app_call_state_merge` **RAISES on any field outside SHARED_FIELDS**, enforcing the property the no-Memorystore costing rests on. **The Postgres store then exposed a PRE-EXISTING bug the Map was hiding:** both boundary writes are fire-and-forget, and a pool does not preserve issue order, so the pickup write (carrying `sawCallerFinal:false`) could land after the latch and re-tag a short real call as spam — through the fix for it. `writeShared` now serialises per call SID; deliberately not a latch in SQL, which would make the two stores behave differently. Contract extracted and run **twice**, file store and **two real pools in two OS processes**, with **two sabotage cases**. **3b:** `scripts/load-test-calls.js` + `docs/capacity.md`. **The binding cap is ElevenLabs at 10 concurrent, quoted from the vendor's own 1008 close reason**, and the knee is exactly there: p50 762ms at N=10, p50 4,617ms and max 8,393ms at N=30. **Gate E's "caller 11 is undefined behaviour" is now measured and is not undefined** — nothing is dropped, the greeting falls back to the Google voice after 4-8s of silence, and the breaker then does that to everyone for 60s. **Also measured: ONE INSTANCE REACHES `DB_POOL_MAX`** (10 connections at 10, 20 and 30 concurrent calls), so `instances × DB_POOL_MAX` is reached, not pessimistic. Deepgram >30 with zero errors; Twilio and Vertex left **UNKNOWN rather than estimated**; **Cloud SQL row left as an explicit Phase 4 fill-in**. **3c:** hit rate **measured on the real prompt at 86.9% / 86.7%, zero misses in 407 turns** — and the contradictory record is explained, because "94%" and "98.8%" were measured on **synthetic filler with a tiny dynamic tail**. **The function-calling gate was a coin flip:** one request per arm, no control; adding a control gave BROKEN and then its exact inverse on the next run. Now N trials per arm — **uncached 3/8, cached 4/8, indistinguishable, so tool calling is NOT broken under a cache and mutual exclusivity is not the blocker.** Eval two runs per mode: every metric overlaps, within-arm spread exceeds between-arm. **Stays OFF, for a new reason.** Gates: **2362/126, 211/16, applied 37 pending none, sim 3, dashboards 126/13 and 36/6, ZERO snapshots moved** | **Phase 4 — provision. THE OWNER MUST BE PRESENT.** All nine Phase 4 preconditions still stand and none is done. Three handoffs from Phase 3: size `DB_POOL_MAX`/`max_instance_count` from `max_connections` read off the instance (P7, half-measured now); **`var.call_state_store` is not wired to a service env var, so `CALL_STATE_STORE=pg` would not reach Cloud Run**; and 038 must be applied before the store is selected. **New parked P9-P12 — P9 (a control migration 033 claims and does not have) and P10 (`/twilio/media-stream` takes no authentication at all) are security-shaped: raise them, do not bundle them into the apply** |
 | A2-4 | 2026-08-28 | `feat/gcp-2` | **SAME SESSION AS A2-3, after Phase 3 closed. P10 FIXED + PHASE 4 PREP + THE FIRST GCP CONTACT OF ATTEMPT 2.** **P10 resolved (`60d1afa`)** at the owner's request once it turned out not to be a Phase 4 concern: `origin/main:server.js:837` carries the identical unauthenticated media-stream upgrade, Railway autodeploys `main`, so it was **live in production while being written down as a future item**. Per-call token in the `<Stream url>` PATH (Twilio drops query strings on the WS handshake), verified before the handshake, with the token's call SID bound to the `start` frame — without that second half one valid token authorises a session for any other call. Key **derived from `TWILIO_AUTH_TOKEN`**, so nothing needed provisioning in Terraform or Secret Manager. Verified both ways: `--no-token` → 0/5 opened, 5×403, **zero `stt_open`**; with token → 5/5, p50 685ms; swapped SID → closed 1008. **`main` is still exposed — nothing pushed.** **Phase 4 prep (`78ddb61`):** attempt-1 residue deleted after proving it was attempt-1 (it named the dead org, dead billing and `c3a3bd`, and is **auto-loaded by every plan**, so the first Phase 4 plan would have run against the suspended estate) — `terraform init -backend=false` now completes **without reaching GCS**, closing the Phase 2 trap; **`project_id_suffix` PINNED to `edc8ca`** (`vetra-{uk,us,core}-edc8ca`), evaluated in `terraform console` and **sabotage-verified** — unpinned it returns `(known after apply)`; **`CALL_STATE_STORE` now rendered onto the service**, which it never was — same shape as the `DEEPGRAM_REGION` bug, and unset it would have silently un-done Phase 3a; **precondition 8 closed early** because the pinned suffix makes the core project ID deterministic. **Owner preconditions, first GCP contact:** the **19 quota APIs enabled and verified 19/19** on `project-b147bdfa-d267-426a-8c7` — and the precondition's "the whole `local.terraform_quota_apis` list (19 APIs)" was **wrong, that local is FOURTEEN**; the 19 is its union with `common_apis`, corrected in place. **Essential contacts set** (`nithinjd06@gmail.com`, `josh.tite@vetratd.com`), closing a HARD gate — `terraform console` refused to evaluate the module at all with exactly one. **`@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN** — measured: both IAM grants refused `User ... does not exist`, and the org has **no `directoryCustomerId`**. An Essential Contact needs no Google account; an IAM principal does. `nithinjd06@gmail.com` granted `billing.admin` + `organizationAdmin`, read back. **That is a second ACCOUNT, not a second PERSON, and attempt 1's suspension was scoped to the OWNER with the cause never disclosed — so it is unproven against the exact event it insures against.** Gates: **2377/127**, 211/16, sim 3, dashboards 126/13 and 36/6, fmt 0, validate Success, ZERO snapshots moved | **PHASE 4 — THE APPLY. It is not one command:** first apply (local state) → **build both images** (`image_tag`/`dashboard_image_tag` are `"0000000"`, a tag that DOES NOT EXIST, so a full apply before the build fails on a missing image) → **apply the migrate job with `-target` and EXECUTE it** before serving code, or 038 is missing under a running service → apply the rest → read `max_connections`, set `DB_POOL_MAX`, re-apply → **`init -migrate-state` to GCS** → repoint `bootstrap_project_id` at `core` **and enable the same 19 APIs on it**. Precondition 6 is still OPEN: it closes when a Google account belonging to **Josh** holds `billing.admin` and `organizationAdmin` |
 | A2-5 | 2026-08-29 | `feat/gcp-2` | **PHASE 4 CLOSED — THE FIRST APPLY OF ATTEMPT 2. THE ESTATE EXISTS.** `vetra-uk-edc8ca` (462445274080), `vetra-us-edc8ca` (1050513323476, dark and empty), `vetra-core-edc8ca` (427725568491); **the pinned suffix `edc8ca` held.** 156 resources in state, Cloud SQL `vetra-uk` RUNNABLE on `db-g1-small` in europe-west2, migrate job executed, both Cloud Run services serving, **state migrated to `gs://vetra-tfstate-edc8ca`**, `bootstrap_project_id` repointed at `core` with 19/19 APIs verified on it. **Nothing pushed, `main` untouched, no Twilio repoint, no live call.** **THREE CONFIG BUGS BLOCKED THE FIRST PLAN AND `validate` SAW NONE OF THEM:** parentheses are illegal in a GCP project display name (and the `for_each` abort hid ~130 resources behind an 8-resource plan); `network_cidr` is STACK-keyed while `private_services` iterates PROJECT keys — Phase 2's reshape broke it and attempt 1's coincidence had hidden it; and the README pointed at the dead org `564252011558` twice. **A TENTH PRECONDITION NOBODY HAD WRITTEN DOWN:** `resourcemanager.organizationAdmin` grants org-policy READ, not WRITE — measured off both role definitions — so the first apply died at the graph's first node with **5 resources and NO PROJECTS**, because `google_project.this` deliberately depends on `skipDefaultNetworkCreation`. Fixed by granting `roles/orgpolicy.policyAdmin`; now README bootstrap item 3. The control held: no `default` network exists. **`roles/owner` FOR AN EXTERNAL GMAIL CANNOT BE GRANTED BY API** (`ORG_MUST_INVITE_EXTERNAL_OWNERS`) — the owner used the Console invitation flow, Terraform adopted the result (P14). **THE APPLY WAS SIX APPLIES**, because `enable_prod_databases` also pulls the migrate job and dashboard in on a nonexistent image tag and Terraform 1.15.8 has no `-exclude`. **P7 CLOSED: `max_connections = 50` READ OFF THE INSTANCE** (superuser reserve 3, cloudsqladmin 3) — **`DB_POOL_MAX` was rendered onto NEITHER service**, the third `CALL_STATE_STORE`/`DEEPGRAM_REGION`-shaped hole, worst case 400 against 50. Now voice 10 / dashboard 5 / `max_instances` 2 = **38 of 50**, with the raise ORDER recorded (ElevenLabs → Twilio → tier → these). **The tier was a decision, not a default:** the module default is $98.62/mo and the `db-g1-small` override was COMMENTED OUT, so the expensive default would have won by inaction. **`VERTEX_LOCATION` was `eu` defended by a comment P1 had already superseded** — now `var.vertex_location = "global"`, the honest label. **The image was verified by reading it, and the first attempt was wrong:** Cloud Build overrides WORKDIR with `/workspace`, so relative paths read the SOURCE — which is also **P13, `cloudbuild.yaml`'s own migration guard cannot see the image it claims to check.** Re-run against `/app` with three controls: 38 migrations, `038_call_state`, `mediaStreamToken.js`, `createPgStore`. **GATE MET on `voice-uk-prod-00001-r6c`:** `GET /` **200** with `Build: b7de0dd` (P2 confirmed on a live service), `Deepgram nova-3 (DEPLOYMENT_MODE=standard)`, `db_backend cloudsql/IAM`, **`call_state_store_selected store=pg shared=True`**, `DEEPGRAM_REGION=eu`, `VERTEX_LOCATION=global`. **Traps verified against LIVE resources, not config:** effective org policy expands to 71 values INCLUDING `europe-west2` with zero US values; instance backups pinned to `europe-west2`; CMEK UK-resident. **`smtp_config` defaulted to `{}` and would have broken the deploy** (bootChecks makes a half-configured pair FATAL). Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success — nothing moved.** New parked **P13-P17**; P7 closed | **PHASE 5 — VERIFY. THE OWNER, THEIR PHONE AND THEIR EARS.** Positive control FIRST on the Twilio signature. **The webhook is `twilio_webhook_base`, never `.uri`.** **Smoke-test `api.eu.deepgram.com` BEFORE the live call** — nothing has yet proved the key works there, and the failure would arrive as silence on a real caller. Then tenant import, live call, 10-concurrent with all 10 resolving `businessId`, latency against a Railway baseline taken FIRST (`cpu_idle` and shared-core CPU are both unmeasured, both one-line fixes), RLS 58/58, eval against the **37-40 of 40** band, restore, DSR. **Precondition 6 still OPEN — it closes when a Google account belonging to JOSH holds `billing.admin` + `organizationAdmin`; `nithinjd06@gmail.com` is a second ACCOUNT, not a second PERSON** |
+| A2-6 | 2026-08-29 | `feat/gcp-2` | **PHASE 5 — EIGHT GATES OF NINE, AND THE ESTATE SERVED ITS FIRST TRAFFIC. GATE 4 (THE LIVE CALL) IS STILL OPEN.** No apply, no new revision, nothing pushed, `main` untouched — everything measured against the same serving revision `voice-uk-prod-00001-r6c`. **The live-call problem turned out to be a TWO-ACCOUNT problem:** `+441372656055` is on account A whose token GCP holds; the owner's US number is on account B, and pointing it at GCP would have 403'd every request — P20's failure exactly. **The owner supplied the fix: a friend on a UK handset dials the real number.** Number repointed at `twilio_webhook_base` 18:38Z and LEFT there. **Gate 1 Deepgram EU** 10/10 finals WER 0.0000 through the real seam, EU host 200 from Frankfurt, garbage key 401. **Gate 2 signature** — P20's trap reproduced under Node (`import *` gives `undefined`, default gives `function`), then signed **200**, tampered **403**, unsigned **403**, and a signature over the `.uri` host **403**, proving the URL trap is real. **Gate 3 tenant import FAILED FIRST** on `voice_style`, a column migration 002 added and **012 deleted** while the importer still names it (P21); second run created `55c7c8c4-…` with `business_directory` routing. **Gate 5 concurrency 10/10, and 4 of 10 status callbacks landed on a DIFFERENT INSTANCE and still resolved `businessId`** — Phase 3a's pg store proved in production against the case an in-process Map fails silently. Zero errors above WARNING at N=10. **Gate 6 latency `voice_to_voice_ms` p50 2825 vs A0 Railway 2980 — no regression**, after two instrument bugs were separated: the missing `turn_latency` lines were THE PROBE's fault (Twilio echoes marks; the driver did not), while turn-0's negative `true_v2v_ms`/`playout_ms`/`tts_ttfb_ms` are REAL and greeting-caused (P24). **`cpu_idle` MEASURED at last: the first cold pair's 6797ms `llm_ttfb` did NOT reproduce (2531ms on the second); what reproduces is greeting 500-523ms cold vs 271-275ms warm, ~240ms.** **Gate 7 RLS 58 passed / 1 by-design fail / rolled back — but as `postgres`, not `vetra_app`, so the GRANT surface was never exercised and P9 remains unsettled on Cloud SQL (P23).** **Gate 8 eval 39/40, inside the 37-40 band.** **Gate 9a restore 591s, content verified against the clone, drift itemised, clone deleted** — and it has no path back into service (P26). **Gate 9b DSR BLOCKED: an imported tenant has no dashboard user and no flow to attach one (P25).** `npm install` was required, as predicted. Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success.** New parked **P21-P26** | **FINISH GATE 4 — the friend's UK handset. Call 1 must be the COLD one.** Book, reschedule, barge in. It is the first real test of every receptionist fix since early August, none of which has answered a phone. Confirm P24 on that call, then decide whether to keep or revert the repoint. **Then PHASE 6** — DNS, `app.<domain>` (P18 decides there), Railway warm one week, ROPA/DPIA/privacy notice, ICO. Precondition 6 still OPEN and still needs a Google account belonging to **JOSH** |
