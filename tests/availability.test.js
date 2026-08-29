@@ -93,6 +93,134 @@ describe("check_appointment_availability tool", () => {
     deps,
   });
 
+  // -------------------------------------------------------------------------
+  // Round 3, 2026-08-29. A caller said only "next Tuesday" and the assistant
+  // invented a time rather than asking or offering. There was nothing to call:
+  // this tool required a full datetime, `book_appointment` accepts whatever
+  // datetime the model computed, and no code anywhere turns a bare day into a
+  // list of open times. internal.findSlots already enumerates the whole day —
+  // it was simply never reachable except as the alternatives to a REFUSED
+  // point-check.
+  // -------------------------------------------------------------------------
+  describe("a date with no time", () => {
+    // A future Tuesday, as a bare date. Frozen "now" is the Monday before.
+    const DATE_ONLY = "2026-07-21";
+
+    it("returns the open times for that day instead of rejecting it", async () => {
+      const deps = makeDeps();
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const r = res.functionResponse.response;
+
+      expect(r.success).toBe(true);
+      // Not a yes/no question — nothing was asked about a specific time.
+      expect(r.available).toBeUndefined();
+      expect(Array.isArray(r.open_times)).toBe(true);
+      expect(r.open_times.length).toBeGreaterThan(0);
+      expect(r.open_times.length).toBeLessThanOrEqual(3);
+      expect(r.message).not.toMatch(/didn't catch a valid date and time/i);
+    });
+
+    it("offers times spread across the day, not the first three of the morning", async () => {
+      // A whole 9-5 day at 30 minutes is 16 slots; the first three are all
+      // before 10:30, which is a worse offer than it looks.
+      const deps = makeDeps();
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const { open_times: open } = res.functionResponse.response;
+
+      expect(open).toHaveLength(3);
+      const hours = open.map((t) => Number(t.slice(11, 13)));
+      expect(hours[0]).toBeLessThan(hours[1]);
+      expect(hours[1]).toBeLessThan(hours[2]);
+      // The last offer is in the afternoon, not 10am.
+      expect(hours[2]).toBeGreaterThanOrEqual(13);
+    });
+
+    it("hands back naive LOCAL times, the same frame book_appointment expects", async () => {
+      const deps = makeDeps();
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const { open_times: open, message } = res.functionResponse.response;
+
+      // Naive local, no Z, no offset — otherwise the model hands a UTC instant
+      // back as scheduled_at and the booking lands hours away.
+      expect(open.every((t) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(t))).toBe(true);
+      // ...and what it is told to SAY carries no ISO at all.
+      expect(message).not.toMatch(/T\d{2}:\d{2}/);
+      expect(message).toMatch(/\d{1,2}(:\d{2})?\s?[AP]M/);
+    });
+
+    it("omits times that are already taken", async () => {
+      const deps = makeDeps({
+        listScheduledBetween: vi.fn().mockResolvedValue([{ scheduled_at: REQUESTED_UTC }]),
+      });
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const { open_times: open } = res.functionResponse.response;
+      // 15:00Z is 10:00 Chicago — the taken slot must not be offered.
+      expect(open).not.toContain("2026-07-21T10:00:00");
+    });
+
+    it("refuses a date in the past with the same wording as a past time", async () => {
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: "2026-07-13" } },
+        ctxFor(makeDeps())
+      );
+      const r = res.functionResponse.response;
+      expect(r.open_times ?? []).toHaveLength(0);
+      expect(r.message).toMatch(/already passed/i);
+    });
+
+    it("refuses a day the business is closed", async () => {
+      // 2026-07-25 is a Saturday; the fixture is closed at weekends.
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: "2026-07-25" } },
+        ctxFor(makeDeps())
+      );
+      const r = res.functionResponse.response;
+      expect(r.open_times ?? []).toHaveLength(0);
+      expect(r.message).toMatch(/closed/i);
+    });
+
+    it("says so plainly when the day is fully booked", async () => {
+      const deps = makeDeps({
+        listScheduledBetween: vi
+          .fn()
+          // Every 30-minute slot from 09:00 to 17:00 Chicago (14:00Z-21:30Z).
+          .mockResolvedValue(
+            Array.from({ length: 16 }, (_, i) => ({
+              scheduled_at: new Date(Date.UTC(2026, 6, 21, 14, 0) + i * 30 * 60_000).toISOString(),
+            }))
+          ),
+      });
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const r = res.functionResponse.response;
+      expect(r.open_times).toHaveLength(0);
+      expect(r.message).toMatch(/nothing (else )?(open|available)|fully booked|another day/i);
+    });
+
+    it("still rejects a date-only value at BOOKING time — the backstop stays", async () => {
+      // The model must never turn "next Tuesday" into a booking on its own.
+      const res = await appointments.execute(
+        { id: "1", name: "book_appointment", args: { client_name: "Ada", scheduled_at: DATE_ONLY } },
+        ctxFor(makeDeps())
+      );
+      expect(res.functionResponse.response.success).toBe(false);
+    });
+  });
+
   it("reports a free slot as available", async () => {
     const deps = makeDeps({ countScheduledOverlapping: vi.fn().mockResolvedValue(0) });
     const res = await appointments.execute(

@@ -230,6 +230,18 @@ vi.mock("../services/gemini.js", () => ({
     "get_caller_appointments_from_db",
     "record_customer_request",
   ]),
+  // The parameter half of the same vocabulary. An orphaned argument blob is
+  // identified by its KEYS once the tool name in front of it has been excised —
+  // which is the 2026-08-29 leak.
+  callToolParamNames: vi.fn(() => [
+    "reason",
+    "client_name",
+    "scheduled_at",
+    "service_type",
+    "notes",
+    "appointment_id",
+    "requested_at",
+  ]),
   ACTION_TOOL_NAMES: [
     "book_appointment",
     "cancel_appointment_db",
@@ -4134,6 +4146,49 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await startCall(ws, newSid());
     await settleGreeting();
     H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    // Since 2026-08-29 the line matches the TOOL. A lookup gets "let me pull
+    // that up", not the generic "one moment" this used to assert - same
+    // one-per-turn budget, better words.
+    expect(written).toMatch(/pull that up/i);
+  });
+
+  it("uses a diary-shaped hold line for an availability check", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "Ten oclock is free.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("can I come in on Tuesday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/check the diary/i);
+  });
+
+  it("falls back to the generic line for a tool it does not recognise", async () => {
+    // A business webhook tool. Guessing what it does would be worse than
+    // saying nothing specific.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "some_partner_thing" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "All done.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("do the thing.");
     await flush();
     await new Promise((r) => setTimeout(r, holdDelay + 250));
 

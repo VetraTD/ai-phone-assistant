@@ -16,8 +16,8 @@ const NAMES = [
   "set_call_intent",
 ];
 
-function run(deltas, toolNames = NAMES) {
-  const s = createToolCallTextStripper({ toolNames });
+function run(deltas, toolNames = NAMES, toolParamNames = []) {
+  const s = createToolCallTextStripper({ toolNames, toolParamNames });
   let text = "";
   const calls = [];
   for (const d of deltas) {
@@ -145,6 +145,78 @@ describe("toolCallText.js — text-channel tool-call stripper", () => {
 
     it("treats an empty argument block as parsed-and-empty", () => {
       expect(parseToolCallArgs("")).toEqual({ ok: true, args: {} });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 3, 2026-08-29. A caller heard
+  //   "{reason:Caller declined further assistance and said thank you. }"
+  // read aloud, and then heard the goodbye twice.
+  //
+  // The name was removed and the ARGUMENTS were not. BARE_NS_RE runs
+  // unconditionally after CALL_RE, so when a delta boundary lands before the
+  // closing brace CALL_RE cannot match (it requires `\{([^{}]*)\}`) but
+  // BARE_NS_RE still fires and deletes just `default_api:end_call`, orphaning
+  // the blob. The existing split-at-every-position test above could not catch
+  // this: it asserts only that the NAME is gone.
+  // -------------------------------------------------------------------------
+  describe("the round-3 leak — an orphaned argument blob", () => {
+    const R3_NAMES = [...NAMES, "end_call"];
+    // Every parameter name the live declarations expose, threaded in the same
+    // way the tool names are. This is what makes the nameless case
+    // registry-driven rather than a denylist.
+    const R3_PARAMS = ["reason", "client_name", "scheduled_at", "appointment_id", "requested_at"];
+
+    const LEAK =
+      "You're very welcome. default_api:end_call{reason:Caller declined further " +
+      "assistance and said thank you. } Thank you for calling Digile Media.";
+
+    const r3 = (deltas) =>
+      run(deltas, R3_NAMES, R3_PARAMS);
+
+    it("removes the arguments along with the name, not just the name", () => {
+      const { text, calls } = r3([LEAK]);
+      expect(text).not.toMatch(/[{}]/);
+      expect(text).not.toMatch(/reason\s*:/i);
+      expect(text).not.toMatch(/default_api|end_call/);
+      expect(text).toContain("You're very welcome.");
+      expect(text).toContain("Thank you for calling Digile Media.");
+      expect(calls.map((c) => c.name)).toEqual(["end_call"]);
+    });
+
+    it("survives being split across delta boundaries at every position", () => {
+      for (let i = 1; i < LEAK.length; i++) {
+        const { text } = r3([LEAK.slice(0, i), LEAK.slice(i)]);
+        expect(
+          /[{}]|reason\s*:|default_api|end_call/i.test(text),
+          `split at ${i} leaked: ${JSON.stringify(text)}`
+        ).toBe(false);
+      }
+    });
+
+    it("excises a nameless argument blob whose keys are all tool parameters", () => {
+      // No function name at all — only the arguments object. This is what
+      // actually reached the caller's ear once BARE_NS_RE had eaten the name.
+      const { text } = r3(["{reason:Caller said thank you. } Have a good day."]);
+      expect(text).not.toMatch(/[{}]|reason\s*:/i);
+      expect(text).toContain("Have a good day.");
+    });
+
+    it("leaves a brace blob alone when its keys are not tool parameters", () => {
+      // The restraint case: braces in prose are not evidence of anything.
+      const { text, calls } = r3(["The note said {colour:blue} on the file."]);
+      expect(text).toBe("The note said {colour:blue} on the file.");
+      expect(calls).toEqual([]);
+    });
+
+    it("still holds a pseudo-call that follows ordinary prose", () => {
+      // viableOpener let the optional [.:] separator start on the PRECEDING
+      // prose word, so "welcome.  {reason:" produced head="welcome", matched
+      // nothing, and the buffer was released mid-call rather than held.
+      const s = createToolCallTextStripper({ toolNames: R3_NAMES, toolParamNames: R3_PARAMS });
+      const out = s.push("Have a wonderful day. end_call{reason:Caller is done");
+      expect(out.text).not.toMatch(/end_call|[{]|reason\s*:/i);
+      expect(out.text).toContain("Have a wonderful day.");
     });
   });
 });

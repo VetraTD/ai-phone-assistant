@@ -166,6 +166,85 @@ describe("a tool call written into the text channel", () => {
     expect(spoken).not.toMatch(/default_api|reschedule_appointment_db/);
   });
 
+  // -------------------------------------------------------------------------
+  // Round 3, 2026-08-29. The caller heard the goodbye TWICE:
+  //
+  //   "{reason:Caller declined further assistance and said thank you. }
+  //    You're very welcome. Thank you for calling Digile Media, and have a
+  //    wonderful day. You're very welcome. Thank you for calling Digile Media,
+  //    and have a great day."
+  //
+  // Round 0 wrote end_call into the text channel and said goodbye. The re-ask
+  // forces mode:ANY, and the model obliged with the call AND another goodbye,
+  // appended to the same fullText. The recovery exists to get the tool CALLED;
+  // whatever it says has already been said.
+  // -------------------------------------------------------------------------
+  describe("the recovery round must not re-speak", () => {
+    const GOODBYE_1 = "You're very welcome. Thank you for calling Digile Media, and have a wonderful day.";
+    const GOODBYE_2 = "You're very welcome. Thank you for calling Digile Media, and have a great day.";
+
+    it("suppresses the recovery round's text when the turn already spoke", async () => {
+      H.chunks = [
+        [text(`${GOODBYE_1} default_api:end_call{reason:Caller declined further assistance and said thank you. }`)],
+        [text(GOODBYE_2), call("end_call", { reason: "Caller declined further assistance" })],
+      ];
+
+      const { spoken, reply } = await run({ callerTurnCount: 3 });
+
+      expect(spoken).toContain("have a wonderful day.");
+      expect(spoken).not.toContain("have a great day.");
+      expect(spoken).not.toMatch(/[{}]|reason\s*:|default_api|end_call/i);
+      // The whole point of the recovery: the tool still actually runs.
+      expect(reply.toolCallEvents.map((e) => e.name)).toContain("end_call");
+    });
+
+    it("still speaks the recovery round when the turn said nothing first", async () => {
+      // Nothing was spoken, so there is no duplicate to suppress and silence is
+      // the worse failure. Suppression must be conditional, not blanket.
+      H.chunks = [
+        [text("default_api:end_call{reason:done}")],
+        [text("Thanks for calling. Goodbye."), call("end_call", { reason: "done" })],
+      ];
+
+      const { spoken } = await run({ callerTurnCount: 3 });
+
+      expect(spoken).toContain("Thanks for calling. Goodbye.");
+    });
+  });
+
+  describe("end_call ends the turn", () => {
+    it("does not send another request after end_call succeeds", async () => {
+      // end_call's own declaration says the goodbye belongs in the SAME
+      // response. A round after it can only produce a second one — and costs a
+      // whole Gemini round-trip at the end of every call.
+      H.chunks = [
+        [text("Thanks for calling. Goodbye."), call("end_call", { reason: "caller is done" })],
+        [text("Goodbye again!")],
+      ];
+
+      const { spoken, reply } = await run({ callerTurnCount: 3 });
+
+      expect(H.sent.length).toBe(1);
+      expect(spoken).toContain("Thanks for calling. Goodbye.");
+      expect(spoken).not.toContain("Goodbye again!");
+      expect(reply.endCallArgs).toBeTruthy();
+    });
+
+    it("keeps going when end_call is REFUSED, so the model can recover", async () => {
+      // callerTurnCount 0 and no completed action: the gate refuses. Breaking
+      // here would strand the caller mid-call with an unanswered request.
+      H.chunks = [
+        [call("end_call", { reason: "too early" })],
+        [text("Sorry — is there anything else I can help with?")],
+      ];
+
+      const { spoken } = await run({ callerTurnCount: 0 });
+
+      expect(H.sent.length).toBe(2);
+      expect(spoken).toContain("anything else I can help with?");
+    });
+  });
+
   it("retries only once, however stuck the model is", async () => {
     H.chunks = [
       [text(PRODUCTION_LEAK)],

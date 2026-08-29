@@ -125,13 +125,13 @@
   },
   {
     "name": "check_appointment_availability",
-    "description": "Check whether a specific date and time is open BEFORE collecting the caller's details. Call this as soon as the caller names a time. If available is false, offer the returned alternatives instead of collecting details.",
+    "description": "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller names a time OR a day. Given a date and time it answers whether that slot is open, and if available is false you offer the returned alternatives instead of collecting details. Given just a date it returns open_times for that day, which you offer to the caller so they can choose — never choose for them.",
     "parameters": {
       "type": "object",
       "properties": {
         "requested_at": {
           "type": "string",
-          "description": "The date and time the caller asked for, as ISO 8601 (e.g. 2026-03-15T10:00:00)"
+          "description": "What the caller asked for. If they named a time, the full date and time as ISO 8601 (e.g. 2026-03-15T10:00:00). If they named only a day, the date alone (e.g. 2026-03-15) — never invent an hour they did not say."
         }
       },
       "required": [

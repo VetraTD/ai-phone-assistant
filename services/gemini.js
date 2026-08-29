@@ -115,6 +115,25 @@ export function callToolNames(cfg, extras = {}) {
   }
 }
 
+/**
+ * Every PARAMETER name the live declarations expose, for the outbound guard's
+ * whole-text pre-pass. A pseudo-call whose name has already been excised leaves
+ * its argument object behind, and that orphan reached a caller's ear on
+ * 2026-08-29 — the keys are the only thing left that identifies it as ours.
+ * @param {object} cfg
+ * @param {object} [extras]
+ * @returns {string[]}
+ */
+export function callToolParamNames(cfg, extras = {}) {
+  try {
+    return buildAllDeclarations(cfg, extras, intentMarkerEnabled(extras)).flatMap((d) =>
+      Object.keys(d?.parameters?.properties || {})
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Singleton Gemini client — @google/genai's GoogleGenAI wraps a connection
 // pool; creating one per turn (as this file used to) throws that pool away
@@ -927,7 +946,9 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // The scheduling note is only meaningful where the business can book; emitting
   // it with no booking tool is a dead instruction.
   if (hasAppointments(config)) {
-    dateTime += `\nWhen scheduling, always calculate from this real date. Never invent dates.`;
+    dateTime +=
+      `\nWhen scheduling, always calculate from this real date. Never invent dates OR times: ` +
+      `if the caller has named a day but not an hour, ask or offer — never assume one.`;
   }
   const resolvedHours = resolveBusinessHoursForPrompt(config, now);
   if (resolvedHours) {
@@ -1518,7 +1539,16 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // One stripper for the whole turn, like the marker one: a pseudo-call can
   // appear in any round, including after the model has already spoken.
   const newToolCallStripper = () =>
-    createToolCallTextStripper({ toolNames: allDeclarations.map((d) => d.name) });
+    createToolCallTextStripper({
+      toolNames: allDeclarations.map((d) => d.name),
+      // Parameter names as well as tool names. A delta boundary landing before
+      // a closing brace leaves the ARGUMENTS behind after the name is excised,
+      // and on 2026-08-29 a caller heard one read aloud. Derived from the live
+      // declarations for the same reason the names are.
+      toolParamNames: allDeclarations.flatMap((d) =>
+        Object.keys(d?.parameters?.properties || {})
+      ),
+    });
   let toolCallStripper = newToolCallStripper();
   // Pseudo-calls seen in the CURRENT round only — the recovery question is
   // "did this round ask for a tool and fail to actually call one".
@@ -1566,10 +1596,18 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // the reason for the round that produced the spoken reply.
   let lastFinishReason = null;
 
+  // Set by the text-channel recovery below when the turn has ALREADY spoken.
+  // Consumed by the round it starts: that round's job is to produce the
+  // function call, and anything it says is a second version of what the caller
+  // just heard. Cleared on read so it can never leak into a later round.
+  let pendingSuppressText = false;
+
   while (true) {
     // Drain the stream, yielding text deltas and collecting function calls
     let functionCalls = [];
     textCallsThisRound = [];
+    const suppressTextThisRound = pendingSuppressText;
+    pendingSuppressText = false;
 
     for await (const chunk of streamResponse) {
       // Text delta — extracted from parts directly (see textFromChunk) rather
@@ -1633,8 +1671,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         }
 
         if (out.text) {
-          fullText += out.text;
-          yield { delta: out.text };
+          if (suppressTextThisRound) {
+            bumpCounter("text_channel_reask_text_suppressed");
+          } else {
+            fullText += out.text;
+            yield { delta: out.text };
+          }
         }
       }
       // Function calls arrive (usually in the last chunk)
@@ -1665,7 +1707,14 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       }
       if (tail.text) {
         const out = stripper ? stripper.push(tail.text) : { text: tail.text };
-        if (out.text) { fullText += out.text; yield { delta: out.text }; }
+        if (out.text) {
+          if (suppressTextThisRound) {
+            bumpCounter("text_channel_reask_text_suppressed");
+          } else {
+            fullText += out.text;
+            yield { delta: out.text };
+          }
+        }
       }
       toolCallStripper = newToolCallStripper();
     }
@@ -1676,14 +1725,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     // nothing ran. Do NOT execute what was parsed: those arguments never met a
     // schema, and on the call this was found on they contained an appointment
     // id that does not exist. Ask for the call properly instead.
+    //
+    // A nameless argument blob (shape "nameless_args") is silenced and counted
+    // but carries no name, so there is nothing to force — skip those when
+    // choosing the target rather than re-asking for `null`.
+    const reaskTarget = textCallsThisRound.find((c) => c.name)?.name || null;
     if (
       TEXT_CALL_RECOVERY &&
       functionCalls.length === 0 &&
-      textCallsThisRound.length > 0 &&
+      reaskTarget &&
       !textCallReaskUsed
     ) {
       textCallReaskUsed = true;
-      const target = textCallsThisRound[0].name;
+      const target = reaskTarget;
       bumpCounter("text_channel_reasks");
       log.info("text_channel_reask", { tool: target, round, step });
       // Name the tool, withhold the arguments. Re-supplying them would launder
@@ -1711,6 +1765,11 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         log.error("gemini_toolconfig_rejected", { reason: err?.message, severity: "warn" });
         streamResponse = await chat.sendMessageStream({ message: note, config: perRequestConfig });
       }
+      // The caller has already heard this turn's reply. Whatever the forced
+      // round says next is a second version of it — on 2026-08-29 that was the
+      // goodbye, said twice. Conditional, not blanket: if nothing was spoken
+      // yet, silence is the worse failure and the round's text is all we have.
+      pendingSuppressText = fullText.trim().length > 0;
       if (stripper) stripper = newStripper();
       continue;
     }
@@ -1838,6 +1897,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         },
       };
     }
+
+    // end_call SUCCEEDED — the call is over. Sending the result back buys one
+    // more round of model output, and the only thing that round can produce is
+    // a second goodbye: end_call's own declaration says the goodbye belongs in
+    // the same response, so it has already been spoken. On 2026-08-29 a caller
+    // heard both.
+    //
+    // Only on success. A REFUSED end_call (the gate in services/tools.js says
+    // the caller has not been helped yet) must keep going, or the turn ends
+    // with the request unanswered and the line still open.
+    //
+    // Also worth a round-trip at the end of every single call.
+    if (endCallArgs) break;
 
     // The model writes the intent line at the top of every ROUND, not once per
     // turn, so the next round needs a stripper that is looking for one again.

@@ -65,7 +65,7 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
 const MESSAGE_PROTOCOL_SECTION =
   `=== MESSAGE PROTOCOL ===\n` +
   `TAKING A MESSAGE — follow this exactly:\n` +
-  `1. Name: ask for it, then repeat their FULL name back once — "Thanks, Marcus Bell — " — first name and surname, so they can correct you if you misheard. If the name is long or unusual, also ask them to spell the surname and read the letters back; saying a name aloud cannot catch a spelling error, because a misheard surname usually sounds almost identical to the real one. Ask for a spelling at most once, and not at all if you already confirmed it earlier in this call.\n` +
+  `1. Name: ask for it, then repeat their FULL name back once — "Thanks, Marcus Bell — " — first name and surname, so they can correct you if you misheard. Do not ask them to spell anything unless you are told to.\n` +
   `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
   `3. Reason: ask briefly what the call is regarding.\n` +
   `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +

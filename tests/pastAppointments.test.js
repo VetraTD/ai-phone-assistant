@@ -120,14 +120,36 @@ describe("hard names are spelled before they become a record", () => {
     expect(res.functionResponse.response.message).toMatch(/\[not caller speech\]/);
   });
 
-  it("lets an ordinary name straight through", async () => {
+  it("asks for an ordinary name too — policy changed 2026-08-29", async () => {
+    // This test used to assert the opposite, and it was right for the policy it
+    // was written against: only names looksHardToSpell flagged were confirmed.
+    // But "Scripps" heard as "Smith" is a confident mis-hearing of a SHORT name,
+    // which that heuristic cannot see by construction — and it is still the
+    // business's record that ends up wrong. The owner chose: ask once for any
+    // name not already on file. VOICE_SPELL_POLICY=hard restores this row.
     const res = await executeToolCall(call("Joe Smith"), {
       config: config(),
       capabilityState: {},
       callerPhone: "+15551234567",
       spellingAlreadyAsked: false,
     });
-    expect(res.functionResponse.response.success).toBe(true);
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(res.functionResponse.response.message).toMatch(/spell/i);
+  });
+
+  it("lets an ordinary name straight through under VOICE_SPELL_POLICY=hard", async () => {
+    process.env.VOICE_SPELL_POLICY = "hard";
+    try {
+      const res = await executeToolCall(call("Joe Smith"), {
+        config: config(),
+        capabilityState: {},
+        callerPhone: "+15551234567",
+        spellingAlreadyAsked: false,
+      });
+      expect(res.functionResponse.response.success).toBe(true);
+    } finally {
+      delete process.env.VOICE_SPELL_POLICY;
+    }
   });
 
   it("does not ask twice — the call gets one spelling request, then proceeds", async () => {

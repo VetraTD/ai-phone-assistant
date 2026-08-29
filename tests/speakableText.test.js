@@ -582,7 +582,8 @@ describe("dampEmphasis", () => {
 describe("sanitizeOutbound — structural leak guard", () => {
   const FALLBACK = "Sorry, let me get someone to help with that.";
   const NAMES = ["get_caller_appointments_from_db", "reschedule_appointment_db", "book_appointment"];
-  const ctx = { toolNames: NAMES, fallback: FALLBACK };
+  const PARAMS = ["reason", "client_name", "scheduled_at", "appointment_id", "requested_at"];
+  const ctx = { toolNames: NAMES, toolParamNames: PARAMS, fallback: FALLBACK };
 
   it("excises a pseudo-call and keeps the sentence that shared the line with it", () => {
     const out = sanitizeOutbound(
@@ -627,6 +628,42 @@ describe("sanitizeOutbound — structural leak guard", () => {
 
   it("never returns an empty utterance", () => {
     expect(sanitizeOutbound("default_api_key", ctx).trim()).not.toBe("");
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 3, 2026-08-29. This guard split the text into sentences and THEN
+  // tested each one, so a bracketed blob whose value contains a full stop was
+  // never judged whole: the `{` landed in one sentence and the `}` in the next,
+  // and JSON_RE needs both. Verified against the shipped regexes — the leaked
+  // string matches JSON_RE as a whole and matches nothing per-sentence.
+  //
+  // The stripper in lib/toolCallText.js is the first net and now catches this.
+  // This is the second one, and second nets are the point.
+  // -------------------------------------------------------------------------
+  describe("a bracketed blob that straddles a sentence boundary", () => {
+    it("excises the blob a caller actually heard", () => {
+      const out = sanitizeOutbound(
+        "{reason:Caller declined further assistance and said thank you. } " +
+          "You're very welcome. Thank you for calling Digile Media.",
+        ctx
+      );
+      expect(out).not.toMatch(/[{}]/);
+      expect(out).not.toMatch(/reason\s*:/i);
+      expect(out).toContain("You're very welcome.");
+      expect(out).toContain("Thank you for calling Digile Media.");
+    });
+
+    it("catches an unquoted key, which the JSON rule alone could not", () => {
+      // JSON_RE's first alternative required a QUOTED key. The model does not
+      // quote them.
+      expect(sanitizeOutbound("{client_name:Ada Lovelace}", ctx)).toBe(FALLBACK);
+    });
+
+    it("still leaves a brace blob in ordinary prose alone", () => {
+      // The restraint case, and the reason this is not simply "delete braces".
+      const line = "The note on the file said {see reception} when they arrive.";
+      expect(sanitizeOutbound(line, ctx)).toBe(line);
+    });
   });
 
   describe("what it must never touch", () => {
