@@ -256,8 +256,22 @@ export async function executeToolCall(fc, ctx) {
           // still completes. Same fail-closed, one-reason-at-a-time shape as
           // checkRequirements below.
           const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
+          // Has this gate ALREADY refused on this call?
+          //
+          // A phrasing-independent backstop for the shared counter, which only
+          // closes once lib/voice/strings.js's spellRequestRe matches what the
+          // assistant said. That regex can be widened but never completed — the
+          // model can always ask in words nobody listed — and an unrecognised
+          // ask means refuse, ask, get an answer, refuse again. That is the
+          // livelock, and the gate now fires for every unknown name rather than
+          // only hard ones, so the exposure is much larger than it was.
+          //
+          // Recorded in the pack's own scratchpad, which the engine threads
+          // through the turn and the session persists across turns.
+          const alreadyRefused = !!ctx?.capabilityState?.[pack.id]?.spellingRefused;
           if (
             pendingName &&
+            !alreadyRefused &&
             shouldConfirmSpelling({
               name: pendingName,
               callerContext: ctx?.callerContext,
@@ -285,13 +299,17 @@ export async function executeToolCall(fc, ctx) {
               stateEffects: {
                 toolResult: { name: fc.name, success: false, message },
                 toolCallEvent: { name: fc.name, args: fc.args },
-                ...(priorSpellFacts.Name
-                  ? {}
-                  : {
-                      capabilityState: {
-                        [pack.id]: { callerFacts: { ...priorSpellFacts, Name: pendingName } },
-                      },
-                    }),
+                capabilityState: {
+                  [pack.id]: {
+                    // The backstop above. Set unconditionally: this gate gets
+                    // exactly one refusal per pack per call, whatever the model
+                    // then says.
+                    spellingRefused: true,
+                    ...(priorSpellFacts.Name
+                      ? {}
+                      : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
+                  },
+                },
               },
             };
           }

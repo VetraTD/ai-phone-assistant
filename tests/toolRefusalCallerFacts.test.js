@@ -153,6 +153,11 @@ describe("the spelling refusal keeps the name too", () => {
         spellingAlreadyAsked: false,
       },
     );
-    expect(result.stateEffects.capabilityState).toBeUndefined();
+    // The refusal DOES emit capabilityState now - it records that the gate has
+    // spent its one refusal, which is the phrasing-independent livelock
+    // backstop. What it must not do is overwrite the established name with a
+    // later, worse transcription.
+    expect(result.stateEffects.capabilityState.appointments.spellingRefused).toBe(true);
+    expect(result.stateEffects.capabilityState.appointments.callerFacts).toBeUndefined();
   });
 });

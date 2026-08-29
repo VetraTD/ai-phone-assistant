@@ -1597,3 +1597,55 @@ describe("services/tools.js — the spelling gate", () => {
     expect(functionResponse.response.success).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The phrasing-independent backstop.
+//
+// The shared counter only closes the gate once lib/voice/strings.js's
+// spellRequestRe matches what the assistant SAID. Widening that regex helps and
+// cannot be complete: the model can always phrase an ask some way nobody
+// listed. With the gate now firing for every unknown name rather than only hard
+// ones, an unmatched phrasing means refuse -> ask -> caller answers -> refuse
+// again, which is the livelock this whole area exists to prevent.
+//
+// So the gate also records, in code, that it has already refused.
+// ---------------------------------------------------------------------------
+describe("services/tools.js — the spelling gate refuses at most once per pack", () => {
+  const bookFc = {
+    id: "sp2",
+    name: "book_appointment",
+    args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane Kowalczyk" },
+  };
+  const cfg = { timezone: "America/Chicago", businessHours: HOURS_MON_FRI };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T15:00:00Z"));
+    mockCreateAppointment.mockResolvedValue("appt-1");
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("records that it asked, so a second attempt proceeds even if the counter never saw the ask", async () => {
+    const first = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingAlreadyAsked: false,
+    });
+    expect(first.functionResponse.response.success).toBe(false);
+
+    // The state the engine threads back into the next round/turn. Note
+    // spellingAlreadyAsked is still FALSE — the model phrased its request in a
+    // way spellRequestRe does not recognise, which is the whole point.
+    const carried = first.stateEffects.capabilityState;
+    expect(carried).toBeTruthy();
+
+    const second = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingAlreadyAsked: false,
+      capabilityState: carried,
+    });
+    expect(second.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+});
