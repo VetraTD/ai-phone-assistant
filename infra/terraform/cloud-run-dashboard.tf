@@ -26,6 +26,23 @@
 # service that queries patient records is not a control-plane component.
 # ---------------------------------------------------------------------------
 
+variable "dashboard_db_pool_max" {
+  description = <<-EOT
+    Postgres pool size PER DASHBOARD INSTANCE (`DB_POOL_MAX`).
+
+    Deliberately lower than `var.db_pool_max`. Both services draw on the same
+    instance, and the voice pool is the one that cannot be reduced without
+    making callers wait. See the P7 arithmetic on `var.db_pool_max`.
+  EOT
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.dashboard_db_pool_max >= 1 && var.dashboard_db_pool_max <= 100
+    error_message = "dashboard_db_pool_max must be between 1 and 100."
+  }
+}
+
 variable "dashboard_image_tag" {
   description = <<-EOT
     Tag of the DASHBOARD image to run. Built by cloudbuild.dashboard.yaml, which
@@ -175,6 +192,22 @@ resource "google_cloud_run_v2_service" "dashboard" {
       env {
         name  = "CLOUD_SQL_IAM_USER"
         value = trimsuffix(google_service_account.runtime[each.value.stack].email, ".gserviceaccount.com")
+      }
+
+      # P7. Smaller than the voice pool ON PURPOSE, and the asymmetry is the
+      # point: both services share ONE Cloud SQL instance whose max_connections
+      # measured 50, and the voice pool cannot come down (Phase 3b measured one
+      # instance REACHING 10 at 10 concurrent calls, so a smaller pool queues
+      # callers). This one can: the dashboard is CRUD over HTTP, it is not on a
+      # call path, and a request waiting briefly for a connection costs a
+      # spinner rather than dead air on a live call.
+      #
+      # AI-phone-dashboard/backend/src/db/index.js defaults this to 10, so
+      # leaving it unset is not neutral -- it silently doubles this service's
+      # share of a ceiling the voice service needs.
+      env {
+        name  = "DB_POOL_MAX"
+        value = tostring(var.dashboard_db_pool_max)
       }
 
       # -------------------------------------------------------------------

@@ -52,6 +52,24 @@ locals {
       for sk in keys(local.active_regional_stacks) : sk if var.stack_projects[sk] == pk
     ])
   }
+
+  # The /16 the PROJECT's private-services range is carved from.
+  #
+  # `network_cidr` above is keyed by STACK. In attempt 1 project keys WERE stack
+  # keys, so `network_cidr[<project key>]` resolved by coincidence. Phase 2 made
+  # them different strings (`uk-prod` lands in project `uk`) and that lookup
+  # started returning nothing -- caught on the first Phase 4 plan, 2026-08-28,
+  # as `Invalid index ... each.value is "uk"`. `terraform validate` does NOT
+  # catch it: the keys are only known once variables are evaluated.
+  #
+  # Derived from the project's FIRST stack, matching the network `description`
+  # right below, which already reads through `stacks_by_regional_project`. Sorted
+  # there, so a project holding two stacks picks the same one every run rather
+  # than whichever the map happened to yield.
+  private_services_cidr = {
+    for pk in local.active_regional_project_keys :
+    pk => local.network_cidr[local.stacks_by_regional_project[pk][0]]
+  }
 }
 
 resource "google_compute_network" "this" {
@@ -108,7 +126,7 @@ resource "google_compute_global_address" "private_services" {
   name          = "vetra-${each.value}-private-services"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
-  address       = "${local.network_cidr[each.value]}.32.0"
+  address       = "${local.private_services_cidr[each.value]}.32.0"
   prefix_length = 19
   network       = google_compute_network.this[each.value].id
 }

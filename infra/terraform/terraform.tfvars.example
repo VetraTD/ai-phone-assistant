@@ -58,7 +58,14 @@ billing_account = "01DB07-24C0F8-391DCC"
 # kept deliberately as a probe target). After the first apply, repoint it at
 # `core` — BEFORE deleting anything, never after, because Terraform routes every
 # call through it.
-bootstrap_project_id = "project-b147bdfa-d267-426a-8c7"
+# REPOINTED 2026-08-29 at `core`, after the first apply created it and after
+# the same 19-API list was enabled and verified 19/19 ON IT -- same trap, second
+# project. The scratch project `project-b147bdfa-d267-426a-8c7` was the
+# bootstrap only because none of the three projects existed at the first apply.
+#
+# Terraform routes EVERY API call through this project, so it must not be
+# deleted or lose those APIs. Verified with a `terraform plan` showing no diff.
+bootstrap_project_id = "vetra-core-edc8ca"
 
 # ---------------------------------------------------------------------------
 # project_id_suffix — PIN IT BEFORE THE FIRST APPLY, NOT AFTER
@@ -110,11 +117,11 @@ stack_projects = {
   shared  = "core"
 }
 
-# The module defaults these to "Vetra UK" / "Vetra US (dark)" / "Vetra Core".
+# The module defaults these to "Vetra UK" / "Vetra US - dark" / "Vetra Core".
 # Override only if the console should say something else.
 # project_display_names = {
 #   uk   = "Vetra UK"
-#   us   = "Vetra US (dark)"
+#   us   = "Vetra US - dark"
 #   core = "Vetra Core"
 # }
 
@@ -171,7 +178,11 @@ deployment_mode = "standard"
 # other's database as well. An unknown key is REFUSED at plan time rather than
 # silently ignored — see the validations in sql.tf.
 #
-# enable_prod_databases = ["uk"]
+# SET 2026-08-28, Phase 4b. Builds the UK Cloud SQL instance -- the first
+# recurring compute charge in attempt 2, and an UNDELETABLE KMS key ring.
+# `us` is deliberately NOT listed: naming it would build a second instance for
+# a market we are not in.
+enable_prod_databases = ["uk"]
 
 # C-5. Regional roughly doubles the instance cost, and HA is not a HIPAA
 # requirement — §164.308(a)(7) is satisfied by PITR + backups + C7's restore
@@ -190,10 +201,24 @@ cloud_sql_high_availability = false
 # in the same edit that adds a second project to enable_prod_databases, or real
 # production inherits a pilot's tier. Resizing Cloud SQL is a restart.
 #
-# cloud_sql_tier = {
-#   prod    = "db-g1-small"
-#   staging = "db-g1-small"
-# }
+# SET 2026-08-28 by the owner, Phase 4. The DEFAULT is db-custom-2-7680 at
+# $98.62/mo, which exceeds the whole approved ~$55-80/mo estate budget on this
+# line alone -- and the override being COMMENTED OUT is how the default would
+# have won by inaction.
+#
+# db-g1-small is chosen because the workload is capped at 10 concurrent calls by
+# ElevenLabs (Phase 3b, measured from the vendor's own 1008), and one instance
+# reaches DB_POOL_MAX=10. ~400 connections of headroom buys nothing against a
+# ceiling another vendor enforces at 10. Tier changes are a RESTART, not a
+# rebuild, so this is reversible; the suffix is not.
+#
+# Shared-core means burstable, throttled CPU -- a LATENCY risk, not just a
+# connection-count one. It surfaces in Phase 5's latency gate against the
+# Railway baseline, which is where someone is already looking.
+cloud_sql_tier = {
+  prod    = "db-g1-small"
+  staging = "db-g1-small"
+}
 
 # C-3. Postgres, not Memorystore. The shared call-state slice is three scalars
 # written at call boundaries with zero per-turn reads, which is not worth
@@ -203,6 +228,106 @@ call_state_store = "postgres"
 # C-6. Never a Serverless VPC Access connector — those are real VMs at ~$30-40
 # each, billed whether or not a packet crosses them.
 cloud_run_vpc_egress = "direct"
+
+# ---------------------------------------------------------------------------
+# P7 -- SIZED FROM THE INSTANCE 2026-08-28, NOT GUESSED. Phase 4, step 8.
+# ---------------------------------------------------------------------------
+# MEASURED on vetra-uk (db-g1-small, europe-west2) by querying it:
+#
+#   max_connections                = 50
+#   superuser_reserved_connections = 3
+#   cloudsqladmin holding          = 3
+#   [system] background workers    = 5   (NOT counted against max_connections)
+#
+# So ~44 slots are available to application roles.
+#
+# The budget, worst case, with the values below:
+#
+#   voice      2 instances x 10 = 20
+#   dashboard  2 instances x  5 = 10
+#   migrate job                 =  2
+#   cloudsqladmin               =  3
+#   superuser reserve           =  3
+#                                 --
+#                                 38  of 50, leaving 12 spare
+#
+# BEFORE THIS, `DB_POOL_MAX` WAS RENDERED ONTO NEITHER SERVICE, so both took
+# the application default of 10 and the worst case was 20 x 10 + 20 x 10 = 400
+# against a ceiling of 50.
+#
+# ⚠ THIS ONE VALUE CAPS BOTH SERVICES -- `cloud_run_scaling` feeds the voice
+# service AND the dashboard from it. 20 -> 2 is not a capacity loss today:
+# `cloud_run_concurrency` is 10 and ElevenLabs refuses concurrent request 11
+# (Phase 3b, measured from the vendor's own 1008 close reason), so ONE instance
+# already serves the entire vendor-capped workload and the second is rollout
+# headroom.
+#
+# ⚠ RAISE IN THIS ORDER, because raising the last one first changes nothing:
+#   1. ElevenLabs concurrency (the actual cap, 10)
+#   2. Twilio concurrent calls + CPS (UNKNOWN, never measured, has lead time)
+#   3. Cloud SQL tier -> a bigger max_connections (a restart)
+#   4. THEN these two values
+#
+# It is a CEILING, not a reservation -- nothing is billed for instances that
+# never start, and raising it later is a tfvars edit and an apply with no
+# downtime.
+cloud_run_max_instances = {
+  prod    = 2
+  staging = 3 # dead config; every stack is prod. See P6.
+}
+
+# Per-instance pool sizes. Asymmetric on purpose: the voice pool cannot come
+# down (one instance was measured REACHING 10 at 10 concurrent calls, so less
+# queues callers on connection acquisition), the dashboard's can.
+db_pool_max           = 10
+dashboard_db_pool_max = 5
+
+# ---------------------------------------------------------------------------
+# smtp_config -- NON-SECRET SMTP settings. Only SMTP_PASS is a secret.
+# ---------------------------------------------------------------------------
+# ⚠ THIS DEFAULTS TO {} AND THAT IS A DEPLOY-BREAKING DEFAULT ONCE
+# `smtp-password` HAS A VERSION. lib/bootChecks.js treats a half-configured
+# credential pair as FATAL -- SMTP_PASS with no SMTP_USER is a service that
+# does not start. cloud-run.tf records that the first deploy did exactly this.
+#
+# ⚠ THESE ARE GMAIL, AND THAT IS DELIBERATE FOR NOW RATHER THAN CORRECT.
+# The From address MUST stay a @gmail.com address while the host is Gmail.
+# Setting SMTP_FROM_EMAIL to anything @vetratd.com while sending through Gmail
+# is silently quarantined: vetratd.com publishes
+# `v=spf1 include:spf.protection.outlook.com -all` -- Microsoft only, hard fail
+# -- under DMARC p=quarantine, with no Gmail DKIM selector. It would read as a
+# one-line professionalism fix and would junk every clinic notification.
+# See AI-phone-dashboard/backend/src/services/mailer.js, which removed Brevo
+# for precisely this reason.
+#
+# THE DESTINATION IS A MICROSOFT 365 SHARED MAILBOX on vetratd.com (free, no
+# licence) with Send As granted to a licensed mailbox -- that passes the SPF
+# and DKIM the domain already publishes. Blocked on tenant admin work, not on
+# this module. REQUIRED BEFORE THE FIRST REAL CLINIC IS ONBOARDED, not before
+# cutover: today's only tenant is a demo with no real callers.
+#
+# Changing it later is a tfvars edit plus an apply; SMTP_PASS is `latest`, so
+# a new secret version needs no Terraform at all.
+smtp_config = {
+  SMTP_HOST       = "smtp.gmail.com"
+  SMTP_PORT       = "587"
+  SMTP_SECURE     = "false"
+  SMTP_USER       = "nithinjd06@gmail.com"
+  SMTP_FROM_EMAIL = "nithinjd06@gmail.com"
+}
+
+# ---------------------------------------------------------------------------
+# wire_runtime_secrets -- the voice service's deploy gate.
+# ---------------------------------------------------------------------------
+# Defaults to FALSE, which keeps `voice-uk-prod` out of the plan entirely. That
+# is correct until every runtime secret HAS A VERSION: Cloud Run refuses to
+# start a revision whose secret cannot be resolved, so flipping this early is a
+# failed deploy rather than a degraded service.
+#
+# SET TRUE 2026-08-29, Phase 4 step 7, after verifying all five secrets in
+# vetra-uk-edc8ca hold exactly one ENABLED version each, with no trailing
+# newline and the right shape per vendor (SID starts AC, ElevenLabs starts sk_).
+wire_runtime_secrets = true
 
 # ---------------------------------------------------------------------------
 # Principals.
@@ -215,6 +340,14 @@ cloud_run_vpc_egress = "direct"
 # AND ON THE BILLING ACCOUNT ON DAY 0.
 owner_principals = [
   "user:vetratd@gmail.com",
+  # Added 2026-08-28, in the apply that CREATES the projects -- "day 0" is
+  # literally this apply. Holds billing.admin + organizationAdmin already.
+  #
+  # This does NOT close precondition 6: it is the same HUMAN, and attempt 1's
+  # suspension was scoped to the owner. It removes single-ACCOUNT loss, not
+  # single-PERSON loss. Managed here rather than by hand so nothing has to
+  # remember to recreate it.
+  "user:nithinjd06@gmail.com",
 ]
 
 # Access to the `core` project ONLY — Artifact Registry and Cloud Build. Never

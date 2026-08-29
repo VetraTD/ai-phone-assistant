@@ -44,10 +44,13 @@ terraform {
   #   2. uncomment the block below and paste the name in
   #   3. terraform init -migrate-state
   #
-  # backend "gcs" {
-  #   bucket = "vetra-tfstate-<suffix>"
-  #   prefix = "root"
-  # }
+  # ACTIVE since Phase 4, 2026-08-29. Bucket created by the first apply (which
+  # therefore had to run on LOCAL state), then `terraform init -migrate-state`.
+  # `tfstate_bucket` output confirms the name.
+  backend "gcs" {
+    bucket = "vetra-tfstate-edc8ca"
+    prefix = "root"
+  }
   # ---------------------------------------------------------------------------
 }
 

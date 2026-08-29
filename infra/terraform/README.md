@@ -97,7 +97,7 @@ precedence over the well-known path, so setting it explicitly is the fix.
 
 ```bash
 # gcloud's view — necessary, NOT sufficient
-gcloud organizations list                     # must print 564252011558
+gcloud organizations list                     # must print 208508072539
 
 # Terraform's view — this is the one that matters
 gcloud auth application-default print-access-token >/dev/null && echo "ADC ok"
@@ -156,16 +156,18 @@ Note also: do **not** set `SSL_CERT_FILE`. It replaces Go's entire root store an
 breaks the same plugin handshake in a different way — an earlier attempt at
 "fixing Norton" that made things worse.
 
-Verify the identity is the right one before proceeding — this must print `564252011558`:
+Verify the identity is the right one before proceeding — this must print
+`208508072539` (attempt 2's auto-provisioned org). **`564252011558` is attempt
+1's org and it is SUSPENDED**; if you see it, you are on the wrong account:
 
 ```bash
 gcloud organizations list
 ```
 
-## Bootstrap: the two things that must exist before the first apply
+## Bootstrap: the three things that must exist before the first apply
 
-Both were found by running the apply, not by reading documentation. Both fail
-with an error that names the wrong cause.
+All three were found by running the apply, not by reading documentation. All
+three fail with an error that names the wrong cause.
 
 ### 1. Enable Terraform's own APIs on the quota project
 
@@ -248,6 +250,51 @@ Untainted, the next apply sets billing on the existing project in place.
 Terraform's dependency graph for a `for_each` resource is per-RESOURCE, not
 per-instance: `google_project_service` depends on `google_project`, so one
 failed project skips every service enablement and everything downstream.
+
+### 3. Grant `roles/orgpolicy.policyAdmin` on the ORG
+
+**Found by the first Phase 4 apply, 2026-08-28.** `google_project.this` carries
+`depends_on = [google_org_policy_policy.skip_default_network]` (projects.tf) --
+deliberately, because `skipDefaultNetworkCreation` has to be IN FORCE before a
+project exists or GCP auto-creates a default VPC with permissive firewall rules
+in all three. So the org policy is the first real resource in the graph, and
+when it fails **nothing downstream is even attempted**: the apply stopped with
+5 resources created and NO PROJECTS.
+
+```
+Error 403: Permission 'orgpolicy.policies.create' denied on resource
+'//cloudresourcemanager.googleapis.com/organizations/<org>'
+```
+
+**`roles/resourcemanager.organizationAdmin` DOES NOT GRANT THIS**, and that is
+the whole trap -- the name suggests total control over the organization. Read
+off the two role definitions rather than inferred:
+
+| Role | orgpolicy permissions it includes |
+|---|---|
+| `resourcemanager.organizationAdmin` | `constraints.list`, `policies.list`, `policy.get` -- **read only** |
+| `orgpolicy.policyAdmin` | `policies.create`, `.delete`, `.update`, `policy.set` |
+
+GCP separates "manage IAM" from "manage org policy". The owner can READ every
+policy Google set at signup and cannot WRITE one.
+
+**This cannot be managed in Terraform** -- it is the permission Terraform needs
+in order to run, so granting it is a bootstrap step like the API list above.
+
+```bash
+gcloud organizations add-iam-policy-binding <org id>   --member="user:<the ADC identity>"   --role="roles/orgpolicy.policyAdmin" --condition=None
+```
+
+Grant it to the break-glass account too. The marginal privilege is zero -- that
+account already holds `organizationAdmin` and can self-grant anything -- and
+without it the break-glass account cannot restore the very controls it exists
+to protect.
+
+**Verify, do not assume:**
+
+```bash
+gcloud organizations get-iam-policy <org id>   --flatten="bindings[].members"   --format="table(bindings.role,bindings.members)" | grep orgpolicy
+```
 
 ## First run
 

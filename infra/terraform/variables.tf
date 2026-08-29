@@ -228,11 +228,20 @@ variable "project_display_names" {
 
     Unlike the project ID, the display name is MUTABLE, so getting it wrong is
     cheap. Keep it that way: a project hosting more than one stack must say so.
+
+    ⚠ NO PARENTHESES. Measured on the first Phase 4 plan, 2026-08-28: "Vetra US
+    (dark)" was REFUSED by the provider before anything was created --
+    `name must be 4 to 30 characters with lowercase and uppercase letters,
+    numbers, hyphen, single-quote, double-quote, space, and exclamation point`.
+    `terraform validate` does NOT catch it (the value is a plain string), and
+    because `google_project.this` is a for_each, the one bad member aborted the
+    plan walk and every downstream resource went unplanned -- so the symptom was
+    an 8-resource plan, not an obviously-cosmetic error.
   EOT
   type        = map(string)
   default = {
     uk   = "Vetra UK"
-    us   = "Vetra US (dark)"
+    us   = "Vetra US - dark"
     core = "Vetra Core"
   }
 }

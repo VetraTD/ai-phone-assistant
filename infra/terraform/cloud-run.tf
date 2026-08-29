@@ -113,6 +113,62 @@ variable "twilio_sms_from" {
   }
 }
 
+variable "vertex_location" {
+  description = <<-EOT
+    `VERTEX_LOCATION` for the voice service.
+
+    "us", "eu" and "global" ALL resolve to the same global Vertex host
+    (services/gemini.js:191), so they differ in label only -- they do not differ
+    in where inference happens. "global" is the honest one, and the inference
+    leg is a DISCLOSED international transfer in the privacy notice and Art. 30
+    record.
+
+    A REAL region (e.g. "europe-west2") is different in kind: it pins the host
+    and therefore genuinely pins processing. It is not usable today because the
+    regional host serves only gemini-2.5-flash and 404s gemini-3.6-flash.
+    Re-probe monthly; the day a 3.x model lands there, this variable is the
+    whole change.
+
+    Everything else -- Cloud SQL, Deepgram EU, KMS, secrets, compute -- stays in
+    europe-west2 regardless of this value.
+  EOT
+  type        = string
+  default     = "global"
+
+  validation {
+    condition     = var.vertex_location != ""
+    error_message = "vertex_location must be set; empty disables Vertex and the service will not boot."
+  }
+}
+
+variable "db_pool_max" {
+  description = <<-EOT
+    Postgres pool size PER VOICE INSTANCE (`DB_POOL_MAX`).
+
+    The ceiling this has to respect is the instance's `max_connections`, which
+    is a property of the TIER and must be read off the instance -- `db-g1-small`
+    measured 50 on 2026-08-28. The arithmetic that matters is
+
+      voice_instances x db_pool_max
+        + dashboard_instances x dashboard_db_pool_max
+        + the migrate job
+        + superuser_reserved_connections
+        + whatever cloudsqladmin is holding
+      <= max_connections
+
+    Raise the TIER before raising this. Lowering it below 10 is the wrong lever:
+    Phase 3b measured one instance reaching 10 at 10 concurrent calls, so a
+    smaller pool queues callers on connection acquisition.
+  EOT
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.db_pool_max >= 1 && var.db_pool_max <= 100
+    error_message = "db_pool_max must be between 1 and 100."
+  }
+}
+
 variable "cloud_run_concurrency" {
   description = <<-EOT
     Requests per instance. Low, because a voice request is not a request: the
@@ -330,6 +386,33 @@ resource "google_cloud_run_v2_service" "this" {
       }
 
       # -------------------------------------------------------------------
+      # P7. The connection pool, sized from the instance rather than guessed.
+      #
+      # THIS WAS SET NOWHERE UNTIL PHASE 4, so both services took services/db.js's
+      # default of 10 and `instances x DB_POOL_MAX` was 20 x 10 = 200 against a
+      # measured ceiling of 50. Third instance of the same shape as
+      # CALL_STATE_STORE above and DEEPGRAM_REGION below: a value the code reads
+      # and the module never sent.
+      #
+      # MEASURED on vetra-uk 2026-08-28, off the instance, not assumed:
+      #   max_connections = 50, superuser_reserved_connections = 3,
+      #   cloudsqladmin holding 3. So ~44 slots for application roles.
+      #
+      # KEPT AT 10 DELIBERATELY. Phase 3b measured one instance REACHING 10 at
+      # 10 concurrent calls, so a smaller pool makes calls queue for a
+      # connection -- and on this product latency is the thing being sold. The
+      # ceiling is respected by lowering max_instance_count instead, which costs
+      # nothing while ElevenLabs refuses concurrent call 11 anyway.
+      #
+      # Connections do NOT scale with callers: the same 10 served 10, 20 AND 30
+      # concurrent calls, because the pool caps and calls queue on it.
+      # -------------------------------------------------------------------
+      env {
+        name  = "DB_POOL_MAX"
+        value = tostring(var.db_pool_max)
+      }
+
+      # -------------------------------------------------------------------
       # The compliance tier. `standard` EVERYWHERE, ON BOTH LANES.
       #
       # ATTEMPT 1 SET THIS PER LANE — `us` was `hipaa`, `uk` was `standard` —
@@ -458,12 +541,38 @@ resource "google_cloud_run_v2_service" "this" {
         }
       }
 
-      # `us`/`eu`, never a single region and never `global`. Probed 2026-08-21:
-      # no single Vertex region serves gemini-3.6-flash, and `global` routes
-      # anywhere on earth, which voids the residency claim.
+      # ⚠ THE HOST DECIDES RESIDENCY. THE LOCATION IN THE PATH DOES NOT.
+      #
+      # This read `lane == "uk" ? "eu" : "us"`, justified by "never `global`,
+      # which routes anywhere on earth and voids the residency claim". P1's
+      # re-probe on 2026-08-28 measured that distinction out of existence:
+      #
+      #   - `aiplatform.googleapis.com` (the global host) serves gemini-3.6-flash
+      #     for ANY path location -- including `locations/madeup-region-9`, which
+      #     returned 200 SERVED. The path segment is not validated, so a 200 on
+      #     `locations/eu` is NOT evidence of EU processing.
+      #   - `europe-west2-aiplatform.googleapis.com` (a REGIONAL host) is
+      #     genuinely region-pinned and serves ONLY gemini-2.5-flash; 3.6-flash
+      #     404s there.
+      #   - services/gemini.js:191 lists "us", "eu" AND "global" as
+      #     VERTEX_GLOBAL_HOST_LOCATIONS -- all three reach the same host, so the
+      #     lane ternary above produced two labels for one behaviour.
+      #
+      # So `eu` was not buying residency; it was asserting it. That is the same
+      # shape as P9 -- a control that exists in a comment and not in fact -- and
+      # it is worse here, because the privacy notice and the Art. 30 record are
+      # supposed to DISCLOSE this leg as an international transfer.
+      #
+      # `global` is the honest label for what this deployment does, and
+      # services/gemini.js:174 says so in as many words. Decided by the owner
+      # 2026-08-28; VERTEX_FORBIDDEN_LOCATIONS is now empty so nothing refuses it.
+      #
+      # A real region still pins the host, so this becomes a genuine residency
+      # control the day europe-west2's REGIONAL host serves a 3.x model. That is
+      # worth re-probing monthly, and is why this is a variable now.
       env {
         name  = "VERTEX_LOCATION"
-        value = local.stacks[each.value.stack].lane == "uk" ? "eu" : "us"
+        value = var.vertex_location
       }
 
       # -----------------------------------------------------------------------
