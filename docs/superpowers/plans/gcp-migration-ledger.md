@@ -2693,8 +2693,22 @@ phone.** Checked 2026-08-28:
   handsets. Real acoustic echo remains never verified, by design: no probe has a microphone.
 - `fix/receptionist-feedback-2026-08` — the four Digile Media complaints. Recorded as **"Not
   deployed. Not committed unless the owner asked since."** It IS in `feat/gcp-2` (every branch is;
-  verified this session — only `chore/gcp-migration-ledger` is unmerged and it is redundant).
-  **It has never answered a real phone.**
+  verified 2026-08-28 — only `chore/gcp-migration-ledger` is unmerged and it is redundant).
+  ~~**It has never answered a real phone.**~~ **CORRECTED 2026-08-29: IT HAS.** `5e1470e`
+  *"merge: receptionist fixes from the Digile Media test call"* is an ancestor of `origin/main`
+  (2026-08-26), Railway autodeploys `main`, and the owner reports test-calling it and deriving further
+  changes from what they heard. The claim above was written from the branch's own status line and was
+  stale by three days.
+
+  **What is genuinely still un-phoned is narrower and deeper: the 35 behaviour-affecting commits on
+  `feat/gcp-2` that `origin/main` does not have.** Measured 2026-08-29 over `lib/voice`,
+  `services/gemini.js`, `services/tools.js`, `capabilities/` and `database/`. The audible ones:
+  **`d71b170` swaps the LLM backend to VERTEX** (main runs the API-key path — a different host, and
+  Phase 5 measured `llm_ttfb` p50 2516ms on it); `2665222` sends the opening sentence on its own for
+  *1.5s less silence per turn*; `567c1a7` a spoken phone number was losing a digit and money read
+  wrong; `dd5659f` + `297891c` caller-facing SMS now needs a recorded spoken yes; `eb101fa` Deepgram
+  EU + training opt-out; `0a1533f` deletes the legacy pipeline outright. **A Railway test call cannot
+  cover any of these, because Railway does not run them.**
 - The greeting-discard / appointment-guard work — partly live, with migration 026's value recorded as
   unmeasured.
 
