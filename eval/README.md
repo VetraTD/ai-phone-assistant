@@ -27,6 +27,7 @@ npm run chat                     # interactive REPL against the same brain (manu
 npm run eval                     # all scenarios, default model
 npm run eval -- --filter cancel  # only scenarios whose NAME contains "cancel"
 npm run eval -- --tag freetext   # only scenarios carrying the "freetext" TAG
+npm run eval -- --no-judge       # skip the advisory judge (cheaper; see Cost)
 npm run eval -- --concurrency 3  # scenarios in parallel (default 2)
 npm run eval -- --model gemini-2.5-pro --temperature 0   # one-off model override
 ```
@@ -57,11 +58,40 @@ land in one `eval/results/matrix-<ts>.json` with a comparison table.
 
 ## Cost expectations
 
-Every turn is one Gemini call, plus one judge call per scenario. The full suite
-is roughly **90 turns** — order of **a few cents** per run on a flash model.
-`--matrix` multiplies that by the number of configs (**×N**). `--filter`/`--tag`
-are the cheap way to iterate on one scenario. The `regression` tag alone is four
-scenarios (~18 turns).
+**Measured 2026-08-29, from the usage recorded in `eval/results/*.json`. The
+figures that used to be here ("roughly 90 turns", "a few cents") were wrong by
+more than an order of magnitude, and that understatement is part of why a
+month of iteration turned into a surprising bill.**
+
+One full run of the suite:
+
+| | |
+|---|---|
+| assistant turns | **~241** |
+| prompt tokens (assistant only) | **~1.16M** |
+| output tokens | ~7.6k |
+| avg prompt per turn | **~4,840** |
+| all-in with judge + persona caller | **~1.7M** |
+
+Input dominates completely — roughly 93% of the bill — because the ~3,000-token
+static prefix is re-sent on **every turn**. Output is a rounding error.
+
+At the rate implied by one real month of billing (~$1.15 per 1M tokens;
+re-derive it rather than trusting this), that is **~$1.50-2.00 per run** and
+**~$10 for a 5-run band**. `--matrix` multiplies by the number of configs
+(**×N**).
+
+**How to not spend that:**
+
+- `--filter`/`--tag` are nearly free and are the right default for iterating.
+  The `regression` tag alone is a handful of scenarios.
+- `--no-judge` skips the advisory judge. It re-sends the whole transcript once
+  per question for every scenario, and it **never affects the exit code** — the
+  hard asserts alone decide pass/fail. Leave it on for the run that decides a
+  merge; skip it on the dozens of runs that do not.
+- Reserve full 5-run bands (`scripts/eval-band.js`) for merge decisions. A
+  single run cannot tell a regression from noise anyway — identical code has
+  scored 40, 38, 40, 38, 38.
 
 ## Adding a scenario
 

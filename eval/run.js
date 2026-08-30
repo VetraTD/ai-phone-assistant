@@ -103,7 +103,12 @@ function looksSuspectTruncated(text) {
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
+/**
+ * Exported for tests. The flag surface is the part of this file most likely to
+ * be broken by a careless edit and the cheapest thing in the whole suite to
+ * cover — every other check here costs real Gemini tokens to run.
+ */
+export function parseArgs(argv) {
   const opts = {
     filter: null,
     tag: null,
@@ -112,6 +117,7 @@ function parseArgs(argv) {
     json: null,
     matrix: false,
     matrixFile: null,
+    noJudge: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -124,6 +130,7 @@ function parseArgs(argv) {
       case "--model": opts.modelOverrides.model = next(); break;
       case "--thinking-budget": opts.modelOverrides.thinkingBudget = parseInt(next(), 10); break;
       case "--json": opts.json = next(); break;
+      case "--no-judge": opts.noJudge = true; break;
       case "--matrix": opts.matrix = true; break;
       case "--matrix-file": opts.matrixFile = next(); break;
       default:
@@ -166,7 +173,7 @@ function callerEndedByReceptionist(out) {
  * @param {object} [opts.modelOverrides] - forwarded to the receptionist (not the judge)
  * @returns {Promise<object>} the per-scenario result
  */
-export async function runScenario(scenario, { modelOverrides } = {}) {
+export async function runScenario(scenario, { modelOverrides, noJudge = false } = {}) {
   const base = {
     name: scenario.name,
     tags: scenario.tags || [],
@@ -174,6 +181,10 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     judgeResults: [],
     hardPass: false,
     judgePass: false,
+    // null = the judge was not asked. Distinct from [] (asked, no questions)
+    // and from a list of failures, so a skipped run can never be read as a
+    // failed one by anything downstream.
+    judgeSkipped: false,
     turns: [],
     latency: { firstEventMs: [], totalMs: [] },
     // Truncation telemetry, accumulated across this scenario's turns.
@@ -275,9 +286,23 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     });
     base.hardPass = base.hardResults.every((r) => r.pass);
 
-    base.judgeResults = await judgeConversation({ turns, questions: scenario.judge || [] });
-    base.judgePass =
-      base.judgeResults.length === 0 ? true : base.judgeResults.every((r) => r.verdict === "pass");
+    if (noJudge) {
+      // The judge is ADVISORY - it never touches the exit code (see the note on
+      // computeMatrixExitCode). It is also the single largest avoidable cost in
+      // a run: it re-sends the whole transcript once per question, for every
+      // scenario, on its own pinned model. Skipping it makes an iteration run
+      // materially cheaper and changes nothing the gate depends on.
+      //
+      // judgePass stays TRUE so no downstream consumer mistakes "not asked" for
+      // "asked and failed"; judgeSkipped is what tells them apart.
+      base.judgeSkipped = true;
+      base.judgeResults = [];
+      base.judgePass = true;
+    } else {
+      base.judgeResults = await judgeConversation({ turns, questions: scenario.judge || [] });
+      base.judgePass =
+        base.judgeResults.length === 0 ? true : base.judgeResults.every((r) => r.verdict === "pass");
+    }
 
     return base;
   } catch (err) {
@@ -325,7 +350,9 @@ function printReport(results) {
     const judgeTot = r.judgeResults.length;
     const p50 = median(r.latency.totalMs);
     const hardCell = r.error ? "ERROR" : `${hardOk}/${hardTot} ${hardTot && hardOk === hardTot ? "✓" : "✗"}`;
-    const judgeCell = judgeTot ? `${judgeOk}/${judgeTot}` : "—";
+    // "skip" and "—" mean different things: not asked, versus asked and had
+    // nothing to ask. Worth distinguishing in a table someone reads quickly.
+    const judgeCell = r.judgeSkipped ? "skip" : judgeTot ? `${judgeOk}/${judgeTot}` : "—";
     console.log(
       `${pad(r.name, 30)} ${pad(hardCell, 9)} ${pad(judgeCell, 9)} ${pad(p50 == null ? "—" : `${p50}ms`, 9)}`
     );
@@ -361,7 +388,12 @@ function printReport(results) {
   console.log("\n=== SUMMARY ===");
   console.log(`scenarios:   ${results.length}`);
   console.log(`hard pass:   ${hardPassCount}/${results.length}`);
-  console.log(`judge pass:  ${judgePassCount}/${results.length} (advisory)`);
+  const judgeSkipped = results.length > 0 && results.every((r) => r.judgeSkipped);
+  console.log(
+    judgeSkipped
+      ? `judge pass:  skipped (--no-judge)`
+      : `judge pass:  ${judgePassCount}/${results.length} (advisory)`
+  );
   console.log(
     `first-event latency: p50 ${fmtMs(percentile(allFirst, 50))}  p95 ${fmtMs(percentile(allFirst, 95))}`
   );
@@ -595,7 +627,7 @@ async function runMatrixMode(scenarios, opts) {
 
     const startedAt = Date.now();
     const results = await runPool(scenarios, opts.concurrency, (scenario) =>
-      runScenario(scenario, { modelOverrides })
+      runScenario(scenario, { modelOverrides, noJudge: opts.noJudge })
     );
     const elapsedMs = Date.now() - startedAt;
     const summary = summarizeConfigResults(results);
@@ -685,7 +717,7 @@ async function main() {
 
   const startedAt = Date.now();
   const results = await runPool(scenarios, opts.concurrency, (scenario) =>
-    runScenario(scenario, { modelOverrides })
+    runScenario(scenario, { modelOverrides, noJudge: opts.noJudge })
   );
   const elapsedMs = Date.now() - startedAt;
 
