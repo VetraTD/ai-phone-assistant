@@ -465,12 +465,20 @@ function makeThrowingGen(err) {
   };
 }
 
+// Every socket a test opens, so afterEach can shut its session down. A session
+// outlives the test that started it otherwise: its hold timers, post-barge
+// settle and generator all keep running, and the tts turns it goes on to create
+// are pushed into H.ttsTurns — which beforeEach clears IN PLACE, so the array
+// the next test reads is the same one the previous test is still writing to.
+const openSockets = [];
+
 class FakeWs {
   constructor() {
     this.readyState = 1; // OPEN
     this.listeners = {};
     this.sent = [];
     this.closeCount = 0;
+    openSockets.push(this);
   }
   on(event, cb) { (this.listeners[event] ||= []).push(cb); return this; }
   send(data) { this.sent.push(typeof data === "string" ? JSON.parse(data) : data); }
@@ -543,9 +551,20 @@ beforeEach(() => {
   process.env.ELEVENLABS_DEFAULT_VOICE_ID = "voice-xyz";
 });
 
-afterEach(() => {
-  // Evict per-call state so unique-sid isolation is airtight.
-  callState.remove; // no-op reference; each test uses a fresh sid anyway
+afterEach(async () => {
+  // Close every socket the test opened so its session tears down HERE rather
+  // than partway through the next test. Skipping this let 14b's session create
+  // a tts turn during 14c and, because both use the same reply text, the leak
+  // was indistinguishable from 14c's own turn — it presented as a wrong
+  // prosody anchor in production code that was in fact correct.
+  for (const ws of openSockets) {
+    if (ws.readyState === 1) {
+      try { ws.close(); } catch { /* a session that already closed is fine */ }
+    }
+  }
+  openSockets.length = 0;
+  // Let the close handlers run before the next test's beforeEach clears state.
+  await flush();
 });
 
 describe("session.js — v2 pipeline orchestrator", () => {
@@ -2716,11 +2735,22 @@ describe("session.js — v2 pipeline orchestrator", () => {
       tm.opts.onInterrupt("wait");
       await flush();
 
+      // The caller barged, so this final is held by the post-barge settle
+      // (POST_BARGE_SETTLE_MS, 700ms) before it becomes a turn. Two macrotask
+      // flushes are single-digit milliseconds, so waiting that way asserted
+      // against the GREETING's tts turn — which trivially has previousText ""
+      // — and never reached turn 1 at all. Wait for turn 1 to exist, and read
+      // it by index rather than taking whatever turn is newest.
+      const beforeTurn1 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what are your hours.");
-      await flush();
-      await flush();
+      await flushUntil(() => H.ttsTurns.length > beforeTurn1, 3_000);
 
-      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn1Tts = H.ttsTurns[beforeTurn1];
+      // Guards against this test silently reverting to what it used to do:
+      // assert that the turn under inspection really is turn 1 and not the
+      // greeting, whose previousText is "" for an entirely different reason.
+      expect(turn1Tts).not.toBe(H.ttsTurns[0]);
+      expect(turn1Tts.write).toHaveBeenCalledWith("Our hours are nine to five.");
       // Must stay at its initial empty value — NOT the full greeting text
       // (the bug this fix closes) and not any other stale value.
       expect(turn1Tts.opts.previousText).toBe("");
