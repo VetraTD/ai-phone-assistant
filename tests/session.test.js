@@ -4178,59 +4178,6 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(all).toMatch(/half four/i);
   });
 
-  it("acknowledges a SECOND time when a turn keeps running tool rounds", async () => {
-    // A reschedule looks the appointment up, checks identity, then answers.
-    // holdLinePlayed capped the acknowledgement at one, so a live call on
-    // 2026-08-30 spent ~4s inside the model acknowledged once and then silent.
-    delete process.env.VOICE_ENGINE_FILLER;
-    process.env.VOICE_SECOND_HOLD_MS = "300";
-    H.llmFactory = () =>
-      (async function* () {
-        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
-        yield { type: "toolEffect", effect: { name: "get_caller_appointments_from_db", success: true } };
-        await new Promise((r) => setTimeout(r, 900));
-        yield { type: "delta", text: "You are down for Thursday at 2." };
-        yield { type: "done", reply: { text: "You are down for Thursday at 2.", toolResults: [] } };
-      })();
-    const ws = new FakeWs();
-    handleVoiceSessionConnection(ws);
-    await startCall(ws, newSid());
-    await settleGreeting();
-    H.turnManagerInstances[0].opts.onTurnEnd("its Nithin, born in June.");
-    await flush();
-    await new Promise((r) => setTimeout(r, 1200));
-
-    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).toMatch(/pull that up|finding that now/i); // the first acknowledgement
-    expect(written).toMatch(/still working/i);     // ...and the follow-up
-    delete process.env.VOICE_SECOND_HOLD_MS;
-  });
-
-  it("does NOT acknowledge twice when the answer arrives promptly", async () => {
-    // The restraint case. A turn that answers quickly must never collect a
-    // second line it did not need.
-    delete process.env.VOICE_ENGINE_FILLER;
-    process.env.VOICE_SECOND_HOLD_MS = "300";
-    H.llmFactory = () =>
-      (async function* () {
-        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
-        yield { type: "toolEffect", effect: { name: "get_caller_appointments_from_db", success: true } };
-        yield { type: "delta", text: "You are down for Thursday at 2." };
-        yield { type: "done", reply: { text: "You are down for Thursday at 2.", toolResults: [] } };
-      })();
-    const ws = new FakeWs();
-    handleVoiceSessionConnection(ws);
-    await startCall(ws, newSid());
-    await settleGreeting();
-    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
-    await flush();
-    await new Promise((r) => setTimeout(r, 900));
-
-    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).not.toMatch(/still working/i);
-    delete process.env.VOICE_SECOND_HOLD_MS;
-  });
-
   it("stays SILENT when the answer beats the threshold", async () => {
     // The complaint that produced this threshold: "during every tool call it is
     // saying some pre-generated text, some tool calls already happened fast and
@@ -4258,6 +4205,65 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).not.toMatch(/let me check|checking the calendar|pull that up|one moment/i);
     // ...and the caller still gets the answer, sooner than they would have.
     expect(written).toMatch(/half four/i);
+  });
+
+  it("waits for the model's own audio to finish, then speaks — it does not give up", async () => {
+    // The reschedule shape. The model says "just to confirm..." and calls a
+    // tool in the same breath, so the hold timer's first look lands while the
+    // caller is still hearing that sentence. It used to return false there and
+    // abandon the line for the rest of the turn, leaving the three seconds
+    // after it silent — reported as the line arriving "after too long".
+    //
+    // It now looks again until the caller is actually in silence.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Thank you. Just to confirm that for you." };
+        yield { type: "toolCall", name: "reschedule_appointment_db" };
+        yield { type: "toolEffect", effect: { name: "reschedule_appointment_db", success: true } };
+        await new Promise((r) => setTimeout(r, 900));
+        yield { type: "delta", text: "That is all moved." };
+        yield { type: "done", reply: { text: "That is all moved.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    // Deliberately no digits: hasPartialDigits() holds a final that looks like
+    // mid-dictation of a number for 1500ms, which would park the turn past this
+    // test's window and make it look like the hold line never fired.
+    H.turnManagerInstances[0].opts.onTurnEnd("yes that is right.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/moving that|getting that changed/i);
+  });
+
+  it("plays ONE line per turn, never a second from another mechanism", async () => {
+    // The stall watchdog did not consult holdLinePlayed, so a turn could be
+    // acknowledged by the tool path and then told "still working on that" a
+    // couple of seconds later.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, 400));
+        yield { type: "stalled", sinceLastChunkMs: 2500 };
+        await new Promise((r) => setTimeout(r, 400));
+        yield { type: "delta", text: "I have ten or four." };
+        yield { type: "done", reply: { text: "I have ten or four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what is open Friday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/let me check|checking the calendar|what is open/i);
+    expect(written).not.toMatch(/still working/i);
   });
 
   it("stays silent when VOICE_ENGINE_FILLER is explicitly false", async () => {
