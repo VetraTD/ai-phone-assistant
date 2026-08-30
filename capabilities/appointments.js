@@ -827,8 +827,9 @@ const CHECK_AVAILABILITY_DECLARATION = {
     "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller " +
     "names a time OR a day. Given a date and time it answers whether that slot is open, and if " +
     "available is false you offer the returned alternatives instead of collecting details. Given " +
-    "just a date it returns open_times for that day, which you offer to the caller so they can " +
-    "choose — never choose for them.",
+    "just a date it returns the times open that day: offer open_times first, and if the caller " +
+    "wants something else that day, offer from all_open_times. Never tell a caller nothing else is " +
+    "available while all_open_times still has times in it. Let them choose — never choose for them.",
   parameters: {
     type: "object",
     properties: {
@@ -1359,11 +1360,21 @@ async function openTimesForDay(dateStr, config, adapter, avail, ctx) {
     }
   }
 
+  const timezoneLocal = (a) => toLocalNaiveDateTime(a, timezone);
+  const allLocal = (free || [])
+    .map((s2) => s2.start)
+    .filter((s2) => Number.isFinite(Date.parse(s2)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
+    .map(timezoneLocal)
+    .filter(Boolean);
+
   const picked = spreadSlots(free, 3);
   if (!picked.length) {
     return {
       success: true,
       open_times: [],
+      all_open_times: [],
+      total_open: 0,
       message: "There is nothing open that day. Ask the caller about another day.",
     };
   }
@@ -1372,12 +1383,27 @@ async function openTimesForDay(dateStr, config, adapter, avail, ctx) {
   // scheduled_at, spoken form for what it says out loud. Same round-trip
   // contract the alternatives path documents below.
   const profile = resolveProfile(config);
+  const spoken = picked.map((a) => speakableDateTime(a, timezone, profile)).join(", ");
+  const more = allLocal.length - picked.length;
   return {
     success: true,
-    open_times: picked.map((a) => toLocalNaiveDateTime(a, timezone)).filter(Boolean),
+    // The three to SAY OUT LOUD. Reading sixteen times down a phone is not an
+    // offer, it is a recital.
+    open_times: picked.map(timezoneLocal).filter(Boolean),
+    // ...and every one that is actually free, so a follow-up question is
+    // answered from what the model already has rather than from the false
+    // impression that three offers means three slots. A live call on
+    // 2026-08-30 was told "nothing else is available" with eleven still open.
+    all_open_times: allLocal,
+    total_open: allLocal.length,
     message:
-      `Open times that day: ${picked.map((a) => speakableDateTime(a, timezone, profile)).join(", ")}. ` +
-      `Offer these to the caller and ask which one suits them. Do not pick one for them.`,
+      `${allLocal.length} time${allLocal.length === 1 ? " is" : "s are"} open that day. ` +
+      `Offer these three first: ${spoken}. Ask which one suits them and do not pick one for them. ` +
+      (more > 0
+        ? `${more} other time${more === 1 ? " is" : "s are"} also open — they are listed in all_open_times. ` +
+          `If the caller asks for anything else that day, offer from that list. Never tell them nothing ` +
+          `else is available while it still has times in it.`
+        : `Those are the only times open that day.`),
   };
 }
 

@@ -211,6 +211,67 @@ describe("check_appointment_availability tool", () => {
       expect(r.message).toMatch(/nothing (else )?(open|available)|fully booked|another day/i);
     });
 
+    // -----------------------------------------------------------------
+    // Live call, 2026-08-30. The caller was offered three times, asked "have
+    // you got anything else that day?", and was told nothing else was
+    // available — while eleven other slots were open. Asking for one of them
+    // by name then worked, which is what proved the data was there and only
+    // the ANSWER was wrong.
+    //
+    // The tool offered three and said "Open times that day: X, Y, Z." Nothing
+    // in that response says the three are a SELECTION, so the model reasonably
+    // concluded they were the whole set. A short list to speak is right; a
+    // short list presented as exhaustive is a lie the model then repeats.
+    // -----------------------------------------------------------------
+    it("says how many are actually open, so three offers are not mistaken for three slots", async () => {
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(makeDeps())
+      );
+      const r = res.functionResponse.response;
+
+      // A 9-5 day at 30 minutes is 16 slots. Three are offered; the model must
+      // be able to see that the other thirteen exist.
+      expect(r.open_times).toHaveLength(3);
+      expect(r.total_open).toBeGreaterThan(3);
+      expect(Array.isArray(r.all_open_times)).toBe(true);
+      expect(r.all_open_times.length).toBe(r.total_open);
+      // ...and be told, in words, not to claim otherwise.
+      expect(r.message).toMatch(/more|other|\d+ (times|slots)/i);
+    });
+
+    it("carries every open time in the same local frame book_appointment wants", async () => {
+      // So a follow-up question is answered from what it already has, instead
+      // of a second tool round the caller waits through.
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(makeDeps())
+      );
+      const { all_open_times: all, open_times: offered } = res.functionResponse.response;
+      expect(all.every((t) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(t))).toBe(true);
+      // The three offered are drawn from the full list, not a separate universe.
+      for (const t of offered) expect(all).toContain(t);
+    });
+
+    it("still says nothing is open when nothing is", async () => {
+      const deps = makeDeps({
+        listScheduledBetween: vi
+          .fn()
+          .mockResolvedValue(
+            Array.from({ length: 16 }, (_, i) => ({
+              scheduled_at: new Date(Date.UTC(2026, 6, 21, 14, 0) + i * 30 * 60_000).toISOString(),
+            }))
+          ),
+      });
+      const res = await appointments.execute(
+        { id: "1", name: "check_appointment_availability", args: { requested_at: DATE_ONLY } },
+        ctxFor(deps)
+      );
+      const r = res.functionResponse.response;
+      expect(r.total_open).toBe(0);
+      expect(r.all_open_times).toEqual([]);
+    });
+
     it("still rejects a date-only value at BOOKING time — the backstop stays", async () => {
       // The model must never turn "next Tuesday" into a booking on its own.
       const res = await appointments.execute(
