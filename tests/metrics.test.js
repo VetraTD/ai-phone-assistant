@@ -514,3 +514,62 @@ describe("metrics.js — greeting-gate counters", () => {
     expect(getLatencyStats().turnTaking.greeting_guard_expired).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Negative durations, 2026-08-30.
+//
+// Observed live: tool_exec_ms -930, true_v2v_ms -9871, playout_ms -12199. Marks
+// land out of order on a barged turn, where a successor generation overlaps the
+// one being abandoned. Nothing filtered them, so the p50/p95 on the debug
+// endpoint were computed over impossible values and understated real latency.
+// ---------------------------------------------------------------------------
+describe("finishTurn — impossible durations", () => {
+  it("drops a negative delta rather than recording it", async () => {
+    const { createTurnMetrics, clearStats, getLatencyStats } = await import("../lib/voice/metrics.js");
+    clearStats();
+    const m = createTurnMetrics("neg-1");
+
+    // llm_first_tool BEFORE llm_first_tool_call — the observed inversion.
+    m.mark("speech_end", 1000);
+    m.mark("llm_first_tool", 1500);
+    m.mark("llm_first_tool_call", 2400);
+    m.mark("llm_request", 3000);
+    const payload = m.finishTurn();
+
+    expect(payload.tool_exec_ms).toBeNull();
+    expect(getLatencyStats().negativeDeltas).toBeGreaterThan(0);
+  });
+
+  it("keeps an ordinary positive delta untouched", async () => {
+    const { createTurnMetrics, clearStats } = await import("../lib/voice/metrics.js");
+    clearStats();
+    const m = createTurnMetrics("pos-1");
+
+    m.mark("speech_end", 1000);
+    m.mark("llm_request", 1100);
+    m.mark("llm_first_tool_call", 2200);
+    m.mark("llm_first_tool", 2210);
+    const payload = m.finishTurn();
+
+    expect(payload.tool_exec_ms).toBe(10);
+    expect(payload.llm_tool_call_ms).toBe(1100);
+  });
+
+  it("keeps a negative value out of the percentiles entirely", async () => {
+    const { createTurnMetrics, clearStats, getLatencyStats } = await import("../lib/voice/metrics.js");
+    clearStats();
+    for (const [a, b] of [[100, 900], [100, -50], [100, 700]]) {
+      let clock = 0;
+      const m = createTurnMetrics("p");
+      m.mark("speech_end", 0);
+      m.mark("llm_request", a);
+      m.mark("llm_first_chunk", a + b);
+      m.finishTurn();
+    }
+    const st = getLatencyStats().byStage.llm_ttfb_ms;
+    // 900 and 700 only. A -50 in the set would drag p50 to 700 or below and,
+    // worse, make the stage look faster than it is.
+    expect(st.p50).toBeGreaterThanOrEqual(700);
+    expect(st.max).toBe(900);
+  });
+});

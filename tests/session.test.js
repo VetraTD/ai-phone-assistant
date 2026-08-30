@@ -4176,6 +4176,59 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(all).toMatch(/half four/i);
   });
 
+  it("acknowledges a SECOND time when a turn keeps running tool rounds", async () => {
+    // A reschedule looks the appointment up, checks identity, then answers.
+    // holdLinePlayed capped the acknowledgement at one, so a live call on
+    // 2026-08-30 spent ~4s inside the model acknowledged once and then silent.
+    delete process.env.VOICE_ENGINE_FILLER;
+    process.env.VOICE_SECOND_HOLD_MS = "300";
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        yield { type: "toolEffect", effect: { name: "get_caller_appointments_from_db", success: true } };
+        await new Promise((r) => setTimeout(r, 900));
+        yield { type: "delta", text: "You are down for Thursday at 2." };
+        yield { type: "done", reply: { text: "You are down for Thursday at 2.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("its Nithin, born in June.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/pull that up/i);      // the first acknowledgement
+    expect(written).toMatch(/still working/i);     // ...and the follow-up
+    delete process.env.VOICE_SECOND_HOLD_MS;
+  });
+
+  it("does NOT acknowledge twice when the answer arrives promptly", async () => {
+    // The restraint case. A turn that answers quickly must never collect a
+    // second line it did not need.
+    delete process.env.VOICE_ENGINE_FILLER;
+    process.env.VOICE_SECOND_HOLD_MS = "300";
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        yield { type: "toolEffect", effect: { name: "get_caller_appointments_from_db", success: true } };
+        yield { type: "delta", text: "You are down for Thursday at 2." };
+        yield { type: "done", reply: { text: "You are down for Thursday at 2.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/still working/i);
+    delete process.env.VOICE_SECOND_HOLD_MS;
+  });
+
   it("stays silent when VOICE_ENGINE_FILLER is explicitly false", async () => {
     process.env.VOICE_ENGINE_FILLER = "false";
     H.llmFactory = () =>
