@@ -4106,18 +4106,23 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
   // The hold line now belongs to the engine, where it can only fire because a
   // tool actually started.
   //
-  // SHIPS OFF as of 2026-08-30 — the line takes ~1.5s to say and the gap it was
-  // covering measures 833ms p50, so firing it made those turns LONGER. These
-  // tests opt it back in, because the mechanism still has to work correctly for
-  // the case it was built for: a genuinely long wait.
+  // It fires only once the wait has ALREADY run past the threshold, because the
+  // line takes ~1.5s to say and audio plays serially: firing sooner delays the
+  // answer it was meant to cover. Live, that threshold is 1500ms against a
+  // measured distribution where almost every turn answers in under a second.
+  //
+  // These tests shorten it to 200ms so they run fast; the SEMANTICS under test
+  // are "short wait stays silent, long wait speaks", not the specific number.
   beforeEach(() => {
     process.env.VOICE_ENGINE_FILLER = "true";
+    process.env.VOICE_TOOL_HOLD_DELAY_MS = "200";
   });
   afterEach(() => {
     delete process.env.VOICE_ENGINE_FILLER;
+    delete process.env.VOICE_TOOL_HOLD_DELAY_MS;
   });
 
-  const holdDelay = 600;
+  const holdDelay = 200;
   const armTurn = async (events) => {
     H.llmFactory = () => makeGen(events);
     const ws = new FakeWs();
@@ -4144,12 +4149,9 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).not.toMatch(/one moment/i);
   });
 
-  it("acknowledges the tool round by default, and does so IMMEDIATELY", async () => {
-    // Default flipped back on 2026-08-30, for a different reason than the
-    // first time. It is no longer a gap-filler fired 600ms in (which landed
-    // just before the answer and made turns longer) -- it is an
-    // acknowledgement fired the instant the tool starts, whose own ~1.5s of
-    // speech IS the pause.
+  it("speaks once the wait has run past the threshold", async () => {
+    // The case the line exists for: the model is still working well past the
+    // point where a caller expects to hear something.
     delete process.env.VOICE_ENGINE_FILLER;
     H.llmFactory = () =>
       (async function* () {
@@ -4227,6 +4229,35 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
     expect(written).not.toMatch(/still working/i);
     delete process.env.VOICE_SECOND_HOLD_MS;
+  });
+
+  it("stays SILENT when the answer beats the threshold", async () => {
+    // The complaint that produced this threshold: "during every tool call it is
+    // saying some pre-generated text, some tool calls already happened fast and
+    // these are not really needed". Measured, almost every turn answers in
+    // 685-861ms. Those must never hear a line -- speaking would delay the very
+    // answer it was pretending to cover.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        // Comfortably inside the 200ms test threshold.
+        await new Promise((r) => setTimeout(r, 60));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("is Friday at 2 free.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 600));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/we have free|check the diary|pull up your appointment|one moment/i);
+    // ...and the caller still gets the answer, sooner than they would have.
+    expect(written).toMatch(/half four/i);
   });
 
   it("stays silent when VOICE_ENGINE_FILLER is explicitly false", async () => {
