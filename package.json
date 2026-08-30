@@ -42,7 +42,7 @@
     "@deepgram/sdk": "^5.0.0",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
-    "@sentry/node": "^9.0.0",
+    "@sentry/node": "^10.72.0",
     "@supabase/supabase-js": "^2.97.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
