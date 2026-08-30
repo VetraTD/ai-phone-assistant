@@ -4105,6 +4105,18 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
   // the model said the words and never made the call — three turns running.
   // The hold line now belongs to the engine, where it can only fire because a
   // tool actually started.
+  //
+  // SHIPS OFF as of 2026-08-30 — the line takes ~1.5s to say and the gap it was
+  // covering measures 833ms p50, so firing it made those turns LONGER. These
+  // tests opt it back in, because the mechanism still has to work correctly for
+  // the case it was built for: a genuinely long wait.
+  beforeEach(() => {
+    process.env.VOICE_ENGINE_FILLER = "true";
+  });
+  afterEach(() => {
+    delete process.env.VOICE_ENGINE_FILLER;
+  });
+
   const holdDelay = 600;
   const armTurn = async (events) => {
     H.llmFactory = () => makeGen(events);
@@ -4130,6 +4142,35 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
     expect(written).not.toMatch(/one moment/i);
+  });
+
+  it("stays SILENT during a tool round by default", async () => {
+    // The default this ships with. A caller reported "it says the thing and then
+    // immediately comes back with the results, why did it even say that" — and
+    // the arithmetic backs them up: the line takes ~1.5s to speak, audio plays
+    // serially, and the gap it covers measures 833ms p50 / 896ms p95. Firing it
+    // delayed the answer instead of hiding the wait.
+    delete process.env.VOICE_ENGINE_FILLER;
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, holdDelay + 500));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what have you got on Friday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 900));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/check the diary|pull that up|one moment|getting that sorted/i);
+    // ...and the real answer is still delivered, unaffected.
+    expect(written).toMatch(/half four/i);
   });
 
   it("covers the wait when the TOOL is instant but the reply is not", async () => {
