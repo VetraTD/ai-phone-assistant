@@ -2644,11 +2644,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
       await startCall(ws, sid);
 
       const tm = H.turnManagerInstances[0];
+      const beforeTurn1 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what are your hours.");
-      await flush();
-      await flush();
+      await flushUntil(
+        () => H.ttsTurns.length > beforeTurn1 && H.ttsTurns[beforeTurn1].write.mock.calls.length > 0
+      );
 
-      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn1Tts = H.ttsTurns[beforeTurn1];
       expect(turn1Tts.write).toHaveBeenCalledWith("Sure, I can help.");
 
       // Turn 2 — a different reply — must continue from turn 1's spoken text,
@@ -2657,11 +2659,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
+      const beforeTurn2 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what time do you open.");
-      await flush();
-      await flush();
+      await flushUntil(
+        () => H.ttsTurns.length > beforeTurn2 && H.ttsTurns[beforeTurn2].write.mock.calls.length > 0
+      );
 
-      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn2Tts = H.ttsTurns[beforeTurn2];
       expect(turn2Tts).not.toBe(turn1Tts);
       expect(turn2Tts.opts.previousText).toBe("Sure, I can help.");
       expect(turn2Tts.write).toHaveBeenCalledWith("We open at nine.");
@@ -2685,11 +2689,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
       greetingTurn.opts.onDone({});
 
       const tm = H.turnManagerInstances[0];
+      const beforeTurn1 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what are your hours.");
-      await flush();
-      await flush();
+      await flushUntil(() => H.ttsTurns.length > beforeTurn1);
 
-      const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn1Tts = H.ttsTurns[beforeTurn1];
       expect(turn1Tts.opts.previousText).toBe("Hello, thanks for calling Test Biz.");
     });
 
@@ -2846,11 +2850,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
+      const beforeTurn2 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what time do you open.");
-      await flush();
-      await flush();
+      await flushUntil(() => H.ttsTurns.length > beforeTurn2);
 
-      const turn2Tts = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn2Tts = H.ttsTurns[beforeTurn2];
       expect(turn2Tts).not.toBe(turn1Tts);
       expect(turn2Tts.opts.previousText).toBe("Sure, I can help");
     });
@@ -2960,11 +2964,11 @@ describe("session.js — v2 pipeline orchestrator", () => {
         { type: "delta", text: "We open at nine." },
         { type: "done", reply: { text: "We open at nine.", toolResults: [] } },
       ]);
+      const beforeTurn2 = H.ttsTurns.length;
       tm.opts.onTurnEnd("what time do you open.");
-      await flush();
-      await flush();
+      await flushUntil(() => H.ttsTurns.length > beforeTurn2);
 
-      const turn2 = H.ttsTurns[H.ttsTurns.length - 1];
+      const turn2 = H.ttsTurns[beforeTurn2];
       expect(turn2).not.toBe(turn1);
       // Sticky-Google engaged — no ElevenLabs attempt on the later turn.
       expect(turn2.opts.forceFallback).toBe(true);
