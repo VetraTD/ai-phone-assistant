@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { looksHardToSpell, shouldConfirmSpelling } from "../lib/nameQuality.js";
+import { looksHardToSpell, shouldConfirmSpelling, callerHasNameOnFile } from "../lib/nameQuality.js";
 
 describe("looksHardToSpell", () => {
   it("flags the name from the live call", () => {
@@ -144,5 +144,20 @@ describe("shouldConfirmSpelling — the whole decision, not just difficulty", ()
     for (const junk of [null, undefined, "", "   ", 42]) {
       expect(shouldConfirmSpelling(ctx({ name: junk }))).toBe(false);
     }
+  });
+});
+
+describe("callerHasNameOnFile — suppressing the prompt nudge for a known caller", () => {
+  it("is true when the call-start snapshot carries a name", () => {
+    expect(
+      callerHasNameOnFile({ upcomingAppointments: [{ client_name: "Aoife Nic Ghabhann" }] })
+    ).toBe(true);
+  });
+
+  it("is false for a caller with no history, or history with no name", () => {
+    expect(callerHasNameOnFile(null)).toBe(false);
+    expect(callerHasNameOnFile({ upcomingAppointments: [] })).toBe(false);
+    expect(callerHasNameOnFile({ upcomingAppointments: [{ scheduled_at: "x" }] })).toBe(false);
+    expect(callerHasNameOnFile({ upcomingAppointments: [{ client_name: "   " }] })).toBe(false);
   });
 });

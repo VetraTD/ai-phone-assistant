@@ -8,7 +8,7 @@ import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
-import { spellPolicy } from "../lib/nameQuality.js";
+import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
@@ -1100,7 +1100,15 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         `You have already asked this caller to spell something on this call. Do not ask again, ` +
         `for any name or detail, for the rest of the call — use what you have and move on.`,
     );
-  } else if (step === "gather_details" && spellPolicy() !== "off") {
+  } else if (
+    step === "gather_details" &&
+    spellPolicy() !== "off" &&
+    // Not for a caller already on file. Without this the nudge asked a
+    // returning caller to spell a name the business already has right — the
+    // exact repetition this round set out to remove. Caught by the eval arm,
+    // 1 run in 5.
+    !callerHasNameOnFile(extras?.callerContext)
+  ) {
     // The same fact, the other way round — and it exists because of WHEN the
     // code gate fires.
     //
