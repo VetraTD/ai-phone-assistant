@@ -4144,18 +4144,18 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).not.toMatch(/one moment/i);
   });
 
-  it("stays SILENT during a tool round by default", async () => {
-    // The default this ships with. A caller reported "it says the thing and then
-    // immediately comes back with the results, why did it even say that" — and
-    // the arithmetic backs them up: the line takes ~1.5s to speak, audio plays
-    // serially, and the gap it covers measures 833ms p50 / 896ms p95. Firing it
-    // delayed the answer instead of hiding the wait.
+  it("acknowledges the tool round by default, and does so IMMEDIATELY", async () => {
+    // Default flipped back on 2026-08-30, for a different reason than the
+    // first time. It is no longer a gap-filler fired 600ms in (which landed
+    // just before the answer and made turns longer) -- it is an
+    // acknowledgement fired the instant the tool starts, whose own ~1.5s of
+    // speech IS the pause.
     delete process.env.VOICE_ENGINE_FILLER;
     H.llmFactory = () =>
       (async function* () {
         yield { type: "toolCall", name: "check_appointment_availability" };
         yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
-        await new Promise((r) => setTimeout(r, holdDelay + 500));
+        await new Promise((r) => setTimeout(r, 700));
         yield { type: "delta", text: "I have 9, 1 oclock or half four." };
         yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
       })();
@@ -4165,11 +4165,37 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await settleGreeting();
     H.turnManagerInstances[0].opts.onTurnEnd("what have you got on Friday.");
     await flush();
-    await new Promise((r) => setTimeout(r, holdDelay + 900));
+
+    // Well inside the old 600ms debounce: the line must already be out.
+    await new Promise((r) => setTimeout(r, 250));
+    const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(early).toMatch(/check the diary/i);
+
+    await new Promise((r) => setTimeout(r, 900));
+    const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(all).toMatch(/half four/i);
+  });
+
+  it("stays silent when VOICE_ENGINE_FILLER is explicitly false", async () => {
+    process.env.VOICE_ENGINE_FILLER = "false";
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, 700));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what have you got on Friday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1100));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).not.toMatch(/check the diary|pull that up|one moment|getting that sorted/i);
-    // ...and the real answer is still delivered, unaffected.
+    expect(written).not.toMatch(/check the diary|pull that up|one moment/i);
     expect(written).toMatch(/half four/i);
   });
 
