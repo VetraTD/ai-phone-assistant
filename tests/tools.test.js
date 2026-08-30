@@ -499,12 +499,14 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       expect(functionResponse.response).toEqual({ success: true });
       expect(stateEffects.endCallArgs).toEqual({ reason: "done" });
-      expect(stateEffects.toolResult).toEqual({
-        name: "end_call",
-        success: true,
-        message: "Goodbye!",
-        callerSafe: true,
-      });
+      // Was the literal "Goodbye!" until 2026-08-30. That line is the FLOOR
+      // spoken when the model ends the call without writing its own sign-off,
+      // and a caller heard it bare after the post-end_call round was removed.
+      expect(stateEffects.toolResult.name).toBe("end_call");
+      expect(stateEffects.toolResult.success).toBe(true);
+      expect(stateEffects.toolResult.callerSafe).toBe(true);
+      expect(stateEffects.toolResult.message).toMatch(/thank you for calling/i);
+      expect(stateEffects.toolResult.message).not.toBe("Goodbye!");
     });
 
     it("honors end_call during the ending step", async () => {

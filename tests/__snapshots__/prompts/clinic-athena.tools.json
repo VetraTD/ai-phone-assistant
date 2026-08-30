@@ -26,7 +26,7 @@
   },
   {
     "name": "end_call",
-    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up. Include a brief goodbye in your text response.",
+    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up. You MUST write your warm sign-off in the SAME response as this call — thank them for calling, use the business name, and wish them well. Nothing you say after this is heard.",
     "parameters": {
       "type": "object",
       "properties": {

@@ -291,7 +291,9 @@ export function buildCallTools(configOrTasks, { markerMode = false } = {}) {
       name: "end_call",
       description:
         "Signal that the conversation is naturally complete and the caller " +
-        "is ready to hang up. Include a brief goodbye in your text response.",
+        "is ready to hang up. You MUST write your warm sign-off in the SAME " +
+        "response as this call — thank them for calling, use the business name, " +
+        "and wish them well. Nothing you say after this is heard.",
       parameters: {
         type: "object",
         properties: {
@@ -781,7 +783,7 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += markerMode
     ? `- Name the intent on the intent line (see INTENT LINE) once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`
     : `- Call set_call_intent once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`;
-  toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
+  toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
     // you" in the same response as a lookup call. That is a two-part

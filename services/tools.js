@@ -16,6 +16,7 @@ import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -190,7 +191,19 @@ export async function executeToolCall(fc, ctx) {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
           stateEffects: {
             endCallArgs,
-            toolResult: { name: fc.name, success: true, message: "Goodbye!", callerSafe: true },
+            // Spoken ONLY when the model ended the call without writing its
+            // own goodbye — see the zero-text fallback in services/gemini.js.
+            // It used to be a bare "Goodbye!", which is what a caller heard on
+            // 2026-08-30 after the post-end_call round was removed: that round
+            // was where a warm ending used to (sometimes) come from, and it was
+            // also where the DUPLICATE goodbye came from. Removing it was right;
+            // leaving the floor at one cold word was not.
+            toolResult: {
+              name: fc.name,
+              success: true,
+              message: getStrings(ctx?.config).signOff(ctx?.config?.businessName || "us"),
+              callerSafe: true,
+            },
             toolCallEvent: { name: fc.name, args: fc.args },
           },
         };
