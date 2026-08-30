@@ -25,13 +25,43 @@ const promiseRe = getStrings({}).promiseRe;
 describe("shouldPlayHoldLine", () => {
   it("plays when the turn has produced nothing at all", () => {
     expect(
-      shouldPlayHoldLine({ producedText: false, holdLinePlayed: false, spokenThisTurn: "", promiseRe }),
+      shouldPlayHoldLine({ audioPlaying: false, holdLinePlayed: false, spokenThisTurn: "", promiseRe }),
     ).toBe(true);
   });
 
-  it("stays quiet once the model has started speaking", () => {
+  it("stays quiet while the caller is actually HEARING something", () => {
     expect(
-      shouldPlayHoldLine({ producedText: true, holdLinePlayed: false, spokenThisTurn: "", promiseRe }),
+      shouldPlayHoldLine({ audioPlaying: true, holdLinePlayed: false, spokenThisTurn: "", promiseRe }),
+    ).toBe(false);
+  });
+
+  it("speaks once the model's own words have FINISHED and it is still working", () => {
+    // The case this whole predicate exists for, and the one it used to refuse.
+    // It opened with `if (producedText) return false` — any text at all this
+    // turn and the line was dead. Under VOICE_INTENT_MARKER the model writes a
+    // sentence alongside its tool call on nearly every turn, so it never fired,
+    // including on a reschedule that says "just to confirm..." and then grinds
+    // for three seconds. Reported from a live call: "it is not running for
+    // important tool calls either".
+    expect(
+      shouldPlayHoldLine({
+        audioPlaying: false,
+        holdLinePlayed: false,
+        spokenThisTurn: "Thank you. Just to confirm, you want to move it to Friday?",
+        promiseRe,
+      }),
+    ).toBe(true);
+  });
+
+  it("still defers to the model's OWN promise, which is the precise version of that check", () => {
+    // Unreachable behind the producedText veto for as long as it existed.
+    expect(
+      shouldPlayHoldLine({
+        audioPlaying: false,
+        holdLinePlayed: false,
+        spokenThisTurn: "One moment while I check that for you.",
+        promiseRe,
+      }),
     ).toBe(false);
   });
 
@@ -40,7 +70,7 @@ describe("shouldPlayHoldLine", () => {
     // flag, then `slow` fires and plays a SECOND one, because the slow branch
     // never looked at the flag.
     expect(
-      shouldPlayHoldLine({ producedText: false, holdLinePlayed: true, spokenThisTurn: "", promiseRe }),
+      shouldPlayHoldLine({ audioPlaying: false, holdLinePlayed: true, spokenThisTurn: "", promiseRe }),
     ).toBe(false);
   });
 
@@ -49,7 +79,7 @@ describe("shouldPlayHoldLine", () => {
     // TOLD to say this, so the engine repeating it is guaranteed, not rare.
     expect(
       shouldPlayHoldLine({
-        producedText: false,
+        audioPlaying: false,
         holdLinePlayed: false,
         spokenThisTurn: "One moment while I check that.",
         promiseRe,
@@ -60,7 +90,7 @@ describe("shouldPlayHoldLine", () => {
   it("recognises the other promise phrasings the model uses", () => {
     for (const said of ["Let me check that for you.", "I'll look that up.", "Give me one second."]) {
       expect(
-        shouldPlayHoldLine({ producedText: false, holdLinePlayed: false, spokenThisTurn: said, promiseRe }),
+        shouldPlayHoldLine({ audioPlaying: false, holdLinePlayed: false, spokenThisTurn: said, promiseRe }),
       ).toBe(false);
     }
   });
@@ -68,7 +98,7 @@ describe("shouldPlayHoldLine", () => {
   it("still plays when the model said something that is not a promise", () => {
     expect(
       shouldPlayHoldLine({
-        producedText: false,
+        audioPlaying: false,
         holdLinePlayed: false,
         spokenThisTurn: "Of course.",
         promiseRe,
@@ -80,7 +110,7 @@ describe("shouldPlayHoldLine", () => {
     // A locale with no promiseRe must not silently suppress every hold line.
     expect(
       shouldPlayHoldLine({
-        producedText: false,
+        audioPlaying: false,
         holdLinePlayed: false,
         spokenThisTurn: "anything",
         promiseRe: undefined,
