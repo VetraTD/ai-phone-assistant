@@ -88,3 +88,49 @@ describe("shouldPlayHoldLine", () => {
     ).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hold-line variety, 2026-08-30.
+//
+// A booking hits a tool round on most turns. The same sentence three times
+// running is how a caller notices they are talking to a machine, so each kind
+// carries several and they cycle within a call.
+// ---------------------------------------------------------------------------
+describe("holdLineFor — cycling the variants", () => {
+  it("gives a different line on consecutive tool rounds", async () => {
+    const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
+    const S = getStrings("en");
+    const heard = [0, 1, 2].map((n) => holdLineFor(S, "holdAvailability", n));
+    expect(new Set(heard).size).toBe(3);
+    expect(heard.every((t) => typeof t === "string" && t.length > 0)).toBe(true);
+  });
+
+  it("wraps rather than running out on a long call", async () => {
+    const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
+    const S = getStrings("en");
+    expect(holdLineFor(S, "holdAvailability", 3)).toBe(holdLineFor(S, "holdAvailability", 0));
+    expect(holdLineFor(S, "holdWrite", 99)).toBeTruthy();
+  });
+
+  it("still handles the single-string kinds", async () => {
+    // filler and stillWorking were never lists and must keep working.
+    const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
+    const S = getStrings("en");
+    expect(holdLineFor(S, "filler", 7)).toBe("One moment.");
+    expect(holdLineFor(S, "stillWorking", 2)).toBeTruthy();
+  });
+
+  it("localizes — a Spanish call cycles Spanish lines", async () => {
+    const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
+    const S = getStrings("es");
+    const heard = [0, 1, 2].map((n) => holdLineFor(S, "holdLookup", n));
+    expect(new Set(heard).size).toBe(3);
+    expect(heard.join(" ")).not.toMatch(/let me|looking/i);
+  });
+
+  it("returns empty for a kind that does not exist, rather than throwing", async () => {
+    const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
+    expect(holdLineFor(getStrings("en"), "nonsense", 0)).toBe("");
+    expect(holdLineFor(null, "filler", 0)).toBe("");
+  });
+});

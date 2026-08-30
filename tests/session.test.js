@@ -4132,6 +4132,37 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).not.toMatch(/one moment/i);
   });
 
+  it("covers the wait when the TOOL is instant but the reply is not", async () => {
+    // The live shape, measured on staging 2026-08-30: tool_exec_ms p50 = 0.
+    // The database answers instantly; the caller then waits ~2s for the SECOND
+    // model round-trip to produce the reply. toolEffect used to cancel the hold
+    // timer, on the assumption that a finished tool meant an imminent answer —
+    // which is exactly backwards now that the tool is the fast part. The result
+    // was 4-5 seconds of dead silence on every tool turn, reported from a live
+    // call.
+    //
+    // Only TEXT ARRIVING means the caller is about to hear something. That is
+    // the only thing entitled to cancel the cover.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, holdDelay + 500));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what have you got on Friday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 300));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/check the diary/i);
+  });
+
   it("speaks a hold line when the tool is slow", async () => {
     // A slow tool means the generator stays OPEN waiting on it — the turn has
     // not ended, the caller is simply hearing nothing.
