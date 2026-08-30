@@ -4171,7 +4171,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     // Well inside the old 600ms debounce: the line must already be out.
     await new Promise((r) => setTimeout(r, 250));
     const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(early).toMatch(/what we have free|check the diary/i);
+    expect(early).toMatch(/let me check|checking the calendar|what is open/i);
 
     await new Promise((r) => setTimeout(r, 900));
     const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
@@ -4201,7 +4201,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, 1200));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).toMatch(/pull up your appointment|find your booking|look that up/i); // the first acknowledgement
+    expect(written).toMatch(/pull that up|finding that now/i); // the first acknowledgement
     expect(written).toMatch(/still working/i);     // ...and the follow-up
     delete process.env.VOICE_SECOND_HOLD_MS;
   });
@@ -4255,7 +4255,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, 600));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).not.toMatch(/we have free|check the diary|pull up your appointment|one moment/i);
+    expect(written).not.toMatch(/let me check|checking the calendar|pull that up|one moment/i);
     // ...and the caller still gets the answer, sooner than they would have.
     expect(written).toMatch(/half four/i);
   });
@@ -4279,7 +4279,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, 1100));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).not.toMatch(/we have free|check the diary|pull up your appointment|one moment/i);
+    expect(written).not.toMatch(/let me check|checking the calendar|pull that up|one moment/i);
     expect(written).toMatch(/half four/i);
   });
 
@@ -4311,7 +4311,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, holdDelay + 300));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).toMatch(/what we have free|check the diary/i);
+    expect(written).toMatch(/let me check|checking the calendar|what is open/i);
   });
 
   it("speaks a hold line when the tool is slow", async () => {
@@ -4335,7 +4335,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     // Since 2026-08-29 the line matches the TOOL. A lookup gets "let me pull
     // that up", not the generic "one moment" this used to assert - same
     // one-per-turn budget, better words.
-    expect(written).toMatch(/pull up your appointment|find your booking|look that up/i);
+    expect(written).toMatch(/pull that up|finding that now/i);
   });
 
   it("uses a diary-shaped hold line for an availability check", async () => {
@@ -4354,7 +4354,7 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, holdDelay + 250));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written).toMatch(/what we have free|check the diary/i);
+    expect(written).toMatch(/let me check|checking the calendar|what is open/i);
   });
 
   it("falls back to the generic line for a tool it does not recognise", async () => {

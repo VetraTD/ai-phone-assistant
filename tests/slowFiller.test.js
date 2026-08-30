@@ -153,7 +153,7 @@ describe("holdLineFor — cycling the variants", () => {
   it("localizes — a Spanish call cycles Spanish lines", async () => {
     const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
     const S = getStrings("es");
-    const heard = [0, 1, 2].map((n) => holdLineFor(S, "holdLookup", n));
+    const heard = [0, 1, 2].map((n) => holdLineFor(S, "holdAvailability", n));
     expect(new Set(heard).size).toBe(3);
     expect(heard.join(" ")).not.toMatch(/let me|looking/i);
   });
@@ -184,13 +184,14 @@ describe("holdKindForTool — the line matches the action", () => {
 
   it("maps every real tool name to a kind that has a line, in both locales", async () => {
     const { holdKindForTool, holdLineFor, getStrings } = await import("../lib/voice/strings.js");
+    // The APPOINTMENT tools, which are the ones that speak. Messages and
+    // quotes are deliberately silent (see the null entries in the map).
     const TOOLS = [
       "check_appointment_availability", "get_available_slots",
       "get_caller_appointments", "get_caller_appointments_from_db",
       "book_appointment", "book_appointment_in_ehr",
       "cancel_appointment", "cancel_appointment_db",
       "reschedule_appointment", "reschedule_appointment_db",
-      "record_customer_request", "record_quote_request",
     ];
     for (const locale of ["en", "es"]) {
       const S = getStrings(locale);
@@ -206,16 +207,78 @@ describe("holdKindForTool — the line matches the action", () => {
     // saying nothing specific.
     const { holdKindForTool } = await import("../lib/voice/strings.js");
     expect(holdKindForTool("sync_to_partner_crm")).toBe("filler");
-    expect(holdKindForTool("")).toBe("filler");
-    expect(holdKindForTool(undefined)).toBe("filler");
+    // Not a tool at all is not the same as an unrecognised tool.
+    expect(holdKindForTool("")).toBeNull();
+    expect(holdKindForTool(undefined)).toBeNull();
   });
 
   it("warms exactly the kinds the tool map can produce", async () => {
     // HOLD_KINDS is derived from the map, so a capability added later cannot
     // ship a line that was never pre-rendered.
     const { HOLD_KINDS, holdKindForTool } = await import("../lib/voice/strings.js");
-    for (const t of ["book_appointment", "cancel_appointment_db", "record_quote_request"]) {
+    for (const t of ["book_appointment", "cancel_appointment_db", "check_appointment_availability"]) {
       expect(HOLD_KINDS).toContain(holdKindForTool(t));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WHICH tools speak, 2026-08-30.
+//
+// "Only for specific tool calls should we do hold lines... that way it does not
+// seem unnatural that for every little thing it has a hold line."
+//
+// Appointments speak. Messages and quotes do not — they are quick writes the
+// caller just dictated. Engine-owned tools do not. Unknown business webhooks
+// get the generic line, because those can genuinely be slow.
+// ---------------------------------------------------------------------------
+describe("holdKindForTool — which tools speak at all", () => {
+  it("stays silent on set_call_intent, which fires on EVERY marker-mode turn", async () => {
+    // The trap. Under VOICE_INTENT_MARKER this is synthesised from the marker
+    // line on every single turn, so treating it as an unknown tool would
+    // announce "One moment." before every reply in the call.
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    expect(holdKindForTool("set_call_intent")).toBeNull();
+  });
+
+  it("stays silent on the quick writes the caller just dictated", async () => {
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    expect(holdKindForTool("record_customer_request")).toBeNull();
+    expect(holdKindForTool("record_quote_request")).toBeNull();
+  });
+
+  it("stays silent on end_call and transfer, which have their own lines", async () => {
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    expect(holdKindForTool("end_call")).toBeNull();
+    expect(holdKindForTool("request_transfer")).toBeNull();
+  });
+
+  it("speaks on every appointment action", async () => {
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    for (const t of [
+      "check_appointment_availability",
+      "get_caller_appointments_from_db",
+      "book_appointment",
+      "reschedule_appointment_db",
+      "cancel_appointment_db",
+    ]) {
+      expect(holdKindForTool(t), `${t} should speak`).toBeTruthy();
+    }
+  });
+
+  it("keeps the lines SHORT, because every word delays the answer behind it", async () => {
+    // Audio plays serially. The line is pure cost whenever the reply beats it,
+    // so length is not a style question.
+    const { getStrings, holdLineFor, HOLD_KINDS } = await import("../lib/voice/strings.js");
+    for (const locale of ["en", "es"]) {
+      const S = getStrings(locale);
+      for (const k of HOLD_KINDS) {
+        for (const i of [0, 1, 2]) {
+          const line = holdLineFor(S, k, i);
+          if (!line) continue;
+          expect(line.split(/\s+/).length, `${locale}/${k}[${i}] is long: "${line}"`).toBeLessThanOrEqual(7);
+        }
+      }
     }
   });
 });
