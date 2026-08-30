@@ -736,6 +736,43 @@ function debugAccessAllowed(req) {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Which model is fastest FROM HERE.
+ *
+ * A laptop cannot answer this: probing from a dev machine put gemini-3.6-flash
+ * at 2,090ms while this deployment was recording 702-1,156ms for the same model
+ * on the same prompt size. That gap is the network hop, not the model, and it
+ * makes any model comparison taken from outside the deployment worthless.
+ *
+ * SPENDS MONEY on every request — real Gemini calls, capped at
+ * MAX_MODELS x MAX_TRIALS (4 x 5 = 20) per invocation. Behind the same
+ * fails-closed debug gate as everything else here, and 404s identically.
+ *
+ *   /api/debug/model-latency?models=gemini-3.6-flash,gemini-2.5-flash&trials=5
+ */
+app.get("/api/debug/model-latency", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  const { probeModelLatency } = await import("./lib/probe/modelLatency.js");
+  const models = String(req.query.models || "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (!models.length) {
+    return res.status(400).json({ error: "models query parameter required (comma-separated)" });
+  }
+  try {
+    const out = await probeModelLatency({
+      models,
+      trials: Number(req.query.trials),
+      promptTokens: Number(req.query.promptTokens),
+    });
+    res.json({ ...out, bootId: BOOT_ID });
+  } catch (err) {
+    captureException(err);
+    res.status(500).json({ error: "probe failed" });
+  }
+});
+
 app.get("/api/debug/latency", async (req, res) => {
   // 404, never 401/403: a rejected request must be indistinguishable from a
   // route that does not exist, so probing can't confirm the endpoint is there.
