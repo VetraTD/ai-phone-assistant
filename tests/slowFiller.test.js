@@ -109,7 +109,7 @@ describe("holdLineFor — cycling the variants", () => {
     const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
     const S = getStrings("en");
     expect(holdLineFor(S, "holdAvailability", 3)).toBe(holdLineFor(S, "holdAvailability", 0));
-    expect(holdLineFor(S, "holdWrite", 99)).toBeTruthy();
+    expect(holdLineFor(S, "holdBook", 99)).toBeTruthy();
   });
 
   it("still handles the single-string kinds", async () => {
@@ -132,5 +132,60 @@ describe("holdLineFor — cycling the variants", () => {
     const { getStrings, holdLineFor } = await import("../lib/voice/strings.js");
     expect(holdLineFor(getStrings("en"), "nonsense", 0)).toBe("");
     expect(holdLineFor(null, "filler", 0)).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-action lines, 2026-08-30.
+//
+// Three coarse buckets was not enough: "holdWrite" covered booking, cancelling,
+// rescheduling, taking a message AND recording a quote, so cancelling an
+// appointment was announced as "just getting that sorted for you". A caller
+// heard the mismatch and said so.
+// ---------------------------------------------------------------------------
+describe("holdKindForTool — the line matches the action", () => {
+  it("does not describe a cancellation as a booking, or either as a lookup", async () => {
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    const kinds = ["book_appointment", "cancel_appointment_db", "reschedule_appointment_db"].map(
+      holdKindForTool
+    );
+    expect(new Set(kinds).size).toBe(3);
+  });
+
+  it("maps every real tool name to a kind that has a line, in both locales", async () => {
+    const { holdKindForTool, holdLineFor, getStrings } = await import("../lib/voice/strings.js");
+    const TOOLS = [
+      "check_appointment_availability", "get_available_slots",
+      "get_caller_appointments", "get_caller_appointments_from_db",
+      "book_appointment", "book_appointment_in_ehr",
+      "cancel_appointment", "cancel_appointment_db",
+      "reschedule_appointment", "reschedule_appointment_db",
+      "record_customer_request", "record_quote_request",
+    ];
+    for (const locale of ["en", "es"]) {
+      const S = getStrings(locale);
+      for (const t of TOOLS) {
+        const line = holdLineFor(S, holdKindForTool(t), 0);
+        expect(line, `${locale}/${t} has no line`).toBeTruthy();
+      }
+    }
+  });
+
+  it("falls back to the generic filler for a business's own webhook tool", async () => {
+    // Guessing what someone else's integration does would be worse than
+    // saying nothing specific.
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    expect(holdKindForTool("sync_to_partner_crm")).toBe("filler");
+    expect(holdKindForTool("")).toBe("filler");
+    expect(holdKindForTool(undefined)).toBe("filler");
+  });
+
+  it("warms exactly the kinds the tool map can produce", async () => {
+    // HOLD_KINDS is derived from the map, so a capability added later cannot
+    // ship a line that was never pre-rendered.
+    const { HOLD_KINDS, holdKindForTool } = await import("../lib/voice/strings.js");
+    for (const t of ["book_appointment", "cancel_appointment_db", "record_quote_request"]) {
+      expect(HOLD_KINDS).toContain(holdKindForTool(t));
+    }
   });
 });
