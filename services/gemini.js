@@ -8,6 +8,7 @@ import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
+import { spellPolicy } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
@@ -1098,6 +1099,30 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
       `=== ALREADY ASKED ===\n` +
         `You have already asked this caller to spell something on this call. Do not ask again, ` +
         `for any name or detail, for the rest of the call — use what you have and move on.`,
+    );
+  } else if (step === "gather_details" && spellPolicy() !== "off") {
+    // The same fact, the other way round — and it exists because of WHEN the
+    // code gate fires.
+    //
+    // services/tools.js refuses a name-bearing write until a spelling has been
+    // confirmed. That guarantee is worth keeping, but a write is the LAST thing
+    // that happens: an eval run caught the assistant asking "could you spell
+    // your full name?" immediately after the caller had said "yes, that's all
+    // correct, thanks so much". The question was right and the moment was
+    // absurd, and on a scripted caller the write then never completed at all.
+    //
+    // So: say it while details are still being collected, which is when a
+    // person would ask. This is a fact about call state, rendered only while it
+    // is true and replaced by ALREADY ASKED the moment it is spent — not a
+    // standing rule of the kind that was deleted from three capability packs on
+    // 2026-08-29 precisely because prose cannot hold a budget.
+    sections.push(
+      `=== SPELLING NOT YET CONFIRMED ===\n` +
+        `You have not yet confirmed a spelling on this call. When the caller gives you a name you ` +
+        `are going to write down, ask them once — right then, while you are still taking details — ` +
+        `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
+        `booking. If they decline or answer with something else, accept the name as you heard it ` +
+        `and carry on.`,
     );
   }
 

@@ -24,7 +24,7 @@ export default {
     maxTurns: 8,
   },
   hard: [
-    (ctx) => A.toolCalledAtMost(ctx, "book_appointment", 1),
+    (ctx) => A.toolSucceededAtMost(ctx, "book_appointment", 1),
     (ctx) =>
       A.toolCalledWith(
         ctx,

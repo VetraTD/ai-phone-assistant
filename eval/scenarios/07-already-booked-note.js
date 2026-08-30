@@ -24,7 +24,7 @@ export default {
     maxTurns: 8,
   },
   hard: [
-    (ctx) => A.toolCalledTimes(ctx, "book_appointment", 1),
+    (ctx) => A.toolSucceededTimes(ctx, "book_appointment", 1),
     (ctx) => A.toolSucceeded(ctx, "book_appointment"),
   ],
   judge: [

@@ -20,6 +20,8 @@ import {
   toolOrder,
   toolBefore,
   toolSucceeded,
+  toolSucceededTimes,
+  toolSucceededAtMost,
   replySomewhereMatches,
   replyMatchesBeforeTool,
   replyNeverMatches,
@@ -287,5 +289,62 @@ describe("replyMatchesAtMost", () => {
 
   it("passes when nothing matches at all", () => {
     expect(replyMatchesAtMost(spellCtx(), /parking/i, 0).pass).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Counting SUCCESSES, not attempts.
+//
+// Added 2026-08-29, when the spelling gate started refusing the first
+// name-bearing write of a call and letting the model retry. "book_appointment
+// was called twice" became ordinary correct behaviour overnight, while "the
+// caller was booked twice" stayed a serious bug — and five scenarios that meant
+// the second were asserting the first, so they went red on a working product.
+// ---------------------------------------------------------------------------
+describe("toolSucceededTimes / toolSucceededAtMost", () => {
+  /** One refusal (the spelling gate) followed by a successful retry. */
+  const refusedThenBooked = {
+    toolResults: [
+      { name: "book_appointment", success: false, message: "confirm the spelling" },
+      { name: "book_appointment", success: true, message: "booked" },
+    ],
+  };
+
+  it("counts the retry as one booking, not two", () => {
+    expect(toolSucceededTimes(refusedThenBooked, "book_appointment", 1).pass).toBe(true);
+  });
+
+  it("still catches an actual double-booking", () => {
+    const twice = {
+      toolResults: [
+        { name: "book_appointment", success: true },
+        { name: "book_appointment", success: true },
+      ],
+    };
+    expect(toolSucceededTimes(twice, "book_appointment", 1).pass).toBe(false);
+    expect(toolSucceededAtMost(twice, "book_appointment", 1).pass).toBe(false);
+  });
+
+  it("reports attempts alongside successes, so a refusal storm is visible", () => {
+    // A scenario passing while the model was refused six times is something the
+    // reader should be able to see without opening the transcript.
+    expect(toolSucceededTimes(refusedThenBooked, "book_appointment", 1).detail).toMatch(
+      /succeeded 1×.*2 attempts/
+    );
+  });
+
+  it("fails when nothing succeeded, however many times it was attempted", () => {
+    const allRefused = {
+      toolResults: [
+        { name: "book_appointment", success: false },
+        { name: "book_appointment", success: false },
+      ],
+    };
+    expect(toolSucceededTimes(allRefused, "book_appointment", 1).pass).toBe(false);
+  });
+
+  it("at-most permits zero — the caller is allowed to bail", () => {
+    expect(toolSucceededAtMost({ toolResults: [] }, "book_appointment", 1).pass).toBe(true);
+    expect(toolSucceededTimes({ toolResults: [] }, "book_appointment", 1).pass).toBe(false);
   });
 });

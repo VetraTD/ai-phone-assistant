@@ -45,7 +45,7 @@ export default {
   hard: [
     // One call, straight through. A second call would mean the guard fired on
     // an empty list.
-    (ctx) => A.toolCalledTimes(ctx, "book_appointment", 1),
+    (ctx) => A.toolSucceededTimes(ctx, "book_appointment", 1),
     (ctx) => A.toolSucceeded(ctx, "book_appointment"),
     // It never claimed an appointment this caller does not have.
     (ctx) => A.replyNeverMatches(ctx, /you (already )?have an (upcoming |existing )?appointment/i),

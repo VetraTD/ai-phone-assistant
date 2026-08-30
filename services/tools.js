@@ -15,7 +15,7 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
-import { shouldConfirmSpelling } from "../lib/nameQuality.js";
+import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -33,22 +33,6 @@ import { shouldConfirmSpelling } from "../lib/nameQuality.js";
  */
 const CONFIRM_HARD_NAMES = process.env.VOICE_CONFIRM_HARD_NAMES !== "false";
 
-/**
- * Which names get a spelling ask.
- *
- * "always" (default, set by the owner 2026-08-29): any name not already on file,
- * once per call, before it is written. "hard" is the pre-2026-08-29 behaviour —
- * only names the difficulty heuristic flags. "off" disables it.
- *
- * Read at CALL time, not module load, so a Railway change takes effect on the
- * next call rather than the next deploy (the convention transcriptUtils.js
- * documents for its own env reads).
- * @returns {"always"|"hard"|"off"}
- */
-function spellPolicy() {
-  const v = (process.env.VOICE_SPELL_POLICY || "").trim().toLowerCase();
-  return v === "hard" || v === "off" ? v : "always";
-}
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
