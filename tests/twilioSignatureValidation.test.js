@@ -42,7 +42,18 @@ process.env.TWILIO_ACCOUNT_SID = "AC00000000000000000000000000000000";
 process.env.BASE_URL = BASE;
 process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "not-a-real-key";
 
-vi.mock("../services/supabase.js", () => ({
+// Repointed from ../services/supabase.js during the dev -> gcp-2 port. That
+// module does not exist on this lineage — it is services/db.js, rewritten
+// against `pg` — so this mock was silently inert, mocking a path nothing
+// imports.
+//
+// Checked rather than assumed: the test passes either way, with DATABASE_URL
+// set or unset, because these five assertions never reach a database call. So
+// this is dead weight removed and isolation restored for whatever is added to
+// this file next, NOT a live bug fixed. Spread the original so an export
+// server.js needs but this list omits does not become undefined.
+vi.mock("../services/db.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   isEnabled: () => false,
   lookupBusinessByPhone: async () => null,
   loadConfig: () => null,
