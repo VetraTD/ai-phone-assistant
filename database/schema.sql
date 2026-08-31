@@ -564,6 +564,12 @@ CREATE INDEX IF NOT EXISTS business_directory_business_id_idx
   ON business_directory (business_id);
 
 REVOKE ALL ON business_directory FROM PUBLIC;
+-- ...and from vetra_app, which is where the privilege actually came from.
+-- ALTER DEFAULT PRIVILEGES above grants every table created afterwards to
+-- vetra_app, and this table is created afterwards, so revoking PUBLIC alone
+-- left the application role able to read the whole tenant routing map. See
+-- database/039_revoke_directory_grants.sql.
+REVOKE ALL ON business_directory FROM vetra_app;
 
 -- A routing table that drifts is worse than none: a stale row sends a caller to
 -- the wrong tenant, a missing row sends them to voicemail.
@@ -618,6 +624,8 @@ CREATE INDEX IF NOT EXISTS user_directory_business_id_idx
   ON user_directory (business_id);
 
 REVOKE ALL ON user_directory FROM PUBLIC;
+-- Same defect, same fix — see the note on business_directory above.
+REVOKE ALL ON user_directory FROM vetra_app;
 
 -- A stale row here is the serious direction: it would resolve somebody's login
 -- to an employer they have left, which is a cross-tenant read with a valid

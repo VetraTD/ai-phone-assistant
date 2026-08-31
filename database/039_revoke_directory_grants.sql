@@ -1,0 +1,73 @@
+-- ---------------------------------------------------------------------------
+-- 039 — close the directory grant that migration 033 believed it had closed.
+--
+-- THE DEFECT, measured 2026-08-31 by scripts/c8-rls-proof.js running as
+-- vetra_app against a local Postgres:
+--
+--   structure :: business_directory: unreachable by the application role
+--     -> READABLE by vetra_app — this table has no RLS, so that would be a
+--        cross-tenant window
+--   structure :: user_directory: (identical)
+--
+-- Migration 033 states the intent plainly in its own COMMENT ON TABLE:
+--   "Deliberately has NO row-level security, and is deliberately NOT granted to
+--    vetra_app — only the SECURITY DEFINER bootstrap function reads it."
+-- and backs it with `REVOKE ALL ON business_directory FROM PUBLIC`.
+--
+-- That revoke was aimed at the wrong grantee. The privilege does not come from
+-- PUBLIC; it comes from migration 029:
+--
+--   ALTER DEFAULT PRIVILEGES IN SCHEMA public
+--     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vetra_app;
+--
+-- Default privileges apply to tables created AFTERWARDS, and 033 creates these
+-- two. So every directory table has been granted to the application role at
+-- creation, silently, since 033 landed — and 033's revoke could never have
+-- stopped it because PUBLIC was never the grantee.
+--
+-- WHY THE CLOUD SQL RUN COULD NOT SEE THIS (ledger P23): the migrate job
+-- connects as `postgres`, which OWNS these tables. An owner's implicit
+-- privileges are not grants, so the proof's grant assertions were vacuous
+-- there. The finding needed a run as vetra_app, which is only possible where
+-- SET ROLE is permitted. The policy half of the proof was genuine on Cloud SQL;
+-- the GRANT half was not, which is exactly what P23 records.
+--
+-- WHAT THIS IS AND IS NOT. These tables hold a dialled number -> tenant id map
+-- and an email -> user map. No PHI, no call content. The exposure is the tenant
+-- roster and the phone numbers routing to it — a metadata leak, not a data
+-- breach — and it requires the application role to be executing attacker-chosen
+-- SQL, which is a different bug than this one. Fixed because a control that
+-- documents itself as present and is absent is worse than no control: P9 relied
+-- on this being true.
+--
+-- SAFE TO REVOKE: nothing in services/, lib/, server.js or middleware/ reads
+-- either table. The intended path is the SECURITY DEFINER functions, which
+-- migration 029 already grants EXECUTE on to vetra_app:
+--   app_lookup_business_by_phone(text), app_lookup_user_by_email(text)
+-- Those keep working — SECURITY DEFINER runs as the owner, not the caller,
+-- which is the whole reason they exist.
+-- ---------------------------------------------------------------------------
+
+REVOKE ALL ON business_directory FROM vetra_app;
+REVOKE ALL ON user_directory     FROM vetra_app;
+
+-- DELIBERATELY NOT touching ALTER DEFAULT PRIVILEGES.
+--
+-- The first version of this migration also revoked the schema-wide default and
+-- re-granted table by table, to stop the next directory-shaped table inheriting
+-- the same silent grant. That was too blunt and the database suite caught it:
+-- the loop handed SELECT/INSERT/UPDATE/DELETE to every RLS table, which
+-- overwrote deliberately narrower grants elsewhere and broke two append-only
+-- guarantees —
+--
+--   phi_access_log: the application may add to the audit trail and must not be
+--                   able to UPDATE or DELETE it
+--   sms_consents:   a recorded answer must not be rewritable
+--
+-- Both are load-bearing compliance properties, and a blanket re-grant is
+-- exactly how you lose one without noticing. The narrow revoke below is the
+-- whole fix; the generic hardening needs its own migration that enumerates the
+-- per-table intent instead of assuming it.
+
+COMMENT ON TABLE business_directory IS
+  'Routing only: dialled number -> tenant. Deliberately has NO row-level security and NO grant to vetra_app — only the SECURITY DEFINER bootstrap function reads it. Migration 039 made that true; 033 stated it but was defeated by 029''s ALTER DEFAULT PRIVILEGES. It exists because a tenant cannot be discovered through a policy that requires the tenant. Must never carry anything beyond a phone number and a business id.';
