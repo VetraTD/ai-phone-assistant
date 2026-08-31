@@ -2816,13 +2816,19 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // really is partial spoken text at risk of being committed), then its
       // generator suspends instead of reaching "done" — the barge-in happens
       // while it is still the current turn.
-      H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Let me check that for you. " }]);
+      //
+      // Deliberately NOT a "let me check..." line. That shape is held back by
+      // the promise gate (lib/voice/promiseGate.js) until a tool call either
+      // arrives or does not, so it would reach tts late or never — and this
+      // test is about barge-in anchoring, not about promises. It needs text
+      // that is unambiguously spoken the moment the sentence completes.
+      H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Our opening hours vary by day. " }]);
       tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
       const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
-      expect(turn1Tts.write).toHaveBeenCalledWith("Let me check that for you.");
+      expect(turn1Tts.write).toHaveBeenCalledWith("Our opening hours vary by day.");
 
       // Caller barges in before turn 1 ever reaches its "done" event. This
       // resolves the suspended generator's pending next() (via return()),
@@ -4427,7 +4433,11 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).toMatch(/one moment/i);
   });
 
-  it("does not double up when the model volunteered its own promise", async () => {
+  // Reported live: "it says 'Let me check our calendar' and then 'I have
+  // booked your appointment'." The engine's table was never wrong — the
+  // model's own promise was, and shouldPlayHoldLine suppressed the correct
+  // line to avoid the two stacking. The gate swaps instead of suppressing.
+  it("replaces the model's own promise with the line for the tool that actually ran", async () => {
     H.llmFactory = () =>
       (async function* () {
         yield { type: "delta", text: "One moment while I check that for you." };
@@ -4444,7 +4454,56 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, holdDelay + 250));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written.match(/one moment/gi) || []).toHaveLength(1);
+    // The model's vague line never reaches the caller...
+    expect(written).not.toMatch(/one moment/i);
+    // ...and what they hear instead describes the lookup that is running.
+    expect(written).toMatch(/pull up your appointment|finding your appointment/i);
+    // Still exactly one line, not the doubling the old suppression prevented.
+    expect(written.match(/appointment/gi).length).toBe(1);
+  });
+
+  it("speaks the model's promise unchanged when no tool follows it", async () => {
+    // The gate costs a promise-shaped sentence ~350ms and nothing else. A turn
+    // that promises and then simply answers must still say what it wrote.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Let me check that for you." };
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: " We are open until six." };
+        yield { type: "done", reply: { text: "Let me check that for you. We are open until six.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what time do you close.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/let me check that for you/i);
+    expect(written).toMatch(/open until six/i);
+  });
+
+  it("never gates a promise that also carries a question", async () => {
+    // Swallowing this would lose the only thing moving the call forward.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "One moment — what was the name again?" };
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "One moment — what was the name again?", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/what was the name again/i);
   });
 });
 

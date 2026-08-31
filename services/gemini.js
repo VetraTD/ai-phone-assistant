@@ -857,7 +857,16 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   let guardrails = `=== GUARDRAILS ===\n`;
 
   // Caller-experience response rules — how every turn should sound.
+  // The "also say something" half is now scoped, because it was producing the
+  // wrong sentence. Reported live: "Let me check our calendar" followed
+  // immediately by "I have booked your appointment" — the model announces a
+  // wait before it has settled which tool it is calling, and it guesses. The
+  // engine already knows: lib/voice/session.js picks the wait line from the
+  // tool that actually started, so on those turns the model's guess is worse
+  // than its silence. lib/voice/promiseGate.js catches the ones that still slip
+  // through; this is the half that stops them being produced.
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
+  guardrails += `- The one exception: when you are calling a tool to look something up, book, change, or cancel, you do NOT need to announce the wait. Do not say "one moment", "let me check the calendar", or anything similar — the system says that for you, and it says it accurately because it knows which action is running. Call the tool and stay quiet, or say something that is true right now. Never name an action you have not taken yet.\n`;
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
   guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
