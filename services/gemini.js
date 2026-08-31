@@ -1145,7 +1145,11 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         `are going to write down, ask them once — right then, while you are still taking details — ` +
         `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
         `booking. If they decline or answer with something else, accept the name as you heard it ` +
-        `and carry on.`,
+        `and carry on.\n` +
+        `THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling ` +
+        `is right and what you heard is wrong. Build the name from the letters, then read THAT ` +
+        `back. Speech recognition mishears names constantly and never mishears letters the same ` +
+        `way, which is the entire reason you are asking.`,
     );
   }
 
