@@ -230,6 +230,18 @@ export async function executeToolCall(fc, ctx) {
     default: {
       const pack = packForTool(fc.name);
       if (pack && typeof pack.execute === "function") {
+        // Was the answer already sitting in the call-start snapshot?
+        //
+        // Counted, not acted on. The tool still runs and still returns live
+        // data — this only records how often it need not have, because the
+        // fix (serve the lookup from ctx.callerContext, or teach the model it
+        // already has the answer) is worth an extra model round-trip per
+        // occurrence and nobody knows what that rate is. Decide from the
+        // counters, not from the intuition that it must be high.
+        if ((pack.callerLookupTools || []).includes(fc.name)) {
+          const warm = (ctx?.callerContext?.upcomingAppointments || []).length > 0;
+          bumpCounter(warm ? "lookup_tool_context_warm" : "lookup_tool_context_cold");
+        }
         // Configured requirements are enforced HERE, before the pack runs, so
         // every capability inherits them and no pack author can forget to
         // check. A refusal is returned to the model as an instruction; the

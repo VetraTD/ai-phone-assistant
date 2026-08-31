@@ -4502,3 +4502,129 @@ describe("session.js — Gemini context cache warm", () => {
     expect(ws.readyState).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The greeting's own audio path.
+//
+// Reported live: the first few words of the greeting are not heard. Nothing
+// here can prove the carrier's behaviour, so these tests pin the two things
+// that ARE ours — that silence goes out in front of the greeting, and that the
+// greeting's timing is finally recorded — and leave the verdict to
+// greeting_audio_timing on a real call.
+// ---------------------------------------------------------------------------
+describe("session.js — greeting audio path", () => {
+  const ENV = "VOICE_GREETING_PREROLL_MS";
+  let prevEnv;
+
+  beforeEach(() => {
+    prevEnv = process.env[ENV];
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env[ENV];
+    else process.env[ENV] = prevEnv;
+  });
+
+  it("primes the audio path with mu-law silence before the greeting", async () => {
+    delete process.env[ENV]; // default 500ms
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const audioOut = H.audioOutInstances[0];
+    // The mocked TTS turn emits no audio of its own, so the preroll is the
+    // only thing that can have been enqueued.
+    expect(audioOut.enqueue).toHaveBeenCalledTimes(1);
+    const [buf] = audioOut.enqueue.mock.calls[0];
+    expect(buf.length).toBe(500 * 8); // 8kHz mu-law is one byte per sample
+    expect(buf.every((b) => b === 0xff)).toBe(true); // 0xFF is mu-law silence
+  });
+
+  it("puts the preroll AHEAD of the greeting's first audio, not behind it", async () => {
+    delete process.env[ENV];
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // Now let the greeting's TTS produce a chunk.
+    H.ttsTurns[0].opts.onAudioChunk(Buffer.from([0x01, 0x02]));
+
+    const audioOut = H.audioOutInstances[0];
+    const lengths = audioOut.enqueue.mock.calls.map(([b]) => b.length);
+    expect(lengths).toEqual([4000, 2]);
+  });
+
+  it("enqueues nothing when the preroll is disabled", async () => {
+    process.env[ENV] = "0";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    expect(H.audioOutInstances[0].enqueue).not.toHaveBeenCalled();
+    // ...and the greeting itself is unaffected.
+    expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
+  });
+
+  it("clamps a nonsense preroll back to the default rather than trusting it", async () => {
+    process.env[ENV] = "999999";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const [buf] = H.audioOutInstances[0].enqueue.mock.calls[0];
+    expect(buf.length).toBe(500 * 8);
+  });
+
+  it("records the greeting's own timing, which no per-turn metric covers", async () => {
+    delete process.env[ENV];
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // Nothing is logged until the greeting actually produces audio.
+    expect(log.info).not.toHaveBeenCalledWith("greeting_audio_timing", expect.anything());
+
+    H.ttsTurns[0].opts.onFirstAudio();
+    await flush();
+
+    const entry = log.info.mock.calls.find(([event]) => event === "greeting_audio_timing");
+    expect(entry).toBeDefined();
+    const [, payload] = entry;
+    expect(payload.prerollMs).toBe(500);
+    expect(typeof payload.ttsFirstByteMs).toBe("number");
+    expect(payload.greetingChars).toBe("Hello, thanks for calling Test Biz.".length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The call-start prefetch wait, which has always been billed to the STT tail.
+// ---------------------------------------------------------------------------
+describe("session.js — the first turn's wait on call-start context", () => {
+  it("marks the context wait on the first turn only, so later turns cannot flood the percentile with zeros", async () => {
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "OK", toolResults: [] } }]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours.");
+    await flush();
+    tm.opts.onTurnEnd("and where are you based.");
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map(([name]) => name);
+    // Two turns ran; ensureContext only actually waited on the first.
+    expect(marks.filter((m) => m === "context_wait_start")).toHaveLength(1);
+    expect(marks.filter((m) => m === "context_wait_end")).toHaveLength(1);
+    // And it is bracketed before the STT marks it was previously hidden inside.
+    expect(marks.indexOf("context_wait_end")).toBeLessThan(marks.indexOf("stt_final"));
+  });
+});

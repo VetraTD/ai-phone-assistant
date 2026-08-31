@@ -961,6 +961,18 @@ export default {
     "reschedule_appointment",
   ],
 
+  /**
+   * Tools that answer "what does this caller have booked?" — the one question
+   * the call-start snapshot (ctx.callerContext.upcomingAppointments) may
+   * already hold the answer to.
+   *
+   * Declared on the pack rather than listed in the engine so services/tools.js
+   * can count warm-vs-cold without knowing any tool's name. Availability tools
+   * are deliberately NOT here: they ask about the business's calendar, not the
+   * caller's, and no snapshot covers them.
+   */
+  callerLookupTools: ["get_caller_appointments", "get_caller_appointments_from_db"],
+
   tools(config) {
     const allowed = config?.allowedTasks || [];
     if (!allowed.includes("book_appointment")) return [];
