@@ -274,9 +274,31 @@ resource "google_cloud_run_v2_service" "this" {
       # the one field whose drift would actually matter, to tidy a cosmetic
       # diff, is how a cost control stops being enforced.
       #
-      # So: this module's plan is NOT clean while a service runs at min 0. Read
-      # the diff rather than trusting an empty one. It disappears for production,
-      # where min is 1.
+      # CORRECTED 2026-08-31 by an actual plan against the live estate. The
+      # phenomenon above is real, but it happens ONE LEVEL UP from here and this
+      # comment named the wrong block.
+      #
+      # google_cloud_run_v2_service has TWO scaling blocks:
+      #
+      #   template.scaling  — THIS one. min/max_instance_count, per revision.
+      #                       State, config and the live service all agree at
+      #                       min 1 / max 2 for production voice, and it does
+      #                       NOT appear in the plan.
+      #
+      #   scaling           — service level: manual_instance_count,
+      #                       min_instance_count, scaling_mode. This module
+      #                       never declares it, the API supplies defaults, and
+      #                       the provider records them in state. THAT is the
+      #                       perpetual `- scaling { ... 0 -> null }` diff.
+      #
+      # So it does NOT "disappear for production": the service-level block is
+      # in every plan regardless of what min is here. `Plan: 0 to add, 2 to
+      # change, 0 to destroy` is the steady state, and applying it does not
+      # touch the warm instance.
+      #
+      # Read the diff rather than trusting an empty one — and read WHICH scaling
+      # block moved. A first pass at this mistook the service-level 0 for a
+      # regression on C-11 and nearly blocked a deploy over it.
       min_instance_count = each.value.min_instances
       max_instance_count = each.value.max_instances
     }
