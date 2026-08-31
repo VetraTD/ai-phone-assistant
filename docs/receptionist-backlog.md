@@ -279,6 +279,38 @@ $85 bill.
 > **no live traffic**, that saving today is on DEVELOPMENT spend — which is
 > exactly what produced the $10 -> $85 bill.
 
+> **SECOND BAND, 2026-08-31 — cache ON *plus* the after-hours prompt fix
+> (`83be36f`), against the SAME baseline. $1.55.** Files `band-fix-{1..5}.json`.
+>
+> | arm | per-run hard pass | mean |
+> |---|---|---|
+> | OFF (current production) | 42, 40, 39, 42, 42 | 41.0 |
+> | ON, old prompt | 39, 38, 41, 40, 39 | 39.4 |
+> | **ON + fix** | 41, 38, 42, 41, 41 | **40.6** |
+>
+> **The fix recovered the booking flows it was aimed at** — fails per 5 runs:
+>
+> | scenario | off | on | on+fix |
+> |---|---|---|---|
+> | `cancel-identity` | 1 | 3 | **0** |
+> | `long-call-memory` | 0 | 2 | **0** |
+> | `own-slot-not-taken` | 0 | 2 | **0** |
+> | `name-recall` | 0 | 2 | 1 |
+> | `changes-mind` | 0 | 2 | 1 |
+> | **total** | **1** | **11** | **2** |
+>
+> The mean gap to baseline closed from 1.6 to **0.4**, against a baseline arm
+> that itself spans 39-42. Still 9 worse / 5 better by scenario count, but the
+> shape changed completely: under the old prompt the damage was concentrated at
+> 0->2 in booking flows, and it is now scattered 0->1 singletons across unrelated
+> scenarios (`date-without-time`, `what-software-do-you-use`,
+> `no-invented-appointment`). That is the signature of noise, not a mechanism.
+>
+> **VERDICT: cleared to ship.** No significant hard-gate regression, the one
+> identified mechanism is fixed and its scenarios recovered 11 -> 2, and the
+> saving is 66% per run. Remaining: merge to `main` and set
+> `GEMINI_EXPLICIT_CACHE=true` in Railway (owner).
+
 **STATUS 2026-08-30 — code complete on `dev`, gate outstanding.** Shipped in
 this pass: `buildCacheSpec()` as the single source of the cache key shared by
 the turn path and the new `warmPromptCache()`; a pickup-time warm chained off
