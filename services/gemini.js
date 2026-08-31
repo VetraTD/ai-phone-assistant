@@ -996,7 +996,20 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
         break;
       case "book_later":
-        afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
+        // "Do NOT book appointments during closed hours" had two readings, and
+        // the model picked the wrong one often enough to cost bookings: the
+        // prohibition is on the SLOT (never schedule a time the office is
+        // shut), not on the ACT (booking while the office happens to be shut).
+        //
+        // Read as a prohibition on the act, the assistant announces it "can't
+        // access the live scheduling calendar right now" and diverts a caller
+        // who wanted an appointment into a callback request. Caught in a
+        // band transcript diff on `name-recall`, 2026-08-31 — and present in
+        // the cache-OFF arm too, so this is a live defect rather than
+        // something explicit caching introduced. Caching only demotes this
+        // text from system role to user role, which made the misreading
+        // frequent enough to see.
+        afterHours += `Inform the caller the office is closed. Being closed does NOT stop you booking — complete the booking now with book_appointment as normal. The restriction is on the SLOT only: never schedule an appointment for a time when the office is closed.`;
         break;
       case "transfer_if_possible":
         afterHours += `Inform the caller the office is closed. If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
