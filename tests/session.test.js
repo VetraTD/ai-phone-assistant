@@ -3278,7 +3278,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
         const tm = H.turnManagerInstances[0];
 
         tm.opts.onTurnEnd("I'd like to book.");
-        await vi.advanceTimersByTimeAsync(10);
+        // Past the trailing-incomplete hold, which since 2026-08-31 fires on
+        // exactly this fragment (VOICE_HOLD_TRAILING_MS, default 800). The two
+        // mitigations compose rather than overlap: the hold waits, and when it
+        // expires on a caller who is STILL thinking, resume-abort is what
+        // catches the continuation. This test is about the second one, so it
+        // has to get past the first.
+        await vi.advanceTimersByTimeAsync(900);
         const afterFirst = runLlmTurn.mock.calls.length;
         expect(afterFirst).toBe(1);
 

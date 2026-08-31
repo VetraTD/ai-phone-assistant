@@ -539,15 +539,24 @@ describe("cutoff simulation", () => {
       // Punctuated mid-sentence finals: smart_format guesses a sentence end, so
       // classifyHold returns terminal_punctuation and the no-punct hold never
       // engages. This is the case the hold CANNOT help with.
-      { name: "punctuated finals @150ms", script: HESITANT_SCRIPT, endpointMs: 150 },
-      { name: "punctuated finals @300ms", script: HESITANT_SCRIPT, endpointMs: 300 },
+      //
+      // holdTrailingMs is PINNED to 0 on every "off" arm below rather than
+      // left to the module default. It used to be omitted, which worked only
+      // while the default was 0 — the day that default moved to 800 these
+      // control rows would silently have become copies of the treatment rows,
+      // the matched pair would have compared 800 against 800, and the
+      // assertion that the flag reduces cutoffs would have started passing or
+      // failing for reasons having nothing to do with the flag. A control arm
+      // that tracks the thing it is controlling for is not a control.
+      { name: "punctuated finals @150ms", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 0 },
+      { name: "punctuated finals @300ms", script: HESITANT_SCRIPT, endpointMs: 300, holdTrailingMs: 0 },
 
       // Unpunctuated mid-sentence finals: the case classifyHold's no-punct
       // branch exists for. Sweeping the knob here is the only place it can show
       // an effect, so this is the real before/after for the shipped fix.
-      { name: "unpunctuated, hold OFF (pre-fix)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 0 },
-      { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500 },
-      { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900 },
+      { name: "unpunctuated, hold OFF (pre-fix)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 0, holdTrailingMs: 0 },
+      { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500, holdTrailingMs: 0 },
+      { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900, holdTrailingMs: 0 },
 
       // THE FIX UNDER TEST. Identical to "punctuated finals @150ms" in every
       // respect except VOICE_HOLD_TRAILING_MS, so the flag is the only
@@ -556,7 +565,7 @@ describe("cutoff simulation", () => {
       // and lead-in lists cannot see — and smart_format punctuates them, so
       // without this they reach terminal_punctuation and get a zero hold.
       { name: "punctuated + trailing 800", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
-      { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150 },
+      { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 0 },
       // The control's own paired row: the fix must cost a fluent caller
       // NOTHING, because they have no cutoffs to fix. Watch the reply column.
       { name: "fluent + trailing 800", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },

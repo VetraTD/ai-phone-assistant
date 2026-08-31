@@ -45,12 +45,27 @@ async function classify(text, rawText, env = {}) {
 const ON = { VOICE_HOLD_TRAILING_MS: "800" };
 
 describe("classifyHold — trailing incomplete", () => {
-  it("is inert by default, so merging this changes nothing", async () => {
-    // Punctuated, exactly as smart_format delivers it mid-thought.
+  // Was "is inert by default, so merging this changes nothing". It shipped
+  // inert in round 2 so the branch could land without behaviour risk, and then
+  // stayed inert in production for the whole of the round-3 turn-taking work —
+  // the cheap half of semantic end-of-turn detection, written, tested, and
+  // switched off. The default moved to 800 on 2026-08-31 once
+  // sim/cutoffSim.sim.js produced the matched pair (50.0% -> 12.5% cutoffs
+  // with the fluent control's reply latency unmoved).
+  it("is ON by default, and holds the fragment smart_format punctuated mid-thought", async () => {
+    // Punctuated, exactly as smart_format delivers it mid-thought. Reaching
+    // terminal_punctuation here would mean a zero hold and the assistant
+    // answering "I'd like to book" as though it were a finished sentence.
     expect(await classify("I'd like to book", "I'd like to book.")).toEqual({
-      holdMs: 0,
-      rule: "terminal_punctuation",
+      holdMs: 800,
+      rule: "trailing_incomplete",
     });
+  });
+
+  it("can still be switched off entirely without a deploy", async () => {
+    expect(
+      await classify("I'd like to book", "I'd like to book.", { VOICE_HOLD_TRAILING_MS: "0" }),
+    ).toEqual({ holdMs: 0, rule: "terminal_punctuation" });
   });
 
   it("holds the four fragments the simulator actually cuts off", async () => {
