@@ -13,11 +13,18 @@
 # Running it
 # ---------------------------------------------------------------------------
 #
-#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit AI-phone-dashboard/frontend \
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit AI-phone-dashboard/frontend \
 #     --config=cloudbuild.frontend.yaml \
-#     --project=vetra-shared-c3a3bd \
-#     --service-account=projects/vetra-shared-c3a3bd/serviceAccounts/vetra-deployer@vetra-shared-c3a3bd.iam.gserviceaccount.com \
-#     --substitutions=_API_URL=https://dashboard-api-us-staging-536266051432.us-central1.run.app,_FIREBASE_API_KEY=...,_FIREBASE_PROJECT=vetra-shared-c3a3bd
+#     --project=vetra-core-edc8ca \
+#     --substitutions=_API_URL=https://dashboard-api-uk-prod-qn43z3hljq-nw.a.run.app,_FIREBASE_API_KEY=...,_FIREBASE_PROJECT=vetra-core-edc8ca,_HOSTING_SITE=vetra-core-edc8ca,_BUCKET=unused
+#
+# THIS PIPELINE HAS NOT RUN ON ATTEMPT 2. The 2026-08-31 dashboard deploy was a
+# LOCAL build plus AI-phone-dashboard/frontend/scripts/deploy-hosting.js, so the
+# values above are correct but the path is unproven. Read _API_URL and the key
+# rather than trusting them:
+#   gcloud run services describe dashboard-api-uk-prod --region=europe-west2 \
+#     --project=vetra-uk-edc8ca --format='value(status.url)'
+#   terraform output -json identity_platform
 #
 # The SOURCE DIRECTORY argument matters for the same reason it does for the
 # dashboard backend: the repository .gcloudignore excludes `AI-phone-dashboard`
@@ -39,7 +46,11 @@
 # ---------------------------------------------------------------------------
 
 substitutions:
-  _BUCKET: vetra-dashboard-c3a3bd
+  # The GCS bucket for the OTHER serving path (bucket + CDN load balancer).
+  # Firebase Hosting is the chosen path — see the P18 decision — so these steps
+  # are dormant, but the default was `vetra-dashboard-c3a3bd`, an attempt-1
+  # bucket that no longer exists. Emptied and guarded with the rest.
+  _BUCKET: ""
   # The dashboard backend's Cloud Run URL.
   #
   # ⚠ IT IS NOT DERIVABLE. This file used to claim the format was
@@ -59,10 +70,25 @@ substitutions:
   #   gcloud run services describe dashboard-api-us-staging --region=us-central1   #     --project=vetra-us-staging-c3a3bd --format='value(status.url)'
   _API_URL: ""
   _FIREBASE_API_KEY: ""
-  _FIREBASE_PROJECT: vetra-shared-c3a3bd
-  # Firebase Hosting site id. Defaults to the project id, which is what the
-  # default site is always named.
-  _HOSTING_SITE: vetra-shared-c3a3bd
+  # EMPTY ON PURPOSE, both of them. They used to default to
+  # `vetra-shared-c3a3bd` — an attempt-1 project that no longer exists — and a
+  # default that LOOKS like a real project is worse than no default at all:
+  # the build succeeds, the bundle verifies clean against its own substitution,
+  # and it ships an auth domain pointing at a dead project. Nobody can sign in,
+  # and nothing in the build says why. Caught 2026-08-31 while deploying the
+  # dashboard by hand; the pipeline itself has not run on attempt 2.
+  #
+  # Now guarded below exactly like _API_URL and _FIREBASE_API_KEY, so the
+  # project must be stated rather than inherited.
+  #
+  # Today's values (attempt 2):
+  #   _FIREBASE_PROJECT=vetra-core-edc8ca
+  #   _HOSTING_SITE=vetra-core-edc8ca
+  _FIREBASE_PROJECT: ""
+  # Firebase Hosting site id. Normally identical to the project id — that is
+  # what the default site is always named — but stated separately because a
+  # project can host more than one site.
+  _HOSTING_SITE: ""
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -93,6 +119,29 @@ steps:
           echo "FAIL: _FIREBASE_API_KEY is empty. Nobody could sign in."
           fail=1
         fi
+        if [ -z "${_FIREBASE_PROJECT}" ]; then
+          echo "FAIL: _FIREBASE_PROJECT is empty. It has no default any more, deliberately:"
+          echo "      it used to default to vetra-shared-c3a3bd, a project that no longer"
+          echo "      exists, and that shipped a bundle nobody could sign in to."
+          fail=1
+        fi
+        if [ -z "${_HOSTING_SITE}" ]; then
+          echo "FAIL: _HOSTING_SITE is empty. Usually the same as _FIREBASE_PROJECT."
+          fail=1
+        fi
+        if [ -z "${_BUCKET}" ]; then
+          echo "FAIL: _BUCKET is empty. Only needed for the bucket+CDN path, but the"
+          echo "      publish steps below reference it unconditionally."
+          fail=1
+        fi
+        # A dead project named explicitly is still a dead project. Cheap to
+        # check, and the failure it prevents is invisible until somebody signs in.
+        case "${_FIREBASE_PROJECT}${_HOSTING_SITE}${_BUCKET}" in
+          *c3a3bd*)
+            echo "FAIL: that is an attempt-1 project (-c3a3bd). Those were suspended and are gone."
+            fail=1
+            ;;
+        esac
         exit $fail
 
   - id: install
