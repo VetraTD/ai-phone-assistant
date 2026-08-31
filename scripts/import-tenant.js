@@ -93,7 +93,11 @@ const BUSINESS_FIELDS = [
   "notifications_enabled",
   "voice_provider",
   "voice_id",
-  "voice_style",
+  // NO voice_style. Migration 002 added it and 012 dropped it, but this list
+  // kept naming it — so every INSERT named a column the table does not have and
+  // the whole tenant import failed, which is exactly how Phase 5's Gate 3 died
+  // on its first run. tests/importTenantFields.test.js now checks this list
+  // against the migration history so the next dropped column cannot repeat it.
   "sms_followup_enabled",
   "sms_templates",
 ];
