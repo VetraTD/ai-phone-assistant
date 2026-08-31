@@ -1420,6 +1420,89 @@ export function buildUsage(usageMetadata) {
 }
 
 /**
+ * The four things that decide a cache's identity, built in exactly one place.
+ *
+ * getReplyStreaming and warmPromptCache MUST agree byte-for-byte on all four,
+ * or the warm path creates a cache the turn path never looks up: storage is
+ * billed, every turn still misses, and nothing in the logs says so. Two paths
+ * computing "the same" prefix independently is precisely how that happens, so
+ * they share this function rather than each calling the builders themselves.
+ *
+ * `generationConfig` is returned alongside because it is resolved here anyway
+ * and `model` is part of the key — recomputing it in the caller would be a
+ * second chance to disagree.
+ *
+ * @param {object} cfg - normalized business config (services/supabase.js loadConfig)
+ * @param {object} [extras]
+ * @returns {{model: string, markerMode: boolean, staticPrefix: string, toolsConfig: Array, generationConfig: object}}
+ */
+export function buildCacheSpec(cfg, extras) {
+  const markerMode = intentMarkerEnabled(extras);
+  // Full config, not just the task list: packs need config.capabilities to
+  // turn a business's configured requirements into tool parameters.
+  const allDeclarations = buildAllDeclarations(cfg, extras, markerMode);
+  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+  const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
+  return {
+    model: generationConfig.model,
+    markerMode,
+    staticPrefix: buildStaticSystemPrefix(cfg, extras),
+    toolsConfig,
+    // The flat list behind toolsConfig. Returned rather than re-derived because
+    // the outbound tool-call leak guard matches against these exact names, and
+    // a second buildAllDeclarations() call would be a second chance to disagree
+    // with the list that was actually sent.
+    allDeclarations,
+    generationConfig,
+  };
+}
+
+/**
+ * Build this business's context cache ahead of the first turn.
+ *
+ * Creating a cache is a 200-500ms round trip. resolveCachedContent refuses to
+ * put that on a turn, so left alone the cache is created DURING turn 1 and used
+ * from turn 2 — turn 1 of every call pays full price for the whole prefix.
+ * Calling this at pickup moves that round trip into the dead time behind the
+ * greeting and the caller's first utterance, so turn 1 hits too.
+ *
+ * Fire-and-forget by construction: returns void, never throws, never awaits.
+ * The work it triggers is the same background create a turn-1 miss would have
+ * scheduled, so the worst case of calling it is exactly today's behavior.
+ *
+ * MUST be called only once the knowledge base and integrations have loaded —
+ * they are part of the prefix, so warming before they land hashes a different
+ * key and builds a cache the call cannot use. See lib/voice/session.js.
+ *
+ * @param {object} config - normalized business config
+ * @param {object} [extras] - the SAME extras the turn path will pass
+ * @returns {void}
+ */
+export function warmPromptCache(config, extras) {
+  try {
+    if (!explicitCacheEnabled(extras)) return;
+    const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
+    const { model, markerMode, staticPrefix, toolsConfig } = buildCacheSpec(cfg, extras);
+    // Return value discarded on purpose: a miss schedules the create, which is
+    // the entire point of warming. A hit means a concurrent call already built
+    // it and there is nothing to do.
+    resolveCachedContent({
+      client: getClient(),
+      model,
+      markerMode,
+      staticPrefix,
+      toolsConfig,
+      businessId: extras?.businessId ?? null,
+      enabled: true,
+    });
+  } catch (err) {
+    // getClient() throws without credentials. Warming is an optimization and
+    // must never be able to affect a call.
+    log.error("gemini_cache_warm_failed", { reason: err?.message, severity: "warn" });
+  }
+}
+
+/**
  * Streaming version of getReply for Media Streams real-time audio pipeline.
  *
  * Yields objects of these shapes:
@@ -1448,12 +1531,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
-  const markerMode = intentMarkerEnabled(extras);
-
-  // Full config, not just the task list: packs need config.capabilities to
-  // turn a business's configured requirements into tool parameters.
-  const allDeclarations = buildAllDeclarations(cfg, extras, markerMode);
-  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+  // Everything the cache key is computed from comes from ONE place, shared with
+  // warmPromptCache() — see buildCacheSpec. A warm path that built the prefix or
+  // the tool list even slightly differently would create a cache that no turn
+  // ever reads, and still pay storage for it.
+  const { model, markerMode, staticPrefix, toolsConfig, allDeclarations, generationConfig } =
+    buildCacheSpec(cfg, extras);
 
   // Turn-aware history bound (lib/voice/historyTrim.js): keeps whole turns from
   // the end so a user/model pair is never split, and hoists any evicted
@@ -1462,13 +1545,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // plain turns — the effective window size is unchanged, only its integrity.
   const trimmedHistory = trimHistory(history, { maxTurns: resolveHistoryMaxTurns() });
 
-  const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
-  const model = generationConfig.model;
   // Kept in a local so per-request calls below can replicate it: the SDK's
   // per-request `config` REPLACES (does not merge with) the chat-level
   // config, so a bare `{ abortSignal }` per call would silently drop tools/
   // systemInstruction/thinkingConfig/maxOutputTokens on that request.
-  const staticPrefix = buildStaticSystemPrefix(cfg, extras);
   const dynamicTail = buildDynamicTail(step, intent, cfg, extras);
 
   // Synchronous and non-blocking by design — returns a live handle or null, and
@@ -1992,6 +2072,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     if (cachedContentTokenCount !== undefined || thoughtsTokenCount !== undefined) {
       log.debug("gemini_turn_usage", { step, cachedContentTokenCount, thoughtsTokenCount });
     }
+  }
+
+  // Counted, not just debug-logged, because the interesting failure is SILENT.
+  // If a provider rejects cache creation — the open question for Vertex, where
+  // "not supported" is classified permanent and parks the entry in `unsupported`
+  // forever — every turn keeps working and keeps costing full price, and the
+  // only symptom is a bill at the end of the month. These two counters are the
+  // tripwire: `llm_cache_hits` flat at zero with the flag on is the alarm.
+  //
+  // Read from usageMetadata rather than from `usingCache`, so it reports what
+  // Google actually billed rather than what this process intended.
+  if (explicitCacheEnabled(extras)) {
+    bumpCounter(lastUsageMetadata?.cachedContentTokenCount > 0 ? "llm_cache_hits" : "llm_cache_misses");
   }
 
 

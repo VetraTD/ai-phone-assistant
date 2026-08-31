@@ -117,7 +117,13 @@ export function parseArgs(argv) {
     json: null,
     matrix: false,
     matrixFile: null,
-    noJudge: false,
+    // Judge OFF by default (changed 2026-08-30). The advisory judge re-sends
+    // the ENTIRE transcript once per question per scenario and has never set
+    // the exit code — the 37-scenario hard gate is the only thing that does.
+    // It was the largest single line in the $10 -> $85 August Gemini bill, and
+    // that bill was development evals, not production traffic. Opt in with
+    // --judge for the run that actually decides a merge.
+    noJudge: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -130,7 +136,10 @@ export function parseArgs(argv) {
       case "--model": opts.modelOverrides.model = next(); break;
       case "--thinking-budget": opts.modelOverrides.thinkingBudget = parseInt(next(), 10); break;
       case "--json": opts.json = next(); break;
+      // --no-judge is now the default; kept so existing scripts and docs that
+      // pass it explicitly keep working rather than dying on "Unknown flag".
       case "--no-judge": opts.noJudge = true; break;
+      case "--judge": opts.noJudge = false; break;
       case "--matrix": opts.matrix = true; break;
       case "--matrix-file": opts.matrixFile = next(); break;
       default:
@@ -402,6 +411,90 @@ function printReport(results) {
   );
 
   printTruncationReport(results);
+  printCostReport(results);
+}
+
+/**
+ * Gemini 3.6 Flash list rates, looked up 2026-08-30. Re-check before quoting.
+ * Cache STORAGE ($0.50/M tokens/hour) is deliberately not modelled: the eval
+ * harness shares one short-lived prefix cache across a whole run, so its
+ * storage cost rounds to zero next to the token bill.
+ */
+const RATE_IN_PER_M = 0.75;
+const RATE_CACHED_IN_PER_M = 0.075;
+const RATE_OUT_PER_M = 3.75;
+
+/**
+ * What a run cost, printed at the end of every run.
+ *
+ * This exists because a session on 2026-08-29/30 spent ~24M tokens — about 35%
+ * of the month's Gemini bill — without cost being mentioned once. A number
+ * nobody can see is a number nobody can manage.
+ *
+ * HONEST SCOPE, stated in the output rather than buried here: these are the
+ * ASSISTANT's tokens only. The persona caller (eval/simCaller.js) and the
+ * advisory judge (eval/judge.js) are separate clients whose usage never reaches
+ * runScenario's turn records, and together they are roughly the difference
+ * between ~1.2M and ~1.7M tokens on a full run. Reporting the assistant total
+ * as if it were the whole bill would be worse than reporting nothing.
+ *
+ * @param {Array<object>} results - runScenario() return values
+ */
+export function printCostReport(results) {
+  const c = summarizeCost(results);
+  console.log("\n=== COST (assistant tokens only — see note) ===");
+  if (!c.turnsWithUsage) {
+    console.log("no usage metadata on any turn — nothing to price.");
+    return;
+  }
+  console.log(`prompt tokens:      ${fmtTok(c.promptTokens)}  (of which cached: ${fmtTok(c.cachedTokens)}, ${pct(c.cachedTokens, c.promptTokens)})`);
+  console.log(`output tokens:      ${fmtTok(c.outputTokens)}`);
+  console.log(`estimated cost:     $${c.estimatedUsd.toFixed(3)}  (in $${RATE_IN_PER_M}/M, cached $${RATE_CACHED_IN_PER_M}/M, out $${RATE_OUT_PER_M}/M)`);
+  if (c.cachedTokens > 0) {
+    console.log(`cache saved:        $${c.savedUsd.toFixed(3)} vs the same run uncached`);
+  } else {
+    console.log("cache saved:        $0.000 — no cached tokens seen (GEMINI_EXPLICIT_CACHE off, or the cache is not engaging)");
+  }
+  console.log("NOTE: excludes the persona caller and the advisory judge, which are separate clients.");
+}
+
+/**
+ * Pool per-turn usage into run totals. Pure, so it can feed both the printed
+ * report and the persisted JSON payload.
+ *
+ * `cachedTokens` is a SUBSET of `promptTokens`, not an addition to it — Google
+ * reports the cached count inside the prompt count — so the uncached remainder
+ * is the difference, and double-counting it would overstate every bill.
+ *
+ * @param {Array<object>} results - runScenario() return values
+ */
+export function summarizeCost(results) {
+  const list = results || [];
+  let promptTokens = 0;
+  let cachedTokens = 0;
+  let outputTokens = 0;
+  let turnsWithUsage = 0;
+  for (const r of list) {
+    for (const t of r.turns || []) {
+      if (!t.usage) continue;
+      turnsWithUsage += 1;
+      promptTokens += t.usage.promptTokens || 0;
+      cachedTokens += t.usage.cachedTokens || 0;
+      outputTokens += t.usage.outputTokens || 0;
+    }
+  }
+  const freshPromptTokens = Math.max(0, promptTokens - cachedTokens);
+  const estimatedUsd =
+    (freshPromptTokens * RATE_IN_PER_M + cachedTokens * RATE_CACHED_IN_PER_M + outputTokens * RATE_OUT_PER_M) / 1e6;
+  const uncachedUsd = (promptTokens * RATE_IN_PER_M + outputTokens * RATE_OUT_PER_M) / 1e6;
+  return {
+    turnsWithUsage,
+    promptTokens,
+    cachedTokens,
+    outputTokens,
+    estimatedUsd,
+    savedUsd: uncachedUsd - estimatedUsd,
+  };
 }
 
 /**
@@ -733,6 +826,9 @@ async function main() {
     concurrency: opts.concurrency,
     elapsedMs,
     truncation: summarizeTruncation(results),
+    // Persisted as well as printed so a cache A/B can be priced from the saved
+    // runs afterwards, without re-running anything.
+    cost: summarizeCost(results),
     results,
   };
   const defaultPath = path.join(RESULTS_DIR, `${ts}.json`);

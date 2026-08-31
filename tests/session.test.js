@@ -30,6 +30,8 @@ const H = vi.hoisted(() => {
     fetchKnowledgeResolve: null,
     // monotonic source for the mocked createRequestId (see the logger mock)
     requestIdCounter: 0,
+    // one entry per geminiService.warmPromptCache() call
+    warmPromptCacheCalls: [],
   };
 });
 
@@ -248,6 +250,11 @@ vi.mock("../services/gemini.js", () => ({
     "reschedule_appointment_db",
     "record_customer_request",
   ],
+  // Pickup-time Gemini context-cache warm. Captured so the tests below can
+  // assert WHEN it is called: it has to run after the knowledge base and
+  // integrations land, or it builds a cache under a different key than the one
+  // the turn path will look up.
+  warmPromptCache: vi.fn(() => H.warmPromptCacheCalls.push(true)),
 }));
 
 vi.mock("../services/googleTts.js", () => ({
@@ -422,6 +429,7 @@ describe("TRANSFER_TRIGGERS regex", () => {
 });
 import * as callState from "../lib/callState.js";
 import * as db from "../services/supabase.js";
+import * as geminiService from "../services/gemini.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
@@ -546,6 +554,7 @@ beforeEach(() => {
   H.metricsInstances.length = 0;
   H.holdRuleCalls.length = 0;
   H.fallbackFlowInstances.length = 0;
+  H.warmPromptCacheCalls.length = 0;
   H.llmFactory = null;
   vi.clearAllMocks();
   process.env.ELEVENLABS_DEFAULT_VOICE_ID = "voice-xyz";
@@ -4436,5 +4445,60 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
     expect(written.match(/one moment/gi) || []).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pickup-time Gemini context-cache warm.
+//
+// Creating a cache is a 200-500ms round trip that must never touch a turn, so
+// it is fired in the background at pickup and turn 1 gets a cache that already
+// exists instead of paying full price while one is built underneath it.
+//
+// The ORDERING is the whole test. The cached prefix contains the knowledge base
+// and the integrations list, and both arrive on state.contextPromise — warming
+// before they land hashes a different key and builds a cache the call can never
+// read: storage billed, every turn still missing, nothing in the logs saying so.
+// ---------------------------------------------------------------------------
+describe("session.js — Gemini context cache warm", () => {
+  it("does not warm until the knowledge base has landed, then warms exactly once", async () => {
+    let resolveKnowledge;
+    db.fetchBusinessKnowledge.mockImplementationOnce(
+      () => new Promise((r) => { resolveKnowledge = r; })
+    );
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // Greeting is already out — pickup did not wait for any of this — but the
+    // prefix is not knowable yet, so nothing may have been warmed.
+    expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
+    expect(H.warmPromptCacheCalls.length).toBe(0);
+
+    resolveKnowledge([{ question: "Parking?", answer: "Out front." }]);
+    await flushUntil(() => H.warmPromptCacheCalls.length > 0);
+
+    expect(H.warmPromptCacheCalls.length).toBe(1);
+    const [config, extras] = geminiService.warmPromptCache.mock.calls[0];
+    expect(config).toBeTruthy();
+    // The extras handed to the warm must be the ones the turn path will use —
+    // same knowledge, or the key differs and the cache is dead on arrival.
+    expect(extras.knowledge).toEqual([{ question: "Parking?", answer: "Out front." }]);
+  });
+
+  it("a warm that throws cannot affect the call", async () => {
+    geminiService.warmPromptCache.mockImplementationOnce(() => {
+      throw new Error("cache backend on fire");
+    });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+
+    // The greeting still played and the socket is still up.
+    expect(H.ttsTurns.length).toBeGreaterThanOrEqual(1);
+    expect(ws.readyState).toBe(1);
   });
 });

@@ -50,7 +50,70 @@ function envInt(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {})
  * real business clears it.
  */
 const MIN_CHARS = envInt("GEMINI_CACHE_MIN_CHARS", 6000);
-const TTL_S = envInt("GEMINI_CACHE_TTL_S", 3600, { min: 60, max: 86_400 });
+
+/**
+ * Vertex has a DIFFERENT, much higher floor than the AI Studio API: measured
+ * 2026-08-30 against gemini-3.6-flash at `global`,
+ *
+ *   "The cached content is of 3078 tokens. The minimum token count to start
+ *    explicit caching is 4096."
+ *
+ * — four times the 1,024 documented above. That matters enormously here,
+ * because NOT ONE business shape in this repo reaches it. Measured with
+ * ai.models.countTokens over every fixture's real cache unit (prefix + tool
+ * declarations):
+ *
+ *   appointments-availability  19,222 chars  3,967 tokens   <- the largest
+ *   clinic-athena              18,974 chars  3,802 tokens
+ *   appointments-db            18,160 chars  3,747 tokens
+ *   modules-and-webhook        14,284 chars  2,957 tokens
+ *   messages-only              12,970 chars  2,749 tokens
+ *
+ * The biggest tenant shape is 129 tokens short. So explicit caching works on
+ * the current AI Studio deployment and does NOT engage on Vertex, for anyone,
+ * until either the prompt grows or Google lowers the floor. Backlog C2
+ * (shrinking the prefix) moves in the WRONG direction for Vertex caching, and
+ * the two items are in direct tension there.
+ *
+ * 19,000 chars is deliberately just BELOW the measured floor (~4.85 chars per
+ * token on this prompt shape, so 4,096 tokens is ~19,850 chars). The point is
+ * to stop the obviously-hopeless attempts while leaving the borderline ones to
+ * Google's own 400, which is the only authority on the real boundary — and
+ * which is classified permanent, so it costs one API call per prompt shape,
+ * once, and never repeats.
+ */
+const VERTEX_MIN_CHARS = envInt("GEMINI_CACHE_VERTEX_MIN_CHARS", 19_000);
+
+/**
+ * The size floor that applies to THIS client's backend.
+ *
+ * Read off the SDK instance rather than an env var so the rule travels with the
+ * deployment automatically: the same code is correct on Railway (API key) and
+ * on Cloud Run (Vertex) with nothing to remember to set.
+ *
+ * @param {object} client - the GoogleGenAI singleton
+ * @returns {number}
+ */
+function minCharsFor(client) {
+  return client?.vertexai === true ? VERTEX_MIN_CHARS : MIN_CHARS;
+}
+/**
+ * Per-CALL lifetime, not per-business.
+ *
+ * Cache reads bill at $0.075/M against $0.75/M for fresh input — but storage
+ * bills at $0.50 per million tokens PER HOUR, whether or not a call comes in.
+ * A ~4,200-token prefix held on a 1h TTL is ~$1.53/month/business and needs
+ * ~49 calls/month just to break even; the registry is a per-process Map, so on
+ * a multi-instance deploy that rent is paid once per instance. At 900s a cache
+ * costs ~$0.0005 per call and has no break-even at any volume.
+ *
+ * 900s (not 600) so a long call is covered end to end and never has to rebuild
+ * mid-conversation. Nothing is lost between calls: the key is content-hashed,
+ * so a second call to the same business inside the window — or a concurrent
+ * one — reuses the live entry for free. Raise it per-tenant via env only once
+ * there is a call-volume figure to justify the rent.
+ */
+const TTL_S = envInt("GEMINI_CACHE_TTL_S", 900, { min: 60, max: 86_400 });
 /** Treat a cache as dead slightly before it expires, so a name is never sent as it dies. */
 const EXPIRY_MARGIN_MS = envInt("GEMINI_CACHE_EXPIRY_MARGIN_MS", 60_000);
 /** After a transient create failure, wait this long before trying again — a quota
@@ -231,10 +294,23 @@ export function resolveCachedContent(spec) {
     let entry = registry.get(key);
 
     if (!entry) {
-      // Below Gemini's hard floor — never worth an API call that will 400.
-      if (sizeChars < MIN_CHARS) {
+      // Below the backend's hard floor — never worth an API call that will 400.
+      const floor = minCharsFor(client);
+      if (sizeChars < floor) {
         stats.skippedTooSmall++;
-        log.debug("gemini_cache_skipped_small", { key: key.slice(0, 12), chars: sizeChars });
+        // On Vertex this is not a rare edge case, it is EVERY tenant today
+        // (floor 4,096 tokens; the largest shape here is 3,967). Logged at
+        // warn severity rather than debug because the whole failure mode is
+        // that caching quietly does nothing and the only other symptom is a
+        // bill — see the VERTEX_MIN_CHARS comment above.
+        if (client?.vertexai === true) {
+          log.error("gemini_cache_below_vertex_floor", {
+            key: key.slice(0, 12), businessId, chars: sizeChars, floor,
+            severity: "warn",
+            reason: "Vertex requires ~4096 tokens to start explicit caching; this prompt is smaller, so no caching will occur.",
+          });
+        }
+        log.debug("gemini_cache_skipped_small", { key: key.slice(0, 12), chars: sizeChars, floor });
         registry.set(key, {
           key, name: null, businessId, state: "unsupported",
           createdAtMs: nowMs, expiresAtMs: 0, tokens: null,

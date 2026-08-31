@@ -27,7 +27,7 @@ npm run chat                     # interactive REPL against the same brain (manu
 npm run eval                     # all scenarios, default model
 npm run eval -- --filter cancel  # only scenarios whose NAME contains "cancel"
 npm run eval -- --tag freetext   # only scenarios carrying the "freetext" TAG
-npm run eval -- --no-judge       # skip the advisory judge (cheaper; see Cost)
+npm run eval -- --judge          # ALSO run the advisory judge (off by default; see Cost)
 npm run eval -- --concurrency 3  # scenarios in parallel (default 2)
 npm run eval -- --model gemini-2.5-pro --temperature 0   # one-off model override
 ```
@@ -85,10 +85,19 @@ re-derive it rather than trusting this), that is **~$1.50-2.00 per run** and
 
 - `--filter`/`--tag` are nearly free and are the right default for iterating.
   The `regression` tag alone is a handful of scenarios.
-- `--no-judge` skips the advisory judge. It re-sends the whole transcript once
-  per question for every scenario, and it **never affects the exit code** — the
-  hard asserts alone decide pass/fail. Leave it on for the run that decides a
-  merge; skip it on the dozens of runs that do not.
+- **The advisory judge is OFF by default** (changed 2026-08-30). It re-sends the
+  whole transcript once per question for every scenario, and it **never affects
+  the exit code** — the hard asserts alone decide pass/fail. Opt in with
+  `--judge` for the run that decides a merge; leave it off for the dozens of
+  runs that do not. (`--no-judge` still parses, so old scripts keep working.)
+- **Every run now prints what it cost** at the end, and the same figures are
+  written into the results JSON as `cost`. Assistant tokens only — the persona
+  caller and the judge are separate clients whose usage never reaches the turn
+  records, and that gap is roughly the ~1.16M vs ~1.7M difference in the table
+  above.
+- Running with `GEMINI_EXPLICIT_CACHE=true` caches the ~3,000-token prefix the
+  harness otherwise re-sends on every one of its ~240 turns. The printed cost
+  report shows the cached share and what it saved.
 - Reserve full 5-run bands (`scripts/eval-band.js`) for merge decisions. A
   single run cannot tell a regression from noise anyway — identical code has
   scored 40, 38, 40, 38, 38.
