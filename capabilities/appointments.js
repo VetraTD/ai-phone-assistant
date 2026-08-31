@@ -25,8 +25,10 @@ import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from 
 import {
   DEFAULT_TIMEZONE,
   HAS_OFFSET_RE,
+  NAIVE_DATE_RE,
   formatLocalDateTime,
   getTzOffsetMs,
+  parseNaiveDate,
   parseNaiveDateTime,
   speakableDateTime,
   toLocalNaiveDateTime,
@@ -536,10 +538,10 @@ function bookingGuidance(config, now, canCheck) {
     return (
       `Your task: Help the caller book, checking the calendar before you collect any details. ` +
       `Ask ONE thing per turn — never put two questions in the same response:\n` +
-      `1. Ask whether they prefer mornings or afternoons (business hours: ${businessHoursStr}).\n` +
-      `2. If they have not already named a day, ask as a SEPARATE question whether any days don't work for them.\n` +
-      `3. As soon as the caller names a specific time, say something like "one moment while I check that" and call check_appointment_availability with that time IN THE SAME response.\n` +
-      `4. If it comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
+      `1. If the caller has named a specific TIME, call check_appointment_availability with that date and time.\n` +
+      `2. If the caller has named a DAY but no time, call check_appointment_availability with just the date (no hour). It returns the open times for that day: offer them and ask which one suits. NEVER pick an hour the caller did not say, and never read a time you chose back to them as though they had chosen it.\n` +
+      `3. Only if they have named neither a day nor a time, ask whether they prefer mornings or afternoons (business hours: ${businessHoursStr}), and — as a SEPARATE question — whether any days don't work for them.\n` +
+      `4. If a check comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
       `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away.\n` +
       `6. If there is anything else you are REQUIRED to collect, ask for it one item per turn. If nothing else is required, go straight to the read-back — do not invent extra questions such as asking for a phone number you were not told to collect.\n` +
       `7. Read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
@@ -553,7 +555,7 @@ function bookingGuidance(config, now, canCheck) {
     `1. Ask whether they prefer mornings or afternoons.\n` +
     `2. Ask if any specific days of the week don't work for them.\n` +
     `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Unless you already did so earlier in this call, confirm its spelling once ("could you spell that for me?"). Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
     `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
     `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
   );
@@ -794,16 +796,24 @@ function validateBookingTime(rawScheduledAt, config, deps) {
   return { ok: true, scheduledAt: storedValue, offsetDisagreesWithZone };
 }
 
-// The read-back-and-confirm requirement itself now lives in NON-NEGOTIABLE RULE
-// 3 (services/gemini.js), so this pack bullet keeps only its non-duplicated
-// tail: the spelling-confirmation detail specific to booking. Task 16 made it
-// UNCONDITIONAL and once-per-call — the old "only if the name is unusual"
-// wording let a confidently-misheard common name ("Scripps" for "Smith") be
-// written into a booking without ever being checked. Spelling is now confirmed
-// exactly once before the first name-bearing booking read-back, and the caller
-// is never asked to spell again for the rest of the call.
+// The read-back-and-confirm requirement itself lives in NON-NEGOTIABLE RULE 3
+// (services/gemini.js), so this pack bullet keeps only the full-name read-back
+// detail specific to booking.
+//
+// THE SPELLING SENTENCES WERE REMOVED 2026-08-29. They were one of three
+// independent prompt sites that each asked for a spelling — this one, the
+// message protocol in capabilities/messages.js (which is `core: true`, so it
+// renders on booking calls TOO), and the no-availability booking guidance
+// below. Each carried its own "at most once" caveat, none of them knew about
+// the others, and none of them could count. A caller was asked to spell their
+// name three times in one call.
+//
+// The ask now has exactly one source: the code gate in services/tools.js, which
+// fires before a write, consults the caller's records, and is capped by a
+// counter in lib/voice/replyState.js. A rule about what the model did EARLIER
+// is something it has to remember; a refusal it reads this turn is a fact.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- When the caller gives you their name, repeat their FULL name back once in your very next sentence — "Thanks, Marcus Bell — ..." — first name and surname, not just the first. A surname you never say aloud is one the caller cannot correct, and it is the part that ends up in the business's records. If their name is long or unusual, also ask them to spell the surname and read the letters back: saying it aloud cannot catch a spelling error, because a misheard surname usually sounds almost identical to the real one. Ask for a spelling at most once in the entire call: if the caller spells it, use that spelling; if they decline, ignore the request, or just answer with something else, proceed with the name exactly as you heard it. Once you have moved past this, treat the name as settled and never raise spelling again.\n`;
+  `- When the caller gives you their name, repeat their FULL name back once in your very next sentence — "Thanks, Marcus Bell — ..." — first name and surname, not just the first. A surname you never say aloud is one the caller cannot correct, and it is the part that ends up in the business's records. Do not ask them to spell anything unless you are told to.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
@@ -814,15 +824,21 @@ const BOOKING_CONFIRMATION_GUARDRAIL =
 const CHECK_AVAILABILITY_DECLARATION = {
   name: "check_appointment_availability",
   description:
-    "Check whether a specific date and time is open BEFORE collecting the caller's details. " +
-    "Call this as soon as the caller names a time. If available is false, offer the returned " +
-    "alternatives instead of collecting details.",
+    "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller " +
+    "names a time OR a day. Given a date and time it answers whether that slot is open, and if " +
+    "available is false you offer the returned alternatives instead of collecting details. Given " +
+    "just a date it returns the times open that day: offer open_times first, and if the caller " +
+    "wants something else that day, offer from all_open_times. Never tell a caller nothing else is " +
+    "available while all_open_times still has times in it. Let them choose — never choose for them.",
   parameters: {
     type: "object",
     properties: {
       requested_at: {
         type: "string",
-        description: "The date and time the caller asked for, as ISO 8601 (e.g. 2026-03-15T10:00:00)",
+        description:
+          "What the caller asked for. If they named a time, the full date and time as ISO 8601 " +
+          "(e.g. 2026-03-15T10:00:00). If they named only a day, the date alone " +
+          "(e.g. 2026-03-15) — never invent an hour they did not say.",
       },
     },
     required: ["requested_at"],
@@ -1259,6 +1275,29 @@ function nextCallerFacts(ctx, bookedValue) {
   return bookedValue ? { ...rest, [BOOKED_FACT_LABEL]: bookedValue } : rest;
 }
 
+/**
+ * `n` free slots SPREAD across whatever is open, as ISO strings.
+ *
+ * Not the first n. A 9-5 day at 30 minutes is sixteen slots, and the first
+ * three are all before 10:30 — offering those to someone who said "Tuesday"
+ * makes a full afternoon sound like a full day. Picks evenly spaced indices so
+ * the caller hears a morning, a middle and an afternoon option.
+ */
+function spreadSlots(free, n) {
+  const starts = (free || [])
+    .map((s) => s.start)
+    .filter((s) => Number.isFinite(Date.parse(s)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  if (n <= 1) return starts.slice(0, Math.max(0, n));
+  if (starts.length <= n) return starts;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    // Evenly spaced across the whole list, first and last included.
+    out.push(starts[Math.round((i * (starts.length - 1)) / (n - 1))]);
+  }
+  return [...new Set(out)];
+}
+
 /** The `n` free slots nearest a requested instant, as ISO strings. */
 function nearestSlots(free, requestedISO, n) {
   const target = Date.parse(requestedISO);
@@ -1270,10 +1309,112 @@ function nearestSlots(free, requestedISO, n) {
 }
 
 /**
+ * Open times on one calendar day, for a caller who named a day and no time.
+ *
+ * Reuses `adapter.findSlots` — which already enumerates every free start on the
+ * day, already skips slots in the past, and is already exercised by the
+ * alternatives path — so there is no new query and no second notion of what
+ * "free" means. The day-level guards (past, closed) reuse the same wording the
+ * point check uses, so a caller hears one voice whichever way they asked.
+ *
+ * @returns {object} the tool response body
+ */
+async function openTimesForDay(dateStr, config, adapter, avail, ctx) {
+  const timezone = config?.timezone || DEFAULT_TIMEZONE;
+  const parts = parseNaiveDate(dateStr);
+  if (!parts) return { success: true, open_times: [], message: INVALID_DATETIME_MESSAGE };
+
+  // Anchor to the START of the business day rather than midnight: midnight is
+  // out of hours everywhere, and comparing it against "now" would call today
+  // "past" the moment the clock ticks over.
+  const { shortWeekday } = zonedWeekdayAndMinutes(
+    zonedComponentsToUtcMs({ ...parts, hour: 12 }, timezone),
+    timezone
+  );
+  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
+  if (day.closed) return { success: true, open_times: [], message: CLOSED_DAY_MESSAGE };
+
+  const [openH, openM] = (day.open || "09:00").split(":").map(Number);
+  const [closeH, closeM] = (day.close || "17:00").split(":").map(Number);
+  const dayEndMs = zonedComponentsToUtcMs(
+    { ...parts, hour: closeH, minute: closeM },
+    timezone
+  );
+  if (dayEndMs < Date.now()) {
+    return { success: true, open_times: [], message: PAST_DATETIME_MESSAGE };
+  }
+
+  const anchorMs = zonedComponentsToUtcMs({ ...parts, hour: openH, minute: openM }, timezone);
+  let free = [];
+  if (typeof adapter.findSlots === "function") {
+    try {
+      free = await adapter.findSlots(ctx, {
+        dateISO: new Date(anchorMs).toISOString(),
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+        businessHours: config.businessHours ?? null,
+        timezone,
+      });
+    } catch (err) {
+      ctx.deps.captureException(err); // fail-open, same as the point check
+    }
+  }
+
+  const timezoneLocal = (a) => toLocalNaiveDateTime(a, timezone);
+  const allLocal = (free || [])
+    .map((s2) => s2.start)
+    .filter((s2) => Number.isFinite(Date.parse(s2)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
+    .map(timezoneLocal)
+    .filter(Boolean);
+
+  const picked = spreadSlots(free, 3);
+  if (!picked.length) {
+    return {
+      success: true,
+      open_times: [],
+      all_open_times: [],
+      total_open: 0,
+      message: "There is nothing open that day. Ask the caller about another day.",
+    };
+  }
+
+  // Naive LOCAL for the model to hand straight back as book_appointment's
+  // scheduled_at, spoken form for what it says out loud. Same round-trip
+  // contract the alternatives path documents below.
+  const profile = resolveProfile(config);
+  const spoken = picked.map((a) => speakableDateTime(a, timezone, profile)).join(", ");
+  const more = allLocal.length - picked.length;
+  return {
+    success: true,
+    // The three to SAY OUT LOUD. Reading sixteen times down a phone is not an
+    // offer, it is a recital.
+    open_times: picked.map(timezoneLocal).filter(Boolean),
+    // ...and every one that is actually free, so a follow-up question is
+    // answered from what the model already has rather than from the false
+    // impression that three offers means three slots. A live call on
+    // 2026-08-30 was told "nothing else is available" with eleven still open.
+    all_open_times: allLocal,
+    total_open: allLocal.length,
+    message:
+      `${allLocal.length} time${allLocal.length === 1 ? " is" : "s are"} open that day. ` +
+      `Offer these three first: ${spoken}. Ask which one suits them and do not pick one for them. ` +
+      (more > 0
+        ? `${more} other time${more === 1 ? " is" : "s are"} also open — they are listed in all_open_times. ` +
+          `If the caller asks for anything else that day, offer from that list. Never tell them nothing ` +
+          `else is available while it still has times in it.`
+        : `Those are the only times open that day.`),
+  };
+}
+
+/**
  * check_appointment_availability — a READ the model calls before collecting
  * details. Reuses validateBookingTime so a past/closed/out-of-hours request is
  * rejected with the same wording as booking, then asks the adapter whether the
  * slot is open and, if not, offers the nearest free times that day.
+ *
+ * Two input shapes: a full datetime is a point check ("is this open?"); a bare
+ * YYYY-MM-DD is a day query ("what is open then?") — see openTimesForDay.
  */
 async function checkAvailabilityTool(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
@@ -1288,6 +1429,22 @@ async function checkAvailabilityTool(fc, ctx) {
       toolCallEvent: { name: fc.name, args: fc.args || {} },
     },
   });
+
+  // DATE ONLY — the caller named a day and no time.
+  //
+  // Handled BEFORE validateBookingTime, which rejects a bare date outright
+  // (NAIVE_DATETIME_RE demands a time) and would send back "I didn't catch a
+  // valid date and time". That refusal is why a caller who said "next Tuesday"
+  // got a time invented for them instead of being offered one: there was
+  // nothing else the model could call, so it guessed an hour and carried on.
+  //
+  // This is a different question from the point check below — "what is open
+  // that day?", not "is this open?" — so it answers with `open_times` and no
+  // `available` field at all, rather than overloading a yes/no.
+  const rawRequested = typeof fc.args?.requested_at === "string" ? fc.args.requested_at.trim() : "";
+  if (NAIVE_DATE_RE.test(rawRequested)) {
+    return respond(await openTimesForDay(rawRequested, config, adapter, avail, ctx));
+  }
 
   const validated = validateBookingTime(fc.args?.requested_at, config, ctx.deps);
   if (!validated.ok) {

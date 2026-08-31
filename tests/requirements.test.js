@@ -332,3 +332,72 @@ describe("notesPromptLines", () => {
     expect(notesPromptLines(undefined)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Telling the model everything it still needs, 2026-08-30.
+//
+// checkRequirements failed closed ONE REASON AT A TIME, so the receptionist
+// asked for the missing thing rather than reciting a list. Good for the caller,
+// and it stays. The cost was invisible until the per-tool timing landed: a live
+// reschedule called reschedule_appointment_db THREE times, refused twice, each
+// refusal costing a full model round-trip.
+//
+//   reschedule_appointment_db  FAILED
+//      2412ms   <- model round-trip
+//   reschedule_appointment_db  FAILED
+//       939ms   <- model round-trip
+//   reschedule_appointment_db  SUCCESS
+//
+// ~2.8s of a ~5s turn, spent discovering the requirements one at a time.
+//
+// The fix changes what the MODEL is told, not what the caller hears: the
+// refusal still leads with one thing to ask for, and now also names what is
+// still outstanding so the model collects them before calling again.
+// ---------------------------------------------------------------------------
+describe("checkRequirements — names everything still outstanding", () => {
+  const cfg = {
+    require: {
+      requiredFields: ["client_name"],
+      identity: { custom: [{ key: "dob", label: "date of birth", ask: "What is your date of birth?" }] },
+      confirmBeforeWrite: true,
+    },
+  };
+
+  it("leads with ONE thing to ask for, exactly as before", () => {
+    const r = checkRequirements(cfg, {}, { toolName: "book_appointment" });
+    expect(r.ok).toBe(false);
+    // The primary directive is unchanged — the caller still gets one question.
+    expect(r.message).toMatch(/Missing required field: client_name/);
+  });
+
+  it("...and also names what is still outstanding, so it stops rediscovering", () => {
+    const r = checkRequirements(cfg, {}, { toolName: "book_appointment" });
+    expect(r.message).toMatch(/date of birth/i);
+    expect(r.message).toMatch(/read-back|yes/i);
+    expect(r.missing.length).toBeGreaterThan(1);
+  });
+
+  it("says nothing extra when only one thing is missing", () => {
+    // No list, no noise — the common case reads exactly as it always did.
+    const r = checkRequirements(cfg, { client_name: "Ada", identity_dob: "1990-01-01" }, {});
+    expect(r.ok).toBe(false);
+    expect(r.missing).toEqual(["an explicit yes to the read-back"]);
+    expect(r.message).not.toMatch(/also need/i);
+  });
+
+  it("passes cleanly once everything is supplied", () => {
+    const r = checkRequirements(
+      cfg,
+      { client_name: "Ada", identity_dob: "1990-01-01", [CONFIRMATION_ARG]: true },
+      {}
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("never leaks a bare field name as speakable text", () => {
+    // "Missing required field: caller_dob" was one text-free turn away from
+    // being read to a caller verbatim. The marker is what stops that.
+    const r = checkRequirements(cfg, {}, {});
+    expect(r.message).toMatch(/\[not caller speech\]/);
+  });
+});

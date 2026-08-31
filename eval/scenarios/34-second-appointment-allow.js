@@ -57,7 +57,7 @@ export default {
   },
   hard: [
     // Exactly one call — no refusal, therefore no retry round.
-    (ctx) => A.toolCalledTimes(ctx, "book_appointment", 1),
+    (ctx) => A.toolSucceededTimes(ctx, "book_appointment", 1),
     (ctx) => A.toolSucceeded(ctx, "book_appointment"),
     // The declaration-honesty assert: the parameter is not offered under this
     // policy, so it must never appear in the arguments.

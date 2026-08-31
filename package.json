@@ -46,7 +46,7 @@
   "homepage": "https://github.com/VetraTD/ai-phone-assistant#readme",
   "devDependencies": {
     "supertest": "^7.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.7"
   },
   "dependencies": {
     "@deepgram/sdk": "^5.0.0",
@@ -54,7 +54,7 @@
     "@google-cloud/speech": "^8.0.1",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
-    "@sentry/node": "^9.0.0",
+    "@sentry/node": "^10.72.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -62,7 +62,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.1.0",
-    "nodemailer": "^8.0.2",
+    "nodemailer": "^9.0.6",
     "pg": "^8.23.0",
     "twilio": "^5.0.0",
     "ws": "^8.20.0"

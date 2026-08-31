@@ -204,7 +204,38 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     const tail = buildDynamicTail("gather_details", null, closedSaturday, extras);
 
     expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
-    expect(tail).toContain("book appointments for future business hours using book_appointment");
+    expect(tail).toContain("book_appointment");
+  });
+
+  // The wording of this branch is load-bearing, not cosmetic.
+  //
+  // It used to end "Do NOT book appointments during closed hours", which reads
+  // two ways: don't schedule a SLOT inside closed hours (intended), or don't
+  // perform the ACT of booking while closed. The model picked the second often
+  // enough to cost bookings — it would announce it could not "access the live
+  // scheduling calendar" and divert an appointment into a callback request
+  // (band transcript diff, `name-recall`, 2026-08-31).
+  //
+  // These assert the two halves that resolve the ambiguity, so a future
+  // "tidy-up" of this sentence cannot quietly reintroduce it.
+  it("after-hours book_later says being closed does not block the ACT of booking", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const tail = buildDynamicTail("gather_details", null, closedSaturday, extras);
+
+    expect(tail).toMatch(/does NOT stop you booking/);
+    expect(tail).toMatch(/complete the booking now/i);
+  });
+
+  it("after-hours book_later still forbids scheduling a SLOT inside closed hours", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T15:00:00Z")); // Saturday = CLOSED
+    const tail = buildDynamicTail("gather_details", null, closedSaturday, extras);
+
+    expect(tail).toMatch(/restriction is on the SLOT only/i);
+    expect(tail).toMatch(/never schedule an appointment for a time when the office is closed/i);
+    // The bare, ambiguous prohibition must not come back.
+    expect(tail).not.toContain("Do NOT book appointments during closed hours");
   });
 
   it("after-hours book_later WITHOUT book_appointment falls back to take-a-message (no phantom tool)", () => {

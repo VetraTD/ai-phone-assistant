@@ -47,6 +47,12 @@ const baseCtx = {
   integrations: [],
   capabilityState: {},
   config: {},
+  // These tests are about what the write tools DO, not about whether a spelling
+  // was confirmed first. Since 2026-08-29 the gate in services/tools.js refuses
+  // the first name-bearing write of a call for ANY name it has not seen before
+  // (VOICE_SPELL_POLICY=always), so without this every one of them would be
+  // asserting the spelling refusal instead. The gate has its own tests below.
+  spellingAlreadyAsked: true,
 };
 
 // Minimal stand-in for CAPABILITY_DEPS, for the few tests that need to observe
@@ -493,12 +499,14 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       expect(functionResponse.response).toEqual({ success: true });
       expect(stateEffects.endCallArgs).toEqual({ reason: "done" });
-      expect(stateEffects.toolResult).toEqual({
-        name: "end_call",
-        success: true,
-        message: "Goodbye!",
-        callerSafe: true,
-      });
+      // Was the literal "Goodbye!" until 2026-08-30. That line is the FLOOR
+      // spoken when the model ends the call without writing its own sign-off,
+      // and a caller heard it bare after the post-end_call round was removed.
+      expect(stateEffects.toolResult.name).toBe("end_call");
+      expect(stateEffects.toolResult.success).toBe(true);
+      expect(stateEffects.toolResult.callerSafe).toBe(true);
+      expect(stateEffects.toolResult.message).toMatch(/thank you for calling/i);
+      expect(stateEffects.toolResult.message).not.toBe("Goodbye!");
     });
 
     it("honors end_call during the ending step", async () => {
@@ -1499,5 +1507,147 @@ describe("services/tools.js — check_appointment_availability and the caller's 
 
     expect(functionResponse.response.available).toBe(true);
     expect(functionResponse.response.message).toMatch(/already has an upcoming appointment/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The spelling gate — since 2026-08-29 the ONLY thing that can ask a caller to
+// spell their name. Three prompt sections used to ask as well, each with its
+// own uncoordinated "at most once", and a caller was asked three times in one
+// call. Prose cannot hold a budget.
+//
+// The rule: at most once per call, only for a name not already on file, and
+// only before a write.
+// ---------------------------------------------------------------------------
+const HOURS_MON_FRI = {
+  mon: { open: "09:00", close: "17:00", closed: false },
+  tue: { open: "09:00", close: "17:00", closed: false },
+  wed: { open: "09:00", close: "17:00", closed: false },
+  thu: { open: "09:00", close: "17:00", closed: false },
+  fri: { open: "09:00", close: "17:00", closed: false },
+  sat: { open: null, close: null, closed: true },
+  sun: { open: null, close: null, closed: true },
+};
+
+describe("services/tools.js — the spelling gate", () => {
+  const fresh = { ...baseCtx, spellingAlreadyAsked: false };
+  const bookFc = {
+    id: "sp1",
+    name: "book_appointment",
+    args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane Kowalczyk" },
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T15:00:00Z"));
+    mockCreateAppointment.mockResolvedValue("appt-1");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.VOICE_SPELL_POLICY;
+  });
+
+  it("refuses the write and asks for the spelling, for a caller it has not seen", async () => {
+    const { functionResponse } = await executeToolCall(bookFc, fresh);
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/spell/i);
+    // Refused means REFUSED — nothing may reach the database.
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("does not ask a caller whose name is already on file, and books straight away", async () => {
+    const ctx = {
+      ...fresh,
+      config: { timezone: "America/Chicago", businessHours: HOURS_MON_FRI },
+      callerContext: {
+        callCount: 2,
+        upcomingAppointments: [{ client_name: "Jane Kowalczyk" }],
+      },
+    };
+    const { functionResponse } = await executeToolCall(bookFc, ctx);
+    expect(functionResponse.response.message ?? "").not.toMatch(/spell/i);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("does not ask twice — once the call has spent its request the gate is open", async () => {
+    const ctx = {
+      ...baseCtx,
+      config: { timezone: "America/Chicago", businessHours: HOURS_MON_FRI },
+    };
+    const { functionResponse } = await executeToolCall(bookFc, ctx);
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("VOICE_SPELL_POLICY=hard restores the old difficulty-only behaviour", async () => {
+    process.env.VOICE_SPELL_POLICY = "hard";
+    const ctx = {
+      ...fresh,
+      config: { timezone: "America/Chicago", businessHours: HOURS_MON_FRI },
+    };
+    const easy = { ...bookFc, args: { ...bookFc.args, client_name: "Jane Doe" } };
+    const { functionResponse } = await executeToolCall(easy, ctx);
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("VOICE_SPELL_POLICY=off never asks at all", async () => {
+    process.env.VOICE_SPELL_POLICY = "off";
+    const ctx = {
+      ...fresh,
+      config: { timezone: "America/Chicago", businessHours: HOURS_MON_FRI },
+    };
+    const { functionResponse } = await executeToolCall(bookFc, ctx);
+    expect(functionResponse.response.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The phrasing-independent backstop.
+//
+// The shared counter only closes the gate once lib/voice/strings.js's
+// spellRequestRe matches what the assistant SAID. Widening that regex helps and
+// cannot be complete: the model can always phrase an ask some way nobody
+// listed. With the gate now firing for every unknown name rather than only hard
+// ones, an unmatched phrasing means refuse -> ask -> caller answers -> refuse
+// again, which is the livelock this whole area exists to prevent.
+//
+// So the gate also records, in code, that it has already refused.
+// ---------------------------------------------------------------------------
+describe("services/tools.js — the spelling gate refuses at most once per pack", () => {
+  const bookFc = {
+    id: "sp2",
+    name: "book_appointment",
+    args: { scheduled_at: "2026-07-21T10:00:00", client_name: "Jane Kowalczyk" },
+  };
+  const cfg = { timezone: "America/Chicago", businessHours: HOURS_MON_FRI };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T15:00:00Z"));
+    mockCreateAppointment.mockResolvedValue("appt-1");
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("records that it asked, so a second attempt proceeds even if the counter never saw the ask", async () => {
+    const first = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingAlreadyAsked: false,
+    });
+    expect(first.functionResponse.response.success).toBe(false);
+
+    // The state the engine threads back into the next round/turn. Note
+    // spellingAlreadyAsked is still FALSE — the model phrased its request in a
+    // way spellRequestRe does not recognise, which is the whole point.
+    const carried = first.stateEffects.capabilityState;
+    expect(carried).toBeTruthy();
+
+    const second = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingAlreadyAsked: false,
+      capabilityState: carried,
+    });
+    expect(second.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
   });
 });

@@ -24,6 +24,23 @@
  * touches no application state.
  *
  *   node scripts/verify-explicit-cache.js
+ *
+ * ---------------------------------------------------------------------------
+ * A FOURTH unknown, added 2026-08-30: does any of this survive Vertex?
+ *
+ * The GCP estate runs `new GoogleGenAI({ vertexai: true })`, and Vertex context
+ * caching is a different, REGIONAL resource — while the deployment's
+ * VERTEX_LOCATION is `global`. If create is refused there, geminiCache.js
+ * classifies "not supported" as PERMANENT, parks the entry in `unsupported`,
+ * and every call thereafter works perfectly and silently costs full price.
+ * That is a failure nobody hears and nobody sees until a bill arrives, so it
+ * gets answered here for ~$0.01 instead of in production.
+ *
+ * The same script covers both backends deliberately: a second script would
+ * drift from this one, and the AI-Studio flow below is the measured one.
+ *
+ *   VERTEX_ENABLED=true GOOGLE_CLOUD_PROJECT=... VERTEX_LOCATION=global \
+ *     node scripts/verify-explicit-cache.js
  */
 
 import "dotenv/config";
@@ -31,13 +48,42 @@ import { GoogleGenAI } from "@google/genai";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const apiKey = process.env.GEMINI_API_KEY;
+const vertexEnabled = process.env.VERTEX_ENABLED === "true" || process.env.VERTEX_ENABLED === "1";
 
-if (!apiKey) {
-  console.error("GEMINI_API_KEY is not set. Nothing to verify.");
-  process.exit(1);
+/**
+ * Mirrors services/gemini.js getClient() on the GCP lineage, including the
+ * baseUrl override. That override is not cosmetic: measured 2026-08-28,
+ * global-aiplatform.googleapis.com returns 404, so `global`/`us`/`eu` must be
+ * pointed at the plain host or every request fails for a reason that has
+ * nothing to do with caching.
+ */
+const VERTEX_GLOBAL_HOST_LOCATIONS = ["us", "eu", "global"];
+
+let ai;
+let backend;
+if (vertexEnabled) {
+  const project = (process.env.GOOGLE_CLOUD_PROJECT || "").trim();
+  const location = (process.env.VERTEX_LOCATION || "").trim();
+  if (!project || !location) {
+    console.error("VERTEX_ENABLED is set but GOOGLE_CLOUD_PROJECT and/or VERTEX_LOCATION are not.");
+    process.exit(1);
+  }
+  const globalHost = VERTEX_GLOBAL_HOST_LOCATIONS.includes(location.toLowerCase());
+  ai = new GoogleGenAI({
+    vertexai: true,
+    project,
+    location,
+    ...(globalHost ? { httpOptions: { baseUrl: "https://aiplatform.googleapis.com" } } : {}),
+  });
+  backend = `vertex (project=${project}, location=${location})`;
+} else {
+  if (!apiKey) {
+    console.error("GEMINI_API_KEY is not set, and VERTEX_ENABLED is not true. Nothing to verify.");
+    process.exit(1);
+  }
+  ai = new GoogleGenAI({ apiKey });
+  backend = "ai-studio (api key)";
 }
-
-const ai = new GoogleGenAI({ apiKey });
 
 /** Roughly `tokens` worth of stable, prose-shaped filler. ~4 chars per token. */
 function filler(tokens) {
@@ -70,6 +116,7 @@ async function tryCreate(label, tokens, extraConfig = {}) {
 // Question 1 — minimum cacheable size
 // ---------------------------------------------------------------------------
 console.log(`\nModel: ${MODEL}`);
+console.log(`Backend: ${backend}`);
 console.log("\n=== 1. Minimum token count for an explicit cache ===");
 console.log("   (messages-only, this repo's smallest business shape, is ~3,000 tokens)\n");
 

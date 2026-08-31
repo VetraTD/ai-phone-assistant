@@ -8,6 +8,7 @@ import { getStrings } from "../lib/voice/strings.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
+import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime } from "../lib/capabilities/datetime.js";
@@ -111,6 +112,25 @@ function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
 export function callToolNames(cfg, extras = {}) {
   try {
     return buildAllDeclarations(cfg, extras, intentMarkerEnabled(extras)).map((d) => d.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every PARAMETER name the live declarations expose, for the outbound guard's
+ * whole-text pre-pass. A pseudo-call whose name has already been excised leaves
+ * its argument object behind, and that orphan reached a caller's ear on
+ * 2026-08-29 — the keys are the only thing left that identifies it as ours.
+ * @param {object} cfg
+ * @param {object} [extras]
+ * @returns {string[]}
+ */
+export function callToolParamNames(cfg, extras = {}) {
+  try {
+    return buildAllDeclarations(cfg, extras, intentMarkerEnabled(extras)).flatMap((d) =>
+      Object.keys(d?.parameters?.properties || {})
+    );
   } catch {
     return [];
   }
@@ -508,7 +528,9 @@ export function buildCallTools(configOrTasks, { markerMode = false } = {}) {
       name: "end_call",
       description:
         "Signal that the conversation is naturally complete and the caller " +
-        "is ready to hang up. Include a brief goodbye in your text response.",
+        "is ready to hang up. You MUST write your warm sign-off in the SAME " +
+        "response as this call — thank them for calling, use the business name, " +
+        "and wish them well. Nothing you say after this is heard.",
       parameters: {
         type: "object",
         properties: {
@@ -998,7 +1020,7 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += markerMode
     ? `- Name the intent on the intent line (see INTENT LINE) once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`
     : `- Call set_call_intent once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`;
-  toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else.\n`;
+  toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
     // you" in the same response as a lookup call. That is a two-part
@@ -1164,7 +1186,9 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // The scheduling note is only meaningful where the business can book; emitting
   // it with no booking tool is a dead instruction.
   if (hasAppointments(config)) {
-    dateTime += `\nWhen scheduling, always calculate from this real date. Never invent dates.`;
+    dateTime +=
+      `\nWhen scheduling, always calculate from this real date. Never invent dates OR times: ` +
+      `if the caller has named a day but not an hour, ask or offer — never assume one.`;
   }
   const resolvedHours = resolveBusinessHoursForPrompt(config, now);
   if (resolvedHours) {
@@ -1209,7 +1233,20 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
         break;
       case "book_later":
-        afterHours += `Inform the caller the office is closed. You may still book appointments for future business hours using book_appointment. Do NOT book appointments during closed hours.`;
+        // "Do NOT book appointments during closed hours" had two readings, and
+        // the model picked the wrong one often enough to cost bookings: the
+        // prohibition is on the SLOT (never schedule a time the office is
+        // shut), not on the ACT (booking while the office happens to be shut).
+        //
+        // Read as a prohibition on the act, the assistant announces it "can't
+        // access the live scheduling calendar right now" and diverts a caller
+        // who wanted an appointment into a callback request. Caught in a
+        // band transcript diff on `name-recall`, 2026-08-31 — and present in
+        // the cache-OFF arm too, so this is a live defect rather than
+        // something explicit caching introduced. Caching only demotes this
+        // text from system role to user role, which made the misreading
+        // frequent enough to see.
+        afterHours += `Inform the caller the office is closed. Being closed does NOT stop you booking — complete the booking now with book_appointment as normal. The restriction is on the SLOT only: never schedule an appointment for a time when the office is closed.`;
         break;
       case "transfer_if_possible":
         afterHours += `Inform the caller the office is closed. If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
@@ -1314,6 +1351,38 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
       `=== ALREADY ASKED ===\n` +
         `You have already asked this caller to spell something on this call. Do not ask again, ` +
         `for any name or detail, for the rest of the call — use what you have and move on.`,
+    );
+  } else if (
+    step === "gather_details" &&
+    spellPolicy() !== "off" &&
+    // Not for a caller already on file. Without this the nudge asked a
+    // returning caller to spell a name the business already has right — the
+    // exact repetition this round set out to remove. Caught by the eval arm,
+    // 1 run in 5.
+    !callerHasNameOnFile(extras?.callerContext)
+  ) {
+    // The same fact, the other way round — and it exists because of WHEN the
+    // code gate fires.
+    //
+    // services/tools.js refuses a name-bearing write until a spelling has been
+    // confirmed. That guarantee is worth keeping, but a write is the LAST thing
+    // that happens: an eval run caught the assistant asking "could you spell
+    // your full name?" immediately after the caller had said "yes, that's all
+    // correct, thanks so much". The question was right and the moment was
+    // absurd, and on a scripted caller the write then never completed at all.
+    //
+    // So: say it while details are still being collected, which is when a
+    // person would ask. This is a fact about call state, rendered only while it
+    // is true and replaced by ALREADY ASKED the moment it is spent — not a
+    // standing rule of the kind that was deleted from three capability packs on
+    // 2026-08-29 precisely because prose cannot hold a budget.
+    sections.push(
+      `=== SPELLING NOT YET CONFIRMED ===\n` +
+        `You have not yet confirmed a spelling on this call. When the caller gives you a name you ` +
+        `are going to write down, ask them once — right then, while you are still taking details — ` +
+        `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
+        `booking. If they decline or answer with something else, accept the name as you heard it ` +
+        `and carry on.`,
     );
   }
 
@@ -1601,6 +1670,89 @@ export function buildUsage(usageMetadata) {
 }
 
 /**
+ * The four things that decide a cache's identity, built in exactly one place.
+ *
+ * getReplyStreaming and warmPromptCache MUST agree byte-for-byte on all four,
+ * or the warm path creates a cache the turn path never looks up: storage is
+ * billed, every turn still misses, and nothing in the logs says so. Two paths
+ * computing "the same" prefix independently is precisely how that happens, so
+ * they share this function rather than each calling the builders themselves.
+ *
+ * `generationConfig` is returned alongside because it is resolved here anyway
+ * and `model` is part of the key — recomputing it in the caller would be a
+ * second chance to disagree.
+ *
+ * @param {object} cfg - normalized business config (services/supabase.js loadConfig)
+ * @param {object} [extras]
+ * @returns {{model: string, markerMode: boolean, staticPrefix: string, toolsConfig: Array, generationConfig: object}}
+ */
+export function buildCacheSpec(cfg, extras) {
+  const markerMode = intentMarkerEnabled(extras);
+  // Full config, not just the task list: packs need config.capabilities to
+  // turn a business's configured requirements into tool parameters.
+  const allDeclarations = buildAllDeclarations(cfg, extras, markerMode);
+  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+  const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
+  return {
+    model: generationConfig.model,
+    markerMode,
+    staticPrefix: buildStaticSystemPrefix(cfg, extras),
+    toolsConfig,
+    // The flat list behind toolsConfig. Returned rather than re-derived because
+    // the outbound tool-call leak guard matches against these exact names, and
+    // a second buildAllDeclarations() call would be a second chance to disagree
+    // with the list that was actually sent.
+    allDeclarations,
+    generationConfig,
+  };
+}
+
+/**
+ * Build this business's context cache ahead of the first turn.
+ *
+ * Creating a cache is a 200-500ms round trip. resolveCachedContent refuses to
+ * put that on a turn, so left alone the cache is created DURING turn 1 and used
+ * from turn 2 — turn 1 of every call pays full price for the whole prefix.
+ * Calling this at pickup moves that round trip into the dead time behind the
+ * greeting and the caller's first utterance, so turn 1 hits too.
+ *
+ * Fire-and-forget by construction: returns void, never throws, never awaits.
+ * The work it triggers is the same background create a turn-1 miss would have
+ * scheduled, so the worst case of calling it is exactly today's behavior.
+ *
+ * MUST be called only once the knowledge base and integrations have loaded —
+ * they are part of the prefix, so warming before they land hashes a different
+ * key and builds a cache the call cannot use. See lib/voice/session.js.
+ *
+ * @param {object} config - normalized business config
+ * @param {object} [extras] - the SAME extras the turn path will pass
+ * @returns {void}
+ */
+export function warmPromptCache(config, extras) {
+  try {
+    if (!explicitCacheEnabled(extras)) return;
+    const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
+    const { model, markerMode, staticPrefix, toolsConfig } = buildCacheSpec(cfg, extras);
+    // Return value discarded on purpose: a miss schedules the create, which is
+    // the entire point of warming. A hit means a concurrent call already built
+    // it and there is nothing to do.
+    resolveCachedContent({
+      client: getClient(),
+      model,
+      markerMode,
+      staticPrefix,
+      toolsConfig,
+      businessId: extras?.businessId ?? null,
+      enabled: true,
+    });
+  } catch (err) {
+    // getClient() throws without credentials. Warming is an optimization and
+    // must never be able to affect a call.
+    log.error("gemini_cache_warm_failed", { reason: err?.message, severity: "warn" });
+  }
+}
+
+/**
  * Streaming version of getReply for Media Streams real-time audio pipeline.
  *
  * Yields objects of these shapes:
@@ -1643,12 +1795,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   const cfg = config || { ...DEFAULT_CONFIG, allowedTasks: normalizeAllowedTasks(null) };
   const gemini = getClient();
 
-  const markerMode = intentMarkerEnabled(extras);
-
-  // Full config, not just the task list: packs need config.capabilities to
-  // turn a business's configured requirements into tool parameters.
-  const allDeclarations = buildAllDeclarations(cfg, extras, markerMode);
-  const toolsConfig = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
+  // Everything the cache key is computed from comes from ONE place, shared with
+  // warmPromptCache() — see buildCacheSpec. A warm path that built the prefix or
+  // the tool list even slightly differently would create a cache that no turn
+  // ever reads, and still pay storage for it.
+  const { model, markerMode, staticPrefix, toolsConfig, allDeclarations, generationConfig } =
+    buildCacheSpec(cfg, extras);
 
   // Turn-aware history bound (lib/voice/historyTrim.js): keeps whole turns from
   // the end so a user/model pair is never split, and hoists any evicted
@@ -1657,13 +1809,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // plain turns — the effective window size is unchanged, only its integrity.
   const trimmedHistory = trimHistory(history, { maxTurns: resolveHistoryMaxTurns() });
 
-  const generationConfig = resolveGenerationConfig(extras?.modelOverrides);
-  const model = generationConfig.model;
   // Kept in a local so per-request calls below can replicate it: the SDK's
   // per-request `config` REPLACES (does not merge with) the chat-level
   // config, so a bare `{ abortSignal }` per call would silently drop tools/
   // systemInstruction/thinkingConfig/maxOutputTokens on that request.
-  const staticPrefix = buildStaticSystemPrefix(cfg, extras);
   const dynamicTail = buildDynamicTail(step, intent, cfg, extras);
 
   // Synchronous and non-blocking by design — returns a live handle or null, and
@@ -1769,7 +1918,16 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // One stripper for the whole turn, like the marker one: a pseudo-call can
   // appear in any round, including after the model has already spoken.
   const newToolCallStripper = () =>
-    createToolCallTextStripper({ toolNames: allDeclarations.map((d) => d.name) });
+    createToolCallTextStripper({
+      toolNames: allDeclarations.map((d) => d.name),
+      // Parameter names as well as tool names. A delta boundary landing before
+      // a closing brace leaves the ARGUMENTS behind after the name is excised,
+      // and on 2026-08-29 a caller heard one read aloud. Derived from the live
+      // declarations for the same reason the names are.
+      toolParamNames: allDeclarations.flatMap((d) =>
+        Object.keys(d?.parameters?.properties || {})
+      ),
+    });
   let toolCallStripper = newToolCallStripper();
   // Pseudo-calls seen in the CURRENT round only — the recovery question is
   // "did this round ask for a tool and fail to actually call one".
@@ -1817,10 +1975,18 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
   // the reason for the round that produced the spoken reply.
   let lastFinishReason = null;
 
+  // Set by the text-channel recovery below when the turn has ALREADY spoken.
+  // Consumed by the round it starts: that round's job is to produce the
+  // function call, and anything it says is a second version of what the caller
+  // just heard. Cleared on read so it can never leak into a later round.
+  let pendingSuppressText = false;
+
   while (true) {
     // Drain the stream, yielding text deltas and collecting function calls
     let functionCalls = [];
     textCallsThisRound = [];
+    const suppressTextThisRound = pendingSuppressText;
+    pendingSuppressText = false;
 
     for await (const chunk of streamResponse) {
       // Text delta — extracted from parts directly (see textFromChunk) rather
@@ -1884,8 +2050,12 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         }
 
         if (out.text) {
-          fullText += out.text;
-          yield { delta: out.text };
+          if (suppressTextThisRound) {
+            bumpCounter("text_channel_reask_text_suppressed");
+          } else {
+            fullText += out.text;
+            yield { delta: out.text };
+          }
         }
       }
       // Function calls arrive (usually in the last chunk)
@@ -1916,7 +2086,14 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       }
       if (tail.text) {
         const out = stripper ? stripper.push(tail.text) : { text: tail.text };
-        if (out.text) { fullText += out.text; yield { delta: out.text }; }
+        if (out.text) {
+          if (suppressTextThisRound) {
+            bumpCounter("text_channel_reask_text_suppressed");
+          } else {
+            fullText += out.text;
+            yield { delta: out.text };
+          }
+        }
       }
       toolCallStripper = newToolCallStripper();
     }
@@ -1927,14 +2104,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     // nothing ran. Do NOT execute what was parsed: those arguments never met a
     // schema, and on the call this was found on they contained an appointment
     // id that does not exist. Ask for the call properly instead.
+    //
+    // A nameless argument blob (shape "nameless_args") is silenced and counted
+    // but carries no name, so there is nothing to force — skip those when
+    // choosing the target rather than re-asking for `null`.
+    const reaskTarget = textCallsThisRound.find((c) => c.name)?.name || null;
     if (
       TEXT_CALL_RECOVERY &&
       functionCalls.length === 0 &&
-      textCallsThisRound.length > 0 &&
+      reaskTarget &&
       !textCallReaskUsed
     ) {
       textCallReaskUsed = true;
-      const target = textCallsThisRound[0].name;
+      const target = reaskTarget;
       bumpCounter("text_channel_reasks");
       log.info("text_channel_reask", { tool: target, round, step });
       // Name the tool, withhold the arguments. Re-supplying them would launder
@@ -1962,6 +2144,11 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         log.error("gemini_toolconfig_rejected", { reason: err?.message, severity: "warn" });
         streamResponse = await chat.sendMessageStream({ message: note, config: perRequestConfig });
       }
+      // The caller has already heard this turn's reply. Whatever the forced
+      // round says next is a second version of it — on 2026-08-29 that was the
+      // goodbye, said twice. Conditional, not blanket: if nothing was spoken
+      // yet, silence is the worse failure and the round's text is all we have.
+      pendingSuppressText = fullText.trim().length > 0;
       if (stripper) stripper = newStripper();
       continue;
     }
@@ -2090,6 +2277,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
       };
     }
 
+    // end_call SUCCEEDED — the call is over. Sending the result back buys one
+    // more round of model output, and the only thing that round can produce is
+    // a second goodbye: end_call's own declaration says the goodbye belongs in
+    // the same response, so it has already been spoken. On 2026-08-29 a caller
+    // heard both.
+    //
+    // Only on success. A REFUSED end_call (the gate in services/tools.js says
+    // the caller has not been helped yet) must keep going, or the turn ends
+    // with the request unanswered and the line still open.
+    //
+    // Also worth a round-trip at the end of every single call.
+    if (endCallArgs) break;
+
     // The model writes the intent line at the top of every ROUND, not once per
     // turn, so the next round needs a stripper that is looking for one again.
     // Without this the second copy streams straight to the caller: the first
@@ -2136,6 +2336,19 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
     if (cachedContentTokenCount !== undefined || thoughtsTokenCount !== undefined) {
       log.debug("gemini_turn_usage", { step, cachedContentTokenCount, thoughtsTokenCount });
     }
+  }
+
+  // Counted, not just debug-logged, because the interesting failure is SILENT.
+  // If a provider rejects cache creation — the open question for Vertex, where
+  // "not supported" is classified permanent and parks the entry in `unsupported`
+  // forever — every turn keeps working and keeps costing full price, and the
+  // only symptom is a bill at the end of the month. These two counters are the
+  // tripwire: `llm_cache_hits` flat at zero with the flag on is the alarm.
+  //
+  // Read from usageMetadata rather than from `usingCache`, so it reports what
+  // Google actually billed rather than what this process intended.
+  if (explicitCacheEnabled(extras)) {
+    bumpCounter(lastUsageMetadata?.cachedContentTokenCount > 0 ? "llm_cache_hits" : "llm_cache_misses");
   }
 
 

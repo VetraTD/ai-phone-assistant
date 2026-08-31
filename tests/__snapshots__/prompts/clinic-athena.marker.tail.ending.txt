@@ -1,6 +1,6 @@
 === DATE AND TIME ===
 Current: Monday, July 20, 2026, 10:00 AM (America/Chicago).
-When scheduling, always calculate from this real date. Never invent dates.
+When scheduling, always calculate from this real date. Never invent dates OR times: if the caller has named a day but not an hour, ask or offer — never assume one.
 Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Status: OPEN.
 
 === CURRENT TASK AND STATE ===

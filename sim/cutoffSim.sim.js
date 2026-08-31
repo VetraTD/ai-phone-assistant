@@ -233,6 +233,10 @@ vi.mock("../services/gemini.js", () => ({
   // either scenario could report a number — vitest treats a missing export on a
   // factory mock as an error, not undefined.
   callToolNames: () => [],
+  // Same reason, added 2026-08-29 alongside the nameless-argument-blob guard.
+  // The sim's own self-test caught the omission immediately: "the assistant
+  // never produced audio", because leakCtx() threw on every speech attempt.
+  callToolParamNames: () => [],
 }));
 vi.mock("../lib/logger.js", () => ({
   log: { debug: () => {}, info: () => {}, error: () => {}, warn: () => {} },

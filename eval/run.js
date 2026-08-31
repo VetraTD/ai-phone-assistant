@@ -103,7 +103,12 @@ function looksSuspectTruncated(text) {
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
+/**
+ * Exported for tests. The flag surface is the part of this file most likely to
+ * be broken by a careless edit and the cheapest thing in the whole suite to
+ * cover — every other check here costs real Gemini tokens to run.
+ */
+export function parseArgs(argv) {
   const opts = {
     filter: null,
     tag: null,
@@ -112,6 +117,13 @@ function parseArgs(argv) {
     json: null,
     matrix: false,
     matrixFile: null,
+    // Judge OFF by default (changed 2026-08-30). The advisory judge re-sends
+    // the ENTIRE transcript once per question per scenario and has never set
+    // the exit code — the 37-scenario hard gate is the only thing that does.
+    // It was the largest single line in the $10 -> $85 August Gemini bill, and
+    // that bill was development evals, not production traffic. Opt in with
+    // --judge for the run that actually decides a merge.
+    noJudge: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -124,6 +136,10 @@ function parseArgs(argv) {
       case "--model": opts.modelOverrides.model = next(); break;
       case "--thinking-budget": opts.modelOverrides.thinkingBudget = parseInt(next(), 10); break;
       case "--json": opts.json = next(); break;
+      // --no-judge is now the default; kept so existing scripts and docs that
+      // pass it explicitly keep working rather than dying on "Unknown flag".
+      case "--no-judge": opts.noJudge = true; break;
+      case "--judge": opts.noJudge = false; break;
       case "--matrix": opts.matrix = true; break;
       case "--matrix-file": opts.matrixFile = next(); break;
       default:
@@ -166,7 +182,7 @@ function callerEndedByReceptionist(out) {
  * @param {object} [opts.modelOverrides] - forwarded to the receptionist (not the judge)
  * @returns {Promise<object>} the per-scenario result
  */
-export async function runScenario(scenario, { modelOverrides } = {}) {
+export async function runScenario(scenario, { modelOverrides, noJudge = false } = {}) {
   const base = {
     name: scenario.name,
     tags: scenario.tags || [],
@@ -174,6 +190,10 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     judgeResults: [],
     hardPass: false,
     judgePass: false,
+    // null = the judge was not asked. Distinct from [] (asked, no questions)
+    // and from a list of failures, so a skipped run can never be read as a
+    // failed one by anything downstream.
+    judgeSkipped: false,
     turns: [],
     latency: { firstEventMs: [], totalMs: [] },
     // Truncation telemetry, accumulated across this scenario's turns.
@@ -275,9 +295,23 @@ export async function runScenario(scenario, { modelOverrides } = {}) {
     });
     base.hardPass = base.hardResults.every((r) => r.pass);
 
-    base.judgeResults = await judgeConversation({ turns, questions: scenario.judge || [] });
-    base.judgePass =
-      base.judgeResults.length === 0 ? true : base.judgeResults.every((r) => r.verdict === "pass");
+    if (noJudge) {
+      // The judge is ADVISORY - it never touches the exit code (see the note on
+      // computeMatrixExitCode). It is also the single largest avoidable cost in
+      // a run: it re-sends the whole transcript once per question, for every
+      // scenario, on its own pinned model. Skipping it makes an iteration run
+      // materially cheaper and changes nothing the gate depends on.
+      //
+      // judgePass stays TRUE so no downstream consumer mistakes "not asked" for
+      // "asked and failed"; judgeSkipped is what tells them apart.
+      base.judgeSkipped = true;
+      base.judgeResults = [];
+      base.judgePass = true;
+    } else {
+      base.judgeResults = await judgeConversation({ turns, questions: scenario.judge || [] });
+      base.judgePass =
+        base.judgeResults.length === 0 ? true : base.judgeResults.every((r) => r.verdict === "pass");
+    }
 
     return base;
   } catch (err) {
@@ -325,7 +359,9 @@ function printReport(results) {
     const judgeTot = r.judgeResults.length;
     const p50 = median(r.latency.totalMs);
     const hardCell = r.error ? "ERROR" : `${hardOk}/${hardTot} ${hardTot && hardOk === hardTot ? "✓" : "✗"}`;
-    const judgeCell = judgeTot ? `${judgeOk}/${judgeTot}` : "—";
+    // "skip" and "—" mean different things: not asked, versus asked and had
+    // nothing to ask. Worth distinguishing in a table someone reads quickly.
+    const judgeCell = r.judgeSkipped ? "skip" : judgeTot ? `${judgeOk}/${judgeTot}` : "—";
     console.log(
       `${pad(r.name, 30)} ${pad(hardCell, 9)} ${pad(judgeCell, 9)} ${pad(p50 == null ? "—" : `${p50}ms`, 9)}`
     );
@@ -361,7 +397,12 @@ function printReport(results) {
   console.log("\n=== SUMMARY ===");
   console.log(`scenarios:   ${results.length}`);
   console.log(`hard pass:   ${hardPassCount}/${results.length}`);
-  console.log(`judge pass:  ${judgePassCount}/${results.length} (advisory)`);
+  const judgeSkipped = results.length > 0 && results.every((r) => r.judgeSkipped);
+  console.log(
+    judgeSkipped
+      ? `judge pass:  skipped (--no-judge)`
+      : `judge pass:  ${judgePassCount}/${results.length} (advisory)`
+  );
   console.log(
     `first-event latency: p50 ${fmtMs(percentile(allFirst, 50))}  p95 ${fmtMs(percentile(allFirst, 95))}`
   );
@@ -370,6 +411,90 @@ function printReport(results) {
   );
 
   printTruncationReport(results);
+  printCostReport(results);
+}
+
+/**
+ * Gemini 3.6 Flash list rates, looked up 2026-08-30. Re-check before quoting.
+ * Cache STORAGE ($0.50/M tokens/hour) is deliberately not modelled: the eval
+ * harness shares one short-lived prefix cache across a whole run, so its
+ * storage cost rounds to zero next to the token bill.
+ */
+const RATE_IN_PER_M = 0.75;
+const RATE_CACHED_IN_PER_M = 0.075;
+const RATE_OUT_PER_M = 3.75;
+
+/**
+ * What a run cost, printed at the end of every run.
+ *
+ * This exists because a session on 2026-08-29/30 spent ~24M tokens — about 35%
+ * of the month's Gemini bill — without cost being mentioned once. A number
+ * nobody can see is a number nobody can manage.
+ *
+ * HONEST SCOPE, stated in the output rather than buried here: these are the
+ * ASSISTANT's tokens only. The persona caller (eval/simCaller.js) and the
+ * advisory judge (eval/judge.js) are separate clients whose usage never reaches
+ * runScenario's turn records, and together they are roughly the difference
+ * between ~1.2M and ~1.7M tokens on a full run. Reporting the assistant total
+ * as if it were the whole bill would be worse than reporting nothing.
+ *
+ * @param {Array<object>} results - runScenario() return values
+ */
+export function printCostReport(results) {
+  const c = summarizeCost(results);
+  console.log("\n=== COST (assistant tokens only — see note) ===");
+  if (!c.turnsWithUsage) {
+    console.log("no usage metadata on any turn — nothing to price.");
+    return;
+  }
+  console.log(`prompt tokens:      ${fmtTok(c.promptTokens)}  (of which cached: ${fmtTok(c.cachedTokens)}, ${pct(c.cachedTokens, c.promptTokens)})`);
+  console.log(`output tokens:      ${fmtTok(c.outputTokens)}`);
+  console.log(`estimated cost:     $${c.estimatedUsd.toFixed(3)}  (in $${RATE_IN_PER_M}/M, cached $${RATE_CACHED_IN_PER_M}/M, out $${RATE_OUT_PER_M}/M)`);
+  if (c.cachedTokens > 0) {
+    console.log(`cache saved:        $${c.savedUsd.toFixed(3)} vs the same run uncached`);
+  } else {
+    console.log("cache saved:        $0.000 — no cached tokens seen (GEMINI_EXPLICIT_CACHE off, or the cache is not engaging)");
+  }
+  console.log("NOTE: excludes the persona caller and the advisory judge, which are separate clients.");
+}
+
+/**
+ * Pool per-turn usage into run totals. Pure, so it can feed both the printed
+ * report and the persisted JSON payload.
+ *
+ * `cachedTokens` is a SUBSET of `promptTokens`, not an addition to it — Google
+ * reports the cached count inside the prompt count — so the uncached remainder
+ * is the difference, and double-counting it would overstate every bill.
+ *
+ * @param {Array<object>} results - runScenario() return values
+ */
+export function summarizeCost(results) {
+  const list = results || [];
+  let promptTokens = 0;
+  let cachedTokens = 0;
+  let outputTokens = 0;
+  let turnsWithUsage = 0;
+  for (const r of list) {
+    for (const t of r.turns || []) {
+      if (!t.usage) continue;
+      turnsWithUsage += 1;
+      promptTokens += t.usage.promptTokens || 0;
+      cachedTokens += t.usage.cachedTokens || 0;
+      outputTokens += t.usage.outputTokens || 0;
+    }
+  }
+  const freshPromptTokens = Math.max(0, promptTokens - cachedTokens);
+  const estimatedUsd =
+    (freshPromptTokens * RATE_IN_PER_M + cachedTokens * RATE_CACHED_IN_PER_M + outputTokens * RATE_OUT_PER_M) / 1e6;
+  const uncachedUsd = (promptTokens * RATE_IN_PER_M + outputTokens * RATE_OUT_PER_M) / 1e6;
+  return {
+    turnsWithUsage,
+    promptTokens,
+    cachedTokens,
+    outputTokens,
+    estimatedUsd,
+    savedUsd: uncachedUsd - estimatedUsd,
+  };
 }
 
 /**
@@ -595,7 +720,7 @@ async function runMatrixMode(scenarios, opts) {
 
     const startedAt = Date.now();
     const results = await runPool(scenarios, opts.concurrency, (scenario) =>
-      runScenario(scenario, { modelOverrides })
+      runScenario(scenario, { modelOverrides, noJudge: opts.noJudge })
     );
     const elapsedMs = Date.now() - startedAt;
     const summary = summarizeConfigResults(results);
@@ -724,7 +849,7 @@ async function main() {
 
   const startedAt = Date.now();
   const results = await runPool(scenarios, opts.concurrency, (scenario) =>
-    runScenario(scenario, { modelOverrides })
+    runScenario(scenario, { modelOverrides, noJudge: opts.noJudge })
   );
   const elapsedMs = Date.now() - startedAt;
 
@@ -740,6 +865,9 @@ async function main() {
     concurrency: opts.concurrency,
     elapsedMs,
     truncation: summarizeTruncation(results),
+    // Persisted as well as printed so a cache A/B can be priced from the saved
+    // runs afterwards, without re-running anything.
+    cost: summarizeCost(results),
     results,
   };
   const defaultPath = path.join(RESULTS_DIR, `${ts}.json`);

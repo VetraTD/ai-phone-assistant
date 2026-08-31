@@ -157,6 +157,36 @@ export function toolSucceeded(ctx, name) {
   return ok(pass, `toolSucceeded(${name})`, detail);
 }
 
+/**
+ * How many times this tool actually SUCCEEDED.
+ *
+ * Distinct from toolCalledTimes, which counts attempts. The two were the same
+ * number until 2026-08-29, when the spelling gate started refusing the first
+ * name-bearing write of a call and letting the model retry — so "book_appointment
+ * was called twice" became ordinary correct behaviour while "the caller was
+ * booked twice" stayed a serious bug. Scenarios that meant the second one were
+ * asserting the first.
+ *
+ * A refused call never reaches the pack, so nothing was written for it.
+ */
+export function toolSucceededTimes(ctx, name, times) {
+  const n = (ctx?.toolResults || []).filter((r) => r.name === name && r.success).length;
+  const attempts = (ctx?.toolResults || []).filter((r) => r.name === name).length;
+  return ok(
+    n === times,
+    `toolSucceededTimes(${name}, ${times})`,
+    `succeeded ${n}× (${attempts} attempt${attempts === 1 ? "" : "s"})`
+  );
+}
+
+/** At most `max` SUCCESSFUL runs. The at-most twin of toolSucceededTimes: a
+ * floor check where zero is a legitimate outcome (the caller bailed), and the
+ * only thing being forbidden is doing it twice. */
+export function toolSucceededAtMost(ctx, name, max) {
+  const n = (ctx?.toolResults || []).filter((r) => r.name === name && r.success).length;
+  return ok(n <= max, `toolSucceededAtMost(${name}, ${max})`, `succeeded ${n}×`);
+}
+
 export function replySomewhereMatches(ctx, regex) {
   const replies = collectReplies(ctx);
   const hit = replies.find((r) => regex.test(r));

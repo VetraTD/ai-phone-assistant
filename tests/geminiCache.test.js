@@ -1,4 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// The Vertex floor warning is a LOG LINE and nothing else — there is no counter
+// for "this backend will never cache anything" — so the log has to be the thing
+// under test.
+vi.mock("../lib/logger.js", () => ({
+  log: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
+  createRequestId: vi.fn(() => "req-1"),
+  recordTurnLatency: vi.fn(),
+}));
+import { log } from "../lib/logger.js";
+
 import {
   computeCacheKey,
   resolveCachedContent,
@@ -8,6 +19,8 @@ import {
   getCacheStats,
   _resetForTests,
 } from "../services/geminiCache.js";
+import { buildCacheSpec, warmPromptCache, getClient } from "../services/gemini.js";
+import { FIXTURES } from "./fixtures/businessConfigs.js";
 
 // ---------------------------------------------------------------------------
 // Explicit Gemini context caching.
@@ -353,5 +366,187 @@ describe("computeCacheKey — indifferent to the SDK's in-place schema rewrite",
 
     expect(s.client.caches.create).toHaveBeenCalledTimes(1);
     expect(getCacheStats().creates).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The TTL is an economic decision, not a tuning knob, so it is asserted.
+//
+// Reads bill at $0.075/M against $0.75/M for fresh input, but STORAGE bills at
+// $0.50 per million tokens per hour whether or not a call comes in. A ~4,200
+// token prefix on the old 1h TTL is ~$1.53/month/business and needs ~49
+// calls/month to break even — paid once per process on a multi-instance
+// deploy, since the registry is a per-process Map. At 900s it is ~$0.0005 per
+// call and breaks even at any volume. Nothing warns you if this silently goes
+// back up; the bill arrives a month later.
+// ---------------------------------------------------------------------------
+describe("cache lifetime", () => {
+  it("creates per-call caches (900s), not per-business ones", async () => {
+    const s = spec();
+    resolveCachedContent(s);
+    await flush();
+
+    expect(s.client.caches.create).toHaveBeenCalledTimes(1);
+    const { config } = s.client.caches.create.mock.calls[0][0];
+    expect(config.ttl).toBe("900s");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The warm path and the turn path must agree on the key, or warming is worse
+// than useless: it builds a cache no turn ever reads, pays storage for it, and
+// every turn still misses at full price — with nothing in the logs to say so.
+//
+// Asserted end-to-end (warm, then resolve exactly as a turn would) rather than
+// by comparing two hashes, because the failure mode is the two paths CONSTRUCTING
+// the prefix differently, which a hash comparison of one construction cannot see.
+// ---------------------------------------------------------------------------
+describe("warmPromptCache <-> turn path agreement", () => {
+  // Deliberately a fixture with NON-EMPTY knowledge and integrations. Those two
+  // are the fields that only arrive on state.contextPromise, so they are the
+  // ones a warm fired at the wrong moment would get wrong — a fixture whose
+  // extras are all empty cannot tell a correct warm from a premature one.
+  const base = FIXTURES["appointments-db"];
+  const fixture = {
+    config: base.config,
+    extras: {
+      ...base.extras,
+      knowledge: [{ question: "Do you take walk-ins?", answer: "Yes, before 3pm." }],
+    },
+  };
+  let client;
+  let createSpy;
+
+  beforeEach(() => {
+    process.env.GEMINI_EXPLICIT_CACHE = "true";
+    client = getClient();
+    createSpy = vi
+      .spyOn(client.caches, "create")
+      .mockResolvedValue({ name: "cachedContents/warm1", usageMetadata: { totalTokenCount: 4200 } });
+  });
+
+  afterEach(() => {
+    createSpy.mockRestore();
+    delete process.env.GEMINI_EXPLICIT_CACHE;
+  });
+
+  it("warms a cache the turn path then finds", async () => {
+    warmPromptCache(fixture.config, fixture.extras);
+    await flush();
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
+    // Exactly what getReplyStreaming does on the next turn.
+    const s = buildCacheSpec(fixture.config, fixture.extras);
+    const hit = resolveCachedContent({
+      client,
+      model: s.model,
+      markerMode: s.markerMode,
+      staticPrefix: s.staticPrefix,
+      toolsConfig: s.toolsConfig,
+      enabled: true,
+    });
+
+    expect(hit).not.toBeNull();
+    expect(hit.name).toBe("cachedContents/warm1");
+    // The turn must REUSE, never create a second cache for the same call.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("still agrees after the SDK rewrites the shared tool declarations in place", async () => {
+    // buildAllDeclarations returns module-level objects by reference, and the
+    // SDK upper-cases JSON-Schema `type` on them when a request is sent. This
+    // once produced a second, never-reused cache per process.
+    const first = buildCacheSpec(fixture.config, fixture.extras);
+    const upper = (v) => {
+      if (Array.isArray(v)) return v.forEach(upper);
+      if (v && typeof v === "object") {
+        for (const [k, val] of Object.entries(v)) {
+          if (k === "type" && typeof val === "string") v[k] = val.toUpperCase();
+          else upper(val);
+        }
+      }
+    };
+    upper(first.toolsConfig);
+
+    warmPromptCache(fixture.config, fixture.extras);
+    await flush();
+
+    const s = buildCacheSpec(fixture.config, fixture.extras);
+    const hit = resolveCachedContent({
+      client,
+      model: s.model,
+      markerMode: s.markerMode,
+      staticPrefix: s.staticPrefix,
+      toolsConfig: s.toolsConfig,
+      enabled: true,
+    });
+    expect(hit?.name).toBe("cachedContents/warm1");
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing at all when the flag is off", async () => {
+    delete process.env.GEMINI_EXPLICIT_CACHE;
+    warmPromptCache(fixture.config, fixture.extras);
+    await flush();
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it("never throws, whatever the config", () => {
+    expect(() => warmPromptCache(null, undefined)).not.toThrow();
+    expect(() => warmPromptCache(undefined, { explicitCache: true })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vertex has a FOUR TIMES higher floor than the AI Studio API, and not one
+// business shape in this repo clears it.
+//
+// Measured 2026-08-30 on gemini-3.6-flash at `global`: "The cached content is
+// of 3078 tokens. The minimum token count to start explicit caching is 4096."
+// countTokens over every fixture's real cache unit put the LARGEST shape at
+// 3,967 tokens — 129 short. So the same flag that saves ~19% of a call today
+// saves nothing at all after the GCP cutover, and the only native symptom of
+// that is a bill.
+//
+// The floor is read off the SDK client's own `vertexai` flag rather than an env
+// var, so the rule travels with the deployment instead of being something
+// somebody has to remember to set.
+// ---------------------------------------------------------------------------
+describe("backend-aware size floor", () => {
+  const vertexClient = (create) => ({ vertexai: true, caches: { create: create || vi.fn() } });
+
+  it("caches a real-sized prompt on the API-key backend", async () => {
+    const s = spec(); // PREFIX is ~8,000 chars — over the 6,000 AI Studio floor
+    resolveCachedContent(s);
+    await flush();
+    expect(s.client.caches.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not even attempt the same prompt on Vertex, where it would 400", async () => {
+    const client = vertexClient();
+    const hit = resolveCachedContent(spec({ client }));
+    await flush();
+    expect(hit).toBeNull();
+    expect(client.caches.create).not.toHaveBeenCalled();
+    expect(getCacheStats().skippedTooSmall).toBe(1);
+  });
+
+  it("still caches on Vertex once a prompt is genuinely big enough", async () => {
+    const client = vertexClient(
+      vi.fn(async () => ({ name: "cachedContents/v1", usageMetadata: { totalTokenCount: 6588 } }))
+    );
+    // ~24,000 chars, comfortably past the ~19,850 that 4,096 tokens costs.
+    resolveCachedContent(spec({ client, staticPrefix: "You are a receptionist. ".repeat(1000) }));
+    await flush();
+    expect(client.caches.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so loudly when Vertex is the reason nothing is being cached", async () => {
+    const client = vertexClient();
+    resolveCachedContent(spec({ client }));
+    expect(log.error).toHaveBeenCalledWith(
+      "gemini_cache_below_vertex_floor",
+      expect.objectContaining({ severity: "warn", floor: 19_000 })
+    );
   });
 });

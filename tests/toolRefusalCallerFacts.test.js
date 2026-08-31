@@ -53,7 +53,7 @@ describe("a refused write keeps the caller's name", () => {
     const config = configRequiringDob();
     const result = await executeToolCall(
       bookCall({ client_name: "Marcus Bell", scheduled_at: "2099-01-05T10:00:00" }),
-      { config, capabilityState: {}, callerPhone: "+15551234567" },
+      { config, capabilityState: {}, callerPhone: "+15551234567", spellingAlreadyAsked: true },
     );
 
     // The refusal itself must be unchanged.
@@ -71,7 +71,7 @@ describe("a refused write keeps the caller's name", () => {
       {
         config,
         capabilityState: { appointments: { callerFacts: { Name: "Marcus Bell" } } },
-        callerPhone: "+15551234567",
+        callerPhone: "+15551234567", spellingAlreadyAsked: true,
       },
     );
 
@@ -85,7 +85,7 @@ describe("a refused write keeps the caller's name", () => {
     const result = await executeToolCall(bookCall({ scheduled_at: "2099-01-05T10:00:00" }), {
       config,
       capabilityState: {},
-      callerPhone: "+15551234567",
+      callerPhone: "+15551234567", spellingAlreadyAsked: true,
     });
 
     expect(result.functionResponse.response.success).toBe(false);
@@ -112,10 +112,52 @@ describe("a refused write keeps the caller's name", () => {
 
     const result = await executeToolCall(
       { id: "call-2", name: "record_customer_request", args: { request_type: "message", caller_name: "Ilija Eftimov" } },
-      { config, capabilityState: {}, callerPhone: "+15551234567" },
+      { config, capabilityState: {}, callerPhone: "+15551234567", spellingAlreadyAsked: true },
     );
 
     expect(result.functionResponse.response.success).toBe(false);
     expect(result.stateEffects.capabilityState.messages.callerFacts.Name).toBe("Ilija Eftimov");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ...including the spelling refusal itself, added 2026-08-29.
+//
+// The gate that exists to get the name RIGHT is now the FIRST refusal a new
+// caller's booking hits, and a refusal discards fc.args. Without this it would
+// be the single biggest cause of the re-asking loop the rest of this file
+// guards against: refuse for spelling, lose the name, ask for the name again,
+// refuse for spelling again.
+// ---------------------------------------------------------------------------
+describe("the spelling refusal keeps the name too", () => {
+  it("records the name it is asking the caller to spell", async () => {
+    const config = configRequiringDob();
+    const result = await executeToolCall(
+      bookCall({ client_name: "Marcus Bell", scheduled_at: "2099-01-05T10:00:00" }),
+      { config, capabilityState: {}, callerPhone: "+15551234567", spellingAlreadyAsked: false },
+    );
+
+    expect(result.functionResponse.response.success).toBe(false);
+    expect(result.functionResponse.response.message).toMatch(/spell/i);
+    expect(result.stateEffects.capabilityState.appointments.callerFacts.Name).toBe("Marcus Bell");
+  });
+
+  it("does not clobber a name the pack already established", async () => {
+    const config = configRequiringDob();
+    const result = await executeToolCall(
+      bookCall({ client_name: "Mis Heard", scheduled_at: "2099-01-05T10:00:00" }),
+      {
+        config,
+        capabilityState: { appointments: { callerFacts: { Name: "Marcus Bell" } } },
+        callerPhone: "+15551234567",
+        spellingAlreadyAsked: false,
+      },
+    );
+    // The refusal DOES emit capabilityState now - it records that the gate has
+    // spent its one refusal, which is the phrasing-independent livelock
+    // backstop. What it must not do is overwrite the established name with a
+    // later, worse transcription.
+    expect(result.stateEffects.capabilityState.appointments.spellingRefused).toBe(true);
+    expect(result.stateEffects.capabilityState.appointments.callerFacts).toBeUndefined();
   });
 });

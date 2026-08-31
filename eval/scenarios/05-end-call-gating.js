@@ -37,7 +37,7 @@ export default {
     // end_call must not fire before the caller's final (scripted) turn.
     (ctx) => A.toolNotCalledBeforeTurn(ctx, "end_call", CALLER_TURNS.length - 1),
     // Never double-book (zero is fine — the caller bailed).
-    (ctx) => A.toolCalledAtMost(ctx, "book_appointment", 1),
+    (ctx) => A.toolSucceededAtMost(ctx, "book_appointment", 1),
   ],
   judge: [
     "Did the receptionist keep the call going and gather details rather than ending abruptly while the caller was still booking?",

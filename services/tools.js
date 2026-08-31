@@ -17,17 +17,25 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
-import { looksHardToSpell } from "../lib/nameQuality.js";
+import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 /**
- * Ask for a spelling before writing a hard-to-transcribe name into a record.
+ * Ask for a spelling before writing a name into a record.
  *
  * ON by default: the cost is one refused tool call per call at most (the gate
  * opens once the call's single spelling request is spent), and the thing it
  * protects is the row the business keeps. `false` turns it off without a
  * deploy if it proves more friction than it is worth.
+ *
+ * Since 2026-08-29 this is also the ONLY thing that can request a spelling.
+ * Three separate prompt sections used to ask as well, each with its own
+ * uncoordinated "at most once" caveat, and none of them counted — which is how
+ * a caller came to be asked to spell their name three times in one call. Prose
+ * cannot hold a budget; a counter can.
  */
 const CONFIRM_HARD_NAMES = process.env.VOICE_CONFIRM_HARD_NAMES !== "false";
+
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -188,7 +196,19 @@ export async function executeToolCall(fc, ctx) {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
           stateEffects: {
             endCallArgs,
-            toolResult: { name: fc.name, success: true, message: "Goodbye!", callerSafe: true },
+            // Spoken ONLY when the model ended the call without writing its
+            // own goodbye — see the zero-text fallback in services/gemini.js.
+            // It used to be a bare "Goodbye!", which is what a caller heard on
+            // 2026-08-30 after the post-end_call round was removed: that round
+            // was where a warm ending used to (sometimes) come from, and it was
+            // also where the DUPLICATE goodbye came from. Removing it was right;
+            // leaving the floor at one cold word was not.
+            toolResult: {
+              name: fc.name,
+              success: true,
+              message: getStrings(ctx?.config).signOff(ctx?.config?.businessName || "us"),
+              callerSafe: true,
+            },
             toolCallEvent: { name: fc.name, args: fc.args },
           },
         };
@@ -237,14 +257,41 @@ export async function executeToolCall(fc, ctx) {
           // a caller who declines to spell is never asked twice and the booking
           // still completes. Same fail-closed, one-reason-at-a-time shape as
           // checkRequirements below.
-          const hardName = CONFIRM_HARD_NAMES && !ctx?.spellingAlreadyAsked
-            ? callerNameFromArgs(fc.args)
-            : null;
-          if (hardName && looksHardToSpell(hardName)) {
+          const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
+          // Has this gate ALREADY refused on this call?
+          //
+          // A phrasing-independent backstop for the shared counter, which only
+          // closes once lib/voice/strings.js's spellRequestRe matches what the
+          // assistant said. That regex can be widened but never completed — the
+          // model can always ask in words nobody listed — and an unrecognised
+          // ask means refuse, ask, get an answer, refuse again. That is the
+          // livelock, and the gate now fires for every unknown name rather than
+          // only hard ones, so the exposure is much larger than it was.
+          //
+          // Recorded in the pack's own scratchpad, which the engine threads
+          // through the turn and the session persists across turns.
+          const alreadyRefused = !!ctx?.capabilityState?.[pack.id]?.spellingRefused;
+          if (
+            pendingName &&
+            !alreadyRefused &&
+            shouldConfirmSpelling({
+              name: pendingName,
+              callerContext: ctx?.callerContext,
+              spellingAlreadyAsked: ctx?.spellingAlreadyAsked,
+              policy: spellPolicy(),
+            })
+          ) {
             const message =
-              `[not caller speech] Before recording "${hardName}", confirm the spelling: ask the caller to ` +
+              `[not caller speech] Before recording "${pendingName}", confirm the spelling: ask the caller to ` +
               `spell it, read the letters back, then try again. Ask this only once — if they decline or ` +
               `just answer with something else, proceed with the name exactly as you heard it.`;
+            // Keep the name, exactly as the requirements refusal below does.
+            // A refusal throws fc.args away, and this one now fires for every
+            // caller whose name is not already on file — so without this the
+            // very gate meant to get the name RIGHT would be the one that made
+            // the model forget it and ask for it again. That is the re-asking
+            // loop this whole area exists to close.
+            const priorSpellFacts = ctx?.capabilityState?.[pack.id]?.callerFacts || {};
             return {
               functionResponse: {
                 id: fc.id,
@@ -254,6 +301,17 @@ export async function executeToolCall(fc, ctx) {
               stateEffects: {
                 toolResult: { name: fc.name, success: false, message },
                 toolCallEvent: { name: fc.name, args: fc.args },
+                capabilityState: {
+                  [pack.id]: {
+                    // The backstop above. Set unconditionally: this gate gets
+                    // exactly one refusal per pack per call, whatever the model
+                    // then says.
+                    spellingRefused: true,
+                    ...(priorSpellFacts.Name
+                      ? {}
+                      : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
+                  },
+                },
               },
             };
           }
@@ -489,6 +547,18 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
       log.error("tool_timeout", { tool: fc?.name, ms: timeoutMs, severity: "warn" });
       return failure("TIMEOUT");
     }
+    // PER-TOOL timing. `llm_tool_ms` is first-write-wins across a turn, so it
+    // describes only the first tool and never says WHICH tool was slow. The
+    // integrations already log this shape (athena_tool, webhook duration_ms);
+    // the Supabase-backed pack tools — including check_appointment_availability,
+    // which sits on the booking hot path and can make two round trips — emitted
+    // nothing at all. "It takes 4-5 seconds when a tool runs" needs a name
+    // attached to be actionable.
+    log.info("tool_duration", {
+      tool: fc?.name,
+      ms: Date.now() - startedAt,
+      success: result?.functionResponse?.response?.success !== false,
+    });
     return result;
   } catch (err) {
     // The vendor's own words stop here. They reach the log, never the model.

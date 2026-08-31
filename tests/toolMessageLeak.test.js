@@ -126,3 +126,59 @@ describe("zero-text turns never speak an unmarked tool message", () => {
     expect(spoken).toBe("I'm sorry, I wasn't able to do that.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The closing line, 2026-08-30.
+//
+// Removing the round after end_call killed a duplicated goodbye AND a wasted
+// model round-trip, both wanted. What it also killed was the place a warm
+// ending used to come from when the model wrote none itself — so a caller heard
+// a bare "Goodbye!" and nothing else. The floor is now a real sign-off.
+//
+// It must still be a FIXED string built from config, never model text, or it
+// becomes another way for something unspeakable to reach the caller.
+// ---------------------------------------------------------------------------
+describe("the end_call sign-off", () => {
+  const cfg = { businessName: "Brightwork Dental" };
+
+  it("thanks the caller and names the business", async () => {
+    const { executeToolCall } = await import("../services/tools.js");
+    const res = await executeToolCall(
+      { id: "e1", name: "end_call", args: { reason: "caller is done" } },
+      { config: cfg, callerTurnCount: 3 }
+    );
+    const msg = res.stateEffects.toolResult.message;
+    expect(res.stateEffects.toolResult.success).toBe(true);
+    expect(res.stateEffects.toolResult.callerSafe).toBe(true);
+    expect(msg).toContain("Brightwork Dental");
+    expect(msg).toMatch(/thank you for calling/i);
+    expect(msg).not.toBe("Goodbye!");
+  });
+
+  it("survives a business with no name configured", async () => {
+    const { executeToolCall } = await import("../services/tools.js");
+    const res = await executeToolCall(
+      { id: "e2", name: "end_call", args: { reason: "done" } },
+      { config: {}, callerTurnCount: 3 }
+    );
+    expect(res.stateEffects.toolResult.message).toMatch(/thank you for calling/i);
+  });
+
+  it("is still clean through the outbound guard", async () => {
+    // The floor line is spoken via the zero-text fallback, so it goes through
+    // toSpeakable like anything else. It must come out unchanged.
+    const { executeToolCall } = await import("../services/tools.js");
+    const { toSpeakable } = await import("../lib/voice/speakableText.js");
+    const res = await executeToolCall(
+      { id: "e3", name: "end_call", args: { reason: "done" } },
+      { config: cfg, callerTurnCount: 3 }
+    );
+    const spoken = toSpeakable(res.stateEffects.toolResult.message, {
+      toolNames: ["end_call", "book_appointment"],
+      toolParamNames: ["reason", "client_name"],
+      fallback: "Sorry, let me get someone to help with that.",
+    });
+    expect(spoken).toContain("Brightwork Dental");
+    expect(spoken).not.toMatch(/[{}]|reason\s*:|end_call/i);
+  });
+});
