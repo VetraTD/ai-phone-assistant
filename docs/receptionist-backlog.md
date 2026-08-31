@@ -86,7 +86,7 @@ five arguments recurring.
 | One full eval run | ~1.2M assistant tokens; **~1.7M all-in** with judge + persona caller | `eval/README.md` |
 | A 5-run band | ~8M tokens ≈ **$10** | same |
 | Implied rate | ~$1.15 per 1M tokens | owner's own bill |
-| Eval hard-gate noise band | **35–37 of 37**, five identical runs | 2026-08-23 |
+| Eval hard-gate noise band | **39–42 of 43**, mean 41.0, spread 3 — re-measured 2026-08-31 at the current 43 scenarios. **Supersedes the 35–37 of 37 figure, which was recorded when the suite had 37.** Seven scenarios carry it now, not three: `ai-offers-to-caller-with-appointment`, `rambling-elderly` and `reschedule-two-appointments` at 2/5, plus `cancel-identity`, `intent-switch-midcall`, `second-appointment-allow`, `third-party-privacy` at 1/5. Judge band 42–43, spread 1 | `scripts/eval-band.js --band`, five cache-OFF runs |
 | `npm run eval:compare` false-alarm rate | **85%** on unchanged code — do not use it as a gate | same |
 | Turn-taking hold trade | **~340ms added latency per barge-in removed** | live calls, 2026-08-27 |
 | July → August Gemini bill | $10 → $85, **1.7M → 47.4M** prompt tokens, ~28× | 2026-08-29 |
