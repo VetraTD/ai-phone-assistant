@@ -32,8 +32,21 @@ const H = vi.hoisted(() => {
     requestIdCounter: 0,
     // one entry per geminiService.warmPromptCache() call
     warmPromptCacheCalls: [],
+    // Canned verdict for the semantic end-of-turn arbiter. null = "no
+    // opinion", which is what the real one returns whenever it is late,
+    // errored, or switched off — i.e. the default every other test runs under.
+    arbiterVerdict: { complete: null },
   };
 });
+
+// ---- lib/voice/endpointArbiter.js ------------------------------------------
+// Only the model call is faked. semanticEndpointEnabled and ARBITRATED_RULES
+// stay REAL, because "is the flag off by default" and "which holds get asked
+// about" are exactly the properties these tests are here to check.
+vi.mock("../lib/voice/endpointArbiter.js", async (importActual) => ({
+  ...(await importActual()),
+  judgeTurnComplete: vi.fn(async () => H.arbiterVerdict),
+}));
 
 // ---- lib/voice/sttStream.js ------------------------------------------------
 vi.mock("../lib/voice/sttStream.js", () => ({
@@ -222,6 +235,12 @@ vi.mock("../services/notifications.js", () => ({
 
 vi.mock("../services/gemini.js", () => ({
   isBusinessOpen: vi.fn(() => true),
+  // Handed to the semantic end-of-turn arbiter as its injection seam. Present
+  // even though these tests stub the arbiter itself: Vitest THROWS on reading
+  // an export a mock does not define, and session.js reads this one while
+  // building the arbiter's deps — so omitting it turned the whole feature into
+  // a silently swallowed rejection.
+  getClient: vi.fn(() => ({ models: { generateContent: vi.fn() } })),
   // The live tool vocabulary the outbound leak guard matches against. Mirrors
   // the real export so the guard runs for real in these tests rather than
   // being silently skipped.
@@ -433,6 +452,7 @@ import * as geminiService from "../services/gemini.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
+import { judgeTurnComplete } from "../lib/voice/endpointArbiter.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
@@ -555,6 +575,7 @@ beforeEach(() => {
   H.holdRuleCalls.length = 0;
   H.fallbackFlowInstances.length = 0;
   H.warmPromptCacheCalls.length = 0;
+  H.arbiterVerdict = { complete: null };
   H.llmFactory = null;
   vi.clearAllMocks();
   process.env.ELEVENLABS_DEFAULT_VOICE_ID = "voice-xyz";
@@ -4691,5 +4712,103 @@ describe("session.js — the first turn's wait on call-start context", () => {
     expect(marks.filter((m) => m === "context_wait_end")).toHaveLength(1);
     // And it is bracketed before the STT marks it was previously hidden inside.
     expect(marks.indexOf("context_wait_end")).toBeLessThan(marks.indexOf("stt_final"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Semantic end-of-turn detection, wired but shipped OFF.
+//
+// The point of these is that "wired but disabled" is the state in which code
+// rots: VOICE_HOLD_TRAILING_MS sat written, tested and switched off in
+// production for two whole rounds before anyone noticed it was doing nothing.
+// So the wiring is asserted here even though no call runs it yet.
+// ---------------------------------------------------------------------------
+describe("session.js — the semantic end-of-turn arbiter", () => {
+  const ENV = "VOICE_SEMANTIC_ENDPOINT";
+  let prevEnv;
+
+  beforeEach(() => {
+    prevEnv = process.env[ENV];
+    // "I'd like to book." classifies as trailing_incomplete -> an 800ms hold,
+    // which is the window every assertion below is measured against.
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "Sure.", toolResults: [] } }]);
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env[ENV];
+    else process.env[ENV] = prevEnv;
+  });
+
+  async function callerSays(text) {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    runLlmTurn.mockClear();
+    H.turnManagerInstances[0].opts.onTurnEnd(text);
+    await flush();
+  }
+
+  it("asks nothing at all while the flag is off", async () => {
+    delete process.env[ENV];
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).not.toHaveBeenCalled();
+    // ...and the heuristic hold is untouched: still waiting at 120ms.
+    expect(runLlmTurn).not.toHaveBeenCalled();
+  });
+
+  it("releases the hold early when the model says the caller has finished", async () => {
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: true };
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    // Well inside the 800ms the heuristic would have waited.
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the hold alone when the model has no opinion", async () => {
+    // The fail-open path, which is every path the real arbiter takes when it
+    // is slow, erroring, or unparseable.
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: null };
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).toHaveBeenCalled();
+    expect(runLlmTurn).not.toHaveBeenCalled();
+    // The timer still owns the decision, and still makes it.
+    await new Promise((r) => setTimeout(r, 900));
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds past the heuristic deadline when the model says they are mid-sentence", async () => {
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: false };
+    await callerSays("I'd like to book.");
+
+    // The heuristic would have flushed at 800ms. This is the case a fixed hold
+    // provably cannot cover — a caller who pauses longer than the number.
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(runLlmTurn).not.toHaveBeenCalled();
+
+    // ...but the chain ceiling still ends it, so the call cannot hang.
+    await new Promise((r) => setTimeout(r, 2_600));
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask about a final the grammar already settles", async () => {
+    // A fluent caller's turn: terminal_punctuation, zero hold, nothing to
+    // arbitrate. This is what keeps the cost proportional to hesitation
+    // rather than to call length.
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: true };
+    await callerSays("Yes that works.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).not.toHaveBeenCalled();
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
   });
 });

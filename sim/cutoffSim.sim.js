@@ -38,6 +38,11 @@ import { describe, it, vi, beforeEach, afterEach, expect } from "vitest";
 const H = vi.hoisted(() => ({
   sttInstances: [],
   ttsTurns: [],
+  /**
+   * Canned verdict for the semantic end-of-turn arbiter. null = "no opinion",
+   * which is the fail-open path every number in this file is measured under.
+   */
+  semanticVerdict: { complete: null },
   /** Modelled first-chunk latencies, overridden per scenario. */
   llmTtfbMs: 940,
   ttsTtfbMs: 95,
@@ -155,6 +160,24 @@ vi.mock("../lib/voice/audioOut.js", async (importActual) => {
 // WHY a decision went the way it did instead of only that it did. A row that
 // says "no cut" is ambiguous on its own: it could mean the gates worked, or
 // that the assistant was not speaking and there was nothing to cut.
+// The semantic end-of-turn arbiter never reaches a network from here.
+//
+// It is OFF by default (VOICE_SEMANTIC_ENDPOINT), so today this changes
+// nothing — but session.js is driven for real by this file, and the day
+// someone runs the simulator with the flag on to see what it does, the
+// unmocked version would make a live Gemini call per hesitant turn. That is
+// billed money leaking out of a harness whose whole value is being free and
+// deterministic, and it would be discovered on an invoice.
+//
+// Returns "no opinion", which is the fail-open path the heuristic numbers in
+// this file are measured under. Set H.semanticVerdict to exercise the other
+// two branches; the wiring itself is asserted in tests/session.test.js, where
+// a stubbed verdict proves something rather than assuming it.
+vi.mock("../lib/voice/endpointArbiter.js", async (importActual) => ({
+  ...(await importActual()),
+  judgeTurnComplete: async () => H.semanticVerdict ?? { complete: null },
+}));
+
 vi.mock("../lib/voice/turnManager.js", async (importActual) => {
   const actual = await importActual();
   return {
