@@ -52,7 +52,7 @@ const baseCtx = {
   // the first name-bearing write of a call for ANY name it has not seen before
   // (VOICE_SPELL_POLICY=always), so without this every one of them would be
   // asserting the spelling refusal instead. The gate has its own tests below.
-  spellingAlreadyAsked: true,
+  spellingSettled: true,
 };
 
 // Minimal stand-in for CAPABILITY_DEPS, for the few tests that need to observe
@@ -1530,7 +1530,7 @@ const HOURS_MON_FRI = {
 };
 
 describe("services/tools.js — the spelling gate", () => {
-  const fresh = { ...baseCtx, spellingAlreadyAsked: false };
+  const fresh = { ...baseCtx, spellingSettled: false };
   const bookFc = {
     id: "sp1",
     name: "book_appointment",
@@ -1612,7 +1612,7 @@ describe("services/tools.js — the spelling gate", () => {
 //
 // So the gate also records, in code, that it has already refused.
 // ---------------------------------------------------------------------------
-describe("services/tools.js — the spelling gate refuses at most once per pack", () => {
+describe("services/tools.js — the spelling gate blocks until answered, then lets go", () => {
   const bookFc = {
     id: "sp2",
     name: "book_appointment",
@@ -1623,31 +1623,64 @@ describe("services/tools.js — the spelling gate refuses at most once per pack"
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T15:00:00Z"));
+    // Cleared, not just re-stubbed: these tests assert the write did NOT
+    // happen, and a call left over from an earlier test in this file reads
+    // exactly like the gate having failed open.
+    mockCreateAppointment.mockClear();
     mockCreateAppointment.mockResolvedValue("appt-1");
   });
   afterEach(() => vi.useRealTimers());
 
-  it("records that it asked, so a second attempt proceeds even if the counter never saw the ask", async () => {
+  // The defect this replaced: the gate used to allow itself exactly ONE
+  // refusal per pack per call, so the second attempt went through whatever the
+  // caller had said. A caller who was asked to spell their name and simply
+  // talked past the question got their mis-heard name written down, and the
+  // call could not tell that apart from a caller who had spelled it perfectly.
+  it("refuses a SECOND time when the caller still has not spelled anything", async () => {
     const first = await executeToolCall(bookFc, {
       ...baseCtx,
       config: cfg,
-      spellingAlreadyAsked: false,
+      spellingSettled: false,
     });
     expect(first.functionResponse.response.success).toBe(false);
 
-    // The state the engine threads back into the next round/turn. Note
-    // spellingAlreadyAsked is still FALSE — the model phrased its request in a
-    // way spellRequestRe does not recognise, which is the whole point.
+    // The state the engine threads back into the next round/turn.
+    // spellingSettled is still FALSE: nothing about the caller's side of the
+    // conversation has changed, so neither should the gate's answer.
     const carried = first.stateEffects.capabilityState;
-    expect(carried).toBeTruthy();
+    expect(carried.appointments.spellingGateRefusals).toBe(1);
 
     const second = await executeToolCall(bookFc, {
       ...baseCtx,
       config: cfg,
-      spellingAlreadyAsked: false,
+      spellingSettled: false,
       capabilityState: carried,
     });
-    expect(second.functionResponse.response.success).toBe(true);
+    expect(second.functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  // ...and the other half, which is what keeps the hard block from trapping a
+  // call. A caller who cannot or will not spell must still be able to book.
+  it("lets the write through once it has run out of refusals", async () => {
+    const spent = { appointments: { spellingGateRefusals: 2 } };
+    const result = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingSettled: false,
+      capabilityState: spent,
+    });
+    expect(result.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("lets the write through the moment the caller HAS settled it, without spending a refusal", async () => {
+    const result = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingSettled: true,
+    });
+    expect(result.functionResponse.response.success).toBe(true);
     expect(mockCreateAppointment).toHaveBeenCalled();
   });
 });

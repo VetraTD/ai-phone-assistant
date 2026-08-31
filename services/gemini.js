@@ -1115,20 +1115,28 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     sections.push(factsSection);
   }
 
-  // The spelling cap, stated as an accomplished fact rather than as a rule.
+  // The spelling state, stated as an accomplished fact rather than as a rule.
   //
   // The prompt already carries "ask this at most once" and the model still
   // asked nine turns running, because a rule about the past is something it
   // has to remember, while a fact in the tail is something it can read. The
-  // counter lives in lib/voice/session.js; this only reports it.
+  // state lives in lib/voice/replyState.js; this only reports it.
+  //
+  // The flag changed meaning on 2026-08-31, and the block below changed with
+  // it. It used to close on "we have asked", which is why a caller who ignored
+  // the question got their mis-heard name written down: the assistant read
+  // ALREADY ASKED, believed the matter settled, and moved on with a spelling
+  // nobody had ever given it. It now closes on "the caller answered, declined,
+  // or used up their attempts".
   //
   // Emits nothing when false, which is what keeps every existing tail snapshot
   // byte-identical — the same empty-case contract as KNOWN CALLER FACTS.
-  if (extras?.spellingAlreadyAsked) {
+  if (extras?.spellingSettled) {
     sections.push(
-      `=== ALREADY ASKED ===\n` +
-        `You have already asked this caller to spell something on this call. Do not ask again, ` +
-        `for any name or detail, for the rest of the call — use what you have and move on.`,
+      `=== SPELLING SETTLED ===\n` +
+        `The spelling question is closed for this call — the caller has either spelled it, declined ` +
+        `to, or been asked as often as this call allows. Do not ask again, for any name or detail, ` +
+        `for the rest of the call — use what you have and move on.`,
     );
   } else if (
     step === "gather_details" &&
@@ -1156,11 +1164,13 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     // 2026-08-29 precisely because prose cannot hold a budget.
     sections.push(
       `=== SPELLING NOT YET CONFIRMED ===\n` +
-        `You have not yet confirmed a spelling on this call. When the caller gives you a name you ` +
-        `are going to write down, ask them once — right then, while you are still taking details — ` +
-        `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
-        `booking. If they decline or answer with something else, accept the name as you heard it ` +
-        `and carry on.`,
+        `The caller has not spelled a name on this call yet. When they give you a name you are ` +
+        `going to write down, ask them — right then, while you are still taking details — to spell ` +
+        `it, and read the letters back. Do not leave it until you are confirming or booking. You ` +
+        `cannot record a name until they have spelled it or told you not to bother, so getting this ` +
+        `now is what stops you having to interrupt the booking later. If they decline, tell you it ` +
+        `is spelled how it sounds, or ignore the question twice, accept the name as you heard it ` +
+        `and carry on — do not keep pressing.`,
     );
   }
 
@@ -1976,9 +1986,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Call-scoped counterparts, both read only by end_call's gate.
         completedActionThisCall: !!extras?.completedActionThisCall || completedActionThisTurn,
         callerTurnCount: Number(extras?.callerTurnCount) || 0,
-        // Has this call already spent its one spelling request? Read by the
-        // hard-name gate in services/tools.js, which must never ask twice.
-        spellingAlreadyAsked: !!extras?.spellingAlreadyAsked,
+        // Is the spelling question closed for this call — answered, declined,
+        // or out of attempts? Read by the hard-name gate in services/tools.js,
+        // which blocks the write until one of those is true.
+        spellingSettled: !!extras?.spellingSettled,
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,

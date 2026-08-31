@@ -11,6 +11,15 @@
  * something it has to remember. A line in the dynamic tail is something it
  * reads fresh every turn. Anything that must hold across a long call belongs
  * in the second category.
+ *
+ * 2026-08-31: the cap was only ever half the problem. Counting the ASSISTANT's
+ * questions stopped the nine-turn interrogation, but it also meant the gate
+ * opened on having asked rather than on having been answered — so the opposite
+ * failure was still live, and quieter: a caller who ignored the question got
+ * their mis-heard name written to the database and nothing in the call could
+ * tell. What the call now tracks is in lib/spellingSignal.js and the
+ * lifecycle assertions in tests/spellingSignal.test.js; what stayed here is
+ * the ceiling, which is now a backstop rather than the policy.
  */
 
 import { describe, it, expect } from "vitest";
@@ -62,19 +71,29 @@ describe("spellRequestRe — recognising the assistant's own spelling request", 
   });
 });
 
-describe("dynamic tail — the ALREADY ASKED block", () => {
-  it("emits nothing at all before a spelling request has been spent", () => {
+describe("dynamic tail — the SPELLING SETTLED block", () => {
+  it("emits nothing at all while the spelling question is still open", () => {
     // Load-bearing: every existing tail snapshot is recorded without this
     // flag, so a non-empty default would move all of them.
-    expect(tail({})).not.toMatch(/ALREADY ASKED/);
-    expect(tail({ spellingAlreadyAsked: false })).not.toMatch(/ALREADY ASKED/);
+    expect(tail({})).not.toMatch(/SPELLING SETTLED/);
+    expect(tail({ spellingSettled: false })).not.toMatch(/SPELLING SETTLED/);
   });
 
-  it("states the cap as a fact once it has been spent", () => {
-    const out = tail({ spellingAlreadyAsked: true });
-    expect(out).toMatch(/ALREADY ASKED/);
-    expect(out).toMatch(/already asked this caller to spell/i);
+  it("states the closure as a fact once the question is settled", () => {
+    const out = tail({ spellingSettled: true });
+    expect(out).toMatch(/SPELLING SETTLED/);
+    expect(out).toMatch(/spelling question is closed/i);
     expect(out).toMatch(/do not ask again/i);
+  });
+
+  // The distinction the whole change turns on. The open block must ask for a
+  // spelling AND say the write is blocked without one, because a model that
+  // reads "ask them once, and carry on if they don't answer" will do exactly
+  // that and hand the gate a name nobody confirmed.
+  it("tells the model the write is blocked, not merely that asking is polite", () => {
+    const out = tail({ spellingSettled: false });
+    expect(out).toMatch(/SPELLING NOT YET CONFIRMED/);
+    expect(out).toMatch(/cannot record a name until they have spelled it/i);
   });
 });
 
@@ -94,7 +113,11 @@ describe("applyReplyState — the counter both drivers share", () => {
     expect(hasSpentSpellingAsk(state)).toBe(false);
     say(state, "Could you spell that for me?");
     expect(state.spellAsks).toBe(1);
-    expect(hasSpentSpellingAsk(state)).toBe(true);
+    // One ask no longer spends the call's allowance. It used to, and that is
+    // precisely how a caller who ignored the question ended up with a
+    // mis-spelled record: the flag latched on OUR question rather than THEIR
+    // answer. The ceiling is now a backstop at 3, not the policy.
+    expect(hasSpentSpellingAsk(state)).toBe(false);
   });
 
   it("does not count ordinary replies", () => {
@@ -109,7 +132,11 @@ describe("applyReplyState — the counter both drivers share", () => {
     const state = freshState();
     say(state, "Could you spell that for me?");
     say(state, "Sorry, could you spell your last name?");
-    expect(state.spellAsks).toBe(2);
+    say(state, "One more time — how do you spell it?");
+    expect(state.spellAsks).toBe(3);
+    expect(hasSpentSpellingAsk(state)).toBe(true);
+    say(state, "And could you spell that for me?");
+    expect(state.spellAsks).toBe(4);
     expect(hasSpentSpellingAsk(state)).toBe(true);
   });
 
@@ -123,7 +150,7 @@ describe("applyReplyState — the counter both drivers share", () => {
     expect(state.spellAsks).toBeUndefined();
   });
 
-  it("exposes a cap of 1 by default", () => {
-    expect(spellAskCap()).toBe(1);
+  it("exposes a hard ask ceiling of 3 by default", () => {
+    expect(spellAskCap()).toBe(3);
   });
 });

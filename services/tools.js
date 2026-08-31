@@ -16,6 +16,7 @@ import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
 
 /**
@@ -259,39 +260,49 @@ export async function executeToolCall(fc, ctx) {
           // the two sound nearly identical. Only letters catch a letter error,
           // and the business keeps that row.
           //
-          // Refused once, not looped: the gate opens as soon as the call has
-          // spent its spelling request (counted in lib/voice/replyState.js), so
-          // a caller who declines to spell is never asked twice and the booking
-          // still completes. Same fail-closed, one-reason-at-a-time shape as
-          // checkRequirements below.
+          // Blocked until answered, not until asked. Until 2026-08-31 this gate
+          // opened the moment the call had SPOKEN a spelling request, so a
+          // caller who was asked and simply carried on talking had their
+          // mis-heard name written anyway — the reported defect. It now stays
+          // shut until lib/voice/replyState.js sees letters, a refusal, or the
+          // agreed number of unanswered attempts. Same fail-closed,
+          // one-reason-at-a-time shape as checkRequirements below.
           const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
-          // Has this gate ALREADY refused on this call?
+          // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
-          // closes once lib/voice/strings.js's spellRequestRe matches what the
+          // moves once lib/voice/strings.js's spellRequestRe matches what the
           // assistant said. That regex can be widened but never completed — the
           // model can always ask in words nobody listed — and an unrecognised
           // ask means refuse, ask, get an answer, refuse again. That is the
-          // livelock, and the gate now fires for every unknown name rather than
-          // only hard ones, so the exposure is much larger than it was.
+          // livelock, and the gate fires for every unknown name rather than
+          // only hard ones, so the exposure is large.
+          //
+          // A COUNTER, not the boolean it replaced. The boolean gave the gate
+          // exactly one refusal per pack per call, which is what made "asked
+          // once" and "answered" indistinguishable: the second attempt always
+          // went through regardless of what the caller had said. The ceiling is
+          // the same escape hatch the reducer's miss cap provides, expressed
+          // where it survives a detector that never fires at all.
           //
           // Recorded in the pack's own scratchpad, which the engine threads
           // through the turn and the session persists across turns.
-          const alreadyRefused = !!ctx?.capabilityState?.[pack.id]?.spellingRefused;
+          const gateRefusals = Number(ctx?.capabilityState?.[pack.id]?.spellingGateRefusals) || 0;
           if (
             pendingName &&
-            !alreadyRefused &&
+            gateRefusals < spellMissCap() &&
             shouldConfirmSpelling({
               name: pendingName,
               callerContext: ctx?.callerContext,
-              spellingAlreadyAsked: ctx?.spellingAlreadyAsked,
+              spellingSettled: ctx?.spellingSettled,
               policy: spellPolicy(),
             })
           ) {
             const message =
-              `[not caller speech] Before recording "${pendingName}", confirm the spelling: ask the caller to ` +
-              `spell it, read the letters back, then try again. Ask this only once — if they decline or ` +
-              `just answer with something else, proceed with the name exactly as you heard it.`;
+              `[not caller speech] Before recording "${pendingName}", get the spelling: ask the caller to ` +
+              `spell it, read the letters back, then try again. This is required — do not record the name ` +
+              `until they have spelled it. If they decline, say it is spelled how it sounds, or ask you to ` +
+              `move on, accept that and try again immediately with the name exactly as you heard it.`;
             // Keep the name, exactly as the requirements refusal below does.
             // A refusal throws fc.args away, and this one now fires for every
             // caller whose name is not already on file — so without this the
@@ -310,10 +321,10 @@ export async function executeToolCall(fc, ctx) {
                 toolCallEvent: { name: fc.name, args: fc.args },
                 capabilityState: {
                   [pack.id]: {
-                    // The backstop above. Set unconditionally: this gate gets
-                    // exactly one refusal per pack per call, whatever the model
-                    // then says.
-                    spellingRefused: true,
+                    // The backstop above. Counted unconditionally, so a
+                    // detector that never recognises this caller's phrasing
+                    // still runs out of refusals rather than looping forever.
+                    spellingGateRefusals: gateRefusals + 1,
                     ...(priorSpellFacts.Name
                       ? {}
                       : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
