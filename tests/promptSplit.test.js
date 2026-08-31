@@ -517,3 +517,55 @@ describe("gemini.js — the existing-appointment rule is intent-independent", ()
     expect(prefix).not.toContain("Boris Johnson");
   });
 });
+
+// ---------------------------------------------------------------------------
+// When the spelling disagrees with what was heard, the LETTERS win.
+//
+// From a real call, 2026-08-31, Brightwork staging:
+//
+//   [caller] "My name is Nitza Dodla. N I t h I n d o d l a"
+//   [ai]     "Thanks, Nitza Dodla. I have you down for..."
+//
+// Deepgram misheard the spoken name and transcribed the spelling CORRECTLY —
+// N-I-T-H-I-N is "Nithin". Both were in the same utterance. The assistant asked
+// for the spelling, received it, read a name back, and booked the appointment
+// under the misheard spoken form anyway.
+//
+// So the spell policy was working; the gap was that nothing said which source
+// wins when they conflict. Asking someone to spell their name and then ignoring
+// the letters is worse than not asking: it spends a turn and produces false
+// confidence in a wrong record.
+// ---------------------------------------------------------------------------
+describe("spelling guidance — the letters are authoritative", () => {
+  // callerContext is DROPPED, not merged: the shared `extras` fixture describes
+  // a returning caller whose name the business already has, and the section is
+  // deliberately suppressed for them (asking a regular to spell a name you
+  // already hold right is the repetition this round removed). The rule under
+  // test only renders for a caller with no name on file.
+  const spellCtx = { ...extras, callerContext: null, spellingAlreadyAsked: false };
+
+  it("tells the model the spelling wins over what it heard", () => {
+    const tail = buildDynamicTail("gather_details", "book_appointment", config, spellCtx);
+    expect(tail).toContain("=== SPELLING NOT YET CONFIRMED ===");
+    expect(tail).toMatch(/THE LETTERS WIN/);
+    expect(tail).toMatch(/spelling is right and what you heard is wrong/i);
+    expect(tail).toMatch(/[Bb]uild the name from the letters/);
+  });
+
+  it("still says to read the reconstructed name back, not just accept it silently", () => {
+    const tail = buildDynamicTail("gather_details", "book_appointment", config, spellCtx);
+    expect(tail).toMatch(/read THAT back/);
+  });
+
+  it("says nothing about spelling once the call has already asked", () => {
+    // The cap is a fact about this call, not a rule to re-state — see the
+    // section it replaces. If the guidance leaked into the already-asked
+    // branch, every call would keep re-asking.
+    const tail = buildDynamicTail("gather_details", "book_appointment", config, {
+      ...spellCtx,
+      spellingAlreadyAsked: true,
+    });
+    expect(tail).not.toContain("=== SPELLING NOT YET CONFIRMED ===");
+    expect(tail).not.toMatch(/THE LETTERS WIN/);
+  });
+});
