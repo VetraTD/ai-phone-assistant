@@ -770,6 +770,21 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // === TOOL CONTRACT ===
   let toolContract = `=== TOOL CONTRACT ===\n`;
   toolContract += `You have access to tools (function calls). Follow these rules strictly:\n`;
+  // Placed HERE, unconditionally, and it started life in the wrong place.
+  //
+  // It was first written into the SPELLING NOT YET CONFIRMED block in the
+  // dynamic tail, which is gated on `!callerHasNameOnFile(callerContext)` — so
+  // for a RETURNING caller it never rendered. Measured on a live staging call
+  // 2026-08-31: the caller had prior appointments on file, the assistant asked
+  // for a spelling anyway (that ask comes from the tool requirement in
+  // services/tools.js, a different path), received "n I t h I n", and still
+  // wrote down "Nathan".
+  //
+  // The distinction the gate is drawing is about WHETHER TO ASK — a per-call
+  // budget, correctly suppressed for someone whose name you already hold. This
+  // is about HOW TO READ an answer you already have, which is true whenever a
+  // spelling arrives and has nothing to do with who is calling.
+  toolContract += `- When a caller spells a name, THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling is right and what you heard is wrong: rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. Speech recognition mishears spoken names constantly and does not mishear letters the same way, which is the whole reason a spelling is worth having.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   if (appointmentsEnabled) {
     toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
@@ -1145,11 +1160,7 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         `are going to write down, ask them once — right then, while you are still taking details — ` +
         `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
         `booking. If they decline or answer with something else, accept the name as you heard it ` +
-        `and carry on.\n` +
-        `THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling ` +
-        `is right and what you heard is wrong. Build the name from the letters, then read THAT ` +
-        `back. Speech recognition mishears names constantly and never mishears letters the same ` +
-        `way, which is the entire reason you are asking.`,
+        `and carry on.`,
     );
   }
 
