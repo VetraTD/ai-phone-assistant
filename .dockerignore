@@ -34,6 +34,11 @@ scripts
 !scripts/c8-rls-proof.js
 !scripts/c7-restore-parity.js
 !scripts/import-tenant.js
+# P25's fix. Migration 040 shipped in the image and the script that uses it did
+# not, so an imported tenant still had no dashboard user and no DSR path -- the
+# finding was recorded as closed while remaining true in the only place it
+# could be run.
+!scripts/attach-tenant-user.js
 docs
 latency-runs
 infra

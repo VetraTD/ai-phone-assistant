@@ -90,6 +90,7 @@ COPY scripts/c7-restore-parity.js ./scripts/c7-restore-parity.js
 # Lane U. One-tenant CONFIG import — the D3 rehearsal, and the tool D3 itself
 # needs. Config only: it refuses a payload naming any PHI table.
 COPY scripts/import-tenant.js ./scripts/import-tenant.js
+COPY scripts/attach-tenant-user.js ./scripts/attach-tenant-user.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:
