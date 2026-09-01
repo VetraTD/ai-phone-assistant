@@ -542,10 +542,10 @@ function bookingGuidance(config, now, canCheck) {
       `2. If the caller has named a DAY but no time, call check_appointment_availability with just the date (no hour). It returns the open times for that day: offer them and ask which one suits. NEVER pick an hour the caller did not say, and never read a time you chose back to them as though they had chosen it.\n` +
       `3. Only if they have named neither a day nor a time, ask whether they prefer mornings or afternoons (business hours: ${businessHoursStr}), and — as a SEPARATE question — whether any days don't work for them.\n` +
       `4. If a check comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
-      `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away.\n` +
+      `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away. That time is now settled: do NOT call check_appointment_availability again for it while you collect details. You already have the answer, and re-asking makes the caller wait while you check something you have just checked.\n` +
       `6. If there is anything else you are REQUIRED to collect, ask for it one item per turn. If nothing else is required, go straight to the read-back — do not invent extra questions such as asking for a phone number you were not told to collect.\n` +
       `7. Read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
-      `8. Do NOT call book_appointment until the caller clearly confirms. The system re-checks availability at booking time; if it reports the slot is full, call check_appointment_availability again and offer another time.`
+      `8. Do NOT call book_appointment until the caller clearly confirms. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
     );
   }
 
@@ -1434,11 +1434,16 @@ async function checkAvailabilityTool(fc, ctx) {
   const avail = availabilitySettings(capabilityConfig(config, "appointments"));
   const adapter = schedulingAdapter(config, ctx.integrations);
 
-  const respond = (response) => ({
+  const respond = (response, { silent = false, capabilityState = null } = {}) => ({
     functionResponse: { id: fc.id, name: fc.name, response },
     stateEffects: {
       toolResult: { name: fc.name, success: true, message: response.message },
-      toolCallEvent: { name: fc.name, args: fc.args || {} },
+      // `silent` means this answer cost no backend work, so the voice session
+      // must not put a hold line in front of it — "One sec, checking the
+      // calendar" ahead of a verdict we already had is a claim about work that
+      // is not happening. See lib/voice/session.js's toolCall branch.
+      toolCallEvent: { name: fc.name, args: fc.args || {}, ...(silent ? { silent: true } : {}) },
+      ...(capabilityState ? { capabilityState } : {}),
     },
   });
 
@@ -1506,6 +1511,27 @@ async function checkAvailabilityTool(fc, ctx) {
   // rules, not here.
   const otherNote = own.length > 0 ? ` This caller already has an upcoming appointment: ${spokenOwn(own)}.` : "";
 
+  // ALREADY ANSWERED, this call, for this exact slot.
+  //
+  // A caller reported hearing "Checking the calendar now." on the turn after
+  // they gave their name — the model was re-checking a slot it had already
+  // agreed with them. The prompt now says not to (see the booking guidance
+  // above), but a prompt rule is a request, not a guarantee: the same lesson
+  // the spelling caps taught. This is the half that holds.
+  //
+  // Narrow on purpose — the SAME point check, same call, and only a verdict of
+  // "available". A day query is a different question with a different answer
+  // shape, and a "taken" verdict is the one that genuinely can change while the
+  // caller is still on the line, so neither is cached.
+  //
+  // Not a correctness risk: book_appointment re-checks with the adapter
+  // immediately before the write, and createAppointmentIfAvailable is atomic on
+  // top of that. This removes a redundant question, not a guard.
+  const priorVerdict = scratch(ctx).availableSlot;
+  if (priorVerdict?.slot === startISO && priorVerdict.message) {
+    return respond({ success: true, available: true, message: priorVerdict.message }, { silent: true });
+  }
+
   let available = true;
   if (typeof adapter.checkAvailability === "function") {
     try {
@@ -1521,7 +1547,11 @@ async function checkAvailabilityTool(fc, ctx) {
   }
 
   if (available) {
-    return respond({ success: true, available: true, message: `That time is available.${otherNote}` });
+    const message = `That time is available.${otherNote}`;
+    return respond(
+      { success: true, available: true, message },
+      { capabilityState: { appointments: { availableSlot: { slot: startISO, message } } } },
+    );
   }
 
   let alternatives = [];
