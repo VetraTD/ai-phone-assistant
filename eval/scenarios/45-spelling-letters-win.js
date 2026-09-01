@@ -26,7 +26,24 @@ const SLOT = nextWeekdayAt("tue", "09:00", { timezone: TZ });
 export default {
   name: "spelling-letters-win",
   tags: ["regression", "booking"],
-  fixture: "appointments-availability",
+  // appointments-db, NOT appointments-availability.
+  //
+  // The availability fixture configures require.identity = ["name","dob"], so
+  // the first run of this scenario never reached book_appointment at all: the
+  // receptionist kept asking for a date of birth the scripted caller has no
+  // turn for, and the assertions failed for a reason that has nothing to do
+  // with spelling. A scenario whose subject is the spelling gate must not be
+  // gated on something else first.
+  //
+  // KNOWN FLAKY, and not yet fit to gate a merge. Four runs on this fixture
+  // booked twice. In BOTH runs that reached a booking the name was rebuilt
+  // from the letters and "Nathan" never appeared — so the behaviour under test
+  // is right — but a scripted caller cannot adapt when the receptionist asks
+  // something the script has no turn for, and the call then ends without
+  // booking. Report this as a rate, never as a verdict from one run:
+  // temperature 0 is not deterministic for WHETHER Gemini emits a function
+  // call, which this repo has been bitten by before.
+  fixture: "appointments-db",
   caller: {
     mode: "scripted",
     turns: [

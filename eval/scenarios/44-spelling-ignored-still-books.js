@@ -38,7 +38,15 @@ const SPELL_REQUEST = getStrings("en").spellRequestRe;
 export default {
   name: "spelling-ignored-still-books",
   tags: ["regression", "booking"],
-  fixture: "appointments-availability",
+  // appointments-db, NOT appointments-availability.
+  //
+  // The availability fixture configures require.identity = ["name","dob"], so
+  // the first run of this scenario never reached book_appointment at all: the
+  // receptionist kept asking for a date of birth the scripted caller has no
+  // turn for, and the assertions failed for a reason that has nothing to do
+  // with spelling. A scenario whose subject is the spelling gate must not be
+  // gated on something else first.
+  fixture: "appointments-db",
   caller: {
     mode: "scripted",
     turns: [
