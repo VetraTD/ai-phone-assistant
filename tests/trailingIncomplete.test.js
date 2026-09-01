@@ -133,33 +133,54 @@ describe("classifyHold — trailing incomplete", () => {
     }
   });
 
-  // NOT A PASS. Documenting a PRE-EXISTING defect found while fixing the one
-  // above, in an older and stronger rule.
+  // FIXED 2026-09-01. Was recorded here the day before as a PRE-EXISTING
+  // defect, deliberately left alone; the owner asked for it once it was
+  // explained, so it now has the matched pair it was owed.
   //
   // "No, that's all I need." is one of the most common ways a caller signals
-  // the call is over, and TRAILING_LEAD_IN matches its trailing "i need" — so
-  // it takes a 2000ms hold, more than twice what the verb list would have
-  // charged, and it lands immediately before the goodbye. The lead-in list was
-  // built for "my name is…" / "I need…" as OPENINGS, where the caller really
-  // is about to say more; it cannot tell that from the same words closing a
-  // sentence.
+  // the call is over, and TRAILING_LEAD_IN matched its trailing "i need" — a
+  // 2000ms hold, twice what the verb list charges, landing immediately before
+  // the goodbye, and independent of every flag so it was live on production
+  // the whole time. Two seconds of silence on a phone reads as the line having
+  // dropped, and it was the last thing the caller experienced.
   //
-  // Left alone deliberately: it predates this branch, it is not what the round
-  // was asked to fix, and changing a 2000ms rule deserves its own matched pair
-  // in the simulator rather than being folded into someone else's change. This
-  // assertion exists so the behaviour is recorded rather than assumed, and so
-  // the day it is fixed this test fails and points at the reason.
-  it("PRE-EXISTING: a caller signing off on 'I need' / 'I want' waits 2s on the lead-in rule", async () => {
+  // The lead-in list was built for "my name is…" / "I need…" as OPENINGS. The
+  // split teaches it to tell an opening from a closure by what precedes it.
+  it("does NOT hold a caller signing off on 'I need' / 'I want' / 'the reason'", async () => {
     for (const [clean, raw] of [
       ["No that's all I need", "No that's all I need."],
       ["That's what I want", "That's what I want."],
       ["That's all I want", "That's all I want."],
+      ["That's exactly what I'd like", "That's exactly what I'd like."],
+      ["No that's all we need", "No that's all we need."],
+      ["That's the reason", "That's the reason."],
     ]) {
-      expect(await classify(clean, raw, ON), `pre-existing 2s hold: "${raw}"`).toEqual({
-        holdMs: 2_000,
-        rule: "trailing_lead_in",
-      });
+      expect((await classify(clean, raw, ON)).rule, `should NOT hold: "${raw}"`).toBe(
+        "terminal_punctuation",
+      );
     }
+  });
+
+  it("still holds the same phrases when the caller is genuinely leading in", async () => {
+    // The whole distinction: identical trailing words, opposite meanings.
+    for (const [clean, raw] of [
+      ["Hi I need", "Hi I need."],
+      ["I want", "I want."],
+      ["My name is", "My name is."],
+      ["Can I", "Can I."],
+      ["Is there", "Is there."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should hold: "${raw}"`).toBe(
+        "trailing_lead_in",
+      );
+    }
+  });
+
+  it("tells a Spanish sign-off from a Spanish lead-in", async () => {
+    expect((await classify("Es todo lo que necesito", "Es todo lo que necesito.", ON)).rule).toBe(
+      "terminal_punctuation",
+    );
+    expect((await classify("Necesito", "Necesito.", ON)).rule).toBe("trailing_lead_in");
   });
 
   it("still holds the same verbs when a cue shows they are governing something", async () => {

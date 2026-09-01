@@ -481,8 +481,13 @@ anything looking wrong.
 Two live consequences, both on staging, both predating this branch:
 - The false positives the split fixes — "No, that's all I need." taking an
   800ms hold before the goodbye — were **already happening**.
-- `TRAILING_LEAD_IN` matches `i need` and `i want`, so the same sign-off takes
-  **2000ms** on an older rule. Flag-independent, so it is live everywhere.
+- `TRAILING_LEAD_IN` matched `i need` and `i want`, so the same sign-off took
+  **2000ms** on an older rule — flag-independent, so live everywhere including
+  production. **FIXED 2026-09-01**, split the same way: "my name is" still
+  holds, "that's all I need" does not. The fluent control now carries that
+  utterance and asserts on it, and the assertion was confirmed to fail with the
+  split disabled. This was the longest hold in the system landing on the
+  goodbye of every call that ends that way.
 
 Production is reported as identical to staging "except for debug items, and
 maybe one voice item" — that one unconfirmed voice flag is unresolved and is

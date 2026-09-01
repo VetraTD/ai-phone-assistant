@@ -318,6 +318,12 @@ const FLUENT_SCRIPT = [
   // fluent row's reply latency moves and this control says so.
   { label: "f6", segments: [speak("Just a booking")] },
   { label: "f7", segments: [speak("Yes go ahead and book")] },
+  // Added 2026-09-01 for the lead-in split, same reasoning as f6/f7. This is
+  // the single most common way a call ENDS, and it took a 2000ms hold on
+  // TRAILING_LEAD_IN's trailing "i need" — the longest hold in the system,
+  // landing on the goodbye, on every flag setting. If that rule ever stops
+  // distinguishing a sign-off from an opening, this row says so.
+  { label: "f8", segments: [speak("No that's all I need")] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -761,6 +767,17 @@ describe("cutoff simulation", () => {
       fluentOn.rules.includes("trailing_incomplete"),
       "trailing_incomplete fired on FLUENT speech — the word list is too broad and is taxing finished turns",
     ).toBe(false);
+    // The lead-in rule is FLAG-INDEPENDENT, so both fluent arms are checked.
+    // It charges 2000ms — the longest hold in the system — and the utterance
+    // that used to trip it ("No that's all I need") is how a call ENDS, so the
+    // cost landed on the goodbye. Asserted on rules rather than on median
+    // latency: one hold in an eight-turn script disappears into a median.
+    for (const arm of [control, fluentOn]) {
+      expect(
+        arm.rules.includes("trailing_lead_in"),
+        `trailing_lead_in fired on FLUENT speech in "${arm.name}" — a sign-off is being read as an opening and charged 2000ms before the goodbye`,
+      ).toBe(false);
+    }
     expect(
       fluentOn.medianLatency,
       `fluent callers now wait ${fluentOn.medianLatency}ms vs ${control.medianLatency}ms with the flag off`,
