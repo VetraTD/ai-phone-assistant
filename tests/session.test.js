@@ -4558,7 +4558,12 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     handleVoiceSessionConnection(ws);
     await startCall(ws, newSid());
     await settleGreeting();
-    H.turnManagerInstances[0].opts.onTurnEnd("it's N-I-T-H-I-N.");
+    // Deliberately NOT a spelling. It used to be "it's N-I-T-H-I-N.", which
+    // stopped isolating this behaviour the moment holdSpelling existed: the
+    // caller-keyed line took the turn's hold budget and the neutral fallback
+    // under test never ran. The spelling interaction is worth testing and is
+    // tested separately; this case is about a promise made over a silent tool.
+    H.turnManagerInstances[0].opts.onTurnEnd("it's Nithin.");
     await flush();
     await new Promise((r) => setTimeout(r, 700));
 
@@ -4766,6 +4771,94 @@ describe("session.js — the hold line at the shipped default", () => {
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
     expect(written).not.toMatch(/checking the calendar|what's open|one moment/i);
     expect(written).toMatch(/two o'clock it is/i);
+  });
+
+  it("covers the spelling turn, keyed to the CALLER rather than to a tool", async () => {
+    // The one long silence the owner could still hear on a live call, and the
+    // one turn no tool-keyed line could ever have covered: the model
+    // acknowledges the spelling and reads the details back without calling
+    // anything, so there is no toolCall event to hang a line on.
+    //
+    // No tool in this generator, deliberately. That is the real shape.
+    H.llmFactory = () =>
+      (async function* () {
+        await new Promise((r) => setTimeout(r, 400));
+        yield { type: "delta", text: "Thanks Nithin. So that's Tuesday at 2." };
+        yield {
+          type: "done",
+          reply: { text: "Thanks Nithin. So that's Tuesday at 2.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("N I T H I N");
+    await flush();
+
+    // 700ms: past the 500ms transcript hold ("N I T H I N" carries no terminal
+    // punctuation, so classifyHold parks it), and still well short of the
+    // model. The line must be out and the ANSWER must not be — that ordering is
+    // the whole claim, and asserting only the first half would pass even if the
+    // line arrived after the reply it was meant to precede.
+    await new Promise((r) => setTimeout(r, 700));
+    const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(early).toMatch(/writing that down|get that down/i);
+    expect(early).not.toMatch(/tuesday at 2/i);
+
+    await new Promise((r) => setTimeout(r, 600));
+    const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(all).toMatch(/tuesday at 2/i);
+  });
+
+  it("drops a bare promise the model adds after a hold line has already played", async () => {
+    // The hole the spelling line exposed. canGatePromise requires
+    // !holdLinePlayed — a line having played is normally what means the gap is
+    // covered — so once the engine has spoken, the model's own "Checking that
+    // now." sailed past every guard and was voiced straight after it. Two wait
+    // lines in one turn, the second of them a claim about work that is not
+    // happening.
+    //
+    // Reachable before holdSpelling existed too, on any turn where a tool line
+    // beat the model's first sentence.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Checking that now." };
+        await new Promise((r) => setTimeout(r, 600));
+        yield { type: "delta", text: " You're all set for Tuesday." };
+        yield {
+          type: "done",
+          reply: { text: "Checking that now. You're all set for Tuesday.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("N I T H I N");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1400));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/writing that down|get that down/i);
+    // The model's redundant second wait line never reaches the caller...
+    expect(written).not.toMatch(/checking that now/i);
+    // ...and the real answer still does.
+    expect(written).toMatch(/all set for tuesday/i);
+  });
+
+  it("does not fire the spelling line on an ordinary turn", async () => {
+    // Restraint. looksLikeSpelling needs a real run of single letters; a name
+    // said normally is not one, and a line on every turn is chatter.
+    const written = await run(
+      [
+        { type: "delta", text: "Thanks Nithin. What day suits you?" },
+        { type: "done", reply: { text: "Thanks Nithin. What day suits you?", toolResults: [] } },
+      ],
+      "it's Nithin.",
+    );
+    expect(written).not.toMatch(/writing that down|get that down|one moment/i);
+    expect(written).toMatch(/what day suits you/i);
   });
 
   it("still says nothing for a deliberately silent tool", async () => {

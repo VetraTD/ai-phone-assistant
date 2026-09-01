@@ -41,9 +41,20 @@ Book an appointment. Run it to a real booking: name, spelling, confirmation.
 | "Tuesday at 2?" | `check_appointment_availability` | "One sec, checking the calendar." |
 | "And your name?" → "Nithin" | none | *nothing* — the reply just arrives |
 | if it asks you to spell it | `book_appointment`, refused | *nothing* |
-| after you spell it | `book_appointment` | "Getting that scheduled now." |
+| **after you spell it** | **none — keyed to YOU** | **"Writing that down."** |
 | "Yes, book it" | `book_appointment` | "Getting that scheduled now." |
 | "Take a message instead" | `record_customer_request` | *nothing* — a fast write |
+
+**The spelling row is the only line in the system not keyed to a tool.** It
+fires off `looksLikeSpelling` reading your own transcript, so it does not wait
+on Gemini — measured floor is ~570ms of Deepgram plus a 500ms transcript hold,
+so about **1.1s**, against ~2.9s for anything tool-keyed. It was added because
+that turn was the only long silence still audible on a real call, and it is
+also the turn least likely to call a tool at all.
+
+It takes the turn's one-line budget, so if a tool does follow, its line is
+suppressed. That is correct — "writing that down" is true of a booking write
+too, and two lines in one turn is the defect the budget exists to prevent.
 
 **The name turn losing its line is the fix, not a regression.** There is no
 name-capture tool: the name is an argument of `book_appointment`, never its own
