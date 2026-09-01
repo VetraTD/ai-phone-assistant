@@ -4532,6 +4532,70 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
     expect(written).toMatch(/what was the name again/i);
   });
+
+  // Reported from a live call on the new build: "after spelling my name it
+  // said 'Checking that now...' and I am not sure what it was checking".
+  //
+  // That is the MODEL's sentence, and the gate was letting it through: the
+  // swap only fired for a tool with a mapped hold line, and set_call_intent is
+  // mapped deliberately silent. So a promise made over a tool that looks
+  // nothing up survived intact — a specific claim about work that was not
+  // happening, which is worse than the vague line it replaced.
+  it("replaces a promise made over a SILENT tool with the neutral line", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Checking that now." };
+        yield { type: "toolCall", name: "set_call_intent" };
+        await new Promise((r) => setTimeout(r, 900));
+        yield { type: "done", reply: { text: "Checking that now.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("it's N-I-T-H-I-N.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 700));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    // The false claim never reaches the caller...
+    expect(written).not.toMatch(/checking that now/i);
+    // ...and they are not left with nothing either.
+    expect(written).toMatch(/one moment/i);
+  });
+
+  // The other half, and a regression the first version of the swap introduced.
+  // services/gemini.js yields `toolCall` AFTER the tool has run, so playing the
+  // replacement instantly announced work that had already finished — or been
+  // REFUSED. Here the model's real answer arrives promptly, so the caller
+  // should hear only that.
+  it("says nothing at all when the answer arrives before the replacement is due", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Let me check that." };
+        yield { type: "toolCall", name: "book_appointment" };
+        // Faster than the swap delay — an instant tool, or one the gate refused.
+        await new Promise((r) => setTimeout(r, 60));
+        yield { type: "delta", text: " Could you spell your surname?" };
+        yield {
+          type: "done",
+          reply: { text: "Let me check that. Could you spell your surname?", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("book me in for Tuesday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    // No booking announced for a call that did not book.
+    expect(written).not.toMatch(/scheduled|calendar|one moment/i);
+    // Just the question the caller actually needs to answer.
+    expect(written).toMatch(/spell your surname/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
