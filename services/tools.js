@@ -134,7 +134,7 @@ const CAPABILITY_DEPS = {
  *     endCallArgs?: object|null,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
- *     toolCallEvent?: {name: string, args: object}|null,
+ *     toolCallEvent?: {name: string, args: object, silent?: boolean}|null,
  *     capabilityEffects?: Array<{capability: string, type: string, data?: object}>,
  *     capabilityState?: Record<string, object|null>,
  *   }
@@ -332,8 +332,14 @@ export async function executeToolCall(fc, ctx) {
                 response: { success: false, message },
               },
               stateEffects: {
+                // refused: nothing ran. The voice session uses this to stay
+                // quiet — announcing "Getting that scheduled now." a moment
+                // before asking the caller to spell their name describes work
+                // that was declined, not work in progress. The event itself
+                // still goes out, because metrics and the transcript both want
+                // to know the model tried.
                 toolResult: { name: fc.name, success: false, message },
-                toolCallEvent: { name: fc.name, args: fc.args },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 capabilityState: {
                   [pack.id]: {
                     // The backstop above. Counted once per caller turn, so a
@@ -373,8 +379,9 @@ export async function executeToolCall(fc, ctx) {
                 response: { success: false, message: check.message },
               },
               stateEffects: {
+                // refused before execution — see the spelling gate above.
                 toolResult: { name: fc.name, success: false, message: check.message },
-                toolCallEvent: { name: fc.name, args: fc.args },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 ...(heardName && !priorFacts.Name
                   ? {
                       capabilityState: {

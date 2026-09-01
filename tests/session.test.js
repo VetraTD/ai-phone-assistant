@@ -4182,13 +4182,18 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
   // The hold line now belongs to the engine, where it can only fire because a
   // tool actually started.
   //
-  // It fires only once the wait has ALREADY run past the threshold, because the
-  // line takes ~1.5s to say and audio plays serially: firing sooner delays the
-  // answer it was meant to cover. Live, that threshold is 1500ms against a
-  // measured distribution where almost every turn answers in under a second.
+  // These tests PIN VOICE_TOOL_HOLD_DELAY_MS to 200, and since 2026-08-31 that
+  // pin is the whole point of them rather than a convenience.
   //
-  // These tests shorten it to 200ms so they run fast; the SEMANTICS under test
-  // are "short wait stays silent, long wait speaks", not the specific number.
+  // The live default is now 0 — speak the moment the tool is known — so "a fast
+  // answer stays silent" is no longer what production does. The threshold
+  // mechanism still exists for anyone who sets the var, and these tests are
+  // what keeps it working. The DEFAULT's behaviour is covered separately below,
+  // in "at the shipped default", which deletes the var instead of setting it.
+  //
+  // Worth stating plainly, because it nearly went unnoticed: every test in this
+  // block passed unchanged across the 1500 -> 0 switch. A suite that pins the
+  // value it is meant to be testing cannot see that value change.
   beforeEach(() => {
     process.env.VOICE_ENGINE_FILLER = "true";
     process.env.VOICE_TOOL_HOLD_DELAY_MS = "200";
@@ -4595,6 +4600,189 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).not.toMatch(/scheduled|calendar|one moment/i);
     // Just the question the caller actually needs to answer.
     expect(written).toMatch(/spell your surname/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hold line at the SHIPPED DEFAULT.
+//
+// Everything above pins VOICE_TOOL_HOLD_DELAY_MS. Nothing here does, which is
+// the point: on 2026-08-31 the default went 1500 -> 0 and every existing test
+// passed unchanged, because they all set the value they were meant to be
+// exercising. A caller heard the difference; the suite could not.
+//
+// The contract at 0 is deliberately different, and was chosen with the trade
+// stated out loud: a turn whose answer was ~800ms away now carries a line in
+// front of it and ends up LONGER. What is bought is that the caller is never
+// sitting in dead air, and that the line always names work that is happening.
+// ---------------------------------------------------------------------------
+describe("session.js — the hold line at the shipped default", () => {
+  beforeEach(() => {
+    process.env.VOICE_ENGINE_FILLER = "true";
+    delete process.env.VOICE_TOOL_HOLD_DELAY_MS;
+  });
+  afterEach(() => {
+    delete process.env.VOICE_ENGINE_FILLER;
+  });
+
+  const run = async (events, utterance = "is Friday at 2 free.") => {
+    H.llmFactory = () => makeGen(events);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd(utterance);
+    await flush();
+    await new Promise((r) => setTimeout(r, 400));
+    return H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+  };
+
+  it("speaks even when the answer is fast — the accepted cost of covering every wait", async () => {
+    // The inverse of "stays SILENT when the answer beats the threshold" above.
+    // Both are correct; they describe different configurations, and this is the
+    // one that ships.
+    //
+    // The 300ms gap is not padding. services/gemini.js yields toolCall after
+    // the tool has run, and the model then needs a SECOND round-trip to write
+    // the reply — measured at 685-861ms. A generator that yields its delta in
+    // the next microtask models no real call, and would only prove that text
+    // arriving cancels the timer, which is tested elsewhere and is correct.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, 300));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("is Friday at 2 free.");
+    await flush();
+
+    // 150ms in: far inside the old 1500ms threshold, which would still be
+    // silent here. This is the whole change, expressed as a deadline.
+    await new Promise((r) => setTimeout(r, 150));
+    const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(early).toMatch(/checking the calendar|what's open/i);
+
+    await new Promise((r) => setTimeout(r, 500));
+    const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(all).toMatch(/half four/i);
+  });
+
+  it("announces the round the caller is WAITING on, not the one already finished", async () => {
+    // The reported defect. The caller gave their name, the turn checked
+    // availability and then wrote, and they heard "Checking the calendar now."
+    // — a description of work that had already completed, while they waited on
+    // the booking.
+    //
+    // pendingHoldKind used to latch the FIRST tool of the turn and never
+    // update. All four events below are consumed in successive microtasks,
+    // before the 0ms timer (a macrotask) can fire, so the promise gate is what
+    // speaks here and it reads pendingHoldKind after BOTH tools have run.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolCall", name: "book_appointment" };
+        // Promise-only, and it arrives in the same microtask batch as the two
+        // tool calls — so the delta branch cancels the 0ms timer and the
+        // PROMISE GATE is what answers for this turn. That is the path where
+        // pendingHoldKind is read late, which is where the stale kind lived.
+        yield { type: "delta", text: "I'll get that booked." };
+        // The write is still running. Without this the turn would end before
+        // the swap's own delay elapsed and the caller would hear nothing —
+        // which proves nothing either way.
+        await new Promise((r) => setTimeout(r, 700));
+        yield { type: "delta", text: " You're all set for Tuesday." };
+        yield {
+          type: "done",
+          reply: { text: "I'll get that booked. You're all set for Tuesday.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("yes please, and it's Nithin.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 600));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/scheduled|putting that on the calendar/i);
+    // The specific failure: the availability line covering a booking write.
+    expect(written).not.toMatch(/checking the calendar|what's open|one sec, checking/i);
+  });
+
+  it("says nothing for a tool the gates refused — no work, no announcement", async () => {
+    // The spelling gate refuses book_appointment and services/tools.js still
+    // emits a toolCallEvent, so the caller could hear "Getting that scheduled
+    // now." moments before being asked to spell their name. The event now
+    // carries `silent`, which is decided by the OUTCOME rather than by whether
+    // the reply happens to win a race.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "book_appointment", silent: true };
+        // Slow enough that an unsuppressed line would certainly have played.
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: "Could you spell your surname?" };
+        yield { type: "done", reply: { text: "Could you spell your surname?", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("it's Nithin.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/scheduled|putting that on the calendar|one moment/i);
+    expect(written).toMatch(/spell your surname/i);
+  });
+
+  it("says nothing for an availability verdict served from the call's own state", async () => {
+    // capabilities/appointments.js answers a repeat point check for a slot it
+    // already confirmed without touching the adapter. Nothing is being looked
+    // up, so "One sec, checking the calendar" would be describing work that is
+    // not happening — the same defect as the refusal above, from the other end.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability", silent: true };
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: "Two o'clock it is." };
+        yield { type: "done", reply: { text: "Two o'clock it is.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("yes, two o'clock.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/checking the calendar|what's open|one moment/i);
+    expect(written).toMatch(/two o'clock it is/i);
+  });
+
+  it("still says nothing for a deliberately silent tool", async () => {
+    // Restraint. Dropping the delay to 0 must not turn the null-mapped tools
+    // back into speakers — that was the chatter the 1500ms threshold was
+    // reverting to fix, and the mapping is what actually fixed it.
+    const written = await run(
+      [
+        { type: "toolCall", name: "record_customer_request" },
+        { type: "toolEffect", effect: { name: "record_customer_request", success: true } },
+        { type: "delta", text: "I've passed that on." },
+        { type: "done", reply: { text: "I've passed that on.", toolResults: [] } },
+      ],
+      "can you tell them the boiler is still leaking.",
+    );
+    expect(written).not.toMatch(/one moment|calendar|scheduled/i);
+    expect(written).toMatch(/passed that on/i);
   });
 });
 
