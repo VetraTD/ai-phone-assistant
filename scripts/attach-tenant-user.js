@@ -50,6 +50,7 @@
 
 import "dotenv/config";
 import pg from "pg";
+import { cloudSqlConfig, cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
 
 function usage(msg) {
   if (msg) console.error(`\n${msg}`);
@@ -87,14 +88,42 @@ if (!args.authUid) usage("--auth-uid is required.");
 if (!args.business && !args.phone) usage("one of --business or --phone is required.");
 if (args.business && args.phone) usage("--business and --phone are mutually exclusive.");
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is not set. This script needs an ADMIN connection — vetra_app cannot run it.");
-  process.exit(1);
-}
+// TWO WAYS IN, AND THE SECOND ONE IS THE ONLY ONE THAT WORKS IN PRODUCTION.
+//
+// This originally read DATABASE_URL and nothing else, which made it unrunnable
+// against the estate it was written for: Cloud SQL is private-IP only, so the
+// only place this can execute is the migrate job inside the VPC, and that job
+// connects through the Cloud SQL connector with CLOUD_SQL_INSTANCE and a
+// password — it has no DATABASE_URL at all. So P25 shipped a migration, then a
+// script that could not reach the database, and read as closed twice.
+//
+// Same shape as scripts/migrate.js: prefer the connector when its config is
+// present, fall back to a plain URL for the local Docker database.
+const sqlCfg = cloudSqlConfig();
+let closeConnector = () => {};
+let client;
 
-const client = new pg.Client({ connectionString: url });
-await client.connect();
+if (sqlCfg) {
+  const { poolConfig, close } = await cloudSqlPoolConfig(sqlCfg);
+  closeConnector = close;
+  client = new pg.Client(poolConfig);
+  await client.connect();
+  console.log(
+    `connected: ${sqlCfg.instance} db=${sqlCfg.database} as ${sqlCfg.user} ` +
+      `(${sqlCfg.authType === "PASSWORD" ? "password" : "IAM"})`
+  );
+} else {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error(
+      "Neither CLOUD_SQL_INSTANCE nor DATABASE_URL is set. This script needs an ADMIN connection — vetra_app cannot run it."
+    );
+    process.exit(1);
+  }
+  client = new pg.Client({ connectionString: url });
+  await client.connect();
+  console.log(`connected: ${new URL(url).hostname}`);
+}
 
 // Never leave a half-attached tenant behind: one transaction, committed only on
 // --confirm, rolled back otherwise. That also makes the dry run exercise the
@@ -157,4 +186,5 @@ try {
   process.exitCode = 1;
 } finally {
   await client.end();
+  closeConnector();
 }
