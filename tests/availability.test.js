@@ -471,3 +471,81 @@ describe("appointments — the in_addition_to_existing parameter is declared onl
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The same slot, asked twice in one call.
+//
+// Reported live 2026-08-31: a caller gave their name and heard "Checking the
+// calendar now." The engine's line was accurate — the model really was calling
+// check_appointment_availability again, for a time it had already agreed with
+// the caller. That is a wasted round trip in the middle of a booking, and it
+// puts the caller on hold to be told something they were told a minute ago.
+//
+// The booking guidance now says not to. This is the half that does not depend
+// on the model reading it — the same division of labour the spelling caps
+// settled on, for the same reason: prose cannot hold a budget.
+// ---------------------------------------------------------------------------
+describe("check_appointment_availability — a slot already confirmed this call", () => {
+  const ctxFor = (deps, capabilityState = undefined) => ({
+    businessId: "b1",
+    config: makeConfig(),
+    integrations: [],
+    callerPhone: "+15551234567",
+    capabilityState,
+    deps,
+  });
+
+  const check = (deps, capabilityState, requested_at = REQUESTED) =>
+    appointments.execute(
+      { id: "1", name: "check_appointment_availability", args: { requested_at } },
+      ctxFor(deps, capabilityState),
+    );
+
+  it("remembers an available verdict on the call's scratchpad", async () => {
+    const res = await check(makeDeps());
+    expect(res.functionResponse.response.available).toBe(true);
+    // Keyed by the ANCHORED UTC instant, not the naive string the model sent,
+    // so "2026-07-21T10:00" and "2026-07-21T10:00:00" are the same slot.
+    expect(res.stateEffects.capabilityState.appointments.availableSlot.slot).toBe(REQUESTED_UTC);
+  });
+
+  it("answers a repeat check without touching the calendar at all", async () => {
+    const first = await check(makeDeps());
+    const deps = makeDeps();
+    const res = await check(deps, { appointments: first.stateEffects.capabilityState.appointments });
+
+    expect(res.functionResponse.response.available).toBe(true);
+    // The whole point: no second query.
+    expect(deps.countScheduledOverlapping).not.toHaveBeenCalled();
+    // ...and the caller is not put on hold for work that is not happening.
+    expect(res.stateEffects.toolCallEvent.silent).toBe(true);
+  });
+
+  it("still checks a DIFFERENT time properly", async () => {
+    const first = await check(makeDeps());
+    const deps = makeDeps();
+    const res = await check(
+      deps,
+      { appointments: first.stateEffects.capabilityState.appointments },
+      "2026-07-21T11:00:00",
+    );
+
+    expect(deps.countScheduledOverlapping).toHaveBeenCalled();
+    expect(res.stateEffects.toolCallEvent.silent).toBeUndefined();
+    expect(res.functionResponse.response.available).toBe(true);
+  });
+
+  it("never caches a TAKEN verdict — that is the one that can change", async () => {
+    // A slot someone else holds can free up while this caller is still on the
+    // line, and the alternatives offered alongside it go stale the same way.
+    // Only "yes, that is free" is safe to reuse, and only because
+    // book_appointment re-checks and writes atomically underneath it.
+    const deps = makeDeps({
+      countScheduledOverlapping: vi.fn().mockResolvedValue(1),
+      listScheduledBetween: vi.fn().mockResolvedValue([{ scheduled_at: REQUESTED_UTC }]),
+    });
+    const res = await check(deps);
+    expect(res.functionResponse.response.available).toBe(false);
+    expect(res.stateEffects.capabilityState).toBeUndefined();
+  });
+});

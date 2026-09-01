@@ -18,6 +18,7 @@ import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
 
 /**
@@ -138,7 +139,7 @@ const CAPABILITY_DEPS = {
  *     endCallArgs?: object|null,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
- *     toolCallEvent?: {name: string, args: object}|null,
+ *     toolCallEvent?: {name: string, args: object, silent?: boolean}|null,
  *     capabilityEffects?: Array<{capability: string, type: string, data?: object}>,
  *     capabilityState?: Record<string, object|null>,
  *   }
@@ -235,6 +236,18 @@ export async function executeToolCall(fc, ctx) {
     default: {
       const pack = packForTool(fc.name);
       if (pack && typeof pack.execute === "function") {
+        // Was the answer already sitting in the call-start snapshot?
+        //
+        // Counted, not acted on. The tool still runs and still returns live
+        // data — this only records how often it need not have, because the
+        // fix (serve the lookup from ctx.callerContext, or teach the model it
+        // already has the answer) is worth an extra model round-trip per
+        // occurrence and nobody knows what that rate is. Decide from the
+        // counters, not from the intuition that it must be high.
+        if ((pack.callerLookupTools || []).includes(fc.name)) {
+          const warm = (ctx?.callerContext?.upcomingAppointments || []).length > 0;
+          bumpCounter(warm ? "lookup_tool_context_warm" : "lookup_tool_context_cold");
+        }
         // Configured requirements are enforced HERE, before the pack runs, so
         // every capability inherits them and no pack author can forget to
         // check. A refusal is returned to the model as an instruction; the
@@ -252,39 +265,64 @@ export async function executeToolCall(fc, ctx) {
           // the two sound nearly identical. Only letters catch a letter error,
           // and the business keeps that row.
           //
-          // Refused once, not looped: the gate opens as soon as the call has
-          // spent its spelling request (counted in lib/voice/replyState.js), so
-          // a caller who declines to spell is never asked twice and the booking
-          // still completes. Same fail-closed, one-reason-at-a-time shape as
-          // checkRequirements below.
+          // Blocked until answered, not until asked. Until 2026-08-31 this gate
+          // opened the moment the call had SPOKEN a spelling request, so a
+          // caller who was asked and simply carried on talking had their
+          // mis-heard name written anyway — the reported defect. It now stays
+          // shut until lib/voice/replyState.js sees letters, a refusal, or the
+          // agreed number of unanswered attempts. Same fail-closed,
+          // one-reason-at-a-time shape as checkRequirements below.
           const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
-          // Has this gate ALREADY refused on this call?
+          // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
-          // closes once lib/voice/strings.js's spellRequestRe matches what the
+          // moves once lib/voice/strings.js's spellRequestRe matches what the
           // assistant said. That regex can be widened but never completed — the
           // model can always ask in words nobody listed — and an unrecognised
           // ask means refuse, ask, get an answer, refuse again. That is the
-          // livelock, and the gate now fires for every unknown name rather than
-          // only hard ones, so the exposure is much larger than it was.
+          // livelock, and the gate fires for every unknown name rather than
+          // only hard ones, so the exposure is large.
+          //
+          // A COUNTER, not the boolean it replaced. The boolean gave the gate
+          // exactly one refusal per pack per call, which is what made "asked
+          // once" and "answered" indistinguishable: the second attempt always
+          // went through regardless of what the caller had said. The ceiling is
+          // the same escape hatch the reducer's miss cap provides, expressed
+          // where it survives a detector that never fires at all.
           //
           // Recorded in the pack's own scratchpad, which the engine threads
           // through the turn and the session persists across turns.
-          const alreadyRefused = !!ctx?.capabilityState?.[pack.id]?.spellingRefused;
+          const gateScratch = ctx?.capabilityState?.[pack.id] || {};
+          const gateRefusals = Number(gateScratch.spellingGateRefusals) || 0;
+          // Which caller turn the last refusal belonged to.
+          //
+          // The budget is per TURN, not per tool round, and the difference is
+          // the whole safety of it. services/gemini.js merges capabilityState
+          // back after every round and rebuilds ctx from it, so a model that
+          // re-calls book_appointment three times inside one turn would burn
+          // 0->1->2 and write the mis-heard name on the third — in a single
+          // turn, with zero spelling questions ever spoken to the caller. The
+          // refusal only means something once the caller has had a chance to
+          // answer it, so only a NEW turn spends one. The in-turn loop is
+          // bounded separately, by MAX_FC_ROUNDS.
+          const callerTurn = Number(ctx?.callerTurnCount) || 0;
+          const refusalIsNew = gateScratch.spellingGateRefusedTurn !== callerTurn;
           if (
             pendingName &&
-            !alreadyRefused &&
+            gateRefusals < spellMissCap() &&
             shouldConfirmSpelling({
               name: pendingName,
               callerContext: ctx?.callerContext,
-              spellingAlreadyAsked: ctx?.spellingAlreadyAsked,
+              spellingSettled: ctx?.spellingSettled,
               policy: spellPolicy(),
             })
           ) {
             const message =
-              `[not caller speech] Before recording "${pendingName}", confirm the spelling: ask the caller to ` +
-              `spell it, read the letters back, then try again. Ask this only once — if they decline or ` +
-              `just answer with something else, proceed with the name exactly as you heard it.`;
+              `[not caller speech] Before recording "${pendingName}", get the spelling: ask the caller to ` +
+              `spell it, and read the letters back. This is required — do not record the name until they ` +
+              `have spelled it. Ask them now and wait for their answer; do not call this function again ` +
+              `until they have replied. If they decline or tell you it is spelled how it sounds, accept ` +
+              `that and record the name exactly as you heard it.`;
             // Keep the name, exactly as the requirements refusal below does.
             // A refusal throws fc.args away, and this one now fires for every
             // caller whose name is not already on file — so without this the
@@ -299,14 +337,23 @@ export async function executeToolCall(fc, ctx) {
                 response: { success: false, message },
               },
               stateEffects: {
+                // refused: nothing ran. The voice session uses this to stay
+                // quiet — announcing "Getting that scheduled now." a moment
+                // before asking the caller to spell their name describes work
+                // that was declined, not work in progress. The event itself
+                // still goes out, because metrics and the transcript both want
+                // to know the model tried.
                 toolResult: { name: fc.name, success: false, message },
-                toolCallEvent: { name: fc.name, args: fc.args },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 capabilityState: {
                   [pack.id]: {
-                    // The backstop above. Set unconditionally: this gate gets
-                    // exactly one refusal per pack per call, whatever the model
-                    // then says.
-                    spellingRefused: true,
+                    // The backstop above. Counted once per caller turn, so a
+                    // detector that never recognises this caller's phrasing
+                    // still runs out of refusals rather than looping forever —
+                    // without the model being able to spend the whole budget
+                    // on its own retries inside a single turn.
+                    spellingGateRefusals: refusalIsNew ? gateRefusals + 1 : gateRefusals,
+                    spellingGateRefusedTurn: callerTurn,
                     ...(priorSpellFacts.Name
                       ? {}
                       : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
@@ -337,8 +384,9 @@ export async function executeToolCall(fc, ctx) {
                 response: { success: false, message: check.message },
               },
               stateEffects: {
+                // refused before execution — see the spelling gate above.
                 toolResult: { name: fc.name, success: false, message: check.message },
-                toolCallEvent: { name: fc.name, args: fc.args },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 ...(heardName && !priorFacts.Name
                   ? {
                       capabilityState: {

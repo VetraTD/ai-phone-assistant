@@ -537,35 +537,49 @@ describe("gemini.js — the existing-appointment rule is intent-independent", ()
 // confidence in a wrong record.
 // ---------------------------------------------------------------------------
 describe("spelling guidance — the letters are authoritative", () => {
-  // callerContext is DROPPED, not merged: the shared `extras` fixture describes
-  // a returning caller whose name the business already has, and the section is
-  // deliberately suppressed for them (asking a regular to spell a name you
-  // already hold right is the repetition this round removed). The rule under
-  // test only renders for a caller with no name on file.
-  const spellCtx = { ...extras, callerContext: null, spellingAlreadyAsked: false };
-
-  it("tells the model the spelling wins over what it heard", () => {
-    const tail = buildDynamicTail("gather_details", "book_appointment", config, spellCtx);
-    expect(tail).toContain("=== SPELLING NOT YET CONFIRMED ===");
-    expect(tail).toMatch(/THE LETTERS WIN/);
-    expect(tail).toMatch(/spelling is right and what you heard is wrong/i);
-    expect(tail).toMatch(/[Bb]uild the name from the letters/);
+  // Lives in the STATIC PREFIX (TOOL CONTRACT), not the dynamic tail, and the
+  // first version got that wrong in a way only a live call revealed.
+  //
+  // It was written into the SPELLING NOT YET CONFIRMED block, which is gated on
+  // `!callerHasNameOnFile(callerContext)`. For a returning caller it never
+  // rendered. Measured on staging 2026-08-31: the caller had prior appointments
+  // on file, was asked to spell anyway (that ask comes from the tool
+  // requirement in services/tools.js), spelled "n I t h I n", and was still
+  // booked as "Nathan".
+  //
+  // Whether to ASK is a per-call budget and is rightly suppressed for someone
+  // whose name you already hold. How to READ an answer you already have is not.
+  it("states that the letters beat what was heard", () => {
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toMatch(/THE LETTERS WIN/);
+    expect(prefix).toMatch(/spelling is right and what you heard is wrong/i);
+    expect(prefix).toMatch(/rebuild the name from the letters/i);
   });
 
-  it("still says to read the reconstructed name back, not just accept it silently", () => {
-    const tail = buildDynamicTail("gather_details", "book_appointment", config, spellCtx);
-    expect(tail).toMatch(/read THAT back/);
+  it("says to use the rebuilt name in TOOL CALLS, not just when reading it back", () => {
+    // The live failure booked the appointment under the misheard name even
+    // though a name had been read back, so "read it back correctly" alone is
+    // not the requirement.
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toMatch(/in every tool call/i);
   });
 
-  it("says nothing about spelling once the call has already asked", () => {
-    // The cap is a fact about this call, not a rule to re-state — see the
-    // section it replaces. If the guidance leaked into the already-asked
-    // branch, every call would keep re-asking.
-    const tail = buildDynamicTail("gather_details", "book_appointment", config, {
-      ...spellCtx,
-      spellingAlreadyAsked: true,
-    });
-    expect(tail).not.toContain("=== SPELLING NOT YET CONFIRMED ===");
-    expect(tail).not.toMatch(/THE LETTERS WIN/);
+  // THE REGRESSION TEST FOR THE ACTUAL BUG. `extras` is a returning caller with
+  // a name on file — the exact case where the first attempt vanished.
+  it("is present for a RETURNING caller, whose name is already on file", () => {
+    expect(buildStaticSystemPrefix(config, { ...extras }).match(/THE LETTERS WIN/)).toBeTruthy();
+  });
+
+  it("is present for a first-time caller too", () => {
+    expect(
+      buildStaticSystemPrefix(config, { ...extras, callerContext: null }).match(/THE LETTERS WIN/)
+    ).toBeTruthy();
+  });
+
+  it("does not live in the dynamic tail, where a gate could hide it", () => {
+    for (const ctx of [{ ...extras }, { ...extras, callerContext: null }]) {
+      const tail = buildDynamicTail("gather_details", "book_appointment", config, ctx);
+      expect(tail).not.toMatch(/THE LETTERS WIN/);
+    }
   });
 });

@@ -36,8 +36,21 @@ const H = vi.hoisted(() => {
     writes: [],
     // one entry per geminiService.warmPromptCache() call
     warmPromptCacheCalls: [],
+    // Canned verdict for the semantic end-of-turn arbiter. null = "no
+    // opinion", which is what the real one returns whenever it is late,
+    // errored, or switched off — i.e. the default every other test runs under.
+    arbiterVerdict: { complete: null },
   };
 });
+
+// ---- lib/voice/endpointArbiter.js ------------------------------------------
+// Only the model call is faked. semanticEndpointEnabled and ARBITRATED_RULES
+// stay REAL, because "is the flag off by default" and "which holds get asked
+// about" are exactly the properties these tests are here to check.
+vi.mock("../lib/voice/endpointArbiter.js", async (importActual) => ({
+  ...(await importActual()),
+  judgeTurnComplete: vi.fn(async () => H.arbiterVerdict),
+}));
 
 // ---- lib/voice/sttStream.js ------------------------------------------------
 vi.mock("../lib/voice/sttStream.js", () => ({
@@ -261,6 +274,12 @@ vi.mock("../services/notifications.js", () => ({
 
 vi.mock("../services/gemini.js", () => ({
   isBusinessOpen: vi.fn(() => true),
+  // Handed to the semantic end-of-turn arbiter as its injection seam. Present
+  // even though these tests stub the arbiter itself: Vitest THROWS on reading
+  // an export a mock does not define, and session.js reads this one while
+  // building the arbiter's deps — so omitting it turned the whole feature into
+  // a silently swallowed rejection.
+  getClient: vi.fn(() => ({ models: { generateContent: vi.fn() } })),
   // The live tool vocabulary the outbound leak guard matches against. Mirrors
   // the real export so the guard runs for real in these tests rather than
   // being silently skipped.
@@ -472,6 +491,7 @@ import * as geminiService from "../services/gemini.js";
 import * as notifications from "../services/notifications.js";
 import { log } from "../lib/logger.js";
 import { runLlmTurn } from "../lib/voice/llmTurn.js";
+import { judgeTurnComplete } from "../lib/voice/endpointArbiter.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { synthesizeMulaw as mockSynthesizeMulaw } from "../services/googleTts.js";
 import { VOICE_CATALOG } from "../config/voices.js";
@@ -596,6 +616,7 @@ beforeEach(() => {
   H.holdRuleCalls.length = 0;
   H.fallbackFlowInstances.length = 0;
   H.warmPromptCacheCalls.length = 0;
+  H.arbiterVerdict = { complete: null };
   H.llmFactory = null;
   vi.clearAllMocks();
   process.env.ELEVENLABS_DEFAULT_VOICE_ID = "voice-xyz";
@@ -2857,13 +2878,19 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // really is partial spoken text at risk of being committed), then its
       // generator suspends instead of reaching "done" — the barge-in happens
       // while it is still the current turn.
-      H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Let me check that for you. " }]);
+      //
+      // Deliberately NOT a "let me check..." line. That shape is held back by
+      // the promise gate (lib/voice/promiseGate.js) until a tool call either
+      // arrives or does not, so it would reach tts late or never — and this
+      // test is about barge-in anchoring, not about promises. It needs text
+      // that is unambiguously spoken the moment the sentence completes.
+      H.llmFactory = () => makeSuspendableGen([{ type: "delta", text: "Our opening hours vary by day. " }]);
       tm.opts.onTurnEnd("what are your hours.");
       await flush();
       await flush();
 
       const turn1Tts = H.ttsTurns[H.ttsTurns.length - 1];
-      expect(turn1Tts.write).toHaveBeenCalledWith("Let me check that for you.");
+      expect(turn1Tts.write).toHaveBeenCalledWith("Our opening hours vary by day.");
 
       // Caller barges in before turn 1 ever reaches its "done" event. This
       // resolves the suspended generator's pending next() (via return()),
@@ -3313,7 +3340,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
         const tm = H.turnManagerInstances[0];
 
         tm.opts.onTurnEnd("I'd like to book.");
-        await vi.advanceTimersByTimeAsync(10);
+        // Past the trailing-incomplete hold, which since 2026-08-31 fires on
+        // exactly this fragment (VOICE_HOLD_TRAILING_MS, default 800). The two
+        // mitigations compose rather than overlap: the hold waits, and when it
+        // expires on a caller who is STILL thinking, resume-abort is what
+        // catches the continuation. This test is about the second one, so it
+        // has to get past the first.
+        await vi.advanceTimersByTimeAsync(900);
         const afterFirst = runLlmTurn.mock.calls.length;
         expect(afterFirst).toBe(1);
 
@@ -4190,13 +4223,18 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
   // The hold line now belongs to the engine, where it can only fire because a
   // tool actually started.
   //
-  // It fires only once the wait has ALREADY run past the threshold, because the
-  // line takes ~1.5s to say and audio plays serially: firing sooner delays the
-  // answer it was meant to cover. Live, that threshold is 1500ms against a
-  // measured distribution where almost every turn answers in under a second.
+  // These tests PIN VOICE_TOOL_HOLD_DELAY_MS to 200, and since 2026-08-31 that
+  // pin is the whole point of them rather than a convenience.
   //
-  // These tests shorten it to 200ms so they run fast; the SEMANTICS under test
-  // are "short wait stays silent, long wait speaks", not the specific number.
+  // The live default is now 0 — speak the moment the tool is known — so "a fast
+  // answer stays silent" is no longer what production does. The threshold
+  // mechanism still exists for anyone who sets the var, and these tests are
+  // what keeps it working. The DEFAULT's behaviour is covered separately below,
+  // in "at the shipped default", which deletes the var instead of setting it.
+  //
+  // Worth stating plainly, because it nearly went unnoticed: every test in this
+  // block passed unchanged across the 1500 -> 0 switch. A suite that pins the
+  // value it is meant to be testing cannot see that value change.
   beforeEach(() => {
     process.env.VOICE_ENGINE_FILLER = "true";
     process.env.VOICE_TOOL_HOLD_DELAY_MS = "200";
@@ -4468,7 +4506,11 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     expect(written).toMatch(/one moment/i);
   });
 
-  it("does not double up when the model volunteered its own promise", async () => {
+  // Reported live: "it says 'Let me check our calendar' and then 'I have
+  // booked your appointment'." The engine's table was never wrong — the
+  // model's own promise was, and shouldPlayHoldLine suppressed the correct
+  // line to avoid the two stacking. The gate swaps instead of suppressing.
+  it("replaces the model's own promise with the line for the tool that actually ran", async () => {
     H.llmFactory = () =>
       (async function* () {
         yield { type: "delta", text: "One moment while I check that for you." };
@@ -4485,7 +4527,396 @@ describe("session.js — the engine covers a slow tool round, not the model", ()
     await new Promise((r) => setTimeout(r, holdDelay + 250));
 
     const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
-    expect(written.match(/one moment/gi) || []).toHaveLength(1);
+    // The model's vague line never reaches the caller...
+    expect(written).not.toMatch(/one moment/i);
+    // ...and what they hear instead describes the lookup that is running.
+    expect(written).toMatch(/pull up your appointment|finding your appointment/i);
+    // Still exactly one line, not the doubling the old suppression prevented.
+    expect(written.match(/appointment/gi).length).toBe(1);
+  });
+
+  it("speaks the model's promise unchanged when no tool follows it", async () => {
+    // The gate costs a promise-shaped sentence ~350ms and nothing else. A turn
+    // that promises and then simply answers must still say what it wrote.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Let me check that for you." };
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: " We are open until six." };
+        yield { type: "done", reply: { text: "Let me check that for you. We are open until six.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("what time do you close.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/let me check that for you/i);
+    expect(written).toMatch(/open until six/i);
+  });
+
+  it("never gates a promise that also carries a question", async () => {
+    // Swallowing this would lose the only thing moving the call forward.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "One moment — what was the name again?" };
+        yield { type: "toolCall", name: "get_caller_appointments_from_db" };
+        await new Promise((r) => setTimeout(r, holdDelay + 400));
+        yield { type: "done", reply: { text: "One moment — what was the name again?", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("when is my appointment.");
+    await flush();
+    await new Promise((r) => setTimeout(r, holdDelay + 250));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/what was the name again/i);
+  });
+
+  // Reported from a live call on the new build: "after spelling my name it
+  // said 'Checking that now...' and I am not sure what it was checking".
+  //
+  // That is the MODEL's sentence, and the gate was letting it through: the
+  // swap only fired for a tool with a mapped hold line, and set_call_intent is
+  // mapped deliberately silent. So a promise made over a tool that looks
+  // nothing up survived intact — a specific claim about work that was not
+  // happening, which is worse than the vague line it replaced.
+  it("replaces a promise made over a SILENT tool with the neutral line", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Checking that now." };
+        yield { type: "toolCall", name: "set_call_intent" };
+        await new Promise((r) => setTimeout(r, 900));
+        yield { type: "done", reply: { text: "Checking that now.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    // Deliberately NOT a spelling. It used to be "it's N-I-T-H-I-N.", which
+    // stopped isolating this behaviour the moment holdSpelling existed: the
+    // caller-keyed line took the turn's hold budget and the neutral fallback
+    // under test never ran. The spelling interaction is worth testing and is
+    // tested separately; this case is about a promise made over a silent tool.
+    H.turnManagerInstances[0].opts.onTurnEnd("it's Nithin.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 700));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    // The false claim never reaches the caller...
+    expect(written).not.toMatch(/checking that now/i);
+    // ...and they are not left with nothing either.
+    expect(written).toMatch(/one moment/i);
+  });
+
+  // The other half, and a regression the first version of the swap introduced.
+  // services/gemini.js yields `toolCall` AFTER the tool has run, so playing the
+  // replacement instantly announced work that had already finished — or been
+  // REFUSED. Here the model's real answer arrives promptly, so the caller
+  // should hear only that.
+  it("says nothing at all when the answer arrives before the replacement is due", async () => {
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Let me check that." };
+        yield { type: "toolCall", name: "book_appointment" };
+        // Faster than the swap delay — an instant tool, or one the gate refused.
+        await new Promise((r) => setTimeout(r, 60));
+        yield { type: "delta", text: " Could you spell your surname?" };
+        yield {
+          type: "done",
+          reply: { text: "Let me check that. Could you spell your surname?", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("book me in for Tuesday.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    // No booking announced for a call that did not book.
+    expect(written).not.toMatch(/scheduled|calendar|one moment/i);
+    // Just the question the caller actually needs to answer.
+    expect(written).toMatch(/spell your surname/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hold line at the SHIPPED DEFAULT.
+//
+// Everything above pins VOICE_TOOL_HOLD_DELAY_MS. Nothing here does, which is
+// the point: on 2026-08-31 the default went 1500 -> 0 and every existing test
+// passed unchanged, because they all set the value they were meant to be
+// exercising. A caller heard the difference; the suite could not.
+//
+// The contract at 0 is deliberately different, and was chosen with the trade
+// stated out loud: a turn whose answer was ~800ms away now carries a line in
+// front of it and ends up LONGER. What is bought is that the caller is never
+// sitting in dead air, and that the line always names work that is happening.
+// ---------------------------------------------------------------------------
+describe("session.js — the hold line at the shipped default", () => {
+  beforeEach(() => {
+    process.env.VOICE_ENGINE_FILLER = "true";
+    delete process.env.VOICE_TOOL_HOLD_DELAY_MS;
+  });
+  afterEach(() => {
+    delete process.env.VOICE_ENGINE_FILLER;
+  });
+
+  const run = async (events, utterance = "is Friday at 2 free.") => {
+    H.llmFactory = () => makeGen(events);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd(utterance);
+    await flush();
+    await new Promise((r) => setTimeout(r, 400));
+    return H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+  };
+
+  it("speaks even when the answer is fast — the accepted cost of covering every wait", async () => {
+    // The inverse of "stays SILENT when the answer beats the threshold" above.
+    // Both are correct; they describe different configurations, and this is the
+    // one that ships.
+    //
+    // The 300ms gap is not padding. services/gemini.js yields toolCall after
+    // the tool has run, and the model then needs a SECOND round-trip to write
+    // the reply — measured at 685-861ms. A generator that yields its delta in
+    // the next microtask models no real call, and would only prove that text
+    // arriving cancels the timer, which is tested elsewhere and is correct.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolEffect", effect: { name: "check_appointment_availability", success: true } };
+        await new Promise((r) => setTimeout(r, 300));
+        yield { type: "delta", text: "I have 9, 1 oclock or half four." };
+        yield { type: "done", reply: { text: "I have 9, 1 oclock or half four.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("is Friday at 2 free.");
+    await flush();
+
+    // 150ms in: far inside the old 1500ms threshold, which would still be
+    // silent here. This is the whole change, expressed as a deadline.
+    await new Promise((r) => setTimeout(r, 150));
+    const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(early).toMatch(/checking the calendar|what's open/i);
+
+    await new Promise((r) => setTimeout(r, 500));
+    const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(all).toMatch(/half four/i);
+  });
+
+  it("announces the round the caller is WAITING on, not the one already finished", async () => {
+    // The reported defect. The caller gave their name, the turn checked
+    // availability and then wrote, and they heard "Checking the calendar now."
+    // — a description of work that had already completed, while they waited on
+    // the booking.
+    //
+    // pendingHoldKind used to latch the FIRST tool of the turn and never
+    // update. All four events below are consumed in successive microtasks,
+    // before the 0ms timer (a macrotask) can fire, so the promise gate is what
+    // speaks here and it reads pendingHoldKind after BOTH tools have run.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability" };
+        yield { type: "toolCall", name: "book_appointment" };
+        // Promise-only, and it arrives in the same microtask batch as the two
+        // tool calls — so the delta branch cancels the 0ms timer and the
+        // PROMISE GATE is what answers for this turn. That is the path where
+        // pendingHoldKind is read late, which is where the stale kind lived.
+        yield { type: "delta", text: "I'll get that booked." };
+        // The write is still running. Without this the turn would end before
+        // the swap's own delay elapsed and the caller would hear nothing —
+        // which proves nothing either way.
+        await new Promise((r) => setTimeout(r, 700));
+        yield { type: "delta", text: " You're all set for Tuesday." };
+        yield {
+          type: "done",
+          reply: { text: "I'll get that booked. You're all set for Tuesday.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("yes please, and it's Nithin.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 600));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/scheduled|putting that on the calendar/i);
+    // The specific failure: the availability line covering a booking write.
+    expect(written).not.toMatch(/checking the calendar|what's open|one sec, checking/i);
+  });
+
+  it("says nothing for a tool the gates refused — no work, no announcement", async () => {
+    // The spelling gate refuses book_appointment and services/tools.js still
+    // emits a toolCallEvent, so the caller could hear "Getting that scheduled
+    // now." moments before being asked to spell their name. The event now
+    // carries `silent`, which is decided by the OUTCOME rather than by whether
+    // the reply happens to win a race.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "book_appointment", silent: true };
+        // Slow enough that an unsuppressed line would certainly have played.
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: "Could you spell your surname?" };
+        yield { type: "done", reply: { text: "Could you spell your surname?", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("it's Nithin.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/scheduled|putting that on the calendar|one moment/i);
+    expect(written).toMatch(/spell your surname/i);
+  });
+
+  it("says nothing for an availability verdict served from the call's own state", async () => {
+    // capabilities/appointments.js answers a repeat point check for a slot it
+    // already confirmed without touching the adapter. Nothing is being looked
+    // up, so "One sec, checking the calendar" would be describing work that is
+    // not happening — the same defect as the refusal above, from the other end.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "toolCall", name: "check_appointment_availability", silent: true };
+        await new Promise((r) => setTimeout(r, 500));
+        yield { type: "delta", text: "Two o'clock it is." };
+        yield { type: "done", reply: { text: "Two o'clock it is.", toolResults: [] } };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("yes, two o'clock.");
+    await flush();
+    await new Promise((r) => setTimeout(r, 800));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).not.toMatch(/checking the calendar|what's open|one moment/i);
+    expect(written).toMatch(/two o'clock it is/i);
+  });
+
+  it("covers the spelling turn, keyed to the CALLER rather than to a tool", async () => {
+    // The one long silence the owner could still hear on a live call, and the
+    // one turn no tool-keyed line could ever have covered: the model
+    // acknowledges the spelling and reads the details back without calling
+    // anything, so there is no toolCall event to hang a line on.
+    //
+    // No tool in this generator, deliberately. That is the real shape.
+    H.llmFactory = () =>
+      (async function* () {
+        await new Promise((r) => setTimeout(r, 400));
+        yield { type: "delta", text: "Thanks Nithin. So that's Tuesday at 2." };
+        yield {
+          type: "done",
+          reply: { text: "Thanks Nithin. So that's Tuesday at 2.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("N I T H I N");
+    await flush();
+
+    // 700ms: past the 500ms transcript hold ("N I T H I N" carries no terminal
+    // punctuation, so classifyHold parks it), and still well short of the
+    // model. The line must be out and the ANSWER must not be — that ordering is
+    // the whole claim, and asserting only the first half would pass even if the
+    // line arrived after the reply it was meant to precede.
+    await new Promise((r) => setTimeout(r, 700));
+    const early = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(early).toMatch(/writing that down|get that down/i);
+    expect(early).not.toMatch(/tuesday at 2/i);
+
+    await new Promise((r) => setTimeout(r, 600));
+    const all = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(all).toMatch(/tuesday at 2/i);
+  });
+
+  it("drops a bare promise the model adds after a hold line has already played", async () => {
+    // The hole the spelling line exposed. canGatePromise requires
+    // !holdLinePlayed — a line having played is normally what means the gap is
+    // covered — so once the engine has spoken, the model's own "Checking that
+    // now." sailed past every guard and was voiced straight after it. Two wait
+    // lines in one turn, the second of them a claim about work that is not
+    // happening.
+    //
+    // Reachable before holdSpelling existed too, on any turn where a tool line
+    // beat the model's first sentence.
+    H.llmFactory = () =>
+      (async function* () {
+        yield { type: "delta", text: "Checking that now." };
+        await new Promise((r) => setTimeout(r, 600));
+        yield { type: "delta", text: " You're all set for Tuesday." };
+        yield {
+          type: "done",
+          reply: { text: "Checking that now. You're all set for Tuesday.", toolResults: [] },
+        };
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    H.turnManagerInstances[0].opts.onTurnEnd("N I T H I N");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1400));
+
+    const written = H.ttsTurns.flatMap((t) => t.write.mock.calls.map((c) => c[0])).join(" ");
+    expect(written).toMatch(/writing that down|get that down/i);
+    // The model's redundant second wait line never reaches the caller...
+    expect(written).not.toMatch(/checking that now/i);
+    // ...and the real answer still does.
+    expect(written).toMatch(/all set for tuesday/i);
+  });
+
+  it("does not fire the spelling line on an ordinary turn", async () => {
+    // Restraint. looksLikeSpelling needs a real run of single letters; a name
+    // said normally is not one, and a line on every turn is chatter.
+    const written = await run(
+      [
+        { type: "delta", text: "Thanks Nithin. What day suits you?" },
+        { type: "done", reply: { text: "Thanks Nithin. What day suits you?", toolResults: [] } },
+      ],
+      "it's Nithin.",
+    );
+    expect(written).not.toMatch(/writing that down|get that down|one moment/i);
+    expect(written).toMatch(/what day suits you/i);
+  });
+
+  it("still says nothing for a deliberately silent tool", async () => {
+    // Restraint. Dropping the delay to 0 must not turn the null-mapped tools
+    // back into speakers — that was the chatter the 1500ms threshold was
+    // reverting to fix, and the mapping is what actually fixed it.
+    const written = await run(
+      [
+        { type: "toolCall", name: "record_customer_request" },
+        { type: "toolEffect", effect: { name: "record_customer_request", success: true } },
+        { type: "delta", text: "I've passed that on." },
+        { type: "done", reply: { text: "I've passed that on.", toolResults: [] } },
+      ],
+      "can you tell them the boiler is still leaking.",
+    );
+    expect(written).not.toMatch(/one moment|calendar|scheduled/i);
+    expect(written).toMatch(/passed that on/i);
   });
 });
 
@@ -4656,5 +5087,299 @@ describe("session.js — no database write escapes its tenant scope", () => {
 
     const unscoped = H.writes.filter((w) => w.tenant == null);
     expect(unscoped).toEqual([]);
+// The greeting's own audio path.
+//
+// Reported live: the first few words of the greeting are not heard. Nothing
+// here can prove the carrier's behaviour, so these tests pin the two things
+// that ARE ours — that silence goes out in front of the greeting, and that the
+// greeting's timing is finally recorded — and leave the verdict to
+// greeting_audio_timing on a real call.
+// ---------------------------------------------------------------------------
+describe("session.js — greeting audio path", () => {
+  const ENV = "VOICE_GREETING_PREROLL_MS";
+  let prevEnv;
+
+  beforeEach(() => {
+    prevEnv = process.env[ENV];
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env[ENV];
+    else process.env[ENV] = prevEnv;
+  });
+
+  it("primes the audio path with mu-law silence before the greeting", async () => {
+    delete process.env[ENV]; // default 500ms
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const audioOut = H.audioOutInstances[0];
+    // The mocked TTS turn emits no audio of its own, so the preroll is the
+    // only thing that can have been enqueued.
+    expect(audioOut.enqueue).toHaveBeenCalledTimes(1);
+    const [buf] = audioOut.enqueue.mock.calls[0];
+    expect(buf.length).toBe(500 * 8); // 8kHz mu-law is one byte per sample
+    expect(buf.every((b) => b === 0xff)).toBe(true); // 0xFF is mu-law silence
+  });
+
+  it("puts the preroll AHEAD of the greeting's first audio, not behind it", async () => {
+    delete process.env[ENV];
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // Now let the greeting's TTS produce a chunk.
+    H.ttsTurns[0].opts.onAudioChunk(Buffer.from([0x01, 0x02]));
+
+    const audioOut = H.audioOutInstances[0];
+    const lengths = audioOut.enqueue.mock.calls.map(([b]) => b.length);
+    expect(lengths).toEqual([4000, 2]);
+  });
+
+  it("enqueues nothing when the preroll is disabled", async () => {
+    process.env[ENV] = "0";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    expect(H.audioOutInstances[0].enqueue).not.toHaveBeenCalled();
+    // ...and the greeting itself is unaffected.
+    expect(H.ttsTurns[0].write).toHaveBeenCalledWith("Hello, thanks for calling Test Biz.");
+  });
+
+  it("clamps a nonsense preroll back to the default rather than trusting it", async () => {
+    process.env[ENV] = "999999";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    const [buf] = H.audioOutInstances[0].enqueue.mock.calls[0];
+    expect(buf.length).toBe(500 * 8);
+  });
+
+  const timingEntry = () =>
+    log.info.mock.calls.find(([event]) => event === "greeting_audio_timing");
+
+  it("records the greeting's own timing, which no per-turn metric covers", async () => {
+    delete process.env[ENV];
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // Nothing is logged until the greeting actually produces audio.
+    expect(timingEntry()).toBeUndefined();
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    H.ttsTurns[0].opts.onFirstAudio();
+    await flush();
+
+    const [, payload] = timingEntry();
+    expect(payload.prerollMs).toBe(500);
+    expect(typeof payload.firstWireMs).toBe("number");
+    expect(typeof payload.ttsFirstByteMs).toBe("number");
+    expect(payload.greetingChars).toBe("Hello, thanks for calling Test Biz.".length);
+  });
+
+  // Found in review. With the preroll disabled nothing is enqueued until
+  // ElevenLabs produces audio, so the TTS callback runs BEFORE that audio is
+  // paced onto the wire — and the first version, which logged from that
+  // callback, emitted firstWireMs as null. That is the CONTROL ARM the
+  // .env instructions tell the operator to compare against, so it is the one
+  // configuration where the number must not be missing.
+  it("still reports both halves when the preroll is disabled", async () => {
+    process.env[ENV] = "0";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // TTS first, wire second — the order this configuration actually produces.
+    H.ttsTurns[0].opts.onFirstAudio();
+    await flush();
+    expect(timingEntry(), "logged before the wire number existed").toBeUndefined();
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    await flush();
+
+    const [, payload] = timingEntry();
+    expect(payload.prerollMs).toBe(0);
+    expect(typeof payload.firstWireMs).toBe("number");
+    expect(typeof payload.gapMs).toBe("number");
+  });
+
+  it("logs the greeting timing exactly once", async () => {
+    delete process.env[ENV];
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    H.ttsTurns[0].opts.onFirstAudio();
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    await flush();
+
+    const all = log.info.mock.calls.filter(([event]) => event === "greeting_audio_timing");
+    expect(all).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The call-start prefetch wait, which has always been billed to the STT tail.
+// ---------------------------------------------------------------------------
+describe("session.js — the first turn's wait on call-start context", () => {
+  it("marks the context wait on the first turn only, so later turns cannot flood the percentile with zeros", async () => {
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "OK", toolResults: [] } }]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours.");
+    await flush();
+    tm.opts.onTurnEnd("and where are you based.");
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map(([name]) => name);
+    // Two turns ran; ensureContext only actually waited on the first.
+    expect(marks.filter((m) => m === "context_wait_start")).toHaveLength(1);
+    expect(marks.filter((m) => m === "context_wait_end")).toHaveLength(1);
+    // Stamped AFTER stt_final, not where the wait happened.
+    //
+    // Deliberate, and it cost a review finding to learn why: a turn that hits
+    // the TRANSFER_TRIGGERS escape returns without ever reaching finishTurn(),
+    // and createTurnMetrics only clears its marks there — so a pair stamped
+    // before that escape survived into the NEXT turn's payload, which then
+    // reported a context wait it never incurred. The timestamps are captured
+    // at the true moment and replayed here, so the DELTA is still right.
+    expect(marks.indexOf("context_wait_end")).toBeGreaterThan(marks.indexOf("stt_final"));
+  });
+
+  it("leaves no marks behind on a turn that escapes to transfer", async () => {
+    // The leak itself. This turn never reaches finishTurn(), so anything
+    // stamped on it would be inherited by the turn after.
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "OK", toolResults: [] } }]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("let me speak to a manager please.");
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map(([name]) => name);
+    expect(marks).not.toContain("context_wait_start");
+    expect(marks).not.toContain("context_wait_end");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Semantic end-of-turn detection, wired but shipped OFF.
+//
+// The point of these is that "wired but disabled" is the state in which code
+// rots: VOICE_HOLD_TRAILING_MS sat written, tested and switched off in
+// production for two whole rounds before anyone noticed it was doing nothing.
+// So the wiring is asserted here even though no call runs it yet.
+// ---------------------------------------------------------------------------
+describe("session.js — the semantic end-of-turn arbiter", () => {
+  const ENV = "VOICE_SEMANTIC_ENDPOINT";
+  let prevEnv;
+
+  beforeEach(() => {
+    prevEnv = process.env[ENV];
+    // "I'd like to book." classifies as trailing_incomplete -> an 800ms hold,
+    // which is the window every assertion below is measured against.
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "Sure.", toolResults: [] } }]);
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env[ENV];
+    else process.env[ENV] = prevEnv;
+  });
+
+  async function callerSays(text) {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await settleGreeting();
+    runLlmTurn.mockClear();
+    H.turnManagerInstances[0].opts.onTurnEnd(text);
+    await flush();
+  }
+
+  it("asks nothing at all while the flag is off", async () => {
+    delete process.env[ENV];
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).not.toHaveBeenCalled();
+    // ...and the heuristic hold is untouched: still waiting at 120ms.
+    expect(runLlmTurn).not.toHaveBeenCalled();
+  });
+
+  it("releases the hold early when the model says the caller has finished", async () => {
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: true };
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    // Well inside the 800ms the heuristic would have waited.
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the hold alone when the model has no opinion", async () => {
+    // The fail-open path, which is every path the real arbiter takes when it
+    // is slow, erroring, or unparseable.
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: null };
+    await callerSays("I'd like to book.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).toHaveBeenCalled();
+    expect(runLlmTurn).not.toHaveBeenCalled();
+    // The timer still owns the decision, and still makes it.
+    await new Promise((r) => setTimeout(r, 900));
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds past the heuristic deadline when the model says they are mid-sentence", async () => {
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: false };
+    await callerSays("I'd like to book.");
+
+    // The heuristic would have flushed at 800ms. This is the case a fixed hold
+    // provably cannot cover — a caller who pauses longer than the number.
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(runLlmTurn).not.toHaveBeenCalled();
+
+    // ...but the extension is DOUBLE the original wait, not the whole chain
+    // budget. A single wrong INCOMPLETE costs the caller another 800ms, not
+    // another 2.2s on top of a 3s p50 — the runaway onHoldExpired already
+    // refuses to allow, for a reason a live call taught it.
+    await new Promise((r) => setTimeout(r, 900));
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask about a final the grammar already settles", async () => {
+    // A fluent caller's turn: terminal_punctuation, zero hold, nothing to
+    // arbitrate. This is what keeps the cost proportional to hesitation
+    // rather than to call length.
+    process.env[ENV] = "true";
+    H.arbiterVerdict = { complete: true };
+    await callerSays("Yes that works.");
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(judgeTurnComplete).not.toHaveBeenCalled();
+    expect(runLlmTurn).toHaveBeenCalledTimes(1);
   });
 });

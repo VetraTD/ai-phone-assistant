@@ -5,6 +5,7 @@ import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
@@ -1007,6 +1008,21 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // === TOOL CONTRACT ===
   let toolContract = `=== TOOL CONTRACT ===\n`;
   toolContract += `You have access to tools (function calls). Follow these rules strictly:\n`;
+  // Placed HERE, unconditionally, and it started life in the wrong place.
+  //
+  // It was first written into the SPELLING NOT YET CONFIRMED block in the
+  // dynamic tail, which is gated on `!callerHasNameOnFile(callerContext)` — so
+  // for a RETURNING caller it never rendered. Measured on a live staging call
+  // 2026-08-31: the caller had prior appointments on file, the assistant asked
+  // for a spelling anyway (that ask comes from the tool requirement in
+  // services/tools.js, a different path), received "n I t h I n", and still
+  // wrote down "Nathan".
+  //
+  // The distinction the gate is drawing is about WHETHER TO ASK — a per-call
+  // budget, correctly suppressed for someone whose name you already hold. This
+  // is about HOW TO READ an answer you already have, which is true whenever a
+  // spelling arrives and has nothing to do with who is calling.
+  toolContract += `- When a caller spells a name, THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling is right and what you heard is wrong: rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. Speech recognition mishears spoken names constantly and does not mishear letters the same way, which is the whole reason a spelling is worth having.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   if (appointmentsEnabled) {
     toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
@@ -1079,7 +1095,24 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   let guardrails = `=== GUARDRAILS ===\n`;
 
   // Caller-experience response rules — how every turn should sound.
+  // The "also say something" half is now scoped, because it was producing the
+  // wrong sentence. Reported live: "Let me check our calendar" followed
+  // immediately by "I have booked your appointment" — the model announces a
+  // wait before it has settled which tool it is calling, and it guesses. The
+  // engine already knows: lib/voice/session.js picks the wait line from the
+  // tool that actually started, so on those turns the model's guess is worse
+  // than its silence. lib/voice/promiseGate.js catches the ones that still slip
+  // through; this is the half that stops them being produced.
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
+  // Conditioned on the SAME flag as the code that speaks the replacement.
+  // Unconditional, this told the model to stay quiet on tool turns while
+  // VOICE_ENGINE_FILLER="false" left the engine silent too, and the caller sat
+  // through the whole tool round hearing nothing.
+  if (engineFillerEnabled()) {
+    guardrails += `- The one exception: when you are calling a tool to look something up, book, change, or cancel, you do NOT need to announce the wait. Do not say "one moment", "let me check the calendar", or anything similar — the system says that for you, and it says it accurately because it knows which action is running. Call the tool and stay quiet, or say something that is true right now. Never name an action you have not taken yet.\n`;
+  } else {
+    guardrails += `- Never name an action you have not taken yet. Describe what you are doing only once you have the result.\n`;
+  }
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
   guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
@@ -1337,20 +1370,28 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     sections.push(factsSection);
   }
 
-  // The spelling cap, stated as an accomplished fact rather than as a rule.
+  // The spelling state, stated as an accomplished fact rather than as a rule.
   //
   // The prompt already carries "ask this at most once" and the model still
   // asked nine turns running, because a rule about the past is something it
   // has to remember, while a fact in the tail is something it can read. The
-  // counter lives in lib/voice/session.js; this only reports it.
+  // state lives in lib/voice/replyState.js; this only reports it.
+  //
+  // The flag changed meaning on 2026-08-31, and the block below changed with
+  // it. It used to close on "we have asked", which is why a caller who ignored
+  // the question got their mis-heard name written down: the assistant read
+  // ALREADY ASKED, believed the matter settled, and moved on with a spelling
+  // nobody had ever given it. It now closes on "the caller answered, declined,
+  // or used up their attempts".
   //
   // Emits nothing when false, which is what keeps every existing tail snapshot
   // byte-identical — the same empty-case contract as KNOWN CALLER FACTS.
-  if (extras?.spellingAlreadyAsked) {
+  if (extras?.spellingSettled) {
     sections.push(
-      `=== ALREADY ASKED ===\n` +
-        `You have already asked this caller to spell something on this call. Do not ask again, ` +
-        `for any name or detail, for the rest of the call — use what you have and move on.`,
+      `=== SPELLING SETTLED ===\n` +
+        `The spelling question is closed for this call — the caller has either spelled it, declined ` +
+        `to, or been asked as often as this call allows. Do not ask again, for any name or detail, ` +
+        `for the rest of the call — use what you have and move on.`,
     );
   } else if (
     step === "gather_details" &&
@@ -1378,15 +1419,13 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     // 2026-08-29 precisely because prose cannot hold a budget.
     sections.push(
       `=== SPELLING NOT YET CONFIRMED ===\n` +
-        `You have not yet confirmed a spelling on this call. When the caller gives you a name you ` +
-        `are going to write down, ask them once — right then, while you are still taking details — ` +
-        `to spell it, and read the letters back. Do not leave it until you are confirming or ` +
-        `booking. If they decline or answer with something else, accept the name as you heard it ` +
-        `and carry on.\n` +
-        `THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling ` +
-        `is right and what you heard is wrong. Build the name from the letters, then read THAT ` +
-        `back. Speech recognition mishears names constantly and never mishears letters the same ` +
-        `way, which is the entire reason you are asking.`,
+        `The caller has not spelled a name on this call yet. When they give you a name you are ` +
+        `going to write down, ask them — right then, while you are still taking details — to spell ` +
+        `it, and read the letters back. Do not leave it until you are confirming or booking. You ` +
+        `cannot record a name until they have spelled it or told you not to bother, so getting this ` +
+        `now is what stops you having to interrupt the booking later. If they decline, tell you it ` +
+        `is spelled how it sounds, or ignore the question twice, accept the name as you heard it ` +
+        `and carry on — do not keep pressing.`,
     );
   }
 
@@ -2216,9 +2255,10 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // Call-scoped counterparts, both read only by end_call's gate.
         completedActionThisCall: !!extras?.completedActionThisCall || completedActionThisTurn,
         callerTurnCount: Number(extras?.callerTurnCount) || 0,
-        // Has this call already spent its one spelling request? Read by the
-        // hard-name gate in services/tools.js, which must never ask twice.
-        spellingAlreadyAsked: !!extras?.spellingAlreadyAsked,
+        // Is the spelling question closed for this call — answered, declined,
+        // or out of attempts? Read by the hard-name gate in services/tools.js,
+        // which blocks the write until one of those is true.
+        spellingSettled: !!extras?.spellingSettled,
         step,
         transferAllowed: extras?.transferAllowed !== false,
         config: cfg,

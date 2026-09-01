@@ -45,12 +45,30 @@ async function classify(text, rawText, env = {}) {
 const ON = { VOICE_HOLD_TRAILING_MS: "800" };
 
 describe("classifyHold — trailing incomplete", () => {
-  it("is inert by default, so merging this changes nothing", async () => {
-    // Punctuated, exactly as smart_format delivers it mid-thought.
+  // Was "is inert by default, so merging this changes nothing". It shipped
+  // inert in round 2 so the branch could land without behaviour risk. The
+  // default moved to 800 on 2026-08-31 once sim/cutoffSim.sim.js produced the
+  // matched pair (50.0% -> 12.5% cutoffs, fluent control unmoved).
+  //
+  // NOT, as first recorded here, because the rule "stayed inert in production":
+  // staging had VOICE_HOLD_TRAILING_MS=800 set in its environment all along, so
+  // the rule was live there. Inert applied to the default, and therefore to
+  // every environment that never set the flag — including this test suite and
+  // the simulator. See lib/transcriptUtils.js for why that matters.
+  it("is ON by default, and holds the fragment smart_format punctuated mid-thought", async () => {
+    // Punctuated, exactly as smart_format delivers it mid-thought. Reaching
+    // terminal_punctuation here would mean a zero hold and the assistant
+    // answering "I'd like to book" as though it were a finished sentence.
     expect(await classify("I'd like to book", "I'd like to book.")).toEqual({
-      holdMs: 0,
-      rule: "terminal_punctuation",
+      holdMs: 800,
+      rule: "trailing_incomplete",
     });
+  });
+
+  it("can still be switched off entirely without a deploy", async () => {
+    expect(
+      await classify("I'd like to book", "I'd like to book.", { VOICE_HOLD_TRAILING_MS: "0" }),
+    ).toEqual({ holdMs: 0, rule: "terminal_punctuation" });
   });
 
   it("holds the four fragments the simulator actually cuts off", async () => {
@@ -94,6 +112,88 @@ describe("classifyHold — trailing incomplete", () => {
     ]) {
       expect((await classify(clean, raw, ON)).rule, `should NOT hold: "${raw}"`).toBe(
         "terminal_punctuation",
+      );
+    }
+  });
+
+  // Found in review, and the reason the single word list had to be split.
+  // Every one of these ends on a word that WAS in it, and every one is a
+  // complete caller turn — several are how a call ends, so at 800ms they put
+  // dead air in front of the goodbye. They were invisible while the default
+  // was 0.
+  it("does NOT hold a complete turn that happens to end on one of the verbs", async () => {
+    for (const [clean, raw] of [
+      ["Yes cancel", "Yes cancel."],
+      ["Just a booking", "Just a booking."],
+      ["Yes go ahead and book", "Yes go ahead and book."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should NOT hold: "${raw}"`).toBe(
+        "terminal_punctuation",
+      );
+    }
+  });
+
+  // FIXED 2026-09-01. Was recorded here the day before as a PRE-EXISTING
+  // defect, deliberately left alone; the owner asked for it once it was
+  // explained, so it now has the matched pair it was owed.
+  //
+  // "No, that's all I need." is one of the most common ways a caller signals
+  // the call is over, and TRAILING_LEAD_IN matched its trailing "i need" — a
+  // 2000ms hold, twice what the verb list charges, landing immediately before
+  // the goodbye, and independent of every flag so it was live on production
+  // the whole time. Two seconds of silence on a phone reads as the line having
+  // dropped, and it was the last thing the caller experienced.
+  //
+  // The lead-in list was built for "my name is…" / "I need…" as OPENINGS. The
+  // split teaches it to tell an opening from a closure by what precedes it.
+  it("does NOT hold a caller signing off on 'I need' / 'I want' / 'the reason'", async () => {
+    for (const [clean, raw] of [
+      ["No that's all I need", "No that's all I need."],
+      ["That's what I want", "That's what I want."],
+      ["That's all I want", "That's all I want."],
+      ["That's exactly what I'd like", "That's exactly what I'd like."],
+      ["No that's all we need", "No that's all we need."],
+      ["That's the reason", "That's the reason."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should NOT hold: "${raw}"`).toBe(
+        "terminal_punctuation",
+      );
+    }
+  });
+
+  it("still holds the same phrases when the caller is genuinely leading in", async () => {
+    // The whole distinction: identical trailing words, opposite meanings.
+    for (const [clean, raw] of [
+      ["Hi I need", "Hi I need."],
+      ["I want", "I want."],
+      ["My name is", "My name is."],
+      ["Can I", "Can I."],
+      ["Is there", "Is there."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should hold: "${raw}"`).toBe(
+        "trailing_lead_in",
+      );
+    }
+  });
+
+  it("tells a Spanish sign-off from a Spanish lead-in", async () => {
+    expect((await classify("Es todo lo que necesito", "Es todo lo que necesito.", ON)).rule).toBe(
+      "terminal_punctuation",
+    );
+    expect((await classify("Necesito", "Necesito.", ON)).rule).toBe("trailing_lead_in");
+  });
+
+  it("still holds the same verbs when a cue shows they are governing something", async () => {
+    // The distinction the split turns on: "to book" is unfinished, "all I
+    // need" is not, and the trailing word is identical.
+    for (const [clean, raw] of [
+      ["I'd like to book", "I'd like to book."],
+      ["Can I get", "Can I get."],
+      ["I want to cancel", "I want to cancel."],
+      ["Could you take", "Could you take."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should hold: "${raw}"`).toBe(
+        "trailing_incomplete",
       );
     }
   });

@@ -111,7 +111,7 @@ describe("hard names are spelled before they become a record", () => {
       config: config(),
       capabilityState: {},
       callerPhone: "+15551234567",
-      spellingAlreadyAsked: false,
+      spellingSettled: false,
     });
     expect(res.functionResponse.response.success).toBe(false);
     expect(res.functionResponse.response.message).toMatch(/spell/i);
@@ -131,7 +131,7 @@ describe("hard names are spelled before they become a record", () => {
       config: config(),
       capabilityState: {},
       callerPhone: "+15551234567",
-      spellingAlreadyAsked: false,
+      spellingSettled: false,
     });
     expect(res.functionResponse.response.success).toBe(false);
     expect(res.functionResponse.response.message).toMatch(/spell/i);
@@ -144,7 +144,7 @@ describe("hard names are spelled before they become a record", () => {
         config: config(),
         capabilityState: {},
         callerPhone: "+15551234567",
-        spellingAlreadyAsked: false,
+        spellingSettled: false,
       });
       expect(res.functionResponse.response.success).toBe(true);
     } finally {
@@ -159,7 +159,7 @@ describe("hard names are spelled before they become a record", () => {
       config: config(),
       capabilityState: {},
       callerPhone: "+15551234567",
-      spellingAlreadyAsked: true,
+      spellingSettled: true,
     });
     expect(res.functionResponse.response.success).toBe(true);
   });

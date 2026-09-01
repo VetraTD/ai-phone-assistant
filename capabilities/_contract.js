@@ -102,6 +102,13 @@
  *   list in services/gemini.js.
  * @property {boolean} [isLookup] - true if the tool reads rather than writes;
  *   requirement checks that gate writes do not apply.
+ *
+ *   NOT READ ANYWHERE. Declared here since the packs were extracted and never
+ *   wired: what actually gates writes is membership of the pack's `actionTools`
+ *   array (services/tools.js). Left documented rather than deleted because a
+ *   real read/write marker is a prerequisite for ever calling a tool
+ *   speculatively — see the pack-level `callerLookupTools` below for the
+ *   narrow, wired version of the same idea.
  */
 
 /**
@@ -158,6 +165,10 @@
  *   Tools whose shape depends on which backend is active. TRANSITIONAL: in Step A
  *   this reproduces today's EHR-vs-DB fork; Step B replaces it with real adapters
  *   and this hook goes away.
+ * @property {string[]} [callerLookupTools] - tools that answer "what does this
+ *   caller already have with us?", i.e. whose answer the call-start snapshot
+ *   (ctx.callerContext) may already hold. Instrumentation only today: it lets
+ *   the engine count warm-vs-cold lookups without knowing any tool's name.
  * @property {(cfg: CapabilityConfig, ctx: object) => CapabilityPrompt} [prompt]
  * @property {(cfg: CapabilityConfig) => RequireBlock} [requirements]
  * @property {(toolName: string, args: object, ctx: object) => Promise<object>} [execute]

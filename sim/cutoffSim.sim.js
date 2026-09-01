@@ -38,6 +38,11 @@ import { describe, it, vi, beforeEach, afterEach, expect } from "vitest";
 const H = vi.hoisted(() => ({
   sttInstances: [],
   ttsTurns: [],
+  /**
+   * Canned verdict for the semantic end-of-turn arbiter. null = "no opinion",
+   * which is the fail-open path every number in this file is measured under.
+   */
+  semanticVerdict: { complete: null },
   /** Modelled first-chunk latencies, overridden per scenario. */
   llmTtfbMs: 940,
   ttsTtfbMs: 95,
@@ -155,6 +160,24 @@ vi.mock("../lib/voice/audioOut.js", async (importActual) => {
 // WHY a decision went the way it did instead of only that it did. A row that
 // says "no cut" is ambiguous on its own: it could mean the gates worked, or
 // that the assistant was not speaking and there was nothing to cut.
+// The semantic end-of-turn arbiter never reaches a network from here.
+//
+// It is OFF by default (VOICE_SEMANTIC_ENDPOINT), so today this changes
+// nothing — but session.js is driven for real by this file, and the day
+// someone runs the simulator with the flag on to see what it does, the
+// unmocked version would make a live Gemini call per hesitant turn. That is
+// billed money leaking out of a harness whose whole value is being free and
+// deterministic, and it would be discovered on an invoice.
+//
+// Returns "no opinion", which is the fail-open path the heuristic numbers in
+// this file are measured under. Set H.semanticVerdict to exercise the other
+// two branches; the wiring itself is asserted in tests/session.test.js, where
+// a stubbed verdict proves something rather than assuming it.
+vi.mock("../lib/voice/endpointArbiter.js", async (importActual) => ({
+  ...(await importActual()),
+  judgeTurnComplete: async () => H.semanticVerdict ?? { complete: null },
+}));
+
 vi.mock("../lib/voice/turnManager.js", async (importActual) => {
   const actual = await importActual();
   return {
@@ -283,6 +306,24 @@ const FLUENT_SCRIPT = [
   { label: "f3", segments: [speak("My name is Nithin and my number is five five five one two three four")] },
   { label: "f4", segments: [speak("Can I get something Tuesday morning please")] },
   { label: "f5", segments: [speak("No that's everything thank you")] },
+  // Added 2026-08-31, after review found the control was structurally unable
+  // to fail. Every utterance above happens to end on a word no hold rule
+  // matches, so "the fluent control does not move" was a property of THIS
+  // SCRIPT, not of the rule under test — and the day VOICE_HOLD_TRAILING_MS
+  // was switched on, a complete turn ending on one of its verbs would have
+  // taken an 800ms hold with the control reporting all clear.
+  //
+  // These two end on `booking` and `book`, both in that list, and both are
+  // finished sentences. If the verb rule ever stops requiring a cue, the
+  // fluent row's reply latency moves and this control says so.
+  { label: "f6", segments: [speak("Just a booking")] },
+  { label: "f7", segments: [speak("Yes go ahead and book")] },
+  // Added 2026-09-01 for the lead-in split, same reasoning as f6/f7. This is
+  // the single most common way a call ENDS, and it took a 2000ms hold on
+  // TRAILING_LEAD_IN's trailing "i need" — the longest hold in the system,
+  // landing on the goodbye, on every flag setting. If that rule ever stops
+  // distinguishing a sign-off from an opening, this row says so.
+  { label: "f8", segments: [speak("No that's all I need")] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -539,15 +580,24 @@ describe("cutoff simulation", () => {
       // Punctuated mid-sentence finals: smart_format guesses a sentence end, so
       // classifyHold returns terminal_punctuation and the no-punct hold never
       // engages. This is the case the hold CANNOT help with.
-      { name: "punctuated finals @150ms", script: HESITANT_SCRIPT, endpointMs: 150 },
-      { name: "punctuated finals @300ms", script: HESITANT_SCRIPT, endpointMs: 300 },
+      //
+      // holdTrailingMs is PINNED to 0 on every "off" arm below rather than
+      // left to the module default. It used to be omitted, which worked only
+      // while the default was 0 — the day that default moved to 800 these
+      // control rows would silently have become copies of the treatment rows,
+      // the matched pair would have compared 800 against 800, and the
+      // assertion that the flag reduces cutoffs would have started passing or
+      // failing for reasons having nothing to do with the flag. A control arm
+      // that tracks the thing it is controlling for is not a control.
+      { name: "punctuated finals @150ms", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 0 },
+      { name: "punctuated finals @300ms", script: HESITANT_SCRIPT, endpointMs: 300, holdTrailingMs: 0 },
 
       // Unpunctuated mid-sentence finals: the case classifyHold's no-punct
       // branch exists for. Sweeping the knob here is the only place it can show
       // an effect, so this is the real before/after for the shipped fix.
-      { name: "unpunctuated, hold OFF (pre-fix)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 0 },
-      { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500 },
-      { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900 },
+      { name: "unpunctuated, hold OFF (pre-fix)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 0, holdTrailingMs: 0 },
+      { name: "unpunctuated, hold 500 (shipped)", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 500, holdTrailingMs: 0 },
+      { name: "unpunctuated, hold 900", script: HESITANT_SCRIPT, endpointMs: 150, midSentencePunctuated: false, holdNoPunctMs: 900, holdTrailingMs: 0 },
 
       // THE FIX UNDER TEST. Identical to "punctuated finals @150ms" in every
       // respect except VOICE_HOLD_TRAILING_MS, so the flag is the only
@@ -556,7 +606,7 @@ describe("cutoff simulation", () => {
       // and lead-in lists cannot see — and smart_format punctuates them, so
       // without this they reach terminal_punctuation and get a zero hold.
       { name: "punctuated + trailing 800", script: HESITANT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
-      { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150 },
+      { name: "fluent (control)", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 0 },
       // The control's own paired row: the fix must cost a fluent caller
       // NOTHING, because they have no cutoffs to fix. Watch the reply column.
       { name: "fluent + trailing 800", script: FLUENT_SCRIPT, endpointMs: 150, holdTrailingMs: 800 },
@@ -717,6 +767,17 @@ describe("cutoff simulation", () => {
       fluentOn.rules.includes("trailing_incomplete"),
       "trailing_incomplete fired on FLUENT speech — the word list is too broad and is taxing finished turns",
     ).toBe(false);
+    // The lead-in rule is FLAG-INDEPENDENT, so both fluent arms are checked.
+    // It charges 2000ms — the longest hold in the system — and the utterance
+    // that used to trip it ("No that's all I need") is how a call ENDS, so the
+    // cost landed on the goodbye. Asserted on rules rather than on median
+    // latency: one hold in an eight-turn script disappears into a median.
+    for (const arm of [control, fluentOn]) {
+      expect(
+        arm.rules.includes("trailing_lead_in"),
+        `trailing_lead_in fired on FLUENT speech in "${arm.name}" — a sign-off is being read as an opening and charged 2000ms before the goodbye`,
+      ).toBe(false);
+    }
     expect(
       fluentOn.medianLatency,
       `fluent callers now wait ${fluentOn.medianLatency}ms vs ${control.medianLatency}ms with the flag off`,

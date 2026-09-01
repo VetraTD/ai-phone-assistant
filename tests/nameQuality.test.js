@@ -83,7 +83,7 @@ describe("shouldConfirmSpelling — the whole decision, not just difficulty", ()
   const ctx = (over = {}) => ({
     name: "Aoife Nic Ghabhann",
     callerContext: null,
-    spellingAlreadyAsked: false,
+    spellingSettled: false,
     policy: "always",
     ...over,
   });
@@ -100,7 +100,7 @@ describe("shouldConfirmSpelling — the whole decision, not just difficulty", ()
   });
 
   it("never asks twice in one call", () => {
-    expect(shouldConfirmSpelling(ctx({ spellingAlreadyAsked: true }))).toBe(false);
+    expect(shouldConfirmSpelling(ctx({ spellingSettled: true }))).toBe(false);
   });
 
   it("never asks a caller whose name is already on file", () => {

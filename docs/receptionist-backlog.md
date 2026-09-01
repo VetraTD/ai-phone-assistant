@@ -431,12 +431,24 @@ if changed. **Do not touch until C4 can prove what was saved.**
 The big architectural win is banked. What's left is smaller and mostly trades
 against conversation quality.
 
+### L1b · The one voice flag that differs in production `[cheap]` · P0
+
+Reported 2026-08-31: production is the same as staging "except for debug items,
+and maybe one voice item". Nobody knows which. Every conclusion drawn from a
+staging call, and every simulator row read as "what production does", is
+conditional on that answer — as the `VOICE_HOLD_TRAILING_MS` correction in L2
+demonstrates, where a flag set in one environment and defaulted in another
+turned a measured baseline into fiction.
+
+- **Done when:** the two environments' voice flags are diffed and the difference
+  is either named and justified or removed.
+
 ### L1 · Confirm `VOICE_INTENT_MARKER` in Railway — see P0-1 `[cheap]` · P0
 
 ~900ms, free, never confirmed on that environment. Listed here because "the AI
 feels slow" complaints should check this **before** any diagnosis.
 
-### L2 · Semantic end-of-turn detection `[cheap]` · P1
+### L2 · Semantic end-of-turn detection `[cheap]` · P1 — HALF SHIPPED 2026-08-31
 
 The residual from round 2, verified on live calls: **a pause longer than the
 hold still gets talked over.** A hold cannot out-wait a slow caller. Raising it
@@ -449,13 +461,77 @@ how long they've been quiet. `TRAILING_INCOMPLETE` (round 2) is the cheap
 first version of this and already works — it sits above the punctuation branch
 and costs a completed turn nothing.
 
-- **Effort:** multi-day. Needs a design.
+**Update 2026-08-31, corrected same day.** The cheap half was already written:
+`VOICE_HOLD_TRAILING_MS` defaulted to **0**, so it shipped inert in round 2 to
+land without behaviour risk. The default is now 800.
+
+**The correction matters more than the change.** This was first written up as
+"the rule had never fired on a real call". It had — staging has had
+`VOICE_HOLD_TRAILING_MS=800` set in its environment all along. What was inert
+was the DEFAULT, and therefore every environment that never set the flag: local
+dev, the test suite, and `sim/cutoffSim.sim.js`.
+
+So the simulator was modelling an environment that did not exist. Its
+`punctuated finals @150ms / 50% cutoffs` baseline was never staging's
+behaviour; staging was already on the 12.5% row. **A sim row only means
+"production" if the flags match, and nobody had checked.** That is P0-1's whole
+subject, and it turned a piece of evidence into a piece of fiction without
+anything looking wrong.
+
+Two live consequences, both on staging, both predating this branch:
+- The false positives the split fixes — "No, that's all I need." taking an
+  800ms hold before the goodbye — were **already happening**.
+- `TRAILING_LEAD_IN` matched `i need` and `i want`, so the same sign-off took
+  **2000ms** on an older rule — flag-independent, so live everywhere including
+  production. **FIXED 2026-09-01**, split the same way: "my name is" still
+  holds, "that's all I need" does not. The fluent control now carries that
+  utterance and asserts on it, and the assertion was confirmed to fail with the
+  split disabled. This was the longest hold in the system landing on the
+  goodbye of every call that ends that way.
+
+Production is reported as identical to staging "except for debug items, and
+maybe one voice item" — that one unconfirmed voice flag is unresolved and is
+the remaining P0-1 work.
+
+The numbers, same script, same pauses, same endpointing, flag the only variable:
+
+```
+punctuated finals @150ms    8 turns  4 cutoffs  50.0%  reply 1260ms
+punctuated + trailing 800   8 turns  1 cutoff   12.5%  reply 1260ms
+fluent (control)            5 turns  0 cutoffs   0.0%  reply 1260ms
+fluent + trailing 800       5 turns  0 cutoffs   0.0%  reply 1260ms
+```
+
+The sim's "off" arms had to be pinned to 0 first: they omitted the knob and
+inherited the module default, so moving that default would have turned the
+control rows into copies of the treatment rows and the matched pair would have
+compared 800 against 800. **A control arm that tracks the thing it is
+controlling for is not a control** — worth checking the other sweeps in that
+file for the same shape.
+
+The model half (`lib/voice/endpointArbiter.js`) is built and wired but
+**shipped dark** behind `VOICE_SEMANTIC_ENDPOINT`. It runs concurrently with
+the hold that was going to run anyway and can only shorten or extend it; a
+late, failed or unparseable answer means no opinion and the timer is untouched.
+
+**It is an accuracy fix, not a latency fix.** p50 is 3,062ms and endpointing
+plus hold is ~500-650ms of it, so even perfect detection is worth a couple of
+hundred ms. Anyone reaching for this to make the assistant feel faster is
+reaching for the wrong item — see L1 and §9.
+
+- **Effort:** the free half is done. Enabling the arbiter is a flag plus a
+  costed estimate plus a live call.
 - **Measured by:** `npm run sim:cutoff` — free, deterministic (verified across 5
   identical runs), and it already reports both cutoff rate **and** the reply
   latency cost, which is what stops a "hold everything for 3s" non-fix reading
   as a win.
-- **Done when:** cutoff rate drops in the sim with the fluent control unmoved,
-  and a live call confirms it.
+- **Blocked on, for the arbiter half:** nobody has measured what a model call
+  per hesitant turn costs. `semantic_endpoint_flushed` / `_extended` both at
+  zero with the flag on does NOT mean the model agreed with us — it means no
+  verdict ever arrived inside its hold. Failing open makes "too slow" look
+  exactly like "not needed".
+- **Done when:** a live call confirms the trailing hold, and the arbiter is
+  either enabled on a costed number or closed as not worth it.
 
 ### L3 · Barge-in minimum words 4 → 2 `[cheap]` · P1
 
@@ -469,6 +545,68 @@ is now wired to the interim path. Guarded by
 - **Effort:** the code exists; this is a flag plus a sim run plus a call.
 - **Done when:** sim shows no rise in false interrupts, and a live call with a
   speakerphone confirms the AI does not interrupt itself.
+
+### L3b · Warm caller dossier — instrumented 2026-08-31, NOT built `[twice]` · P2
+
+Asked for as: prefetch everything about the caller at pickup — appointments
+now, prescriptions and quotes later — so "when is my appointment?" is answered
+from memory instead of a lookup. Three separate items wearing one coat.
+
+**The prefetch already exists.** `lib/voice/session.js` fires four parallel
+Supabase reads at the `start` event, unawaited, and `fetchCallerContext`
+returns the caller's upcoming appointments. **No lookup tool reads it.**
+`get_caller_appointments_from_db` re-queries through `listAppointmentsByCaller`
+— the same function that built the snapshot.
+
+**The cost is not a database round trip.** `services/gemini.js` sends tool
+results back to Gemini for another streaming round, so a lookup whose answer we
+already had costs a whole extra model turn. That is the number worth chasing,
+and it is not the one the request assumes.
+
+Instrumented rather than fixed, because nobody has measured how often it
+happens:
+
+- `lookup_tool_context_warm` / `_cold` — a caller-appointment lookup running
+  while the snapshot already held rows. Declared as `pack.callerLookupTools` so
+  the engine counts it without knowing any tool's name. Warm is a deliberate
+  upper bound: an upper bound that comes back small closes the question.
+- `context_wait_ms` — split out of `stt_tail_ms`. `startTurn` awaits
+  `ensureContext()` before stamping `speech_end` (from the true end of speech)
+  and `stt_final` (from "now"), so the prefetch wait has always been billed to
+  the speech-to-text tail. Any widening of the prefetch would have made that
+  worse and stayed just as invisible.
+
+Three sub-items, three different answers:
+
+1. **Serve the lookup from `ctx.callerContext`, and stop the model burning a
+   round on data already in its prompt.** Worth doing if the counters say it is
+   frequent. `capabilities/appointments.js` already states the principle —
+   "Read from `ctx.callerContext`, never re-queried… a Supabase round trip
+   inside a tool round would be latency they hear" — and the booking guard obeys
+   it while the lookup tool does not. That is an inconsistency, not a new design.
+2. **A generic pack `prefetch()` hook for future data types.** Premature. There
+   is no pack lifecycle hook of any kind today and no second consumer to shape
+   it. Build it when the second data type arrives and let that one prove the
+   design — the argument `capabilities/quotes.js` makes about its own seam.
+3. **Speculative fan-out to business webhooks / EHR.** No, and not without
+   prerequisites. Every webhook is POST or PUT (`ALLOWED_METHODS` in
+   `integrations/webhook.js` has no GET) and nothing marks a tool read-only:
+   `capabilities/_contract.js` declares `isLookup` for exactly this and
+   **nothing in the codebase reads it**. Firing a business's write-capable
+   endpoint for every inbound call — wrong numbers and hangups included — is a
+   bad idea on its own terms.
+
+**Disclosure is a separate gate from prefetch, and must stay one.** Caller ID
+is spoofable and handsets are shared. `services/gemini.js` NON-NEGOTIABLE
+RULE 4 and `appointments.js appointmentBelongsToCaller` are the current policy;
+note that `=== CALLER CONTEXT ===` already puts the caller's name and
+appointment times into the prompt on turn 1 with no identity check, and only
+the *speaking* of them is restrained — by prose. A dossier makes that far
+easier to leak, because the data is right there and the model is helpful by
+default.
+
+- **Done when:** the counters have a number, and item 1 is either built or
+  closed on it.
 
 ### L4 · Decide the per-call day-slot cache `[cheap]` · P2
 
