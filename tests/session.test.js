@@ -951,7 +951,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         reply: {
           text: "Sure.",
           toolResults: [],
-          usage: { promptTokens: 4000, outputTokens: 60, cachedTokens: 3200 },
+          usage: { promptTokens: 4000, outputTokens: 60, cachedTokens: 3200, thoughtsTokens: 12 },
         },
       },
     ]);
@@ -970,8 +970,19 @@ describe("session.js — v2 pipeline orchestrator", () => {
     // Without these on the payload, cache-hit rate stays unobservable in
     // production and a dead cache prefix is indistinguishable from a working
     // one — while silently inflating LLM TTFT on every turn.
+    //
+    // OUTPUT tokens matter for a different reason, and their absence was a real
+    // gap: this fixture has always supplied `outputTokens` and this assertion
+    // never looked at it, so the value was dropped between buildUsage() and the
+    // payload with a green test either side. Output is the dearer half per
+    // token, so a cost figure built from input alone is not a cost figure.
     expect(H.metricsInstances[0].finishTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ cached_tokens: 3200, prompt_tokens: 4000 })
+      expect.objectContaining({
+        cached_tokens: 3200,
+        prompt_tokens: 4000,
+        output_tokens: 60,
+        thoughts_tokens: 12,
+      })
     );
   });
 
@@ -995,6 +1006,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const extras = H.metricsInstances[0].finishTurn.mock.calls.at(-1)?.[0] ?? {};
     expect(extras.cached_tokens).toBeUndefined();
     expect(extras.prompt_tokens).toBeUndefined();
+    // Omitted, not null: getLatencyStats skips a turn with no count, and a
+    // present-but-null field would be averaged in as a zero.
+    expect(extras.output_tokens).toBeUndefined();
+    expect(extras.thoughts_tokens).toBeUndefined();
   });
 
   it("3b. tts onDone({truncated: true}) logs tts_turn_truncated with callSid + turn index", async () => {

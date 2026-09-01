@@ -54,3 +54,7 @@ eval/results/tts-readback/
 *.tfvars
 !*.tfvars.example
 
+
+# Vendor prices are account-specific and go stale; a committed rate is one
+# nobody re-checks. See config/rates.example.json.
+config/rates.json
