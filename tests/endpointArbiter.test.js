@@ -163,7 +163,13 @@ describe("judgeTurnComplete — the request itself", () => {
     const req = gen.mock.calls[0][0];
     expect(req.model).toBe("gemini-3.6-flash");
     // Thinking tokens would blow the deadline on every single turn.
-    expect(req.config.thinkingConfig.thinkingBudget).toBe(0);
+    //
+    // Asserted as thinkingLevel, not thinkingBudget. gemini-3.x REJECTS the
+    // legacy budget key with a 400, so the original version of this assertion
+    // — expect(thinkingConfig.thinkingBudget).toBe(0) — was pinning a request
+    // shape that could never have succeeded, and passing while doing it.
+    expect(req.config.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
+    expect(req.config.thinkingConfig.thinkingBudget).toBeUndefined();
     expect(req.config.temperature).toBe(0);
     expect(req.config.maxOutputTokens).toBeLessThanOrEqual(8);
   });

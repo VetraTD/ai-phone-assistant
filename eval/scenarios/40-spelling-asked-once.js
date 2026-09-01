@@ -27,13 +27,22 @@
  */
 import * as A from "../asserts.js";
 import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { getStrings } from "../../lib/voice/strings.js";
 
 const TZ = "America/Chicago";
 const SLOT = nextWeekdayAt("thu", "15:00", { timezone: TZ });
 
-/** Any way the model phrases "please spell that". Mirrors strings.js spellRequestRe. */
-const SPELL_REQUEST =
-  /\b(spell (that|it|your|the)|spelling of|could you spell|can you spell|how do you spell)\b/i;
+/**
+ * Any way the model phrases "please spell that".
+ *
+ * IMPORTED rather than transcribed. This copy had drifted badly — five
+ * alternatives against strings.js's seven, and narrower inside them ("spell
+ * your" but not "spell them"/"spell those", no "would/will you spell", no
+ * "letter by letter") — so phrasings the live cap counts were invisible here
+ * and the at-most-once assertion could pass on a call that asked four times.
+ * A second copy of a regex is a second thing to keep right.
+ */
+const SPELL_REQUEST = getStrings("en").spellRequestRe;
 
 export default {
   name: "spelling-asked-once",

@@ -113,6 +113,67 @@ describe("classifyHold — trailing incomplete", () => {
     }
   });
 
+  // Found in review, and the reason the single word list had to be split.
+  // Every one of these ends on a word that WAS in it, and every one is a
+  // complete caller turn — several are how a call ends, so at 800ms they put
+  // dead air in front of the goodbye. They were invisible while the default
+  // was 0.
+  it("does NOT hold a complete turn that happens to end on one of the verbs", async () => {
+    for (const [clean, raw] of [
+      ["Yes cancel", "Yes cancel."],
+      ["Just a booking", "Just a booking."],
+      ["Yes go ahead and book", "Yes go ahead and book."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should NOT hold: "${raw}"`).toBe(
+        "terminal_punctuation",
+      );
+    }
+  });
+
+  // NOT A PASS. Documenting a PRE-EXISTING defect found while fixing the one
+  // above, in an older and stronger rule.
+  //
+  // "No, that's all I need." is one of the most common ways a caller signals
+  // the call is over, and TRAILING_LEAD_IN matches its trailing "i need" — so
+  // it takes a 2000ms hold, more than twice what the verb list would have
+  // charged, and it lands immediately before the goodbye. The lead-in list was
+  // built for "my name is…" / "I need…" as OPENINGS, where the caller really
+  // is about to say more; it cannot tell that from the same words closing a
+  // sentence.
+  //
+  // Left alone deliberately: it predates this branch, it is not what the round
+  // was asked to fix, and changing a 2000ms rule deserves its own matched pair
+  // in the simulator rather than being folded into someone else's change. This
+  // assertion exists so the behaviour is recorded rather than assumed, and so
+  // the day it is fixed this test fails and points at the reason.
+  it("PRE-EXISTING: a caller signing off on 'I need' / 'I want' waits 2s on the lead-in rule", async () => {
+    for (const [clean, raw] of [
+      ["No that's all I need", "No that's all I need."],
+      ["That's what I want", "That's what I want."],
+      ["That's all I want", "That's all I want."],
+    ]) {
+      expect(await classify(clean, raw, ON), `pre-existing 2s hold: "${raw}"`).toEqual({
+        holdMs: 2_000,
+        rule: "trailing_lead_in",
+      });
+    }
+  });
+
+  it("still holds the same verbs when a cue shows they are governing something", async () => {
+    // The distinction the split turns on: "to book" is unfinished, "all I
+    // need" is not, and the trailing word is identical.
+    for (const [clean, raw] of [
+      ["I'd like to book", "I'd like to book."],
+      ["Can I get", "Can I get."],
+      ["I want to cancel", "I want to cancel."],
+      ["Could you take", "Could you take."],
+    ]) {
+      expect((await classify(clean, raw, ON)).rule, `should hold: "${raw}"`).toBe(
+        "trailing_incomplete",
+      );
+    }
+  });
+
   it("does not fire on a bare -ing word that ends a real answer", async () => {
     // No /\w+ing$/ catch-all: "Tuesday morning." and "just a cleaning." are
     // complete answers.

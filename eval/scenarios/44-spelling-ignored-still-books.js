@@ -20,13 +20,20 @@
  */
 import * as A from "../asserts.js";
 import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { getStrings } from "../../lib/voice/strings.js";
 
 const TZ = "America/Chicago";
 const SLOT = nextWeekdayAt("wed", "11:00", { timezone: TZ });
 
-/** Mirrors lib/voice/strings.js spellRequestRe. */
-const SPELL_REQUEST =
-  /\b(spell (that|it|your|the|them|those)|spelling of|(could|can|would|will) you spell|how (do|would) (you|i) spell|letter by letter|how (do|would) (you|i) write (that|it)|write that down)\b/i;
+// IMPORTED, not transcribed.
+//
+// The hand-copied version of this regex was missing one of strings.js's seven
+// alternatives — `spell (that|it) (out|for me)` — so a model asking "could you
+// spell that out for me?" repeatedly would be counted by the live cap and
+// scored as ZERO asks by this scenario. The assertion below would have gone
+// green on exactly the livelock it exists to catch. Found in review; the fix
+// is to stop keeping a second copy.
+const SPELL_REQUEST = getStrings("en").spellRequestRe;
 
 export default {
   name: "spelling-ignored-still-books",

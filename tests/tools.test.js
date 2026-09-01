@@ -1674,6 +1674,58 @@ describe("services/tools.js — the spelling gate blocks until answered, then le
     expect(mockCreateAppointment).toHaveBeenCalled();
   });
 
+  // Found in review. services/gemini.js merges capabilityState back after
+  // every tool ROUND and rebuilds ctx from it, so before this the model could
+  // re-call book_appointment three times inside one turn, burn the whole
+  // budget on its own retries, and write the mis-heard name — with zero
+  // spelling questions ever spoken to the caller.
+  it("does not let the model spend the budget on its own retries inside one turn", async () => {
+    let carried = {};
+    // Three rounds, same caller turn. The model is retrying, not the caller
+    // failing to answer.
+    for (let i = 0; i < 3; i++) {
+      const res = await executeToolCall(bookFc, {
+        ...baseCtx,
+        config: cfg,
+        spellingSettled: false,
+        callerTurnCount: 4,
+        capabilityState: carried,
+      });
+      expect(res.functionResponse.response.success).toBe(false);
+      carried = res.stateEffects.capabilityState;
+    }
+    // One turn, one refusal spent — not three.
+    expect(carried.appointments.spellingGateRefusals).toBe(1);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("spends a refusal once per caller turn, so the escape hatch still opens", async () => {
+    let carried = {};
+    for (const turnNo of [4, 5]) {
+      const res = await executeToolCall(bookFc, {
+        ...baseCtx,
+        config: cfg,
+        spellingSettled: false,
+        callerTurnCount: turnNo,
+        capabilityState: carried,
+      });
+      expect(res.functionResponse.response.success).toBe(false);
+      carried = res.stateEffects.capabilityState;
+    }
+    expect(carried.appointments.spellingGateRefusals).toBe(2);
+
+    // Third caller turn: budget spent, the write goes through rather than
+    // trapping the call.
+    const third = await executeToolCall(bookFc, {
+      ...baseCtx,
+      config: cfg,
+      spellingSettled: false,
+      callerTurnCount: 6,
+      capabilityState: carried,
+    });
+    expect(third.functionResponse.response.success).toBe(true);
+  });
+
   it("lets the write through the moment the caller HAS settled it, without spending a refusal", async () => {
     const result = await executeToolCall(bookFc, {
       ...baseCtx,

@@ -15,14 +15,14 @@
  */
 import * as A from "../asserts.js";
 import { nextWeekdayAt, spokenSlot } from "../scenarioUtils.js";
+import { getStrings } from "../../lib/voice/strings.js";
 
 const TZ = "America/Chicago";
 const SLOT = nextWeekdayAt("thu", "14:00", { timezone: TZ });
 const EXISTING = nextWeekdayAt("mon", "10:00", { timezone: TZ });
 
-/** Mirrors lib/voice/strings.js spellRequestRe, including the 2026-08-29 widening. */
-const SPELL_REQUEST =
-  /\b(spell (that|it|your|the|them|those)|spelling of|(could|can|would|will) you spell|how (do|would) (you|i) spell|letter by letter|how (do|would) (you|i) write (that|it)|write that down)\b/i;
+/** Imported, not transcribed — a second copy is a second thing to keep right. */
+const SPELL_REQUEST = getStrings("en").spellRequestRe;
 
 export default {
   name: "spelling-known-caller",

@@ -4665,6 +4665,9 @@ describe("session.js — greeting audio path", () => {
     expect(buf.length).toBe(500 * 8);
   });
 
+  const timingEntry = () =>
+    log.info.mock.calls.find(([event]) => event === "greeting_audio_timing");
+
   it("records the greeting's own timing, which no per-turn metric covers", async () => {
     delete process.env[ENV];
 
@@ -4673,17 +4676,59 @@ describe("session.js — greeting audio path", () => {
     await startCall(ws, newSid());
 
     // Nothing is logged until the greeting actually produces audio.
-    expect(log.info).not.toHaveBeenCalledWith("greeting_audio_timing", expect.anything());
+    expect(timingEntry()).toBeUndefined();
 
+    H.audioOutInstances[0].opts.onFirstFrameWire();
     H.ttsTurns[0].opts.onFirstAudio();
     await flush();
 
-    const entry = log.info.mock.calls.find(([event]) => event === "greeting_audio_timing");
-    expect(entry).toBeDefined();
-    const [, payload] = entry;
+    const [, payload] = timingEntry();
     expect(payload.prerollMs).toBe(500);
+    expect(typeof payload.firstWireMs).toBe("number");
     expect(typeof payload.ttsFirstByteMs).toBe("number");
     expect(payload.greetingChars).toBe("Hello, thanks for calling Test Biz.".length);
+  });
+
+  // Found in review. With the preroll disabled nothing is enqueued until
+  // ElevenLabs produces audio, so the TTS callback runs BEFORE that audio is
+  // paced onto the wire — and the first version, which logged from that
+  // callback, emitted firstWireMs as null. That is the CONTROL ARM the
+  // .env instructions tell the operator to compare against, so it is the one
+  // configuration where the number must not be missing.
+  it("still reports both halves when the preroll is disabled", async () => {
+    process.env[ENV] = "0";
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    // TTS first, wire second — the order this configuration actually produces.
+    H.ttsTurns[0].opts.onFirstAudio();
+    await flush();
+    expect(timingEntry(), "logged before the wire number existed").toBeUndefined();
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    await flush();
+
+    const [, payload] = timingEntry();
+    expect(payload.prerollMs).toBe(0);
+    expect(typeof payload.firstWireMs).toBe("number");
+    expect(typeof payload.gapMs).toBe("number");
+  });
+
+  it("logs the greeting timing exactly once", async () => {
+    delete process.env[ENV];
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    H.ttsTurns[0].opts.onFirstAudio();
+    H.audioOutInstances[0].opts.onFirstFrameWire();
+    await flush();
+
+    const all = log.info.mock.calls.filter(([event]) => event === "greeting_audio_timing");
+    expect(all).toHaveLength(1);
   });
 });
 
@@ -4710,8 +4755,34 @@ describe("session.js — the first turn's wait on call-start context", () => {
     // Two turns ran; ensureContext only actually waited on the first.
     expect(marks.filter((m) => m === "context_wait_start")).toHaveLength(1);
     expect(marks.filter((m) => m === "context_wait_end")).toHaveLength(1);
-    // And it is bracketed before the STT marks it was previously hidden inside.
-    expect(marks.indexOf("context_wait_end")).toBeLessThan(marks.indexOf("stt_final"));
+    // Stamped AFTER stt_final, not where the wait happened.
+    //
+    // Deliberate, and it cost a review finding to learn why: a turn that hits
+    // the TRANSFER_TRIGGERS escape returns without ever reaching finishTurn(),
+    // and createTurnMetrics only clears its marks there — so a pair stamped
+    // before that escape survived into the NEXT turn's payload, which then
+    // reported a context wait it never incurred. The timestamps are captured
+    // at the true moment and replayed here, so the DELTA is still right.
+    expect(marks.indexOf("context_wait_end")).toBeGreaterThan(marks.indexOf("stt_final"));
+  });
+
+  it("leaves no marks behind on a turn that escapes to transfer", async () => {
+    // The leak itself. This turn never reaches finishTurn(), so anything
+    // stamped on it would be inherited by the turn after.
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "OK", toolResults: [] } }]);
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    H.turnManagerInstances[0].opts.onTurnEnd("let me speak to a manager please.");
+    await flush();
+
+    const marks = H.metricsInstances[0].mark.mock.calls.map(([name]) => name);
+    expect(marks).not.toContain("context_wait_start");
+    expect(marks).not.toContain("context_wait_end");
   });
 });
 
@@ -4794,8 +4865,11 @@ describe("session.js — the semantic end-of-turn arbiter", () => {
     await new Promise((r) => setTimeout(r, 1_000));
     expect(runLlmTurn).not.toHaveBeenCalled();
 
-    // ...but the chain ceiling still ends it, so the call cannot hang.
-    await new Promise((r) => setTimeout(r, 2_600));
+    // ...but the extension is DOUBLE the original wait, not the whole chain
+    // budget. A single wrong INCOMPLETE costs the caller another 800ms, not
+    // another 2.2s on top of a 3s p50 — the runaway onHoldExpired already
+    // refuses to allow, for a reason a live call taught it.
+    await new Promise((r) => setTimeout(r, 900));
     expect(runLlmTurn).toHaveBeenCalledTimes(1);
   });
 

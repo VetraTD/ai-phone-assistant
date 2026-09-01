@@ -17,7 +17,12 @@
 import { describe, it, expect } from "vitest";
 import { looksLikeSpelling, looksLikeSpellingRefusal } from "../lib/spellingSignal.js";
 import { getStrings } from "../lib/voice/strings.js";
-import { applyReplyState, spellingSettled, spellMissCap } from "../lib/voice/replyState.js";
+import {
+  applyReplyState,
+  applyCallerSpellingSignal,
+  spellingSettled,
+  spellMissCap,
+} from "../lib/voice/replyState.js";
 import { STEPS } from "../lib/callState.js";
 
 const en = getStrings("en");
@@ -120,11 +125,31 @@ describe("looksLikeSpellingRefusal — did the caller decline", () => {
     expect(looksLikeSpellingRefusal("I'd rather not", en)).toBe(true);
   });
 
+  it("reads a decline with a trailing thanks, which is how people actually say it", () => {
+    // The anchored bare-no form missed these, scoring a genuine refusal as an
+    // unanswered ask and costing the caller another question.
+    expect(looksLikeSpellingRefusal("No, thanks", en)).toBe(true);
+    expect(looksLikeSpellingRefusal("No thank you.", en)).toBe(true);
+  });
+
   it("does not read an ordinary answer as a refusal", () => {
     expect(looksLikeSpellingRefusal("It is Marcus Bell", en)).toBe(false);
     expect(looksLikeSpellingRefusal("Tuesday at ten would be great", en)).toBe(false);
     // "no" inside a sentence is not a refusal of anything.
     expect(looksLikeSpellingRefusal("no appointment yet, I want to make one", en)).toBe(false);
+  });
+
+  // Found in review, and the most dangerous class this function has. The
+  // assistant asks two things in one turn — "Could you spell that? And is two
+  // o'clock alright?" — and the caller answers the second. Reading that as a
+  // refusal writes the misheard name with no letters ever heard, silently,
+  // and the business keeps the row. These all matched the first version.
+  it("does not read a plain affirmative as a refusal to spell", () => {
+    expect(looksLikeSpellingRefusal("Yes, that's fine", en)).toBe(false);
+    expect(looksLikeSpellingRefusal("that's okay", en)).toBe(false);
+    expect(looksLikeSpellingRefusal("no worries", en)).toBe(false);
+    expect(looksLikeSpellingRefusal("never mind", en)).toBe(false);
+    expect(looksLikeSpellingRefusal("it's fine", en)).toBe(false);
   });
 
   it("reads the Spanish forms", () => {
@@ -143,12 +168,19 @@ describe("applyReplyState — the spelling question opens and closes on the CALL
     mergeCapabilityState: () => {},
     dispatchEffects: () => [],
     spellRequestRe: en.spellRequestRe,
-    strings: en,
   });
   const freshState = () => ({ history: [], step: STEPS.GATHER_DETAILS, intent: null });
-  // One turn: what the caller said, then what the assistant said back.
-  const turn = (state, userText, replyText) =>
-    applyReplyState(state, { userText, reply: { text: replyText } }, deps());
+  // One turn, in the order the real drivers run it: the caller's words are
+  // read FIRST (lib/voice/session.js startTurn, before buildExtras), then the
+  // model replies, then the reducer records what we said.
+  //
+  // The ordering is the point. These two used to be one call, and the caller
+  // half ran after the reply — so the turn on which someone spelled their name
+  // still went out to the model saying they had not.
+  const turn = (state, userText, replyText) => {
+    applyCallerSpellingSignal(state, userText, en);
+    return applyReplyState(state, { userText, reply: { text: replyText } }, deps());
+  };
 
   it("stays open when the assistant has merely asked", () => {
     const state = freshState();
@@ -221,11 +253,56 @@ describe("applyReplyState — the spelling question opens and closes on the CALL
   it("tracks nothing at all when no strings are supplied", () => {
     // Same "unaffected other callers" contract the ask counter already has.
     const state = freshState();
+    applyCallerSpellingSignal(state, "N-I-T-H-I-N", null);
     applyReplyState(
       state,
       { userText: "N-I-T-H-I-N", reply: { text: "Thanks." } },
       { STEPS, mergeCapabilityState: () => {}, dispatchEffects: () => [] },
     );
     expect(state.spellingCaptured).toBeUndefined();
+  });
+
+  // Found in review: looksLikeSpelling answers "did a spelling happen", but
+  // the gate it feeds is specifically about NAMES. Spelling an email address
+  // is a perfectly good letter run, and counting it opened the name gate for
+  // the rest of the call — the original wrong-name defect through a new door.
+  it("does not treat a spelled-out email or reference as the name", () => {
+    const state = freshState();
+    applyCallerSpellingSignal(state, "my email is j-a-y at gmail dot com", en);
+    expect(state.spellingCaptured).toBeUndefined();
+    expect(spellingSettled(state)).toBe(false);
+
+    const other = freshState();
+    applyCallerSpellingSignal(other, "the reference is A-B-C-1-2-3", en);
+    expect(other.spellingCaptured).toBeUndefined();
+  });
+
+  it("still counts letters as the name when the spelling was what we asked for", () => {
+    // The guard is skipped while an ask is outstanding: we asked about the
+    // name, so an answer to that question is what is being given.
+    const state = freshState();
+    turn(state, "It is Nithin.", "Could you spell that for me?");
+    applyCallerSpellingSignal(state, "sure, my email spelling is N-I-T-H-I-N", en);
+    expect(state.spellingCaptured).toBe(true);
+  });
+
+  // THE regression this ordering exists for, found in review.
+  //
+  // Everything the write gate and the prompt block read is assembled BEFORE
+  // the model is called, so a signal recorded after the reply arrives too late
+  // to affect the turn that produced it. With the old placement the caller
+  // spelled their name and that same turn still told the model they had not,
+  // and still refused a booking for want of a spelling it already had.
+  it("is visible on the SAME turn the caller spells, not the one after", () => {
+    const state = freshState();
+    turn(state, "It is Nithin.", "Could you spell that for me?");
+    expect(spellingSettled(state)).toBe(false);
+
+    // What a driver does at the top of the next turn, before buildExtras.
+    applyCallerSpellingSignal(state, "N-I-T-H-I-N", en);
+
+    // Settled by the time the prompt and the gate are decided — so the model
+    // is not told to ask again, and a booking in THIS turn is not refused.
+    expect(spellingSettled(state)).toBe(true);
   });
 });

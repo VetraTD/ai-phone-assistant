@@ -11,6 +11,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { isPromiseOnly, promiseGateMs } from "../lib/voice/promiseGate.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { buildStaticSystemPrefix } from "../services/gemini.js";
 
 const EN = getStrings("en").promiseRe;
 const ES = getStrings("es").promiseRe;
@@ -91,5 +92,47 @@ describe("promiseGateMs", () => {
     expect(promiseGateMs()).toBe(350);
     process.env.VOICE_PROMISE_GATE_MS = "abc";
     expect(promiseGateMs()).toBe(350);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The prompt half and the code half of this change are governed by ONE flag.
+//
+// Found in review: the guardrail telling the model it may stay silent on a
+// tool turn shipped unconditional, while every code path that speaks the
+// replacement line is behind VOICE_ENGINE_FILLER. Set that to "false" and the
+// model obeys the prompt, the engine says nothing, and the caller sits through
+// the whole tool round — measured at ~2s for the second model round-trip
+// alone — in silence.
+// ---------------------------------------------------------------------------
+describe("the stay-silent guardrail follows VOICE_ENGINE_FILLER", () => {
+  const CONFIG = {
+    businessName: "Testwork Dental",
+    timezone: "America/Chicago",
+    allowedTasks: ["book_appointment"],
+  };
+  const EXTRAS = { knowledge: [], integrations: [], transferAllowed: true };
+  const prev = process.env.VOICE_ENGINE_FILLER;
+
+  afterEach(() => {
+    if (prev === undefined) delete process.env.VOICE_ENGINE_FILLER;
+    else process.env.VOICE_ENGINE_FILLER = prev;
+  });
+
+  it("invites silence on tool turns while the engine is covering them", () => {
+    delete process.env.VOICE_ENGINE_FILLER;
+    const out = buildStaticSystemPrefix(CONFIG, EXTRAS);
+    expect(out).toMatch(/Call the tool and stay quiet/);
+    expect(out).toMatch(/Never name an action you have not taken yet/);
+  });
+
+  it("withdraws the invitation when the engine has been switched off", () => {
+    process.env.VOICE_ENGINE_FILLER = "false";
+    const out = buildStaticSystemPrefix(CONFIG, EXTRAS);
+    expect(out).not.toMatch(/Call the tool and stay quiet/);
+    // The half that is true either way survives.
+    expect(out).toMatch(/Never name an action you have not taken yet/);
+    // ...and the caller is still guaranteed a voice.
+    expect(out).toMatch(/Never leave the caller with no verbal response/);
   });
 });

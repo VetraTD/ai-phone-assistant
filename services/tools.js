@@ -287,7 +287,21 @@ export async function executeToolCall(fc, ctx) {
           //
           // Recorded in the pack's own scratchpad, which the engine threads
           // through the turn and the session persists across turns.
-          const gateRefusals = Number(ctx?.capabilityState?.[pack.id]?.spellingGateRefusals) || 0;
+          const gateScratch = ctx?.capabilityState?.[pack.id] || {};
+          const gateRefusals = Number(gateScratch.spellingGateRefusals) || 0;
+          // Which caller turn the last refusal belonged to.
+          //
+          // The budget is per TURN, not per tool round, and the difference is
+          // the whole safety of it. services/gemini.js merges capabilityState
+          // back after every round and rebuilds ctx from it, so a model that
+          // re-calls book_appointment three times inside one turn would burn
+          // 0->1->2 and write the mis-heard name on the third — in a single
+          // turn, with zero spelling questions ever spoken to the caller. The
+          // refusal only means something once the caller has had a chance to
+          // answer it, so only a NEW turn spends one. The in-turn loop is
+          // bounded separately, by MAX_FC_ROUNDS.
+          const callerTurn = Number(ctx?.callerTurnCount) || 0;
+          const refusalIsNew = gateScratch.spellingGateRefusedTurn !== callerTurn;
           if (
             pendingName &&
             gateRefusals < spellMissCap() &&
@@ -300,9 +314,10 @@ export async function executeToolCall(fc, ctx) {
           ) {
             const message =
               `[not caller speech] Before recording "${pendingName}", get the spelling: ask the caller to ` +
-              `spell it, read the letters back, then try again. This is required — do not record the name ` +
-              `until they have spelled it. If they decline, say it is spelled how it sounds, or ask you to ` +
-              `move on, accept that and try again immediately with the name exactly as you heard it.`;
+              `spell it, and read the letters back. This is required — do not record the name until they ` +
+              `have spelled it. Ask them now and wait for their answer; do not call this function again ` +
+              `until they have replied. If they decline or tell you it is spelled how it sounds, accept ` +
+              `that and record the name exactly as you heard it.`;
             // Keep the name, exactly as the requirements refusal below does.
             // A refusal throws fc.args away, and this one now fires for every
             // caller whose name is not already on file — so without this the
@@ -321,10 +336,13 @@ export async function executeToolCall(fc, ctx) {
                 toolCallEvent: { name: fc.name, args: fc.args },
                 capabilityState: {
                   [pack.id]: {
-                    // The backstop above. Counted unconditionally, so a
+                    // The backstop above. Counted once per caller turn, so a
                     // detector that never recognises this caller's phrasing
-                    // still runs out of refusals rather than looping forever.
-                    spellingGateRefusals: gateRefusals + 1,
+                    // still runs out of refusals rather than looping forever —
+                    // without the model being able to spend the whole budget
+                    // on its own retries inside a single turn.
+                    spellingGateRefusals: refusalIsNew ? gateRefusals + 1 : gateRefusals,
+                    spellingGateRefusedTurn: callerTurn,
                     ...(priorSpellFacts.Name
                       ? {}
                       : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),

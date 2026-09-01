@@ -5,6 +5,7 @@ import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./supabase.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
@@ -866,7 +867,15 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // than its silence. lib/voice/promiseGate.js catches the ones that still slip
   // through; this is the half that stops them being produced.
   guardrails += `- Every time the caller speaks, you must respond with spoken text. If you call a tool, also say something in the same turn—confirm what was done, what you're doing, or what you need. Never leave the caller with no verbal response.\n`;
-  guardrails += `- The one exception: when you are calling a tool to look something up, book, change, or cancel, you do NOT need to announce the wait. Do not say "one moment", "let me check the calendar", or anything similar — the system says that for you, and it says it accurately because it knows which action is running. Call the tool and stay quiet, or say something that is true right now. Never name an action you have not taken yet.\n`;
+  // Conditioned on the SAME flag as the code that speaks the replacement.
+  // Unconditional, this told the model to stay quiet on tool turns while
+  // VOICE_ENGINE_FILLER="false" left the engine silent too, and the caller sat
+  // through the whole tool round hearing nothing.
+  if (engineFillerEnabled()) {
+    guardrails += `- The one exception: when you are calling a tool to look something up, book, change, or cancel, you do NOT need to announce the wait. Do not say "one moment", "let me check the calendar", or anything similar — the system says that for you, and it says it accurately because it knows which action is running. Call the tool and stay quiet, or say something that is true right now. Never name an action you have not taken yet.\n`;
+  } else {
+    guardrails += `- Never name an action you have not taken yet. Describe what you are doing only once you have the result.\n`;
+  }
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
   guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;

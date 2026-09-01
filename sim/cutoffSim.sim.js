@@ -306,6 +306,18 @@ const FLUENT_SCRIPT = [
   { label: "f3", segments: [speak("My name is Nithin and my number is five five five one two three four")] },
   { label: "f4", segments: [speak("Can I get something Tuesday morning please")] },
   { label: "f5", segments: [speak("No that's everything thank you")] },
+  // Added 2026-08-31, after review found the control was structurally unable
+  // to fail. Every utterance above happens to end on a word no hold rule
+  // matches, so "the fluent control does not move" was a property of THIS
+  // SCRIPT, not of the rule under test — and the day VOICE_HOLD_TRAILING_MS
+  // was switched on, a complete turn ending on one of its verbs would have
+  // taken an 800ms hold with the control reporting all clear.
+  //
+  // These two end on `booking` and `book`, both in that list, and both are
+  // finished sentences. If the verb rule ever stops requiring a cue, the
+  // fluent row's reply latency moves and this control says so.
+  { label: "f6", segments: [speak("Just a booking")] },
+  { label: "f7", segments: [speak("Yes go ahead and book")] },
 ];
 
 // ---------------------------------------------------------------------------
