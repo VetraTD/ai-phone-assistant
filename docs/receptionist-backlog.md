@@ -431,6 +431,18 @@ if changed. **Do not touch until C4 can prove what was saved.**
 The big architectural win is banked. What's left is smaller and mostly trades
 against conversation quality.
 
+### L1b · The one voice flag that differs in production `[cheap]` · P0
+
+Reported 2026-08-31: production is the same as staging "except for debug items,
+and maybe one voice item". Nobody knows which. Every conclusion drawn from a
+staging call, and every simulator row read as "what production does", is
+conditional on that answer — as the `VOICE_HOLD_TRAILING_MS` correction in L2
+demonstrates, where a flag set in one environment and defaulted in another
+turned a measured baseline into fiction.
+
+- **Done when:** the two environments' voice flags are diffed and the difference
+  is either named and justified or removed.
+
 ### L1 · Confirm `VOICE_INTENT_MARKER` in Railway — see P0-1 `[cheap]` · P0
 
 ~900ms, free, never confirmed on that environment. Listed here because "the AI
@@ -449,11 +461,34 @@ how long they've been quiet. `TRAILING_INCOMPLETE` (round 2) is the cheap
 first version of this and already works — it sits above the punctuation branch
 and costs a completed turn nothing.
 
-**Update 2026-08-31.** The cheap half was not merely cheap, it was already
-written: `VOICE_HOLD_TRAILING_MS` defaulted to **0**, so `TRAILING_INCOMPLETE`
-had never fired on a real call. It shipped inert in round 2 so the branch could
-land without behaviour risk and then stayed inert through all of round 3 — the
-entire turn-taking round — with nobody noticing. Default is now 800:
+**Update 2026-08-31, corrected same day.** The cheap half was already written:
+`VOICE_HOLD_TRAILING_MS` defaulted to **0**, so it shipped inert in round 2 to
+land without behaviour risk. The default is now 800.
+
+**The correction matters more than the change.** This was first written up as
+"the rule had never fired on a real call". It had — staging has had
+`VOICE_HOLD_TRAILING_MS=800` set in its environment all along. What was inert
+was the DEFAULT, and therefore every environment that never set the flag: local
+dev, the test suite, and `sim/cutoffSim.sim.js`.
+
+So the simulator was modelling an environment that did not exist. Its
+`punctuated finals @150ms / 50% cutoffs` baseline was never staging's
+behaviour; staging was already on the 12.5% row. **A sim row only means
+"production" if the flags match, and nobody had checked.** That is P0-1's whole
+subject, and it turned a piece of evidence into a piece of fiction without
+anything looking wrong.
+
+Two live consequences, both on staging, both predating this branch:
+- The false positives the split fixes — "No, that's all I need." taking an
+  800ms hold before the goodbye — were **already happening**.
+- `TRAILING_LEAD_IN` matches `i need` and `i want`, so the same sign-off takes
+  **2000ms** on an older rule. Flag-independent, so it is live everywhere.
+
+Production is reported as identical to staging "except for debug items, and
+maybe one voice item" — that one unconfirmed voice flag is unresolved and is
+the remaining P0-1 work.
+
+The numbers, same script, same pauses, same endpointing, flag the only variable:
 
 ```
 punctuated finals @150ms    8 turns  4 cutoffs  50.0%  reply 1260ms

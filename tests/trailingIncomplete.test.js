@@ -46,12 +46,15 @@ const ON = { VOICE_HOLD_TRAILING_MS: "800" };
 
 describe("classifyHold — trailing incomplete", () => {
   // Was "is inert by default, so merging this changes nothing". It shipped
-  // inert in round 2 so the branch could land without behaviour risk, and then
-  // stayed inert in production for the whole of the round-3 turn-taking work —
-  // the cheap half of semantic end-of-turn detection, written, tested, and
-  // switched off. The default moved to 800 on 2026-08-31 once
-  // sim/cutoffSim.sim.js produced the matched pair (50.0% -> 12.5% cutoffs
-  // with the fluent control's reply latency unmoved).
+  // inert in round 2 so the branch could land without behaviour risk. The
+  // default moved to 800 on 2026-08-31 once sim/cutoffSim.sim.js produced the
+  // matched pair (50.0% -> 12.5% cutoffs, fluent control unmoved).
+  //
+  // NOT, as first recorded here, because the rule "stayed inert in production":
+  // staging had VOICE_HOLD_TRAILING_MS=800 set in its environment all along, so
+  // the rule was live there. Inert applied to the default, and therefore to
+  // every environment that never set the flag — including this test suite and
+  // the simulator. See lib/transcriptUtils.js for why that matters.
   it("is ON by default, and holds the fragment smart_format punctuated mid-thought", async () => {
     // Punctuated, exactly as smart_format delivers it mid-thought. Reaching
     // terminal_punctuation here would mean a zero hold and the assistant
