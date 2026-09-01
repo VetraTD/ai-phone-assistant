@@ -5087,6 +5087,9 @@ describe("session.js — no database write escapes its tenant scope", () => {
 
     const unscoped = H.writes.filter((w) => w.tenant == null);
     expect(unscoped).toEqual([]);
+  });
+});
+
 // The greeting's own audio path.
 //
 // Reported live: the first few words of the greeting are not heard. Nothing
