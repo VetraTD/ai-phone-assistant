@@ -4062,7 +4062,91 @@ the server having stopped instrumenting. The service was fine; the probe was wro
 
 ---
 
-## Attempt 2 — NEXT SESSION: finish Gate 4, then PHASE 6. **THE FRIEND'S HANDSET FIRST**
+## DEPLOY 2026-09-01 — THE ESTATE NOW RUNS CURRENT CODE. `voice-uk-prod-00002-kfc`
+
+**The finding that prompted this: GCP had been serving a build from 2026-08-29 while `main`
+(which Railway autodeploys) had moved to `13265a3`.** Railway was AHEAD of GCP on receptionist
+behaviour — rounds 4/5 hold lines, spelling, the semantic end-of-turn arbiter — so a cutover
+without a rebuild would have been a DOWNGRADE, not a lateral move. Measured, not assumed:
+`GET /` on Railway reported `Build: 13265a3 (main)`; `GET /` on GCP reported `Build: b7de0dd`.
+
+**Port:** `chore/port-dev-2026-09-01` off `feat/gcp-2`, `dev` merged in, fast-forwarded,
+both pushed. 94 files, +4,399/-350.
+
+**52 conflicts, and 48 of them were snapshots.** The four real ones and why they resolved the way
+they did:
+
+| File | Resolution |
+|---|---|
+| `services/gemini.js` | **dev.** Both branches fixed the same spelling bug independently. gcp-2 kept `THE LETTERS WIN` inside the `SPELLING NOT YET CONFIRMED` block, which is gated on `!callerHasNameOnFile` and therefore **never rendered for a returning caller**; dev's `6e5d030` moved it into the static TOOL CONTRACT. Taking dev drops the copy that does not render and keeps the write-block wording. |
+| `tests/promptSplit.test.js` | **dev**, for the same reason — it tests the new placement and carries the staging evidence for why the old one was wrong. |
+| `.env.example` | **Both, minus one line.** Not a clean add/add: gcp-2's 380-line block ENDS on the `VOICE_SPELL_ASK_CAP` comment that dev changed from `Default 1` to `Default 3`. Naive "keep both" duplicates the comment with contradictory values. |
+| `tests/session.test.js` | **Both — and this is the one that broke.** Each parent adds a top-level `describe` at the same point, so keeping both bodies kept only ONE pair of closing braces. The file became an unterminated block, and **vitest reported it as `vite:import-analysis` "invalid JS syntax" at line 1:1**, which reads like a transform/plugin bug rather than a merge artefact. `node -c` names the real line. Fixed in `5564fb6`. |
+
+**Snapshots deleted and regenerated (110 written), then checked against BOTH parents:**
+vs `dev` — 20 files, **170 insertions and zero deletions**, all `record_sms_consent` and the
+no-SMS line, i.e. exactly `capabilities/smsConsent.js`, which is gcp-2-only. vs `feat/gcp-2` — 58
+files, and every deleted line has a newer replacement in the same diff. **The merged prompt is the
+exact union of the two branches**, evidenced in both directions rather than asserted.
+
+**Gates — pasted, not claimed.** Root suite with `DATABASE_URL` UNSET (P4); `test:db` against the
+local PG16 on **port 55432**, not 5432.
+
+```
+root suite    2604 passed / 135 files    (was 2501 on feat/gcp-2)
+test:db        224 passed / 18 files
+sim:cutoff       3 passed  — punctuated+trailing800 12.5%, fluent control 0.0%, reply 1260ms
+dashboard be   126 passed / 13 files
+dashboard fe    36 passed /  6 files
+terraform plan  0 to add, 3 to change, 0 to destroy   (2 of them are P15's benign scaling diff)
+```
+
+**THE BUILD FAILED FIRST, AND THE REASON IS WORTH KEEPING.** `gcloud builds submit` without
+`--service-account` runs as `427725568491-compute@developer.gserviceaccount.com`, which has no
+`storage.objects.get` on `vetra-core-edc8ca_cloudbuild` — the error names the SOURCE TARBALL and
+reads like the upload failed. The working command is the one already written at line 1447 of this
+file: `--service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com`.
+Build `8931dc18` SUCCESS in 54s.
+
+**TWO MIGRATIONS WERE PENDING ON THE LIVE DATABASE, AND NOTHING HAD SAID SO.** The migrate job was
+updated to the new image with `-target` and executed BEFORE the service rolled, which is the only
+order that does not run new code against an old schema:
+
+```
+database already has 16 application table(s) and 37 ledger row(s); skipping baseline
+applied 039_revoke_directory_grants.sql (27ms)      <- P23/P9
+applied 040_attach_user_to_business.sql (25ms)      <- P25
+2 migration(s) applied.
+granted vetra_app to voice-uk-prod@vetra-uk-edc8ca.iam
+```
+
+**Verified on the serving revision `voice-uk-prod-00002-kfc`, read back rather than believed:**
+
+```
+GET /                     200, Build: 5564fb6
+call_state_store_selected store=pg  shared=True
+db_backend                cloudsql / IAM / vetra_uk_prod
+env                       DEEPGRAM_REGION=eu  VERTEX_LOCATION=global  DEPLOYMENT_MODE=standard
+                          VERTEX_ENABLED=true  DB_POOL_MAX=10  GIT_COMMIT_SHA=5564fb6
+scaling                   minScale 1 / maxScale 2   (C-11 intact)
+signature  signed 200 + correct TwiML | unsigned 403 | tampered 403
+           TwiML carries the per-call media-stream token in the PATH and resolves
+           businessPhone=+441372656055, so routing survived the redeploy
+dashboard-api /health 200 | dashboard SPA /app 200
+```
+
+**Unchanged and deliberately so:** `dashboard_image_tag` stays `b7de0dd` — `AI-phone-dashboard/`
+has zero diff across the port, and the two tags are independent on purpose. `+441372656055` is
+still pointed at `twilio_webhook_base`.
+
+**Noticed at boot, NOT fixed, and it has been true since Phase 4:**
+`[boot] notice sms_channel_off — TWILIO_ACCOUNT_SID/TOKEN are set; TWILIO_SMS_FROM is not`, so
+every business with `notification_phone` set silently receives no text and caller SMS follow-ups do
+not send. The boot notice is trap 8 working exactly as designed. Owner decision, not a deploy fix.
+
+---
+
+## Attempt 2 — NEXT SESSION: finish Gate 4, then PHASE 6. **A US NUMBER ON ACCOUNT A CAN DO IT**
 
 **Phase 5 left exactly one gate open, and it is the product gate, not a migration gate.**
 
@@ -4070,7 +4154,23 @@ the server having stopped instrumenting. The service was fine; the probe was wro
 
 1. **THE LIVE CALL, and it is already set up.** `+441372656055` is repointed at
    `twilio_webhook_base` and the `Digile Media` tenant is imported and routing. A friend on a **UK
-   handset** dials it. **Call 1 must be the COLD one** — `cpu_idle = true` only shows on turn one
+   handset** dials it.
+   **OR — measured 2026-09-01 — buy a US local number ON ACCOUNT A and dial it yourself.** US local
+   on account A returns `address_requirements: none`, balance £18.40, ~$1.15/mo. **The owner's
+   EXISTING US number cannot do this job**: it is on account B, the accounts are unrelated
+   top-level accounts (checked — A has no subaccounts, B's only subaccount is `vetratd_staging`),
+   so there is no cross-account number move without Twilio support, and pointing a B number at GCP
+   403s every request. The two alternatives both cost more than $1.15: disabling
+   `TWILIO_VALIDATE_SIGNATURE` also disables the media-stream token (deliberately — one switch
+   cannot be turned off believing the other holds), which re-opens P10 on a public URL; swapping the
+   deployed secrets to account B breaks `+441372656055` and repoints every outbound Twilio call.
+   **Routing a second number needs a `business_directory` row**, and Cloud SQL is private-IP only,
+   so it runs from inside the VPC — `gcloud run jobs execute vetra-migrate-uk-prod --args=<script>`.
+   Note the `businesses` trigger DELETES every directory row for a business on any `phone_number`
+   UPDATE, so a hand-added second row is temporary; importing a second demo tenant is the durable
+   version. **What a US number does NOT prove:** the UK carrier path, and it adds a transatlantic
+   leg each way — in-process `voice_to_voice_ms` will not move, the ear will, so `cpu_idle` cannot
+   be judged from it. **Call 1 must be the COLD one** — `cpu_idle = true` only shows on turn one
    after an idle gap, and a second call spends the evidence for ~15 minutes.
    - Book an appointment on call 1. Reschedule it on call 2. Barge in and cough on call 3.
    - Listen for: time-to-first-word after the caller stops; dead air over ~2s; being cut off; whether
@@ -4128,3 +4228,4 @@ serve a DSR, and that is a compliance commitment, not a nicety.
 | A2-4 | 2026-08-28 | `feat/gcp-2` | **SAME SESSION AS A2-3, after Phase 3 closed. P10 FIXED + PHASE 4 PREP + THE FIRST GCP CONTACT OF ATTEMPT 2.** **P10 resolved (`60d1afa`)** at the owner's request once it turned out not to be a Phase 4 concern: `origin/main:server.js:837` carries the identical unauthenticated media-stream upgrade, Railway autodeploys `main`, so it was **live in production while being written down as a future item**. Per-call token in the `<Stream url>` PATH (Twilio drops query strings on the WS handshake), verified before the handshake, with the token's call SID bound to the `start` frame — without that second half one valid token authorises a session for any other call. Key **derived from `TWILIO_AUTH_TOKEN`**, so nothing needed provisioning in Terraform or Secret Manager. Verified both ways: `--no-token` → 0/5 opened, 5×403, **zero `stt_open`**; with token → 5/5, p50 685ms; swapped SID → closed 1008. **`main` is still exposed — nothing pushed.** **Phase 4 prep (`78ddb61`):** attempt-1 residue deleted after proving it was attempt-1 (it named the dead org, dead billing and `c3a3bd`, and is **auto-loaded by every plan**, so the first Phase 4 plan would have run against the suspended estate) — `terraform init -backend=false` now completes **without reaching GCS**, closing the Phase 2 trap; **`project_id_suffix` PINNED to `edc8ca`** (`vetra-{uk,us,core}-edc8ca`), evaluated in `terraform console` and **sabotage-verified** — unpinned it returns `(known after apply)`; **`CALL_STATE_STORE` now rendered onto the service**, which it never was — same shape as the `DEEPGRAM_REGION` bug, and unset it would have silently un-done Phase 3a; **precondition 8 closed early** because the pinned suffix makes the core project ID deterministic. **Owner preconditions, first GCP contact:** the **19 quota APIs enabled and verified 19/19** on `project-b147bdfa-d267-426a-8c7` — and the precondition's "the whole `local.terraform_quota_apis` list (19 APIs)" was **wrong, that local is FOURTEEN**; the 19 is its union with `common_apis`, corrected in place. **Essential contacts set** (`nithinjd06@gmail.com`, `josh.tite@vetratd.com`), closing a HARD gate — `terraform console` refused to evaluate the module at all with exactly one. **`@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN** — measured: both IAM grants refused `User ... does not exist`, and the org has **no `directoryCustomerId`**. An Essential Contact needs no Google account; an IAM principal does. `nithinjd06@gmail.com` granted `billing.admin` + `organizationAdmin`, read back. **That is a second ACCOUNT, not a second PERSON, and attempt 1's suspension was scoped to the OWNER with the cause never disclosed — so it is unproven against the exact event it insures against.** Gates: **2377/127**, 211/16, sim 3, dashboards 126/13 and 36/6, fmt 0, validate Success, ZERO snapshots moved | **PHASE 4 — THE APPLY. It is not one command:** first apply (local state) → **build both images** (`image_tag`/`dashboard_image_tag` are `"0000000"`, a tag that DOES NOT EXIST, so a full apply before the build fails on a missing image) → **apply the migrate job with `-target` and EXECUTE it** before serving code, or 038 is missing under a running service → apply the rest → read `max_connections`, set `DB_POOL_MAX`, re-apply → **`init -migrate-state` to GCS** → repoint `bootstrap_project_id` at `core` **and enable the same 19 APIs on it**. Precondition 6 is still OPEN: it closes when a Google account belonging to **Josh** holds `billing.admin` and `organizationAdmin` |
 | A2-5 | 2026-08-29 | `feat/gcp-2` | **PHASE 4 CLOSED — THE FIRST APPLY OF ATTEMPT 2. THE ESTATE EXISTS.** `vetra-uk-edc8ca` (462445274080), `vetra-us-edc8ca` (1050513323476, dark and empty), `vetra-core-edc8ca` (427725568491); **the pinned suffix `edc8ca` held.** 156 resources in state, Cloud SQL `vetra-uk` RUNNABLE on `db-g1-small` in europe-west2, migrate job executed, both Cloud Run services serving, **state migrated to `gs://vetra-tfstate-edc8ca`**, `bootstrap_project_id` repointed at `core` with 19/19 APIs verified on it. **Nothing pushed, `main` untouched, no Twilio repoint, no live call.** **THREE CONFIG BUGS BLOCKED THE FIRST PLAN AND `validate` SAW NONE OF THEM:** parentheses are illegal in a GCP project display name (and the `for_each` abort hid ~130 resources behind an 8-resource plan); `network_cidr` is STACK-keyed while `private_services` iterates PROJECT keys — Phase 2's reshape broke it and attempt 1's coincidence had hidden it; and the README pointed at the dead org `564252011558` twice. **A TENTH PRECONDITION NOBODY HAD WRITTEN DOWN:** `resourcemanager.organizationAdmin` grants org-policy READ, not WRITE — measured off both role definitions — so the first apply died at the graph's first node with **5 resources and NO PROJECTS**, because `google_project.this` deliberately depends on `skipDefaultNetworkCreation`. Fixed by granting `roles/orgpolicy.policyAdmin`; now README bootstrap item 3. The control held: no `default` network exists. **`roles/owner` FOR AN EXTERNAL GMAIL CANNOT BE GRANTED BY API** (`ORG_MUST_INVITE_EXTERNAL_OWNERS`) — the owner used the Console invitation flow, Terraform adopted the result (P14). **THE APPLY WAS SIX APPLIES**, because `enable_prod_databases` also pulls the migrate job and dashboard in on a nonexistent image tag and Terraform 1.15.8 has no `-exclude`. **P7 CLOSED: `max_connections = 50` READ OFF THE INSTANCE** (superuser reserve 3, cloudsqladmin 3) — **`DB_POOL_MAX` was rendered onto NEITHER service**, the third `CALL_STATE_STORE`/`DEEPGRAM_REGION`-shaped hole, worst case 400 against 50. Now voice 10 / dashboard 5 / `max_instances` 2 = **38 of 50**, with the raise ORDER recorded (ElevenLabs → Twilio → tier → these). **The tier was a decision, not a default:** the module default is $98.62/mo and the `db-g1-small` override was COMMENTED OUT, so the expensive default would have won by inaction. **`VERTEX_LOCATION` was `eu` defended by a comment P1 had already superseded** — now `var.vertex_location = "global"`, the honest label. **The image was verified by reading it, and the first attempt was wrong:** Cloud Build overrides WORKDIR with `/workspace`, so relative paths read the SOURCE — which is also **P13, `cloudbuild.yaml`'s own migration guard cannot see the image it claims to check.** Re-run against `/app` with three controls: 38 migrations, `038_call_state`, `mediaStreamToken.js`, `createPgStore`. **GATE MET on `voice-uk-prod-00001-r6c`:** `GET /` **200** with `Build: b7de0dd` (P2 confirmed on a live service), `Deepgram nova-3 (DEPLOYMENT_MODE=standard)`, `db_backend cloudsql/IAM`, **`call_state_store_selected store=pg shared=True`**, `DEEPGRAM_REGION=eu`, `VERTEX_LOCATION=global`. **Traps verified against LIVE resources, not config:** effective org policy expands to 71 values INCLUDING `europe-west2` with zero US values; instance backups pinned to `europe-west2`; CMEK UK-resident. **`smtp_config` defaulted to `{}` and would have broken the deploy** (bootChecks makes a half-configured pair FATAL). Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success — nothing moved.** New parked **P13-P17**; P7 closed | **PHASE 5 — VERIFY. THE OWNER, THEIR PHONE AND THEIR EARS.** Positive control FIRST on the Twilio signature. **The webhook is `twilio_webhook_base`, never `.uri`.** **Smoke-test `api.eu.deepgram.com` BEFORE the live call** — nothing has yet proved the key works there, and the failure would arrive as silence on a real caller. Then tenant import, live call, 10-concurrent with all 10 resolving `businessId`, latency against a Railway baseline taken FIRST (`cpu_idle` and shared-core CPU are both unmeasured, both one-line fixes), RLS 58/58, eval against the **37-40 of 40** band, restore, DSR. **Precondition 6 still OPEN — it closes when a Google account belonging to JOSH holds `billing.admin` + `organizationAdmin`; `nithinjd06@gmail.com` is a second ACCOUNT, not a second PERSON** |
 | A2-6 | 2026-08-29 | `feat/gcp-2` | **PHASE 5 — EIGHT GATES OF NINE, AND THE ESTATE SERVED ITS FIRST TRAFFIC. GATE 4 (THE LIVE CALL) IS STILL OPEN.** No apply, no new revision, nothing pushed, `main` untouched — everything measured against the same serving revision `voice-uk-prod-00001-r6c`. **The live-call problem turned out to be a TWO-ACCOUNT problem:** `+441372656055` is on account A whose token GCP holds; the owner's US number is on account B, and pointing it at GCP would have 403'd every request — P20's failure exactly. **The owner supplied the fix: a friend on a UK handset dials the real number.** Number repointed at `twilio_webhook_base` 18:38Z and LEFT there. **Gate 1 Deepgram EU** 10/10 finals WER 0.0000 through the real seam, EU host 200 from Frankfurt, garbage key 401. **Gate 2 signature** — P20's trap reproduced under Node (`import *` gives `undefined`, default gives `function`), then signed **200**, tampered **403**, unsigned **403**, and a signature over the `.uri` host **403**, proving the URL trap is real. **Gate 3 tenant import FAILED FIRST** on `voice_style`, a column migration 002 added and **012 deleted** while the importer still names it (P21); second run created `55c7c8c4-…` with `business_directory` routing. **Gate 5 concurrency 10/10, and 4 of 10 status callbacks landed on a DIFFERENT INSTANCE and still resolved `businessId`** — Phase 3a's pg store proved in production against the case an in-process Map fails silently. Zero errors above WARNING at N=10. **Gate 6 latency `voice_to_voice_ms` p50 2825 vs A0 Railway 2980 — no regression**, after two instrument bugs were separated: the missing `turn_latency` lines were THE PROBE's fault (Twilio echoes marks; the driver did not), while turn-0's negative `true_v2v_ms`/`playout_ms`/`tts_ttfb_ms` are REAL and greeting-caused (P24). **`cpu_idle` MEASURED at last: the first cold pair's 6797ms `llm_ttfb` did NOT reproduce (2531ms on the second); what reproduces is greeting 500-523ms cold vs 271-275ms warm, ~240ms.** **Gate 7 RLS 58 passed / 1 by-design fail / rolled back — but as `postgres`, not `vetra_app`, so the GRANT surface was never exercised and P9 remains unsettled on Cloud SQL (P23).** **Gate 8 eval 39/40, inside the 37-40 band.** **Gate 9a restore 591s, content verified against the clone, drift itemised, clone deleted** — and it has no path back into service (P26). **Gate 9b DSR BLOCKED: an imported tenant has no dashboard user and no flow to attach one (P25).** `npm install` was required, as predicted. Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success.** New parked **P21-P26** | **FINISH GATE 4 — the friend's UK handset. Call 1 must be the COLD one.** Book, reschedule, barge in. It is the first real test of every receptionist fix since early August, none of which has answered a phone. Confirm P24 on that call, then decide whether to keep or revert the repoint. **Then PHASE 6** — DNS, `app.<domain>` (P18 decides there), Railway warm one week, ROPA/DPIA/privacy notice, ICO. Precondition 6 still OPEN and still needs a Google account belonging to **JOSH** |
+| A2-7 | 2026-09-01 | `feat/gcp-2` | **THE ESTATE NOW RUNS CURRENT CODE — `voice-uk-prod-00002-kfc`, `Build: 5564fb6`.** Opened on a status question and the load-bearing finding was that **GCP was serving a 2026-08-29 build while `main` had moved to `13265a3`**, so Railway was AHEAD of GCP on receptionist behaviour and a cutover would have been a downgrade. Ported `dev` into `feat/gcp-2` (`chore/port-dev-2026-09-01`, fast-forwarded, both pushed): 52 conflicts, 48 of them snapshots. **`services/gemini.js` and `promptSplit.test.js` resolved to dev** because gcp-2's `THE LETTERS WIN` sat in a block gated on `!callerHasNameOnFile` and never rendered for a returning caller; **`.env.example` was NOT a clean add/add** (gcp-2's block ends on the line dev changed 1->3); **`session.test.js` kept both bodies and only one pair of closing braces**, and vitest reported that as `vite:import-analysis` "invalid JS syntax" at 1:1 rather than as an unterminated block. 110 snapshots regenerated and checked against BOTH parents — vs dev, 170 insertions and ZERO deletions, all `record_sms_consent`; vs gcp-2, every deletion has a newer replacement. Gates **2604/135, 224/18, 3, 126/13, 36/6**, plan 0/3/0. **The build failed first on the DEFAULT compute SA** (`storage.objects.get` on the cloudbuild source bucket) — the working `--service-account=vetra-deployer` form was already written at line 1447. **TWO migrations were pending on the live database and nothing had said so:** 039 (P23/P9) and 040 (P25), applied via the migrate job with `-target` BEFORE the service rolled. Verified on the serving revision: `store=pg shared=True`, `cloudsql/IAM`, `DEEPGRAM_REGION=eu`, `VERTEX_LOCATION=global`, min1/max2, and signature signed 200 / unsigned 403 / tampered 403 with routing intact. `dashboard_image_tag` deliberately unchanged — zero dashboard diff | **GATE 4 — THE LIVE CALL, and it no longer needs a UK handset:** a US local number on **account A** (`address_requirements: none`, ~$1.15/mo) can do it. The owner's existing US number CANNOT — it is on account B and the two are unrelated top-level accounts. Route it with a `business_directory` row from inside the VPC. **Then PHASE 6.** Railway/Supabase retirement is blocked on account B's two US numbers, not on the migration |
