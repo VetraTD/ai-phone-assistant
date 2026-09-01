@@ -406,3 +406,46 @@ variable "dashboard_domains" {
     error_message = "dashboard_domains takes bare hostnames — no scheme, no path, no trailing slash."
   }
 }
+
+# ---------------------------------------------------------------------------
+# THE INTENT ROUND-TRIP. Added 2026-09-01, after a live call measured it.
+#
+# Unset, the model is offered `set_call_intent` as a real tool and calls it
+# BEFORE it speaks — so every turn costs TWO sequential model round-trips, and
+# the caller waits through both. Measured on `voice-uk-prod-00003-znz`:
+# `llm_tool_ms` 1,669-2,001ms for a tool whose own `tool_duration` is 5-7ms,
+# then `llm_reply_after_tool_ms` 1,028-1,421ms on top. `llm_ttfb_ms` came to
+# 2,772-3,422ms, which was 72-97% of each turn.
+#
+# The architectural fix already exists and has been ON IN RAILWAY since
+# 2026-08-04: the model writes `<<intent:x>>` as the first line of its reply
+# and `services/gemini.js` strips it, so the intent rides the reply that was
+# going to be streamed anyway. Measured then: `llm_ttfb_ms` 1,836 -> 940ms
+# (-49%), `true_v2v_ms` p50 3,062 -> 2,607ms, turns paying a tool round-trip
+# 80% -> 35%.
+#
+# ⚠ NOTHING IN THIS MODULE HAD EVER SET IT, so the GCP estate ran the slow path
+# while `main` ran the fast one — and the migration's stated requirement is that
+# the receptionist behave IDENTICALLY. This is the same failure shape as
+# DEEPGRAM_REGION and CALL_STATE_STORE: a flag that exists, is documented in
+# `.env.example`, is covered by tests, and is set by no deployment.
+#
+# ⚠ THE VALUE IS COMPARED AS A STRING. `services/gemini.js:486` is
+# `process.env.VOICE_INTENT_MARKER === "true"` — so it is rendered explicitly
+# rather than interpolated from the bool, and `false` reaches the same code path
+# as unset rather than being a third state.
+#
+# Defaulted ON to match Railway. A deployment that wants the tool path back sets
+# this to false and should say why in the ledger, because it costs ~2s a turn.
+# ---------------------------------------------------------------------------
+variable "voice_intent_marker" {
+  description = <<-EOT
+    Route the call intent through a marker in the reply text instead of a
+    speech-blocking `set_call_intent` tool call.
+
+    ON in Railway since 2026-08-04. Worth ~2s per turn: without it every turn
+    pays two sequential model round-trips before the caller hears a word.
+  EOT
+  type        = bool
+  default     = true
+}

@@ -408,6 +408,24 @@ resource "google_cloud_run_v2_service" "this" {
       }
 
       # -------------------------------------------------------------------
+      # THE INTENT ROUND-TRIP — see `var.voice_intent_marker` for the numbers.
+      #
+      # Unset, the model calls `set_call_intent` BEFORE it speaks, so every turn
+      # costs two sequential model round-trips. Measured on a real call
+      # 2026-09-01: `llm_ttfb_ms` 2,772-3,422ms, of which 1,669-2,001ms was the
+      # tool round-trip for a tool that executes in 5-7ms.
+      #
+      # THE VALUE IS COMPARED AS A STRING. `services/gemini.js:486` reads
+      # `process.env.VOICE_INTENT_MARKER === "true"`, so this renders the exact
+      # literal rather than interpolating the bool. "false" and unset reach the
+      # same branch; there is no third state.
+      # -------------------------------------------------------------------
+      env {
+        name  = "VOICE_INTENT_MARKER"
+        value = var.voice_intent_marker ? "true" : "false"
+      }
+
+      # -------------------------------------------------------------------
       # P7. The connection pool, sized from the instance rather than guessed.
       #
       # THIS WAS SET NOWHERE UNTIL PHASE 4, so both services took services/db.js's

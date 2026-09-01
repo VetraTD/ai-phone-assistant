@@ -4144,6 +4144,55 @@ still pointed at `twilio_webhook_base`.
 every business with `notification_phone` set silently receives no text and caller SMS follow-ups do
 not send. The boot notice is trap 8 working exactly as designed. Owner decision, not a deploy fix.
 
+### THE FIRST REAL CALL FOUND A ~2s/TURN PARITY GAP, AND IT WAS A FLAG NOBODY SET
+
+**The owner reported latency "way more than Railway". It was not geography and not Vertex.** The
+transatlantic leg is ~80ms; the turn metrics off `voice-uk-prod-00003-znz` decompose it:
+
+```
+16:56:58  stt_tail=6     llm_ttfb=3422  tts_ttfb=97   v2v=3526
+16:57:08  stt_tail=3003  llm_ttfb=2875  tts_ttfb=98   v2v=5978  true_v2v=6408   <- barged_in, contaminated
+16:57:29  stt_tail=700   llm_ttfb=2772  tts_ttfb=385  v2v=3858  true_v2v=4232
+
+turn 1:  llm_request=7 -> llm_first_tool=2008   (llm_tool_ms 2001)
+         tool_duration = 7ms                     set_call_intent itself
+         llm_reply_after_tool_ms = 1421          the SECOND round trip
+         llm_ttfb_ms = 3422 = 2001 + 1421
+```
+
+**Every turn paid TWO sequential model round-trips**, because the model calls `set_call_intent`
+before it speaks. It fired on all four turns of the call, including one where the intent did not
+change (`general_question` -> `general_question`).
+
+**`VOICE_INTENT_MARKER` has been ON IN RAILWAY since 2026-08-04 and was set by NOTHING in this
+module.** `services/gemini.js:486` is `process.env.VOICE_INTENT_MARKER === "true"`; the revision
+carried no `VOICE_*` variables at all. **This is the FOURTH instance of one failure shape** —
+after `DEEPGRAM_REGION`, `CALL_STATE_STORE` and `DB_POOL_MAX` — a flag that exists, is documented
+in `.env.example`, is covered by tests, and is rendered onto no service. The tests prove the
+FUNCTION behaves; nothing proves a deployment sets the variable.
+
+The 2026-08-04 live measurement of the same flag: `llm_ttfb_ms` **1,836 -> 940ms (-49%)**,
+`true_v2v_ms` p50 **3,062 -> 2,607ms**, turns paying a tool round-trip **80% -> 35%**,
+`set_call_intent` really cost **1,030ms**. GCP paid MORE than Railway did for it —
+`llm_tool_ms` 1,669-2,001ms against that 1,030ms — so the gap the owner heard is ~2-2.5s a turn.
+
+**FIXED in `infra/terraform/`**: `var.voice_intent_marker`, bool, **default true** to match
+Railway, rendered as the exact literal because the code compares a STRING (`"false"` and unset
+reach the same branch; there is no third state). `fmt` 0, `validate` Success, plan **0 to add, 2 to
+change** — the env addition plus P15's benign scaling diff. Applied: **`voice-uk-prod-00004-ctg`**,
+`VOICE_INTENT_MARKER = true`, `GET /` 200, and the signature + routing re-verified afterwards
+(signed 200, `businessPhone=+18176011171`).
+
+**What to check on the next call, because marker mode has one caller-audible failure mode:**
+`intent_marker_leaks` must be **0** (`lib/voice/metrics.js:110` — the defensive strip repairs a
+leak, so without the counter it leaves no trace and a latency probe cannot hear it). Also read
+`tts_fallback_turns` and `internal_term_leaks`; both must be 0.
+
+**Read alongside it, and do NOT mistake either for a regression:** turn 2's `stt_final=3003` is a
+turn with `barged_in: true` and two `barge_in` events, so it is not an STT measurement; and turn
+1's `first_frame_wire: -15266` is P24's known greeting contamination. Caching is healthy —
+`cached_tokens` 1,881 of `prompt_tokens` 5,435.
+
 ---
 
 ## Attempt 2 — NEXT SESSION: finish Gate 4, then PHASE 6. **A US NUMBER ON ACCOUNT A CAN DO IT**
