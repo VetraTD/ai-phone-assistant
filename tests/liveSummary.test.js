@@ -128,6 +128,21 @@ describe("interruptions", () => {
   });
 });
 
+describe("language pinning", () => {
+  it("is recorded after connect, because it is only known then", () => {
+    // The retry lives in the client: connect with the language code, and fall
+    // back without it if the model refuses. Which of those happened is not
+    // known when the summary is constructed, so it is set afterwards -- and it
+    // must be RECORDED either way, because "accepted" is the claim the vendor
+    // docs got wrong and "honoured" is still unproven.
+    const s = createCallSummary({ arm: "vendor" });
+    expect(s.build().language_pinned).toBeNull();
+
+    s.recordLanguagePinned(false);
+    expect(s.build().language_pinned).toBe(false);
+  });
+});
+
 describe("what it must never contain", () => {
   it("records the hold rule and punctuation shape, never the caller's words", () => {
     const s = createCallSummary({ arm: "hold" });
