@@ -23,8 +23,11 @@ and never edited: round 1 held 3/8, round 2 held 1/7, round 3 held 4/6 scored.
   passed on 2026-09-02. The cascade serves from GCP.
 - **The speech-to-speech migration has NOT started.** No integration exists;
   every probe was a direct WebSocket with no Twilio leg.
-- **Tier-1 model choice is OPEN**, and it is a business judgement, not a
-  technical one. See §6.
+- **Tier-1 model is DECIDED: Gemini 3.1 Live on AI Studio.** The blocking
+  question — whether the AI Studio tier permits training on prompts — was
+  checked by the owner on 2026-09-02: **the paid tier does not use data for
+  model training.** That was the only thing standing between 3.1's measured
+  behaviour and shipping it. See §2.
 
 ---
 
@@ -41,15 +44,34 @@ and never edited: round 1 held 3/8, round 2 held 1/7, round 3 held 4/6 scored.
 | Doubled utterances | **0 / 90 turns** | **5 / 33 turns (15%)** |
 | $/turn | $0.0067 | $0.0049 |
 
-**3.1 is behaviourally the clear winner. 2.5 has the stronger compliance
-posture.** Neither offers UK residency — `europe-west2` (London) serves NO Live
-model at all (HTTP 400 at the WebSocket upgrade, measured across every candidate
-model).
+**DECIDED: Gemini 3.1 Live.**
 
-**Decide it by checking the AI Studio tier's data-use terms first** (§6). If
-Google may use prompts to improve products on your tier, that is health data and
-3.1 is off the table; take 2.5 with the idempotency guard and accept the
-repetition.
+3.1 is behaviourally the clear winner and the one objection to it — that AI
+Studio might train on prompts, which would be disqualifying for health data —
+was resolved on 2026-09-02: **the paid tier does not use data for model
+training.** The project is demonstrably on the paid tier (it has a real Gemini
+billing history).
+
+What choosing 3.1 still costs, and what must therefore be recorded rather than
+forgotten:
+
+- **US transfer**, not EEA. Lawful with the importer's DPF certification or an
+  IDTA / UK Addendum plus a transfer risk assessment — but it needs documenting.
+- **No Cloud Audit Logs, no VPC-SC, no CMEK** on the model leg. It is egress to
+  a public API.
+- **A `-preview` model.** It will move, change, or be withdrawn. This is why the
+  client must be swappable (§6).
+- **Moving the LLM leg from Vertex to AI Studio is a downgrade in posture.** The
+  cascade runs the LLM on Vertex today. Accepting this is a deliberate trade of
+  audit surface for measured behaviour, not an oversight.
+
+Neither option offered UK residency anyway — `europe-west2` (London) serves NO
+Live model at all (HTTP 400 at the WebSocket upgrade, every candidate model). So
+2.5's Belgium endpoint bought an EEA transfer, not a UK one, in exchange for a
+model that re-fires tool calls in half its booking trials.
+
+**Revisit if 3.1 ships GA on Vertex** — at that point the trade disappears and
+it becomes a config change.
 
 ---
 
@@ -231,9 +253,10 @@ downstream (45 scenarios, 19 assert helpers, the judge, matrix mode) reads a
 
 Not legal advice. These are the questions, not the answers.
 
-1. **Check the AI Studio tier's data-use terms first.** If Google may use prompts
-   to improve products on your tier, that is health data and 3.1 is off the
-   table. Highest-value hour available.
+1. ~~Check the AI Studio tier's data-use terms.~~ **DONE 2026-09-02 — the paid
+   tier does not use data for model training.** This unblocked the 3.1 decision.
+   Confirm the key's project stays on the paid tier; a lapse to free tier would
+   silently change the terms under you.
 2. UK GDPR does **not** require UK residency — transfers are lawful with
    adequacy (EEA) or IDTA/UK Addendum + a transfer risk assessment (US).
    Geography is the easy part; **terms are the hard part.**
