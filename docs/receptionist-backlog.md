@@ -1262,9 +1262,26 @@ This does not contradict the cascade's documented live-call echo defect — that
 was Deepgram transcribing quiet audio into words, a different stack and possibly
 a different handset. One condition is not a law.
 
-**Done when:** either echo is reproduced on some real handset, or manual
-activity detection is justified on turn-taking alone and the half-duplex gate is
-re-costed against the ~900 ms/turn it adds.
+**CORRECTED 2026-09-02, same day, by better instrumentation.** Echo IS present.
+A second silent call with frame counters showed 40 of 1514 frames carrying
+signal during our own playback, peaking at RMS 211, against a caller-speech peak
+of 14,334. The mean read 0 only because 1,474 frames were exactly zero -- a mean
+is the wrong statistic for a bursty signal, and the max was not being logged.
+
+`lib/voice/inboundVad.js` uses `minRms` 700, so the worst observed echo sits
+about 10 dB UNDER the VAD floor. Nothing fired because of a margin, not an
+absence. One handset, one room, one carrier's echo canceller; a louder speaker
+or a worse canceller closes that gap.
+
+**The two mechanisms are separable and were being conflated:**
+- the half-duplex gate (do not forward inbound while we speak) costs **nothing**
+  in latency and is free insurance on a 10 dB margin -- **keep it**;
+- `HANGOVER_MS` (how long to wait before declaring the turn over) is what costs
+  ~900 ms per turn, and `classifyHold` replaces it now that P6 measured
+  transcript lag at 113-360 ms.
+
+**Done when:** the real front-end keeps the gate, replaces the flat hangover with
+`classifyHold`, and the 10 dB margin is re-checked on a second handset.
 
 ---
 

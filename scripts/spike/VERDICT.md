@@ -200,6 +200,69 @@ but "very unlikely" is not "ruled out", and closing it needs a counter.
   half-duplex gating. Those are two separable mechanisms and the spike has been
   treating them as one.
 
+## CORRECTION — echo is present, and the previous entry in this file was wrong
+
+The silent call above reported `in_rms_playing_mean = 0` and I recorded "no echo
+reaches us on this path... absent at the sample level". **That was wrong**, and
+the counters added specifically to check it are what caught it.
+
+Second silent call, auto arm (no gate), 61 s:
+
+```
+WHILE WE SPOKE   frames=1514   nonzero=40    mean=0   max=211
+WHILE IDLE       frames=1394   nonzero=805   mean=1623 max=14334
+interrupted=0    without local barge=0
+```
+
+**Echo arrives.** 40 of 1514 frames — 2.6% — carried signal while we were
+speaking, peaking at RMS 211. The mean rounded to 0 only because 1,474 of those
+frames were exactly zero. A mean is the wrong statistic for a signal that is
+absent 97% of the time and present in bursts; the max is the one that matters,
+and I was not logging it.
+
+### What the numbers actually say
+
+| | |
+|---|---|
+| worst echo frame | RMS **211** |
+| caller's own speech, peak | RMS **14,334** (68x louder) |
+| `inboundVad` `minRms` floor | **700** |
+| **headroom, echo peak to VAD floor** | **~10 dB** |
+
+The carrier's echo canceller is working but leaks — most likely at speech onset
+before it adapts. What it leaks lands about 10 dB under the absolute floor
+`lib/voice/inboundVad.js` uses, which is why neither our VAD nor Gemini's ever
+fired on it. **Nothing fired because of a margin, not because of an absence.**
+
+### This changes the design conclusion, and separates two things I had conflated
+
+- **The half-duplex gate is not guarding an empty road.** It guards a road with
+  light traffic that currently stays under the limit. ~10 dB of margin on ONE
+  handset, in one room, through one carrier's canceller. A louder speaker, a
+  harder surface or a worse canceller closes that gap.
+- **The gate costs nothing in latency.** Not forwarding inbound audio while we
+  speak adds no delay whatsoever. **Keep it** — it is free insurance on a
+  10 dB margin.
+- **`HANGOVER_MS` is the thing that costs ~900 ms a turn, and it is a SEPARATE
+  mechanism.** I had been treating "manual activity detection" as one decision.
+  It is two: who decides the turn ended (the hangover, expensive, replaceable
+  by `classifyHold`) and whether we forward our own echo (the gate, free, keep).
+  Earlier entries in this file conflated them.
+
+### Recorded as a miss
+
+Two confident claims of mine, disproved by better measurement in the same
+session that made them:
+
+1. "`echo_return_loss_db` = 23-40 dB" — was measuring caller speech in the
+   window tail. Correct, and still correct.
+2. "No echo reaches us at all, absent at the sample level" — **wrong.** Echo is
+   present at up to RMS 211. A mean over a bursty signal hid it, and I drew a
+   design conclusion from a statistic that could not support one.
+
+The handoff's section 3 exists because nine confident conclusions were disproved
+by measurement. This is the tenth and eleventh, and both are mine.
+
 ## Final results
 
 _Filled in after the calls. A prediction that missed is recorded as a miss._
