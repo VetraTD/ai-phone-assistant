@@ -2,25 +2,43 @@
   "summary": {
     "probe": "L3",
     "model": "gpt-realtime-2.1",
-    "n": 1,
+    "n": 5,
     "prompt": {
-      "chars": 13704,
+      "chars": 13705,
       "approx_tokens": 3426,
       "tools": 6,
       "business": "Brightwork Family Dental",
       "fixture": "appointments-availability"
     },
     "model_leg_ms": {
-      "p50": 1375,
-      "p95": 1700,
-      "mean": 1375,
-      "n": 5,
+      "p50": 1558,
+      "p95": 2288,
+      "mean": 1718,
+      "n": 23,
       "samples": [
-        1047,
-        1720,
-        1375,
-        1113,
-        1620
+        2499,
+        1862,
+        1665,
+        1331,
+        1345,
+        2082,
+        1422,
+        1399,
+        1518,
+        1939,
+        1382,
+        1558,
+        1262,
+        1469,
+        2017,
+        2064,
+        1373,
+        1479,
+        2104,
+        2301,
+        2052,
+        1218,
+        2175
       ]
     },
     "barge": {
@@ -31,7 +49,7 @@
       }
     },
     "semantic_vad": null,
-    "usd": 0.11802800000000002
+    "usd": 0.37451599999999996
   },
   "conversations": [
     {
@@ -40,11 +58,11 @@
         {
           "label": "clean_open",
           "seconds": 1.920625,
-          "model_leg_ms": 1047,
-          "audio_chunks": 14,
-          "audio_bytes": 42400,
+          "model_leg_ms": 2499,
+          "audio_chunks": 10,
+          "audio_bytes": 30800,
           "heard": "Hi, I'd like to book an appointment.",
-          "said": "Sure thing, I can help with that. First, are you a new patient or an existing patient?",
+          "said": "Of course. Are you a new patient or an existing patient?",
           "tools": [
             "set_call_intent"
           ]
@@ -52,53 +70,323 @@
         {
           "label": "rep_time_q",
           "seconds": 2.13625,
-          "model_leg_ms": 1720,
-          "audio_chunks": 13,
-          "audio_bytes": 39200,
-          "heard": "Do you have anything Tuesday morning?",
-          "said": "I can help with that.Of course. Before we go further, are you a new patient or an existing patient?",
+          "model_leg_ms": 1862,
+          "audio_chunks": 14,
+          "audio_bytes": 42000,
+          "heard": "",
+          "said": "Sure thing. Before we look at availability, are you a new patient or an existing patient?",
           "tools": []
         },
         {
           "label": "rep_digits",
           "seconds": 2.74,
-          "model_leg_ms": 1375,
-          "audio_chunks": 19,
-          "audio_bytes": 58000,
-          "heard": "It's 555-1234.",
-          "said": "Of course, thanks for sharing that, but first I need to know if you’re a new patient or an existing patient. Which one are you?",
+          "model_leg_ms": 1665,
+          "audio_chunks": 20,
+          "audio_bytes": 62800,
+          "heard": "Do you have anything Tuesday morning? It's 555-1234.",
+          "said": "Of course. I’ve got 555-1234 noted, and first I need to know if you’re a new patient or an existing patient.",
           "tools": []
         },
         {
           "label": "rep_confirm",
           "seconds": 2.043375,
-          "model_leg_ms": 1113,
-          "audio_chunks": 17,
-          "audio_bytes": 53600,
+          "model_leg_ms": 1331,
+          "audio_chunks": 14,
+          "audio_bytes": 42800,
           "heard": "Tuesday at 10, works for me.",
-          "said": "Sure thing. Before we look at a time, I need to know if you’re a new patient or an existing patient. Which are you?",
+          "said": "Sure thing. Before we go any further, are you a new patient or an existing patient?",
           "tools": []
         },
         {
           "label": "rep_close",
           "seconds": 0.882375,
-          "model_leg_ms": 1620,
-          "audio_chunks": 11,
-          "audio_bytes": 34400,
+          "model_leg_ms": 1345,
+          "audio_chunks": 10,
+          "audio_bytes": 29200,
           "heard": "Thanks, bye.",
-          "said": "Of course. Before we end, is there anything else I can help you with today?",
+          "said": "Of course. Is there anything else I can help you with before you go?",
           "tools": []
         }
       ],
       "usage": {
-        "text_in": 8029,
-        "audio_in": 217,
-        "cached_text_in": 16064,
+        "text_in": 4252,
+        "audio_in": 267,
+        "cached_text_in": 23808,
         "cached_audio_in": 192,
-        "text_out": 570,
-        "audio_out": 581
+        "text_out": 704,
+        "audio_out": 624
       },
-      "usd": 0.09186640000000001,
+      "usd": 0.086352,
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 2082,
+          "audio_chunks": 9,
+          "audio_bytes": 28000,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Of course. Are you a new patient or an existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1422,
+          "audio_chunks": 25,
+          "audio_bytes": 79600,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Sure thing. Are you a new patient or an existing patient? Once I know that, I can take your name and date of birth and then we can look at Tuesday morning options without guessing any times.",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1399,
+          "audio_chunks": 21,
+          "audio_bytes": 65200,
+          "heard": "It's 555-1234.",
+          "said": "Sure thing. Are you a new patient or an existing patient? Once I know that, I can collect the details needed to check availability.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1518,
+          "audio_chunks": 9,
+          "audio_bytes": 28800,
+          "heard": "Tuesday at 10, works for me.",
+          "said": "Of course. Are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": null,
+          "audio_chunks": 0,
+          "audio_bytes": 0,
+          "heard": "Thanks, bye.",
+          "said": "",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usage": {
+        "text_in": 4062,
+        "audio_in": 281,
+        "cached_text_in": 19968,
+        "cached_audio_in": 128,
+        "text_out": 594,
+        "audio_out": 504
+      },
+      "usd": 0.0750384,
+      "error": null
+    },
+    {
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1939,
+          "audio_chunks": 10,
+          "audio_bytes": 31200,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Of course. Are you a new patient or an existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1382,
+          "audio_chunks": 13,
+          "audio_bytes": 39200,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Sure thing. Before we look at options, are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1558,
+          "audio_chunks": 10,
+          "audio_bytes": 31200,
+          "heard": "It's 555-1234.",
+          "said": "Of course. Are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1262,
+          "audio_chunks": 10,
+          "audio_bytes": 30800,
+          "heard": "Tuesday at 10, works for me.",
+          "said": "Sure thing. Are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1469,
+          "audio_chunks": 9,
+          "audio_bytes": 26400,
+          "heard": "Thanks, bye.",
+          "said": "Before you go, is there anything else I can help you with today?",
+          "tools": []
+        }
+      ],
+      "usage": {
+        "text_in": 4030,
+        "audio_in": 217,
+        "cached_text_in": 19904,
+        "cached_audio_in": 192,
+        "text_out": 469,
+        "audio_out": 397
+      },
+      "usd": 0.0640144,
+      "error": null
+    },
+    {
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 2017,
+          "audio_chunks": 10,
+          "audio_bytes": 30400,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Sure thing. Are you a new patient or an existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 2064,
+          "audio_chunks": 15,
+          "audio_bytes": 48000,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Of course. Before we get into availability, are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1373,
+          "audio_chunks": 16,
+          "audio_bytes": 50800,
+          "heard": "It's 555-1234.",
+          "said": "Sure thing. I have that number if we need it, but first I need to know: are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1479,
+          "audio_chunks": 26,
+          "audio_bytes": 81600,
+          "heard": "Tuesday at 10 works for me.",
+          "said": "Of course. I can’t promise that time until we check availability, and I need to know if you’re a new patient or an existing patient first. Are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": null,
+          "audio_chunks": 0,
+          "audio_bytes": 0,
+          "heard": "Thanks, bye.",
+          "said": "",
+          "tools": []
+        }
+      ],
+      "usage": {
+        "text_in": 4017,
+        "audio_in": 223,
+        "cached_text_in": 15872,
+        "cached_audio_in": 64,
+        "text_out": 459,
+        "audio_out": 527
+      },
+      "usd": 0.0706504,
+      "error": null
+    },
+    {
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 2104,
+          "audio_chunks": 10,
+          "audio_bytes": 29200,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Of course. Are you a new patient or an existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 2301,
+          "audio_chunks": 10,
+          "audio_bytes": 29200,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Sure thing. Are you a new patient, or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 2052,
+          "audio_chunks": 21,
+          "audio_bytes": 66000,
+          "heard": "It's 555-1234.",
+          "said": "Of course. Thanks for the number, but I still need to know if you’re a new patient or an existing patient before we go further. Are you new or existing?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1218,
+          "audio_chunks": 14,
+          "audio_bytes": 42400,
+          "heard": "Tuesday at 10, works for me.",
+          "said": "Of course. Before we go further, are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 2175,
+          "audio_chunks": 10,
+          "audio_bytes": 30400,
+          "heard": "Thanks, bye.",
+          "said": "Of course. Is there anything else I can help you with before we wrap up?",
+          "tools": []
+        }
+      ],
+      "usage": {
+        "text_in": 4064,
+        "audio_in": 281,
+        "cached_text_in": 19904,
+        "cached_audio_in": 128,
+        "text_out": 853,
+        "audio_out": 493
+      },
+      "usd": 0.0784608,
       "error": null
     }
   ],
