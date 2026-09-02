@@ -201,15 +201,54 @@ this.
 
 ## 7. Build order
 
-1. **Spike — throwaway Twilio ↔ Live bridge, one call on the UK handset.**
-   ~1 day. Answers what $8.62 of probes could not: does echo break it, does it
-   sound better through 300–3400 Hz, does 1,370 ms/turn feel like anything.
-   **If echo wrecks it, stop here** — a day spent instead of 73–134 h.
+1. **Spike — throwaway bridge, one call on the UK handset.** ~1 day. See §7a
+   for exactly what it is. Answers what $8.62 of probes could not: does echo
+   break it, does it sound better through 300–3400 Hz, does 1,370 ms/turn feel
+   like anything. **If echo wrecks it, stop here** — a day spent instead of
+   73–134 h.
 2. Real front-end: manual activity detection, swappable client, all ten tools.
 3. Guards: availability invariant + idempotent tool execution.
 4. Port the 43-scenario eval to a Live session — see §8; the only instrument
    that measures booking correctness.
 5. Fallback tiers, after tier 1 has survived real calls.
+
+### 7a. What the spike is — and is NOT
+
+**"Throwaway" describes the BRIDGE CODE, not the Twilio account.** Use the
+existing Twilio account and an existing number. The disposable part is ~200
+lines of glue.
+
+One WebSocket endpoint that Twilio `<Stream>` connects to:
+
+```
+Twilio <Stream>  →  your endpoint  →  Gemini Live session
+                 ←                  ←
+```
+
+- receive Twilio media frames (base64 μ-law 8 kHz, 20 ms)
+- resample to PCM16 16 kHz
+- pipe into a Live session
+- pipe the reply audio back as Twilio media frames
+
+**No tools. No database. No tenant logic. No reducer. No guards.** Audio in,
+audio out. Throw it away and write the real front-end afterwards.
+
+Why throwaway rather than "the first commit of the real thing": the spike
+answers exactly one question — *does echo break this, and does it sound better
+on a handset.* Building it properly first means committing to session lifecycle,
+error handling and turn management before knowing whether the approach survives
+contact with a phone line. If echo wrecks it you delete 200 lines instead of a
+week's work.
+
+**Two practical cautions:**
+
+- **Use the right Twilio account.** There are two, and only one whose token GCP
+  holds — a number from the wrong one 403s every call. See the Twilio topology
+  notes; this is an easy hour to lose.
+- **Do not point the clinic's live number at the spike.** `.env` carries
+  `LISTENING_TEST_NUMBER` and `PROBE_NUMBER`. Use one of those, or repoint
+  outside business hours. A real caller reaching a bare audio bridge with no
+  tools and no fallback path is a bad afternoon.
 
 ---
 
