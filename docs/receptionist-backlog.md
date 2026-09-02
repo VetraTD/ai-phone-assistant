@@ -1173,8 +1173,8 @@ The UK lane is `deployment_mode = "standard"` and there is no GCP BAA, so this
 is a naming collision rather than a live exposure. It is still a trap with a
 detonator already installed.
 
-**Done when:** either the secret is gone with the spike, or the boundary rule
-distinguishes a `standard` lane from a covered one.
+**DONE 2026-09-02** — secret deleted with the spike, verified absent from
+`vetra-uk-edc8ca`. The boundary rule is untouched and the trap is disarmed.
 
 **LVX3 · The spike webhook is gated by URL secrecy, not a Twilio signature** `[gcp]` · P2
 
@@ -1188,7 +1188,8 @@ segment instead. The WebSocket leg keeps the real per-call token, keyed by
 What leaks if the URL leaks: Gemini spend on a service with no data behind it.
 The real front-end uses the signature path like everything else.
 
-**Done when:** the spike service is deleted.
+**DONE 2026-09-02** — service, secret and service account all deleted and
+verified gone; the number is restored to its recorded values.
 
 **LVX4 · Gemini Live refused to read a caller's phone number back** `[gcp]` · P1
 

@@ -265,10 +265,65 @@ by measurement. This is the tenth and eleventh, and both are mine.
 
 ## Final results
 
-_Filled in after the calls. A prediction that missed is recorded as a miss._
+Nine calls, 2026-09-02. Torn down the same day: number restored to its recorded
+values, Cloud Run service, secret and service account all deleted and verified
+gone.
 
-| | |
-|---|---|
-| Score | — / 8 |
-| Verdict | — |
-| Spend | $— of the $3.00 cap |
+| # | prediction | outcome |
+|---|---|---|
+| P1 | manual arm does not self-interrupt | **PASS** |
+| P2 | auto arm audibly worse | **PARTIAL** — 2 uncorroborated interrupts, inaudible to the caller |
+| P3 | echo return loss >= 15 dB | **VOID** — the metric was measuring caller speech, not echo |
+| P4 | ear vs speakerphone differ by >= 10 dB | **not scorable** — condition not recorded per call |
+| P5 | intelligible, not worse than the cascade | **PASS** — "it sounds amazing" |
+| P6 | transcript lag < 500 ms | **PASS** — 113-360 ms |
+| P7 | barge-in works under manual AD | **PASS** |
+| P8 | no drops or unexplained closes | **PASS** |
+
+**Score: 5 pass, 1 partial, 1 void, 1 unscorable. Spend ~$0.65 of the $3.00 cap.**
+
+### Verdict
+
+**Echo does not break speech-to-speech. Proceed to section 7 step 2.**
+
+The decision rule fixed in advance was P1 and P5. Both passed.
+
+### What the spike actually bought, beyond the go/no-go
+
+1. **`classifyHold` and `echoGuard` can survive.** Transcript lag 113-360 ms,
+   comfortably inside any hold. This was the open question behind backlog LVX1
+   and it resolves in the good direction. P6 is the most valuable pass here.
+2. **Echo is real but ~10 dB under `inboundVad`'s floor** on this handset. The
+   half-duplex gate is free insurance on a thin margin: keep it.
+3. **`HANGOVER_MS` and the gate are separate mechanisms.** The gate costs no
+   latency. The flat hangover costs ~900 ms a turn and `classifyHold` replaces
+   it. Section 6 treats these as one decision; they are two.
+4. **The model leg is 880-1140 ms with a real PSTN leg**, against 1,043 ms
+   measured with no phone line at all. Transport cost almost nothing.
+5. **`en-GB` is accepted** — `language_pinned` true on every call — contradicting
+   section 4's vendor-doc claim.
+
+### What it did NOT settle
+
+- **LVX4** — it refused to read a caller's phone number back. Needs the
+  production prompt; untestable in a spike with a ten-line one.
+- **Booking correctness** — no tools were declared. That is the eval port,
+  section 7 step 4.
+- **A second handset.** Every acoustic number here is one phone, one room, one
+  carrier.
+
+### Instrument defects found in my own harness, for the next person
+
+1. `usage` overwritten instead of accumulated — **harness defect #1 from the
+   handoff's own section 11, reproduced by someone who had read it.**
+2. `echo_return_loss_db` measured caller speech leaking into the playback
+   window tail.
+3. A mean reported over a bursty signal that is zero 97% of the time, from
+   which a design conclusion was drawn. The max was not logged.
+4. `noise_floor_db` measured the caller talking, not the room.
+5. A wait loop keyed on "the latest build" rather than a build id, which exited
+   on the *previous* build's status. Made twice.
+
+Five instrument defects against roughly one vendor observation. That ratio
+matches round 1's and is the honest headline: **most of what a new harness
+measures at first is itself.**
