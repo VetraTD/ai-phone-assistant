@@ -1,0 +1,43 @@
+{
+  "model": "gemini-3.1-flash-live-preview",
+  "fixture": "trailing_lead_in",
+  "hold_ms": 3000,
+  "rows": [
+    {
+      "trial": 1,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "cut_in_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1241,
+      "heard": "It's for uh",
+      "said": "I understand.",
+      "usd": 0
+    },
+    {
+      "trial": 2,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "cut_in_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1346,
+      "heard": "It's for uh",
+      "said": "I understand.",
+      "usd": 0
+    },
+    {
+      "trial": 3,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "cut_in_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1183,
+      "heard": "It's for uh",
+      "said": "I understand.",
+      "usd": 0
+    }
+  ]
+}
