@@ -17,10 +17,28 @@
 # Running it
 # ---------------------------------------------------------------------------
 #
-#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit \
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit \
 #     --config=cloudbuild.yaml \
-#     --project=vetra-shared-c3a3bd \
+#     --project=vetra-core-edc8ca \
+#     --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
 #     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# CORRECTED 2026-09-02. The previous version of these four lines was wrong in
+# three independent ways, and every one of them fails with an error naming
+# something else:
+#
+#   ~/.gcloud-vetratd    admin@vetratd.com now returns `access_denied: Account
+#                        Restricted` -- restricted at Google, not logged out.
+#                        Use ~/.gcloud-vetra2 (vetratd@gmail.com).
+#   vetra-shared-c3a3bd  an ATTEMPT-1 project that no longer exists.
+#                        cloudbuild.frontend.yaml:74 already records being
+#                        bitten by this exact name. It is vetra-core-edc8ca.
+#   no --service-account Cloud Build now defaults to the COMPUTE service
+#                        account, which holds no roles here, and the failure
+#                        reads `does not have storage.objects.get access to the
+#                        Google Cloud Storage object ... (or it may not exist)`
+#                        -- which looks like a missing source archive. Every
+#                        build in this project's history ran as vetra-deployer.
 #
 # ---------------------------------------------------------------------------
 
