@@ -84,12 +84,22 @@ export const ACTION_TOOL_NAMES = actionToolNames();
  * Every function declaration this business's calls are given, in the order the
  * model sees them.
  *
+ * EXPORTED for the speech-to-speech front-end (lib/voice/live/tools.js), which
+ * needs the declarations themselves rather than just their names.
+ *
+ * Exported rather than reimplemented, and the reason is measured: probe rounds
+ * 1 and 2 declared SIX tools because they assembled their own list, so the
+ * model could not check availability and every behavioural observation from
+ * both rounds is suspect (docs/speech-to-speech-handoff.md section 11, defect
+ * #1). A second union drifts from this one the first time a capability is
+ * added. There is one union, and this is it.
+ *
  * @param {object} cfg - normalised business config
  * @param {object} [extras] - { integrations, ... }
  * @param {boolean} [markerMode]
  * @returns {object[]}
  */
-function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
+export function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
   return [
     ...(buildCallTools(cfg, { markerMode }).functionDeclarations || []),
     ...(buildIntegrationTools(extras?.integrations || [], cfg).functionDeclarations || []),
