@@ -4,7 +4,7 @@
 BAA at $2,000/mo put HIPAA out of reach. Predictions pre-registered in
 `verdicts-r3.json` (2026-09-02T05:10:00Z) before the first run.
 
-**Round 3 spend $4.4995. Cumulative $7.0151 against the $10.0000 cap.**
+**Round 3 spend $5.6151. Cumulative $8.1307 against the $10.0000 cap.**
 **4 of 6 scored predictions held; 3 unresolved.**
 
 > **Harness correction that invalidates part of rounds 1-2.** Production declares
@@ -54,6 +54,25 @@ patient is not.
 which is the good kind of failure) and **neither spoke a raw tool blob aloud** in
 50 trials (X5 fails). Round 1's "Gemini spoke JSON" was an artefact of
 the six-tool harness, not a model defect.
+
+---
+
+## (a2) Duplicate tool calls — the defect the scorecard missed
+
+| model | trials | duplicate-call events | `end_call` twice | **`book_appointment` twice** |
+|---|---|---|---|---|
+| Gemini 2.5 | — | — | — | — |
+| Gemini 3.1 | 25 | **2** | 2 | 0 |
+| gpt-realtime-2.1 | 24 | **0** | 0 | 0 |
+
+**Gemini 2.5 re-fires actions.** It does not merely repeat itself audibly (15% of
+turns); it calls tools again. A doubled `end_call` hangs up on a caller. A
+doubled `book_appointment` puts a patient in the calendar twice.
+
+This is the single most important result in round 3 and **the assertion suite
+scored it as a pass**, because every check asks whether a tool was called and
+with what arguments, and none asks whether it was called twice. It was found by
+reading raw call sequences. Any future eval work must assert call COUNTS.
 
 ---
 
@@ -165,7 +184,7 @@ and hold arms above.
 | L4 | $0.3288 |
 | L5 | $0.1987 |
 | R2 | $0.8434 |
-| R3 | $4.4995 |
-| **Total** | **$7.0151** |
+| R3 | $5.6151 |
+| **Total** | **$8.1307** |
 | Cap | $10.0000 |
-| Headroom | $2.9849 |
+| Headroom | $1.8693 |

@@ -219,8 +219,7 @@ the six-tool harness, not a model defect.
 | model | trials | duplicate-call events | \`end_call\` twice | **\`book_appointment\` twice** |
 |---|---|---|---|---|
 ${["2.5", "3.1", "gpt"].map((m) => { const d = dupByModel[m]; const lbl = { "2.5": "Gemini 2.5", "3.1": "Gemini 3.1", gpt: "gpt-realtime-2.1" }[m];
-  return d ? `| ${lbl} | ${d.trials} | **${d.events}** | ${d.byTool.end_call || 0} | ${d.doubleBook ? "**" + d.doubleBook + "**" : 0} |` : `| ${lbl} | — | — | — | — |`; }).join("
-")}
+  return d ? `| ${lbl} | ${d.trials} | **${d.events}** | ${d.byTool.end_call || 0} | ${d.doubleBook ? "**" + d.doubleBook + "**" : 0} |` : `| ${lbl} | — | — | — | — |`; }).join(String.fromCharCode(10))}
 
 **Gemini 2.5 re-fires actions.** It does not merely repeat itself audibly (15% of
 turns); it calls tools again. A doubled \`end_call\` hangs up on a caller. A
