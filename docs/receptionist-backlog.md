@@ -1014,6 +1014,17 @@ and GitHub URL); "live in 3 business days".
 Opened 2026-08-30 after the owner asked why ChatGPT voice sounds so much better
 than a phone receptionist. Two probes were run; the measured facts are in §0.
 
+> **2026-09-01 — see `docs/speech-to-speech-vendor-analysis.md`.** The measured
+> facts below still hold, but two conclusions in this section are superseded
+> because criteria changed, not because the arithmetic was wrong:
+> (1) `gemini-3.1-flash-live-preview` is **AI Studio / global only — no Vertex
+> version in any region** and **no async function calling**, so it does not ride
+> the Vertex migration and cannot satisfy UK/EU residency; (2) **OpenAI is no
+> longer ruled out** — `gpt-realtime-2.1-mini` prices at ~$0.131/call, level
+> with the cascade, and its $0.40/M cached audio input flattens the quadratic
+> term. That doc also shows cost is a **non-reason** to migrate at any
+> foreseeable volume (~$11 spread per 1,000 calls).
+
 **The verdict, in one line: Live is very likely the better long-run
 architecture, but it must be built as a THIRD FRONT-END, never as a cutover.**
 
