@@ -1,64 +1,83 @@
 import { describe, it, expect } from "vitest";
-import { buildUsage } from "../services/gemini.js";
+import { emptyUsage, addUsage } from "../lib/voice/geminiUsage.js";
 
 // ---------------------------------------------------------------------------
-// Gemini's implicit prompt caching only hits on a stable prefix, which is the
-// entire reason buildSystemInstruction splits into a static prefix + dynamic
-// tail. Whether that actually works has never been observable: the SDK's
-// cachedContentTokenCount was logged at DEBUG and then dropped before the
-// usage object left the module, so nothing downstream could count it.
+// This file exists because the defect it guards has now been committed TWICE.
 //
-// A hit rate near zero means the whole prefix is re-processed every turn —
-// which inflates LLM time-to-first-token on every candidate model equally, and
-// so has to be ruled out BEFORE any vendor benchmark is worth running.
+// Gemini emits one `usageMetadata` message PER TURN, not a running session
+// total. Storing `usage = msg.usageMetadata` keeps only the last turn and
+// under-reports a multi-turn call by 3-4x. That is harness defect #1 in
+// docs/speech-to-speech-handoff.md section 11, written up with measured
+// numbers in this module's own header -- and it was re-committed anyway in
+// scripts/spike/s2s-bridge.js by someone who had read both (backlog LVX5).
+//
+// A written-up post-mortem did not stop the recurrence. An assertion does.
+// The module moved to lib/voice/ for the same reason: scripts/probes is not
+// in the Dockerfile COPY list, so anything shipping in the image could not
+// import it and inlined a copy instead. Reuse has to be POSSIBLE before
+// "reuse the instrument, do not re-derive it" is advice rather than a wish.
 // ---------------------------------------------------------------------------
 
-describe("buildUsage — telemetry shaping for one LLM turn", () => {
-  it("returns null when the SDK reported no usage at all", () => {
-    expect(buildUsage(null)).toBeNull();
-    expect(buildUsage(undefined)).toBeNull();
+/** One turn's worth of the real message shape. */
+function turn({ text = 0, audioIn = 0, audioOut = 0, textOut = 0, cached = 0 }) {
+  return {
+    promptTokensDetails: [
+      { modality: "TEXT", tokenCount: text },
+      { modality: "AUDIO", tokenCount: audioIn },
+    ],
+    responseTokensDetails: [
+      { modality: "TEXT", tokenCount: textOut },
+      { modality: "AUDIO", tokenCount: audioOut },
+    ],
+    cacheTokensDetails: cached ? [{ modality: "TEXT", tokenCount: cached }] : [],
+  };
+}
+
+describe("addUsage accumulates across turns rather than overwriting", () => {
+  it("sums the three turns from the module header instead of keeping the last", () => {
+    // The measured numbers that revealed the defect. Overwriting reports
+    // 3,928 text_in; the truth is 15,550, which is 3.96x more.
+    const acc = emptyUsage();
+    addUsage(acc, turn({ text: 7728, audioIn: 96 }));
+    addUsage(acc, turn({ text: 3894, audioIn: 205 }));
+    addUsage(acc, turn({ text: 3928, audioIn: 389 }));
+
+    expect(acc.text_in).toBe(15_550);
+    expect(acc.audio_in).toBe(690);
+    expect(acc.turns_billed).toBe(3);
   });
 
-  it("carries the cached token count through to callers", () => {
-    const usage = buildUsage({
-      promptTokenCount: 4000,
-      candidatesTokenCount: 60,
-      cachedContentTokenCount: 3200,
-    });
+  it("splits response modalities so audio out is never billed as text", () => {
+    const acc = emptyUsage();
+    addUsage(acc, turn({ audioOut: 1200, textOut: 40 }));
 
-    expect(usage.cachedTokens).toBe(3200);
-    expect(usage.promptTokens).toBe(4000);
-    expect(usage.outputTokens).toBe(60);
+    expect(acc.audio_out).toBe(1200);
+    expect(acc.text_out).toBe(40);
   });
 
-  it("reports a genuine zero-hit turn as 0, not as missing", () => {
-    // The difference matters: 0 means "the cache did not hit", absent means
-    // "this model/SDK never told us". Collapsing them would make a broken
-    // cache prefix indistinguishable from an unreported one.
-    const usage = buildUsage({
-      promptTokenCount: 4000,
-      candidatesTokenCount: 60,
-      cachedContentTokenCount: 0,
-    });
+  it("counts cached input on its own axis", () => {
+    const acc = emptyUsage();
+    addUsage(acc, turn({ text: 100, cached: 4096 }));
 
-    expect(usage.cachedTokens).toBe(0);
+    expect(acc.cached_in).toBe(4096);
+    expect(acc.text_in).toBe(100);
   });
 
-  it("omits cachedTokens entirely when the SDK did not report it", () => {
-    const usage = buildUsage({ promptTokenCount: 4000, candidatesTokenCount: 60 });
+  it("falls back to the flat counters so a turn is never billed as zero", () => {
+    // No detail arrays at all. Without the fallback this turn costs nothing,
+    // which is how a spend cap silently stops capping.
+    const acc = emptyUsage();
+    addUsage(acc, { promptTokenCount: 500, responseTokenCount: 300 });
 
-    expect("cachedTokens" in usage).toBe(false);
+    expect(acc.text_in).toBe(500);
+    expect(acc.audio_out).toBe(300);
+    expect(acc.turns_billed).toBe(1);
   });
 
-  it("still omits thoughtsTokens when absent and includes it when present", () => {
-    expect("thoughtsTokens" in buildUsage({ promptTokenCount: 10 })).toBe(false);
-    expect(buildUsage({ promptTokenCount: 10, thoughtsTokenCount: 7 }).thoughtsTokens).toBe(7);
-  });
+  it("ignores a missing message without advancing the turn count", () => {
+    const acc = emptyUsage();
+    addUsage(acc, null);
 
-  it("nulls missing prompt/output counts rather than leaving them undefined", () => {
-    const usage = buildUsage({ cachedContentTokenCount: 5 });
-
-    expect(usage.promptTokens).toBeNull();
-    expect(usage.outputTokens).toBeNull();
+    expect(acc.turns_billed).toBe(0);
   });
 });
