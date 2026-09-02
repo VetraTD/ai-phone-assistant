@@ -1,0 +1,75 @@
+{
+  "at": "2026-09-02T05:35:58.354Z",
+  "n": 1,
+  "models": [
+    "3.1"
+  ],
+  "rows": [
+    {
+      "scenario": "T3",
+      "model": "3.1",
+      "passes": 4,
+      "total": 4,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller confirmed they are finished."
+              }
+            }
+          ],
+          "said": "Tuesday at 3 PM is available. Are you a new or existing patient?Wonderful. To book that appointment, I'll need your full name and date of birth, please.Thanks, Sarah Miller. And that's March 3rd, 1990?Booking that appointment for Tuesday, September eighth, at three p m. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, and have a great day.",
+          "usd": 0.024291749999999994
+        }
+      ]
+    }
+  ]
+}

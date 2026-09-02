@@ -25,7 +25,13 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SPEND_FILE = path.join(HERE, "..", "spend.json");
 
-export const CAP_USD = 5.0;
+/**
+ * Raised from $5.00 to $10.00 on 2026-09-02, explicitly authorised by the owner
+ * to fund round 3 (tool reliability, plus the VAD/barge/slope arms that rounds
+ * 1-2 ran on only one of the two finalists). The original $5.00 covered rounds
+ * 1 and 2 and was never breached — $2.2383 of it was spent.
+ */
+export const CAP_USD = 10.0;
 
 /** USD per million tokens. */
 export const RATES = {

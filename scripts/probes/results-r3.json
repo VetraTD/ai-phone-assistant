@@ -1,0 +1,150 @@
+{
+  "at": "2026-09-02T06:11:14.590Z",
+  "scenarios": [
+    {
+      "id": "T1",
+      "name": "ordering — availability checked before booking",
+      "g": "15/15",
+      "o": "—",
+      "winner": "—"
+    },
+    {
+      "id": "T2",
+      "name": "conflict pivot — never books a slot it was told is taken",
+      "g": "20/20",
+      "o": "19/20",
+      "winner": "Gemini"
+    },
+    {
+      "id": "T3",
+      "name": "argument fidelity — books the time the caller said",
+      "g": "14/20",
+      "o": "14/20",
+      "winner": "tie"
+    },
+    {
+      "id": "T4",
+      "name": "failure recovery — backend fails, must not claim success",
+      "g": "19/20",
+      "o": "16/20",
+      "winner": "Gemini"
+    },
+    {
+      "id": "T5",
+      "name": "end_call gating — ends when the caller says goodbye",
+      "g": "15/15",
+      "o": "13/15",
+      "winner": "Gemini"
+    },
+    {
+      "id": "T6",
+      "name": "no phantom tools",
+      "g": "—",
+      "o": "—",
+      "winner": "—"
+    },
+    {
+      "id": "T7",
+      "name": "slow backend — 3 s stall",
+      "g": "—",
+      "o": "17/20",
+      "winner": "—"
+    }
+  ],
+  "totals": {
+    "gemini": [
+      83,
+      90
+    ],
+    "openai": [
+      79,
+      95
+    ]
+  },
+  "openai_scenario_wins": 0,
+  "leaks": 0,
+  "trials": 50,
+  "vad": {
+    "default_trailing_lead_in": null,
+    "patient_trailing_lead_in": {
+      "n": 5,
+      "cut": 3
+    }
+  },
+  "slope_gemini_3_1": [
+    1540,
+    1107,
+    2154,
+    1875,
+    1219,
+    1052,
+    1106,
+    1011,
+    1161,
+    1038,
+    1164,
+    1562
+  ],
+  "drift_ms": 22,
+  "verdicts": [
+    {
+      "id": "X1",
+      "pred": "Gemini checks availability before booking >=4/5",
+      "res": "15/15 checks, 5 of 5 trials ordered correctly",
+      "pass": true
+    },
+    {
+      "id": "X2",
+      "pred": "BOTH refuse to book the slot they were told is taken, 5/5 each",
+      "res": "Gemini 5/5, OpenAI 5/5",
+      "pass": true
+    },
+    {
+      "id": "X3",
+      "pred": "At least one model claims a booking the backend refused, >=1/5",
+      "res": "Gemini 0/5, OpenAI 0/5 — neither ever did",
+      "pass": false
+    },
+    {
+      "id": "X4",
+      "pred": "gpt-2.1 misses end_call >=2/5; Gemini calls it >=4/5",
+      "res": "OpenAI missed 2/5, Gemini missed 0/5",
+      "pass": true
+    },
+    {
+      "id": "X5",
+      "pred": "Gemini speaks a raw tool blob >=1 time; OpenAI never",
+      "res": "0 leaks across 50 trials, both models",
+      "pass": false
+    },
+    {
+      "id": "X6",
+      "pred": "Gemini 3.1 default VAD holds trailing_lead_in past 2,000 ms",
+      "res": "no data",
+      "pass": null
+    },
+    {
+      "id": "X7",
+      "pred": "gpt-2.1 signals an interrupt >=4/5 with audio genuinely in flight",
+      "res": "NOT MEASURED — the long-barge arm was killed before producing a cell",
+      "pass": null
+    },
+    {
+      "id": "X8",
+      "pred": "Neither model drifts >300 ms across 12 turns",
+      "res": "Gemini turn1 1540 ms -> turn12 1562 ms, drift 22 ms. OpenAI NOT MEASURED (killed).",
+      "pass": null
+    },
+    {
+      "id": "X9",
+      "pred": "OpenAI wins <=2 of the 7 tool scenarios, so does not justify 2.2x",
+      "res": "OpenAI won 0 of 4 scored scenarios",
+      "pass": true
+    }
+  ],
+  "spend": {
+    "total": 7.015108,
+    "cap": 10,
+    "r3": 4.499452599999997
+  }
+}

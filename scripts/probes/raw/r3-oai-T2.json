@@ -1,0 +1,248 @@
+{
+  "at": "2026-09-02T06:08:15.819Z",
+  "n": 5,
+  "models": [
+    "gpt"
+  ],
+  "rows": [
+    {
+      "scenario": "T2",
+      "model": "gpt",
+      "passes": 19,
+      "total": 20,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing, I can help with that. Let’s start by confirming whether you’re a new or existing patient.Sure thing. I can look at other times, but first, are you a"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that. Let’s start by confirming whether you’re a new or existing patient.Sure thing. I can look at other times, but first, are you a new patient or an existing patient?Of course. Take your time, and you can call back when you’re ready. Is there anything else I can help you with right now?",
+          "turnSaid": [
+            "Sure thing, I can help with that. Let’s start by confirming whether you’re a new or existing patient.",
+            "Sure thing. I can look at other times, but first, are you a new patient or an existing patient?",
+            "Of course. Take your time, and you can call back when you’re ready. Is there anything else I can help you with right now?"
+          ],
+          "usd": 0.048780000000000004
+        },
+        {
+          "trial": 2,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing, I can help with that — let me check availability for that time.Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednes"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that — let me check availability for that time.Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednesday at 10 AM. Which would you prefer?Of course. Is there anything else I can help you with today? If not, you can call back when you're ready to choose a time.",
+          "turnSaid": [
+            "Sure thing, I can help with that — let me check availability for that time.",
+            "Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednesday at 10 AM. Which would you prefer?",
+            "Of course. Is there anything else I can help you with today? If not, you can call back when you're ready to choose a time."
+          ],
+          "usd": 0.046319200000000005
+        },
+        {
+          "trial": 3,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing, let me think about how to get that appointment started.Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednesday at 1"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, let me think about how to get that appointment started.Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednesday at 10 AM. Which would you prefer?",
+          "turnSaid": [
+            "Sure thing, let me think about how to get that appointment started.",
+            "Of course. That 3 PM slot is already taken. I can offer Tuesday at 4:30 PM, or Wednesday at 10 AM. Which would you prefer?",
+            ""
+          ],
+          "usd": 0.0357368
+        },
+        {
+          "trial": 4,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Of course. That Tuesday at 3 PM is already taken. Would you like to try Tuesday at 4:30 PM, or Wednesday at 10 AM instead?Of course. Those are the options I can"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Of course. That Tuesday at 3 PM is already taken. Would you like to try Tuesday at 4:30 PM, or Wednesday at 10 AM instead?Of course. Those are the options I can see right now: Tuesday at 4:30 PM or Wednesday at 10 AM. Is there anything else I can help you with while you think it over?",
+          "turnSaid": [
+            "Of course. That Tuesday at 3 PM is already taken. Would you like to try Tuesday at 4:30 PM, or Wednesday at 10 AM instead?",
+            "",
+            "Of course. Those are the options I can see right now: Tuesday at 4:30 PM or Wednesday at 10 AM. Is there anything else I can help you with while you think it over?"
+          ],
+          "usd": 0.04564
+        },
+        {
+          "trial": 5,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing, I can help with that.Of course. The time you asked for is taken, but we do have Tuesday at 4:30 PM and Wednesday at 10 AM. Would you like to book on"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that.Of course. The time you asked for is taken, but we do have Tuesday at 4:30 PM and Wednesday at 10 AM. Would you like to book one of those, or try a different day?",
+          "turnSaid": [
+            "Sure thing, I can help with that.",
+            "",
+            "Of course. The time you asked for is taken, but we do have Tuesday at 4:30 PM and Wednesday at 10 AM. Would you like to book one of those, or try a different day?"
+          ],
+          "usd": 0.0364496
+        }
+      ]
+    }
+  ]
+}

@@ -16,11 +16,29 @@ import {
   VERTEX_MODEL, VERTEX_LOCATION,
 } from "./lib/geminiSession.js";
 import { geminiFrames, paceFrames, silenceFrames } from "./lib/audio.js";
-import { CONVERSATION_TURNS } from "./lib/prompt.js";
+import { CONVERSATION_TURNS, SLOPE_TURNS } from "./lib/prompt.js";
 import { reserve, commit, price, spent, CAP_USD } from "./lib/spend.js";
 import { p50, p95, errorGuard, writeRaw, readRaw } from "./lib/stats.js";
 
 const ARM = process.argv[2] || "all";
+/**
+ * Which Gemini surface. Rounds 1-2 split these across scripts; round 3 needs
+ * both drivable from one, because the two finalists are 3.1 on AI Studio and
+ * gpt-realtime-2.1 — and 3.1 is NOT a Vertex model (measured: "Publisher model
+ * not found" in all three regions), so it can only be reached this way.
+ */
+const SURFACE = process.env.PROBE_SURFACE || "vertex";
+const MODEL = process.env.PROBE_MODEL || (SURFACE === "vertex" ? VERTEX_MODEL : "gemini-3.1-flash-live-preview");
+const TAG = SURFACE === "vertex" ? "r2-gemini" : "r3-gemini31";
+/**
+ * Batch controls. Background runs longer than roughly three minutes are killed
+ * in this environment — five separate round-3 runs died that way, and each lost
+ * everything because raw was only written at the very end. The VAD grid alone is
+ * 45 sessions (~8 min), so it has to be run a slice at a time and persisted as
+ * it goes.
+ */
+const VAD_ONLY = process.env.PROBE_VAD_ARMS ? process.env.PROBE_VAD_ARMS.split(",") : null;
+const FIX_ONLY = process.env.PROBE_VAD_FIXTURES ? process.env.PROBE_VAD_FIXTURES.split(",") : null;
 const N = 5;
 const EST = 0.05;
 
@@ -43,8 +61,8 @@ const VAD_ARMS = {
 
 const money = (n) => `$${n.toFixed(4)}`;
 const bill = (probe, arm, run, usage) => {
-  const c = price(VERTEX_MODEL, usage);
-  commit({ probe, arm, run, model: VERTEX_MODEL, location: VERTEX_LOCATION, usage, usd: c.usd });
+  const c = price(MODEL, usage);
+  commit({ probe, arm, run, model: MODEL, location: SURFACE === "vertex" ? VERTEX_LOCATION : "aistudio", usage, usd: c.usd });
   return c.usd;
 };
 
@@ -55,7 +73,7 @@ const bill = (probe, arm, run, usage) => {
 // ---------------------------------------------------------------------------
 async function conversation(idx) {
   reserve(`R2 gemini conv ${idx + 1}`, EST);
-  const { session, state } = await openSession({ surface: "vertex" });
+  const { session, state } = await openSession({ surface: SURFACE, model: MODEL });
   const turns = [];
   try {
     await setupOk(state);
@@ -91,7 +109,7 @@ async function conversation(idx) {
 async function endpointing(armName, label, idx) {
   reserve(`R2 gemini vad ${armName}/${label} ${idx + 1}`, EST);
   const { session, state } = await openSession({
-    surface: "vertex",
+    surface: SURFACE, model: MODEL,
     automaticActivityDetection: VAD_ARMS[armName] || undefined,
   });
   const windowMs = PAUSE_WINDOW_MS[label];
@@ -111,7 +129,7 @@ async function endpointing(armName, label, idx) {
       heard: state.inputTranscript.trim(),
       said: state.outputTranscript.trim().slice(0, 140),
     };
-  } finally { try { session.close(); } catch {} await sleep(200); }
+  } finally { try { session.close(); } catch {} await sleep(1200); }
   row.usd = bill("R2", `vad:${armName}:${label}`, idx + 1, state.usage);
   return row;
 }
@@ -127,7 +145,7 @@ async function endpointing(armName, label, idx) {
 async function generationSplit(idx) {
   reserve(`R2 gemini split ${idx + 1}`, EST);
   const { session, state } = await openSession({
-    surface: "vertex",
+    surface: SURFACE, model: MODEL,
     automaticActivityDetection: { disabled: true },
   });
   let row = { trial: idx + 1 };
@@ -163,7 +181,7 @@ async function generationSplit(idx) {
 // ---------------------------------------------------------------------------
 async function longBarge(idx) {
   reserve(`R2 gemini longbarge ${idx + 1}`, EST);
-  const { session, state } = await openSession({ surface: "vertex" });
+  const { session, state } = await openSession({ surface: SURFACE, model: MODEL });
   let row = { trial: idx + 1 };
   try {
     await setupOk(state);
@@ -215,11 +233,37 @@ async function longBarge(idx) {
 }
 
 // ---------------------------------------------------------------------------
+// ARM 5 — a 12-turn call. Measures DRIFT, which a 5-turn p50 cannot show.
+// ---------------------------------------------------------------------------
+async function slope(idx) {
+  reserve(`R3 gemini slope ${idx + 1}`, EST * 3);
+  const { session, state } = await openSession({ surface: SURFACE, model: MODEL });
+  const turns = [];
+  try {
+    await setupOk(state);
+    for (const label of SLOPE_TURNS) {
+      armTurn(state);
+      const fx = geminiFrames(label);
+      await paceFrames(fx.frames, (f) => sendAudio(session, f));
+      const tEnd = Date.now();
+      await paceFrames(silenceFrames("pcm16k", 4000), (f) => sendAudio(session, f), {
+        stop: () => state.firstAudioAt !== null,
+      });
+      await waitFor(() => state.firstAudioAt !== null, 25000);
+      await waitForQuiet(state);
+      turns.push({ label, model_leg_ms: state.firstAudioAt ? state.firstAudioAt - tEnd : null,
+                   said: state.outputTranscript.trim().slice(0, 120), tools: [...state.turnToolCalls] });
+      await sleep(200);
+    }
+  } finally { try { session.close(); } catch {} await sleep(300); }
+  return { run: idx + 1, turns, usd: bill("R3", "slope", idx + 1, state.usage), error: state.error };
+}
+
 async function main() {
-  console.log(`R2 Gemini — ${VERTEX_MODEL} @ vertex/${VERTEX_LOCATION}`);
+  console.log(`Gemini arms — ${MODEL} @ ${SURFACE}${SURFACE === "vertex" ? "/" + VERTEX_LOCATION : ""}`);
   console.log(`arm: ${ARM}   spent $${spent().toFixed(4)} / $${CAP_USD.toFixed(2)}\n`);
   const guard = errorGuard(3);
-  const prior = readRaw("r2-gemini") || {};
+  const prior = readRaw(TAG) || {};
   const out = { ...prior };
 
   const run = async (name, fn, list) => {
@@ -246,10 +290,14 @@ async function main() {
 
   if (ARM === "endpointing" || ARM === "all") {
     const rows = [];
-    for (const armName of ["patient", "default", "eager"]) {
-      for (const label of Object.keys(PAUSE_WINDOW_MS)) {
+    for (const armName of (VAD_ONLY || ["patient", "default", "eager"])) {
+      for (const label of (FIX_ONLY || Object.keys(PAUSE_WINDOW_MS))) {
         const cell = await run("vad", endpointing, Array.from({ length: N }, (_, i) => [armName, label, i]));
         rows.push(...cell);
+        // Persist per cell — a kill should cost one cell, not the whole grid.
+        const merged = [...((readRaw(TAG) || {}).endpointing || []).filter(
+          (r) => !(r.arm === armName && r.label === label)), ...cell];
+        writeRaw(TAG, { ...(readRaw(TAG) || {}), endpointing: merged });
         const valid = cell.filter((r) => !r.error);
         const cut = valid.filter((r) => r.cut_in).length;
         console.log(`  vad ${armName.padEnd(7)} ${label.padEnd(18)} cut-in ${cut}/${valid.length}  waited ${valid.length - cut}/${valid.length}  (window ${PAUSE_WINDOW_MS[label]}ms)`);
@@ -266,6 +314,16 @@ async function main() {
     console.log(`  generation-only (manual activityEnd): [${g.join(", ")}]  p50 ${p50(g)} ms\n`);
   }
 
+  if (ARM === "slope" || ARM === "all") {
+    const rows = await run("slope", slope, Array.from({ length: 3 }, (_, i) => [i]));
+    out.slope = rows;
+    for (const r of rows) if (r.turns) console.log(`  slope ${r.run}: [${r.turns.map((t) => t.model_leg_ms ?? "MISS").join(", ")}]`);
+    const first = rows.flatMap((r) => (r.turns || [])[0]?.model_leg_ms || []);
+    const last = rows.flatMap((r) => (r.turns || [])[11]?.model_leg_ms || []);
+    console.log(`  -> turn1 p50 ${p50(first)} ms  turn12 p50 ${p50(last)} ms  drift ${p50(last) - p50(first)} ms
+`);
+  }
+
   if (ARM === "longbarge" || ARM === "all") {
     const rows = await run("longbarge", longBarge, Array.from({ length: N }, (_, i) => [i]));
     out.longbarge = rows;
@@ -276,7 +334,7 @@ async function main() {
   }
 
   out.meta = { model: VERTEX_MODEL, surface: "vertex", location: VERTEX_LOCATION, n: N, at: new Date().toISOString() };
-  writeRaw("r2-gemini", out);
+  writeRaw(TAG, out);
   console.log(`  running total $${spent().toFixed(4)}`);
 }
 

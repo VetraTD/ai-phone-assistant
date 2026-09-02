@@ -14,7 +14,10 @@
 // ---------------------------------------------------------------------------
 import "dotenv/config";
 import { FIXTURES } from "../../../tests/fixtures/businessConfigs.js";
-import { buildSystemInstruction, buildCallTools } from "../../../services/gemini.js";
+import {
+  buildSystemInstruction, buildCallTools,
+  buildIntegrationTools, buildDbAppointmentTools,
+} from "../../../services/gemini.js";
 
 export const FIXTURE_KEY = "appointments-availability";
 
@@ -60,8 +63,24 @@ export const SYSTEM_PROMPT = buildSystemInstruction(
   BUSINESS_EXTRAS
 );
 
-/** Gemini shape: exactly what services/gemini.js hands the live model. */
-export const GEMINI_TOOLS = buildCallTools(BUSINESS_CONFIG, { markerMode: false });
+/**
+ * Gemini shape: exactly what services/gemini.js hands the live model.
+ *
+ * MUST be the union of all three builders, mirroring buildAllDeclarations at
+ * services/gemini.js:92. Rounds 1 and 2 used buildCallTools alone and therefore
+ * ran against SIX tools where production offers more — critically, without
+ * `check_appointment_availability`. That is why no model in those rounds ever
+ * checked availability before booking: it was never offered the tool. Any probe
+ * of booking behaviour against the short list is measuring a receptionist that
+ * cannot do the job.
+ */
+export const GEMINI_TOOLS = {
+  functionDeclarations: [
+    ...(buildCallTools(BUSINESS_CONFIG, { markerMode: false }).functionDeclarations || []),
+    ...(buildIntegrationTools(BUSINESS_EXTRAS?.integrations || [], BUSINESS_CONFIG).functionDeclarations || []),
+    ...(buildDbAppointmentTools(BUSINESS_CONFIG, BUSINESS_EXTRAS).functionDeclarations || []),
+  ],
+};
 
 /**
  * OpenAI Realtime shape. Same declarations, flattened — Realtime takes
@@ -94,4 +113,18 @@ export const CONVERSATION_TURNS = [
   "rep_digits",
   "rep_confirm",
   "rep_close",
+];
+
+/**
+ * A 12-turn call, for measuring latency DRIFT rather than a p50.
+ *
+ * Every arm before round 3 stopped at 5 turns, and the mini's degradation was
+ * still climbing at that edge (980 ms -> 2,748 ms). A real receptionist call is
+ * 10-15 turns, so the number that decides the product is the one at the END,
+ * not the middle. All twelve are real fixtures already in test-audio/caller.
+ */
+export const SLOPE_TURNS = [
+  "rep_open", "rep_reason", "rep_avail_q", "rep_time_q",
+  "name_spelling", "rep_digits", "rep_confirm", "rep_repeat_q",
+  "no_terminal_punct", "digits_continuation", "rep_done", "rep_close",
 ];

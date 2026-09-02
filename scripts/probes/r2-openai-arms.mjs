@@ -14,7 +14,7 @@
 import "dotenv/config";
 import { openSession, appendAudio, billableUsage } from "./lib/openai.js";
 import { openaiFrames, paceFrames, silenceFrames, sleep } from "./lib/audio.js";
-import { SYSTEM_PROMPT, OPENAI_TOOLS, CONVERSATION_TURNS } from "./lib/prompt.js";
+import { SYSTEM_PROMPT, OPENAI_TOOLS, CONVERSATION_TURNS, SLOPE_TURNS } from "./lib/prompt.js";
 import { reserve, commit, price, spent, CAP_USD } from "./lib/spend.js";
 import { p50, errorGuard, writeRaw, readRaw } from "./lib/stats.js";
 
@@ -137,6 +137,35 @@ async function longBarge(idx) {
 }
 
 // ---------------------------------------------------------------------------
+// ARM 3 — a 12-turn call, matched to the Gemini slope arm. Measures DRIFT.
+// The mini went 980 -> 2,748 ms across five turns and was still climbing; a real
+// receptionist call is 10-15 turns, so this is where the product actually lives.
+// ---------------------------------------------------------------------------
+async function slope(idx) {
+  reserve(`R3 openai slope ${idx + 1}`, EST * 3);
+  const s = await openSession({
+    model: MODEL, instructions: SYSTEM_PROMPT, tools: OPENAI_TOOLS, turnDetection: serverVad(500),
+  });
+  const turns = [];
+  try {
+    await waitFor(() => s.state.sessionUpdated, 10000);
+    for (const label of SLOPE_TURNS) {
+      armTurn(s.state);
+      await paceFrames(openaiFrames(label).frames, (f) => appendAudio(s.send, f));
+      const tEnd = Date.now();
+      await paceFrames(silenceFrames("ulaw8k", 6000), (f) => appendAudio(s.send, f), {
+        stop: () => s.state.firstAudioAt !== null,
+      });
+      await waitFor(() => s.state.firstAudioAt !== null, 25000);
+      await waitFor(() => s.state.lastAudioAt && Date.now() - s.state.lastAudioAt >= 800, 15000);
+      turns.push({ label, model_leg_ms: s.state.firstAudioAt ? s.state.firstAudioAt - tEnd : null,
+                   tools: [...s.state.turnToolCalls] });
+      await sleep(200);
+    }
+  } finally { s.close(); await sleep(250); }
+  return { run: idx + 1, turns, usd: bill("slope", idx + 1, s), error: s.state.error };
+}
+
 async function main() {
   console.log(`R2 OpenAI — ${MODEL}`);
   console.log(`arm: ${ARM}   spent $${spent().toFixed(4)} / $${CAP_USD.toFixed(2)}\n`);
@@ -162,6 +191,23 @@ async function main() {
       console.log(`  silence ${String(ms).padStart(3)}ms  leg p50 ${String(p50(legs)).padStart(5)} ms   endpoint p50 ${String(p50(commits)).padStart(5)} ms   n=${legs.length}  missed=${miss}`);
     }
     out.silence = rows;
+    console.log("");
+  }
+
+  if (ARM === "slope" || ARM === "all") {
+    const rows = [];
+    for (let i = 0; i < 3; i++) {
+      try { const r = await slope(i); guard.ok(); rows.push(r); }
+      catch (e) {
+        if (e.name === "BudgetExceeded" || e.name === "SocketErrorStreak") throw e;
+        rows.push({ run: i + 1, error: e.message?.slice(0, 120), turns: [] }); guard.fail(e);
+      }
+    }
+    out.slope = rows;
+    for (const r of rows) if (r.turns?.length) console.log(`  slope ${r.run}: [${r.turns.map((t) => t.model_leg_ms ?? "MISS").join(", ")}]`);
+    const f = rows.map((r) => (r.turns || [])[0]?.model_leg_ms).filter(Boolean);
+    const l = rows.map((r) => (r.turns || [])[11]?.model_leg_ms).filter(Boolean);
+    if (f.length && l.length) console.log(`  -> turn1 p50 ${p50(f)} ms  turn12 p50 ${p50(l)} ms  drift ${p50(l) - p50(f)} ms`);
     console.log("");
   }
 
