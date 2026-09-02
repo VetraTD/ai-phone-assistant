@@ -49,8 +49,18 @@ const ONLY = argOf("--only", null)?.split(",") || null;
 const TAG = argOf("--tag", "r3-tools");
 
 const GEMINI_MODEL = "gemini-3.1-flash-live-preview";
+/**
+ * The third arm, added after the six-tool harness defect invalidated the
+ * rounds 1-2 quality verdict against 2.5. 2.5 is the only Gemini on Vertex —
+ * ADC auth, europe-west1 residency, not a preview model — and it held
+ * trailing_lead_in 5/5 where 3.1 cuts in at every setting. If its conversation
+ * quality survives the corrected tool set it wins on every axis that matters.
+ */
+const GEMINI25_MODEL = "gemini-live-2.5-flash-native-audio";
+const VERTEX_PROJECT = "vetra-uk-edc8ca";
+const VERTEX_LOCATION = "europe-west1";
 const OPENAI_MODEL = "gpt-realtime-2.1";
-const EST = { "3.1": 0.05, gpt: 0.12 };
+const EST = { "3.1": 0.05, "2.5": 0.05, gpt: 0.12 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The slot the caller asks for, in the words the prompt will see. */
@@ -158,15 +168,18 @@ const SCENARIOS = [
 // ---------------------------------------------------------------------------
 // Gemini driver
 // ---------------------------------------------------------------------------
-async function runGemini(scn, idx) {
-  reserve(`R3 ${scn.id} gemini ${idx + 1}`, EST["3.1"]);
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+async function runGemini(scn, idx, variant = "3.1") {
+  const model = variant === "2.5" ? GEMINI25_MODEL : GEMINI_MODEL;
+  reserve(`R3 ${scn.id} gemini${variant} ${idx + 1}`, EST[variant]);
+  const ai = variant === "2.5"
+    ? new GoogleGenAI({ vertexai: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION })
+    : new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const exec = makeScriptedExecutor(scn.script);
   const state = { usage: emptyUsage(), said: "", turnSaid: [], mark: 0, firstAudioAt: null, lastAudioAt: null, turnComplete: false, err: null };
   let session = null;
 
   session = await ai.live.connect({
-    model: GEMINI_MODEL,
+    model,
     config: {
       responseModalities: [Modality.AUDIO],
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
@@ -217,8 +230,8 @@ async function runGemini(scn, idx) {
     }
   } finally { try { session.close(); } catch {} await sleep(250); }
 
-  const c = price(GEMINI_MODEL, state.usage);
-  commit({ probe: "R3", arm: `${scn.id}:gemini`, run: idx + 1, model: GEMINI_MODEL, usage: state.usage, usd: c.usd });
+  const c = price(model, state.usage);
+  commit({ probe: "R3", arm: `${scn.id}:gemini${variant}`, run: idx + 1, model, usage: state.usage, usd: c.usd });
   return { calls: exec.calls, said: state.said, turnSaid: state.turnSaid, usd: c.usd, err: state.err };
 }
 
@@ -286,7 +299,7 @@ async function main() {
   for (const scn of scns) {
     console.log(`${scn.id} — ${scn.name}`);
     for (const m of MODELS) {
-      const runner = m === "3.1" ? runGemini : runOpenAI;
+      const runner = m === "gpt" ? runOpenAI : (scn2, i2) => runGemini(scn2, i2, m);
       let passes = 0, total = 0, leaks = 0, errs = 0;
       const detail = [];
       for (let i = 0; i < N; i++) {
@@ -298,6 +311,11 @@ async function main() {
           passes += p; total += checks.length;
           if (!toolBlobLeak(r.said).pass) leaks++;
           detail.push({ trial: i + 1, model: m, checks, calls: r.calls.map((c) => ({ name: c.name, args: c.args })), said: r.said.slice(0, 400), turnSaid: r.turnSaid || [], usd: r.usd });
+          // Persist after every TRIAL, not every cell. Cell-level writes still
+          // lost everything when a run was killed part-way through a cell, which
+          // happened twice on Gemini 2.5 and cost $0.51 for zero saved data.
+          writeRaw(TAG, { at: new Date().toISOString(), n: N, models: MODELS,
+            rows: [...rows, { scenario: scn.id, model: m, passes, total, leaks, errs, detail, partial: i + 1 < N }] });
         } catch (e) {
           if (e.name === "BudgetExceeded" || e.name === "SocketErrorStreak") throw e;
           errs++; detail.push({ trial: i + 1, model: m, error: e.message?.slice(0, 140) });
@@ -309,7 +327,7 @@ async function main() {
       // result because raw was only written at the end.
       writeRaw(TAG, { at: new Date().toISOString(), n: N, models: MODELS, rows });
       const failed = detail.flatMap((d) => (d.checks || []).filter((c) => !c.pass).map((c) => c.name));
-      console.log(`   ${(m === "3.1" ? "gemini-3.1" : "gpt-2.1  ").padEnd(11)} checks ${passes}/${total}  leaks ${leaks}/${N}  errors ${errs}` +
+      console.log(`   ${({ "3.1": "gemini-3.1", "2.5": "gemini-2.5", gpt: "gpt-2.1  " })[m].padEnd(11)} checks ${passes}/${total}  leaks ${leaks}/${N}  errors ${errs}` +
         (failed.length ? `\n      failed: ${[...new Set(failed)].join(", ")}` : ""));
     }
   }

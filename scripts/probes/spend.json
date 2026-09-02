@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 7.015108,
+  "spent_usd": 8.13074,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -7582,8 +7582,680 @@
         "audio_out": 386
       },
       "usd": 0.065084
+    },
+    {
+      "at": "2026-09-02T10:31:35.653Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23392,
+        "audio_in": 1450,
+        "text_out": 218,
+        "audio_out": 645,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.024221999999999997
+    },
+    {
+      "at": "2026-09-02T10:32:10.847Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 26539,
+        "audio_in": 2201,
+        "text_out": 320,
+        "audio_out": 966,
+        "cached_in": 0,
+        "turns_billed": 8
+      },
+      "usd": 0.0321045
+    },
+    {
+      "at": "2026-09-02T10:32:25.859Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 19376,
+        "audio_in": 628,
+        "text_out": 115,
+        "audio_out": 325,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.015702
+    },
+    {
+      "at": "2026-09-02T10:32:38.723Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23292,
+        "audio_in": 574,
+        "text_out": 127,
+        "audio_out": 265,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.016802
+    },
+    {
+      "at": "2026-09-02T10:32:52.511Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12784,
+        "audio_in": 268,
+        "text_out": 114,
+        "audio_out": 343,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.01154
+    },
+    {
+      "at": "2026-09-02T10:33:08.079Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12768,
+        "audio_in": 258,
+        "text_out": 80,
+        "audio_out": 321,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.01117
+    },
+    {
+      "at": "2026-09-02T10:33:24.093Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 16191,
+        "audio_in": 564,
+        "text_out": 135,
+        "audio_out": 457,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0155415
+    },
+    {
+      "at": "2026-09-02T10:33:39.668Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23625,
+        "audio_in": 826,
+        "text_out": 179,
+        "audio_out": 451,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.020060500000000002
+    },
+    {
+      "at": "2026-09-02T10:33:55.198Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 20068,
+        "audio_in": 536,
+        "text_out": 186,
+        "audio_out": 478,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.017750000000000002
+    },
+    {
+      "at": "2026-09-02T10:34:26.320Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 16045,
+        "audio_in": 381,
+        "text_out": 100,
+        "audio_out": 262,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0125095
+    },
+    {
+      "at": "2026-09-02T10:34:39.932Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 19798,
+        "audio_in": 296,
+        "text_out": 141,
+        "audio_out": 318,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.014884999999999999
+    },
+    {
+      "at": "2026-09-02T10:34:51.572Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23507,
+        "audio_in": 540,
+        "text_out": 188,
+        "audio_out": 270,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.016989499999999998
+    },
+    {
+      "at": "2026-09-02T10:35:06.187Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 26897,
+        "audio_in": 598,
+        "text_out": 206,
+        "audio_out": 398,
+        "cached_in": 0,
+        "turns_billed": 8
+      },
+      "usd": 0.020430500000000004
+    },
+    {
+      "at": "2026-09-02T10:35:21.070Z",
+      "probe": "R3",
+      "arm": "T1:gemini2.5",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 34720,
+        "audio_in": 549,
+        "text_out": 251,
+        "audio_out": 416,
+        "cached_in": 0,
+        "turns_billed": 10
+      },
+      "usd": 0.024501
+    },
+    {
+      "at": "2026-09-02T10:35:47.124Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23691,
+        "audio_in": 955,
+        "text_out": 199,
+        "audio_out": 552,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.021732500000000002
+    },
+    {
+      "at": "2026-09-02T10:36:01.803Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23641,
+        "audio_in": 818,
+        "text_out": 175,
+        "audio_out": 404,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.019472499999999997
+    },
+    {
+      "at": "2026-09-02T10:36:16.858Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 23641,
+        "audio_in": 811,
+        "text_out": 188,
+        "audio_out": 470,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.0202695
+    },
+    {
+      "at": "2026-09-02T10:36:37.475Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 16212,
+        "audio_in": 699,
+        "text_out": 161,
+        "audio_out": 528,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.016861
+    },
+    {
+      "at": "2026-09-02T10:36:58.534Z",
+      "probe": "R3",
+      "arm": "T2:gemini2.5",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 27309,
+        "audio_in": 1392,
+        "text_out": 234,
+        "audio_out": 694,
+        "cached_in": 0,
+        "turns_billed": 8
+      },
+      "usd": 0.026626499999999997
+    },
+    {
+      "at": "2026-09-02T10:37:18.904Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12628,
+        "audio_in": 326,
+        "text_out": 88,
+        "audio_out": 289,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.010936
+    },
+    {
+      "at": "2026-09-02T10:37:30.679Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12627,
+        "audio_in": 324,
+        "text_out": 88,
+        "audio_out": 290,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.0109415
+    },
+    {
+      "at": "2026-09-02T10:37:42.698Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12638,
+        "audio_in": 344,
+        "text_out": 93,
+        "audio_out": 298,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.011113
+    },
+    {
+      "at": "2026-09-02T10:37:55.425Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15959,
+        "audio_in": 538,
+        "text_out": 104,
+        "audio_out": 327,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.013725500000000002
+    },
+    {
+      "at": "2026-09-02T10:38:05.109Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12592,
+        "audio_in": 180,
+        "text_out": 55,
+        "audio_out": 149,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.008734
+    },
+    {
+      "at": "2026-09-02T10:38:23.550Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22847,
+        "audio_in": 964,
+        "text_out": 173,
+        "audio_out": 382,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.019245500000000002
+    },
+    {
+      "at": "2026-09-02T10:38:38.633Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22951,
+        "audio_in": 940,
+        "text_out": 148,
+        "audio_out": 383,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.019187499999999996
+    },
+    {
+      "at": "2026-09-02T10:38:55.132Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22989,
+        "audio_in": 1037,
+        "text_out": 174,
+        "audio_out": 484,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.0207615
+    },
+    {
+      "at": "2026-09-02T10:39:21.769Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12635,
+        "audio_in": 352,
+        "text_out": 90,
+        "audio_out": 292,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.0110575
+    },
+    {
+      "at": "2026-09-02T10:39:55.913Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 472868,
+        "audio_in": 20184,
+        "text_out": 696,
+        "audio_out": 232,
+        "cached_in": 0,
+        "turns_billed": 90
+      },
+      "usd": 0.30116200000000004
+    },
+    {
+      "at": "2026-09-02T10:40:09.256Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15974,
+        "audio_in": 642,
+        "text_out": 114,
+        "audio_out": 379,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.014689
+    },
+    {
+      "at": "2026-09-02T10:40:23.775Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12647,
+        "audio_in": 426,
+        "text_out": 96,
+        "audio_out": 338,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.0118495
+    },
+    {
+      "at": "2026-09-02T10:40:35.358Z",
+      "probe": "R3",
+      "arm": "T5:gemini2.5",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12625,
+        "audio_in": 286,
+        "text_out": 86,
+        "audio_out": 268,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.010558500000000002
+    },
+    {
+      "at": "2026-09-02T10:40:57.924Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 16071,
+        "audio_in": 568,
+        "text_out": 96,
+        "audio_out": 276,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.013243499999999998
+    },
+    {
+      "at": "2026-09-02T10:41:17.011Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22999,
+        "audio_in": 1071,
+        "text_out": 183,
+        "audio_out": 508,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.0211745
+    },
+    {
+      "at": "2026-09-02T10:41:46.556Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22789,
+        "audio_in": 824,
+        "text_out": 163,
+        "audio_out": 373,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.0186685
+    },
+    {
+      "at": "2026-09-02T10:42:03.421Z",
+      "probe": "R3",
+      "arm": "T7:gemini2.5",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12634,
+        "audio_in": 188,
+        "text_out": 70,
+        "audio_out": 217,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.009625
+    },
+    {
+      "at": "2026-09-02T10:42:46.253Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 37093,
+        "audio_in": 2176,
+        "text_out": 233,
+        "audio_out": 520,
+        "cached_in": 0,
+        "turns_billed": 11
+      },
+      "usd": 0.0317805
+    },
+    {
+      "at": "2026-09-02T10:43:37.407Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 36796,
+        "audio_in": 3449,
+        "text_out": 335,
+        "audio_out": 942,
+        "cached_in": 0,
+        "turns_billed": 11
+      },
+      "usd": 0.040719
+    },
+    {
+      "at": "2026-09-02T10:43:56.862Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 37367,
+        "audio_in": 1540,
+        "text_out": 228,
+        "audio_out": 439,
+        "cached_in": 0,
+        "turns_billed": 11
+      },
+      "usd": 0.029027499999999998
+    },
+    {
+      "at": "2026-09-02T10:44:42.972Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 47970,
+        "audio_in": 5985,
+        "text_out": 319,
+        "audio_out": 813,
+        "cached_in": 0,
+        "turns_billed": 14
+      },
+      "usd": 0.052334
+    },
+    {
+      "at": "2026-09-02T10:45:09.773Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 40356,
+        "audio_in": 3474,
+        "text_out": 306,
+        "audio_out": 867,
+        "cached_in": 0,
+        "turns_billed": 12
+      },
+      "usd": 0.041616
+    },
+    {
+      "at": "2026-09-02T10:45:29.964Z",
+      "probe": "R3",
+      "arm": "T3:gemini2.5",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 44841,
+        "audio_in": 2000,
+        "text_out": 300,
+        "audio_out": 441,
+        "cached_in": 0,
+        "turns_billed": 13
+      },
+      "usd": 0.0343125
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T06:10:59.137Z"
+  "updated_at": "2026-09-02T10:45:29.964Z"
 }

@@ -95,6 +95,35 @@ const byTurn = (i) => med(slopeRuns.map((r) => (r.turns || [])[i]?.model_leg_ms)
 const gSlope = Array.from({ length: 12 }, (_, i) => byTurn(i));
 const gDrift = gSlope[0] && gSlope[11] ? gSlope[11] - gSlope[0] : null;
 
+/**
+ * DUPLICATE TOOL CALLS — the failure the assertion suite was blind to.
+ *
+ * Every check in lib/toolScript.js asks whether a tool was called and with what
+ * arguments. None asks whether it was called TWICE. Gemini 2.5 scored 15/15,
+ * 20/20 and 15/15 on T1/T2/T5 while re-firing end_call in 41% of trials and
+ * book_appointment in one — a double booking that the scorecard recorded as a
+ * pass. Read this table before the scenario table, not after it.
+ */
+const dupByModel = (() => {
+  const out = {};
+  for (const c of cells.values()) {
+    const m = c.model;
+    out[m] ||= { trials: 0, events: 0, doubleBook: 0, byTool: {} };
+    for (const det of c.detail || []) {
+      const names = (det.calls || []).map((x) => x.name);
+      if (!names.length) continue;
+      out[m].trials++;
+      const counts = {};
+      for (const n of names) counts[n] = (counts[n] || 0) + 1;
+      for (const [n, v] of Object.entries(counts)) {
+        if (v > 1) { out[m].events++; out[m].byTool[n] = (out[m].byTool[n] || 0) + 1; }
+      }
+      if ((counts.book_appointment || 0) > 1) out[m].doubleBook++;
+    }
+  }
+  return out;
+})();
+
 const leaksTotal = [...cells.values()].reduce((s, c) => s + (c.leaks || 0), 0);
 const turnsTotal = [...cells.values()].reduce((s, c) => s + trials(c), 0);
 
@@ -182,6 +211,25 @@ patient is not.
 which is the good kind of failure) and **neither spoke a raw tool blob aloud** in
 ${turnsTotal} trials (X5 fails). Round 1's "Gemini spoke JSON" was an artefact of
 the six-tool harness, not a model defect.
+
+---
+
+## (a2) Duplicate tool calls — the defect the scorecard missed
+
+| model | trials | duplicate-call events | \`end_call\` twice | **\`book_appointment\` twice** |
+|---|---|---|---|---|
+${["2.5", "3.1", "gpt"].map((m) => { const d = dupByModel[m]; const lbl = { "2.5": "Gemini 2.5", "3.1": "Gemini 3.1", gpt: "gpt-realtime-2.1" }[m];
+  return d ? `| ${lbl} | ${d.trials} | **${d.events}** | ${d.byTool.end_call || 0} | ${d.doubleBook ? "**" + d.doubleBook + "**" : 0} |` : `| ${lbl} | — | — | — | — |`; }).join("
+")}
+
+**Gemini 2.5 re-fires actions.** It does not merely repeat itself audibly (15% of
+turns); it calls tools again. A doubled \`end_call\` hangs up on a caller. A
+doubled \`book_appointment\` puts a patient in the calendar twice.
+
+This is the single most important result in round 3 and **the assertion suite
+scored it as a pass**, because every check asks whether a tool was called and
+with what arguments, and none asks whether it was called twice. It was found by
+reading raw call sequences. Any future eval work must assert call COUNTS.
 
 ---
 

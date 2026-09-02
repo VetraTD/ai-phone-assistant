@@ -1,0 +1,78 @@
+{
+  "at": "2026-09-02T10:31:35.658Z",
+  "n": 1,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T2",
+      "model": "2.5",
+      "passes": 4,
+      "total": 4,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Is this for a new patient or an existing one?I'm sorry, that time is already taken. Are you interested in 4:30 that day, or should we try a different time?We al"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller decided to think about it"
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?I'm sorry, that time is already taken. Are you interested in 4:30 that day, or should we try a different time?We also have availability at 10:00 AM or 2:00 PM on Wednesday.We have 4:30 that day, or next Wednesday morning at 10 AM.We have 4:30 available that day, or 10:00 AM the next morning.Is there anything else I can help you with? Thanks for calling ",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?I'm sorry, that time is already taken. Are you interested in 4:30 that day, or should we try a different time?",
+            "We also have availability at 10:00 AM or 2:00 PM on Wednesday.We have 4:30 that day, or next Wednesday morning at 10 AM.We have 4:30 available that day, or 10:00 AM the next morning.",
+            "Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.024221999999999997
+        }
+      ]
+    }
+  ]
+}

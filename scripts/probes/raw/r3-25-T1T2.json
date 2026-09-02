@@ -1,0 +1,261 @@
+{
+  "at": "2026-09-02T10:33:08.081Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T1",
+      "model": "2.5",
+      "passes": 15,
+      "total": 15,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "check_appointment_availability@0 vs book_appointment@2"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "scheduled_at": "2026-09-08T15:00:00",
+                "client_name": "Sarah Miller",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "user hung up after confirming no further assistance needed"
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?Tuesday, September 8th at 3:00 PM is available. Are you a new or existing patient?Thanks, Sarah Miller — just to confirm, you'd like to book an appointment for Tuesday, September 8th at 3:00 PM?Thanks, Sarah Miller. And just to confirm, your date of birth is March 3rd, 1990?OK, I have that booked for you. Is there anything else I can help with today? Th",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?Tuesday, September 8th at 3:00 PM is available. Are you a new or existing patient?",
+            "Thanks, Sarah Miller — just to confirm, you'd like to book an appointment for Tuesday, September 8th at 3:00 PM?Thanks, Sarah Miller. And just to confirm, your date of birth is March 3rd, 1990?",
+            "OK, I have that booked for you. Is there anything else I can help with today? Thank you for calling Brightwork Family Dental, and have a great day!OK, you're booked for Tuesday, September 8th at 3:00 PM. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day.on that for you one moment. Okay, your appointment is confirmed. Is there anything else I can help you with? Thank you for calling Brightwork Family Dental, have a great day.for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.0321045
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?Is this for a new patient or an existing one?Great, is that for a new patient?Great, and are you an existing patient or a new one?Thank you for calling Brightwork Family Dental, have a great day.Thank you for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?Is this for a new patient or an existing one?",
+            "Great, is that for a new patient?Great, and are you an existing patient or a new one?",
+            "Thank you for calling Brightwork Family Dental, have a great day.Thank you for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.015702
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            }
+          ],
+          "said": "Are you a new patient or an existing one?Yes, thatGreat, that time is open. Are you a new patient or an existing one?Great, and what is the appointment for?Is there anything else I can help you with today?Thank you",
+          "turnSaid": [
+            "Are you a new patient or an existing one?Yes, that",
+            "Great, that time is open. Are you a new patient or an existing one?Great, and what is the appointment for?",
+            "Is there anything else I can help you with today?"
+          ],
+          "usd": 0.016802
+        },
+        {
+          "trial": 4,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?Tuesday, September 8th at 3 PM is available. Are you a new patient?Great, Sarah Miller, and your date of birth is March 3rd, 1990. Is that correct?Thanks, Sarah Miller. Just to confirm, you'd like to book for Tuesday, September 8th at 3 PM, is that correct?",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?Tuesday, September 8th at 3 PM is available. Are you a new patient?",
+            "Great, Sarah Miller, and your date of birth is March 3rd, 1990. Is that correct?",
+            "Thanks, Sarah Miller. Just to confirm, you'd like to book for Tuesday, September 8th at 3 PM, is that correct?"
+          ],
+          "usd": 0.01154
+        },
+        {
+          "trial": 5,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?Is that for a new patient or an existing one?Great, and the service you're requesting is a general consultation?Great, and just for clarification, are you a new patient or an existing one?",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?Is that for a new patient or an existing one?",
+            "Great, and the service you're requesting is a general consultation?",
+            "Great, and just for clarification, are you a new patient or an existing one?"
+          ],
+          "usd": 0.01117
+        }
+      ]
+    }
+  ]
+}

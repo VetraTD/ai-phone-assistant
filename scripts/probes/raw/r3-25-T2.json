@@ -1,0 +1,320 @@
+{
+  "at": "2026-09-02T10:36:58.537Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T2",
+      "model": "2.5",
+      "passes": 20,
+      "total": 20,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Is that for Tuesday, September 8th at 3 PM?I'm sorry,I'm sorry, that time is already booked. We do have an opening later that day at 4:30 PM or on Wednesday at "
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller decided to think about it"
+              }
+            }
+          ],
+          "said": "Is that for Tuesday, September 8th at 3 PM?I'm sorry,I'm sorry, that time is already booked. We do have an opening later that day at 4:30 PM or on Wednesday at 10 AM.I'm sorry, that time is already booked. We have an opening for 4:30 that day or 10:00 AM on Wednesday.Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day.Thank you for calling Br",
+          "turnSaid": [
+            "Is that for Tuesday, September 8th at 3 PM?I'm sorry,",
+            "I'm sorry, that time is already booked. We do have an opening later that day at 4:30 PM or on Wednesday at 10 AM.I'm sorry, that time is already booked. We have an opening for 4:30 that day or 10:00 AM on Wednesday.",
+            "Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day.Thank you for calling Brightwork Family Dental, have a great day!"
+          ],
+          "usd": 0.021732500000000002
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Are you a new or existing patient?I'm sorry,I'm sorry, that time is already taken. We have an opening later that day at 4:30 PM, or would you like to try a diff"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            }
+          ],
+          "said": "Are you a new or existing patient?I'm sorry,I'm sorry, that time is already taken. We have an opening later that day at 4:30 PM, or would you like to try a different time?I'm sorry, that time is already booked. I do have an opening at 4:30 that Tuesday or tomorrow at 10 AM; do either of those work?Is there anything else I can help you with today?Thanks for calling",
+          "turnSaid": [
+            "Are you a new or existing patient?I'm sorry,",
+            "I'm sorry, that time is already taken. We have an opening later that day at 4:30 PM, or would you like to try a different time?I'm sorry, that time is already booked. I do have an opening at 4:30 that Tuesday or tomorrow at 10 AM; do either of those work?",
+            "Is there anything else I can help you with today?Thanks for"
+          ],
+          "usd": 0.019472499999999997
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Are you a new or existing patient?I'm sorry, thatI'm sorry, that time is already taken. I do have an opening on Tuesday at 4:30 PM, or on Wednesday at 10:00 AM."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller decided to think about it"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller decided to think about it"
+              }
+            }
+          ],
+          "said": "Are you a new or existing patient?I'm sorry, thatI'm sorry, that time is already taken. I do have an opening on Tuesday at 4:30 PM, or on Wednesday at 10:00 AM. Do either of those work for you?I'm sorry, that time is already taken. Would you like to try a different time?Is there anything else I can help you with today? Thanks for calling Brightwork Family Dental, and have a great day.Thanks for ca",
+          "turnSaid": [
+            "Are you a new or existing patient?I'm sorry,",
+            " thatI'm sorry, that time is already taken. I do have an opening on Tuesday at 4:30 PM, or on Wednesday at 10:00 AM. Do either of those work for you?I'm sorry, that time is already taken. Would you like to try a different time?",
+            "Is there anything else I can help you with today? Thanks for calling Brightwork Family Dental, and have a great day.Thanks for"
+          ],
+          "usd": 0.0202695
+        },
+        {
+          "trial": 4,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Is this for a new appointment, or are you an existing patient?I'm sorry, that time is already taken. We do have an opening at 4:30 that afternoon or Thursday mo"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller is thinking about options after preferred time was unavailable."
+              }
+            }
+          ],
+          "said": "Is this for a new appointment, or are you an existing patient?I'm sorry, that time is already taken. We do have an opening at 4:30 that afternoon or Thursday morning at 10:00 AM if either work for you?Are you interested in another time on Tuesday, or would you like to look at a different day?Is there anything else I can help you with? Thank you for calling Brightwork Family Dental, and have a grea",
+          "turnSaid": [
+            "Is this for a new appointment, or are you an existing patient?I'm sorry, that time is already taken. We do have an opening at 4:30 that afternoon or Thursday morning at 10:00 AM if either work for you?",
+            "Are you interested in another time on Tuesday, or would you like to look at a different day?",
+            "Is there anything else I can help you with? Thank you for calling Brightwork Family Dental, and have a great day.You're welcome. Thanks for calling Brightwork Family Dental, and have a great day."
+          ],
+          "usd": 0.016861
+        },
+        {
+          "trial": 5,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Is this for a new patient, or have you been here before?I'm sorry,I'm sorry, that time is already booked. We do have an opening at 4:30 that day, or tomorrow at"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            }
+          ],
+          "said": "Is this for a new patient, or have you been here before?I'm sorry,I'm sorry, that time is already booked. We do have an opening at 4:30 that day, or tomorrow at 10:00 AM.I'm sorry, that time is already booked. We have an opening later that day at 4:30 or tomorrow at 10 am; do either of those work for you?Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and h",
+          "turnSaid": [
+            "Is this for a new patient, or have you been here before?I'm sorry,",
+            "I'm sorry, that time is already booked. We do have an opening at 4:30 that day, or tomorrow at 10:00 AM.I'm sorry, that time is already booked. We have an opening later that day at 4:30 or tomorrow at 10 am; do either of those work for you?",
+            "Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.Thank you for calling Brightwork Family Dental. Have a great day.Is there anything else I can help you with today? Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.026626499999999997
+        }
+      ]
+    }
+  ]
+}

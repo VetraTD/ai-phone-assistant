@@ -1,0 +1,307 @@
+{
+  "at": "2026-09-02T10:45:29.966Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T3",
+      "model": "2.5",
+      "passes": 12,
+      "total": 12,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "appointment booked"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            }
+          ],
+          "said": "Is this for a new patient or an existing one?You're calling from 555-0100; are you an existing patient?Great, what is your full name and date of birth?Great, I can book you for a new patient consultation at 3 PM on September 8th. What is your name and date of birth?You are all set for September 8th at 3 PM, Sarah. Is there anything else I can help you with?Thank you for calling Brightwork Family D",
+          "turnSaid": [
+            "Is this for a new patient or an existing one?You're calling from 555-0100; are you an existing patient?",
+            "Great, what is your full name and date of birth?Great, I can book you for a new patient consultation at 3 PM on September 8th. What is your name and date of birth?",
+            "You are all set for September 8th at 3 PM, Sarah. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day.OK, you have an appointment for a new patient consultation on September 8th at 3 PM. Is there anything else I can help you with?I have booked",
+            " you for a consultationThank you for calling",
+            " Brightwork FamilyOK, you're all set. Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.052334
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "identity_dob": "1990-03-03",
+                "scheduled_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "record_sms_consent",
+              "args": {
+                "granted": false
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller has no further questions"
+              }
+            }
+          ],
+          "said": "Is this a new patient appointment, or are you an existing patient?Are you a new or existing patient?Great, and what is your full name and date of birth?Great, I can book that for you. What is your full name and date of birth?Thanks, Sarah Miller. And just to confirm, your date of birth is March 3rd, 1990?OK, I have you booked for a new patient appointment on September 8th at 3 PM. Is there anythin",
+          "turnSaid": [
+            "Is this a new patient appointment, or are you an existing patient?Are you a new or existing patient?",
+            "Great, and what is your full name and date of birth?Great, I can book that for you. What is your full name and date of birth?",
+            "Thanks, Sarah Miller. And just to confirm, your date of birth is March 3rd, 1990?",
+            "OK, I have you booked for a new patient appointment on September 8th at 3 PM. Is there anything else I can help you with?You're all set, your appointment is booked for Tuesday, September 8th at 3 PM. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day.Thank you for calling Brightwork Family Dental. Have a great day!",
+            "Thank you for calling Brightwork Family Dental. Have a great day!Thank you for calling Brightwork Family Dental. Have a great day."
+          ],
+          "usd": 0.041616
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03",
+                "client_name": "Sarah Miller"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller has successfully booked an appointment and has no further questions"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller has successfully booked an appointment and has no further questions"
+              }
+            }
+          ],
+          "said": "Is this an appointment for a new patient or an existing one?That time is available.Great, and what isGreat, that time is available. What is your full name and date of birth?OK, I have you booked for Tuesday, September 8th at 3 PM. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!",
+          "turnSaid": [
+            "Is this an appointment for a new patient or an existing one?That time",
+            " is available.Great, and",
+            " what isGreat, that time is available. What is your full name and date of birth?",
+            "OK, I have you booked for Tuesday, September 8th at 3 PM. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!"
+          ],
+          "usd": 0.0343125
+        }
+      ],
+      "partial": true
+    }
+  ]
+}

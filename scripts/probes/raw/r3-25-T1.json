@@ -1,0 +1,307 @@
+{
+  "at": "2026-09-02T10:35:21.073Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T1",
+      "model": "2.5",
+      "passes": 15,
+      "total": 15,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller provided name and DOB but then ended the call without confirming or booking"
+              }
+            }
+          ],
+          "said": "Is this for a new or existing patient?Is that for a new patient?Great, and what date of birth did you say that was?Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "Is this for a new or existing patient?Is that for a new patient?",
+            "Great, and what date of birth did you say that was?",
+            "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.0125095
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "book_appointment never called (vacuously ordered)"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Are you a new or an existing patient with us?That time is available.Great, that time is available. What is your full name and date of birth?What type of service are you looking to book?Just to confirm, your name is Sarah Miller, date of birth March 3rd, 1990, and you don't need a specific service type?",
+          "turnSaid": [
+            "Are you a new or an existing patient with us?That time is available.",
+            "Great, that time is available. What is your full name and date of birth?What type of service are you looking to book?",
+            "Just to confirm, your name is Sarah Miller, date of birth March 3rd, 1990, and you don't need a specific service type?"
+          ],
+          "usd": 0.014884999999999999
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "check_appointment_availability@1 vs book_appointment@4"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03",
+                "client_name": "Sarah Miller"
+              }
+            }
+          ],
+          "said": "Is that on Tuesday, September 8th at 3 PM? Also, are you a new or existing patient?Tuesday, SeptemberThanks, SarahI have you down for Tuesday, September 8th at 3 PM for a new patient appointment. Is that correct?",
+          "turnSaid": [
+            "Is that on Tuesday, September 8th at 3 PM? Also, are you a new or existing patient?Tuesday, September",
+            "Thanks, Sarah",
+            "I have you down for Tuesday, September 8th at 3 PM for a new patient appointment. Is that correct?"
+          ],
+          "usd": 0.016989499999999998
+        },
+        {
+          "trial": 4,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "check_appointment_availability@1 vs book_appointment@3"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "identity_dob": "1990-03-03",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "client_name": "Sarah Miller"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller has no further questions"
+              }
+            }
+          ],
+          "said": "Are you a new or existing patient?That timeI see you'd like to book an appointment for Tuesday, September 8th at 3 PM. Is that correct?You're all set. Thank you for calling Brightwork Family Dental, have a great day!OK, you're all set with that appointment. Is there anything else I can help you with? Thank you for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "Are you a new or existing patient?That time",
+            "I see you'd like to book an appointment for Tuesday, September 8th at 3 PM. Is that correct?",
+            "You're all set. Thank you for calling Brightwork Family Dental, have a great day!OK, you're all set with that appointment. Is there anything else I can help you with? Thank you for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.020430500000000004
+        },
+        {
+          "trial": 5,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability before book_appointment",
+              "pass": true,
+              "detail": "check_appointment_availability@1 vs book_appointment@4"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "identity_dob": "1990-03-03",
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00-05:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller has no further questions"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "booked appointment"
+              }
+            }
+          ],
+          "said": "Are you a new or existing patient?That time is available.OK, I have you booked for Tuesday, September 8th at 3 PM. Is there anything else I can help you with?OK, I have you booked for Tuesday, September 8th, at 3 PM. Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.Thanks for calling Brightwork Family Dental, have a great day!",
+          "turnSaid": [
+            "Are you a new or existing patient?That time",
+            " is available.",
+            "OK, I have you booked for Tuesday, September 8th at 3 PM. Is there anything else I can help you with?OK, I have you booked for Tuesday, September 8th, at 3 PM. Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.Thanks for calling Brightwork Family Dental, have a great day!"
+          ],
+          "usd": 0.024501
+        }
+      ]
+    }
+  ]
+}
