@@ -39,15 +39,6 @@ scripts
 # finding was recorded as closed while remaining true in the only place it
 # could be run.
 !scripts/attach-tenant-user.js
-# THROWAWAY — the speech-to-speech spike bridge, a second entrypoint reached
-# with `gcloud run deploy --command=node --args=scripts/spike/s2s-bridge.js` on
-# its own Cloud Run service. Added here as well as in the Dockerfile because the
-# comment fifteen lines up says so and I still hit it: with the COPY present and
-# this negation missing, the build fails with
-# `"/scripts/spike" not found: not found`, which reads as a missing directory in
-# the repository. DELETE THESE TWO LINES WITH THE SPIKE.
-!scripts/spike
-!scripts/spike/**
 docs
 latency-runs
 infra

@@ -93,13 +93,6 @@ COPY scripts/import-tenant.js ./scripts/import-tenant.js
 COPY scripts/attach-tenant-user.js ./scripts/attach-tenant-user.js
 COPY database ./database
 
-# THROWAWAY — docs/speech-to-speech-handoff.md section 7 step 1. The spike
-# bridge is a SECOND entrypoint in the same image, reached with
-# `gcloud run deploy --command=node --args=scripts/spike/s2s-bridge.js` on its
-# own Cloud Run service, so the service that answers real calls never runs it
-# and never redeploys for it. DELETE THIS LINE WITH THE SPIKE.
-COPY scripts/spike ./scripts/spike
-
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:
 # it is what keeps .env, latency-runs/, docs/ and the entire test suite out of a
 # production image. A .dockerignore does the same job by exclusion, which fails
