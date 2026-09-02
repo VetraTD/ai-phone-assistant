@@ -171,6 +171,49 @@ function frameRms(mulawBuf) {
   return Math.sqrt(sum / s.length);
 }
 
+// ---------------------------------------------------------------------------
+// Usage accumulation.
+//
+// Gemini emits one `usageMetadata` message PER TURN, not a running session
+// total. This file originally stored `m.usage = msg.usageMetadata`, keeping
+// only the last turn -- which is harness defect #1 in the handoff's own section
+// 11 list, already found and fixed once in scripts/probes/lib/geminiUsage.js,
+// and re-committed here anyway. It under-reports a multi-turn call by roughly
+// 3-4x, and a spend cap enforced against the last turn only is not a cap.
+//
+// Logic copied from scripts/probes/lib/geminiUsage.js rather than imported:
+// scripts/probes is not in the Dockerfile COPY list, and adding it would put
+// the whole probe suite in the image to reuse thirty lines.
+// ---------------------------------------------------------------------------
+
+function emptyUsage() {
+  return { text_in: 0, audio_in: 0, text_out: 0, audio_out: 0, cached_in: 0, turns_billed: 0 };
+}
+
+function addUsage(acc, u) {
+  if (!u) return acc;
+  let sawDetail = false;
+  for (const d of u.promptTokensDetails || []) {
+    sawDetail = true;
+    if (d.modality === "AUDIO") acc.audio_in += d.tokenCount || 0;
+    else acc.text_in += d.tokenCount || 0;
+  }
+  for (const d of u.responseTokensDetails || []) {
+    sawDetail = true;
+    if (d.modality === "AUDIO") acc.audio_out += d.tokenCount || 0;
+    else acc.text_out += d.tokenCount || 0;
+  }
+  for (const d of u.cacheTokensDetails || []) acc.cached_in += d.tokenCount || 0;
+  // Fall back to the flat counters when the detail arrays are absent, so a turn
+  // is never silently billed as zero.
+  if (!sawDetail) {
+    acc.text_in += u.promptTokenCount || 0;
+    acc.audio_out += u.responseTokenCount || 0;
+  }
+  acc.turns_billed += 1;
+  return acc;
+}
+
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
 function p50(a) {
@@ -266,7 +309,7 @@ async function handleConnection(ws, callSid) {
     replyAfterLastVoiceMs: [],
     transcriptLagMs: [],
     barges: 0,
-    usage: null,
+    usage: emptyUsage(),
     closeReason: null,
     languagePinned: null,
   };
@@ -461,7 +504,7 @@ async function handleConnection(ws, callSid) {
   try {
     const connected = await connect(config, {
         onmessage: (msg) => {
-          if (msg.usageMetadata) m.usage = msg.usageMetadata;
+          if (msg.usageMetadata) addUsage(m.usage, msg.usageMetadata);
           const sc = msg.serverContent;
           if (!sc) return;
 
@@ -608,9 +651,14 @@ async function handleConnection(ws, callSid) {
       // sits while we are talking. Large is good. Near 0 dB means our own voice
       // is arriving back at full strength.
       echo_return_loss_db: ratioDb(outMean, inPlaying),
-      // The room, for comparison. If this is close to echo_return_loss_db then
-      // what was measured is ambient noise, not our own audio coming back.
-      noise_floor_db: ratioDb(outMean, inIdle),
+      // MISNAMED, and the first calls proved it: `inIdle` is the inbound level
+      // while we are NOT playing, which on a real call is dominated by the
+      // CALLER SPEAKING, not by room noise. Measured 2026-09-02: idle RMS 928
+      // to 1662 against a playing RMS of 37 to 236. So this is not a noise
+      // floor and cannot be used as the "is it echo or is it the room"
+      // control it was added to be. Kept under an honest name; the control it
+      // was meant to provide does not exist yet.
+      inbound_while_idle_db: ratioDb(outMean, inIdle),
       out_rms_mean: Math.round(outMean),
       in_rms_playing_mean: Math.round(inPlaying),
       in_rms_idle_mean: Math.round(inIdle),
@@ -630,7 +678,7 @@ async function handleConnection(ws, callSid) {
       activity_starts_during_playback: m.activityStartsDuringPlayback,
       barges: m.barges,
       close_reason: m.closeReason,
-      usage: m.usage || null,
+      usage: m.usage,
     });
   };
 

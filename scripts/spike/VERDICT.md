@@ -59,7 +59,39 @@ comparable to the 1,043 ms model leg measured in round 3.
   `classifyHold` cannot gate turn ends in the real front-end and the design owes
   a different answer. Record it; do not quietly build around it.
 
-## Results
+## Results — manual arm, 4 calls, 2026-09-02
+
+Handset condition not recorded per call, which is itself a gap: **P1 and P3 are
+NOT settled until a speakerphone call is matched against a manual one.**
+
+| # | prediction | outcome |
+|---|---|---|
+| P1 | manual arm does not self-interrupt | **holding, not settled** — `interrupted_without_local_barge` = 0 on all 4 calls, but the speakerphone condition has not been run |
+| P2 | auto arm is audibly worse | not run |
+| P3 | echo return loss >= 15 dB | **passes so far** — 23.3 / 37.5 / 39.6 dB |
+| P4 | ear vs speakerphone differ by >= 10 dB | not scorable — condition not recorded per call |
+| P5 | intelligible, not worse than the cascade | **PASS** — owner: "it sounds amazing" |
+| P6 | transcript lag < 500 ms | **PASS** — p50 215 / 301 / 326 ms |
+| P7 | barge-in works under manual AD | **PASS** — 2 barges, both produced an `interrupted` |
+| P8 | no drops or unexplained closes | **PASS** — `close_reason` null on all 4 |
+
+### Unpredicted findings — flagged as unpredicted, not folded in as if expected
+
+- **`language_pinned` = true on all four calls.** Handoff section 4 states that
+  native audio "does not accept an explicit language code". The API accepted
+  `en-GB` without error. Accepted is not the same as honoured, and this does not
+  prove the accent came from the code rather than the prompt — but the doc claim
+  as written is wrong.
+- **Model leg 880-1140 ms with a real PSTN leg**, against 1,043 ms measured in
+  round 3 with no phone line at all. The transport cost close to nothing. The
+  ~2.2 s the caller actually feels is mostly the bridge's own 1,200 ms hangover,
+  which is a tunable number and not a vendor property.
+- **The assistant refused to read a caller's phone number back.** Recorded as
+  backlog LVX4. Not caused by the missing tools — read-back is prompt behaviour.
+- **The instrument under-reported its own token usage** (last turn only, not
+  summed). Backlog LVX5. Cost per call is therefore still unmeasured.
+
+## Final results
 
 _Filled in after the calls. A prediction that missed is recorded as a miss._
 

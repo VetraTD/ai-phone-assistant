@@ -1190,6 +1190,55 @@ The real front-end uses the signature path like everything else.
 
 **Done when:** the spike service is deleted.
 
+**LVX4 · Gemini Live refused to read a caller's phone number back** `[gcp]` · P1
+
+Observed on a real spike call, 2026-09-02. The caller gave a mobile number and
+asked the assistant to repeat it back; it declined.
+
+**This is not the missing tools.** Read-back is prompt and model behaviour, not
+a tool call. It is also not optional: reading a number back is one of the
+commonest lines on these calls — `lib/voice/echoGuard.js` normalises digit runs
+specifically so that a read-back-the-number echo can be recognised, which is
+only necessary because production does it constantly. A receptionist that will
+not confirm a number it has just been given cannot take a message.
+
+Two candidate causes, neither confirmed: the model's own reluctance to repeat
+personal data back, or the spike's ten-line system prompt (which says it has no
+tools and that "someone will confirm", and may read as "do not handle details").
+The real front-end runs the production prompt, so this may simply not reproduce.
+
+**Not diagnosable from the current logs** — the bridge records transcript
+TIMING but not transcript TEXT, so there is no record of what was actually said.
+
+**Done when:** the real front-end is exercised with the production prompt and a
+number read-back is either observed working or reproduced as a defect. Assume
+neither.
+
+**LVX5 · The spike under-reported its own token usage** `[gcp]` · P2
+
+`scripts/spike/s2s-bridge.js` stored `m.usage = msg.usageMetadata`, keeping only
+the LAST turn. Gemini emits one `usageMetadata` per turn, not a session total,
+so a multi-turn call was under-reported by roughly 3-4x.
+
+This is **harness defect #1 in the handoff's own section 11 list**, already
+found and fixed once in `scripts/probes/lib/geminiUsage.js` — whose header
+documents it with measured numbers — and re-committed anyway while writing a new
+instrument. A spend cap enforced against the last turn only is not a cap.
+
+Fixed in the spike (accumulator inlined). Recorded because the interesting part
+is not the fix: a documented harness defect with a written-up post-mortem was
+reproduced by someone who had read the document. Reuse the instrument, do not
+re-derive it.
+
+**Also renamed in the same pass:** `noise_floor_db` measured the inbound level
+while we are NOT playing, which on a real call is dominated by the caller
+speaking — idle RMS 928-1662 against a playing RMS of 37-236. It was added as
+the "is this echo or is it the room" control and cannot serve as one. Now
+`inbound_while_idle_db`; the control it was meant to provide does not exist.
+
+**Done when:** the spike is deleted, or the real front-end's cost accounting is
+built on the accumulator rather than a fresh one.
+
 ---
 
 ## Appendix A — commands
