@@ -145,6 +145,61 @@ inheriting the spike's placeholder.
 **N=1 per arm.** One call each, one room, one handset. This codebase has already
 had a probe give opposite verdicts on consecutive runs. Suggestive, not settled.
 
+## The silent call — decisive, and it invalidates my own headline metric
+
+Caller silent throughout after the opening question. Auto arm, no gate.
+
+```
+in_rms while WE speak  (echo + line noise) = 0
+in_rms while IDLE      (line noise alone)  = 1909
+interrupted = 0        without local barge = 0
+```
+
+**Zero.** Not low — zero. Inbound audio during our own playback was digital
+silence: mu-law 0xFF decodes to PCM 0, so the RMS is exactly 0.000.
+
+### What this means
+
+**No echo reaches us on this path.** Not "well attenuated" — absent at the
+sample level. Whether that is the mobile network's uplink DTX suppressing the
+channel while the caller is quiet, or carrier-side echo cancellation removing
+our audio, the consequence is the same: the vendor never hears our output come
+back.
+
+### It also means `echo_return_loss_db` was never measuring echo
+
+Every earlier call reported 23-40 dB and I reported those as echo return loss.
+They were not. With the caller silent the playing bucket is 0; with the caller
+talking it is 37-84. So the metric was measuring **caller speech bleeding into
+the tail of our playback window**, which is a window-overlap artefact and not
+echo at all. The numbers were real; the name and the interpretation were wrong.
+
+**Known remaining ambiguity, stated rather than papered over:** the summary does
+not log a sample COUNT for that bucket, so `mean([]) === 0` and "every sample was
+digital silence" are indistinguishable in the record. The earlier auto call on
+identical code reported 84, which makes the empty-array reading very unlikely —
+but "very unlikely" is not "ruled out", and closing it needs a counter.
+
+### Consequences for the build
+
+- **The 2 uncorroborated interrupts in the earlier auto call were NOT echo.**
+  They were the caller — short backchannel below the 300 ms `voicedRunMs`
+  threshold. The competing explanation is eliminated by this call.
+- **Section 6's echo justification is not demonstrable on this path.** "Far-end
+  VAD cannot detect our own PSTN echo" describes a threat that did not
+  materialise here. This does NOT contradict the cascade's live-call echo
+  defect, which was real and documented — but that was a different stack
+  (Deepgram transcribing very quiet audio into words) and possibly a different
+  handset. One condition, not a law.
+- **Manual activity detection's OTHER justification is untouched and still
+  stands on its own:** it removes the trail-off cut-in, measured 3/3 in round 3
+  and reproduced on call 1 here. That reason never depended on echo.
+- **So the ~900 ms per turn the hangover costs is currently being paid for a
+  threat that has not been demonstrated**, while the benefit that HAS been
+  demonstrated (trail-off) is a property of who decides the turn ends, not of
+  half-duplex gating. Those are two separable mechanisms and the spike has been
+  treating them as one.
+
 ## Final results
 
 _Filled in after the calls. A prediction that missed is recorded as a miss._

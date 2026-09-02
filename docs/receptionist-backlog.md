@@ -1239,6 +1239,33 @@ the "is this echo or is it the room" control and cannot serve as one. Now
 **Done when:** the spike is deleted, or the real front-end's cost accounting is
 built on the accumulator rather than a fresh one.
 
+**LVX6 · No PSTN echo was detectable at all, and the metric that said otherwise was wrong** `[gcp]` · P1
+
+Measured 2026-09-02 on a call where the caller stayed silent throughout:
+inbound RMS during our own playback was **0** — digital silence — against 1909
+while idle. Echo does not reach us on this path, whether through mobile uplink
+DTX or carrier-side echo cancellation.
+
+**The spike's `echo_return_loss_db` was measuring the wrong thing.** Its 23-40 dB
+readings were caller speech bleeding into the tail of the playback window, not
+echo. Renamed reasoning recorded in scripts/spike/VERDICT.md. The bucket also
+logs no sample count, so an empty array and an all-silent array are
+indistinguishable in the record — a counter is needed to close that.
+
+**Why it matters for the build:** section 6 justifies manual activity detection
+primarily on echo — "far-end VAD cannot detect our own PSTN echo". That threat
+did not appear in any of seven calls. Its OTHER justification, removing the
+trail-off cut-in, is independent, was measured 3/3 in round 3, and reproduced
+here. The two are separable mechanisms and the design treats them as one.
+
+This does not contradict the cascade's documented live-call echo defect — that
+was Deepgram transcribing quiet audio into words, a different stack and possibly
+a different handset. One condition is not a law.
+
+**Done when:** either echo is reproduced on some real handset, or manual
+activity detection is justified on turn-taking alone and the half-duplex gate is
+re-costed against the ~900 ms/turn it adds.
+
 ---
 
 ## Appendix A — commands
