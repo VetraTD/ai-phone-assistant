@@ -33,6 +33,7 @@ const SOURCES = [
   "r3-tools-fixed-gemini", "r3-tools-fixed-openai",
   "r3-openai-T4", "r3-openai-T5",
   "r3-gem-T1T2", "r3-gem-T2", "r3-oai-T2", "r3-gem-T7", "r3-oai-T7",
+  "r3-25-T1T2", "r3-25-T1", "r3-25-T2", "r3-25-T5T7", "r3-25-T5", "r3-25-T3",
 ];
 /**
  * Cells whose raw was destroyed before --tag existed: a one-trial diagnostic run

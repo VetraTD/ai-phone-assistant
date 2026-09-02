@@ -52,7 +52,7 @@ patient is not.
 
 **Neither model ever claimed a booking the backend had refused** (X3 fails,
 which is the good kind of failure) and **neither spoke a raw tool blob aloud** in
-50 trials (X5 fails). Round 1's "Gemini spoke JSON" was an artefact of
+68 trials (X5 fails). Round 1's "Gemini spoke JSON" was an artefact of
 the six-tool harness, not a model defect.
 
 ---
@@ -61,7 +61,7 @@ the six-tool harness, not a model defect.
 
 | model | trials | duplicate-call events | `end_call` twice | **`book_appointment` twice** |
 |---|---|---|---|---|
-| Gemini 2.5 | — | — | — | — |
+| Gemini 2.5 | 18 | **22** | 9 | **1** |
 | Gemini 3.1 | 25 | **2** | 2 | 0 |
 | gpt-realtime-2.1 | 24 | **0** | 0 | 0 |
 
@@ -121,7 +121,7 @@ five-turn data had it *improving* (-613 ms), so it is unlikely to be the problem
 | **X2** | BOTH refuse to book the slot they were told is taken, 5/5 each | Gemini 5/5, OpenAI 5/5 | **PASS** |
 | **X3** | At least one model claims a booking the backend refused, >=1/5 | Gemini 0/5, OpenAI 0/5 — neither ever did | **FAIL** |
 | **X4** | gpt-2.1 misses end_call >=2/5; Gemini calls it >=4/5 | OpenAI missed 2/5, Gemini missed 0/5 | **PASS** |
-| **X5** | Gemini speaks a raw tool blob >=1 time; OpenAI never | 0 leaks across 50 trials, both models | **FAIL** |
+| **X5** | Gemini speaks a raw tool blob >=1 time; OpenAI never | 0 leaks across 68 trials, both models | **FAIL** |
 | **X6** | Gemini 3.1 default VAD holds trailing_lead_in past 2,000 ms | no data | UNRESOLVED |
 | **X7** | gpt-2.1 signals an interrupt >=4/5 with audio genuinely in flight | NOT MEASURED — the long-barge arm was killed before producing a cell | UNRESOLVED |
 | **X8** | Neither model drifts >300 ms across 12 turns | Gemini turn1 1540 ms -> turn12 1562 ms, drift 22 ms. OpenAI NOT MEASURED (killed). | UNRESOLVED |
