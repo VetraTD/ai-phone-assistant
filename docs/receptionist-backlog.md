@@ -1215,6 +1215,21 @@ TIMING but not transcript TEXT, so there is no record of what was actually said.
 number read-back is either observed working or reproduced as a defect. Assume
 neither.
 
+**DONE 2026-09-02 — READ-BACK WORKS. It was the prompt, not the model.**
+`scripts/live-exercise.js` against Digile Media's real config, all ten tools
+declared, `gemini-3.1-flash-live-preview`. The assistant read the number back
+*unprompted* when it was given:
+
+> caller: "My mobile is 07700 900123."
+> assistant: "Thank you, I've got that number. Just to make sure I have it
+> right, that's zero double seven double zero, nine zero zero, one two three."
+
+and again on request the following turn. Two things follow. The model has no
+reluctance to repeat a caller's own number back, so that hypothesis is dead.
+And a ten-line prompt saying "you have NO tools" and "someone will confirm"
+was enough to suppress a behaviour production depends on — which is worth
+remembering the next time a spike's prompt is called a detail.
+
 **LVX5 · The spike under-reported its own token usage** `[gcp]` · P2
 
 `scripts/spike/s2s-bridge.js` stored `m.usage = msg.usageMetadata`, keeping only
@@ -1399,6 +1414,21 @@ Not half-built on purpose. `applyReplyState` needs `STEPS`,
 
 **Done when:** the reducer is shared between both front-ends, or the Live path
 names what replaces each thing it drops.
+
+**CONFIRMED BY OBSERVATION 2026-09-02**, first real exercise, and it is the
+spelling cap that went first. Three consecutive turns:
+
+> "Could I please have your full name? And would you spell that for me as well, please?"
+> "Thanks, Marcus Bell – and could you spell that for me, please?"
+> "...And could you still spell your name for me when you get a chance?"
+
+Asked three times in a row, having already been given the name. `spellAskCap`
+and `hasSpentSpellingAsk` live in `applyReplyState`, which this path does not
+run, so nothing counts the asks and nothing closes the question. This is the
+same defect class the cascade already paid for — "at most once" held in a
+prompt does not hold — reappearing on a path that dropped the counter.
+
+Raises this from P1-on-principle to P1-with-a-transcript.
 
 **LVX9 · Re-creating `gemini-api-key` re-arms the LVX2 tripwire** `[gcp]` · P2
 

@@ -129,15 +129,47 @@ client.incomingPhoneNumbers("<sid>").update({
 
 ## 4. Before a live call — spend the cheap thing first
 
-```
-node scripts/live-exercise.js              # prints the plan and the estimate, spends nothing
-node scripts/live-exercise.js --confirm    # ~$0.04-0.05
+It needs a database it can resolve the tenant from. `db.isEnabled()` is false
+without `DATABASE_URL` or `CLOUD_SQL_INSTANCE`, and the script refuses rather
+than testing a prompt no caller will ever hear. The whole local path, which
+touches no production database — Supabase is read for config only, every write
+lands in the throwaway docker Postgres:
+
+```bash
+docker compose -f infra/docker-compose.dev.yml up -d      # or: npm run db:up
+export DATABASE_URL="postgres://vetra:vetra_local_dev@localhost:55432/vetra"
+node scripts/migrate.js                                    # 39 migrations
+
+# Digile Media's config, out of Supabase and into the local DB. CONFIG ONLY:
+# scripts/import-tenant.js refuses calls, transcripts, appointments and
+# consents by name.
+export IMPORT_TENANT_B64=$(node -e '
+  import("dotenv/config").then(async()=>{
+    const h={apikey:process.env.SUPABASE_SERVICE_KEY,
+             Authorization:"Bearer "+process.env.SUPABASE_SERVICE_KEY};
+    const q=process.env.SUPABASE_URL+"/rest/v1/";
+    const B=await (await fetch(q+"businesses?phone_number=eq.%2B441372656055&select=*",{headers:h})).json();
+    const C=await (await fetch(q+"business_capabilities?business_id=eq."+B[0].id+"&select=capability_id,enabled,config",{headers:h})).json();
+    const business={...B[0]}; delete business.created_at;
+    process.stdout.write(Buffer.from(JSON.stringify({business,capabilities:C})).toString("base64"));
+  });')
+node scripts/import-tenant.js
+
+node scripts/live-exercise.js              # plan and estimate, spends nothing
+node scripts/live-exercise.js --confirm    # ~53k input tokens over 6 turns
 ```
 
-It answers **LVX4** — the spike's assistant refused to read a caller's phone
-number back — with the production prompt and all ten tools, which is the
-difference that makes it diagnosable. It also shows tool selection and the
-availability guard.
+Verify before spending: the config should yield **ten** tools. Note that
+Digile Media's real `business_hours` are `00:00-23:59` every day, so
+availability legitimately offers midnight and 11 PM slots — that is a demo
+tenant configured always-open, not a bug.
+
+**Run 2026-09-02: LVX4 is CLOSED — read-back works**, unprompted and again on
+request. It was the spike's ten-line prompt, not the model.
+
+The same run confirmed **LVX8**: the assistant asked the caller to spell their
+name three turns in a row, because `applyReplyState` — where `spellAskCap`
+lives — does not run on this path.
 
 It **cannot** answer whether `inputAudioTranscription` is punctuated (no audio
 in, so no input transcription), how anything sounds, or how the arms compare.

@@ -40,11 +40,18 @@
  * It costs money
  * ---------------------------------------------------------------------------
  *
- * A real Gemini Live session with the production prompt. The prompt is the
- * bulk of it: measured on the probes, turn 1 carried ~8,500 prompt tokens and
- * later turns ~4,500. At the six turns below that is roughly 30-35k input
- * tokens plus audio out, which on 3.1's measured $0.0067/turn lands around
- * $0.04-0.05 for a full run.
+ * A real Gemini Live session with the production prompt, which is the bulk of
+ * it.
+ *
+ * MEASURED 2026-09-02, first real run: 53,059 text-in + 4,380 audio-in over
+ * six turns. That is ~8,800 input tokens PER TURN, flat -- the full prompt is
+ * re-billed every turn, it does not amortise.
+ *
+ * The estimate here previously said 30-35k, built from probe numbers showing
+ * turn 1 at ~8,500 and later turns at ~4,500, and it under-shot by 1.6x. The
+ * repository already knew better: Live re-bills the whole context every turn
+ * and the prefix is ~85% of the bill. Corrected rather than left as a figure
+ * that reads low.
  *
  * That is small, and it is still not spent without being asked for: this
  * refuses to run without --confirm, and prints the estimate first either way.
@@ -105,9 +112,10 @@ function estimate() {
   console.log(`  business  ${BUSINESS_PHONE}`);
   console.log(`  turns     ${TURNS.length}`);
   console.log("");
-  console.log("  ESTIMATE  ~30-35k input tokens (the production prompt dominates:");
-  console.log("            ~8.5k on turn 1, ~4.5k after), plus audio out.");
-  console.log("            Roughly $0.04-0.05 at 3.1's measured $0.0067/turn.");
+  console.log(`  ESTIMATE  ~${(TURNS.length * 8.8).toFixed(0)}k input tokens, plus audio out.`);
+  console.log("            MEASURED at 6 turns: 53,059 text-in + 4,380 audio-in.");
+  console.log("            ~8.8k per turn, FLAT -- Live re-bills the whole prompt");
+  console.log("            every turn, so this scales linearly with turn count.");
   console.log("");
   console.log("  Answers:      LVX4 read-back, tool selection, the availability guard.");
   console.log("  Cannot answer: whether inputAudioTranscription is punctuated (no audio in),");
