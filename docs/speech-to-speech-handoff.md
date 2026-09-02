@@ -207,14 +207,31 @@ treated them as a single decision. They are:
 1. **The half-duplex gate** — do not forward inbound audio while we are
    speaking. **Costs zero latency.** Guards a ~10 dB margin against carrier
    echo leak (section 4). **Keep it**; it is free insurance.
-2. **Who decides the turn ended** — the thing that actually costs. The spike
-   used a flat 1,200 ms hangover and it cost **~900 ms per turn**: 2,246 ms
-   felt, against 1,325 ms in the vendor-VAD arm. **Replace the flat number with
-   `classifyHold`**, which prices the wait from what the caller actually said —
-   0 ms on a sentence that ends in terminal punctuation, 2,000 ms on a trailing
-   conjunction. A caller who speaks in whole sentences then pays nothing, where
-   a flat timer charges everyone. This is only possible because transcript lag
-   measured 113-360 ms.
+2. **Who decides the turn ended** — the thing that actually costs, and the
+   thing that is **NOT yet decided**. The spike used a flat 1,200 ms hangover
+   and it cost **~900 ms per turn**: 2,246 ms felt, against 1,325 ms in the
+   vendor-VAD arm.
+
+   `classifyHold` is the *candidate*, not the conclusion. It prices the wait
+   from what the caller actually said — 0 ms on a sentence ending in terminal
+   punctuation, 2,000 ms on a trailing conjunction — so a caller who speaks in
+   whole sentences pays nothing where a flat timer charges everyone. Transcript
+   lag of 113-360 ms is what makes it possible at all.
+
+   **But it has never been run in a Live front-end, and the vendor's own
+   detector behaved well on every spike call.** Build the turn-end decision as a
+   SWAPPABLE STRATEGY and measure three arms against each other:
+
+   | arm | what it is |
+   |---|---|
+   | A | vendor `automaticActivityDetection`, default |
+   | B | manual + flat hangover, tunable |
+   | C | manual + `classifyHold` |
+
+   Score them on the same calls: felt latency (caller stops → caller hears),
+   and cut-ins on a deliberately trailing-off caller. **Lock nothing until C
+   beats A on a real handset.** Arm A is the incumbent and it is winning on
+   latency today; C's advantage is a prediction.
 
 `automaticActivityDetection: { disabled: true }` remains correct. The rest of
 this section's reasoning stands, with one correction: its primary justification
@@ -258,8 +275,14 @@ while still spending 2,000 ms on the fragments that need it.
 
 That is the design bet: **pay only the callers who are actually mid-thought.**
 It has not been measured end to end and it is the first thing step 2 should
-instrument — with a vendor-VAD arm kept alongside for comparison, because a bet
-this clean is exactly the kind this document's section 3 is full of.
+instrument — with the vendor-VAD arm kept alongside as the incumbent, because a
+bet this clean is exactly the kind this document's section 3 is full of.
+
+**Do not ship arm C on the strength of this paragraph.** The owner's objection
+on 2026-09-02 was the right one: the vendor's detector worked on every call
+anyone actually made, and replacing something that works with something
+untested, on the strength of a synthetic harness result, is how section 3 got
+long. Measure, then lock.
 
 - It is what lets **`echoGuard` survive**. Far-end VAD sits at the other end of a
   WebSocket and cannot know that the speech it hears is our own output echoing
