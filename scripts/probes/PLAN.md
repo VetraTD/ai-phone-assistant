@@ -131,3 +131,54 @@ Written to `verdicts.json` before the first run.
 - Booking correctness / conversation quality — that is the 43-scenario eval and
   needs the LV4 harness built first.
 - Anything about real callers. 10 fixtures is not a distribution.
+
+## Module fate — what the probes decide about the cascade
+
+Added 2026-09-01 after the owner asked whether the vendor's VAD/barge-in makes
+the hand-built pipeline redundant. Mostly yes — with one structural exception.
+
+**Three modules say it in their own headers: "There is no acoustic echo
+cancellation anywhere in this pipeline."** Vendor VAD sits at the far end of a
+WebSocket. It cannot know that the speech it hears is the assistant's own
+output echoing back through the PSTN off a speakerphone. It reads echo as
+barge-in and cuts itself off. This is already the measured failure mode —
+cutoffs were echo, not endpointing. **Speech-to-speech does not fix it.**
+
+### Deleted — vendor genuinely replaces (~3,915 lines)
+
+| Module | Lines | Why |
+|---|---|---|
+| `sttDeepgram` + `sttGoogle` + `sttStream` | 1,407 | vendor does STT |
+| `ttsStream` + `elevenlabs` + `googleTts` + `ttsHealth` | 1,124 | vendor does TTS |
+| `speakableText` | 693 | normalizes text *before TTS*; no text→TTS step exists in S2S |
+| `geminiCache` | 412 | `cachedContentTokenCount` measured zero on Live |
+| `endpointArbiter` | 176 | superseded; also shipped dark (`VOICE_SEMANTIC_ENDPOINT=false`), never ran on a real call |
+| `utteranceCache` | 103 | caches pre-synthesized audio; no synthesis to cache |
+
+### Survives — vendor cannot replace
+
+| Module | Lines | Why |
+|---|---|---|
+| `echoGuard` | 365 | far-end VAD cannot identify our own echo |
+| `audioOut` | 424 | we still write to the Twilio socket: pacing, marks, `clear` on barge-in |
+| `mulaw` | 100 | Twilio speaks μ-law; also needed to decode for echo energy |
+| `inboundVad` | 193 | shrinks, does not vanish — feeds echoGuard's energy signal |
+| `fallbackFlow` | 360 | S2S has no fallback path; this matters MORE |
+| `promiseGate` | 132 | model announces the wrong action — behaviour bug, not transport |
+| `historyTrim` | 99 | becomes central; it is what text reseeding needs |
+| brain (`tools`, `replyState`, `appointments`, `notifications`, `llmTurn`) | ~1,900 | untouched — the reason Shape A is possible |
+| `metrics` | 595 | rewired, not deleted |
+
+### Decided by the probes
+
+| Module | Lines | Decided by |
+|---|---|---|
+| `turnManager` | 667 | **V2 and V3.** If vendor barge-in genuinely works, most of it goes. If the reported Gemini `interrupted` bug is real for us, it stays and the migration buys nothing here |
+
+**The report must state explicitly, per vendor, which of these modules the
+results prove redundant and which survive** — with `turnManager` called out by
+name, since 667 lines of the Shape A estimate hang on V2/V3.
+
+Note this barely moves the 73–134 h Shape A figure: that number is the cost of
+writing the new front-end, tool bridge, reseed and eval harness. Deletion is
+the cheap part.
