@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 8.45316,
+  "spent_usd": 8.616065,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -8398,8 +8398,56 @@
         "audio_out": 353
       },
       "usd": 0.0819944
+    },
+    {
+      "at": "2026-09-02T14:33:13.894Z",
+      "probe": "R3",
+      "arm": "T2F:openai",
+      "run": 1,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 4854,
+        "audio_in": 0,
+        "cached_text_in": 14144,
+        "cached_audio_in": 0,
+        "text_out": 466,
+        "audio_out": 367
+      },
+      "usd": 0.0560176
+    },
+    {
+      "at": "2026-09-02T14:33:46.370Z",
+      "probe": "R3",
+      "arm": "T2F:openai",
+      "run": 2,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 4842,
+        "audio_in": 0,
+        "cached_text_in": 9344,
+        "cached_audio_in": 0,
+        "text_out": 441,
+        "audio_out": 294
+      },
+      "usd": 0.048977599999999996
+    },
+    {
+      "at": "2026-09-02T14:34:19.941Z",
+      "probe": "R3",
+      "arm": "T2F:openai",
+      "run": 3,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 4903,
+        "audio_in": 0,
+        "cached_text_in": 9344,
+        "cached_audio_in": 0,
+        "text_out": 384,
+        "audio_out": 444
+      },
+      "usd": 0.057909600000000006
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T14:27:35.361Z"
+  "updated_at": "2026-09-02T14:34:19.941Z"
 }

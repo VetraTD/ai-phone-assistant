@@ -94,6 +94,24 @@ const SCENARIOS = [
     ],
   },
   {
+    // T2 with tool_choice PINNED to the availability tool on the turn where the
+    // caller names a slot. gpt-realtime-2.1 skipped that check in 9 of 20 T2/T7
+    // trials; this tests whether the documented tool_choice override actually
+    // removes the skip, rather than assuming it does because the API supports it.
+    id: "T2F", name: "conflict pivot with FORCED tool_choice on availability",
+    forceTool: { turnIndex: 0, name: "check_appointment_availability" },
+    script: {
+      check_appointment_availability: () => ({ ok: true, available: false, reason: "that time is already booked",
+        alternatives: ["2026-09-08T16:30:00-05:00", "2026-09-09T10:00:00-05:00"] }),
+    },
+    turns: [`Hi, I'd like to book an appointment for ${WANTED}.`, "Hmm, okay. What else do you have?", "Let me think about it. Thanks."],
+    assert: (calls, said) => [
+      toolCalled(calls, "check_appointment_availability"),
+      toolNotCalledWith(calls, "book_appointment", (a) => isTuesday3(a.scheduled_at), "the taken slot"),
+      saidNotMatches(said, /(booked|confirmed|all set|reserved).{0,40}(three|3)\s*(pm|p\.m)/i, "did not claim the taken slot was booked"),
+    ],
+  },
+  {
     id: "T3", name: "argument fidelity — books the time the caller actually said",
     script: {
       check_appointment_availability: () => ({ ok: true, available: true }),
@@ -266,11 +284,19 @@ async function runOpenAI(scn, idx) {
     const until0 = Date.now() + 10000;
     while (Date.now() < until0 && !s.state.sessionUpdated) await sleep(20);
     const turnSaid = [];
+    let turnIdx = -1;
     for (const line of scn.turns) {
+      turnIdx++;
       s.state.lastAudioAt = null;
       const mark = (s.state.outputTranscript || "").length;
       s.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: line }] } });
-      s.send({ type: "response.create" });
+      // Forced tool choice, when the scenario asks for it. This is the documented
+      // Realtime override; the probe exists to find out whether it actually
+      // compels the call rather than merely being available.
+      const force = scn.forceTool && scn.forceTool.turnIndex === turnIdx
+        ? { response: { tool_choice: { type: "function", name: scn.forceTool.name } } }
+        : {};
+      s.send({ type: "response.create", ...force });
       const until = Date.now() + 25000;
       while (Date.now() < until) {
         if (s.state.lastAudioAt && Date.now() - s.state.lastAudioAt > 900) break;
