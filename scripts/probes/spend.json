@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 8.167778,
+  "spent_usd": 8.45316,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -8350,8 +8350,56 @@
         "turns_billed": 4
       },
       "usd": 0.012644
+    },
+    {
+      "at": "2026-09-02T14:26:04.797Z",
+      "probe": "R2",
+      "arm": "silence:200",
+      "run": 1,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 9519,
+        "audio_in": 219,
+        "cached_text_in": 23936,
+        "cached_audio_in": 256,
+        "text_out": 1179,
+        "audio_out": 587
+      },
+      "usd": 0.11119279999999998
+    },
+    {
+      "at": "2026-09-02T14:26:29.575Z",
+      "probe": "R2",
+      "arm": "silence:200",
+      "run": 2,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 10491,
+        "audio_in": 336,
+        "cached_text_in": 18112,
+        "cached_audio_in": 64,
+        "text_out": 581,
+        "audio_out": 358
+      },
+      "usd": 0.09219440000000001
+    },
+    {
+      "at": "2026-09-02T14:27:35.361Z",
+      "probe": "R2",
+      "arm": "silence:200",
+      "run": 3,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 9609,
+        "audio_in": 175,
+        "cached_text_in": 9408,
+        "cached_audio_in": 128,
+        "text_out": 722,
+        "audio_out": 353
+      },
+      "usd": 0.0819944
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T13:50:13.512Z"
+  "updated_at": "2026-09-02T14:27:35.361Z"
 }

@@ -1,0 +1,149 @@
+{
+  "silence": [
+    {
+      "silence_ms": 200,
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 809,
+          "commit_ms": -1144,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 840,
+          "commit_ms": 233,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2217,
+          "commit_ms": 158,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1632,
+          "commit_ms": 97,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 5990,
+          "commit_ms": 187,
+          "heard": "",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.11119279999999998,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1867,
+          "commit_ms": -1139,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 685,
+          "commit_ms": 217,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": -2684,
+          "commit_ms": null,
+          "heard": "",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 595,
+          "commit_ms": -1881,
+          "heard": "It's 555-1234. Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1972,
+          "commit_ms": 178,
+          "heard": "Thanks, bye.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.09219440000000001,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": null,
+          "commit_ms": -1136,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 956,
+          "commit_ms": 214,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2350,
+          "commit_ms": 229,
+          "heard": "It's 555-1234.",
+          "tools": [
+            "set_call_intent",
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": -1839,
+          "commit_ms": null,
+          "heard": "",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 2650,
+          "commit_ms": -739,
+          "heard": "Tuesday at 10 works for me. Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.0819944,
+      "error": "conversation_already_has_active_response: Conversation already has an active response in progress: resp_EJgDuwjFZ2plfXIT82EVe. Wait until the response is finished before creating a new one."
+    }
+  ],
+  "meta": {
+    "model": "gpt-realtime-2.1",
+    "n": 3,
+    "at": "2026-09-02T14:27:35.363Z"
+  }
+}

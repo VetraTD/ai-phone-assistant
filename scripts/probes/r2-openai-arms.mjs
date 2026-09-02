@@ -20,7 +20,7 @@ import { p50, errorGuard, writeRaw, readRaw } from "./lib/stats.js";
 
 const ARM = process.argv[2] || "all";
 const MODEL = process.env.PROBE_MODEL || "gpt-realtime-2.1-mini";
-const N = 5;
+const N = Number(process.env.PROBE_N || 5);
 const EST = 0.06;
 
 const serverVad = (ms) => ({
@@ -174,7 +174,7 @@ async function main() {
 
   if (ARM === "silence" || ARM === "all") {
     const rows = [];
-    for (const ms of [200, 300, 500]) {
+    for (const ms of (process.env.PROBE_SILENCE_MS ? process.env.PROBE_SILENCE_MS.split(",").map(Number) : [200, 300, 500])) {
       const cell = [];
       for (let i = 0; i < N; i++) {
         try { const r = await silenceRun(ms, i); guard.ok(); cell.push(r); }
