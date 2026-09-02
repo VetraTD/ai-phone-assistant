@@ -1350,3 +1350,92 @@ static prefix diluted below the cutoff). The signal was in the modality split,
 not the total — **an instrument that reports a verdict can still be reporting
 the wrong quantity.** Same lesson as `sim/cutoffSim.sim.js` asserting only its
 row count.
+
+### Found while building the Live front-end — recorded, not fixed (2026-09-02)
+
+Section 7 step 2, branch `feat/s2s-frontend`. Same rule as the spike: real bugs
+get written down and the owner decides what gets pulled in.
+
+**LVX7 · `audioOut.isPlaying()` answers true before anything has ever played** `[gcp]` · P2
+
+`isPlaying(graceMs)` is `now() < playingUntil + graceMs`, and `playingUntil`
+starts at **0**. On any clock whose readings are smaller than the 150 ms grace
+window it therefore returns **true before a single byte has been enqueued**.
+
+In production this is harmless *by accident*: `now` is `performance.now()`,
+which is process uptime and is far past 150 ms by the time a call arrives. It
+is an accident of the clock, not a property of the logic.
+
+Found in the Live front-end, where a test clock starting at zero reproduces it
+in one line: the half-duplex gate asked `isPlaying()`, was told yes, and
+withheld the caller's opening frames. Worked around **on the Live side only**
+(`hasEnqueuedAudio`, `lib/voice/live/index.js`) rather than changed in
+`audioOut`, which the cascade shares.
+
+The cascade is not affected today. The trap is that `isPlaying` conflates "we
+are playing" with "we have never played", and only an absolute clock value
+separates them.
+
+**Done when:** `audioOut` distinguishes the two states itself, or the coupling
+to the clock's magnitude is documented at the call sites that depend on it.
+
+**LVX8 · The Live front-end has no reply-state reducer** `[gcp]` · P1
+
+`lib/voice/session.js` drives the call-flow step machine through
+`applyReplyState`, which reads the assistant's own reply text and moves
+`greeting → identify_intent → gather_details → confirm → ending`. The Live
+front-end does not run it: `step` advances on the intent tool and on a
+completed action, which is enough to unlock `end_call` through the paths
+`services/tools.js` already allows, and no further.
+
+What is therefore missing on this path: the spelling-ask caps, the hold-line
+promise backstop, the intent-marker handling, and the step transitions that
+shape `buildDynamicTail`'s per-step guidance. The prompt is rebuilt once at
+connect and not per turn.
+
+Not half-built on purpose. `applyReplyState` needs `STEPS`,
+`mergeCapabilityState`, `dispatchEffects` and `spellRequestRe` from inside a
+209 KB handler, and extracting them is a change to the cascade.
+
+**Done when:** the reducer is shared between both front-ends, or the Live path
+names what replaces each thing it drops.
+
+**LVX9 · Re-creating `gemini-api-key` re-arms the LVX2 tripwire** `[gcp]` · P2
+
+LVX2 was closed by deleting the secret with the spike. Tier 1 needs it back:
+`lib/voice/live/client.js` reads `GEMINI_API_KEY`, and it belongs in Secret
+Manager rather than `.env`.
+
+The trap is unchanged. `gemini-api-key` is on `FORBIDDEN_IN_PHI_PROJECTS` in
+`lib/credentialBoundary.js`, and it passes the gate today only because
+`scripts/check-credential-boundary.js` resolves its default target to the **US
+prod** project, which is not an active stack. Naming the UK project in
+`VETRA_PHI_PROJECTS` detonates it.
+
+The UK lane is `deployment_mode = "standard"` with no GCP BAA, so this remains
+a naming collision rather than a live exposure — and `client.js` now refuses to
+construct the AI Studio client at all in `hipaa` mode, which is the guard that
+actually matters.
+
+**Done when:** the boundary rule distinguishes "this project is PHI-covered"
+from "this secret exists", or the UK project is explicitly excluded with a
+reason recorded.
+
+**LVX10 · Arm C's advantage rests on an unchecked property of Gemini's transcript** `[gcp]` · P1
+
+`classifyHold` returns **0 ms** for an utterance ending in terminal
+punctuation, and that branch is the entire reason to prefer arm C over a
+shorter flat hangover. It tests the RAW transcript for `[.!?]` and was written
+against Deepgram with `smart_format` on, which punctuates.
+
+**Nobody has checked whether Gemini's `inputAudioTranscription` punctuates.**
+If it does not, every utterance falls through to `no_terminal_punctuation` at
+500 ms and arm C is a shorter flat hangover wearing a rule name. It does not
+break — 500 ms still beats 1,200 — but the reason to choose it would be gone.
+
+`scripts/live-exercise.js` cannot answer this: text input produces no input
+transcription at all. The per-call summary's `punctuation` block
+(`classified` / `has_terminal_punct`) answers it on the first real audio call.
+
+**Done when:** a live call in arm `hold` reports a non-zero `classified`, and
+`has_terminal_punct` is read against it.

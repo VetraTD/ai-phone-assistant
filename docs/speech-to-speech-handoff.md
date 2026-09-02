@@ -33,8 +33,12 @@ and never edited: round 1 held 3/8, round 2 held 1/7, round 3 held 4/6 scored.
   1 partial, 1 void, 1 unscorable, ~$0.65. See `scripts/spike/VERDICT.md`.
   The bridge, its Cloud Run service, its secret and its service account were all
   torn down the same day; `lib/voice/resample.js` and its tests survive.
-- **The real front-end has NOT been built.** Step 2 is next and is the bulk of
-  the remaining 73-134 h.
+- **The real front-end IS built, and has never taken a call.** 2026-09-02,
+  `feat/s2s-frontend`: ten tools, both guards, the half-duplex gate, three
+  turn-end arms, swappable client, its own routes. Every test is offline —
+  146 files, 2,726 assertions — and **offline is not a call.** Sections 6 and 9
+  list what only a handset can settle, and the list did not get shorter.
+- **Steps 4 and 5 remain**: the eval port, and the fallback tiers.
 - **Tier-1 model is DECIDED: Gemini 3.1 Live on AI Studio.** The blocking
   question — whether the AI Studio tier permits training on prompts — was
   checked by the owner on 2026-09-02: **the paid tier does not use data for
@@ -323,8 +327,30 @@ this.
    ("it sounds amazing"); the felt gap was 2.2 s of which ~1.2 s was our own
    timer. Torn down the same day. Full result and the pre-registered
    predictions: `scripts/spike/VERDICT.md`.
-2. Real front-end: manual activity detection, swappable client, all ten tools.
-3. Guards: availability invariant + idempotent tool execution.
+2. ~~**Real front-end: manual activity detection, swappable client, all ten
+   tools.**~~ **BUILT 2026-09-02** on `feat/s2s-frontend`. Its own routes
+   (`/twilio/live-voice`, `/twilio/live-stream`) so the cascade is not edited
+   at all. Ten tools from production's own union — `buildAllDeclarations` is
+   now exported rather than reimplemented, which is what makes the six-tool
+   defect structurally impossible rather than merely remembered. Client
+   swappable, and refused at construction in `hipaa` mode. **Not yet run
+   against a real call.**
+
+   One correction to this line as written: "manual activity detection" is not
+   a property of the front-end, because it is TWO mechanisms and only one of
+   them is settled. The half-duplex gate is unconditional. Who ends the turn
+   is a swappable strategy with three arms, defaulting to the vendor's.
+3. ~~**Guards: availability invariant + idempotent tool execution.**~~ **BUILT
+   2026-09-02**, in the reducer and counted, with the counter names registered
+   in `lib/voice/metrics.js` — `bumpCounter` drops unknown names silently, so
+   a guard that fires, blocks and logs can still report nothing.
+
+   What the availability invariant actually buys is narrower than it sounds,
+   and worth stating so it is not oversold: `book_appointment` already
+   re-checks the slot with the adapter before writing, atomically. This is not
+   double-booking protection. It catches a slot the model INVENTED — the
+   backend re-check asks whether a slot is free, never whether anyone offered
+   it to the caller.
 4. Port the 43-scenario eval to a Live session — see §8; the only instrument
    that measures booking correctness.
 5. Fallback tiers, after tier 1 has survived real calls.
