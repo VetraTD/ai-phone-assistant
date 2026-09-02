@@ -91,6 +91,60 @@ NOT settled until a speakerphone call is matched against a manual one.**
 - **The instrument under-reported its own token usage** (last turn only, not
   summed). Backlog LVX5. Cost per call is therefore still unmeasured.
 
+## Arm comparison — speakerphone, matched conditions, N=1 each
+
+| | manual (148 s, 10 turns) | auto (218 s, 17 turns) |
+|---|---|---|
+| echo return loss | 37.5 dB | 32.7 dB |
+| inbound RMS while we spoke | 52 | 84 |
+| `interrupted` total | 1 | 3 |
+| **`interrupted` our VAD did NOT corroborate** | **0** | **2** |
+| caller stops → hears a reply (p50) | 2,246 ms | **1,325 ms** |
+| transcript lag (p50) | 249 ms | 113 ms |
+
+### P2 — partially held, and the split matters
+
+Predicted: the auto arm self-interrupts and is **audibly worse**.
+
+- **The instrument agrees.** Two interrupts in the auto arm that our own VAD
+  never corroborated, against zero in the manual arm. The mechanism showed up
+  exactly where it was predicted to.
+- **The ear does not.** The owner reported no self-interruption on either call.
+
+So the gate does something measurable that the caller cannot hear. Recording
+this as **partially held** rather than a pass, because scoring it as a pass
+would credit a prediction whose audible half missed.
+
+### Two readings of those 2 uncorroborated interrupts, not yet separated
+
+1. **Echo** — the vendor hearing our own output and cutting itself off. This is
+   the defect manual activity detection exists to prevent.
+2. **Short caller backchannel** — an "mm-hm" or a half-word below the 300 ms
+   sustained-voice threshold `voicedRunMs` requires. Our VAD would not
+   corroborate it, and it would look identical in this data.
+
+**These are not distinguishable from a call where the caller talks.** The clean
+experiment is a call where the caller says nothing at all after the opening
+question: then inbound-while-playing is echo plus line noise, inbound-while-idle
+is line noise alone, and the difference is the echo. Cheap, decisive, no code
+change.
+
+### The finding nobody predicted: manual activity detection costs ~900 ms a turn
+
+`reply_after_last_voice_ms` is 2,246 ms manual against 1,325 ms auto. That gap is
+almost entirely the bridge's own `HANGOVER_MS` of 1,200 — a flat number chosen
+for this spike, not a tuned one, and not a vendor property.
+
+So the trade as measured today is: **manual activity detection buys echo
+protection the caller cannot hear, at ~900 ms per turn the caller can.** That is
+not an argument against section 6 — the hangover is tunable and
+`classifyHold`'s real rules are shorter than 1,200 ms except in specific cases.
+It is an argument that the number needs choosing deliberately rather than
+inheriting the spike's placeholder.
+
+**N=1 per arm.** One call each, one room, one handset. This codebase has already
+had a probe give opposite verdicts on consecutive runs. Suggestive, not settled.
+
 ## Final results
 
 _Filled in after the calls. A prediction that missed is recorded as a miss._
