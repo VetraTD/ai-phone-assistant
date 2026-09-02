@@ -1138,6 +1138,58 @@ network, whichever model generates the audio.
 - **Live as a pure cost play** — it is roughly a wash at 3 minutes and *worse*
   beyond that. Migrate for realism and latency, not for the bill.
 
+### Parked during the spike build — recorded, not fixed (2026-09-02)
+
+Found while building the section 7 step 1 bridge on `spike/s2s-bridge`. None
+were fixed: the migration rule is that real bugs get written down and the owner
+decides what gets pulled in.
+
+**LVX1 · `echoGuard` has no transcript source under speech-to-speech** `[gcp]` · P1
+
+`lib/voice/echoGuard.js` is a **content** guard — it compares a transcript
+against what the AI said (`normalizeTokens`, bigram overlap over a time window).
+It needs Deepgram. Under S2S there is no Deepgram, and the only text available
+is Gemini's own `inputAudioTranscription`, which arrives *after* the audio was
+already fed into the session. So the handoff's "echoGuard gating when we send
+`activityEnd`" needs a number nobody has: how late that transcript lands
+relative to speech end.
+
+Manual activity detection is unaffected and still right — the trail-off case is
+timer-based. What is unresolved is the *content* half of echo defence. The spike
+logs `input_transcript_lag_ms` for exactly this.
+
+**Done when:** the real front-end either gates on the transcript with a measured
+lag that permits it, or names what replaces echoGuard.
+
+**LVX2 · `gemini-api-key` is a credential-boundary tripwire** `[gcp]` · P2
+
+`lib/credentialBoundary.js` lists `gemini-api-key` in `FORBIDDEN_IN_PHI_PROJECTS`
+— the AI Studio path is not BAA-covered. `scripts/check-credential-boundary.js`
+resolves its default target to the **US prod** project, which is not an active
+stack, so the secret created in `vetra-uk` for the spike does not fail the gate
+today. It would fail the day the UK project is named in `VETRA_PHI_PROJECTS`.
+
+The UK lane is `deployment_mode = "standard"` and there is no GCP BAA, so this
+is a naming collision rather than a live exposure. It is still a trap with a
+detonator already installed.
+
+**Done when:** either the secret is gone with the spike, or the boundary rule
+distinguishes a `standard` lane from a covered one.
+
+**LVX3 · The spike webhook is gated by URL secrecy, not a Twilio signature** `[gcp]` · P2
+
+`+18176011171` is on Twilio **account B**, whose auth token GCP does not hold —
+the UK project's `twilio-auth-token` is account A's. Rather than push a second
+Twilio credential into that project for a one-day service,
+`scripts/spike/s2s-bridge.js` validates no signature and gates on a secret path
+segment instead. The WebSocket leg keeps the real per-call token, keyed by
+`MEDIA_STREAM_SECRET`.
+
+What leaks if the URL leaks: Gemini spend on a service with no data behind it.
+The real front-end uses the signature path like everything else.
+
+**Done when:** the spike service is deleted.
+
 ---
 
 ## Appendix A — commands
