@@ -1,0 +1,59 @@
+{
+  "model": "gemini-live-2.5-flash-native-audio",
+  "rows": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "said": "Certainly. Are you a new patient or an existing one?",
+          "doubled": false
+        },
+        {
+          "label": "rep_avail_q",
+          "said": "Are you a new patient or an existing one?",
+          "doubled": false
+        },
+        {
+          "label": "rep_repeat_q",
+          "said": "No problem — are you a new patient, or have you been here before?",
+          "doubled": false
+        },
+        {
+          "label": "rep_close",
+          "said": "Thank you for calling Brightwork Family Dental. Have a great day. end_call",
+          "doubled": false
+        }
+      ],
+      "usd": 0.012028,
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "said": "Certainly. Are you a new or existing patient?",
+          "doubled": false
+        },
+        {
+          "label": "rep_avail_q",
+          "said": "I'd be happy to check for you. Are you a new or existing patient?",
+          "doubled": false
+        },
+        {
+          "label": "rep_repeat_q",
+          "said": "No problem. I was just asking if you're a new or existing patient.",
+          "doubled": false
+        },
+        {
+          "label": "rep_close",
+          "said": "Thank you for calling Brightwork Family Dental. Have a great day. end_call",
+          "doubled": false
+        }
+      ],
+      "usd": 0.012644,
+      "error": null
+    }
+  ]
+}

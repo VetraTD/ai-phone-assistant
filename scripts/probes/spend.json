@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 8.13074,
+  "spent_usd": 8.167778,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -8302,8 +8302,56 @@
         "turns_billed": 0
       },
       "usd": 0
+    },
+    {
+      "at": "2026-09-02T13:48:44.148Z",
+      "probe": "R3c",
+      "arm": "notools:2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12500,
+        "audio_in": 816,
+        "text_out": 58,
+        "audio_out": 296,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.012366
+    },
+    {
+      "at": "2026-09-02T13:49:51.530Z",
+      "probe": "R3c",
+      "arm": "notools:2.5",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12490,
+        "audio_in": 819,
+        "text_out": 55,
+        "audio_out": 268,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.012028
+    },
+    {
+      "at": "2026-09-02T13:50:13.511Z",
+      "probe": "R3c",
+      "arm": "notools:2.5",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 12470,
+        "audio_in": 823,
+        "text_out": 62,
+        "audio_out": 318,
+        "cached_in": 0,
+        "turns_billed": 4
+      },
+      "usd": 0.012644
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T13:22:07.304Z"
+  "updated_at": "2026-09-02T13:50:13.512Z"
 }
