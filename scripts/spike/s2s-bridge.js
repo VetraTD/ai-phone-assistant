@@ -216,6 +216,21 @@ function addUsage(acc, u) {
 
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
+/**
+ * Max of an array, by reduce.
+ *
+ * NOT `Math.max(...arr)`: a 3-minute call holds ~9,000 frames per bucket and
+ * spreading that many arguments can blow the stack. This runs inside the
+ * end-of-call summary, so a throw there would lose the ENTIRE call's
+ * measurements -- which is harness defect #4 in the handoff's section 11 list,
+ * where seven runs were lost because results were only written at the end.
+ */
+function maxOf(a) {
+  let m = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i];
+  return m;
+}
+
 function p50(a) {
   if (!a.length) return null;
   const s = [...a].sort((x, y) => x - y);
@@ -662,6 +677,27 @@ async function handleConnection(ws, callSid) {
       out_rms_mean: Math.round(outMean),
       in_rms_playing_mean: Math.round(inPlaying),
       in_rms_idle_mean: Math.round(inIdle),
+      // ------------------------------------------------------------------
+      // The counters that settle what a mean of 0 actually means.
+      //
+      // The silent call reported in_rms_playing_mean = 0, and `mean([])` is
+      // ALSO 0 -- so "no frames arrived during playback" and "every frame that
+      // arrived was digital silence" were indistinguishable in the record.
+      // Those are a broken instrument and a real finding respectively, and the
+      // conclusion drawn from them is about to shape the front-end design.
+      //
+      // frames_* is how many frames landed in each bucket; nonzero is how many
+      // carried any signal at all (mu-law 0xFF decodes to PCM 0, so true
+      // digital silence scores exactly 0.000); max is the loudest single frame.
+      // frames > 0 with nonzero == 0 is digital silence and echo is absent.
+      // frames == 0 is the instrument failing, and says nothing about echo.
+      // ------------------------------------------------------------------
+      in_frames_playing: m.inRmsPlaying.length,
+      in_frames_playing_nonzero: m.inRmsPlaying.filter((v) => v > 0).length,
+      in_rms_playing_max: Math.round(maxOf(m.inRmsPlaying)),
+      in_frames_idle: m.inRmsIdle.length,
+      in_frames_idle_nonzero: m.inRmsIdle.filter((v) => v > 0).length,
+      in_rms_idle_max: Math.round(maxOf(m.inRmsIdle)),
       // Comparable across arms: caller falls silent -> caller hears a reply.
       reply_after_last_voice_ms_p50: p50(m.replyAfterLastVoiceMs),
       reply_after_last_voice_ms: m.replyAfterLastVoiceMs,
