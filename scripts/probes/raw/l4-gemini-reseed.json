@@ -1,0 +1,345 @@
+{
+  "summary": {
+    "probe": "L4",
+    "model": "gemini-3.1-flash-live-preview",
+    "n": 5,
+    "ground_truth": "Nithin",
+    "exact_match_count": 5,
+    "name_exact_count": 2,
+    "spelling_exact_count": 5,
+    "stt_captured_name_count": 0,
+    "usd": 0.17387325,
+    "rescored_at": "2026-09-02T02:31:57.787Z",
+    "rescore_reason": "letter extractor took every single-letter token instead of the longest contiguous run; a correct 'n i t h i n' scored as NITHINI. Re-scored from saved transcripts, no new calls.",
+    "name_word_spoken_count": 2
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "heard_name_pre_reseed": "My name is Nitin. That's n i t h i n.",
+      "stt_captured_name": false,
+      "reseed_history_chars": 349,
+      "readback_said": "Of course, your first name is Nithin, spelled n i t h i n. Is there anything else I can help you with today?",
+      "readback_letters": "NITHIN",
+      "name_exact": true,
+      "spelling_exact": true,
+      "pass": true,
+      "turns_before": [
+        {
+          "label": "name_spelling",
+          "heard": "My name is Nitin. That's n i t h i n.",
+          "said": "noted, thank you, Nithin. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I can check that for you. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        }
+      ],
+      "turns_after": [
+        {
+          "label": "rep_confirm",
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "To confirm, you are all set for an appointment on Tuesday, September 8th, at 10 am. Is there anything else I can help you with?",
+          "tools": [
+            "set_call_intent",
+            "book_appointment"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "heard": "It's 5551234.",
+          "said": "Thanks, I've got that number. Is there anything else I can help you with?",
+          "tools": []
+        }
+      ],
+      "usage_pre": {
+        "text_in": 11721,
+        "audio_in": 630,
+        "text_out": 0,
+        "audio_out": 163,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usage_post": {
+        "text_in": 16074,
+        "audio_in": 752,
+        "text_out": 0,
+        "audio_out": 432,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.03213225,
+      "readback_letters_v1_buggy": "NITHIN"
+    },
+    {
+      "trial": 2,
+      "heard_name_pre_reseed": "My name is Nitin. That's n i t h i n.",
+      "stt_captured_name": false,
+      "reseed_history_chars": 460,
+      "readback_said": "textSure thing, your first name is Nithin, spelled n i t h i n. Is there anything else I can help you with?textThanks for calling Brightwork Family Dental. Have a great day.",
+      "readback_letters": "NITHIN",
+      "name_exact": true,
+      "spelling_exact": true,
+      "pass": true,
+      "turns_before": [
+        {
+          "label": "name_spelling",
+          "heard": "My name is Nitin. That's n i t h i n.",
+          "said": "textThanks, Nithin — and how can I help you today?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I can help with that. Are you a new or existing patient?I'm sorry, I can't get to the calendar right now. Would you like to leave a message so someone can call you back to schedule?",
+          "tools": [
+            "set_call_intent"
+          ]
+        }
+      ],
+      "turns_after": [
+        {
+          "label": "rep_confirm",
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "textI understand, and what was your full name, just so I can check for that time? I also need your date of birth, please.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "heard": "It's 5551234.",
+          "said": "textI'm sorry, I may have confused you. I just need your full name and your date of birth to look up that time. What are those details?",
+          "tools": []
+        }
+      ],
+      "usage_pre": {
+        "text_in": 15593,
+        "audio_in": 734,
+        "text_out": 0,
+        "audio_out": 313,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usage_post": {
+        "text_in": 16091,
+        "audio_in": 1339,
+        "text_out": 0,
+        "audio_out": 545,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.040278,
+      "readback_letters_v1_buggy": "NITHIN"
+    },
+    {
+      "trial": 3,
+      "heard_name_pre_reseed": "My name is Nitin. That's n i t h i n.",
+      "stt_captured_name": false,
+      "reseed_history_chars": 437,
+      "readback_said": "Of course, your first name is Nitin, spelled n i t h i n. Is there anything else I can help you with?",
+      "readback_letters": "NITHIN",
+      "name_exact": false,
+      "spelling_exact": true,
+      "pass": true,
+      "turns_before": [
+        {
+          "label": "name_spelling",
+          "heard": "My name is Nitin. That's n i t h i n.",
+          "said": "Thanks, Nitin. To make sure I'm helping correctly, are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I understand you're asking about availability, but are you looking to book a new appointment or reschedule an existing one?",
+          "tools": [
+            "set_call_intent"
+          ]
+        }
+      ],
+      "turns_after": [
+        {
+          "label": "rep_confirm",
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "",
+          "tools": [
+            "set_call_intent",
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "heard": "It's 5551234.",
+          "said": "I'm sorry, I'm not able to check availability right now. I don't want to give you the wrong information, so would you like to leave a message or have someone call you back?",
+          "tools": [
+            "record_sms_consent"
+          ]
+        }
+      ],
+      "usage_pre": {
+        "text_in": 11717,
+        "audio_in": 692,
+        "text_out": 0,
+        "audio_out": 269,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usage_post": {
+        "text_in": 11974,
+        "audio_in": 478,
+        "text_out": 0,
+        "audio_out": 355,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.02876625,
+      "readback_letters_v1_buggy": "NITHIN"
+    },
+    {
+      "trial": 4,
+      "heard_name_pre_reseed": "My name is Nitin. That's n i t h i n.",
+      "stt_captured_name": false,
+      "reseed_history_chars": 397,
+      "readback_said": "textprompt:Of course. The name I have is Nitin, spelled n i t h i n. Is there anything else I can help you with?",
+      "readback_letters": "NITHIN",
+      "name_exact": false,
+      "spelling_exact": true,
+      "pass": true,
+      "turns_before": [
+        {
+          "label": "name_spelling",
+          "heard": "My name is Nitin. That's n i t h i n.",
+          "said": "reaponse:Thanks, Nitin — I don't have a record of that name. Are you a new patient or have you been here before?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I can help with that. Are you a new or existing patient?",
+          "tools": []
+        }
+      ],
+      "turns_after": [
+        {
+          "label": "rep_confirm",
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "textprompt:I understand, Tuesday at ten AM. Before I can book that, can you confirm your full name for me, and your date of birth? Also, do you agree to receive text messages from Brightwork Family Dental?",
+          "tools": [
+            "set_call_intent",
+            "check_appointment_availability",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "heard": "It's 5551234.",
+          "said": "Thanks, I have five five five one two three four. Could you please provide your full name and date of birth to proceed with booking? Just to let you know, that time on Tuesday is no longer available. Is there another time that would work for you?",
+          "tools": []
+        }
+      ],
+      "usage_pre": {
+        "text_in": 11714,
+        "audio_in": 702,
+        "text_out": 0,
+        "audio_out": 245,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usage_post": {
+        "text_in": 12094,
+        "audio_in": 1159,
+        "text_out": 0,
+        "audio_out": 776,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.035691,
+      "readback_letters_v1_buggy": "NITHIN"
+    },
+    {
+      "trial": 5,
+      "heard_name_pre_reseed": "My name is Nitin. That's n i t h i n.",
+      "stt_captured_name": false,
+      "reseed_history_chars": 422,
+      "readback_said": "Of course, your name is Nitin, spelled N I T H I N. Is there anything else I can help with?",
+      "readback_letters": "NITHIN",
+      "name_exact": false,
+      "spelling_exact": true,
+      "pass": true,
+      "turns_before": [
+        {
+          "label": "name_spelling",
+          "heard": "My name is Nitin. That's n i t h i n.",
+          "said": "textblockThanks, Nitin. Just to confirm, are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Thanks, Nitin. Are you looking for a new appointment or rescheduling? And could you please provide your date of birth?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ]
+        }
+      ],
+      "turns_after": [
+        {
+          "label": "rep_confirm",
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "textblockThank you. Your appointment is set for Tuesday, September 8th at 10 00 AM. We look forward to seeing you. Is there anything else I can help with today?",
+          "tools": [
+            "book_appointment",
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "heard": "It's 5551234.",
+          "said": "I've made a note of that number. Is there anything else I can help you with today?",
+          "tools": []
+        }
+      ],
+      "usage_pre": {
+        "text_in": 11725,
+        "audio_in": 680,
+        "text_out": 0,
+        "audio_out": 262,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usage_post": {
+        "text_in": 20148,
+        "audio_in": 875,
+        "text_out": 0,
+        "audio_out": 441,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.037005750000000004,
+      "readback_letters_v1_buggy": "NITHIN"
+    }
+  ]
+}

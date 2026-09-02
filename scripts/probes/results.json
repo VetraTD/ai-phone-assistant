@@ -1,0 +1,246 @@
+{
+  "run_at": "2026-09-02T02:40:01.828Z",
+  "plan": "scripts/probes/PLAN.md",
+  "verdicts_locked": "2026-09-01T20:30:00Z",
+  "prompt": {
+    "chars": 13704,
+    "approx_tokens": 3426,
+    "tools": 6,
+    "business": "Brightwork Family Dental",
+    "fixture": "appointments-availability"
+  },
+  "spend": {
+    "cap_usd": 5,
+    "total_usd": 1.297721,
+    "by_probe": {
+      "L0": 0.0089,
+      "L1": 0.359,
+      "L2": 0.2843,
+      "L3": 0.118,
+      "L4": 0.3288,
+      "L5": 0.1987
+    }
+  },
+  "latency_model_leg_ms": {
+    "_metric_note": "last caller speech frame -> first model audio byte. NOT voice-to-voice: no Twilio leg, no playout queue.",
+    "gemini_live_3_1": {
+      "p50": 1043,
+      "n": 25,
+      "plain_p50": 1013,
+      "tool_p50": 1070,
+      "missed_turns": 0
+    },
+    "openai_mini": {
+      "p50": 1983,
+      "n": 22,
+      "missed_turns": 2,
+      "misattributed_turns": 1
+    },
+    "openai_full": {
+      "p50": 1375,
+      "n": 5,
+      "missed_turns": 0
+    },
+    "vertex_eu_2_5_native": {
+      "p50": 1053,
+      "n": 20
+    },
+    "cascade_baseline": {
+      "llm_ttfb_ms_p50": 940,
+      "voice_to_voice_p50_ms": 2607,
+      "barge_in_trade_ms": 340,
+      "cost_per_3min_call_cache_on_usd": 0.13
+    }
+  },
+  "barge_in": {
+    "_caveat": "Scripted replies were 2-3 s and had often finished streaming before the barge signal arrived. Interrupting a LONG in-flight reply was not tested. Also: no playout queue exists in this harness, so nothing here measures what a caller would hear.",
+    "gemini": {
+      "trials": 5,
+      "signalled": 5,
+      "signal_latency_ms_p50": 490,
+      "audio_still_in_flight_at_signal": 0,
+      "replies_truncated_mid_sentence": 2
+    },
+    "openai_mini": {
+      "trials": 5,
+      "cancelled": 2,
+      "audio_still_in_flight_at_detection": 1,
+      "speech_detect_ms_p50": 445
+    }
+  },
+  "semantic_vad": [
+    {
+      "eagerness": "low",
+      "label": "no_terminal_punct",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    },
+    {
+      "eagerness": "low",
+      "label": "trailing_lead_in",
+      "n": 5,
+      "cut_in": 3,
+      "waited": 2,
+      "window_ms": 2000
+    },
+    {
+      "eagerness": "low",
+      "label": "partial_digits",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    },
+    {
+      "eagerness": "medium",
+      "label": "no_terminal_punct",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    },
+    {
+      "eagerness": "medium",
+      "label": "trailing_lead_in",
+      "n": 5,
+      "cut_in": 5,
+      "waited": 0,
+      "window_ms": 2000
+    },
+    {
+      "eagerness": "medium",
+      "label": "partial_digits",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    },
+    {
+      "eagerness": "high",
+      "label": "no_terminal_punct",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    },
+    {
+      "eagerness": "high",
+      "label": "trailing_lead_in",
+      "n": 5,
+      "cut_in": 5,
+      "waited": 0,
+      "window_ms": 2000
+    },
+    {
+      "eagerness": "high",
+      "label": "partial_digits",
+      "n": 5,
+      "cut_in": 0,
+      "waited": 5,
+      "window_ms": 1500
+    }
+  ],
+  "reseed_name_fidelity": {
+    "probe": "L4",
+    "model": "gemini-3.1-flash-live-preview",
+    "n": 5,
+    "ground_truth": "Nithin",
+    "exact_match_count": 5,
+    "name_exact_count": 2,
+    "spelling_exact_count": 5,
+    "stt_captured_name_count": 0,
+    "usd": 0.17387325,
+    "rescored_at": "2026-09-02T02:31:57.787Z",
+    "rescore_reason": "letter extractor took every single-letter token instead of the longest contiguous run; a correct 'n i t h i n' scored as NITHINI. Re-scored from saved transcripts, no new calls.",
+    "name_word_spoken_count": 2
+  },
+  "vertex_eu": {
+    "probe": "L5",
+    "project": "vetra-uk-edc8ca",
+    "location": "europe-west1",
+    "model": "gemini-live-2.5-flash-native-audio",
+    "n": 5,
+    "fully_working_runs": 5,
+    "turn1_ok_runs": 5,
+    "turn2_silence_reproduced": false,
+    "connect_failures": 0,
+    "errors": [],
+    "usd": 0.0888955
+  },
+  "verdicts": [
+    {
+      "id": "V1",
+      "probe": "L1",
+      "prediction": "Gemini model leg p50 < 940 ms",
+      "result": "1043 ms (n=25)",
+      "pass": false,
+      "cost": 0.35898,
+      "note": "model_leg_ms includes the vendor's own endpointing wait, which the 940 ms llm_ttfb baseline excludes — see question 1. Plain turns p50 1013 ms vs tool turns 1070 ms in this run, but the first L1 run put tool turns ~650 ms slower; the two runs disagree and neither figure should be quoted."
+    },
+    {
+      "id": "V2",
+      "probe": "L1",
+      "prediction": "serverContent.interrupted fires on >=4 of 5 barge-ins",
+      "result": "5/5 (10/10 across both independent runs)",
+      "pass": true,
+      "cost": 0,
+      "note": "The reported Gemini barge-in bug does NOT reproduce for us."
+    },
+    {
+      "id": "V3",
+      "probe": "L1",
+      "prediction": "barge-in stop latency < 340 ms",
+      "result": "490 ms p50",
+      "pass": false,
+      "cost": 0,
+      "note": "Signal latency, not stop latency: there is no playout queue in this harness. See section (c)."
+    },
+    {
+      "id": "V4",
+      "probe": "L2",
+      "prediction": "at eagerness low, no cut-in on no_terminal_punct / trailing_lead_in in >=4 of 5",
+      "result": "no_terminal_punct 5/5 waited (PASS); trailing_lead_in 2/5 waited (FAIL)",
+      "pass": false,
+      "cost": 0.28434716,
+      "note": "The prediction names both fixtures, so one failing cell fails the verdict. Pooled across both L2 runs: no_terminal_punct 10/10 waited, trailing_lead_in 5/10."
+    },
+    {
+      "id": "V5",
+      "probe": "L2",
+      "prediction": "OpenAI mini model leg p50 < Gemini's (V1)",
+      "result": "1983 ms vs Gemini 1043 ms — +90%",
+      "pass": false,
+      "cost": 0,
+      "note": "OpenAI mini also produced 2 turns with no audio at all and 1 turn credited to the wrong window; Gemini produced 0 and 0."
+    },
+    {
+      "id": "V6",
+      "probe": "L4",
+      "prediction": "name read-back exact-matches ground truth 5/5",
+      "result": "spelling exact 5/5 (10/10 across both runs)",
+      "pass": true,
+      "cost": 0.32879925,
+      "note": "Vendor STT transcribed the name itself as \"Nitin\" in 5/5 — the spelled-out letters carried what the transcript lost."
+    },
+    {
+      "id": "V7",
+      "probe": "L5",
+      "prediction": "turn-2 silence does NOT reproduce",
+      "result": "5/5 runs fully working, all 4 turns; reproduced: false",
+      "pass": true,
+      "cost": 0.19866649999999997,
+      "note": "project vetra-uk-edc8ca, location europe-west1. Model leg p50 1053 ms."
+    },
+    {
+      "id": "V8",
+      "probe": "all",
+      "prediction": "measured cost/call within +/-25% of the analysis doc's modelled figures",
+      "result": "Gemini 19 turns, OpenAI mini 22 turns, OpenAI full 19 turns — vs a 12-turn call, all 35-45% low",
+      "pass": false,
+      "cost": 1.297721,
+      "note": "The doc's absolute figures are only reproducible if a 3-minute call is ~19-22 turns; at a 12-turn call all three vendors land 35-45% below. More important: the measured RANKING is reversed — see section (b) note."
+    }
+  ]
+}

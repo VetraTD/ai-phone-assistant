@@ -1,0 +1,93 @@
+{
+  "_": "PRE-REGISTERED. Written before the first probe run on 2026-09-01. NEVER edited afterwards. The report prints prediction beside result so a wrong prediction stays visible instead of being quietly retrofitted.",
+  "written_at": "2026-09-01T20:30:00Z",
+  "baselines": {
+    "llm_ttfb_ms_p50": 940,
+    "voice_to_voice_p50_ms": 2607,
+    "barge_in_trade_ms": 340,
+    "cost_per_3min_call_cache_on_usd": 0.130
+  },
+  "verdicts": [
+    {
+      "id": "V1",
+      "probe": "L1",
+      "metric": "gemini_model_leg_ms_p50",
+      "prediction": "Gemini Live model leg p50 < 940 ms",
+      "fails_if": ">= 940 ms — no win at the leg that dominates the cascade turn",
+      "threshold": 940,
+      "direction": "lt"
+    },
+    {
+      "id": "V2",
+      "probe": "L1",
+      "metric": "gemini_interrupted_events",
+      "prediction": "serverContent.interrupted fires on >=4 of 5 barge-ins",
+      "fails_if": "<=3 — the reported barge-in bug is real for us",
+      "threshold": 4,
+      "of": 5,
+      "direction": "gte"
+    },
+    {
+      "id": "V3",
+      "probe": "L1",
+      "metric": "gemini_barge_stop_latency_ms_p50",
+      "prediction": "barge-in stop latency < 340 ms",
+      "fails_if": ">= 340 ms — no better than the cascade's measured trade",
+      "threshold": 340,
+      "direction": "lt"
+    },
+    {
+      "id": "V4",
+      "probe": "L2",
+      "metric": "openai_semantic_vad_low_no_cutin",
+      "prediction": "at eagerness:low, no cut-in on no_terminal_punct / trailing_lead_in in >=4 of 5",
+      "fails_if": "<=3 — semantic_vad does not solve our measured endpointing failures, and OpenAI's main advantage over Gemini evaporates",
+      "threshold": 4,
+      "of": 5,
+      "direction": "gte"
+    },
+    {
+      "id": "V5",
+      "probe": "L2",
+      "metric": "openai_mini_model_leg_ms_p50",
+      "prediction": "OpenAI mini model leg p50 < Gemini's (V1)",
+      "fails_if": ">= — no latency reason to prefer OpenAI",
+      "threshold": "V1",
+      "direction": "lt"
+    },
+    {
+      "id": "V6",
+      "probe": "L4",
+      "metric": "gemini_reseed_name_exact_match",
+      "prediction": "name read-back exact-matches ground truth 5/5",
+      "fails_if": "<5/5 — kills LV2, which is the entire economic case for Gemini Live",
+      "threshold": 5,
+      "of": 5,
+      "direction": "gte",
+      "ground_truth": "Nithin"
+    },
+    {
+      "id": "V7",
+      "probe": "L5",
+      "metric": "vertex_eu_turn2_silence",
+      "prediction": "turn-2 silence does NOT reproduce",
+      "fails_if": "reproduces — Gemini has no residency-compliant Live option and OpenAI wins the hard gate by default",
+      "direction": "no_repro"
+    },
+    {
+      "id": "V8",
+      "probe": "all",
+      "metric": "measured_cost_vs_modelled",
+      "prediction": "measured cost/call within +/-25% of the analysis doc's modelled figures",
+      "fails_if": "outside — section 4 of the analysis doc needs re-deriving",
+      "modelled_usd_per_call": {
+        "gemini_live_reseed": 0.122,
+        "gemini_live_baseline": 0.149,
+        "openai_mini": 0.131,
+        "openai_full": 0.375
+      },
+      "tolerance": 0.25,
+      "note": "Modelled figures include Twilio carriage $0.0255/call. The probes have NO Twilio leg, so the comparison is made against the model-only remainder (modelled minus 0.0255) and both are printed."
+    }
+  ]
+}

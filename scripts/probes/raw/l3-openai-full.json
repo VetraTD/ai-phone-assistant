@@ -1,0 +1,130 @@
+{
+  "summary": {
+    "probe": "L3",
+    "model": "gpt-realtime-2.1",
+    "n": 1,
+    "prompt": {
+      "chars": 13704,
+      "approx_tokens": 3426,
+      "tools": 6,
+      "business": "Brightwork Family Dental",
+      "fixture": "appointments-availability"
+    },
+    "model_leg_ms": {
+      "p50": 1375,
+      "p95": 1700,
+      "mean": 1375,
+      "n": 5,
+      "samples": [
+        1047,
+        1720,
+        1375,
+        1113,
+        1620
+      ]
+    },
+    "barge": {
+      "trials": 1,
+      "interrupted_count": 0,
+      "speech_latency_ms": {
+        "p50": 436
+      }
+    },
+    "semantic_vad": null,
+    "usd": 0.11802800000000002
+  },
+  "conversations": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1047,
+          "audio_chunks": 14,
+          "audio_bytes": 42400,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Sure thing, I can help with that. First, are you a new patient or an existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1720,
+          "audio_chunks": 13,
+          "audio_bytes": 39200,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I can help with that.Of course. Before we go further, are you a new patient or an existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1375,
+          "audio_chunks": 19,
+          "audio_bytes": 58000,
+          "heard": "It's 555-1234.",
+          "said": "Of course, thanks for sharing that, but first I need to know if you’re a new patient or an existing patient. Which one are you?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1113,
+          "audio_chunks": 17,
+          "audio_bytes": 53600,
+          "heard": "Tuesday at 10, works for me.",
+          "said": "Sure thing. Before we look at a time, I need to know if you’re a new patient or an existing patient. Which are you?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1620,
+          "audio_chunks": 11,
+          "audio_bytes": 34400,
+          "heard": "Thanks, bye.",
+          "said": "Of course. Before we end, is there anything else I can help you with today?",
+          "tools": []
+        }
+      ],
+      "usage": {
+        "text_in": 8029,
+        "audio_in": 217,
+        "cached_text_in": 16064,
+        "cached_audio_in": 192,
+        "text_out": 570,
+        "audio_out": 581
+      },
+      "usd": 0.09186640000000001,
+      "error": null
+    }
+  ],
+  "barges": [
+    {
+      "trial": 1,
+      "barged": true,
+      "opener_model_leg_ms": 2661,
+      "interrupted": false,
+      "speech_detected": true,
+      "response_cancelled": false,
+      "barge_to_speech_started_ms": 436,
+      "barge_to_last_audio_ms": 151,
+      "chunks_before_barge": 6,
+      "audio_still_arriving_1s_later": false,
+      "usage": {
+        "text_in": 3954,
+        "audio_in": 46,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 161,
+        "audio_out": 74
+      },
+      "usd": 0.026161600000000004,
+      "error": null
+    }
+  ],
+  "vad": []
+}

@@ -1,0 +1,2637 @@
+{
+  "cap_usd": 5,
+  "spent_usd": 1.297721,
+  "entries": [
+    {
+      "at": "2026-09-02T01:35:35.434Z",
+      "probe": "L0",
+      "arm": "harness-validation",
+      "model": "gemini-3.1-flash-live-preview",
+      "note": "3 single-turn transport validation runs while debugging VAD padding + tool responses",
+      "usage": {
+        "text_in": 7838,
+        "audio_in": 96,
+        "audio_out": 224
+      },
+      "usd": 0.0089
+    },
+    {
+      "at": "2026-09-02T01:36:26.107Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 8008,
+        "audio_in": 1626,
+        "text_out": 0,
+        "audio_out": 82,
+        "cached_in": 0
+      },
+      "usd": 0.011868
+    },
+    {
+      "at": "2026-09-02T01:37:02.118Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7933,
+        "audio_in": 1172,
+        "text_out": 0,
+        "audio_out": 71,
+        "cached_in": 0
+      },
+      "usd": 0.01031775
+    },
+    {
+      "at": "2026-09-02T01:37:48.253Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 8047,
+        "audio_in": 1798,
+        "text_out": 0,
+        "audio_out": 79,
+        "cached_in": 0
+      },
+      "usd": 0.01237725
+    },
+    {
+      "at": "2026-09-02T01:38:29.202Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7984,
+        "audio_in": 1548,
+        "text_out": 0,
+        "audio_out": 76,
+        "cached_in": 0
+      },
+      "usd": 0.011543999999999999
+    },
+    {
+      "at": "2026-09-02T01:39:03.383Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7928,
+        "audio_in": 1188,
+        "text_out": 0,
+        "audio_out": 74,
+        "cached_in": 0
+      },
+      "usd": 0.010398000000000001
+    },
+    {
+      "at": "2026-09-02T01:39:10.787Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 87,
+        "cached_in": 0
+      },
+      "usd": 0.00408
+    },
+    {
+      "at": "2026-09-02T01:39:18.881Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 82,
+        "cached_in": 0
+      },
+      "usd": 0.007068
+    },
+    {
+      "at": "2026-09-02T01:39:27.022Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 83,
+        "cached_in": 0
+      },
+      "usd": 0.0070799999999999995
+    },
+    {
+      "at": "2026-09-02T01:39:37.154Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 84,
+        "cached_in": 0
+      },
+      "usd": 0.007092
+    },
+    {
+      "at": "2026-09-02T01:39:44.552Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 90,
+        "cached_in": 0
+      },
+      "usd": 0.004116
+    },
+    {
+      "at": "2026-09-02T01:42:04.704Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7842,
+        "audio_in": 508,
+        "text_out": 0,
+        "audio_out": 85,
+        "cached_in": 0
+      },
+      "usd": 0.008425499999999999
+    },
+    {
+      "at": "2026-09-02T01:42:04.704Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 8376,
+        "audio_in": 1058,
+        "text_out": 0,
+        "audio_out": 186,
+        "cached_in": 0
+      },
+      "usd": 0.011687999999999999
+    },
+    {
+      "at": "2026-09-02T01:43:05.337Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7888,
+        "audio_in": 678,
+        "text_out": 0,
+        "audio_out": 173,
+        "cached_in": 0
+      },
+      "usd": 0.010025999999999998
+    },
+    {
+      "at": "2026-09-02T01:43:05.338Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 4076,
+        "audio_in": 632,
+        "text_out": 0,
+        "audio_out": 218,
+        "cached_in": 0
+      },
+      "usd": 0.007569
+    },
+    {
+      "at": "2026-09-02T01:43:48.602Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7814,
+        "audio_in": 492,
+        "text_out": 0,
+        "audio_out": 123,
+        "cached_in": 0
+      },
+      "usd": 0.0088125
+    },
+    {
+      "at": "2026-09-02T01:43:48.603Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 4009,
+        "audio_in": 365,
+        "text_out": 0,
+        "audio_out": 172,
+        "cached_in": 0
+      },
+      "usd": 0.00616575
+    },
+    {
+      "at": "2026-09-02T01:44:36.915Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7860,
+        "audio_in": 594,
+        "text_out": 0,
+        "audio_out": 94,
+        "cached_in": 0
+      },
+      "usd": 0.008805000000000002
+    },
+    {
+      "at": "2026-09-02T01:44:36.916Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 4023,
+        "audio_in": 446,
+        "text_out": 0,
+        "audio_out": 193,
+        "cached_in": 0
+      },
+      "usd": 0.00667125
+    },
+    {
+      "at": "2026-09-02T01:45:30.393Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7862,
+        "audio_in": 548,
+        "text_out": 0,
+        "audio_out": 149,
+        "cached_in": 0
+      },
+      "usd": 0.009328499999999998
+    },
+    {
+      "at": "2026-09-02T01:45:30.394Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 8134,
+        "audio_in": 1161,
+        "text_out": 0,
+        "audio_out": 272,
+        "cached_in": 0
+      },
+      "usd": 0.0128475
+    },
+    {
+      "at": "2026-09-02T01:49:31.986Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1430,
+        "audio_in": 281,
+        "cached_text_in": 22656,
+        "cached_audio_in": 128,
+        "text_out": 1416,
+        "audio_out": 860
+      },
+      "usd": 0.02567696
+    },
+    {
+      "at": "2026-09-02T01:49:55.126Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 8001,
+        "audio_in": 277,
+        "cached_text_in": 11968,
+        "cached_audio_in": 64,
+        "text_out": 1040,
+        "audio_out": 414
+      },
+      "usd": 0.01909028
+    },
+    {
+      "at": "2026-09-02T01:51:14.155Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1005,
+        "audio_in": 208,
+        "cached_text_in": 14976,
+        "cached_audio_in": 128,
+        "text_out": 1021,
+        "audio_out": 390
+      },
+      "usd": 0.013883159999999999
+    },
+    {
+      "at": "2026-09-02T01:51:42.965Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 4315,
+        "audio_in": 281,
+        "cached_text_in": 19776,
+        "cached_audio_in": 128,
+        "text_out": 1466,
+        "audio_out": 719
+      },
+      "usd": 0.02453516
+    },
+    {
+      "at": "2026-09-02T01:53:03.890Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 4193,
+        "audio_in": 190,
+        "cached_text_in": 15808,
+        "cached_audio_in": 256,
+        "text_out": 1335,
+        "audio_out": 646
+      },
+      "usd": 0.02159068
+    },
+    {
+      "at": "2026-09-02T01:53:14.360Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1586,
+        "audio_in": 46,
+        "cached_text_in": 6272,
+        "cached_audio_in": 0,
+        "text_out": 255,
+        "audio_out": 160
+      },
+      "usd": 0.0055999199999999996
+    },
+    {
+      "at": "2026-09-02T01:53:28.495Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 3954,
+        "audio_in": 46,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 135,
+        "audio_out": 58
+      },
+      "usd": 0.00455064
+    },
+    {
+      "at": "2026-09-02T01:53:36.767Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 925,
+        "audio_in": 69,
+        "cached_text_in": 10880,
+        "cached_audio_in": 0,
+        "text_out": 213,
+        "audio_out": 280
+      },
+      "usd": 0.008008999999999999
+    },
+    {
+      "at": "2026-09-02T01:54:11.438Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 775,
+        "audio_in": 23,
+        "cached_text_in": 3136,
+        "cached_audio_in": 0,
+        "text_out": 192,
+        "audio_out": 0
+      },
+      "usd": 0.00134396
+    },
+    {
+      "at": "2026-09-02T01:54:27.276Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 3954,
+        "audio_in": 46,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 155,
+        "audio_out": 87
+      },
+      "usd": 0.00517864
+    },
+    {
+      "at": "2026-09-02T01:54:31.380Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:54:35.512Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:54:41.700Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:54:47.902Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:54:51.960Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:54:56.639Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:01.254Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:05.878Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:10.489Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:15.089Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:21.524Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:27.904Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:34.316Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:42.831Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:49.220Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:55.587Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:55:59.626Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:03.718Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:09.867Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:13.922Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:18.518Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:23.124Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:29.946Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:36.727Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:41.576Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:47.994Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:56:54.395Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:00.843Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:09.401Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:15.820Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:21.958Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:26.012Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:30.399Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:34.424Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:38.480Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:43.185Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:47.808Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:52.431Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:57:59.247Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:03.874Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:12.551Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:21.097Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:27.548Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:33.924Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:58:40.364Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T01:59:50.806Z",
+      "probe": "L3",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 8029,
+        "audio_in": 217,
+        "cached_text_in": 16064,
+        "cached_audio_in": 192,
+        "text_out": 570,
+        "audio_out": 581
+      },
+      "usd": 0.09186640000000001
+    },
+    {
+      "at": "2026-09-02T02:00:06.976Z",
+      "probe": "L3",
+      "arm": "barge",
+      "run": 1,
+      "model": "gpt-realtime-2.1",
+      "usage": {
+        "text_in": 3954,
+        "audio_in": 46,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 161,
+        "audio_out": 74
+      },
+      "usd": 0.026161600000000004
+    },
+    {
+      "at": "2026-09-02T02:01:30.843Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3161,
+        "audio_in": 298,
+        "text_out": 37,
+        "audio_out": 105
+      },
+      "usd": 0.0038085000000000003
+    },
+    {
+      "at": "2026-09-02T02:01:47.644Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3161,
+        "audio_in": 317,
+        "text_out": 29,
+        "audio_out": 104
+      },
+      "usd": 0.0038374999999999998
+    },
+    {
+      "at": "2026-09-02T02:02:02.392Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3280,
+        "audio_in": 203,
+        "text_out": 4,
+        "audio_out": 13
+      },
+      "usd": 0.002413
+    },
+    {
+      "at": "2026-09-02T02:02:18.582Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3161,
+        "audio_in": 316,
+        "text_out": 23,
+        "audio_out": 67
+      },
+      "usd": 0.0033785
+    },
+    {
+      "at": "2026-09-02T02:02:32.801Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3340,
+        "audio_in": 349,
+        "text_out": 40,
+        "audio_out": 71
+      },
+      "usd": 0.0036490000000000003
+    },
+    {
+      "at": "2026-09-02T02:04:50.967Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1365,
+        "audio_in": 281,
+        "cached_text_in": 22784,
+        "cached_audio_in": 128,
+        "text_out": 1372,
+        "audio_out": 657
+      },
+      "usd": 0.02148004
+    },
+    {
+      "at": "2026-09-02T02:06:33.677Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1323,
+        "audio_in": 217,
+        "cached_text_in": 22976,
+        "cached_audio_in": 192,
+        "text_out": 2153,
+        "audio_out": 894
+      },
+      "usd": 0.02746636
+    },
+    {
+      "at": "2026-09-02T02:07:05.156Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1459,
+        "audio_in": 339,
+        "cached_text_in": 26880,
+        "cached_audio_in": 192,
+        "text_out": 1343,
+        "audio_out": 808
+      },
+      "usd": 0.0253382
+    },
+    {
+      "at": "2026-09-02T02:08:41.243Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 338,
+        "audio_in": 320,
+        "cached_text_in": 23872,
+        "cached_audio_in": 128,
+        "text_out": 1002,
+        "audio_out": 702
+      },
+      "usd": 0.021331120000000002
+    },
+    {
+      "at": "2026-09-02T02:09:08.639Z",
+      "probe": "L2",
+      "arm": "conversation",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 2372,
+        "audio_in": 329,
+        "cached_text_in": 21888,
+        "cached_audio_in": 128,
+        "text_out": 809,
+        "audio_out": 837
+      },
+      "usd": 0.024759279999999998
+    },
+    {
+      "at": "2026-09-02T02:09:59.945Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1031,
+        "audio_in": 23,
+        "cached_text_in": 2880,
+        "cached_audio_in": 0,
+        "text_out": 214,
+        "audio_out": 123
+      },
+      "usd": 0.003995
+    },
+    {
+      "at": "2026-09-02T02:10:13.554Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 3954,
+        "audio_in": 46,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 181,
+        "audio_out": 72
+      },
+      "usd": 0.00494104
+    },
+    {
+      "at": "2026-09-02T02:10:29.394Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1074,
+        "audio_in": 46,
+        "cached_text_in": 6784,
+        "cached_audio_in": 0,
+        "text_out": 179,
+        "audio_out": 132
+      },
+      "usd": 0.00458104
+    },
+    {
+      "at": "2026-09-02T02:10:42.256Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 775,
+        "audio_in": 23,
+        "cached_text_in": 3136,
+        "cached_audio_in": 0,
+        "text_out": 113,
+        "audio_out": 113
+      },
+      "usd": 0.00341436
+    },
+    {
+      "at": "2026-09-02T02:10:50.299Z",
+      "probe": "L2",
+      "arm": "barge",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1902,
+        "audio_in": 69,
+        "cached_text_in": 10048,
+        "cached_audio_in": 0,
+        "text_out": 477,
+        "audio_out": 411
+      },
+      "usd": 0.01179888
+    },
+    {
+      "at": "2026-09-02T02:11:12.740Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:16.886Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:20.937Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:24.969Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:29.035Z",
+      "probe": "L2",
+      "arm": "vad:low:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:33.653Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:38.308Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:42.973Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:47.659Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:11:52.298Z",
+      "probe": "L2",
+      "arm": "vad:low:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:00.908Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:07.335Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:15.921Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:24.459Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:35.361Z",
+      "probe": "L2",
+      "arm": "vad:low:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:39.384Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:43.447Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:47.468Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:51.555Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:12:55.599Z",
+      "probe": "L2",
+      "arm": "vad:medium:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:00.229Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:04.843Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:09.512Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:14.152Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:20.934Z",
+      "probe": "L2",
+      "arm": "vad:medium:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:27.351Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:35.953Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:42.387Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:51.078Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:13:59.709Z",
+      "probe": "L2",
+      "arm": "vad:medium:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:05.817Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:09.895Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:13.925Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:20.092Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:24.132Z",
+      "probe": "L2",
+      "arm": "vad:high:no_terminal_punct",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:28.772Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:33.403Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 1031,
+        "audio_in": 28,
+        "cached_text_in": 2880,
+        "cached_audio_in": 0,
+        "text_out": 104,
+        "audio_out": 110
+      },
+      "usd": 0.003521
+    },
+    {
+      "at": "2026-09-02T02:14:40.059Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:44.685Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 7,
+        "audio_in": 28,
+        "cached_text_in": 3904,
+        "cached_audio_in": 0,
+        "text_out": 110,
+        "audio_out": 74
+      },
+      "usd": 0.00226244
+    },
+    {
+      "at": "2026-09-02T02:14:49.307Z",
+      "probe": "L2",
+      "arm": "vad:high:trailing_lead_in",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:14:55.679Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 1,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:15:04.176Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 2,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:15:10.549Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 3,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:15:19.123Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 4,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:15:27.607Z",
+      "probe": "L2",
+      "arm": "vad:high:partial_digits",
+      "run": 5,
+      "model": "gpt-realtime-2.1-mini",
+      "usage": {
+        "text_in": 0,
+        "audio_in": 0,
+        "text_out": 0,
+        "audio_out": 0
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-02T02:16:19.716Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3172,
+        "audio_in": 440,
+        "text_out": 27,
+        "audio_out": 85
+      },
+      "usd": 0.003979999999999999
+    },
+    {
+      "at": "2026-09-02T02:16:41.679Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3178,
+        "audio_in": 415,
+        "text_out": 23,
+        "audio_out": 71
+      },
+      "usd": 0.003732
+    },
+    {
+      "at": "2026-09-02T02:17:03.359Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3188,
+        "audio_in": 441,
+        "text_out": 20,
+        "audio_out": 50
+      },
+      "usd": 0.0035570000000000003
+    },
+    {
+      "at": "2026-09-02T02:17:24.948Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3187,
+        "audio_in": 429,
+        "text_out": 18,
+        "audio_out": 36
+      },
+      "usd": 0.0033485000000000003
+    },
+    {
+      "at": "2026-09-02T02:17:47.095Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 3186,
+        "audio_in": 439,
+        "text_out": 23,
+        "audio_out": 70
+      },
+      "usd": 0.0037960000000000003
+    },
+    {
+      "at": "2026-09-02T02:21:21.536Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15697,
+        "audio_in": 925,
+        "text_out": 108,
+        "audio_out": 302,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.014463499999999999
+    },
+    {
+      "at": "2026-09-02T02:21:35.589Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 27546,
+        "audio_in": 3015,
+        "text_out": 0,
+        "audio_out": 629,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0372525
+    },
+    {
+      "at": "2026-09-02T02:21:47.523Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22740,
+        "audio_in": 1924,
+        "text_out": 212,
+        "audio_out": 548,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.024141999999999997
+    },
+    {
+      "at": "2026-09-02T02:21:47.756Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11799,
+        "audio_in": 726,
+        "text_out": 0,
+        "audio_out": 268,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.014243249999999999
+    },
+    {
+      "at": "2026-09-02T02:21:47.758Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 12005,
+        "audio_in": 965,
+        "text_out": 0,
+        "audio_out": 601,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.01911075
+    },
+    {
+      "at": "2026-09-02T02:22:12.769Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 19343,
+        "audio_in": 1380,
+        "text_out": 162,
+        "audio_out": 520,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.020375499999999998
+    },
+    {
+      "at": "2026-09-02T02:22:28.107Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 23866,
+        "audio_in": 3771,
+        "text_out": 0,
+        "audio_out": 891,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.039904499999999996
+    },
+    {
+      "at": "2026-09-02T02:22:35.259Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15848,
+        "audio_in": 1130,
+        "text_out": 128,
+        "audio_out": 310,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.015290000000000002
+    },
+    {
+      "at": "2026-09-02T02:22:36.270Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11650,
+        "audio_in": 662,
+        "text_out": 0,
+        "audio_out": 274,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.0140115
+    },
+    {
+      "at": "2026-09-02T02:22:36.271Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 12422,
+        "audio_in": 771,
+        "text_out": 0,
+        "audio_out": 466,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.0172215
+    },
+    {
+      "at": "2026-09-02T02:23:46.760Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 27512,
+        "audio_in": 2948,
+        "text_out": 0,
+        "audio_out": 652,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.037302
+    },
+    {
+      "at": "2026-09-02T02:24:32.499Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 19739,
+        "audio_in": 2209,
+        "text_out": 0,
+        "audio_out": 742,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03033525
+    },
+    {
+      "at": "2026-09-02T02:25:15.396Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 19727,
+        "audio_in": 2016,
+        "text_out": 0,
+        "audio_out": 622,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.02830725
+    },
+    {
+      "at": "2026-09-02T02:25:54.365Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 27573,
+        "audio_in": 2760,
+        "text_out": 0,
+        "audio_out": 564,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03572775
+    },
+    {
+      "at": "2026-09-02T02:26:37.964Z",
+      "probe": "L1",
+      "arm": "conversation",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 23737,
+        "audio_in": 3021,
+        "text_out": 0,
+        "audio_out": 674,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03495375
+    },
+    {
+      "at": "2026-09-02T02:26:45.473Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 86,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.0040680000000000004
+    },
+    {
+      "at": "2026-09-02T02:26:52.878Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 78,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.003972
+    },
+    {
+      "at": "2026-09-02T02:27:03.099Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 84,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007092
+    },
+    {
+      "at": "2026-09-02T02:27:11.126Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 81,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007056
+    },
+    {
+      "at": "2026-09-02T02:27:19.150Z",
+      "probe": "L1",
+      "arm": "barge",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 82,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007068
+    },
+    {
+      "at": "2026-09-02T02:28:09.521Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11721,
+        "audio_in": 630,
+        "text_out": 0,
+        "audio_out": 163,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.012636749999999999
+    },
+    {
+      "at": "2026-09-02T02:28:09.522Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 16074,
+        "audio_in": 752,
+        "text_out": 0,
+        "audio_out": 432,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.0194955
+    },
+    {
+      "at": "2026-09-02T02:29:04.516Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 15593,
+        "audio_in": 734,
+        "text_out": 0,
+        "audio_out": 313,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.01765275
+    },
+    {
+      "at": "2026-09-02T02:29:04.518Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 16091,
+        "audio_in": 1339,
+        "text_out": 0,
+        "audio_out": 545,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.022625250000000003
+    },
+    {
+      "at": "2026-09-02T02:30:10.384Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11717,
+        "audio_in": 692,
+        "text_out": 0,
+        "audio_out": 269,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.01409175
+    },
+    {
+      "at": "2026-09-02T02:30:10.385Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11974,
+        "audio_in": 478,
+        "text_out": 0,
+        "audio_out": 355,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.0146745
+    },
+    {
+      "at": "2026-09-02T02:31:10.058Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11714,
+        "audio_in": 702,
+        "text_out": 0,
+        "audio_out": 245,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.0138315
+    },
+    {
+      "at": "2026-09-02T02:31:10.060Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 12094,
+        "audio_in": 1159,
+        "text_out": 0,
+        "audio_out": 776,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.0218595
+    },
+    {
+      "at": "2026-09-02T02:31:57.672Z",
+      "probe": "L4",
+      "arm": "pre-reseed",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 11725,
+        "audio_in": 680,
+        "text_out": 0,
+        "audio_out": 262,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.01397775
+    },
+    {
+      "at": "2026-09-02T02:31:57.674Z",
+      "probe": "L4",
+      "arm": "post-reseed",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "text_in": 20148,
+        "audio_in": 875,
+        "text_out": 0,
+        "audio_out": 441,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.023028
+    },
+    {
+      "at": "2026-09-02T02:32:42.888Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 1,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15763,
+        "audio_in": 1089,
+        "text_out": 105,
+        "audio_out": 316,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.015150499999999999
+    },
+    {
+      "at": "2026-09-02T02:33:04.805Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 2,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15733,
+        "audio_in": 1040,
+        "text_out": 94,
+        "audio_out": 285,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0145945
+    },
+    {
+      "at": "2026-09-02T02:33:30.908Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 3,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 22590,
+        "audio_in": 1904,
+        "text_out": 194,
+        "audio_out": 513,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.023551000000000002
+    },
+    {
+      "at": "2026-09-02T02:33:54.897Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 4,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 19048,
+        "audio_in": 1561,
+        "text_out": 145,
+        "audio_out": 401,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.019309
+    },
+    {
+      "at": "2026-09-02T02:34:17.602Z",
+      "probe": "L5",
+      "arm": "vertex-eu",
+      "run": 5,
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usage": {
+        "text_in": 15745,
+        "audio_in": 1088,
+        "text_out": 135,
+        "audio_out": 407,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0162905
+    }
+  ],
+  "started_at": "2026-09-02T01:35:35.433Z",
+  "updated_at": "2026-09-02T02:34:17.602Z"
+}
