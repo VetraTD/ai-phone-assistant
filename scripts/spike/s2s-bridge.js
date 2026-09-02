@@ -105,8 +105,35 @@ const BARGE_MS = Number(process.env.SPIKE_BARGE_MS) || 300;
 /** How much inbound audio to hold back during playback, for the barge flush. */
 const LOOKBACK_MS = Number(process.env.SPIKE_LOOKBACK_MS) || 500;
 
+/**
+ * Preset voice. The prebuilt Live voices (Puck, Charon, Kore, Fenrir, Aoede,
+ * Leda, Orus, Zephyr, ...) are documented by NAME and not by accent, so which
+ * of them reads as British is not something this file can assert -- it is
+ * something an ear decides. Env-swappable so two can be compared on successive
+ * calls for the price of a redeploy.
+ */
+const VOICE = process.env.SPIKE_VOICE || "Kore";
+
+/**
+ * BCP-47 code for synthesis.
+ *
+ * docs/speech-to-speech-handoff.md section 4 says Gemini Live native audio
+ * "does not accept an explicit language code -- it auto-detects". That came
+ * from vendor documentation, NOT from measurement, and section 3 is a list of
+ * nine confident claims that measurement disproved. So this is set, and whether
+ * the model accepts it is RECORDED rather than assumed: if connect fails
+ * complaining about it, the session is retried without it and the fact is
+ * logged. Either outcome turns a doc claim into a measured one, for free.
+ */
+const LANGUAGE_CODE = process.env.SPIKE_LANGUAGE_CODE || "en-GB";
+
 const SYSTEM_PROMPT = [
-  "You are the receptionist for Brightwork Family Dental, a dental practice.",
+  "You are the receptionist for Brightwork Family Dental, a dental practice in England.",
+  "Speak British English in a natural British accent, the way a receptionist in an",
+  "English dental practice would: British vocabulary and idiom throughout —",
+  "'mobile' not 'cell', 'surgery' or 'practice' not 'office', 'post code' not 'zip',",
+  "'appointment' times as 'half past two' or 'ten past three', dates as",
+  "'the third of October'. Never use American spellings or Americanisms.",
   "Answer the phone warmly and briefly. Keep replies to one or two sentences.",
   "You have NO tools and NO calendar access in this configuration: if the caller",
   "asks to book, take the details conversationally and say someone will confirm.",
@@ -241,6 +268,7 @@ async function handleConnection(ws, callSid) {
     barges: 0,
     usage: null,
     closeReason: null,
+    languagePinned: null,
   };
 
   // ------------------------------------------------------------------
@@ -402,16 +430,36 @@ async function handleConnection(ws, callSid) {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     inputAudioTranscription: {},
     outputAudioTranscription: {},
+    speechConfig: {
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } },
+      languageCode: LANGUAGE_CODE,
+    },
   };
   if (ARM === "manual") {
     config.realtimeInputConfig = { automaticActivityDetection: { disabled: true } };
   }
 
+  /**
+   * Connect, and if the model refuses the language code, connect again without
+   * it rather than dropping the call. The retry is the measurement: it records
+   * whether native audio accepts a pinned language, which the handoff asserts
+   * from vendor docs and nobody has ever checked.
+   */
+  async function connect(cfg, callbacks) {
+    try {
+      return { session: await geminiClient().live.connect({ model: MODEL, config: cfg, callbacks }), languagePinned: true };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      if (!/languageCode|language_code|speech_config|speechConfig/i.test(msg)) throw err;
+      emit("spike_language_code_rejected", { callSid, languageCode: LANGUAGE_CODE, reason: msg.slice(0, 200) });
+      const { speechConfig, ...rest } = cfg;
+      const fallback = { ...rest, speechConfig: { voiceConfig: speechConfig.voiceConfig } };
+      return { session: await geminiClient().live.connect({ model: MODEL, config: fallback, callbacks }), languagePinned: false };
+    }
+  }
+
   try {
-    session = await geminiClient().live.connect({
-      model: MODEL,
-      config,
-      callbacks: {
+    const connected = await connect(config, {
         onmessage: (msg) => {
           if (msg.usageMetadata) m.usage = msg.usageMetadata;
           const sc = msg.serverContent;
@@ -448,11 +496,19 @@ async function handleConnection(ws, callSid) {
             });
           }
         },
-        onerror: (e) => emitError("spike_gemini_error", { callSid, reason: e?.message || String(e) }),
-        onclose: (e) => {
-          m.closeReason = e?.reason || null;
-        },
+      onerror: (e) => emitError("spike_gemini_error", { callSid, reason: e?.message || String(e) }),
+      onclose: (e) => {
+        m.closeReason = e?.reason || null;
       },
+    });
+    session = connected.session;
+    m.languagePinned = connected.languagePinned;
+    emit("spike_session_open", {
+      callSid,
+      arm: ARM,
+      voice: VOICE,
+      languageCode: LANGUAGE_CODE,
+      language_pinned: connected.languagePinned,
     });
   } catch (err) {
     emitError("spike_gemini_connect_failed", { callSid, reason: err?.message });
@@ -540,6 +596,12 @@ async function handleConnection(ws, callSid) {
       callSid,
       arm: ARM,
       model: MODEL,
+      voice: VOICE,
+      language_code: LANGUAGE_CODE,
+      // Whether native audio ACCEPTED a pinned language. The handoff asserts
+      // from vendor docs that it does not; this is the first time anything has
+      // checked.
+      language_pinned: m.languagePinned,
       durationMs: Math.round(now() - t0),
       turns: m.turns,
       // Echo return loss: how far below our own output level the inbound stream
