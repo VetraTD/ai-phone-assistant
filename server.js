@@ -4,7 +4,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
-import { verifyTwilioSignature } from "./lib/twilioSignature.js";
+import { verifyTwilioSignature, verifyTwilioSignatureAny } from "./lib/twilioSignature.js";
 import { fileDegradedVoicemail } from "./lib/degradedVoicemail.js";
 
 import * as geminiService from "./services/gemini.js";
@@ -337,6 +337,87 @@ function twilioValidation(req, res, next) {
   }
   next();
 }
+
+// ---------------------------------------------------------------------------
+// Speech-to-speech front-end (docs/speech-to-speech-handoff.md §7 step 2)
+//
+// Its OWN routes. The cascade answers on /twilio/voice and
+// /twilio/media-stream and is not touched by anything below -- it serves a
+// paying clinic and it is tier 3, the last thing standing when both S2S
+// vendors are down. A defect in tier 1 must not be able to reach it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Signature validation for the Live routes, accepting either Twilio account.
+ *
+ * There are two accounts and GCP holds one token. A single-token check makes a
+ * number on the other account unvalidatable, which is the corner the spike was
+ * backed into -- it gave up on signatures and gated on a secret URL path
+ * instead (backlog LVX3). That was defensible for a bare audio bridge living
+ * one day; it is not defensible for a front-end with appointment writes behind
+ * it.
+ *
+ * Deliberately separate from `twilioValidation` above rather than replacing
+ * it. The cascade stays single-token: widening what it accepts is a change to
+ * the path a paying clinic answers on, for the benefit of a path it does not
+ * use.
+ */
+function twilioValidationLive(req, res, next) {
+  if (!TWILIO_VALIDATE_SIGNATURE) return next();
+
+  const authTokens = [process.env.TWILIO_AUTH_TOKEN, process.env.TWILIO_AUTH_TOKEN_ALT];
+  if (!authTokens.some((t) => (t || "").trim())) {
+    log.error("live_signature_validation_disabled", { reason: "no_auth_token", severity: "warn" });
+    return res.status(403).send("Forbidden");
+  }
+
+  const valid = verifyTwilioSignatureAny({
+    authTokens,
+    signature: req.headers["x-twilio-signature"],
+    url: BASE_URL + (req.originalUrl || req.url),
+    params: req.body,
+  });
+  if (!valid) {
+    log.error("live_signature_invalid", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
+  next();
+}
+
+/**
+ * Answer a call on the speech-to-speech front-end.
+ *
+ * Mirrors /twilio/voice's <Connect><Stream> handoff, including minting the
+ * per-call token HERE, which is the one place that has already proved the
+ * request came from Twilio. The token rides in the PATH: Twilio does not carry
+ * a `<Stream url="...">` query string through to the websocket handshake, and
+ * a `?token=` form arrives empty.
+ *
+ * No voicemail fallback and no degraded-mode branch. Tier 1 has not survived a
+ * real call yet, and a fallback built before the thing it falls back from is
+ * proven is a fallback built on an assumption about how it fails.
+ */
+app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
+  res.type("text/xml");
+  const callSid = req.body.CallSid;
+  const businessPhone = req.body.To || "";
+  const callerPhone = req.body.From || "";
+
+  const streamToken = mintMediaStreamToken(callSid);
+  const wsUrl =
+    BASE_URL.replace(/^http/, "ws") +
+    "/twilio/live-stream" +
+    (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
+
+  log.info("live_stream_initiated", { callSid, authenticated: streamToken !== null });
+
+  return res.send(
+    `<Response><Connect><Stream url="${wsUrl}">` +
+    `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
+    `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
+    `</Stream></Connect></Response>`
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Voice webhook
@@ -1156,6 +1237,25 @@ const PROBE_WS_PATH = "/twilio/probe-stream";
 const MEDIA_WS_PATH = "/twilio/media-stream";
 
 /**
+ * Websocket path for the speech-to-speech front-end. Same token scheme, its
+ * own handler: the cascade's upgrade branch below is unchanged.
+ */
+const LIVE_WS_PATH = "/twilio/live-stream";
+
+/**
+ * A raw HTTP refusal, written straight to the socket before the websocket
+ * handshake completes. Nothing is allocated: no Gemini session, no tenant
+ * lookup, no spend.
+ *
+ * Named rather than inlined because it is the one string here whose CRLFs are
+ * PROTOCOL rather than formatting — an editor or a codemod that "helpfully"
+ * normalises them turns a 403 into a malformed response, and the failure would
+ * show up as a websocket that never connects rather than as anything obviously
+ * about line endings.
+ */
+const FORBIDDEN_403 = "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n";
+
+/**
  * May this upgrade become a call, and which call is it allowed to be?
  *
  * Exported for the test that matters most: the one asserting a GOOD token is
@@ -1234,6 +1334,32 @@ function attachWebSocket(httpServer) {
         // the `start` frame. null when enforcement is off.
         ws.authorizedCallSid = verdict.callSid;
         selectPipelineHandler()(ws, req);
+      });
+    } else if (pathname === LIVE_WS_PATH || pathname.startsWith(`${LIVE_WS_PATH}/`)) {
+      // Same per-call token as the cascade's socket, same fail-closed refusal
+      // before the handshake completes: a bad token allocates no Gemini
+      // session and spends nothing.
+      const verdict = verifyMediaStreamToken(tokenFromPath(pathname, LIVE_WS_PATH));
+      if (!verdict.ok && mediaStreamTokenRequired()) {
+        log.error("live_stream_upgrade_refused", { reason: verdict.reason, ip: req.socket?.remoteAddress });
+        socket.write(FORBIDDEN_403);
+        socket.destroy();
+        return;
+      }
+      // Imported lazily so the Live front-end costs nothing -- no @google/genai
+      // Live client, no strategy selection -- in a deployment that never uses
+      // it, which today is every deployment answering a real caller.
+      const { handleLiveSessionConnection } = await import("./lib/voice/live/index.js");
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.authorizedCallSid = verdict.callSid;
+        handleLiveSessionConnection(ws, req).catch((err) => {
+          log.error("live_connection_failed", { reason: err?.message });
+          try {
+            ws.close();
+          } catch {
+            /* socket already gone */
+          }
+        });
       });
     } else if (
       (pathname === PROBE_WS_PATH || pathname.startsWith(`${PROBE_WS_PATH}/`)) &&
