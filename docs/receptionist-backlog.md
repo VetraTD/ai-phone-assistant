@@ -1830,6 +1830,168 @@ tenant for testing.
 
 ---
 
+## From the two `POSTCALL_VERIFY=count` calls, 2026-09-03
+
+Two real calls on `+18176011171` against Digile Media's config on the local
+rig, ~$0.32 of Gemini. **LVX29's read is VERIFIED. Everything the owner heard
+is below, and none of it is fixed.**
+
+### LVX29 · VERIFIED on a real call
+
+| | call 1 | call 2 |
+|---|---|---|
+| verdict | `ok` | `ok` |
+| `booked_rows` | 0 | **1** |
+| `changed_rows` | 3 | 0 |
+| claims | 2 | 1 |
+| false accusations | **0** | **0** |
+
+Call 2's row carries `call_id` → `twilio_call_sid CA6875865a…`, matching the
+call exactly. The post-call read found the right row by `call_id` on a real
+call, which is the whole mechanism working end to end.
+
+**The spelling gate earned its keep on call 2.** The assistant heard "Nathan
+Darla" on two turns; the row says **"Nithin Dodla"**. The gate refused the
+write, forced the spelling, and the corrected name is what reached the
+database — the exact reverse of the LVX28 ordering defect. It also confirms the
+LVX28 finding: on call 1 the name WAS on file (three appointments under it) and
+the gate correctly stayed silent; on call 2 the record was clean and it asked.
+
+**Still unproven:** `POSTCALL_VERIFY=send`. No SMS has ever been sent by this
+path. Note `record_sms_consent` was called on these calls and wrote NOTHING,
+correctly — `sms_followup_enabled` is false for this tenant, so the send round
+needs that flag flipped locally first or nothing will send regardless of the
+transactional override.
+
+### The flaw in the reconciler, found by call 1 — MINE, and not yet fixed
+
+The verdict is computed **per call**, so unrelated successful writes mask a
+fabrication. Call 1 cancelled three appointments and failed to book; had it
+*invented* a booking in the same call, `wroteAnything` would still have been
+true and the verdict would still have been `ok`.
+
+`bookedEffect && !bookedRows` only catches a booking that emitted an effect. It
+does not catch the LVX27 shape — a claim of booking with no tool call at all —
+on a call that also did something else successfully.
+
+**Fix direction:** classify the claim. `completionClaimRe` already alternates on
+the verb, so capture it and check a *booking* claim against booking rows and a
+*cancellation* claim against cancelled rows, instead of against "any write".
+
+### LVX33 · Cancelling several appointments in one turn only forgets the last one `[gcp]` · **P0**
+
+The owner cancelled three appointments. The assistant confirmed all three. Then,
+minutes later in the same call:
+
+> turn 11: "It looks like you actually have upcoming appointments with us
+> already — on Friday at 11 30 AM and Monday at 10 AM."
+> turn 12: "You're absolutely right, I did cancel those three! My mistake."
+
+**Root cause, and it is not what it first looks like.** `setCallerContext` IS
+wired on the Live path — that was checked and an earlier note saying otherwise
+was wrong. The bug is that `dispatchCapabilityEffects` builds its `engine.call`
+object **once per batch** (`lib/capabilities/effects.js:58`), and
+`applyToCallerSnapshot` reads the snapshot off that frozen object every time
+(`capabilities/appointments.js:402`). Three cancels in one turn therefore each
+recompute from the SAME starting list:
+
+```
+start        [Fri, Mon, Tue]
+cancel Fri → [Mon, Tue]
+cancel Mon → base is STILL [Fri, Mon, Tue] → [Fri, Tue]
+cancel Tue → base is STILL [Fri, Mon, Tue] → [Fri, Mon]
+```
+
+Last write wins, so two survive — **exactly the pair turn 11 named.**
+Read-modify-write over a stale base. N removals in one turn remove only the last.
+
+**Then it cost a booking.** The phantom pair tripped the existing-appointment
+policy, so the caller could not book at all for the rest of the call. That is
+the owner's "it was unable to book the new appointment".
+
+**SHARED, so the cascade has it too.** A clinic caller cancelling two
+appointments in one breath hits the identical bug. Recorded, not fixed.
+
+**Done when:** N cancellations in one turn leave zero of them in the snapshot,
+with a test that dispatches a batch rather than one effect at a time.
+
+### LVX34 · A refused write is answered with "someone will call you back" `[gcp]` · **P0**
+
+Call 2. `book_appointment` was refused by the spelling gate, whose message says
+explicitly: *"ask the caller to spell it, and read the letters back… Ask them
+now and wait for their answer."* The model instead told the caller someone would
+ring them back, twice, and only asked for the spelling when the caller pushed.
+
+> turn 6: "…Someone will call you back…"
+> turn 8: "…that's N-I-T-H-I-N D-O-D-L-A, is that right? … Someone will call you
+> back within the next business day."
+
+Even *after* taking the spelling it promised a callback rather than confirming.
+
+**A guard is a prompt, and this one is not landing.** The gate returns
+`success: false` with an instruction, and the model treats a refusal as a cue to
+fall back to take-a-message.
+
+**The near miss is worse than what was heard.** `spellMissCap` is 2, so after two
+refusals the gate opens and writes the name AS HEARD. This caller pushed back
+twice; a less persistent one ends up as **"Nathan Darla"** in the database with a
+reminder that never arrives.
+
+**Why the promise backstop stayed silent:** `promisedAction` fires only when the
+promise ends the reply or is essentially the whole of it. Here it sat mid-reply
+followed by "is there anything else". Correct by its own rule, wrong for the
+caller.
+
+**Shared prompt/tool text, so a change needs an eval band.** Recorded, not fixed.
+
+### LVX35 · It closes the call the moment anything succeeds `[gcp]` · P1
+
+The owner: *"it went straight to thank you for calling Digile Media have a great
+day? It is supposed to ask if I need anything else before ending."*
+
+The ordering is inverted. It asked "is there anything else" on turn 8, **before**
+the booking was confirmed, then on turn 9 confirmed and closed immediately.
+`close_reason: end_call_mark`, so the goodbye played out properly — the fault is
+that `end_call`'s gate opens on `completedActionThisCall`, so from the first
+successful action the model may close whenever it likes. Same family as LVX22.
+
+### LVX36 · Offered three slots, booked a different one — NEEDS THE OWNER `[gcp]` · P1
+
+> turn 3: "We have availability on Monday, September 7th at 12 AM, 11 30 AM, or
+> 11 PM. Do any of those work for you?"
+> turn 4: "Great, I can book you in for Monday, September 7th at 11 PM."
+
+The row is 11 PM. The agreed script said to take **the first** slot offered. If
+that is what was said, the assistant booked the wrong one and this is a real
+defect; if the owner said "11 PM", there is nothing here. **Unresolved — ask
+before investigating.**
+
+Separately and NOT a defect: midnight and 11 PM offers are Digile Media's
+`business_hours` of 00:00–23:59. Config, working correctly on nonsense hours —
+but a prospect on a demo call cannot tell that, which is why it is on the
+demo list in `docs/readiness.md`.
+
+### LVX25 reconfirmed, verbatim
+
+> turn 8 (call 1): "To get started, what's your name and the best number to
+> reach you at? Also, what's your company and industry, and what's your main
+> marketing challenge?"
+
+Four asks in one breath, on the booking path, exactly as the entry predicts.
+
+### Turn latency, measured on two real calls
+
+| | call 1 | call 2 |
+|---|---|---|
+| `reply_after_last_voice_ms` p50 | **2,193 ms** | **1,388 ms** |
+| `first_audio_ms` p50 | 923 ms | 182 ms |
+| worst turn | 7,332 ms | — |
+| turns / duration | 13 / 3m45s | 9 / 1m58s |
+
+**This is NOT LVX17.** The socket stays open for the whole call, so no handshake
+is involved — this is model response time, and it is what the owner meant by
+"2–3 second delay". Two calls is not a measurement; recorded as an observation.
+
 ## Session state at 2026-09-03 close — second sitting, LVX29 built
 
 **Nothing was spent. No call was made, no probe was run, no eval was run.**

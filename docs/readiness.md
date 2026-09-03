@@ -28,6 +28,65 @@ The rest of this document is the honest list for each.
 
 ---
 
+## 0. Demo-ready — what a prospect on a test call actually hears
+
+**Added 2026-09-03.** The owner's nearest goal is a business that rings the
+number and judges call quality. **That is a different list from everything below
+it**, and the difference is worth stating plainly, because most of this
+document's P0s do not appear on it.
+
+**O1, O2, the DPIA, the DPAs, fallback tiers, the eval port, LVX29's
+confirmation SMS — a prospect on a ten-minute test call cannot perceive any of
+them.** They matter enormously the day a real patient is on the line and not one
+minute before. Do not spend the demo run-up on them.
+
+What a prospect DOES perceive, in the order it will cost you the meeting:
+
+| # | what they hear | entry |
+|---|---|---|
+| 1 | asks to book, gets "someone will call you back" | **LVX34** |
+| 2 | cancels two things, is told it still has them, then cannot book | **LVX33** |
+| 3 | four questions in one breath | LVX25 |
+| 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 |
+| 5 | offers midnight and 11 PM appointments | **config, free** |
+| 6 | a UK callback number read out in US digit grouping | LVX26 |
+| 7 | a 1.4–2.2 s pause before every reply | measured, unfixed |
+| 8 | two seconds of silence before the greeting | LVX17 — **may not exist off the dev laptop** |
+
+**1 and 2 are demo-killers and they are the same demo-killer twice**: the
+assistant fails to do the one thing it is being demonstrated to do. Everything
+else on this list is a wince; those two are a no.
+
+**5 is free and has the best ratio on the page.** Digile Media's
+`business_hours` are 00:00–23:59, so availability correctly offers midnight. A
+prospect cannot tell config from defect, and "would you like midnight?" reads as
+broken software. **Give the demo tenant real hours.**
+
+**8 has to be re-measured before it is believed.** The 2.2 s was traced to
+Norton's TLS interception on the development machine and has never been measured
+anywhere else. If the demo is served from Cloud Run it may simply not be there.
+
+### Which front-end does the prospect call?
+
+An unresolved question and it should be answered deliberately rather than by
+whichever one happens to be pointed at the number.
+
+- **The cascade** is what serves a paying clinic, has fallbacks, and does not
+  fabricate. It is also the one the owner has heard least recently.
+- **The Live front-end** is the one that sounds better — that was the entire
+  reason for the architecture — and it is the one with all eight rows above.
+  **It has no fallback: a failure is silence, not voicemail.** Demoing it means
+  accepting that risk in front of a prospect, on a path with no deployed home
+  today (it runs locally behind a cloudflared tunnel).
+
+### The honest shortest path to a call-quality demo
+
+Fix **LVX34** and **LVX33**, give the demo tenant **real business hours**, and
+decide which front-end answers. LVX25 and LVX35 next if there is time. That is a
+short list and none of it is compliance work.
+
+---
+
 ## 1. Technical — to sell the cascade to more customers
 
 ### Blocking
