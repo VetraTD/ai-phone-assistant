@@ -440,7 +440,14 @@ app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
     }
     if (!business && !lookupFailed && !process.env.LIVE_BUSINESS_PHONE) {
       log.error("live_no_business_for_number", { callSid, businessPhone, severity: "warn" });
-      const profile = getProfile(countryFromE164(businessPhone));
+      // getProfile is keyed by LOCALE id ("en-GB"), not by country code
+      // ("GB"), and returns the US default for anything it does not recognise
+      // -- so passing a country code gave a UK caller on a UK line an American
+      // voice. The cascade's own unrouted path does this mapping correctly and
+      // its comment records that the bug was already paid for once.
+      const profile = getProfile(
+        countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+      );
       return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
     }
   }

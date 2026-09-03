@@ -1557,3 +1557,37 @@ nothing can assert the voice actually configured. Move both reads inside the
 handler.
 
 **Done when:** every Live setting is read from the same place.
+
+**LVX14 · The Live route's voicemail callback is single-token, so an alt-account call loses its recording** `[gcp]` · P3
+
+`/twilio/live-voice`'s unrouted fallback sends the caller to
+`buildUnroutedVoicemailTwiml(${BASE_URL}/twilio/voicemail, ...)`, and
+`/twilio/voicemail` is mounted behind the single-token `twilioValidation`.
+
+`twilioValidationLive` exists precisely because there are two Twilio accounts
+and GCP holds one token. A number on the alt account therefore records a
+voicemail, Twilio POSTs the recording callback, and it 403s with
+`twilio_signature_invalid` -- which reads as a forged request rather than a
+cross-account mismatch, and the recording is never persisted.
+
+Inert until the alt token is actually in use, which **LVX11** currently
+prevents on GCP. The two should be closed together: whatever makes the alt
+token available has to decide which routes accept it.
+
+**Done when:** the voicemail callback accepts the same accounts the route that
+sent the caller there accepts.
+
+**LVX15 · The Live tenant load has no timeout** `[gcp]` · P2
+
+`onStart` now awaits `lookupBusinessByPhone` and then a four-query
+`withTenantSafe` block BEFORE `connect()` and before the greeting is kicked
+off. That await is deliberate -- tool declarations are fixed at connect, so
+firing it without awaiting meant every integration tool was missing (see the
+2026-09-02 fixes) -- but it has no deadline.
+
+A hung query therefore means the caller hears **nothing at all, indefinitely**.
+The cascade cannot get into this state because it speaks a greeting from TTS
+while the context loads; this path has no voice until the model has one.
+
+**Done when:** the context load has a deadline, after which the session opens
+with whatever resolved and logs what did not.
