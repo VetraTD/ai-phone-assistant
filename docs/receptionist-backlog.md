@@ -1667,3 +1667,85 @@ Recorded because they were heard, not because a cause is known.
   decision this call suggests is mistimed.
 - The intake questions themselves ("what marketing issue does your business
   have?") are Digile Media's own configuration, not a defect.
+
+### Third live call, 2026-09-02 — two long-open questions answered
+
+**LVX17 ROOT CAUSE FOUND, and it is not a cold start.** Staged timings on two
+calls:
+
+| | lookup | context | **connect** | total |
+|---|---|---|---|---|
+| call 1 | 17 ms | 61 ms | **2,243 ms** | 2,400 ms |
+| call 2 | 3 ms | 14 ms | **2,158 ms** | 2,177 ms |
+
+The database is nothing. Warming the module graph was nothing. **`live.connect()`
+to AI Studio takes ~2.2 seconds, on EVERY call, warm or cold** — and it sits in
+front of the greeting, because on this path the model is the only voice.
+
+So the framing was wrong. This is not "the first call is slow"; it is *every*
+call opening with two seconds of silence, and the first one is merely where a
+caller notices and hangs up. Warming a module cannot fix a per-call handshake.
+
+Candidates, none tried: hold a pre-connected session pool; send something
+audible while the socket opens (which needs a non-model voice, i.e. the thing
+this architecture removed); or accept it and make sure the caller hears ringing
+rather than dead air.
+
+**ECHO IS SETTLED, on this handset, by a proper silent call.** 61 s, caller
+silent after the greeting:
+
+| | |
+|---|---|
+| echo peak while we spoke | RMS **406** |
+| `inboundVad` `minRms` floor | **700** |
+| **margin** | **4.7 dB** |
+| idle level with nobody speaking | RMS **8** |
+
+Two consequences. The 14,611 and 10,036 peaks seen on conversational calls were
+**the caller**, not echo — the ambiguity the spike got wrong in both directions
+is now closed by measurement rather than by argument. And the margin on THIS
+handset is **4.7 dB, not the spike's 10.4 dB** — the same conclusion (the gate
+is guarding a real, thin margin) from a number twice as close to the floor.
+Second handset, second answer, same verdict: keep the gate.
+
+**LVX19 · No silence handling at all on the Live path** `[gcp]` · P1
+
+The cascade nudges a quiet caller ("Are you still there?") and then hangs up
+after a ladder of them. The Live front-end has neither: `buildSilenceNudge`, the
+nudge ladder and the silence hang-up are all cascade-only.
+
+Measured: a call sat for **61 seconds** with the caller silent and ended only
+because they hung up. A caller who puts the phone down instead leaves the line
+open to the 30-minute cap, billing Gemini the whole time.
+
+This is also the real answer to "it did not end the call by itself" from the
+previous call. `end_call` had not been invoked, and in the cascade the silence
+ladder is the backstop for exactly that. On the call after, `end_call` DID fire
+and `close_reason` was `end_call_mark`, so the hang-up path works — what is
+missing is the backstop for when the model never asks.
+
+**Done when:** a silent caller is nudged and then released, and the counters say
+which happened.
+
+**LVX20 · The assistant repeats itself, cause unknown** `[gcp]` · P2
+
+Reported on two separate calls: it says a phrase, stops partway, then says the
+same phrase again and continues. Not reproduced offline and not explained.
+
+`interrupted_count` was 2 on the call in question with 2 corroborated barges, so
+this is not the vendor cutting itself off. One hypothesis is now instrumented:
+if `modelTurn.parts` is ever CUMULATIVE, playing every part (which the
+multi-part fix now does) would duplicate audio. `live_multipart_audio` logs any
+message carrying more than one audio part; several of those per call would be
+the signature.
+
+Worth noting the fix that preceded it went the other way -- `.find()` was
+playing only the FIRST part and dropping the rest -- so both the old and new
+behaviour are suspect until this is measured.
+
+**NOT A DEFECT, recorded so it is not re-investigated:** the assistant offering
+5 a.m. appointments and quoting "4:30 UK time" is Digile Media's own
+configuration. Its `business_hours` are `00:00-23:59` every day and its timezone
+is `Europe/London`. A London business quoting London time to a caller is
+correct; it only reads as wrong because a US handset is being pointed at a UK
+tenant for testing.
