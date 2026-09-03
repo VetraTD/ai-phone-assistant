@@ -2364,12 +2364,13 @@ a callback", "do not take a message instead"). Every constraint the old text
 carried is kept and pinned by tests: `[not caller speech]`, the name quoted, one
 attempt per caller turn, and the decline escape hatch.
 
-**THE EVAL BAND HAS NOT BEEN RUN.** ~$20 across two arms — the recorded band of
-39–42 of 43 was measured at 43 scenarios and the suite is now 45, so a baseline
-is needed as well as a candidate. And be honest about what it buys: the band
-runs on the TEXT driver, so a green result says the cascade did not regress. It
-says nothing about whether the Live model stops promising callbacks; only a
-deployed call answers that.
+**THE EVAL BAND HAS NOT BEEN RUN, and the owner's decision on 2026-09-03 is to
+skip it for now.** The reasoning, so it is not re-litigated: the band runs on
+the TEXT driver, so a green result says only that the cascade did not regress —
+and no caller reaches the cascade, so the cost of a regression there is a
+redeploy. What actually protects the demo path is the Live-side guard above,
+which fires on exactly the shape that was heard. **Pre-registered as LVX43
+below, to run before the first customer.**
 
 **The near miss is unchanged and now visible.** `spellMissCap` is 2, so after
 two refusals the gate opens and writes the name as heard. That ceiling is the
@@ -2379,6 +2380,30 @@ anti-livelock escape hatch and removing it re-opens a worse failure, so it stays
 
 **Done when:** DONE offline 2026-09-03 for the guard and the wording.
 **Unverified on a call, and the band is unspent.**
+
+### LVX43 · The reworded spelling gate has never been through an eval band `[gcp]` · P1
+
+**Pre-registered 2026-09-03, deliberately not run.** LVX34's fix rewrote the
+spelling gate's refusal message in `services/tools.js` — text both front-ends
+execute. It is pinned by unit tests, and no eval has been run against it.
+
+**Cost:** ~$20. Five runs baseline plus five candidate, ~$1.50–2.00 a run on the
+text driver. **Both arms are needed**, because the recorded band — 39–42 of 43,
+mean 41.0, spread 3 (§0) — was measured at 43 scenarios and the suite is now 45.
+The old figure cannot serve as the baseline and should not be quoted as one.
+
+**What it would buy, stated honestly so nobody over-reads a green result:** the
+band answers "did the cascade regress". It cannot answer "does the Live model
+stop promising callbacks", because the text driver is not that front-end. Only a
+deployed call answers the second question, and that is what the call round is
+for.
+
+**Why it was skipped:** no caller reaches either front-end, so a regression on
+the cascade costs a redeploy. That stops being true the day there is a customer.
+
+**Done when:** the band is measured at the current scenario count and the
+candidate sits inside it — or the wording is reverted and the Live-side guard
+carries it alone.
 
 ### LVX42 · The spelling gate's escape hatch writes the misheard name `[gcp]` · P1
 
