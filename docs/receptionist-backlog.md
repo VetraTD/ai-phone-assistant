@@ -1990,6 +1990,78 @@ Same call: **three `book_appointment` calls with different arguments**, plus a
 not a re-fire. That is a confused flow, not a duplicate-execution bug, and the
 idempotency guard correctly had nothing to say about it.
 
+### From the second arm-0 call, 2026-09-03 (the first with a working ladder)
+
+Owner's verdict: "much better than it was before. Still some issues but
+definitely a step in the right direction." The ladder escalated correctly --
+stage 0, stage 1, goodbye -- and `live_exit_run` fired on `trigger: "mark"`
+with `close_reason: end_call_mark`, so **the goodbye played out in full before
+the line closed**. That is LVX19's design confirmed on a real call, and it is
+the first time any of it has been.
+
+**LVX25 · It asks three or four questions in one breath** `[gcp]` · P1
+
+The owner: "it asks like multiple questions at a time and it is a bit
+overwhelming... it was asking me my name, company, issues faced, and preferred
+date/time. It should separate that so a caller can answer each one at a time."
+
+A person answering a phone asks one thing and waits. Four at once is the
+shape of a form, not a conversation, and a caller answering by voice cannot
+hold four questions in their head or answer them in order.
+
+**DELIBERATELY NOT FIXED, and the reason is the whole point of LVX23.** The
+fix would be a prompt change, the prompt is SHARED with the cascade, and it is
+the bisect's control. If the reduced-prompt arm does not do this, the prompt is
+the cause and a change is earned. If it does it anyway, the prompt is innocent
+and editing it would have been the wrong move made confidently.
+
+**The discriminator worth having before touching anything:** does the CASCADE
+do this, on the same prompt, for the same tenant? It has been in front of real
+callers for months. Same prompt behaving differently on the two front-ends
+points at the surface, not the text.
+
+**LVX26 · A UK callback number is read out in US grouping** `[gcp]` · P1
+
+The owner heard the silence goodbye "make up a random number". It did not --
+it read `main_phone` exactly, every digit in order. What went wrong is how.
+
+`buildSilenceGoodbye` calls `toSpeakable(phone)` **with no locale context**, so
+`+447426704500` is spoken `447-426-704-500`: the leading `0` gone and the
+digits grouped 3-3-3-3, US style. The UK form is `07426-704500`. A caller
+writing down what they heard and dialling `447426704500` reaches nothing.
+
+`lib/voice/session.js`'s `leakCtx()` already carries
+`profile: resolveProfile(cfg)` and its comment says why -- "so every speech
+site gets locale-correct phone grouping for free: '+442079460958' is spoken
+'020 7946 0958' rather than '442 079 460 958'". This is a speech site that
+does not get it, and the comment describes the exact defect.
+
+**A cascade bug, not a Live one.** It survives because the paying clinic is US,
+where 3-3-3-3 grouping is right. Every non-US business has it today.
+
+The fix is one line, and `resolveProfile` is already imported at
+`lib/voice/session.js:33`:
+
+```js
+- return phone ? S.goodbyeWithPhone(toSpeakable(phone)) : S.goodbyeNoPhone;
++ return phone ? S.goodbyeWithPhone(toSpeakable(phone, { profile: resolveProfile(cfg) })) : S.goodbyeNoPhone;
+```
+
+**Worth checking at the same time:** whether any other speech site calls
+`toSpeakable` with no ctx. This one was found by ear on one call.
+
+**Separately, and it is CONFIG not a defect:** Digile Media's `main_phone` is
+`+447426704500`, a mobile, while the line callers dial is `+441372656055`. The
+goodbye offers the mobile because that is what the field says. The owner may
+want it to be the number people actually ring.
+
+**LVX18's spelling-timing bullet, confirmed a second time.** The owner: "It
+should ask to spell the name after the caller says the name. It waited until
+the end to ask when it should ask after the caller says their name." Same
+observation as the first live call, so it reproduces. Their own weighting:
+"not that crazy just as long as it asks for the spelling anytime." Prompt
+timing, so it waits on LVX23 with LVX25.
+
 **LVX23 · The bare spike sounded better than the production configuration** `[gcp]` · P1
 
 The owner, unprompted: *"When I first got gemini live it was working
