@@ -90,12 +90,37 @@ import { buildMinimalInstruction } from "../../lib/voice/live/minimalPrompt.js";
 const argv = process.argv.slice(2);
 const CONFIRMED = argv.includes("--confirm");
 const RUNS = Number(valueOf("--runs") || 3);
+const GAPS = argv.includes("--gaps");
 const BUSINESS_PHONE = valueOf("--business") || process.env.LIVE_BUSINESS_PHONE || "+441372656055";
 
 function valueOf(flag) {
   const i = argv.indexOf(flag);
   return i >= 0 ? argv[i + 1] : null;
 }
+
+/**
+ * Gap ladder, in seconds, for `--gaps`.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this mode exists, added after the first run
+ * ---------------------------------------------------------------------------
+ *
+ * The arms above answered their question and produced a different one. Twelve
+ * connects, 400 ms apart: the FIRST cost 2,255 ms and the other eleven cost
+ * 34-51 ms, with `full` and `floor` one millisecond apart. So the 2.2 s is
+ * neither the payload nor the per-connect network -- it is a ONE-TIME cost,
+ * paid once per process.
+ *
+ * Which would make the fix trivial (one throwaway connect at boot) except for
+ * one thing: the production staged timings show ~2.2 s on TWO consecutive
+ * calls. If what the first connect buys is a TLS session or a connection-pool
+ * entry with a short lifetime, then a real call minutes later pays it again
+ * and warming at boot buys nothing after the first caller of the hour.
+ *
+ * 400 ms apart cannot tell those apart. This can: connect, wait, connect
+ * again, and see at what gap the cost comes back.
+ */
+const GAP_LADDER = [5, 30, 90, 150];
 
 const ARMS = [
   { key: "full", prompt: "full", tools: true },
@@ -167,6 +192,77 @@ async function main() {
 
   const results = Object.fromEntries(ARMS.map((a) => [a.key, []]));
   const usageSeen = [];
+
+  /** One connect on the production arm, closed immediately. Returns ms. */
+  async function timeConnect(cfg) {
+    const t0 = Date.now();
+    let session = null;
+    let error = null;
+    try {
+      const out = await connectLive({
+        config: cfg,
+        callbacks: {
+          onmessage: (msg) => {
+            if (msg?.usageMetadata) usageSeen.push({ usage: msg.usageMetadata });
+          },
+          onerror: () => {},
+          onclose: () => {},
+        },
+      });
+      session = out.session;
+    } catch (err) {
+      error = err?.message || String(err);
+    }
+    const ms = Date.now() - t0;
+    try {
+      session?.close();
+    } catch {
+      /* already gone */
+    }
+    return { ms, error };
+  }
+
+  const fullConfig = () => ({
+    responseModalities: [Modality.AUDIO],
+    systemInstruction: { parts: [{ text: fullInstruction }] },
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
+    tools: allTools,
+    speechConfig: {
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.LIVE_VOICE || "Kore" } },
+      languageCode: process.env.LIVE_LANGUAGE_CODE || "en-GB",
+    },
+  });
+
+  if (GAPS) {
+    console.log("  Gap ladder. Production arm only. The question is whether the one-time");
+    console.log("  cost COMES BACK after an idle period -- if it does, warming at boot");
+    console.log("  buys nothing after the first caller of the hour.\n");
+
+    const first = await timeConnect(fullConfig());
+    console.log(`  connect 1   (cold process)      ${String(first.ms).padStart(5)} ms${first.error ? ` FAILED ${first.error.slice(0, 80)}` : ""}`);
+
+    for (const gap of GAP_LADDER) {
+      await new Promise((r) => setTimeout(r, gap * 1000));
+      const next = await timeConnect(fullConfig());
+      console.log(
+        `  connect after ${String(gap).padStart(3)}s idle    ${String(next.ms).padStart(5)} ms${next.error ? ` FAILED ${next.error.slice(0, 80)}` : ""}`
+      );
+    }
+
+    console.log("");
+    console.log("  Read it as: any row back near the cold number is the gap at which the");
+    console.log("  saving expires. All rows fast => the cost is per-PROCESS and a single");
+    console.log("  throwaway connect at boot fixes LVX17 outright.");
+    console.log("");
+    if (usageSeen.length) {
+      console.log(`  BILLED: ${usageSeen.length} usageMetadata message(s) on connects with no turns.`);
+    } else {
+      console.log("  BILLED: no usageMetadata reported.");
+    }
+    console.log("");
+    return;
+  }
 
   for (let run = 1; run <= RUNS; run += 1) {
     for (const arm of ARMS) {

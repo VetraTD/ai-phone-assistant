@@ -2009,6 +2009,67 @@ it, or whether one confirmed spelling per caller is good enough forever.
 5. **LVX32**, if any greeting-first LVX17 fix is chosen.
 6. **LVX25**, **LVX26**, then the turn-end arms — unchanged from the list below.
 
+### LVX17 MEASURED, 2026-09-03 — it is an idle timeout, and both prior hypotheses are dead
+
+`scripts/probes/live-connect-cost.mjs`, twelve connects across four arms plus a
+gap ladder. **Total spend: $0** — no `usageMetadata` is reported for a connect
+that takes no turns, which is now observed rather than assumed.
+
+**Arms — the payload is not the cause.**
+
+| arm | instruction | tools | median |
+|---|---|---|---|
+| full | 17,758 chars | 10 | 40 ms |
+| minimal | 734 chars | 10 | 42 ms |
+| no_tools | 17,758 chars | 0 | 41 ms |
+| floor | 734 chars | 0 | 39 ms |
+
+**One millisecond between the biggest and smallest setup payload.** So C2's
+prefix shrink is still worth doing for COST and buys nothing for the greeting
+delay. That was the leading hypothesis and it is dead.
+
+Per-connect network is not the cause either: steady state is **39 ms**.
+
+**Gap ladder — the actual mechanism.**
+
+```
+connect 1   (cold process)      99 ms
+connect after   5s idle         40 ms
+connect after  30s idle         48 ms
+connect after  90s idle       2140 ms
+connect after 150s idle       2239 ms
+```
+
+**Something with a 30–90 s idle TTL is what costs 2.2 s to rebuild**, and it is
+shared across processes on this machine — the second probe's "cold" connect was
+99 ms because the first probe had run shortly before. Transport-layer, then:
+TLS session resumption, connection reuse or DNS, not the Live session itself.
+
+**Consequences, and the first one is a correction.**
+
+- A run of twelve connects 400 ms apart showed 2,255 ms on the first and 34–51 ms
+  on the other eleven, and that was briefly read as a one-time per-process cost.
+  **It is not.** A first-connect number means nothing without knowing how long
+  the machine had been idle, and the gap ladder is what separated them.
+- **The earlier entry's "on EVERY call, warm or cold" is CORRECT** and is now
+  explained rather than merely observed. A phone line is idle far longer than
+  90 s between calls, so every caller pays it.
+- **`warmLiveFrontEnd` cannot fix this**, and not only because it merely
+  constructs the client: anything done once at boot has expired before the first
+  caller dials.
+- The fix is therefore a **keep-alive**, not a warm-up — something touching the
+  endpoint at least every ~60 s.
+
+**The open question, and it decides how cheap the fix is:** whether what expires
+is the TLS/transport layer or the Live endpoint specifically. If transport, a
+plain HTTPS request to the same host on a timer holds it and costs no tokens at
+all. If it is Live-specific, it needs a real session held open, which is a
+different thing to reason about. **Testable for $0** — ping the host during a
+90 s idle, then connect and see.
+
+**Do not build the fix before that test.** Both answers are one small change and
+they are different changes.
+
 ### The bug this sitting nearly shipped, caught in review
 
 **A database outage would have been reported as a fabrication.**
