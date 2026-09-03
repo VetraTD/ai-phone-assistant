@@ -1591,3 +1591,79 @@ while the context loads; this path has no voice until the model has one.
 
 **Done when:** the context load has a deadline, after which the session opens
 with whatever resolved and logs what did not.
+
+### From the first live call on the Live front-end (2026-09-02, US handset, 25 turns)
+
+**LVX16 · The assistant does not know the caller's own number, and INVENTS one** `[gcp]` · **P0**
+
+Observed on a real call. The caller was asked for a phone number, said *"use the
+one I'm calling from"*, and asked the assistant to read it back. **It read back a
+number that was not the caller's** -- a plausible-sounding invented one. The
+caller had to dictate the number before it could be repeated correctly.
+
+**The caller's own number is nowhere in the prompt.** Measured directly against
+Digile Media's config: `buildSystemInstruction` produces 17,353 characters and
+none of them contain the calling number. `extras.callerPhone` reaches
+`services/tools.js` as tool context and stops there.
+
+**This is NOT specific to the speech-to-speech front-end.**
+`buildSystemInstruction` is shared, so the cascade has the identical gap and the
+same failure is available on a paying clinic's calls today. It was not found
+earlier because nothing had asked the assistant to read the calling number back.
+
+It is strictly worse than LVX4, which this replaces as the read-back problem.
+LVX4 was a REFUSAL, which is safe. This is fabrication, and `book_appointment`
+ran on the same call -- a wrong number written into a real booking is a caller
+who never gets their reminder and a business that cannot reach them.
+
+**Do not fix blind.** The number is PHI-adjacent and the prompt is the cached
+prefix; adding a per-call field to it has cache and privacy consequences that
+need deciding rather than assuming.
+
+**Done when:** the assistant can state the calling number correctly, or is
+structurally unable to state one at all.
+
+**LVX17 · The first call after any restart is silent, and the caller hangs up** `[gcp]` · P1
+
+Reported by the owner as a long-standing pattern: *"after we make a change it
+does not speak for the first call and then starts speaking from the second call
+onwards."* Reproduced and measured on this call pair.
+
+| | call 1 (cold) | call 2 (warm) |
+|---|---|---|
+| `live_stream_start` -> `live_session_open` | **2,302 ms** | **53 ms** |
+| first audio | +680 ms after that | -- |
+| outcome | caller hung up at 3,320 ms, 0 turns, 0 tokens billed | 25 turns, 4m53s |
+
+So roughly **three seconds of silence** before the first byte, and the caller
+reasonably concludes the line is dead.
+
+The cascade cannot get into this state: it speaks a TTS greeting immediately
+while everything else warms up. This path has no voice at all until the model
+connects, so every cold-start cost is dead air the caller sits through --
+module load, the `@google/genai` client, the database pool, the Gemini
+websocket handshake.
+
+Two contributors are recent and mine: `server.js` imports
+`lib/voice/live/index.js` lazily on the first upgrade, and `onStart` now awaits
+the tenant context *before* connecting (which is correct -- tool declarations
+are fixed at connect -- but it is on the cold path). See also **LVX15**, the
+missing deadline on that same await.
+
+**Done when:** the first call sounds like the second. Candidates: warm the
+module and the client at boot, or give the caller something to hear while the
+session opens.
+
+**LVX18 · Observations from the same call, not yet diagnosed** `[gcp]` · P2
+
+Recorded because they were heard, not because a cause is known.
+
+- **The name was asked for twice** -- once during intake, again at booking. A
+  Live session keeps its own conversation context server-side, so the model had
+  it and re-asked anyway. Prompt or model behaviour rather than lost state.
+- **The name was mispronounced both times**, and the spelling question was only
+  asked after the caller volunteered a correction -- not on first hearing.
+  `spellAsks` is now counted (LVX8), but *when* the first ask fires is a prompt
+  decision this call suggests is mistimed.
+- The intake questions themselves ("what marketing issue does your business
+  have?") are Digile Media's own configuration, not a defect.

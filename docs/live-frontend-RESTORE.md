@@ -103,16 +103,23 @@ strength of its argument.
 
 | field | value |
 |---|---|
-| number | |
-| account (A / B) | |
-| sid | |
-| voiceUrl | |
-| voiceMethod | |
-| statusCallback | |
-| statusCallbackMethod | |
-| voiceApplicationSid | |
-| captured at | |
-| captured by | |
+| number | `+18176011171` |
+| account (A / B) | **B** — `AC7253…ab09`, the account whose token is in the repo's local `.env` and which GCP does **not** hold |
+| sid | `PN58e27f5f39727c40b279354409155ec3` |
+| voiceUrl | `https://ai-phone-assistant-staging.up.railway.app/twilio/voice` |
+| voiceMethod | `POST` |
+| statusCallback | `https://ai-phone-assistant-staging.up.railway.app/twilio/status` |
+| statusCallbackMethod | `POST` |
+| voiceApplicationSid | *(empty)* |
+| captured at | 2026-09-02, read live from Twilio immediately before repointing |
+| captured by | this session |
+
+**Two things this number is, beyond a test line:**
+
+- Its current `voiceUrl` host is **alive** — the Railway *staging* app answers
+  there. This is not a dead endpoint being reclaimed.
+- It is `ASSISTANT_NUMBER` in `.env`, which the latency probe's dial plan reads.
+  **Leaving it pointed elsewhere silently breaks `npm run probe`.**
 
 Restore:
 
