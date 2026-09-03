@@ -1469,3 +1469,32 @@ transcription at all. The per-call summary's `punctuation` block
 
 **Done when:** a live call in arm `hold` reports a non-zero `classified`, and
 `has_terminal_punct` is read against it.
+
+**LVX11 · `TWILIO_AUTH_TOKEN_ALT` is provisioned nowhere, and the naive fix breaks the deploy** `[gcp]` · P2
+
+`server.js` `twilioValidationLive` reads `process.env.TWILIO_AUTH_TOKEN_ALT`;
+`infra/terraform/secrets.tf` declares only `twilio-auth-token`. So on GCP the
+two-account check silently degrades to single-token, and pointing the Live
+webhook at a number on the second Twilio account -- the stated plan, and the
+reason the spike fell back to a secret URL path -- 403s every request with
+`live_signature_invalid`, which reads as a broken endpoint rather than a
+missing secret.
+
+**Adding it to `runtime_secrets` naively BREAKS THE UK DEPLOY**, which is why
+this is recorded rather than fixed. `infra/terraform/cloud-run.tf:645-656` maps
+every secret for the lane into the service with `version = "latest"`, and a
+secret container with no version pushed makes Cloud Run refuse the revision.
+The entry cannot land before a value does, and neither half is verifiable
+without a `terraform apply` nobody has run.
+
+Workable orders, none of them free:
+- push a version first, then add the map entry, then apply; or
+- gate the entry behind a variable defaulting to false, so the default deploy
+  is unchanged and enabling it is deliberate.
+
+Until then the Live route validates against the primary token like every other
+route, which is correct behaviour and simply means account B cannot be used on
+GCP. Locally it works today: `.env` is read directly.
+
+**Done when:** the alt token can be set on the UK service without a deploy that
+fails on a versionless secret.

@@ -403,6 +403,48 @@ app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
   const businessPhone = req.body.To || "";
   const callerPhone = req.body.From || "";
 
+  // The staging caller allowlist, checked BEFORE anything looks up a business
+  // or opens a socket -- the same rule /twilio/voice applies, and it was
+  // missing here. Without it, dialling the Live number instead of the cascade
+  // number walked straight past the control: a call row created for a caller
+  // who did not mean to reach this environment, and their utterances sent to
+  // AI Studio. Inert in production, where CALLER_ALLOWLIST is unset.
+  if (!callerAllowed(callerPhone, CALLER_ALLOWLIST)) {
+    log.error("caller_not_on_allowlist", {
+      callSid,
+      severity: "warn",
+      route: "live",
+      allowlistSize: CALLER_ALLOWLIST.numbers.size,
+      reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
+    });
+    return res.send(buildRefusedTwiml());
+  }
+
+  // An unroutable number must never reach the assistant. The cascade refuses
+  // here rather than in the socket, and this path did not refuse at all: the
+  // socket let lookupBusinessByPhone return null and carried on with
+  // loadConfig(null), so an unrouted number was answered by a generic "our
+  // office" assistant. That is precisely the shape of the phone-number routing
+  // bug this codebase has already paid for once.
+  //
+  // A lookup that THREW is not a lookup that found nothing: only a clean miss
+  // refuses, so a database blip does not turn a real business into voicemail.
+  if (db.isEnabled() && businessPhone) {
+    let business = null;
+    let lookupFailed = false;
+    try {
+      business = await db.lookupBusinessByPhone(businessPhone);
+    } catch (err) {
+      log.error("live_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+      lookupFailed = true;
+    }
+    if (!business && !lookupFailed && !process.env.LIVE_BUSINESS_PHONE) {
+      log.error("live_no_business_for_number", { callSid, businessPhone, severity: "warn" });
+      const profile = getProfile(countryFromE164(businessPhone));
+      return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
+    }
+  }
+
   const streamToken = mintMediaStreamToken(callSid);
   const wsUrl =
     BASE_URL.replace(/^http/, "ws") +
@@ -1349,7 +1391,21 @@ function attachWebSocket(httpServer) {
       // Imported lazily so the Live front-end costs nothing -- no @google/genai
       // Live client, no strategy selection -- in a deployment that never uses
       // it, which today is every deployment answering a real caller.
-      const { handleLiveSessionConnection } = await import("./lib/voice/live/index.js");
+      //
+      // The failure is handled rather than left to reject the upgrade listener:
+      // a module that throws at load (a bad @google/genai version, a transitive
+      // import error) would otherwise leak the raw socket with no 403 and no
+      // destroy, and the client would sit on a half-open connection until it
+      // timed out -- one leaked socket per attempt.
+      let handleLiveSessionConnection;
+      try {
+        ({ handleLiveSessionConnection } = await import("./lib/voice/live/index.js"));
+      } catch (err) {
+        log.error("live_module_load_failed", { reason: err?.message });
+        socket.write(FORBIDDEN_403);
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.authorizedCallSid = verdict.callSid;
         handleLiveSessionConnection(ws, req).catch((err) => {
