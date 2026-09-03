@@ -1391,6 +1391,40 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   );
   if (callerContextSection) sections.push(callerContextSection);
 
+  // === THIS CALLER'S NUMBER ===
+  //
+  // The number the caller is dialling FROM, which the model could not see and
+  // therefore INVENTED when asked for it (backlog LVX16, found on a real call).
+  //
+  // Twilio hands us both numbers on every call: `To` is the business line that
+  // was dialled and `From` is the caller. `From` reached services/tools.js as
+  // tool context and stopped there, so a caller saying "just use the number I'm
+  // calling from" was answered with digits that were not theirs. Not a refusal
+  // — a fabrication, on a call where book_appointment also ran.
+  //
+  // Two halves, and the second is the one that generalises. Knowing the number
+  // fixes "use the one I'm calling from"; it does nothing about a number the
+  // model was never given at all, which is the same failure one step removed.
+  //
+  // DYNAMIC TAIL, never the static prefix: the prefix is the explicit-cache
+  // unit, and a per-call value in it changes the cache key on every call and
+  // costs the caching entirely.
+  //
+  // Emitted only when a number actually arrived. A withheld or unknown caller
+  // must leave NO line here — a placeholder is something the model can read out
+  // as though it were real, which is the defect rather than a fix for it.
+  const callerNumber = typeof extras?.callerPhone === "string" ? extras.callerPhone.trim() : "";
+  if (callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber)) {
+    sections.push(
+      `=== THIS CALLER'S NUMBER ===\n` +
+        `They are calling from ${sanitizeFact(callerNumber, 40)}.\n` +
+        `If they ask you to use or repeat "the number I'm calling from", this is it — ` +
+        `read it back digit by digit.\n` +
+        `Never state, guess or invent a phone number you were not given: if you do not ` +
+        `have one, say so and ask them for it.`
+    );
+  }
+
   // === KNOWN CALLER FACTS ===
   // Facts the call has already established (a confirmed name, a booking made
   // this call) — surfaced every turn so the model stops re-asking and stops

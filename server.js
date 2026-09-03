@@ -246,6 +246,29 @@ app.use(
 // Wrapped so a rejection during startup exits non-zero with a reason rather
 // than surfacing as an unhandled rejection warning on a process that keeps
 // running without a database.
+// ---------------------------------------------------------------------------
+// Warm the speech-to-speech front-end at boot.
+//
+// Its cold start is dead air, not latency: the model IS the voice on that path,
+// so nothing can be said to the caller until the session is up. Measured on a
+// real pair of calls -- 2,302 ms to session open cold against 53 ms warm, plus
+// ~680 ms to first audio -- the caller heard silence for three seconds and hung
+// up (backlog LVX17).
+//
+// The dynamic import is the point: it loads lib/voice/live/** and @google/genai
+// into the module cache now, so the lazy import in the upgrade handler below is
+// a cache hit rather than a module graph. Deliberately NOT awaited -- warming
+// must not delay the port opening, and the cascade must boot regardless.
+//
+// Cloud Run needs `--min-instances=1` alongside this, or scale-to-zero runs the
+// cold path again after every idle period.
+// ---------------------------------------------------------------------------
+if (process.env.NODE_ENV !== "test") {
+  import("./lib/voice/live/index.js")
+    .then((m) => m.warmLiveFrontEnd())
+    .catch((err) => log.error("live_warm_import_failed", { reason: err?.message, severity: "warn" }));
+}
+
 if (process.env.NODE_ENV !== "test") {
   app.use(
     "/twilio",
