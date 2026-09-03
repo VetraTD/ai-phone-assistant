@@ -44,6 +44,7 @@ What a prospect DOES perceive, in the order it will cost you the meeting:
 
 | # | what they hear | entry |
 |---|---|---|
+| 0 | books the appointment **without ever asking their name** | **LVX40** |
 | 1 | asks to book, gets "someone will call you back" | **LVX34** |
 | 2 | cancels two things, is told it still has them, then cannot book | **LVX33** |
 | 3 | four questions in one breath | LVX25 |

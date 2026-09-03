@@ -1854,6 +1854,60 @@ Family Dental as the tenant, `+18176011171` pointed at it.
 environment variable that is set in production and unset on the development
 machine, which is why fourteen laptop calls never saw it.
 
+### LVX40 · It booked an appointment with NO NAME, and that bypasses the spelling gate `[gcp]` · **P0**
+
+First booking on the deployment, 2026-09-03, Brightwork Family Dental, 265 s:
+
+```
+client_name:  null
+client_phone: +14699338887
+scheduled_at: 2026-09-04T17:30:00Z   (12:30 PM Chicago)
+notes:        "tooth pain"
+```
+
+The owner: *"It did not ask for my name, number, or anything when scheduling the
+appointment, I had to ask it after."*
+
+**A clinic receives an appointment with a phone number, a symptom, and nobody
+attached to it.**
+
+**It also silently disables LVX28's protection.** The spelling gate fires on the
+name being WRITTEN — `callerNameFromArgs(fc.args)` returns null when
+`client_name` is absent, `pendingName` is null, and `shouldConfirmSpelling` is
+never consulted. So the gate cannot ask for a spelling it was never given a name
+to check. This is not LVX28 recurring; **it is a hole underneath LVX28**, which
+assumes a name reaches `book_appointment` at all.
+
+The owner then had to ask whether the appointment was confirmed before the model
+collected a name and asked for its spelling — after the row existed. Same
+ordering defect as LVX28's worst case, reached by a different route.
+
+**Worth establishing before fixing:** whether `book_appointment` should refuse a
+booking with no `client_name` at all, or whether the intake step should be what
+guarantees one. The first is a one-line invariant in a SHARED file; the second
+is prompt work. They are different blast radii and the cheap one may be right.
+
+**Done when:** a booking cannot reach the database without a name, or the name is
+collected before the tool is ever called.
+
+### LVX41 · A leak still fires with marker mode off, and it is audible `[gcp]` · P1
+
+Same call: `live_outbound_leaks = 1`, `live_outbound_cuts = 1`,
+`live_outbound_reasks = 1`, `internal_term_leaks = 1`.
+
+The owner, unprompted: *"Seems like responses may be slightly slower? Or
+something gets cut off and then it starts speaking?"* — which is exactly what a
+successful hard cut sounds like. `nudges_fired = 2` on the same call, so there
+were real gaps too.
+
+LVX37 removed the `<<intent:...>>` markers, so **this is a different leak** and
+its content is unknown: the `matched` field would name it, and the log was not
+captured. One leak in a four-minute call is a long way from the six-cycle loop
+LVX37 caused, but it still cut the caller off mid-sentence.
+
+**Done when:** the `matched` value for a post-LVX37 leak is known, and the guard
+is either right to have fired or is not.
+
 ### LVX37 · `VOICE_INTENT_MARKER` makes the model read its markers aloud `[gcp]` · **P0 — FIXED**
 
 The log line that named it, once the instrument could see it at all:
