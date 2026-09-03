@@ -271,3 +271,62 @@ describe("the post-call read gets what the call knew", () => {
     expect(s.verify).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// VOICE_INTENT_MARKER must never reach this front-end.
+//
+// Marker mode asks the model to write <<intent:...>> inline instead of calling
+// set_call_intent. The cascade strips it before TTS; here the model IS the
+// voice, so it is spoken aloud, the leak guard cuts the audio, and the call
+// dies in an apologise-and-repeat loop. Observed on staging 2026-09-03:
+// turns 0, usage.audio_out 13, caller hears silence.
+//
+// The env var is UNSET on the development laptop, which is why fourteen real
+// calls there produced zero leaks and this reached a deployment undetected.
+// That is exactly why it is pinned by a test and not by a comment.
+// ---------------------------------------------------------------------------
+describe('marker mode is forced off', () => {
+  const OLD = process.env.VOICE_INTENT_MARKER;
+  afterEach(() => {
+    if (OLD === undefined) delete process.env.VOICE_INTENT_MARKER;
+    else process.env.VOICE_INTENT_MARKER = OLD;
+  });
+
+  it('does not declare the marker intent tool even with VOICE_INTENT_MARKER=true', async () => {
+    process.env.VOICE_INTENT_MARKER = 'true';
+    const { buildLiveTools } = await import('../lib/voice/live/tools.js');
+    const config = { businessName: 'X', timezone: 'America/Chicago', allowedTasks: ['general_question'], capabilities: {}, businessHours: {} };
+
+    const withMarker = buildLiveTools(config, {})[0].functionDeclarations.map((d) => d.name);
+    const forcedOff = buildLiveTools(config, { intentMarker: false })[0].functionDeclarations.map((d) => d.name);
+
+    // The env var alone changes the declarations; extras.intentMarker overrides it.
+    expect(forcedOff).toContain('set_call_intent');
+    expect(JSON.stringify(forcedOff)).not.toMatch(/intent_marker/i);
+    expect(withMarker).toBeDefined();
+  });
+
+  // The one that would have caught this. A source grep would pass on a comment;
+  // this asserts the prompt the model is actually handed.
+  it('keeps the marker out of the system prompt even with the env var on', async () => {
+    process.env.VOICE_INTENT_MARKER = 'true';
+    const { buildSystemInstruction } = await import('../services/gemini.js');
+    const { STEPS } = await import('../lib/callState.js');
+    const config = {
+      businessName: 'Brightwork Family Dental',
+      timezone: 'America/Chicago',
+      allowedTasks: ['general_question', 'book_appointment'],
+      capabilities: { appointments: { enabled: true } },
+      businessHours: {},
+    };
+
+    // The cascade: the env var alone turns marker mode on, and that is correct
+    // there because getReplyStreaming strips the marker before TTS.
+    const cascade = buildSystemInstruction(STEPS.IDENTIFY_INTENT, null, config, {});
+    // The Live path: extras.intentMarker wins over the env var.
+    const live = buildSystemInstruction(STEPS.IDENTIFY_INTENT, null, config, { intentMarker: false });
+
+    expect(cascade).toMatch(/<<intent:/);
+    expect(live).not.toMatch(/<<intent:/);
+  });
+});
