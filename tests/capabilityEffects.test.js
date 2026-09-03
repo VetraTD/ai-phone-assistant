@@ -298,3 +298,114 @@ describe("appointments.onEffect — the caller snapshot follows what the call di
     expect(setCallerContext).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX33. Three cancellations in one turn only forgot the last one.
+//
+// The dispatcher built its engine once per BATCH, so every removal recomputed
+// from the same starting list and the last write won — two of the three
+// appointments survived in the snapshot. The caller was then told they still
+// had appointments they had just cancelled, and the existing-appointment guard
+// refused to book anything for the rest of the call.
+//
+// These tests drive dispatchCapabilityEffects with a batch, which is what both
+// pipelines actually pass it. The single-effect tests above cannot see this:
+// they call onEffect directly, so there is never a second iteration to be
+// stale.
+// ---------------------------------------------------------------------------
+describe("dispatchCapabilityEffects — several appointment effects in one turn", () => {
+  /**
+   * The shape all four drivers build (lib/voice/session.js:3462,
+   * lib/voice/live/index.js:801, and the two harnesses): a `call` literal whose
+   * callerContext is a VALUE copied at dispatch time, and a setter that rebinds
+   * the session's own reference without touching that copy.
+   */
+  function driver(upcoming) {
+    let callerContext = { callCount: 1, lastCallSummary: null, upcomingAppointments: upcoming };
+    const engine = {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: vi.fn(),
+      setCallerContext(next) {
+        callerContext = next || null;
+      },
+      call: {
+        callSid: "CA1",
+        businessId: "biz-1",
+        callerNumber: "+15551112222",
+        twilioNumber: null,
+        config: { timezone: "America/Chicago" },
+        callerContext,
+      },
+      deps: {
+        log: { error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+        captureException: vi.fn(),
+        notifications: { notifyAppointmentBooked: vi.fn(async () => {}), sendCallerSms: vi.fn(async () => {}) },
+        db: {},
+      },
+    };
+    return { engine, current: () => callerContext };
+  }
+
+  const cancel = (id) => ({
+    capability: "appointments",
+    type: "changed",
+    data: { tool: "cancel_appointment_db", appointmentId: id },
+  });
+
+  const THREE = [
+    { id: "a1", scheduled_at: "2026-09-11T16:30:00.000Z" },
+    { id: "a2", scheduled_at: "2026-09-14T15:00:00.000Z" },
+    { id: "a3", scheduled_at: "2026-09-15T15:00:00.000Z" },
+  ];
+
+  it("three cancellations in one turn leave none of them in the snapshot", () => {
+    const { engine, current } = driver([...THREE]);
+
+    dispatchCapabilityEffects([cancel("a1"), cancel("a2"), cancel("a3")], engine);
+
+    // The observed failure left exactly [a1, a2] here -- the pair the assistant
+    // then read back to the caller as still booked.
+    expect(current().upcomingAppointments).toEqual([]);
+  });
+
+  it("the snapshot the booking guard reads is empty, so a new booking is allowed", () => {
+    // upcomingForCaller() reads callerContext.upcomingAppointments and
+    // book_appointment refuses while it is non-empty. This is the half the
+    // caller actually felt: phantom appointments meant "it was unable to book".
+    const { engine, current } = driver([...THREE]);
+
+    dispatchCapabilityEffects([cancel("a1"), cancel("a2"), cancel("a3")], engine);
+
+    const future = (current().upcomingAppointments || []).filter(
+      (a) => Date.parse(a.scheduled_at) > Date.parse("2026-09-10T00:00:00.000Z")
+    );
+    expect(future).toHaveLength(0);
+  });
+
+  it("a cancel and a booking in the same turn both land", () => {
+    const { engine, current } = driver([...THREE]);
+
+    dispatchCapabilityEffects(
+      [
+        cancel("a2"),
+        {
+          capability: "appointments",
+          type: "booked",
+          data: { scheduled_at: "2026-09-16T15:00:00.000Z", client_name: "Jane" },
+        },
+      ],
+      engine
+    );
+
+    expect(current().upcomingAppointments.map((a) => a.id ?? "new")).toEqual(["a1", "a3", "new"]);
+  });
+
+  it("still does nothing when the driver has no setCallerContext", () => {
+    // The text harness is deliberately not at parity and keeps the call-start
+    // snapshot. It must not throw when a batch arrives.
+    const { engine } = driver([...THREE]);
+    delete engine.setCallerContext;
+
+    expect(() => dispatchCapabilityEffects([cancel("a1"), cancel("a2")], engine)).not.toThrow();
+  });
+});

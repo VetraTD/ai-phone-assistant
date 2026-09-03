@@ -317,12 +317,34 @@ export async function executeToolCall(fc, ctx) {
               policy: spellPolicy(),
             })
           ) {
+            // Worded as an unfinished step, not a failure. LVX34: the model
+            // read `success: false` as "this cannot be done" and told the
+            // caller someone would ring them back -- twice -- rather than
+            // asking the one question it had just been asked to ask. Nothing
+            // in the old text said the request was still live, so the model
+            // supplied its own conclusion, and take-a-message is the fallback
+            // the prompt gives it everywhere else.
+            //
+            // Every constraint the old wording carried is kept: not caller
+            // speech, the name quoted, one attempt per caller turn, and the
+            // decline escape hatch that stops a caller being asked forever.
             const message =
-              `[not caller speech] Before recording "${pendingName}", get the spelling: ask the caller to ` +
-              `spell it, and read the letters back. This is required — do not record the name until they ` +
-              `have spelled it. Ask them now and wait for their answer; do not call this function again ` +
-              `until they have replied. If they decline or tell you it is spelled how it sounds, accept ` +
-              `that and record the name exactly as you heard it.`;
+              `[not caller speech] NOT A FAILURE — this booking is still going ahead, it just needs one ` +
+              `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
+              `spell it, and read the letters back. Do not tell the caller anything went wrong, do not ` +
+              `offer a callback, and do not take a message instead — they are on the line and the only ` +
+              `thing missing is the spelling. Ask them now and wait for their answer; do not call this ` +
+              `function again until they have replied, then call it again with the same details. If they ` +
+              `decline or tell you it is spelled how it sounds, accept that and record the name exactly ` +
+              `as you heard it.`;
+            // Counted, because until now this gate's entire accounting lived in
+            // per-call capabilityState and no call could report how often it
+            // fired or how often it ran out. The cap is the interesting half:
+            // the refusal AFTER the last one writes the name as heard.
+            bumpCounter("spelling_gate_refusals");
+            if (refusalIsNew && gateRefusals + 1 >= spellMissCap()) {
+              bumpCounter("spelling_gate_cap_reached");
+            }
             // Keep the name, exactly as the requirements refusal below does.
             // A refusal throws fc.args away, and this one now fires for every
             // caller whose name is not already on file — so without this the

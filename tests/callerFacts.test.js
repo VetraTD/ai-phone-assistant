@@ -230,7 +230,15 @@ describe("appointments producer — a successful booking writes caller facts", (
     expect(tail).toContain("- Name: Jane");
   });
 
-  it("omits the Name fact when the caller gave no name", async () => {
+  it("a booking with no name never gets as far as caller facts", async () => {
+    // REWRITTEN for LVX40. This used to assert that a nameless booking
+    // SUCCEEDED and simply left the Name fact out -- which is precisely the
+    // behaviour that put an appointment in a clinic's diary with a phone
+    // number, "tooth pain", and nobody attached to it. The test was encoding
+    // the defect.
+    //
+    // There is nothing left to assert about the facts, because the write is
+    // refused before it can produce any.
     const res = await appointments.execute(
       { id: "1", name: "book_appointment", args: { scheduled_at: REQUESTED } },
       {
@@ -242,10 +250,9 @@ describe("appointments producer — a successful booking writes caller facts", (
         deps: makeDeps(),
       }
     );
-    expect(res.functionResponse.response.success).toBe(true);
-    const facts = res.stateEffects.capabilityState.appointments.callerFacts;
-    expect(facts.Name).toBeUndefined();
-    expect(facts["Booked this call"]).toBeTruthy();
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(res.functionResponse.response.message).toMatch(/name/i);
+    expect(res.stateEffects.capabilityState).toBeUndefined();
   });
 });
 

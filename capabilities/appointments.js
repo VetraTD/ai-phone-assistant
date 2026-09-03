@@ -46,6 +46,7 @@ import {
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -74,7 +75,17 @@ const BOOK_APPOINTMENT_DECLARATION = {
         description: "Any additional notes about the appointment or client needs",
       },
     },
-    required: ["scheduled_at"],
+    // LVX40. `client_name` was optional here and the model took the offer: the
+    // first deployed booking wrote a row with a phone number, "tooth pain", and
+    // nobody attached to it. The clinic receives an appointment with no patient.
+    //
+    // Marked required HERE as well as enforced in the handler, because the two
+    // do different jobs. The schema is what makes the model ASK before calling;
+    // the handler is what makes it true. A schema alone is a request.
+    //
+    // Every EHR write tool in this pack has always required `caller_name`. The
+    // internal booking tool was the outlier, not the precedent.
+    required: ["scheduled_at", "client_name"],
   },
 };
 
@@ -1603,6 +1614,54 @@ async function bookAppointment(fc, ctx) {
     "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
   let anchoredScheduledAt = null;
   let alreadyBooked = false;
+
+  // ---- Is there anybody to attach this appointment to? --------------------
+  //
+  // LVX40. The first booking on the deployment wrote client_name: null, with a
+  // phone number from the caller ID and "tooth pain" in the notes. The owner
+  // had to ask whether it was confirmed before the assistant collected a name
+  // at all -- after the row already existed.
+  //
+  // A floor rather than a per-business requirement. `require.identity.builtin:
+  // ["name"]` already expresses "this business insists on a name" and is
+  // correctly opt-in, because enforcement must never lock a tenant out of its
+  // own capability. But a nameless appointment is not a business preference:
+  // there is no scheduling backend, and no receptionist, for whom a slot with
+  // nobody in it is a valid record. lib/capabilities/requirements.js sets the
+  // test as "if the AI ignores this, does someone get hurt, sued, or angry?",
+  // and a clinic holding a chair for nobody answers yes.
+  //
+  // ABOVE validateBookingTime, unlike the existing-appointment invariant below:
+  // a name is the cheapest thing to ask for and the caller has already said it
+  // out loud, so critiquing the time first spends a turn on the wrong question.
+  //
+  // It also re-arms the spelling gate. services/tools.js reads the pending name
+  // off the tool ARGUMENTS, so a booking with no name meant `pendingName` was
+  // null, `shouldConfirmSpelling` was never consulted, and LVX28's protection
+  // was silently absent -- a hole underneath it rather than a recurrence of it.
+  const clientName = typeof args.client_name === "string" ? args.client_name.trim() : "";
+  if (!clientName) {
+    bumpCounter("booking_refused_no_name");
+    const message =
+      `[not caller speech] This booking has no name on it. Ask the caller for their full name, ` +
+      `wait for their answer, and then call this again with client_name set. Do not guess it and ` +
+      `do not book without it.`;
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        // Silent, like the other pre-execution refusals: "Getting that booked
+        // now." a moment before asking who the caller is describes work that
+        // was declined.
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "Before I book that in, can I take your full name?",
+          callerSafe: true,
+        },
+        toolCallEvent: { name: fc.name, args, silent: true },
+      },
+    };
+  }
 
   if (args.scheduled_at) {
     const validated = validateBookingTime(args.scheduled_at, config, ctx.deps);

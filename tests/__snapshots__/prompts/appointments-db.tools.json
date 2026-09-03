@@ -67,7 +67,8 @@
         }
       },
       "required": [
-        "scheduled_at"
+        "scheduled_at",
+        "client_name"
       ]
     }
   },

@@ -141,8 +141,35 @@ describe("the assistant-turn diagnostic", () => {
     expect(debugCalls()[0][1].text).toBe("And could I take your name?");
   });
 
-  it("never records the caller's own words", async () => {
+  it("records the caller's own words too, on the same entry", async () => {
+    // REVERSED DELIBERATELY. This used to assert the caller was never
+    // recorded, and that restraint is what made LVX36 unresolvable: the
+    // assistant offered three slots and booked a fourth, and there is no
+    // record anywhere of which one the caller asked for. On a front-end whose
+    // open P0 is saying things nobody asked for, one-sided evidence is not
+    // evidence. Same flag, same hipaa refusal, same debug_only marking.
     const s = await boot({ LIVE_DEBUG_TRANSCRIPT: "1" });
+    s.hear("My mobile is 07700 900123.");
+    s.say("Thank you.");
+    s.endTurn();
+
+    expect(debugCalls()).toHaveLength(1);
+    expect(debugCalls()[0][1].user_text).toContain("900123");
+    expect(debugCalls()[0][1].text).toBe("Thank you.");
+  });
+
+  it("still records nothing at all when the flag is off", async () => {
+    const s = await boot({});
+    s.hear("My mobile is 07700 900123.");
+    s.say("Thank you.");
+    s.endTurn();
+
+    expect(debugCalls()).toHaveLength(0);
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain("900123");
+  });
+
+  it("refuses the caller's half in hipaa mode along with everything else", async () => {
+    const s = await boot({ LIVE_DEBUG_TRANSCRIPT: "1", DEPLOYMENT_MODE: "hipaa" });
     s.hear("My mobile is 07700 900123.");
     s.say("Thank you.");
     s.endTurn();

@@ -1789,3 +1789,143 @@ describe("services/tools.js — the spelling gate blocks until answered, then le
     expect(mockCreateAppointment).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX40. It booked an appointment with nobody's name on it.
+//
+// The first booking on the deployment:
+//
+//   client_name:  null
+//   client_phone: +14699338887
+//   scheduled_at: 2026-09-04T17:30:00Z
+//   notes:        "tooth pain"
+//
+// A clinic receives an appointment with a phone number, a symptom, and nobody
+// attached to it. The owner had to ASK whether it was confirmed before the
+// assistant collected a name at all.
+//
+// The second half is quieter and worse: the spelling gate reads the pending
+// name off the tool ARGUMENTS, so a booking with no name meant pendingName was
+// null, shouldConfirmSpelling was never consulted, and the whole of LVX28's
+// protection was absent without anything reporting it. Not LVX28 recurring --
+// a hole underneath it.
+// ---------------------------------------------------------------------------
+describe("book_appointment refuses a booking with no name", () => {
+  beforeEach(() => {
+    mockCreateAppointment.mockReset();
+    mockCreateAppointment.mockResolvedValue("appt-1");
+  });
+
+  const book = (args) =>
+    executeToolCall({ id: "fcname", name: "book_appointment", args }, baseCtx);
+
+  it("writes nothing when client_name is absent", async () => {
+    const { functionResponse, stateEffects } = await book({
+      scheduled_at: FUTURE_SLOT,
+      notes: "tooth pain",
+    });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The caller hears a question, not an apology: nothing has gone wrong yet.
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    expect(stateEffects.toolResult.message).toMatch(/name/i);
+    // Refused before execution, so the session stays quiet rather than
+    // announcing work that was declined.
+    expect(stateEffects.toolCallEvent.silent).toBe(true);
+  });
+
+  it("treats a whitespace-only name as no name", async () => {
+    const { functionResponse } = await book({ scheduled_at: FUTURE_SLOT, client_name: "   " });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("asks for the name BEFORE critiquing the time", async () => {
+    // A past time and a missing name in the same call. One reason at a time,
+    // and the name is the one the caller can answer without thinking.
+    const { functionResponse } = await book({ scheduled_at: "2020-01-01T10:00:00" });
+
+    expect(functionResponse.response.message).toMatch(/name/i);
+    expect(functionResponse.response.message).not.toMatch(/past/i);
+  });
+
+  it("still books when a name is supplied", async () => {
+    const { functionResponse } = await book({
+      scheduled_at: FUTURE_SLOT,
+      client_name: "Jane Fitzgerald",
+    });
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("the retry that carries a name then meets the spelling gate", async () => {
+    // The ordering this exists to restore. Nameless booking -> refused for the
+    // name; the follow-up call now HAS a name, so the gate can finally see one
+    // and asks for its spelling before the row is written.
+    const ctx = { ...baseCtx, spellingSettled: false, callerTurnCount: 3 };
+
+    const first = await executeToolCall(
+      { id: "n1", name: "book_appointment", args: { scheduled_at: FUTURE_SLOT } },
+      ctx
+    );
+    expect(first.functionResponse.response.success).toBe(false);
+    expect(first.functionResponse.response.message).toMatch(/name/i);
+
+    const second = await executeToolCall(
+      { id: "n2", name: "book_appointment", args: { scheduled_at: FUTURE_SLOT, client_name: "Nithin Dodla" } },
+      ctx
+    );
+    expect(second.functionResponse.response.success).toBe(false);
+    expect(second.functionResponse.response.message).toMatch(/spell/i);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX34's other half: the wording of the refusal itself.
+//
+// The gate returned success:false with an instruction, and the model read the
+// false and not the instruction -- it told the caller someone would ring them
+// back, twice, and only asked for the spelling when the caller pushed. Nothing
+// in the text said the request was still live, so the model supplied its own
+// conclusion, and take-a-message is the fallback the prompt offers everywhere
+// else.
+//
+// Pinned rather than left to prose review, because this text is SHARED with
+// the cascade and a later tidy-up would silently undo it.
+// ---------------------------------------------------------------------------
+describe("the spelling gate's refusal reads as an unfinished step, not a failure", () => {
+  const cfg = { businessName: "Test", timezone: "America/Chicago" };
+  const refusal = async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "w1", name: "book_appointment", args: { scheduled_at: FUTURE_SLOT, client_name: "Nithin Dodla" } },
+      { ...baseCtx, config: cfg, spellingSettled: false, callerTurnCount: 2 }
+    );
+    return functionResponse.response;
+  };
+
+  it("says the booking is still going ahead", async () => {
+    const r = await refusal();
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/NOT A FAILURE/);
+  });
+
+  it("forbids the two fallbacks the model actually reached for", async () => {
+    const r = await refusal();
+    expect(r.message).toMatch(/do not offer a callback/i);
+    expect(r.message).toMatch(/do not take a message/i);
+  });
+
+  it("keeps every constraint the old wording carried", async () => {
+    const r = await refusal();
+    expect(r.message).toMatch(/^\[not caller speech\]/);
+    expect(r.message).toContain('"Nithin Dodla"');
+    expect(r.message).toMatch(/wait for their answer/i);
+    // The escape hatch. Without it a caller who says "it's spelled how it
+    // sounds" is asked forever.
+    expect(r.message).toMatch(/decline/i);
+  });
+});

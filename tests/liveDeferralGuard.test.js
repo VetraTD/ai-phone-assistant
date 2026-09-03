@@ -1,0 +1,235 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "node:events";
+import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+
+// ---------------------------------------------------------------------------
+// LVX34. A refused write answered with "someone will call you back".
+//
+// From a real call. book_appointment was refused by the spelling gate, whose
+// message says in words: "ask the caller to spell it, and read the letters
+// back... Ask them now and wait for their answer." The model instead told the
+// caller someone would ring them back, twice, and only asked for the spelling
+// once the caller pushed.
+//
+// Two separate reasons nothing caught it, and neither is the one first written
+// down:
+//
+//   1. promiseRe is "I am about to do something" -- one moment, let me check.
+//      "Someone will call you back" is a different speech act and does not
+//      match it in any phrasing. There was no pattern for it at all.
+//   2. The promise guard is gated on !realToolCallsThisTurn, and that count
+//      includes ATTEMPTS. A refused call still increments it, so the guard was
+//      switched off by the very thing it should have fired on.
+//
+// The near miss is worse than what was heard: spellMissCap is 2, so a less
+// persistent caller runs the gate out of refusals and is written to the
+// database exactly as they were misheard.
+// ---------------------------------------------------------------------------
+
+class FakeSocket extends EventEmitter {
+  constructor() {
+    super();
+    this.OPEN = 1;
+    this.readyState = 1;
+  }
+  send() {}
+  close() {
+    this.readyState = 3;
+  }
+  deliver(msg) {
+    this.emit("message", Buffer.from(JSON.stringify(msg)));
+  }
+}
+
+function fakeLive() {
+  const sent = { clientContent: [], toolResponses: [] };
+  let onmessage = null;
+  return {
+    sent,
+    connect: vi.fn(async ({ callbacks }) => {
+      onmessage = callbacks.onmessage;
+      return {
+        session: {
+          sendRealtimeInput: () => {},
+          sendClientContent: (m) => sent.clientContent.push(m),
+          sendToolResponse: (m) => sent.toolResponses.push(m),
+          close: () => {},
+        },
+        languagePinned: true,
+        surface: "aistudio",
+        model: "m",
+      };
+    }),
+    push: (msg) => onmessage?.(msg),
+  };
+}
+
+function fakeDb() {
+  return {
+    isEnabled: () => true,
+    lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Brightwork Family Dental" })),
+    loadConfig: () => ({
+      businessName: "Brightwork Family Dental",
+      timezone: "America/Chicago",
+      allowedTasks: ["general_question", "take_message", "book_appointment", "check_appointment"],
+      capabilities: { appointments: { enabled: true }, messages: { enabled: true } },
+      businessHours: {},
+    }),
+    withTenantSafe: async (_id, fn) => fn(),
+    createCall: async () => "call-1",
+    listIntegrationsForBusiness: async () => [],
+    fetchBusinessKnowledge: async () => [],
+    fetchCallerContext: async () => null,
+  };
+}
+
+let toolId = 0;
+
+/**
+ * @param {"allow"|"refuse"} verdict - what the tool layer does with a write
+ */
+async function boot(verdict = "refuse") {
+  const ws = new FakeSocket();
+  const live = fakeLive();
+  // The shape services/tools.js returns when the spelling gate holds a write
+  // back: success:false on both halves, with the instruction as the message.
+  const execute = vi.fn(async (fc) =>
+    verdict === "refuse"
+      ? {
+          functionResponse: {
+            id: fc.id,
+            name: fc.name,
+            response: { success: false, message: "[not caller speech] Before recording it, get the spelling." },
+          },
+          stateEffects: {
+            toolResult: { name: fc.name, success: false, message: "get the spelling" },
+            toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+          },
+        }
+      : {
+          functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+          stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" } },
+        }
+  );
+
+  await handleLiveSessionConnection(ws, {}, {
+    now: () => 0,
+    connect: live.connect,
+    database: fakeDb(),
+    env: {},
+    execute,
+  });
+  ws.deliver({
+    event: "start",
+    start: { callSid: "CA1", streamSid: "MZ1", customParameters: { businessPhone: "+18176011171" } },
+  });
+  await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
+  await new Promise((r) => setImmediate(r));
+
+  const settle = async () => {
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+  };
+  return {
+    live,
+    settle,
+    say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
+    endTurn: () => live.push({ serverContent: { turnComplete: true } }),
+    async callTool(name = "book_appointment") {
+      live.push({ toolCall: { functionCalls: [{ id: `d${(toolId += 1)}`, name, args: { n: toolId } }] } });
+      await settle();
+    },
+  };
+}
+
+const stat = (name) => getLatencyStats().turnTaking[name];
+// clientContent[0] is the greeting kick; anything after it is a turn note.
+const notes = (live) => live.sent.clientContent.slice(1);
+
+describe("a refused write answered with a callback promise", () => {
+  beforeEach(() => clearStats());
+
+  it("is counted when the TOOL LAYER refuses, and the model is pointed back at it", async () => {
+    // The spelling gate's shape: services/tools.js hands back success:false
+    // with an instruction, and the write never runs.
+    const s = await boot("refuse");
+    await s.callTool("record_customer_request");
+    s.say("Thanks. Someone will call you back within the next business day to confirm that.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_tool_refusals")).toBe(1);
+    expect(stat("live_deferral_after_refusal")).toBe(1);
+    expect(JSON.stringify(notes(s.live))).toContain("refused this turn");
+  });
+
+  it("is counted when the LIVE GUARD refuses, which never reaches the tool layer", async () => {
+    // book_appointment with no verified slot is stopped by the availability
+    // invariant in guards.js, which returns a functionResponse and no
+    // toolResult at all. Counting only what the tool layer sees would miss it.
+    const s = await boot("allow");
+    await s.callTool("book_appointment");
+    s.say("Someone will get back to you about that.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_guard_availability_blocked")).toBe(1);
+    expect(stat("live_tool_refusals")).toBe(1);
+    expect(stat("live_deferral_after_refusal")).toBe(1);
+  });
+
+  it("says nothing when the same words follow a write that SUCCEEDED", async () => {
+    // A receptionist offering a callback after doing the thing is not a defect.
+    // The pairing is the whole signal.
+    const s = await boot("allow");
+    await s.callTool("record_customer_request");
+    s.say("That is noted. Someone will call you back tomorrow to confirm.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_tool_refusals")).toBe(0);
+    expect(stat("live_deferral_after_refusal")).toBe(0);
+  });
+
+  it("says nothing when a refusal is answered by asking, which is the wanted behaviour", async () => {
+    const s = await boot("refuse");
+    await s.callTool("record_customer_request");
+    s.say("Could you spell your last name for me?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_tool_refusals")).toBe(1);
+    expect(stat("live_deferral_after_refusal")).toBe(0);
+  });
+
+  it("does not fire for a refused LOOKUP, only for a write the caller asked for", async () => {
+    // get_caller_appointments_from_db is not an action tool. A failed lookup
+    // leaves nothing outstanding, so offering a callback after one is a
+    // judgement call rather than a defect.
+    const s = await boot("refuse");
+    await s.callTool("get_caller_appointments_from_db");
+    s.say("Someone will call you back later today.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_tool_refusals")).toBe(0);
+    expect(stat("live_deferral_after_refusal")).toBe(0);
+  });
+
+  it("the count does not survive the turn it belongs to", async () => {
+    // Otherwise a refusal on turn 2 would condemn a perfectly good callback
+    // offer on turn 9.
+    const s = await boot("refuse");
+    await s.callTool("record_customer_request");
+    s.say("Could you spell that for me?");
+    s.endTurn();
+    await s.settle();
+
+    s.say("Of course - someone will call you back about the other thing.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_deferral_after_refusal")).toBe(0);
+  });
+});
