@@ -77,6 +77,7 @@ function fakeDb(overrides = {}) {
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
+    fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
     ...overrides,
   };
@@ -151,6 +152,106 @@ describe("session start", () => {
     await boot({ database, env: { LIVE_BUSINESS_PHONE: "+441372656055" } });
 
     expect(database.lookupBusinessByPhone).toHaveBeenCalledWith("+441372656055");
+  });
+});
+
+describe("tenant context is loaded BEFORE the session is configured", () => {
+  it("declares a business's webhook tools, not just the built-in ten", async () => {
+    // The review finding this replaces: the tenant prefetch was fired and not
+    // awaited, then the tool list was built in the same synchronous block, so
+    // extras.integrations was ALWAYS []. Every integration tool was missing
+    // from every call, and the old "declares all ten tools" test passed only
+    // because its fake returned no integrations -- it asserted the number it
+    // would have got either way.
+    const database = fakeDb({
+      listIntegrationsForBusiness: async () => [
+        {
+          provider: "webhook",
+          name: "check_order_status",
+          enabled: true,
+          config: {
+            url: "https://example.com/hook",
+            description: "Look up an order",
+            params_schema: { type: "object", properties: { order_id: { type: "string" } } },
+          },
+        },
+      ],
+    });
+    const { live } = await boot({ database });
+    const names = live.sent.config.tools[0].functionDeclarations.map((d) => d.name);
+
+    expect(names).toContain("check_order_status");
+    expect(names.length).toBeGreaterThan(10);
+  });
+
+  it("puts the business knowledge base in the system prompt", async () => {
+    // Never fetched at all before this: no db.fetchBusinessKnowledge call
+    // existed anywhere under lib/voice/live/, so the KNOWLEDGE BASE section was
+    // absent and the assistant could answer no FAQ.
+    const database = fakeDb({
+      fetchBusinessKnowledge: async () => [
+        { question: "Where do I park?", answer: "There is a car park behind the surgery.", category: "location" },
+      ],
+    });
+    const { live } = await boot({ database });
+    const prompt = live.sent.config.systemInstruction.parts[0].text;
+
+    expect(prompt).toContain("car park behind the surgery");
+  });
+});
+
+describe("the greeting", () => {
+  it("tells the model to open the call, not that a greeting already happened", async () => {
+    // The contradiction the review found: services/gemini.js appends "The
+    // caller was already greeted -- do not greet them again" whenever
+    // config.greeting is set, which is always, while the kick-off message asked
+    // the model to greet. True in the cascade, where TTS speaks first. False
+    // here: the model IS the voice and nothing has been said.
+    const { live } = await boot();
+    const prompt = live.sent.config.systemInstruction.parts[0].text;
+
+    expect(prompt).not.toContain("do not greet them again");
+    expect(prompt).toContain("Nothing has been said to the caller yet");
+  });
+
+  it("carries the recording disclosure into the opening line", async () => {
+    // Compliance, not polish. buildGreeting prepends this for the cascade; a
+    // Live path that never speaks the configured greeting never says it at all,
+    // and a business that enabled it is telling callers something it may be
+    // required to say before anything else happens.
+    const database = fakeDb({
+      loadConfig: () => ({
+        businessName: "Digile Media",
+        timezone: "Europe/London",
+        allowedTasks: ["general_question", "take_message"],
+        capabilities: { messages: { enabled: true } },
+        businessHours: {},
+        greeting: "Hi, how can I help you today?",
+        recordingDisclosureEnabled: true,
+        recordingDisclosureText: "This call is recorded for training purposes.",
+      }),
+    });
+    const { live } = await boot({ database });
+    const prompt = live.sent.config.systemInstruction.parts[0].text;
+
+    expect(prompt).toContain("This call is recorded for training purposes.");
+  });
+
+  it("uses a business's custom greeting verbatim", async () => {
+    const database = fakeDb({
+      loadConfig: () => ({
+        businessName: "Digile Media",
+        timezone: "Europe/London",
+        allowedTasks: ["general_question"],
+        capabilities: {},
+        businessHours: {},
+        greeting: "Good day, Digile Media, Priya speaking.",
+        _hasCustomGreeting: true,
+      }),
+    });
+    const { live } = await boot({ database });
+
+    expect(live.sent.config.systemInstruction.parts[0].text).toContain("Priya speaking");
   });
 });
 

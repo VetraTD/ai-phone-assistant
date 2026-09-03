@@ -5,6 +5,7 @@ import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { greetingTextFor } from "../lib/voice/greeting.js";
 import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
@@ -1328,7 +1329,33 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // and config.greeting still holds the generic DEFAULT_GREETING text — quoting
   // that would tell the model the caller heard words they never did. Fall back
   // to a content-free directive that still stops the re-greet.
-  if (typeof config.greeting === "string" && config.greeting.trim()) {
+  //
+  // `extras.greetingSpoken === false` INVERTS this block, and only the
+  // speech-to-speech front-end passes it. That path has no TTS leg at all —
+  // the model IS the voice — so nothing has been spoken when the session
+  // opens, and telling it otherwise is a flat contradiction: the prompt said
+  // the caller had been greeted while the very next message asked it to greet
+  // them. It also meant the business's configured greeting was never uttered
+  // and, worse, `recordingDisclosureText` never reached a caller who is owed
+  // it.
+  //
+  // Absent flag keeps the cascade's behaviour exactly, so the TTS path is
+  // untouched.
+  const greetingSpoken = extras.greetingSpoken !== false;
+  if (!greetingSpoken) {
+    // Deliberately NOT gated on config.greeting being set. greetingTextFor
+    // synthesizes an opening from the business name and time of day when no
+    // greeting is configured, and on a path where the model is the only voice,
+    // a business with an empty greeting column must still be opened properly
+    // rather than left with no instruction at all.
+    const opening = sanitizeFact(greetingTextFor(config), 400);
+    if (opening) {
+      taskState =
+        taskState.replace(/\n+$/, "") +
+        `\nNothing has been said to the caller yet. Open the call by saying this, ` +
+        `in your own natural voice: "${opening}"`;
+    }
+  } else if (typeof config.greeting === "string" && config.greeting.trim()) {
     if (config._hasCustomGreeting === true) {
       const greeting = sanitizeFact(config.greeting, 300);
       if (greeting) {
