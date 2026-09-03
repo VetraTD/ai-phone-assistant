@@ -217,6 +217,48 @@ describe("a refused write answered with a callback promise", () => {
     expect(stat("live_deferral_after_refusal")).toBe(0);
   });
 
+  it("a claim after a REFUSED call is counted — LVX31, seen on a real call", async () => {
+    // The guard used to ask "did the model call anything", when the question it
+    // needed answered was "did anything actually happen". A refused call answers
+    // yes to the first and no to the second, so a refusal switched the guard
+    // off -- and on the deployed build the spelling gate refused a write, the
+    // assistant claimed something was done, and the post-call read found no row
+    // while this counter read 0.
+    const s = await boot("refuse");
+    await s.callTool("record_customer_request");
+    s.say("All set — I've noted that down for you.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_claim_without_action")).toBe(1);
+  });
+
+  it("a claim after a call that SUCCEEDED is still none of the guard's business", async () => {
+    const s = await boot("allow");
+    await s.callTool("record_customer_request");
+    s.say("All set — I've noted that down for you.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_claim_without_action")).toBe(0);
+  });
+
+  it("a refused turn does not grant the NEXT turn's claim immunity", async () => {
+    // The second half of the same fix. Leaving toolRanPrevTurn on attempts
+    // would be a new blind spot in the shape of the one being closed.
+    const s = await boot("refuse");
+    await s.callTool("record_customer_request");
+    s.say("One moment.");
+    s.endTurn();
+    await s.settle();
+
+    s.say("That's booked for you.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_claim_without_action")).toBe(1);
+  });
+
   it("the count does not survive the turn it belongs to", async () => {
     // Otherwise a refusal on turn 2 would condemn a perfectly good callback
     // offer on turn 9.

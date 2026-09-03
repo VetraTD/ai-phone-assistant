@@ -123,7 +123,13 @@ async function boot(env = {}) {
     settle,
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
-    async callTool(name = "book_appointment") {
+    // NOT book_appointment. The availability invariant in guards.js refuses a
+    // booking whose slot nothing has verified, so these two tests were driving
+    // a REFUSED call while believing they had run a successful one -- and they
+    // passed only because the guard counted attempts. Once it counted tools
+    // that actually executed, the fixture's own mistake surfaced as a failure.
+    // record_customer_request is an action tool that no invariant blocks.
+    async callTool(name = "record_customer_request") {
       live.push({ toolCall: { functionCalls: [{ id: `t${(toolId += 1)}`, name, args: { n: toolId } }] } });
       await settle();
     },

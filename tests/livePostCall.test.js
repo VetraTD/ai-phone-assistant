@@ -203,19 +203,27 @@ describe("the post-call read gets what the call knew", () => {
   });
 
   // ------------------------------------------------------------------
-  // The hole in the turn-level claim guard, pinned.
+  // A claim behind a REFUSED tool call. LVX31.
   //
-  // `realToolCallsThisTurn` is incremented for ATTEMPTED calls, before
-  // guards.before() can refuse one (lib/voice/live/index.js:1155). So a model
-  // whose booking the availability invariant refuses, and which then tells the
-  // caller it is booked, does NOT trip live_claim_without_action -- and a
-  // refused booking is one of the production routes the LVX27 entry itself
-  // named.
+  // This test used to assert `toolBacked: true` here, and it was RIGHT to: it
+  // pinned the hole. `realToolCallsThisTurn` counted ATTEMPTED calls, so a
+  // model whose booking the availability invariant refused, and which then told
+  // the caller it was booked, did not trip live_claim_without_action -- and the
+  // ledger recorded the claim as tool-backed when nothing had run.
   //
-  // The post-call read is what closes it: the claim reaches the ledger anyway,
-  // and the database has no row to back it.
+  // Seen on a real deployed call on 2026-09-03, the other way round: the
+  // spelling gate refused a write, the assistant claimed something was done,
+  // postcall_claim_without_row fired and live_claim_without_action stayed 0.
+  //
+  // Closed 2026-09-03 by counting tools that actually EXECUTED. The assertion
+  // is inverted deliberately: `toolBacked` is now false, which is what it
+  // always should have said.
+  //
+  // The post-call read still matters and is not made redundant. It asks a
+  // different question -- did the database end up holding what the caller was
+  // told -- and it survives a claim that trails its tool by more than a turn.
   // ------------------------------------------------------------------
-  it("records a claim behind a REFUSED tool call, which the turn guard misses", async () => {
+  it("records a claim behind a REFUSED tool call as NOT tool-backed", async () => {
     const s = await boot();
     await s.callTool("book_appointment", { scheduled_at: SLOT });
     s.say("All set — you're booked for Monday at ten.");
@@ -225,7 +233,7 @@ describe("the post-call read gets what the call knew", () => {
 
     const { claims, writes } = arg(s.verify);
     expect(claims).toHaveLength(1);
-    expect(claims[0].toolBacked).toBe(true);
+    expect(claims[0].toolBacked).toBe(false);
     expect(writes).toEqual([]);
   });
 
