@@ -91,6 +91,7 @@ const argv = process.argv.slice(2);
 const CONFIRMED = argv.includes("--confirm");
 const RUNS = Number(valueOf("--runs") || 3);
 const GAPS = argv.includes("--gaps");
+const KEEPALIVE = argv.includes("--keepalive");
 const BUSINESS_PHONE = valueOf("--business") || process.env.LIVE_BUSINESS_PHONE || "+441372656055";
 
 function valueOf(flag) {
@@ -122,6 +123,49 @@ function valueOf(flag) {
  */
 const GAP_LADDER = [5, 30, 90, 150];
 
+/**
+ * The host the AI Studio Live socket is opened against. A plain HTTPS request
+ * here establishes the same TLS path without touching the Live API at all,
+ * which is what makes the transport and the endpoint separable.
+ */
+const AI_STUDIO_HOST = "https://generativelanguage.googleapis.com/";
+
+/**
+ * `--keepalive`: is what expires the TRANSPORT, or the Live endpoint?
+ *
+ * ---------------------------------------------------------------------------
+ * Why the answer decides the fix
+ * ---------------------------------------------------------------------------
+ *
+ * The gap ladder established that something with a 30-90 s idle TTL costs
+ * 2.2 s to rebuild, and that it is shared across processes. If that something
+ * is the TLS/connection path, then ANY traffic to the host holds it and the
+ * fix is an HTTPS request on a timer that spends nothing, ever. If it is
+ * specific to the Live endpoint, a real session has to be held open, which has
+ * a lifecycle, a cost and a failure mode.
+ *
+ * Three measurements, in one process, and the first is the one that settles it:
+ *
+ *   1. a BARE HTTPS request after a long idle, timed. No Gemini involved. If
+ *      this alone takes ~2 s, the cost is transport and has nothing to do with
+ *      the Live API.
+ *   2. a Live connect immediately after that request. If the request warmed the
+ *      path, this is fast.
+ *   3. a Live connect after an idle period that was covered by pings. This is
+ *      the fix, tested as the fix.
+ *
+ * ---------------------------------------------------------------------------
+ * The confound this cannot remove, and it matters
+ * ---------------------------------------------------------------------------
+ *
+ * Every LVX17 number in this repository was taken on ONE Windows machine that
+ * is known to do TLS interception -- it is why ngrok cannot authenticate here
+ * and cloudflared is used instead. An intercepting middlebox with its own idle
+ * connection cache would produce exactly this signature. So a "transport"
+ * verdict here does NOT establish that production pays the same 2.2 s; it
+ * establishes that something in the path does, on this machine. Confirming it
+ * on Cloud Run is a separate job and is not done.
+ */
 const ARMS = [
   { key: "full", prompt: "full", tools: true },
   { key: "minimal", prompt: "minimal", tools: true },
@@ -233,6 +277,71 @@ async function main() {
       languageCode: process.env.LIVE_LANGUAGE_CODE || "en-GB",
     },
   });
+
+  /** A plain HTTPS request to the Live host. No API key, no Gemini call. */
+  async function ping() {
+    const t0 = Date.now();
+    let status = null;
+    try {
+      const res = await fetch(AI_STUDIO_HOST, { method: "GET" });
+      status = res.status;
+    } catch (err) {
+      status = `ERR ${err?.message?.slice(0, 60)}`;
+    }
+    return { ms: Date.now() - t0, status };
+  }
+
+  if (KEEPALIVE) {
+    const IDLE_S = 100; // past the 90 s that was already shown to expire
+
+    console.log("  Transport or endpoint? Three measurements.\n");
+
+    const warm = await timeConnect(fullConfig());
+    console.log(`  0. connect, to start warm                 ${String(warm.ms).padStart(5)} ms`);
+
+    const pWarm = await ping();
+    console.log(`     bare HTTPS while warm                  ${String(pWarm.ms).padStart(5)} ms  (HTTP ${pWarm.status})`);
+
+    // 1. THE DECIDER. A bare HTTPS request after the same idle that was shown
+    //    to cost a Live connect 2.2 s. No Gemini in this measurement at all.
+    console.log(`\n  ... idle ${IDLE_S}s, no traffic ...`);
+    await new Promise((r) => setTimeout(r, IDLE_S * 1000));
+    const pCold = await ping();
+    console.log(`  1. bare HTTPS after idle                  ${String(pCold.ms).padStart(5)} ms  (HTTP ${pCold.status})`);
+
+    // 2. Did that request warm the path for the Live socket?
+    const afterPing = await timeConnect(fullConfig());
+    console.log(`  2. connect immediately after that ping    ${String(afterPing.ms).padStart(5)} ms`);
+
+    // 3. The fix, tested as the fix: the same idle, covered by pings.
+    console.log(`\n  ... idle ${IDLE_S}s, pinging every 25s ...`);
+    const pings = [];
+    const until = Date.now() + IDLE_S * 1000;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 25_000));
+      pings.push((await ping()).ms);
+    }
+    const kept = await timeConnect(fullConfig());
+    console.log(`     pings: ${pings.join(", ")} ms`);
+    console.log(`  3. connect after a PINGED idle            ${String(kept.ms).padStart(5)} ms`);
+
+    console.log("");
+    console.log("  How to read it:");
+    console.log("    1 slow            -> TRANSPORT. Nothing to do with the Live API, and an");
+    console.log("                         HTTPS request on a timer is the whole fix, at zero cost.");
+    console.log("    1 fast, 2 slow    -> the LIVE ENDPOINT specifically. A session must be held");
+    console.log("                         open; a cheap ping will not do it.");
+    console.log("    3 fast            -> the keep-alive works, whatever the layer.");
+    console.log("    3 slow            -> pinging does not hold it. Do not build the timer.");
+    console.log("");
+    console.log("  CONFOUND, unremoved: this machine does TLS interception. A transport verdict");
+    console.log("  here does not establish that Cloud Run pays the same cost.");
+    console.log("");
+    if (usageSeen.length) console.log(`  BILLED: ${usageSeen.length} usageMetadata message(s).`);
+    else console.log("  BILLED: no usageMetadata reported.");
+    console.log("");
+    return;
+  }
 
   if (GAPS) {
     console.log("  Gap ladder. Production arm only. The question is whether the one-time");
