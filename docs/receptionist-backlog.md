@@ -1865,23 +1865,64 @@ unless `LIVE_CLAIM_GUARD=act`, which is deliberately off until the
 false-positive rate is known. There is no deterministic layer between this
 model and the caller -- that is what speech-to-speech costs.
 
+### LVX29 · Confirm from the database, not from what the model said
+
+**The owner's bar is zero fabrications: "even one in 100 or 1000 or more, it
+doesn't matter what number." No LLM speaking directly to a caller meets that
+bar**, and it is worth writing that down plainly rather than implying a guard
+will get there. On this architecture the model IS the voice; there is no layer
+that can refuse to say a sentence. The claim and offer guards detect two shapes
+of fabrication after the fact and prevent none.
+
+**So invert the problem.** Stop trying to make the model incapable of lying,
+and make the lie unable to survive the call:
+
+> After the call, send the caller their confirmation **built from the
+> appointment row**, not from anything the assistant said. If no row exists,
+> no confirmation is sent -- and the caller finds out in a minute instead of on
+> the day.
+
+A fabricated booking then becomes a caller who gets no message and rings back.
+Annoying and recoverable, rather than silent until they turn up. Pair it with
+telling the BUSINESS when a claim and the database disagree, and the same read
+covers both directions.
+
+**This protects the cascade too.** Nothing about it is Live-specific -- it acts
+on the row, not on the front-end -- and the cascade has never had a check on
+whether what it said matches what it wrote either.
+
+**Real dependencies, so this is not costed as a small job:**
+- **Consent.** `record_sms_consent` is already a declared tool for a reason. A
+  confirmation SMS to a caller who has not consented is its own problem.
+- What the message says, and what happens when a booking is legitimately made
+  without a phone number.
+- The delivery path and its cost per message.
+- The reconciliation half needs a decision about what the business is told and
+  through which channel.
+
+**Done when:** a caller who was told about a booking that does not exist finds
+out from us, without anyone reading a log.
+
 ### Open, in the order worth doing
 
-1. **Post-call reconciliation.** Compare what was claimed against what was
-   written and tell the business when they differ. The only measure that helps
-   a caller who has already hung up.
-2. **Measure the fabrication rate.** One observation in ten calls is an
+1. **LVX29 -- confirm from the database.** The only item on this list that
+   changes the OUTCOME for a caller rather than the observability for us, and
+   the only honest answer to a zero-fabrication bar. Everything else here tells
+   somebody about a problem after it has already reached a person.
+2. **Post-call reconciliation.** The other half of the same read: tell the
+   business when a claim and the database disagree.
+3. **Measure the fabrication rate.** One observation in ten calls is an
    anecdote. The eval port (handoff §8) is the instrument that turns it into a
    number a shipping decision can rest on.
-3. **LVX28**, upgraded: the booking row is written before the spelling is
+4. **LVX28**, upgraded: the booking row is written before the spelling is
    checked, and on one call the spelling was never asked at all. Establish why
    the `services/tools.js` gate stays silent before moving it.
-4. **LVX25**: intake fields conjoined into one turn, on the booking path only.
-5. **LVX26**: one line, already written out in the entry.
-6. **LVX10 and the turn-end arms.** Every one of these ten calls ran arm A.
+5. **LVX25**: intake fields conjoined into one turn, on the booking path only.
+6. **LVX26**: one line, already written out in the entry.
+7. **LVX10 and the turn-end arms.** Every one of these ten calls ran arm A.
    `punctuation.classified` is still 0, so arm C's entire justification remains
    unmeasured, and B and C have never taken a call.
-7. **LVX21's cut window.** The leak guard has never fired on a real call, so
+8. **LVX21's cut window.** The leak guard has never fired on a real call, so
    `cut_window_ms` -- whether a leak can be cut at all -- is still unknown.
 
 ### What the bisect actually concluded
