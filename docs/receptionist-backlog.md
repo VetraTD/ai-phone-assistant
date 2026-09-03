@@ -1830,6 +1830,85 @@ tenant for testing.
 
 ---
 
+## Session state at 2026-09-03 close
+
+**Ten calls on a US handset against Digile Media's real config on a local
+database. ~$1.86 of Gemini and Twilio. `+18176011171` is RESTORED** -- put back
+to the Railway staging URLs and verified field for field by re-reading the
+number from Twilio. `npm run probe` works again. The assistant transcripts
+captured during the sitting have been deleted; `LIVE_BUSINESS_PHONE` is
+cleared; `MEDIA_STREAM_SECRET` is left explicitly set, which is what
+`docs/live-frontend-RESTORE.md` §2 asks for.
+
+### What shipped, all on `feat/s2s-frontend`, suite green at every step
+
+| | |
+|---|---|
+| LVX21 | outbound leak guard -- `sanitizeOutbound` as a predicate over `outputAudioTranscription`, hard audio cut, one note per turn |
+| LVX23 | `LIVE_TOOLS` / `LIVE_PROMPT` bisect knobs, pre-registered in `docs/lvx23-bisect.md` |
+| §8 gap | round cap, text-channel recovery, promise backstop, zero-text fallback, sharing one note ration |
+| LVX19 | silence ladder on the frame clock, exit armed behind the goodbye |
+| LVX24 | the sanitizers no longer log the caller's own details |
+| LVX27 | claim guard and offer guard -- both COUNT ONLY |
+| tooling | `LIVE_DEBUG_TRANSCRIPT`, `verified_slots` in the call summary |
+
+### The one thing to understand before touching anything
+
+**LVX27 is open, and it is the reason tier 1 is not ready for a paying
+customer.** On the production configuration, with all ten tools declared and
+used successfully one call earlier, the assistant invented five appointment
+slots and confirmed a booking that never happened. Same code, same prompt,
+consecutive calls. It is intermittent and it is model behaviour.
+
+Both new guards **detect** it. Neither **prevents** it, and neither even speaks
+unless `LIVE_CLAIM_GUARD=act`, which is deliberately off until the
+false-positive rate is known. There is no deterministic layer between this
+model and the caller -- that is what speech-to-speech costs.
+
+### Open, in the order worth doing
+
+1. **Post-call reconciliation.** Compare what was claimed against what was
+   written and tell the business when they differ. The only measure that helps
+   a caller who has already hung up.
+2. **Measure the fabrication rate.** One observation in ten calls is an
+   anecdote. The eval port (handoff §8) is the instrument that turns it into a
+   number a shipping decision can rest on.
+3. **LVX28**, upgraded: the booking row is written before the spelling is
+   checked, and on one call the spelling was never asked at all. Establish why
+   the `services/tools.js` gate stays silent before moving it.
+4. **LVX25**: intake fields conjoined into one turn, on the booking path only.
+5. **LVX26**: one line, already written out in the entry.
+6. **LVX10 and the turn-end arms.** Every one of these ten calls ran arm A.
+   `punctuation.classified` is still 0, so arm C's entire justification remains
+   unmeasured, and B and C have never taken a call.
+7. **LVX21's cut window.** The leak guard has never fired on a real call, so
+   `cut_window_ms` -- whether a leak can be cut at all -- is still unknown.
+
+### What the bisect actually concluded
+
+**Its own question dissolved.** LVX23 asked whether the tools or the prompt
+made the model confused. Neither: the same configuration produced a clean
+tool-using call and a fully fabricated one, one call apart. The original
+symptom -- three bookings, a mid-booking hang-up, audible confusion -- did not
+reproduce in any of the nine valid calls, and the pre-registered rule for that
+outcome is **VOID, not fixed**.
+
+One valid call per arm was run against a pre-registered two. Reading anything
+further from those arms would be the N=1 mistake this round already made once
+and caught.
+
+### Two lessons this sitting paid for
+
+- **A guard is a prompt.** The silence nudge said "say exactly this and nothing
+  else", and once its timing bug made it fire after every reply it stopped the
+  model calling tools at all. A caller asked to cancel an appointment and got
+  circles, on a session with `cancel_appointment_db` declared and never called.
+- **Offline green is not evidence.** Every defect found today was found by a
+  phone call, including two of mine that had passing tests over them -- the
+  nudge timing, and a question-counter that counted question marks and so
+  scored "what company and industry are you in, and what do you sell?" as one
+  question.
+
 ## Session state at 2026-09-02 close
 
 **`+18176011171` IS RESTORED.** It was repointed at a local tunnel for four

@@ -113,7 +113,7 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **CURRENTLY REPOINTED — 2026-09-03, for the LVX23 bisect sitting.** Now on `https://contract-ethernet-speech-gathering.trycloudflare.com/twilio/live-voice`. The values in the rows above were re-read live from Twilio immediately before the change and matched this table field for field, so they are good to restore from. **`npm run probe` is broken until this is put back.** |
+| **status** | **RESTORED 2026-09-03**, after ten calls for the LVX23 bisect. Put back to the Railway staging URLs and verified field-for-field by re-reading the number from Twilio, not by trusting the update. `npm run probe` works again. |
 
 **Two things this number is, beyond a test line:**
 
