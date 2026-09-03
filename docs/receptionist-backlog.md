@@ -2181,9 +2181,49 @@ different route — it mints the stream token with `mintMediaStreamToken` rather
 than reading it out of the TwiML, so it does not exercise `/twilio/live-voice`
 at all.
 
-**Rebuilding it means writing it, not finding it.** What it did: sign the Twilio
-webhook, take the `wss` URL out of the returned TwiML, open the socket, send a
-`start` event and μ-law frames, and read what comes back. About a cent per run.
+**Rebuilt and COMMITTED 2026-09-03 as `scripts/live-call-harness.js`.** Sign the
+Twilio webhook, POST it to `/twilio/live-voice`, take the `wss` URL out of the
+returned TwiML, open the socket, send `start` and μ-law frames, read what comes
+back. `--confirm` for a non-loopback target; about a cent per run.
+
+It echoes `mark` events back on a **playout delay** rather than immediately,
+which matters more than it looks: `end_call` arms on a mark, so an instant echo
+would make a hang-up look clean that in reality cut the goodbye off. A `clear`
+drops the queued marks the way Twilio drops its buffer, so a leak-guard cut is
+visible rather than papered over.
+
+**First run against staging, 2026-09-03, `638cbf4`:**
+
+| | |
+|---|---|
+| webhook | 200 — signature accepted, tenant resolved, token minted |
+| connect | 463 ms |
+| first audio | **2,505 ms** |
+| audio out | 239 frames, 38,240 bytes, ~4.8 s of greeting |
+| leaks / clears | **0 / 0** |
+| `postcall_verify_runs` | 1, with no accusation |
+
+That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
+**The two timings above are from this laptop and are Norton-inflated** — see
+LVX17; they are not measurements.
+
+### CALLER_ALLOWLIST is NOT active on staging `[gcp]` · P2
+
+Found by the harness on 2026-09-03: a call from `+15551230000`, a number nobody
+owns, was answered normally. `/twilio/live-voice`'s own comment says the
+allowlist is "Expected on staging", and it is not set there.
+
+**Not a hole in the front door.** The webhook signature verified — the request
+was accepted because it was correctly signed with the account's auth token, not
+because the URL was known. So the exposure is "anyone holding the Twilio auth
+token can drive a Live session on staging", which is a much smaller statement.
+
+**Recorded, not fixed**, and it is genuinely convenient right now: the harness
+needs it unset to drive a call without a real handset. Worth setting the moment
+staging stops being a room with one person in it.
+
+**Done when:** `CALLER_ALLOWLIST` is set on staging, or the decision not to is
+written down.
 
 It found things a phone call could not — the audio is genuinely loud (RMS 5,042,
 peak 30,076), the `streamSid` echoes correctly, the frames are 160 bytes — and
