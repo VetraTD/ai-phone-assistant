@@ -2207,6 +2207,79 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+## Two scripted calls on the deployed build, 2026-09-03 — and it wrote nothing
+
+Runs A and B, `a25ea8a` on Railway staging, ~$0.40. Both are full conversations:
+7–8 caller lines, 60–70 s of assistant audio, `end_call` armed and the goodbye
+played out in each. Same process (`bootId mtlyl44v-s8hpq5`), so the counters are
+comparable.
+
+| counter | after both runs |
+|---|---|
+| `postcall_verify_runs` | 2 |
+| `spelling_gate_refusals` | **1** |
+| `live_tool_refusals` | 2 |
+| `lookup_tool_context_warm` | 1 |
+| `postcall_claim_without_row` | **1** |
+| `postcall_booked_rows` | **0** |
+| `postcall_changed_rows` | **0** |
+| `live_deferral_after_refusal` | 0 |
+| `live_outbound_leaks` / clears | 0 / 0 |
+| `booking_refused_no_name` | 0 |
+| `live_guard_availability_blocked` | 0 |
+
+### LVX34 · VERIFIED on a deployed call
+
+Run A, from a caller with no history, so `shouldConfirmSpelling` was armed:
+**the spelling gate refused once (`spelling_gate_refusals` 1) and
+`live_deferral_after_refusal` stayed 0.** The model did not answer the refusal by
+promising a callback. That is the P0 a prospect would have heard, checked on the
+deployment rather than in a test.
+
+One run, and the counter is a negative — so this is "did not reproduce", not
+"cannot reproduce". It is still the first evidence of any kind on this defect.
+
+### LVX40 and LVX33 · NOT EXERCISED, which is not the same as passing
+
+**Nothing was written on either call.** `postcall_booked_rows` 0 and
+`postcall_changed_rows` 0 across two conversations that were entirely about
+booking and cancelling.
+
+- LVX40's floor never had to catch anything, because `book_appointment` was
+  never called with a missing name — or, on the evidence below, never called.
+- LVX33's batch path was never entered, because no cancellation happened. Run B
+  came from a caller whose appointments the snapshot did find
+  (`lookup_tool_context_warm` 1), so they exist; the assistant simply did not
+  cancel them.
+
+Both entries stay open. A run where the counter cannot move is not a run that
+tested anything.
+
+### LVX27 reproduced, and LVX31 is why nothing caught it in the call
+
+Run A ended with `postcall_claim_without_row = 1`: **the assistant told the
+caller something was done, and there is no row.** On the current build.
+
+And the in-call guard did not fire. `live_claim_without_action` is 0, because its
+condition is `!realToolCallsThisTurn` and that count includes ATTEMPTS — the
+spelling gate's refusal was an attempt. **That is LVX31, demonstrated on a real
+call rather than argued from the source.** The refusal-aware count now exists
+(added with LVX34) and the claim guard has NOT been switched over to it.
+
+`live_guard_availability_blocked` is 0 and `booking_refused_no_name` is 0, so
+`book_appointment` was most likely never called at all — which is LVX27's exact
+shape: a claim with no tool call anywhere.
+
+**THE HONEST CAVEAT, and it is not small.** The harness cannot hear. A scripted
+caller desyncs, and `demo_anything` is the line "No, that's everything" — if the
+assistant had just asked "shall I book that for you?", the caller declined and a
+claim afterwards means something different. **This cannot be settled from the
+counters.** It needs `LIVE_DEBUG_TRANSCRIPT=1` on the deployment and a read of
+`live_debug_assistant_turn` / `user_text` for these two calls.
+
+**Done when:** the transcript for run A says whether the assistant claimed a
+booking the caller had asked for. Until then this is an alarm, not a verdict.
+
 ### The harness speaks now — and three runs proved the instrument, not the fix
 
 **2026-09-03.** `scripts/live-call-harness.js` gained `--script`: it streams

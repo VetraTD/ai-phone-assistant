@@ -380,6 +380,17 @@ async function main() {
   /** Assistant audio activity, which is how a turn boundary is detected. */
   let lastAssistantMediaAt = 0;
   let assistantFramesThisTurn = 0;
+  /**
+   * Did the CEILING end this call, or did the assistant?
+   *
+   * Not cosmetic. An unfinished script means something different in each case:
+   * the ceiling cutting it short makes every counter inconclusive, whereas the
+   * assistant calling end_call before the last line means the conversation
+   * genuinely finished early and the counters are exactly as good as any other
+   * run's. The first version conflated them and cried "CUT SHORT" at a call the
+   * model had ended properly.
+   */
+  let hitCeiling = false;
 
   /** Caller audio still to send, as 160-byte frames. */
   let outQueue = [];
@@ -485,7 +496,10 @@ async function main() {
     // Silent mode runs for --hold. A script runs until it has said everything
     // and heard the last reply out (the watcher below), with --max-call-ms as
     // the ceiling rather than the plan.
-    later(hangUp, SCRIPT_NAME ? MAX_CALL_MS : HOLD_MS);
+    later(() => {
+      hitCeiling = true;
+      hangUp();
+    }, SCRIPT_NAME ? MAX_CALL_MS : HOLD_MS);
 
     // A script that finishes early should hang up rather than burn budget: the
     // cost of this path is quadratic in call length.
@@ -577,10 +591,14 @@ async function main() {
   console.log(`audio out  ${stats.mediaFrames} frames, ${stats.mediaBytes} bytes, ~${(outMs / 1000).toFixed(1)} s`);
   console.log(`frames in  ${stats.framesSent} (${stats.speechFramesSent} speech, ${stats.framesSent - stats.speechFramesSent} silence)`);
   if (SCRIPT_NAME) {
-    const cutShort = stats.linesSpoken < script.length;
+    const unfinished = stats.linesSpoken < script.length;
+    const note = !unfinished
+      ? ""
+      : hitCeiling
+        ? `   <- CUT SHORT BY THE CEILING: raise --max-call-ms, and treat every counter below as inconclusive`
+        : `   <- the ASSISTANT ended the call first; the counters stand`;
     console.log(
-      `lines      ${stats.linesSpoken}/${script.length} spoken, ${stats.turnsWithNoReply} sent with no reply heard` +
-        (cutShort ? `   <- CUT SHORT: raise --max-call-ms, and treat every counter below as inconclusive` : "")
+      `lines      ${stats.linesSpoken}/${script.length} spoken, ${stats.turnsWithNoReply} sent with no reply heard${note}`
     );
   }
   console.log(`marks      ${stats.marksReceived} received, ${stats.marksEchoed} echoed`);
