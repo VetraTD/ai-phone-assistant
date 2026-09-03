@@ -1747,6 +1747,35 @@ which happened.
   timer started at socket open would be counting while the caller is still
   waiting to be greeted.
 
+**BUILT 2026-09-03, and NOT yet heard on a call.** `checkSilence` in
+`lib/voice/live/index.js`, driven from `onMediaFrame`. Every pointer above was
+used: `buildSilenceNudge` and `buildSilenceGoodbye` are now exported from
+`lib/voice/session.js` and shared rather than copied, the last rung calls
+`armExit("end_call")` so the goodbye plays out, and the three existing counters
+are reused.
+
+Four things worth recording because they are not obvious from the entry above:
+
+- **No timer.** Twilio streams frames during silence too, so `onMediaFrame` is
+  already a 20 ms clock. The only `setTimeout` on this path is still the exit
+  backstop.
+- **The ladder's clock is NOT reset by our own audio**, only by the caller's
+  voice. A nudge is us speaking, and if speaking reset the clock the ladder
+  would restart at the bottom rung after every nudge and the call would never
+  end. The cascade has the identical problem and solves it the same way -- its
+  mark handler skips re-arming for anything named `nudge-`.
+- **It arms on the first queued audio, not at socket open**, which is LVX17's
+  2.2 s handshake staying out of the caller's silence budget.
+- **`modelSpeaking` is deliberately not a suppression condition.** It is only
+  cleared on `generationComplete`, so a vendor that omits one would jam the
+  ladder for the rest of the call. Only an in-flight tool call suppresses a
+  rung, and that suppression is counted.
+
+**What a real call still has to settle:** whether the model actually says the
+line it is given. There is no TTS leg here, so a nudge is a request to the
+model to say specific words, and it will sometimes paraphrase. `nudges_fired`
+counts attempts, not compliance, and nothing offline can tell the two apart.
+
 **LVX20 · The assistant repeats itself, cause unknown** `[gcp]` · P2
 
 Reported on two separate calls: it says a phrase, stops partway, then says the
