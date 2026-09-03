@@ -39,7 +39,22 @@ const build = (extras) => buildSystemInstruction(STEPS.IDENTIFY_INTENT, null, CO
 
 describe("the caller's own number", () => {
   it("is in the prompt, so the model can state it when asked", () => {
-    expect(build({ callerPhone: "+18175551234" })).toContain("+18175551234");
+    expect(build({ callerPhone: "+18175551234" })).toContain("817 555 1234");
+  });
+
+  it("is spoken WITHOUT the country code", () => {
+    // Handed E.164, the model read the country code aloud -- "one four six
+    // nine..." and later "plus one four six nine...". A caller hearing an extra
+    // leading digit on their own number concludes it is wrong, which defeats
+    // the entire point of reading it back.
+    const prompt = build({ callerPhone: "+18175551234" });
+    expect(prompt).not.toContain("+18175551234");
+    expect(prompt).toMatch(/do NOT add a country code/);
+  });
+
+  it("leaves a number it does not recognise alone rather than guessing", () => {
+    // A wrongly-stripped digit is worse than a spoken "plus".
+    expect(build({ callerPhone: "+33123456789" })).toContain("+33123456789");
   });
 
   it("is absent when the caller withheld their number, rather than invented", () => {

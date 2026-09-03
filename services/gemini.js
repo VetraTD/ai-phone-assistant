@@ -1415,11 +1415,20 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // as though it were real, which is the defect rather than a fix for it.
   const callerNumber = typeof extras?.callerPhone === "string" ? extras.callerPhone.trim() : "";
   if (callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber)) {
+    // SPOKEN form, not E.164.
+    //
+    // The first version handed the model `+14699338887` and it read the country
+    // code aloud — "one four six nine…", and later "plus one four six nine".
+    // Nobody says their own country code back to a receptionist in their own
+    // country, and a caller hearing an extra leading digit on their own number
+    // reasonably concludes it is wrong, which defeats the point of reading it
+    // back at all.
     sections.push(
       `=== THIS CALLER'S NUMBER ===\n` +
-        `They are calling from ${sanitizeFact(callerNumber, 40)}.\n` +
-        `If they ask you to use or repeat "the number I'm calling from", this is it — ` +
-        `read it back digit by digit.\n` +
+        `They are calling from ${sanitizeFact(spokenPhoneDigits(callerNumber), 40)}.\n` +
+        `If they ask you to use or repeat "the number I'm calling from", this is it. ` +
+        `Read it back exactly as written above, digit by digit, and do NOT add a ` +
+        `country code or a leading "plus one" — they know which country they are in.\n` +
         `Never state, guess or invent a phone number you were not given: if you do not ` +
         `have one, say so and ask them for it.`
     );
@@ -1514,6 +1523,32 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
  * @param {object} config - Per-business config from loadConfig
  * @param {object} [extras] - { knowledge: Array, transferAllowed: boolean }
  */
+/**
+ * A phone number as a person would say it back, without the country code.
+ *
+ * The model was handed E.164 and read it literally — "one four six nine nine
+ * three three eight eight eight seven", and later "plus one four six nine…".
+ * A caller hearing an extra leading digit on their own number concludes it is
+ * wrong, which defeats the entire point of reading it back.
+ *
+ * Deliberately conservative: only the two country codes this system actually
+ * serves are unwrapped, and anything unrecognised is returned untouched rather
+ * than guessed at. A wrongly-stripped digit is worse than a spoken "plus".
+ *
+ * @param {string} e164
+ * @returns {string}
+ */
+export function spokenPhoneDigits(e164) {
+  const digits = String(e164 || "").replace(/[^\d+]/g, "");
+  // US/Canada: +1 NPA NXX XXXX -> "469 933 8887"
+  const us = digits.match(/^\+?1(\d{3})(\d{3})(\d{4})$/);
+  if (us) return `${us[1]} ${us[2]} ${us[3]}`;
+  // UK: +44 subscriber -> the national 0-leading form, which is how it is said.
+  const uk = digits.match(/^\+?44(\d{9,10})$/);
+  if (uk) return `0${uk[1]}`;
+  return String(e164 || "").trim();
+}
+
 export function buildSystemInstruction(step, intent, config, extras = {}) {
   const staticPrefix = buildStaticSystemPrefix(config, extras);
   const dynamicTail = buildDynamicTail(step, intent, config, extras);
