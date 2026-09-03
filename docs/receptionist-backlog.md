@@ -2493,7 +2493,7 @@ on a call that also did something else successfully.
 the verb, so capture it and check a *booking* claim against booking rows and a
 *cancellation* claim against cancelled rows, instead of against "any write".
 
-### LVX33 · Cancelling several appointments in one turn only forgets the last one `[gcp]` · **P0 — FIXED offline 2026-09-03**
+### LVX33 · Cancelling several appointments in one turn only forgets the last one `[gcp]` · **P0 — VERIFIED on a call 2026-09-03**
 
 The owner cancelled three appointments. The assistant confirmed all three. Then,
 minutes later in the same call:
@@ -2548,9 +2548,41 @@ arrays of two effects, but with no `setCallerContext` on the engine, so
 entered. The bug lived in the gap between "we test batches" and "we test the
 snapshot", and both halves looked covered.
 
-**Done when:** DONE offline 2026-09-03 — three cancels dispatched as one batch
-leave zero in the snapshot, and the list the booking guard reads is empty so a
-new booking is allowed. **Unverified on a call.**
+**Done when:** **DONE 2026-09-03, verified on a call.** Three appointments seeded
+on one caller, all three cancelled in a single turn:
+
+```
+2026-09-09T10:00:00Z -> cancelled
+2026-09-10T11:00:00Z -> cancelled
+2026-09-11T14:00:00Z -> cancelled
+still scheduled: 0
+```
+
+`postcall_verify` agreed — `changed_rows 3, claims 1, verdict ok` — and that
+counter did not exist this morning. Without `postcall_changed_rows` the run
+would have reported nothing at all, which is the whole reason the positive
+counters were added.
+
+**The decisive line is the next turn, not the cancels.** The cancels reached the
+database before this fix too; what the caller felt was being unable to book
+afterwards. Turn 6:
+
+> caller: "Now, can I book a new one for next Tuesday at 10 in the morning?"
+> assistant: "I'm sorry, that time is already taken. Would you like to try 9:30
+> AM, 10:30 AM, or 9:00 AM on Tuesday instead?"
+
+That is the availability pre-check answering, and `bookAppointment` places the
+existing-appointment guard **directly above** it — so reaching the availability
+check at all proves the guard passed and the snapshot was empty. With the bug
+present the reply would have been "it looks like you already have an upcoming
+appointment", for the rest of the call.
+
+(The slot genuinely was taken: the previous run on this rig booked it.)
+
+**The script desynced after turn 6** — the callback-number line landed on a
+choose-a-slot question — so no rebooking completed. It does not matter here: the
+assertion was answered by the reply above, before the desync. Worth fixing in
+`demo_cancel` before it is used for anything else.
 
 ### LVX34 · A refused write is answered with "someone will call you back" `[gcp]` · **P0 — FIXED offline 2026-09-03**
 

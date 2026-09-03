@@ -66,7 +66,7 @@ What a prospect DOES perceive, in the order it will cost you the meeting:
 |---|---|---|
 | 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40 — VERIFIED on a call 2026-09-03**: it asked, and the row carries the name |
 | 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34 — VERIFIED on a call 2026-09-03**: the gate refused, it asked for the spelling and waited, then booked |
-| 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33** — fixed offline, **still unexercised**: no call has cancelled anything yet |
+| 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33 — VERIFIED on a call 2026-09-03**: three cancelled in one turn, none left behind, and the next booking was allowed |
 | 3 | four questions in one breath | **LVX25 — REPRODUCED 2026-09-03**, twice on one call. Still open |
 | 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 — never observed on Brightwork; verify before fixing |
 | 5 | ~~offers midnight and 11 PM appointments~~ | **GONE** — Brightwork has real hours |
@@ -95,8 +95,14 @@ database row both read.** LVX40 asked for the name and wrote it; LVX34's gate
 refused, the assistant asked for the spelling and waited rather than promising a
 callback, and then booked. `postcall_verify` matched the claim to the row.
 
-**LVX33 is still unexercised** — no call this session has cancelled anything, so
-the batch path has never been entered. Fixed offline, unproven.
+**LVX33 is now verified too.** Three appointments cancelled in a single turn,
+all three `cancelled` in the database, none left in the snapshot — and the
+booking the caller asked for immediately afterwards reached the availability
+check instead of being refused, which is the half they actually felt.
+
+**All three demo-killers are verified on real calls.** What remains on this list
+is LVX25 (reproduced twice today, shared prompt text, belongs with the eval
+band), LVX35's ordering, and the 1.4–2.2 s reply pause.
 
 The verification was done on the LOCAL rig, not staging, and that is the lesson
 rather than a shortcut: with no database access, "no row" and "never tried" are
