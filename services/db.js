@@ -1160,6 +1160,53 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
 }
 
 /**
+ * Every appointment this CALL wrote.
+ *
+ * `appointments.call_id` has been populated on every booking since the column
+ * existed and had no reader until LVX29 needed one. It is the difference
+ * between "what did this call write" being an exact question and being a
+ * heuristic over business_id, phone and created_at.
+ *
+ * Status is deliberately NOT filtered. The post-call read confirms from the
+ * row, and a booking this call made and then cancelled is a row whose status
+ * is the answer, not a row to hide.
+ *
+ * RETURNS `null` ON FAILURE, and `[]` only for a read that genuinely found
+ * nothing. This DIVERGES from listAppointmentsByCaller, which returns `[]` for
+ * both, and the divergence is the whole point: the caller is LVX29, where "the
+ * database has no row for what the assistant said" is a report that the
+ * assistant fabricated a booking. Collapsing an outage into that answer would
+ * accuse the model of lying every time the database hiccups, and suppress a
+ * confirmation the caller should have had. The two must not look alike here.
+ *
+ * @param {string} callId - calls.id, i.e. state.dbCallId
+ * @param {string} businessId - REQUIRED. Same rule as getAppointmentById: a
+ *   call UUID is not a secret, so an unscoped lookup would read across tenants.
+ * @returns {Promise<Array<{id: string, client_name: string|null, client_phone: string|null, scheduled_at: string, status: string, notes: string|null}>|null>}
+ */
+export async function listAppointmentsByCallId(callId, businessId) {
+  if (!pool || !callId) return null;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "listAppointmentsByCallId" });
+    return null;
+  }
+  const res = await q(
+    `SELECT id, client_name, client_phone, scheduled_at, status, notes
+       FROM appointments
+      WHERE call_id = $1 AND business_id = $2
+      ORDER BY scheduled_at ASC`,
+    [callId, businessId]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listAppointmentsByCallId", error: res.error.message });
+    return null;
+  }
+  const list = res.rows || [];
+  noteAccess("listAppointmentsByCallId", { resourceIds: list.map((r) => r.id), rowCount: list.length });
+  return list;
+}
+
+/**
  * Fetch a single appointment by id (for the caller-identity guard before
  * cancel/reschedule — verifies the appointment actually belongs to the
  * caller before mutating it).

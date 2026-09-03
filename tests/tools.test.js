@@ -1569,6 +1569,59 @@ describe("services/tools.js — the spelling gate", () => {
     expect(mockCreateAppointment).toHaveBeenCalled();
   });
 
+  // -------------------------------------------------------------------
+  // LVX28, and it is NOT a broken gate.
+  //
+  // On the 2026-09-03 call the row was written on turn 10 and the spelling
+  // confirmed on turn 11, afterwards. The obvious reading -- "the gate did
+  // not fire" -- is right, and the reason is the test above: that caller had
+  // an existing appointment, `fetchCallerContext` put it in the prompt, and
+  // the name was therefore ALREADY ON FILE. The gate returned false because
+  // it was correct to.
+  //
+  // Which means the turn-11 ask was the model's own initiative, with nothing
+  // gating it -- and that is exactly why it landed wherever it liked. Moving
+  // the gate would not have changed that call, because the gate was never
+  // involved in it.
+  //
+  // The two other candidates are eliminated by environment: neither
+  // VOICE_CONFIRM_HARD_NAMES nor VOICE_SPELL_POLICY is set, so the gate is
+  // armed and the policy is "always".
+  //
+  // What IS new, and is what this test pins: "already on file" trusts a row
+  // that may itself never have been spelled. A caller who declines to spell,
+  // or who is simply not asked, gets their mis-heard name written once -- and
+  // every later call treats that row as authority and never asks again. The
+  // gate is not wrong here either; the chain of custody is just shorter than
+  // it looks, and nothing in the code says so.
+  // -------------------------------------------------------------------
+  it("trusts a name on file even when that row's own spelling was never confirmed", async () => {
+    const cfg = { timezone: "America/Chicago", businessHours: HOURS_MON_FRI };
+    // This file's spy is not auto-cleared between tests, and the assertions
+    // below count calls rather than merely observing them.
+    mockCreateAppointment.mockClear();
+
+    // Call 1. The caller never answers the spelling question, so the gate runs
+    // out of refusals and lets the write through unverified -- the escape
+    // hatch that stops a caller being trapped.
+    const spent = { ...fresh, config: cfg, capabilityState: { appointments: { spellingGateRefusals: 2 } } };
+    const first = await executeToolCall(bookFc, spent);
+    expect(first.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+
+    // Call 2, days later. That unverified row is now "on file", and the gate
+    // asks nothing at all -- not because the spelling is known to be right,
+    // but because it was written down once.
+    const later = {
+      ...fresh,
+      config: cfg,
+      callerContext: { callCount: 2, upcomingAppointments: [{ client_name: "Jane Kowalczyk" }] },
+    };
+    const second = await executeToolCall(bookFc, later);
+    expect(second.functionResponse.response.message ?? "").not.toMatch(/spell/i);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(2);
+  });
+
   it("does not ask twice — once the call has spent its request the gate is open", async () => {
     const ctx = {
       ...baseCtx,

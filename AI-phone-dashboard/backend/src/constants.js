@@ -46,7 +46,12 @@ const ELEVENLABS_VOICE_IDS = [
 // (and database/017_followups_and_metrics.sql's businesses.sms_templates
 // comment). A business may override the copy for any of these kinds; any
 // other key would be dead data the voice server never reads.
-const SMS_TEMPLATE_KINDS = ["appointment_confirmation", "message_received", "missed_call"];
+const SMS_TEMPLATE_KINDS = [
+  "appointment_confirmation",
+  "appointment_cancelled",
+  "message_received",
+  "missed_call",
+];
 
 // A single SMS segment is 160 GSM-7 characters; 320 keeps an override to at
 // most two segments after placeholder interpolation is roughly accounted for.
@@ -68,6 +73,7 @@ const SMS_TEMPLATE_MAX_LENGTH = 320;
 // for it, whatever the owner typed into the template.
 const SMS_TEMPLATE_PLACEHOLDERS = {
   appointment_confirmation: ["name", "business", "datetime"],
+  appointment_cancelled: ["name", "business", "datetime"],
   message_received: ["name_part", "business", "sla"],
   missed_call: ["business"],
 };

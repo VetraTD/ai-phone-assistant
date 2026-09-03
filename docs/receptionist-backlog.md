@@ -1830,6 +1830,227 @@ tenant for testing.
 
 ---
 
+## Session state at 2026-09-03 close — second sitting, LVX29 built
+
+**Nothing was spent. No call was made, no probe was run, no eval was run.**
+Everything below is offline work, and the standing rule applies to all of it:
+**offline green is not evidence.** Suite 165 files / 2,880 tests, from 161 /
+2,832.
+
+### What shipped, all on `feat/s2s-frontend`
+
+| | |
+|---|---|
+| LVX29 | `lib/postCallVerify.js` — confirm from the appointment ROW, behind `POSTCALL_VERIFY` |
+| reconciliation | the same read in the other direction: claim ledger vs write ledger vs database, seven new counters |
+| eval port | `lib/harness/liveTextSession.js` + `EVAL_DRIVER=live` at the single swap point, and `eval/fabrication.js` to turn runs into a rate |
+| LVX17 | `scripts/probes/live-connect-cost.mjs` — four arms, built and NOT run |
+| LVX28 | **answered**, and the answer is that the gate was correct |
+
+### LVX29 — how it actually works, so nobody re-derives it
+
+`appointments.call_id` has been written on every booking since the column
+existed and **had no reader until now**. That is the whole basis for the claim
+to be reading the database rather than the model: "what did THIS call write" is
+one exact query (`db.listAppointmentsByCallId`), not a heuristic over
+business_id, phone and timestamp.
+
+Cancels and reschedules write no row, so `call_id` cannot find them. The
+appointment id arrives instead on the effect the appointments pack **already**
+emits (`{type:"changed", data:{tool, appointmentId}}`) and the row is read back
+by id, so the status and the time still come from the database. **A fabricated
+cancellation emits no effect, so there is no id, so there is no message** —
+that is the wanted behaviour, not a gap.
+
+**The hook is `finish()`, not `/twilio/status`.** See LVX30 below for why.
+
+**`POSTCALL_VERIFY` is a ladder — unset / `count` / `send`** — for the same
+reason `LIVE_CLAIM_GUARD` has one. A verdict computed from a database read
+nobody has watched is not evidence, and whether the rows are being found at all
+is answerable without messaging a single caller.
+
+**Consent: the transactional opt-out.** `sendCallerSms` takes a new
+`{ transactional }` option, defaulting false, so all six existing call sites are
+byte-identical. Only the post-call path passes true. **An explicit decline still
+blocks** — that narrowing is mine, not the owner's instruction: someone who was
+asked and said no has answered the question, and only the ABSENCE of a record is
+overridden. Worth confirming that reading. The gate's own justification is TCPA
+and HIPAA 164.522(b), both US and both written for the paying clinic;
+`docs/readiness.md` already lists this as a question for the professional.
+
+**Not solved, recorded:** `capabilities/appointments.js:1207` still sends a
+model-args confirmation at booking time, and that `onEffect` runs on the Live
+path too. Digile Media has `sms_followup_enabled = false`, so during Live-only
+rollout the post-call sender is the only one. **This must be resolved before the
+cascade phase**, and that file is shared, so it was not touched.
+
+### LVX30 · A Live call never reaches `/twilio/status`, so half its record is missing `[gcp]` · P1
+
+Found while looking for a post-call hook. **The Live path never calls
+`callState.writeShared`** — `grep -rn "writeShared" lib/voice/live/` returns
+nothing, where the cascade does it at `lib/voice/session.js:1878` and `:3906`.
+
+`SHARED_FIELDS` is `["dbCallId", "businessId", "sawCallerFinal"]`
+(`lib/callStateStore.js:43`), and `/twilio/status` reads all three at
+`server.js:714`. For a Live call they are all absent, so:
+
+- `db.completeCall` runs **unscoped** — under FORCE row-level security it
+  matches zero rows, so the call is never marked completed at all;
+- `notifyCallMissed` is skipped (`server.js:742` requires `businessId`);
+- **the whole summary and sentiment block never runs** (`server.js:774` is
+  guarded on `dbCallId`);
+- `sawCallerFinal` always reads false.
+
+The Live path also never calls `db.addTranscriptEntry`, so there would be no
+transcript to summarise regardless.
+
+**Consequence:** every Live call so far is half-recorded. `D3` (call review /
+QA) would have nothing to show for any of them, and that is the first thing a
+clinic asks for after an incident.
+
+**Recorded, not fixed — the owner's call on 2026-09-03.** LVX29 does not need
+it: `finish()` has the tenant, the call row and the config already in scope.
+
+**Done when:** a Live call's row is completed, scoped, and summarised the way a
+cascade call's is.
+
+### LVX31 · The claim guard is blind to a REFUSED tool call `[gcp]` · P1
+
+`realToolCallsThisTurn` is incremented for **attempted** calls, at
+`lib/voice/live/index.js:1155`, before `guards.before()` can refuse one. So the
+claim guard's `!realToolCallsThisTurn` condition is false whenever the model
+merely *tried*.
+
+A model whose `book_appointment` the availability invariant refuses, and which
+then tells the caller it is booked, **does not trip
+`live_claim_without_action`.** And a refused booking is one of the production
+routes the LVX27 entry itself named:
+
+> "the availability invariant refusing a booking (`guards.js` returns
+> `allow: false` with an instruction to check first)"
+
+So the guard is weakest on one of the exact cases it was written for.
+
+**LVX29 closes it**, which is why this is recorded rather than fixed: the claim
+ledger records every completion claim regardless of tool activity, so the
+post-call read still finds no row and reports `claim_without_row`. Pinned by
+`tests/livePostCall.test.js` — "records a claim behind a REFUSED tool call,
+which the turn guard misses".
+
+**Done when:** the guard distinguishes a tool that RAN from one that was
+refused, or is deliberately left to the post-call read and says so.
+
+### LVX32 · Inbound audio is discarded for the whole 2.2 s handshake `[gcp]` · P1
+
+`sendAudio` drops every frame while the session is null:
+
+```js
+// lib/voice/live/index.js:947-948
+function sendAudio(mulawFrame) {
+  if (!session || closed) return;
+```
+
+Harmless **today**, and only by luck: the caller hears silence, so they say
+nothing, so nothing is lost. It becomes a defect the moment anything is spoken
+before the socket opens — which is precisely what every candidate fix for
+LVX17 does. A caller greeted by TwiML would answer into the hole and their
+opening words would be discarded.
+
+**So this is a hard prerequisite for any greeting-first LVX17 fix, not a
+nicety.** Recorded now so it is not discovered halfway through one.
+
+**Done when:** frames arriving before the session opens are buffered and
+replayed, or the greeting cannot precede the socket.
+
+### LVX28 · ANSWERED — the gate was correct, and that is the finding
+
+The premise in the earlier entry and in `docs/live-frontend-RESTORE.md:177` is
+**stale**: `applyReplyState` does run on the Live path (`live/index.js:854`,
+LVX8 closed 2026-09-02), and the gate at `services/tools.js:310` can fire there.
+
+Why it stayed silent on the call where the row was written first:
+`shouldConfirmSpelling` (`lib/nameQuality.js:143-146`) returns false when the
+name is **already on file** via `callerContext.upcomingAppointments[].client_name`
+— and that caller had an existing appointment, which the LVX27 entry already
+noted `fetchCallerContext` puts in the prompt at session start.
+
+The other two candidates are eliminated by environment: neither
+`VOICE_CONFIRM_HARD_NAMES` nor `VOICE_SPELL_POLICY` is set, so the gate is armed
+and the policy is `always`.
+
+**So the turn-11 spelling ask was the model's own initiative, with nothing
+gating it — which is exactly why it landed wherever it liked.** Moving the gate
+would not have changed that call, because the gate was never involved. LVX28 is
+not a broken gate; it is an ungated model behaviour, and it should be re-filed
+as a prompt question rather than a `services/tools.js` one.
+
+**The new half, and it is a data-integrity point rather than an ergonomic one:**
+"already on file" trusts a row **that may itself never have been spelled**. A
+caller who declines, or who runs out of gate refusals, has their mis-heard name
+written once — and every later call treats that row as authority and never asks
+again. Pinned by `tests/tools.test.js` — "trusts a name on file even when that
+row's own spelling was never confirmed".
+
+**Done when:** the owner decides whether a name's provenance should travel with
+it, or whether one confirmed spelling per caller is good enough forever.
+
+### Open, in the order worth doing
+
+1. **A call with `POSTCALL_VERIFY=count`.** Everything above is offline. The
+   first question is whether the row read finds anything at all, and it is
+   answerable without texting anybody.
+2. **Then `POSTCALL_VERIFY=send`**, and the call that matters is the NEGATIVE
+   one: force a claim with no row, and confirm no message goes out.
+3. **The LVX17 connect probe.** ~$0.03, four arms, no handset. It decides
+   whether the 2.2 s is ours (payload) or not (network), and no greeting fix
+   should be chosen before it.
+4. **The fabrication rate.** `docs/lvx27-fabrication-rate.md` is pre-registered
+   and costed at ~$9. Not approved, not run.
+5. **LVX32**, if any greeting-first LVX17 fix is chosen.
+6. **LVX25**, **LVX26**, then the turn-end arms — unchanged from the list below.
+
+### The bug this sitting nearly shipped, caught in review
+
+**A database outage would have been reported as a fabrication.**
+
+`withTenantSafe` CATCHES and returns its fallback (`services/db.js:2239-2243`),
+and most of `services/db.js` returns `[]` for both "found nothing" and "the
+query failed". Collapsed together, that made `verifyCall` read a hiccup as *the
+assistant claimed a booking and the database has no row for it* — accusing the
+model of lying every time Postgres blinked, and suppressing a confirmation the
+caller should have had. Both directions wrong, from one shared sentinel.
+
+`listAppointmentsByCallId` therefore returns **`null` on failure and `[]` only
+for a genuine empty read**, deliberately diverging from
+`listAppointmentsByCaller`, and `withTenantSafe` is passed an explicit `null`
+fallback so its own catch cannot flatten it back. A read that failed produces
+the verdict `error`, counts nothing and sends nothing.
+
+The same reasoning gave `row_mismatch` its scope: an EFFECT is evidence a tool
+ran and succeeded, so a call whose rows are unreadable is not accused of having
+invented them. Only a claim with **no effect and no row** is a fabrication.
+
+Covered by three tests in `tests/postCallVerify.test.js`, and the fake
+`withTenantSafe` there swallows exactly as the real one does — a fake that
+rethrew would have hidden the whole thing.
+
+### One lesson this sitting paid for
+
+**The instrument rejected two of its own test fixtures, and that was the point.**
+`eval/fabrication.js` reuses the production regexes rather than defining its
+own, so "That's all confirmed" and "I have nine AM free" — both plausible, both
+written by hand — scored as clean, because `completionClaimRe` and
+`slotOfferRe` do not match them. Had the scorer carried its own looser
+patterns, the fixtures would have passed and the measured rate would have been
+the rate of a detector nobody ships.
+
+The tripwires did the same job on the way through: `tests/envInventory.test.js`
+caught an undocumented `POSTCALL_VERIFY`, `tests/phiAuditCoverage.test.js`
+caught an unclassified database export, and `tests/smsTemplateParity.test.js`
+caught a template kind added to two of its three copies.
+
+---
+
 ## Session state at 2026-09-03 close
 
 **Ten calls on a US handset against Digile Media's real config on a local

@@ -309,6 +309,11 @@ export const MESSAGE_SLA_TEXT = "as soon as possible";
 export const DEFAULT_SMS_TEMPLATES = {
   appointment_confirmation:
     "Hi {name}, your appointment with {business} is confirmed for {datetime}. Call us back if you need to change it.",
+  // LVX29. Sent only after the row has been read back and its status is
+  // actually 'cancelled' -- a cancellation the assistant merely announced
+  // produces no effect, no row read and no message.
+  appointment_cancelled:
+    "Hi {name}, your appointment with {business} on {datetime} has been cancelled. Call us back if you'd like to rebook.",
   message_received:
     "Hi{name_part}, we got your message at {business} — someone will get back to you {sla}. Thanks for calling!",
   missed_call:
@@ -457,7 +462,13 @@ export function _clearHeldCallerSms() {
  * @param {"appointment_confirmation"|"message_received"|"missed_call"} kind
  * @param {Record<string, string>} [vars] - template placeholder values
  */
-export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
+export async function sendCallerSms(
+  businessConfig,
+  toNumber,
+  kind,
+  vars = {},
+  { transactional = false } = {}
+) {
   if (!businessConfig?.smsFollowupEnabled) return;
   if (!isValidE164(toNumber)) return;
   const template = DEFAULT_SMS_TEMPLATES[kind];
@@ -493,15 +504,34 @@ export async function sendCallerSms(businessConfig, toNumber, kind, vars = {}) {
         })
       : null;
     if (!consent?.granted) {
-      // Held, not dropped — see the note above holdCallerSms. The log line
-      // carries no phone number: this is the path that exists to protect one.
-      holdCallerSms(businessId, toNumber, kind, body);
-      log.info("sms_followup_blocked_no_consent", {
-        businessId,
-        kind,
-        reason: consent ? "declined" : "no_record",
-      });
-      return;
+      // The `transactional` opt-out, decided by the owner on 2026-09-03 for
+      // LVX29, and deliberately a per-call-site argument rather than a config
+      // flag so that every send that takes it is greppable.
+      //
+      // Gate 4's justification above is TCPA prior express consent and HIPAA
+      // 164.522(b). BOTH ARE US, and both were written for the paying clinic.
+      // The owner's reading is that a confirmation of a booking the caller
+      // just made, on a call they placed, is a service message rather than a
+      // marketing one -- a materially different analysis under UK PECR for a
+      // non-health tenant, and one that docs/readiness.md already lists as a
+      // question for the professional it says is required.
+      //
+      // An EXPLICIT DECLINE still blocks. Someone who was asked and said no
+      // has answered the question, and no reading of "transactional" reaches
+      // past that. Only the absence of a record is overridden.
+      if (transactional && !consent) {
+        log.info("sms_followup_transactional_no_consent", { businessId, kind });
+      } else {
+        // Held, not dropped — see the note above holdCallerSms. The log line
+        // carries no phone number: this is the path that exists to protect one.
+        holdCallerSms(businessId, toNumber, kind, body);
+        log.info("sms_followup_blocked_no_consent", {
+          businessId,
+          kind,
+          reason: consent ? "declined" : "no_record",
+        });
+        return;
+      }
     }
 
     await sendSms({ to: toNumber, body });

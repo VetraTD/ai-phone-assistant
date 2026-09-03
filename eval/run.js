@@ -38,6 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 import { createTextSession } from "../lib/harness/textSession.js";
+import { createLiveTextSession } from "../lib/harness/liveTextSession.js";
 import { makeFakeDeps, makeFakeEffectsDeps } from "../lib/harness/fakeDeps.js";
 import { resolveGenerationConfig, getClient } from "../services/gemini.js";
 import { STEPS } from "../lib/callState.js";
@@ -200,6 +201,11 @@ export async function runScenario(scenario, { modelOverrides, noJudge = false } 
     truncation: { truncatedTurns: 0, suspectTurns: 0, outputTokens: [] },
   };
 
+  // Hoisted out of the try so the finally can reach it. The text driver has
+  // nothing to release; the Live one holds a WebSocket per scenario, and 45 of
+  // those left open is a run that never exits.
+  let session = null;
+
   try {
     const fixture = FIXTURES[scenario.fixture];
     if (!fixture) throw new Error(`unknown fixture "${scenario.fixture}"`);
@@ -210,7 +216,19 @@ export async function runScenario(scenario, { modelOverrides, noJudge = false } 
 
     const { deps, store } = makeFakeDeps({ seedAppointments });
     const effects = makeFakeEffectsDeps();
-    const session = createTextSession({ config, extras, modelOverrides, fakes: { deps, store, effects } });
+    // The single swap point (handoff section 8). Everything downstream reads a
+    // ctx built from the session's return values, so both drivers satisfy the
+    // same three-member interface and nothing else in this file changes.
+    //
+    // EVAL_DRIVER=live runs the scenario against a real Gemini Live session --
+    // audio-out, text-in, the production tool runner -- which is the only way
+    // to measure booking correctness on the front-end that fabricated. It
+    // costs real money per scenario and is quadratic in turn count, so it is
+    // opt-in and the default is unchanged.
+    session =
+      process.env.EVAL_DRIVER === "live"
+        ? createLiveTextSession({ config, extras, fakes: { deps, store, effects } })
+        : createTextSession({ config, extras, modelOverrides, fakes: { deps, store, effects } });
 
     const turns = [];
     const allToolCalls = [];
@@ -318,6 +336,13 @@ export async function runScenario(scenario, { modelOverrides, noJudge = false } 
     base.error = err?.stack || err?.message || String(err);
     base.hardPass = false;
     return base;
+  } finally {
+    // Optional: only the Live driver has a socket to give back.
+    try {
+      session?.close?.();
+    } catch {
+      /* already gone */
+    }
   }
 }
 
