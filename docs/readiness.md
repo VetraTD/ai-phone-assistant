@@ -48,10 +48,22 @@ What a prospect DOES perceive, in the order it will cost you the meeting:
 | 2 | cancels two things, is told it still has them, then cannot book | **LVX33** |
 | 3 | four questions in one breath | LVX25 |
 | 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 |
-| 5 | offers midnight and 11 PM appointments | **config, free** |
-| 6 | a UK callback number read out in US digit grouping | LVX26 |
+| 5 | ~~offers midnight and 11 PM appointments~~ | **GONE** — Brightwork has real hours |
+| 6 | a UK callback number read out in US digit grouping | LVX26 — US tenant, not on the demo path |
 | 7 | a 1.4–2.2 s pause before every reply | measured, unfixed |
-| 8 | two seconds of silence before the greeting | LVX17 — **may not exist off the dev laptop** |
+| 8 | ~~two seconds of silence before the greeting~~ | **GONE** — LVX17 was Norton; 16 ms on the deployment |
+
+**Rows 5 and 8 closed on 2026-09-03 by deploying**, not by writing code. The
+midnight offers were Digile Media's `00:00-23:59` hours and Brightwork has real
+ones; the greeting delay was TLS interception on the development laptop and does
+not exist where the product runs.
+
+**And one row nearly wasn't on this list at all.** Every deployed call was
+silent until `VOICE_INTENT_MARKER` was found — an environment variable set in
+production and unset locally, which made the model speak `<<intent:...>>` aloud
+and the leak guard shred the call. See LVX37. A demo rehearsal that had only
+ever happened on the laptop would have met that for the first time in front of a
+prospect.
 
 **1 and 2 are demo-killers and they are the same demo-killer twice**: the
 assistant fails to do the one thing it is being demonstrated to do. Everything

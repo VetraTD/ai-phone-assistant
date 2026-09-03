@@ -1844,6 +1844,169 @@ tenant for testing.
 
 ---
 
+## Deployed to Railway staging, 2026-09-03 — and the silence was ours
+
+**The Live front-end left the laptop for the first time.** Branch pushed to
+GitHub, staging deployed from `feat/s2s-frontend`, its own Postgres, Brightwork
+Family Dental as the tenant, `+18176011171` pointed at it.
+
+**Every deployed call was silent until the last one.** The cause was an
+environment variable that is set in production and unset on the development
+machine, which is why fourteen laptop calls never saw it.
+
+### LVX37 · `VOICE_INTENT_MARKER` makes the model read its markers aloud `[gcp]` · **P0 — FIXED**
+
+The log line that named it, once the instrument could see it at all:
+
+```
+live_debug_leak_text  matched: null
+text: <<intent:general_question>> We offer
+text: <<intent:general_question>> I'm sorry
+text: <<intent:general_question>> My apologies,
+```
+
+Marker mode asks the model to write `<<intent:...>>` inline instead of calling
+`set_call_intent`. On the cascade that is a real latency win **and it is safe,
+because `getReplyStreaming` strips the marker out of the text before a character
+reaches TTS**. On this front-end THE MODEL IS THE VOICE. There is no text stage
+between it and the caller, so the marker is spoken.
+
+**It does not embarrass the call, it destroys it.** The leak guard catches the
+marker as structural syntax, cuts the audio and sends a note; the model
+apologises, emits the marker again, and loops. Measured on one real call: **six
+leak cycles, `turns: 0`, `usage.audio_out: 13`, caller hears nothing.**
+
+**Fixed** by `intentMarker: false` on the Live extras.
+`intentMarkerEnabled()` checks that boolean BEFORE the environment variable, so
+one line covers the prompt (`buildSystemInstruction`) and the declarations
+(`buildLiveTools`) together — disabling one and not the other would leave the
+model told to emit a marker it has no tool for, which is worse than either
+state. `lib/harness/liveTextSession.js` gets the same flag or the eval would
+measure a configuration production must never run.
+
+**Verified on a real deployed call:** 117 seconds, zero leaks, against six
+cycles and a 22-second hang-up an hour earlier.
+
+**THE STANDING LESSON, and it is new:** `VOICE_INTENT_MARKER` is **unset in the
+development `.env` and set on the deployment.** Every laptop call ran with
+marker mode off and produced zero leaks; the first deployed call produced six.
+**A configuration that exists in only one environment is invisible to every test
+and every phone call made in the other one.** Five hypotheses were built and
+discarded before this was found, all of them comparing laptop behaviour to
+deployed behaviour without knowing the configurations differed.
+
+Pinned by a test that compares the two prompts directly — the cascade's must
+contain `<<intent:` and the Live path's must not. A source grep would have
+passed on a comment.
+
+### LVX17 · CLOSED. It was Norton, and the deployment proves it
+
+| | laptop | Railway |
+|---|---|---|
+| `connect_ms` | **2,286 ms** | **16–22 ms** |
+
+The 2.2 s before every greeting, the caller who hung up during it, the "cold
+start" that was never a cold start — all of it was Norton's TLS interception on
+the development machine. Off that machine it is gone.
+
+**Do not build the keep-alive.** It works and costs nothing, but it is a fix for
+a defect that does not exist where the product runs.
+
+**The wider consequence stands:** any latency measured on that laptop over a
+connection idle for more than ~90 s carries the same penalty. The repository
+already half-knew this — `/api/debug/model-latency`'s own comment records the
+laptop reading 2,090 ms where the deployment read 702–1,156 ms and attributes it
+to "the network hop". It is Norton.
+
+### LVX21 · ANSWERED — and a guard can silence a call
+
+`cut_window_ms` across one real call: `160, 200, 280, -867, -3036, 120, -3619`.
+Positive means the transcript arrived while the audio was still queued and the
+cut landed; **negative means it had already been spoken.** Seven cut, four
+missed. That question has been open since the guard was written.
+
+The more important half: **the leak guard can destroy a call.** Six cycles
+delivered 0.5 s of audio in 25 seconds. A guard with a hair trigger is worse
+than the leak it guards against — the same family as the silence nudge that
+stopped the model calling tools, and worth remembering before any future guard
+is given the power to cut.
+
+### LVX38 · Four parallel queries on one Postgres client `[gcp]` · P2
+
+```
+DeprecationWarning: Calling client.query() when the client is already executing
+a query is deprecated and will be removed in pg@9.0
+```
+
+`lib/voice/live/index.js`'s context load runs `Promise.allSettled` over
+`createCall`, `listIntegrationsForBusiness`, `fetchBusinessKnowledge` and
+`fetchCallerContext` inside ONE `withTenantSafe`, which holds a single client.
+
+**Not a correctness bug today** — `pg` queues them rather than corrupting them,
+which was checked before it was blamed. It costs the latency of serialisation
+(`context_ms: 783` on staging against 58 ms locally) and **it breaks outright at
+pg@9**.
+
+**Done when:** the four run on separate clients, or deliberately in sequence.
+
+### The instrument was blind on the calls it existed for — FIXED
+
+`LIVE_DEBUG_TRANSCRIPT` was switched on to find out what the assistant says on a
+call that dies, and produced **nothing**: six leak cycles and not one
+`live_debug_assistant_turn`. `debugTranscript` runs from `auditTurn`, `auditTurn`
+runs on `turnComplete`, and a call that leaks repeatedly never completes a turn.
+
+Fixed by logging the leaked text at the moment the guard catches it, under the
+same guard as `debugTranscript` — opt-in, refused in hipaa mode, assistant
+speech only, tail bounded to 400 characters. `outbound_sanitized` still reports
+`chars` and `rules` and no text, because it fires in production and LVX24 is why.
+
+**One commit later the defect named itself.** Worth remembering: when an
+instrument reports nothing, ask whether it can see the case at all before
+concluding the case is clean.
+
+### LVX30 · confirmed on a real deployment
+
+`db_unscoped_fallback  operation: completeCall` on every Live call. The Live
+path still never writes shared call state, so `/twilio/status` has no
+`businessId`. Unchanged, still recorded, still not fixed.
+
+### The staging rig, so nobody rebuilds it by guesswork
+
+- Railway project `ai-phone-assistant-backend`, environment `staging`, deploying
+  branch `feat/s2s-frontend` directly — **not merged to `dev`**, which is still
+  pre-GCP and would be redefined by that merge.
+- Its **own Postgres**, not Supabase. Supabase has no `schema_migrations`, no
+  `sms_consents`, and — decisively — no `app_current_business_id()` and no
+  `create_appointment_if_available()`, so booking cannot work there and
+  `withTenantSafe` would swallow every failure silently.
+- `node scripts/migrate.js --init-if-empty` is the from-zero path. Plain
+  `migrate.js` fails on `002 ... relation "businesses" does not exist`, and the
+  runner's own comment predicts that exact error.
+- Tenant imported with `scripts/import-tenant.js` (config only, refuses PHI
+  tables by name). **Brightwork Family Dental is the better demo tenant**: real
+  business hours, so no midnight offers, and `+18176011171` resolves to it
+  natively with no `LIVE_BUSINESS_PHONE`.
+- `DEBUG_ENDPOINTS=true` + `DEBUG_TOKEN` make `/api/debug/latency` readable
+  remotely, which is how every counter in this section was read.
+- **Railway prefers a Dockerfile over Nixpacks when it finds one.** This branch
+  introduced the first one, written for Cloud Build with a BuildKit-only
+  `RUN --mount=type=secret`, and staging failed to build in five seconds until
+  that became a plain build ARG.
+
+### A WebSocket harness now drives a call without a phone
+
+Built while diagnosing this: sign the Twilio webhook, take the `wss` URL out of
+the returned TwiML, open the socket, send a `start` event and μ-law frames, and
+read what comes back. About a cent per run.
+
+It found things a phone call could not — the audio is genuinely loud (RMS 5,042,
+peak 30,076), the `streamSid` echoes correctly, the frames are 160 bytes — and
+it has one honest limit that cost an hour: **it sends digital silence, so
+`usage.audio_in` is 0 and the vendor's own VAD never hears anything.** A real
+line sends noise. Any conclusion drawn from it about turn-taking or barge-in is
+not evidence about a real call.
+
 ## From the two `POSTCALL_VERIFY=count` calls, 2026-09-03
 
 Two real calls on `+18176011171` against Digile Media's config on the local
