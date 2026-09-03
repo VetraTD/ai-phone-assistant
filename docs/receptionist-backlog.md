@@ -1415,6 +1415,24 @@ Not half-built on purpose. `applyReplyState` needs `STEPS`,
 **Done when:** the reducer is shared between both front-ends, or the Live path
 names what replaces each thing it drops.
 
+**DONE 2026-09-02.** The Live path is now a third driver of `applyReplyState`
+and `dispatchCapabilityEffects`, alongside the cascade and
+`lib/harness/textSession.js`. It touches no cascade file.
+
+**The difficulty above was overstated, and the overstatement is the lesson.**
+"Needs STEPS, mergeCapabilityState, dispatchEffects and spellRequestRe from
+inside a 209 KB handler" is wrong: `applyReplyState` is a standalone export in
+`lib/voice/replyState.js`, `STEPS` is in `lib/callState.js`, and both
+`mergeCapabilityState` and `dispatchCapabilityEffects` are in
+`lib/capabilities/effects.js`. Only `spellRequestRe` needed anything, and it is
+`getStrings(config).spellRequestRe`. `textSession.js` was already doing exactly
+this and was the template.
+
+An inflated estimate written at parking time is what keeps a P1 parked. It also
+hid a far worse defect sitting behind the same wiring: `capabilityEffects` was
+being dropped entirely, so a caller could be told their message was taken while
+no row was written and nobody was notified.
+
 **CONFIRMED BY OBSERVATION 2026-09-02**, first real exercise, and it is the
 spelling cap that went first. Three consecutive turns:
 
@@ -1498,3 +1516,44 @@ GCP. Locally it works today: `.env` is read directly.
 
 **Done when:** the alt token can be set on the UK service without a deploy that
 fails on a versionless secret.
+
+### Deferred from the 2026-09-02 review — recorded, not fixed
+
+The owner scoped the review fixes to the findings that lose data, mislead a
+caller, or block a meaningful live call. These two do none of those.
+
+**LVX12 · The idempotency cache freezes operator webhook tools** `[gcp]` · P3
+
+`lib/voice/live/guards.js` keys its duplicate suppression on `isWriteTool`,
+which returns true for any tool with no owning pack (`lib/voice/session.js:544`
+fails safe that way on purpose). An operator-defined webhook tool --
+`check_order_status`, say -- therefore has its FIRST response frozen for the
+whole call, and a caller asking twice is read a stale answer as though it were
+fresh.
+
+Failing safe is right for the booking tools it was written for and wrong here:
+a webhook is as likely to be a read as a write, and the pack registry cannot
+tell. Needs a narrower key than "unknown means write" -- probably the webhook
+tool's own declaration saying which it is.
+
+Related, same file: a suppressed duplicate pushes a `functionResponse` but never
+sets `completedActionThisTurn`, so a legitimate repeat of a write does not
+unlock `end_call` in that turn.
+
+**Done when:** a webhook tool can be re-called in one call, or its declaration
+says it may not be.
+
+**LVX13 · Two Live settings bypass their own env seam** `[gcp]` · P3
+
+`lib/voice/live/index.js` reads `LIVE_VOICE` and `LIVE_LANGUAGE_CODE` from
+`process.env` at MODULE LOAD, while everything else on that path
+(`LIVE_MODEL`, `LIVE_SURFACE`, `LIVE_BUSINESS_PHONE`, the turn-end arm) goes
+through the injected `deps.env`.
+
+The consequence is small but pointed: a test passing `{ env: { LIVE_VOICE:
+"Puck" } }` silently gets Kore, so the two knobs the call summary REPORTS
+(`voice`, `language_pinned`) are the two that cannot be varied per session --
+nothing can assert the voice actually configured. Move both reads inside the
+handler.
+
+**Done when:** every Live setting is read from the same place.
