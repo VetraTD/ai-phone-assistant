@@ -2207,6 +2207,59 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+### The harness speaks now — and three runs proved the instrument, not the fix
+
+**2026-09-03.** `scripts/live-call-harness.js` gained `--script`: it streams
+pre-synthesised mu-law caller speech, so the vendor VAD fires and the model
+actually converses. Two scripts in `lib/probe/script.js`, `demo_booking` and
+`demo_cancel`, aimed at LVX40/LVX34 and LVX33.
+
+Three runs against staging, ~$0.35 all in. What they settled:
+
+| | |
+|---|---|
+| the harness holds a conversation | **yes** — 7 of 8 lines, 80 s of assistant audio, `end_call` armed and the goodbye played out (a mark arrived and was echoed) |
+| `live_outbound_leaks` | **0 on every run.** LVX41 did not reproduce in three calls |
+| leak-guard cuts | **0** |
+| turn shape | the assistant speaks **5 to 20 seconds** per turn |
+
+**What they did NOT settle, and this is the finding.** Not one of LVX40's,
+LVX34's or LVX33's counters moved — and that is not evidence, because **every
+counter this work added fires only when something is WRONG.** A call that booked
+cleanly and a call that never reached the booking both report zeros. The
+instrument could not see the case it was pointed at.
+
+That is the same mistake as `LIVE_DEBUG_TRANSCRIPT` producing nothing on the
+calls it existed for, made again three weeks later by the person who wrote that
+entry. **When an instrument reports nothing, ask whether it can see the case
+before concluding the case is clean.**
+
+**Fixed by adding the positive half:** `postcall_booked_rows` and
+`postcall_changed_rows`, counted per ROW in `lib/postCallVerify.js`. A booking
+that lands now says so, and three cancellations in one turn say three — which is
+exactly the shape LVX33 needs, since the bug leaves two of them behind.
+
+**Two more things the runs cost, both mine:**
+
+1. **A push mid-call voided a whole run.** Railway redeploys on push, the process
+   restarted, every counter reset. The harness's own `bootId` check exists for
+   this and would have caught it — except the process hung before printing, see
+   below. **Do not push while a call is in flight.**
+2. **The harness hung after the server closed the socket.** The 20 ms ticker and
+   the hang-up watcher were cleared only on the paths where the harness itself
+   decided to stop. The call had ended; the event loop had not. Fixed by owning
+   every timer in one set and stopping them on close.
+
+**Still needed to close LVX40, LVX34 and LVX33:** a run with the new positive
+counters, plus either `LIVE_DEBUG_TRANSCRIPT=1` on the deployment or a read of
+the appointment row. The harness cannot hear, so it can never say the assistant
+said the right thing.
+
+**One caution about `demo_booking` specifically.** The caller number used in
+these runs already has appointments on file, so `shouldConfirmSpelling` returns
+false — "already on file" — and the spelling gate correctly never fires. A run
+meant to exercise LVX34 needs a caller with no history, or it tests nothing.
+
 ### CALLER_ALLOWLIST is NOT active on staging `[gcp]` · P2
 
 Found by the harness on 2026-09-03: a call from `+15551230000`, a number nobody
