@@ -1623,6 +1623,20 @@ need deciding rather than assuming.
 **Done when:** the assistant can state the calling number correctly, or is
 structurally unable to state one at all.
 
+**CLOSED 2026-09-03**, on the first `POSTCALL_VERIFY=count` call. The remaining
+half was that the model still had to be OBSERVED getting a read-back right on a
+real call now that the country code is stripped. It did, unprompted, on turn 10:
+it offered to call back on the caller's own mobile, read out with the country
+code dropped and grouped 3-3-4 for a US number, and every digit was correct.
+
+**The number itself is deliberately not quoted here.** O2 — real caller phone
+numbers in git history — is an open P0 in this same document, and an evidence
+quote is exactly how one gets there. The claim that matters is "correct digits,
+correct grouping, no country code", and that is checkable from the call log
+while the log exists, without a permanent copy in a tracked file.
+
+Both halves of LVX16 are now answered.
+
 **LVX17 · The first call after any restart is silent, and the caller hangs up** `[gcp]` · P1
 
 Reported by the owner as a long-standing pattern: *"after we make a change it
@@ -1963,8 +1977,32 @@ successful action the model may close whenever it likes. Same family as LVX22.
 
 The row is 11 PM. The agreed script said to take **the first** slot offered. If
 that is what was said, the assistant booked the wrong one and this is a real
-defect; if the owner said "11 PM", there is nothing here. **Unresolved — ask
-before investigating.**
+defect; if the owner said "11 PM", there is nothing here.
+
+**UNRESOLVABLE, and it is an instrument gap rather than a bad memory.** The
+owner does not recall which they said, and nothing in the system can answer it:
+
+- `LIVE_DEBUG_TRANSCRIPT` logs `live_debug_assistant_turn` and **only the
+  assistant's side**. The caller's words are held in `turnUserText` from
+  `inputAudioTranscription` and are never written anywhere.
+- The Live path writes no `call_transcripts` rows at all (LVX30), so there is no
+  database record either.
+- The session log was scrubbed after the sitting because it carried the caller's
+  name and number in clear.
+
+So a defect was observed whose entire evidence is one side of the conversation.
+**Any question of the form "did the caller actually ask for that?" is currently
+unanswerable on this front-end**, which is a bad property for a front-end whose
+open P0 is that it says things nobody asked for.
+
+**Cheapest fix, and it should land before the next call round:** have
+`LIVE_DEBUG_TRANSCRIPT` record the caller turn as well as the assistant turn.
+The text is already in hand; it is a debug-only flag, already refused in `hipaa`
+mode, and the same PHI rules apply — it is a diagnostic, never a setting, and
+the log is scrubbed after a sitting.
+
+**Done when:** a disagreement about what the caller said can be settled from the
+record. Until then LVX36 stays open and unproven in both directions.
 
 Separately and NOT a defect: midnight and 11 PM offers are Digile Media's
 `business_hours` of 00:00–23:59. Config, working correctly on nonsense hours —

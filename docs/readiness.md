@@ -79,11 +79,136 @@ whichever one happens to be pointed at the number.
   accepting that risk in front of a prospect, on a path with no deployed home
   today (it runs locally behind a cloudflared tunnel).
 
-### The honest shortest path to a call-quality demo
+### Everything needed, in full
 
-Fix **LVX34** and **LVX33**, give the demo tenant **real business hours**, and
-decide which front-end answers. LVX25 and LVX35 next if there is time. That is a
-short list and none of it is compliance work.
+Six groups. **A is first because it changes what the rest of the list even
+says.**
+
+#### A. Two decisions — ANSWERED by the owner 2026-09-03
+
+**A1. Gemini Live answers, with the cascade as the fallback.**
+
+This is the right shape and it is **not a safety net you already have** — tiers
+2a/2b/3 do not exist, and today a Live failure is silence. Choosing Live means
+building the fallback is now demo work, not later work. Two halves, and they are
+not equally hard:
+
+- **Connect-time failure** — the cheap and valuable half. `/twilio/live-voice`
+  already loads the tenant and mints a stream token before returning TwiML, so a
+  failure there can return the cascade's `<Connect><Stream>` at
+  `/twilio/media-stream` instead. The caller never knows.
+- **Mid-call failure** — the socket drops after `<Connect>` has begun. Twilio's
+  `<Connect>` accepts an `action` URL that is requested when the connection
+  ends, which is the hook: on an abnormal close, hand back the cascade's TwiML
+  and the caller continues on tier 3. **Unverified — nobody has tried it here.**
+
+A connect-time fallback alone removes the worst demo outcome and is much smaller
+than the full tier design in section 2.
+
+**A2. Digile Media on its real UK line eventually; `+18176011171` for testing.**
+
+`LIVE_BUSINESS_PHONE=+441372656055` stays the mechanism: a US test number
+answers with the real tenant's config, nothing else changed.
+
+**Standing cost of that choice:** `+18176011171` is `ASSISTANT_NUMBER`, which
+`npm run probe` dials, so every test round repoints it and must restore it
+afterwards (`docs/live-frontend-RESTORE.md` §3, and verify by reading the number
+back from Twilio, never by trusting the update). **A second, dedicated test
+number would end that ritual permanently** and is worth the few dollars a month.
+
+The original framing of both decisions follows.
+
+#### A (original). Two decisions, before any work starts
+
+1. **Which front-end answers the phone.** The cascade has fallbacks, writes
+   transcripts, serves a paying clinic and does not fabricate. The Live
+   front-end sounds better — which is the entire reason it exists — and carries
+   every row in the table above, has no fallback, and has no deployed home.
+   Choosing the cascade deletes most of groups B, C and E.
+2. **Where it is hosted, and which number is dialled.** Today the Live path runs
+   locally behind a `cloudflared` quick tunnel whose URL changes on every
+   restart. `+18176011171` is a US line and is `ASSISTANT_NUMBER`, which
+   `npm run probe` depends on; `+441372656055` is Digile Media's real UK number
+   that people actually call. **A prospect demo needs neither of those.**
+
+#### B. What they hear — the eight rows above
+
+Ordered by cost to the meeting. **LVX34 and LVX33 are the two that matter**;
+they are the same failure twice, the assistant not doing the thing it is being
+demonstrated to do. Then LVX25, LVX35, LVX26, and the free config fix.
+
+#### C. Infrastructure that survives a demo
+
+- **The Live front-end has no deployed home.** `/twilio/live-voice` is mounted
+  unconditionally in `server.js` — there is no feature flag — so deploying the
+  app deploys the route. What it needs in that environment is `GEMINI_API_KEY`
+  (Secret Manager, via `scripts/push-secrets.js`) and a Twilio number pointed at
+  it. Running it from a laptop tunnel during a live prospect call is a choice,
+  not a default; quick-tunnel URLs die with the process.
+- **There is NO fallback. A Live failure is silence** — not voicemail, not the
+  cascade. Tiers 2a/2b/3 do not exist. On a prospect call that is the worst
+  available outcome, and it is the strongest single argument for demoing the
+  cascade instead.
+- **Concurrency is unmeasured** (O7) and the vendor cap is shared. Two prospects
+  at once is untested.
+- A **second handset** has never been used. Every acoustic number in this
+  repository is one phone, one room, one carrier's echo canceller.
+
+#### D. A tenant that sounds like a real business
+
+The demo tenant is a product surface, and Digile Media is a test fixture.
+
+- **`business_hours` 00:00–23:59** is why it offers midnight. Free to fix,
+  biggest ratio on this page.
+- **`main_phone` is a mobile**, not the line callers dial, so the goodbye reads
+  out the wrong number.
+- **Intake fields drive LVX25.** Four configured fields are what get conjoined
+  into one breath; fewer fields is a cheaper mitigation than a prompt change.
+- Greeting, timezone and locale should match the vertical being demonstrated —
+  and `locale` is currently null on this tenant, which is what LVX26 keys on.
+
+#### E. Being able to answer "what did it say?"
+
+The first question a prospect asks after a test call, and **today it cannot be
+answered for a Live call at all**:
+
+- **LVX30** — the Live path never writes shared call state, so `/twilio/status`
+  sees no `businessId` and no `dbCallId`: the call is never marked completed,
+  never summarised, and `completeCall` runs unscoped.
+- **No transcripts.** The Live path never calls `db.addTranscriptEntry`.
+- **LVX36's gap** — even the debug flag records only the assistant's half, so
+  "did the caller actually ask for that?" is unanswerable.
+- **D3** call review is the dashboard surface all of this would feed.
+
+#### F. Risks to accept knowingly, not discover live
+
+- **LVX27** — roughly one call in ten invented a booking. LVX29 now catches it
+  after the fact, but only in `count` mode; nothing prevents it, and a prospect
+  who checks the diary will find nothing there.
+- **LVX21** — the outbound leak guard has never fired on a real call, so whether
+  a leak can be cut in time is still unknown.
+- **LVX16 is CLOSED** as of 2026-09-03: the assistant read the caller's own
+  number back correctly on a real call, country code stripped.
+
+#### G. Explicitly NOT needed for a call-quality demo
+
+Say no to these now so they do not creep in: the DPIA, the Article 28 DPAs and
+the transfer assessments; O1 and O2; the eval port and the fabrication-rate
+round; the multi-vertical matrix; Google Calendar and the other scheduling
+adapters; the confirmation SMS actually sending; self-serve signup.
+
+They are all real and several are urgent **before money changes hands**. None of
+them is perceivable on a test call, and every hour spent on them is an hour the
+prospect's call still sounds wrong.
+
+### The honest shortest path
+
+Decide A1 and A2. Fix **LVX34** and **LVX33**. Give the demo tenant **real
+business hours** and a sane `main_phone`. Capture the caller's half of the
+transcript so the next round is diagnosable. Then LVX25 and LVX35 if there is
+time.
+
+None of it is compliance work, and none of it is large.
 
 ---
 
