@@ -7,11 +7,16 @@
 # Norton intercepts TLS on the development machine, including inside containers,
 # so `npm ci` in Docker fails there with "Exit handler never called!" — which
 # reads as an npm bug and is really UNABLE_TO_VERIFY_LEAF_SIGNATURE three layers
-# down. The Dockerfile carries a `--mount=type=secret` accommodation for that.
+# down. The Dockerfile carries an `NPM_CA` build-arg accommodation for that.
 #
-# Cloud Build has no Norton, passes no secret, and the mount resolves to an
-# empty file, so the same Dockerfile reduces to a plain `npm ci`. Building here
-# is not a convenience: it is the only place the build is uncomplicated.
+# Cloud Build has no Norton and passes nothing, so the arg is empty and the same
+# Dockerfile reduces to a plain `npm ci`. Building here is not a convenience: it
+# is the only place the build is uncomplicated.
+#
+# That accommodation used to be `RUN --mount=type=secret`, which is BuildKit-only
+# and broke Railway outright — Railway prefers a Dockerfile when it finds one,
+# and its builder could not parse the line. A CA certificate is public, so the
+# secret mount bought nothing that a build arg does not.
 #
 # ---------------------------------------------------------------------------
 # Running it
@@ -66,9 +71,12 @@ steps:
   # -------------------------------------------------------------------------
   # BuildKit, explicitly.
   #
-  # The Dockerfile uses `RUN --mount=type=secret`, which the classic builder
-  # does not understand — it fails on the syntax rather than ignoring it. Cloud
-  # Build's docker image supports BuildKit but does not enable it by default.
+  # NO LONGER for the Dockerfile's syntax — that is now plain Dockerfile any
+  # builder can read, which is what unbroke Railway. It stays for the LAYER
+  # CACHE below: `--build-arg=BUILDKIT_INLINE_CACHE=1` is a BuildKit feature,
+  # and without it `--cache-from` does nothing and every build reinstalls
+  # node_modules from scratch. Cloud Build's docker image supports BuildKit but
+  # does not enable it by default.
   # -------------------------------------------------------------------------
   - id: build
     name: gcr.io/cloud-builders/docker

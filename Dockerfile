@@ -9,22 +9,25 @@
 # that matters, at the worst time. Debian slim costs about 40MB more and removes
 # an entire class of surprise.
 
-# ---- Who actually builds with this file ------------------------------------
+# ---- Who builds with this file, and why it is plain Dockerfile syntax -------
 #
-# CLOUD BUILD does. Railway does NOT, and that is deliberate: `railway.json`
-# pins Railway to NIXPACKS.
+# BOTH Cloud Build and Railway. That is why nothing in here may depend on
+# BuildKit.
 #
 # Railway auto-detects its builder and prefers a Dockerfile when it finds one.
-# This file arrived on feat/s2s-frontend, so the first staging deploy from that
-# branch switched Railway off Nixpacks -- which had built the app fine for
-# months -- and onto this, where it failed in five seconds. The `--mount=type=secret`
-# below is BuildKit-only; a builder without BuildKit cannot parse it at all.
+# This file arrived on feat/s2s-frontend -- it is on neither dev nor main -- so
+# the first staging deploy from that branch switched Railway off Nixpacks, which
+# had built the app for months, and onto this. It failed in five seconds,
+# because the dependency install used `RUN --mount=type=secret`, and that is
+# BuildKit-only: a builder without BuildKit cannot parse the line at all. It
+# built fine locally the whole time, because Docker Desktop enables BuildKit by
+# default, which is exactly what made the difference easy to miss.
 #
-# Rather than debug someone else's builder to reach a phone call, Railway is
-# pinned back to the path that already worked. If this image is ever wanted on
-# Railway, the portable change is to drop the secret mount for a plain build
-# ARG -- a CA certificate is not a secret, so the mount was only ever buying
-# build-context hygiene.
+# Pinning Railway back to Nixpacks was tried first and is the wrong shape: it
+# wins the argument about which builder runs instead of ending it, and it gives
+# up an image that carries no devDependencies, names every file it copies, and
+# runs as a non-root user. So the secret mount is gone and this is now ordinary
+# Dockerfile syntax that any builder can read.
 
 # ---- deps -------------------------------------------------------------------
 FROM node:22-slim AS deps
@@ -35,7 +38,7 @@ WORKDIR /app
 # edit, which on Cloud Build is minutes per deploy.
 COPY package.json package-lock.json ./
 
-# The `--mount=type=secret` is a WORKSTATION accommodation and nothing more.
+# NPM_CA is a WORKSTATION accommodation and nothing more.
 #
 # This machine runs Norton, which intercepts TLS — including inside containers.
 # Without a CA bundle npm cannot verify the registry and fails with
@@ -43,12 +46,36 @@ COPY package.json package-lock.json ./
 # real error is UNABLE_TO_VERIFY_LEAF_SIGNATURE, three layers down. It cost an
 # hour to find, so it is written down here.
 #
-# Cloud Build has no Norton and passes no secret. The mount is then an empty
-# file, the `if` is false, and the command is a plain `npm ci` — so this costs
-# production nothing and the image contains no certificate either way.
+# Cloud Build and Railway have no Norton and pass nothing. The arg is then
+# empty, the `if` is false, and the command is a plain `npm ci` — so this costs
+# production nothing.
 #
-# Local:  docker build --secret id=cacert,src=$HOME/gcloud-cacerts.pem .
-RUN --mount=type=secret,id=cacert,target=/tmp/ca.pem     sh -c 'if [ -s /tmp/ca.pem ]; then export NODE_EXTRA_CA_CERTS=/tmp/ca.pem; fi;            npm ci --omit=dev --no-audit --no-fund'
+# It is a build ARG and not a BuildKit secret ON PURPOSE, and the trade is
+# worth stating: a build arg is visible in `docker history`, whereas a secret
+# mount is not. A CA CERTIFICATE IS PUBLIC — it is the thing a client uses to
+# verify a server, not a credential — so there is nothing here to leak, and the
+# mount was only ever buying build-context hygiene. In exchange this file is
+# readable by any builder, which is what the deploy actually needs. Do not put
+# an actual secret through this door.
+#
+# Local, and it must be a TRIMMED cert, not the whole bundle:
+#
+#   docker build --build-arg NPM_CA="$(cat $HOME/norton-root.pem)" .
+#
+# `gcloud-cacerts.pem` is ~159 KB and a build arg that size exceeds the Windows
+# command-line limit -- docker exits with "Argument list too long", which reads
+# as a docker problem and is really the shell's. Only ONE certificate in that
+# bundle matters here, the Norton interception root, and alone it is ~1.5 KB:
+#
+#   awk '/BEGIN CERTIFICATE/{c++} {print > ("cert-" c ".pem")}' gcloud-cacerts.pem
+#   # then keep the one whose subject says "Norton Web/Mail Shield"
+#
+# Verified 2026-09-03: full build, all 30 steps, on the LEGACY builder
+# (DOCKER_BUILDKIT=0) — which is the builder this file previously could not be
+# parsed by at all.
+ARG NPM_CA=""
+RUN if [ -n "$NPM_CA" ]; then printf '%s' "$NPM_CA" > /tmp/ca.pem; export NODE_EXTRA_CA_CERTS=/tmp/ca.pem; fi; \
+    npm ci --omit=dev --no-audit --no-fund
 
 # ---- runtime ----------------------------------------------------------------
 FROM node:22-slim AS runtime
