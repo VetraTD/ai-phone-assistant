@@ -1790,3 +1790,78 @@ Open and worth doing in order: **LVX19** (silence ladder, well-specified above),
 **LVX20** (needs a call to produce `live_multipart_audio` lines, not analysis),
 then **LVX16's** remaining half -- the model still has to be observed getting a
 read-back right on a real call now that the country code is stripped.
+
+### Fourth live call — a bad one, 2026-09-02
+
+**LVX20 hypothesis ELIMINATED.** `live_multipart_audio` fired **zero** times
+across a 9-turn call. Gemini does not send cumulative `parts` arrays, so the
+multi-part change is inert and is NOT the source of the repetition. The cause
+remains unknown, and the next hypothesis should not be about our audio path.
+
+**LVX21 · The Live path has NO outbound leak guard** `[gcp]` · **P0**
+
+The owner reported "hearing some backend stuff I was not supposed to hear".
+
+The cascade cannot do this: text goes through `lib/voice/speakableText.js` and
+`createToolCallTextStripper` before it ever reaches TTS, and `callToolNames` /
+`callToolParamNames` are exported specifically so that guard can recognise our
+own tool names and argument keys in spoken text. That machinery exists because
+`get_caller_appointments_from_db` reached a caller's ear on 2026-08-04, and
+because an orphaned `{reason:}` args blob did the same on 2026-08-29.
+
+**On the Live path the model IS the voice.** There is no text-to-speech boundary
+to filter, so nothing whatsoever stands between a model that decides to narrate
+`cancel_appointment_db` and the caller's ear. That call had
+`get_caller_appointments_from_db`, `cancel_appointment_db` and three
+`book_appointment` calls in play -- exactly the vocabulary that leaks.
+
+**Unconfirmed from logs, and it cannot be confirmed from these logs**: the
+assistant's spoken text is deliberately not recorded. Confirming it needs
+`outputAudioTranscription` captured for a diagnostic run, which is caller-
+adjacent data and should be a deliberate, time-boxed decision.
+
+**Done when:** either the outbound text is guarded on this path, or it is
+established that it cannot leak and the reason is written down.
+
+**LVX22 · `end_call` fired in the middle of a booking** `[gcp]` · P1
+
+The owner: "the call also just ended itself out of the blue while trying to book
+this appointment". The log agrees, and exonerates the hang-up code:
+`live_exit_armed` then `live_exit_run` with `trigger: "mark"`, and
+`close_reason: end_call_mark`. The goodbye played and the line closed exactly as
+designed. **The model asked to end the call.**
+
+Why it was allowed: `services/tools.js`'s `end_call` gate opens on
+`completedActionThisCall`, and a `book_appointment` had already succeeded
+earlier in the call. From that point the model can end the call at any moment
+and the gate will not stop it.
+
+Same call: **three `book_appointment` calls with different arguments**, plus a
+`cancel_appointment_db` and a `get_caller_appointments_from_db`, with
+`duplicate_suppressed: 0` -- so these were three genuinely different bookings,
+not a re-fire. That is a confused flow, not a duplicate-execution bug, and the
+idempotency guard correctly had nothing to say about it.
+
+**LVX23 · The bare spike sounded better than the production configuration** `[gcp]` · P1
+
+The owner, unprompted: *"When I first got gemini live it was working
+beautifully. Now it seems like it is having issues once connected to
+everything."*
+
+That is a real and uncomfortable comparison. The spike had **no tools and a
+ten-line prompt**, and the verdict recorded was "it sounds amazing". The current
+configuration gives the same model **ten tools and a ~17,000-character system
+prompt** plus a step machine, and the last call produced three bookings, a
+cancellation, a mid-booking hang-up and audible confusion.
+
+Nothing in the recent commits obviously explains it -- the call before ran
+near-identical code and was acceptable -- so the honest hypothesis is that the
+degradation comes from the production surface itself, not from a specific bug.
+
+This is worth treating as a first-class question rather than a symptom, because
+if it is true it undercuts the premise of the whole architecture: the reason to
+choose speech-to-speech was measured behaviour on a bare harness.
+
+**Done when:** the same handset is compared on a reduced tool/prompt
+configuration against the full one, deliberately, rather than inferred from
+memory of how the spike sounded.
