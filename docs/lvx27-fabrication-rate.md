@@ -107,7 +107,9 @@ Scored after all 100 sessions, never before.
 
 P5 is the one with no prior at all, and it is the one that matters most for
 the cascade: if the text path fabricates too, this is not a speech-to-speech
-problem and LVX29 protects a paying clinic today rather than an experiment.
+problem and LVX29 protects the path a customer would actually be sold, rather
+than an experiment. (Corrected 2026-09-03: this said "protects a paying clinic
+today". There is no customer on either front-end yet.)
 
 ## 6. Decision rule — agreed before the data exists
 

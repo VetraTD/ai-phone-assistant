@@ -509,7 +509,7 @@ export async function sendCallerSms(
       // flag so that every send that takes it is greppable.
       //
       // Gate 4's justification above is TCPA prior express consent and HIPAA
-      // 164.522(b). BOTH ARE US, and both were written for the paying clinic.
+      // 164.522(b). BOTH ARE US, and both were written for a US clinic.
       // The owner's reading is that a confirmation of a booking the caller
       // just made, on a call they placed, is a service message rather than a
       // marketing one -- a materially different analysis under UK PECR for a

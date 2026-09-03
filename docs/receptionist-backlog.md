@@ -13,6 +13,28 @@ front of wins already paid for. Update the item's `Done when` line to `DONE
 <date>` rather than deleting it; the history is what stops the same thing being
 re-litigated in three months.
 
+## Correction, 2026-09-03: there is no paying clinic
+
+**This file said "the cascade serves a paying clinic" in four places and
+`docs/readiness.md` said it in four more.** It is not true and never was in this
+form: nobody pays, and no member of the public reaches either front-end. Digile
+Media is a friend's business used as a test tenant.
+
+It is corrected in place rather than deleted, because **two of those eight were
+arguments and not colour**:
+
+- **LVX28's** "`services/tools.js` is SHARED with the cascade, which serves a
+  paying clinic, so the blast radius is both front-ends" was the standing reason
+  to leave shared files alone. The blast radius is still both front-ends; the
+  cost of getting it wrong is a test suite and a redeploy, not a caller. What
+  still argues for care on shared prompt and tool TEXT is the eval band.
+- **LVX26's** "it survives because the paying clinic is US" explained why nobody
+  had noticed UK digit grouping. The explanation holds — the tenants exercised
+  so far are US — but it is not evidence that a customer is unaffected.
+
+`docs/superpowers/plans/gcp-migration-ledger.md` carries the same claim in dated
+status lines from August. Those are left as history.
+
 ## Merge tags
 
 The GCP migration (`feat/gcp-2`) is 217 commits ahead, 338 files, +50,317/−6,139.
@@ -1607,9 +1629,10 @@ none of them contain the calling number. `extras.callerPhone` reaches
 `services/tools.js` as tool context and stops there.
 
 **This is NOT specific to the speech-to-speech front-end.**
-`buildSystemInstruction` is shared, so the cascade has the identical gap and the
-same failure is available on a paying clinic's calls today. It was not found
-earlier because nothing had asked the assistant to read the calling number back.
+`buildSystemInstruction` is shared, so the cascade has the identical gap. It was
+not found earlier because nothing had asked the assistant to read the calling
+number back. (Corrected 2026-09-03: this said "on a paying clinic's calls today".
+There is no paying clinic — see the note at the top of this file.)
 
 It is strictly worse than LVX4, which this replaces as the read-back problem.
 LVX4 was a REFUSAL, which is safe. This is fabrication, and `book_appointment`
@@ -1844,6 +1867,64 @@ tenant for testing.
 
 ---
 
+## Session state at 2026-09-03 close — third sitting, the three demo P0s fixed
+
+**Nothing was spent. No call was made, no probe was run, no eval was run.**
+Everything below is offline, and the standing rule applies to all of it:
+**offline green is not evidence.** Suite 166 files / 2,902 tests, from 165 /
+2,882.
+
+### What shipped, all on `feat/s2s-frontend`
+
+| | |
+|---|---|
+| LVX40 | `client_name` required in the declaration AND refused in `bookAppointment`. Re-arms LVX28. |
+| LVX34 | `deferralRe`, a refusal count kept apart from the attempt count, a counted guard on the pair, and the gate's wording rewritten |
+| LVX33 | the caller snapshot now follows the batch, fixed in `lib/capabilities/effects.js` |
+| LVX36 | `LIVE_DEBUG_TRANSCRIPT` records the caller's half too |
+| LVX31 | partly closed as a side effect of LVX34's refusal split |
+| LVX42 | NEW — the spelling gate's escape hatch, split out and now counted |
+| docs | the "paying clinic" correction, nine assertions across three doc files plus eight source comments |
+
+Five new counters, all registered in `lib/voice/metrics.js`:
+`live_tool_refusals`, `live_deferral_after_refusal`, `spelling_gate_refusals`,
+`spelling_gate_cap_reached`, `booking_refused_no_name`.
+
+### Three things this sitting corrected in the entries themselves
+
+Worth reading before trusting any other entry's stated cause:
+
+1. **LVX40's proposed fix would have broken cancelling.** "A one-line invariant
+   in a SHARED file" — that seam fires for every `actionTools` member, and
+   `cancel_appointment_db` carries no name argument at all.
+2. **LVX34's recorded cause was not the cause.** The entry blamed
+   `promisedAction`'s end-of-reply rule. `promiseRe` would not have matched a
+   callback promise at any position, and the guard was disabled anyway because
+   a refusal counts as an attempt.
+3. **LVX41's `matched` field cannot name the leak.** It is a tool-name label and
+   is null for anything structural, which is every leak LVX37 produced.
+
+Each of the three was written down confidently by someone who had read the
+symptom and not the function. The pattern is not carelessness — it is that a
+plausible cause stops the reading.
+
+### Open, in the order worth doing
+
+1. **Deploy and make the three calls.** Diff the deployed environment against
+   the local `.env` FIRST — `VOICE_INTENT_MARKER` cost five hypotheses because
+   nobody compared the two configs. Call 1 books, giving a name only when asked:
+   LVX40, LVX34, LVX41 and LVX25 all at once. Call 2 cancels several then books:
+   LVX33 and LVX35. Call 3 is the reserve.
+2. **LVX41** — read the `text` on `live_debug_leak_text`, not `matched`.
+3. **LVX25 and LVX35** only if they reproduce on Brightwork. Existence checks,
+   not comparisons: one call showing the behaviour keeps the entry open, one
+   call not showing it closes nothing.
+4. **The eval band for the reworded gate**, ~$20 across two arms, and the
+   recorded band needs re-measuring at 45 scenarios anyway. It proves the
+   cascade did not regress; it cannot prove the Live path improved.
+5. **Rebuild the WebSocket harness and COMMIT it this time.** See the correction
+   below.
+
 ## Deployed to Railway staging, 2026-09-03 — and the silence was ours
 
 **The Live front-end left the laptop for the first time.** Branch pushed to
@@ -1854,7 +1935,7 @@ Family Dental as the tenant, `+18176011171` pointed at it.
 environment variable that is set in production and unset on the development
 machine, which is why fourteen laptop calls never saw it.
 
-### LVX40 · It booked an appointment with NO NAME, and that bypasses the spelling gate `[gcp]` · **P0**
+### LVX40 · It booked an appointment with NO NAME, and that bypasses the spelling gate `[gcp]` · **P0 — FIXED offline 2026-09-03**
 
 First booking on the deployment, 2026-09-03, Brightwork Family Dental, 265 s:
 
@@ -1882,13 +1963,39 @@ The owner then had to ask whether the appointment was confirmed before the model
 collected a name and asked for its spelling — after the row existed. Same
 ordering defect as LVX28's worst case, reached by a different route.
 
-**Worth establishing before fixing:** whether `book_appointment` should refuse a
-booking with no `client_name` at all, or whether the intake step should be what
-guarantees one. The first is a one-line invariant in a SHARED file; the second
-is prompt work. They are different blast radii and the cheap one may be right.
+**The invariant won, and the shared-file version of it would have been wrong.**
+The suggestion above was a one-line refusal in `services/tools.js`. That seam
+fires for every member of the pack's `actionTools`, which includes
+`cancel_appointment_db` — a tool that carries no name argument at all — so a
+blanket `!callerNameFromArgs(args)` there would have refused every cancellation
+forever. A nameless-booking invariant is booking-scoped and belongs in the pack.
 
-**Done when:** a booking cannot reach the database without a name, or the name is
-collected before the tool is ever called.
+**Fixed in two places, and they do different jobs.** `client_name` joins
+`required` on `BOOK_APPOINTMENT_DECLARATION`, which is what makes the model ASK
+before it calls; and `bookAppointment` refuses a blank name before any write,
+which is what makes it true. A schema alone is a request. Placed above
+`validateBookingTime`, because a name is the cheapest thing to ask for and the
+caller has already said it out loud.
+
+**Not the tenant config, deliberately.** `require.identity.builtin: ["name"]`
+already does all of this and is correctly opt-in — enforcement must never lock a
+tenant out of its own capability. But that expresses "this business insists on a
+name", and a nameless appointment is not a business preference: no scheduling
+backend and no receptionist has a use for a slot with nobody in it.
+`lib/capabilities/requirements.js` sets the test as "if the AI ignores this, does
+someone get hurt, sued, or angry?", and a clinic holding a chair for nobody
+answers yes.
+
+Counted as `booking_refused_no_name`. The golden `*.tools.json` snapshots moved
+by exactly one line each and nothing else.
+
+**It re-arms LVX28**, which is the half that matters more than the row: with a
+name guaranteed to reach the tool, `pendingName` is never null and the spelling
+gate is consulted on every booking again.
+
+**Done when:** DONE offline 2026-09-03 — a booking cannot reach the database
+without a name, pinned by five tests including the ordering case (refused for
+the name, then the retry meets the spelling gate). **Unverified on a call.**
 
 ### LVX41 · A leak still fires with marker mode off, and it is audible `[gcp]` · P1
 
@@ -1901,12 +2008,27 @@ successful hard cut sounds like. `nudges_fired = 2` on the same call, so there
 were real gaps too.
 
 LVX37 removed the `<<intent:...>>` markers, so **this is a different leak** and
-its content is unknown: the `matched` field would name it, and the log was not
-captured. One leak in a four-minute call is a long way from the six-cycle loop
-LVX37 caused, but it still cut the caller off mid-sentence.
+its content is unknown.
 
-**Done when:** the `matched` value for a post-LVX37 leak is known, and the guard
-is either right to have fired or is not.
+**`matched` will NOT name it, and that expectation is corrected here before it
+costs another round.** `leakGuard.js:65-70` hands the verdict entirely to
+`sanitizeOutbound`; `matched` is then chosen purely for the log, as the longest
+declared TOOL NAME appearing in the 200-character window
+(`leakGuard.js:55-57`). Anything structural — a snake_case identifier, an
+argument blob, a path, a JSON key — matches no tool name and yields `null`.
+That is exactly why LVX37 logged `matched: null` for `<<intent:general_question>>`.
+
+**The evidence is the `text` field** on `live_debug_leak_text`
+(`live/index.js:955-965`): the last 400 characters of the turn, written at the
+moment the guard catches it, under `LIVE_DEBUG_TRANSCRIPT`. That log line exists
+precisely because `debugTranscript` could not see a call that never completes a
+turn.
+
+One leak in a four-minute call is a long way from the six-cycle loop LVX37
+caused, but it still cut the caller off mid-sentence.
+
+**Done when:** the leaked TEXT for a post-LVX37 leak is known, and the guard is
+either right to have fired or is not.
 
 ### LVX37 · `VOICE_INTENT_MARKER` makes the model read its markers aloud `[gcp]` · **P0 — FIXED**
 
@@ -2048,11 +2170,20 @@ path still never writes shared call state, so `/twilio/status` has no
   `RUN --mount=type=secret`, and staging failed to build in five seconds until
   that became a plain build ARG.
 
-### A WebSocket harness now drives a call without a phone
+### A WebSocket harness drove a call without a phone — AND IT WAS NEVER COMMITTED
 
-Built while diagnosing this: sign the Twilio webhook, take the `wss` URL out of
-the returned TwiML, open the socket, send a `start` event and μ-law frames, and
-read what comes back. About a cent per run.
+**Correction, 2026-09-03:** this section described a tool that is not in the
+repository. The working tree is clean at the commit that added this text, that
+commit touched only two doc files, and nothing under `scripts/` signs a Twilio
+webhook. It was throwaway, like `scripts/spike/s2s-bridge.js` before it.
+`scripts/load-test-calls.js` is the closest committed thing and takes a
+different route — it mints the stream token with `mintMediaStreamToken` rather
+than reading it out of the TwiML, so it does not exercise `/twilio/live-voice`
+at all.
+
+**Rebuilding it means writing it, not finding it.** What it did: sign the Twilio
+webhook, take the `wss` URL out of the returned TwiML, open the socket, send a
+`start` event and μ-law frames, and read what comes back. About a cent per run.
 
 It found things a phone call could not — the audio is genuinely loud (RMS 5,042,
 peak 30,076), the `streamSid` echoes correctly, the frames are 160 bytes — and
@@ -2109,7 +2240,7 @@ on a call that also did something else successfully.
 the verb, so capture it and check a *booking* claim against booking rows and a
 *cancellation* claim against cancelled rows, instead of against "any write".
 
-### LVX33 · Cancelling several appointments in one turn only forgets the last one `[gcp]` · **P0**
+### LVX33 · Cancelling several appointments in one turn only forgets the last one `[gcp]` · **P0 — FIXED offline 2026-09-03**
 
 The owner cancelled three appointments. The assistant confirmed all three. Then,
 minutes later in the same call:
@@ -2140,13 +2271,35 @@ Read-modify-write over a stale base. N removals in one turn remove only the last
 policy, so the caller could not book at all for the rest of the call. That is
 the owner's "it was unable to book the new appointment".
 
-**SHARED, so the cascade has it too.** A clinic caller cancelling two
-appointments in one breath hits the identical bug. Recorded, not fixed.
+**SHARED, so the cascade has it too.** A caller cancelling two appointments in
+one breath hits the identical bug on either front-end.
 
-**Done when:** N cancellations in one turn leave zero of them in the snapshot,
-with a test that dispatches a batch rather than one effect at a time.
+**Fixed in the ENGINE, not the pack.** The contract is that a pack computes the
+next value and the engine owns the state, so keeping the engine's own view
+consistent between one effect and the next is the engine's job.
+`dispatchCapabilityEffects` now threads the caller snapshot through the loop:
+the per-effect engine is rebuilt with `call: { ...engine.call, callerContext }`,
+and `setCallerContext` is wrapped so it updates that local as well as delegating
+to the driver's setter. The wrapper is added only when the driver HAS a setter,
+so `capabilities/appointments.js:401`'s escape hatch for the text harness still
+bails.
 
-### LVX34 · A refused write is answered with "someone will call you back" `[gcp]` · **P0**
+One place covers both pipelines, both harnesses, and the barge-in salvage loop
+at `lib/voice/session.js:3508`.
+
+**Why no test could see it, which is the part worth remembering.** The six
+snapshot tests call `appointments.onEffect` DIRECTLY, one effect at a time —
+there was never a second iteration to be stale. Two dispatcher tests did pass
+arrays of two effects, but with no `setCallerContext` on the engine, so
+`applyToCallerSnapshot` bailed at line 401 and the snapshot path was never
+entered. The bug lived in the gap between "we test batches" and "we test the
+snapshot", and both halves looked covered.
+
+**Done when:** DONE offline 2026-09-03 — three cancels dispatched as one batch
+leave zero in the snapshot, and the list the booking guard reads is empty so a
+new booking is allowed. **Unverified on a call.**
+
+### LVX34 · A refused write is answered with "someone will call you back" `[gcp]` · **P0 — FIXED offline 2026-09-03**
 
 Call 2. `book_appointment` was refused by the spelling gate, whose message says
 explicitly: *"ask the caller to spell it, and read the letters back… Ask them
@@ -2168,12 +2321,114 @@ refusals the gate opens and writes the name AS HEARD. This caller pushed back
 twice; a less persistent one ends up as **"Nathan Darla"** in the database with a
 reminder that never arrives.
 
-**Why the promise backstop stayed silent:** `promisedAction` fires only when the
-promise ends the reply or is essentially the whole of it. Here it sat mid-reply
-followed by "is there anything else". Correct by its own rule, wrong for the
-caller.
+**Why the promise backstop stayed silent — and the recorded reason was not the
+reason.** This entry said `promisedAction` fires only when the promise ends the
+reply. True, and irrelevant: it would not have fired at ANY position, because
+`promiseRe` is "I am about to do something" — one moment, let me check, I'll
+look — and "someone will call you back" is a different speech act that matches
+none of it. There was no pattern for a deferral at all.
 
-**Shared prompt/tool text, so a change needs an eval band.** Recorded, not fixed.
+**And a second cause underneath it.** The Live promise guard is gated on
+`!realToolCallsThisTurn` (`live/index.js:707`), and that count includes
+ATTEMPTS (`:1155`). A refused write increments it, so the refusal switched off
+the guard that should have fired on the refusal. **That is LVX31's root cause
+reached from another direction.**
+
+**Fixed in three parts, none of which needed an eval band:**
+
+- `deferralRe` in `lib/voice/strings.js`, beside `promiseRe`,
+  `completionClaimRe` and `slotOfferRe`. Localised in `en` and `es`, because a
+  Spanish caller gets brushed off in Spanish.
+- A refusal count kept apart from the attempt count, in `live/tools.js`, drawn
+  from every refusal shape: the Live guards (which return no `toolResult` at
+  all), the spelling gate, the requirements check, a pack's own invariant, and
+  an execution failure. A suppressed duplicate is excluded — that write already
+  succeeded.
+- A counted guard, `live_deferral_after_refusal`, that fires only on the PAIR.
+  Both conditions are needed and that is what makes it safe to act on: offering
+  a callback is a perfectly good thing for a receptionist to say, right up until
+  the tools refused the thing the caller just asked for. It sends a turn note
+  under the existing rationing, and the note points the model back at the
+  instruction it was already given rather than competing with it — LVX21's
+  lesson about a guard with a hair trigger.
+
+**Side effect on LVX31:** `live_claim_without_action`'s condition is now
+correct, because the split makes "attempted" and "succeeded" separable. Nothing
+acts on it — `LIVE_CLAIM_GUARD` stays unset.
+
+**The gate's own wording is rewritten too, and this half IS shared text.** It
+returned `success: false` with an instruction and the model read the false and
+not the instruction. It now opens with "NOT A FAILURE — this booking is still
+going ahead", and names the two fallbacks it actually reached for ("do not offer
+a callback", "do not take a message instead"). Every constraint the old text
+carried is kept and pinned by tests: `[not caller speech]`, the name quoted, one
+attempt per caller turn, and the decline escape hatch.
+
+**THE EVAL BAND HAS NOT BEEN RUN.** ~$20 across two arms — the recorded band of
+39–42 of 43 was measured at 43 scenarios and the suite is now 45, so a baseline
+is needed as well as a candidate. And be honest about what it buys: the band
+runs on the TEXT driver, so a green result says the cascade did not regress. It
+says nothing about whether the Live model stops promising callbacks; only a
+deployed call answers that.
+
+**The near miss is unchanged and now visible.** `spellMissCap` is 2, so after
+two refusals the gate opens and writes the name as heard. That ceiling is the
+anti-livelock escape hatch and removing it re-opens a worse failure, so it stays
+— but it is now counted as `spelling_gate_cap_reached`, against
+`spelling_gate_refusals` as the denominator. See the new entry below.
+
+**Done when:** DONE offline 2026-09-03 for the guard and the wording.
+**Unverified on a call, and the band is unspent.**
+
+### LVX42 · The spelling gate's escape hatch writes the misheard name `[gcp]` · P1
+
+**Split out of LVX34 on 2026-09-03, because it is a different problem and it is
+not fixed.**
+
+`spellMissCap` is 2 (`lib/voice/replyState.js:105`). After two refusals in two
+different caller turns, the gate opens and the write goes through **with the
+name exactly as it was heard**. The caller who found LVX34 pushed back twice; a
+less persistent one ends up as "Nathan Darla" in the database, with a reminder
+that never arrives and a row every later call will treat as authority (see
+LVX28's second half).
+
+**The ceiling is deliberate and removing it is worse.** The shared spelling
+counter only closes once `spellRequestRe` matches what the assistant SAID, and
+that regex can be widened but never completed — the model can always ask in
+words nobody listed. An unrecognised ask means refuse, ask, get an answer,
+refuse again, forever. The cap is what stops that livelock, and it fires for
+every unknown name rather than only hard ones, so the exposure is wide.
+
+**Now visible rather than silent.** `spelling_gate_refusals` and
+`spelling_gate_cap_reached` are registered and bumped. Until 2026-09-03 the
+gate's entire accounting lived in per-call `capabilityState`, so no call could
+report how often it fired or how often it ran out — which is why nobody knew
+whether this was a theoretical hole or a weekly one.
+
+**Done when:** the rate is known, and then one of — raise the cap, mark the row
+as unconfirmed so a later call knows not to trust it, or accept it knowingly.
+Not before the rate.
+
+### LVX36's instrument gap · HALF FIXED 2026-09-03
+
+`LIVE_DEBUG_TRANSCRIPT` now records the caller's turn as well as the
+assistant's, on the same log line, under the same flag and the same hipaa
+refusal. The text was already in hand: `turnUserText` is still populated when
+`auditTurn` runs, because `applyTurn` — which clears it — runs after.
+
+**This reverses a deliberate earlier choice, and the reversal is the finding.**
+Leaving `inputAudioTranscription` alone read as restraint and was a blind spot:
+LVX36 is a defect whose entire evidence is one side of the conversation, and it
+cannot be settled in either direction. On a front-end whose open P0 is that it
+says things nobody asked for, "did the caller actually ask for that?" has to be
+answerable. Nothing about the risk changed; the caller's words were always in
+the process, they were simply not written down.
+
+`tests/liveDebugTranscript.test.js` had a test asserting the caller is NEVER
+recorded. It is inverted, with the reason in the test.
+
+**LVX36 itself stays open**: the disagreement it records happened before the
+instrument existed and cannot be settled retrospectively.
 
 ### LVX35 · It closes the call the moment anything succeeds `[gcp]` · P1
 
@@ -2292,8 +2547,9 @@ byte-identical. Only the post-call path passes true. **An explicit decline still
 blocks** — that narrowing is mine, not the owner's instruction: someone who was
 asked and said no has answered the question, and only the ABSENCE of a record is
 overridden. Worth confirming that reading. The gate's own justification is TCPA
-and HIPAA 164.522(b), both US and both written for the paying clinic;
-`docs/readiness.md` already lists this as a question for the professional.
+and HIPAA 164.522(b), both US and both written for a US clinic — of which there
+is not one yet, so this is a question to settle before the first customer rather
+than a live exposure. `docs/readiness.md` lists it as one for the professional.
 
 **Not solved, recorded:** `capabilities/appointments.js:1207` still sends a
 model-args confirmation at booking time, and that `onEffect` runs on the Live
@@ -2337,6 +2593,11 @@ cascade call's is.
 `lib/voice/live/index.js:1155`, before `guards.before()` can refuse one. So the
 claim guard's `!realToolCallsThisTurn` condition is false whenever the model
 merely *tried*.
+
+**PARTLY CLOSED 2026-09-03, as a side effect of LVX34.** Refused calls are now
+counted apart from attempted ones, so the condition can be expressed correctly.
+`LIVE_CLAIM_GUARD` stays unset, so nothing acts on it — what changed is that the
+count is no longer wrong. The original analysis, unedited:
 
 A model whose `book_appointment` the availability invariant refuses, and which
 then tells the caller it is booked, **does not trip
@@ -2993,8 +3254,14 @@ confirmation sentence. The model is doing what it was told.
 
 **Why it is not simply moved:** the gate can only fire when a tool is called,
 so asking earlier is not a change to the gate but to what prompts the name
-collection in the first place. And `services/tools.js` is SHARED with the
-cascade, which serves a paying clinic, so the blast radius is both front-ends.
+collection in the first place. And `services/tools.js` is SHARED, so the blast
+radius is both front-ends.
+
+**The blast-radius half of that argument was overstated and is corrected
+2026-09-03.** It used to read "shared with the cascade, which serves a paying
+clinic". There is no paying clinic and no member of the public reaches either
+front-end, so a shared-file regression costs a test suite and a redeploy. What
+still argues for care is the eval band, not a caller.
 
 Worth separating when it is fixed:
 - **when** the ask happens (at name capture, not at booking);
@@ -3109,8 +3376,11 @@ site gets locale-correct phone grouping for free: '+442079460958' is spoken
 '020 7946 0958' rather than '442 079 460 958'". This is a speech site that
 does not get it, and the comment describes the exact defect.
 
-**A cascade bug, not a Live one.** It survives because the paying clinic is US,
-where 3-3-3-3 grouping is right. Every non-US business has it today.
+**A cascade bug, not a Live one.** It survives because the tenants exercised so
+far are US, where 3-3-3-3 grouping is right. Every non-US business has it today
+— including Digile Media, whose real line is UK. (Corrected 2026-09-03: this
+said "because the paying clinic is US". There is no paying clinic; the reason it
+went unnoticed is the same, the stakes are lower.)
 
 The fix is one line, and `resolveProfile` is already imported at
 `lib/voice/session.js:33`:

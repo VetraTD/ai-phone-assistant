@@ -70,8 +70,8 @@ describe("the Live route applies the controls the cascade route applies", () => 
 
 describe("the cascade route is unchanged by any of this", () => {
   it("still validates with the single-token middleware", () => {
-    // Widening what a paying clinic's route accepts, for the benefit of a route
-    // it does not use, is not a trade worth making.
+    // Widening what the mature route accepts, for the benefit of a route it
+    // does not use, is not a trade worth making.
     expect(SERVER).toContain('app.post("/twilio/voice", twilioValidation,');
   });
 

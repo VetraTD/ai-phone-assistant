@@ -365,8 +365,8 @@ function twilioValidation(req, res, next) {
 // Speech-to-speech front-end (docs/speech-to-speech-handoff.md §7 step 2)
 //
 // Its OWN routes. The cascade answers on /twilio/voice and
-// /twilio/media-stream and is not touched by anything below -- it serves a
-// paying clinic and it is tier 3, the last thing standing when both S2S
+// /twilio/media-stream and is not touched by anything below -- it is the
+// mature path and it is tier 3, the last thing standing when both S2S
 // vendors are down. A defect in tier 1 must not be able to reach it.
 // ---------------------------------------------------------------------------
 
@@ -382,8 +382,7 @@ function twilioValidation(req, res, next) {
  *
  * Deliberately separate from `twilioValidation` above rather than replacing
  * it. The cascade stays single-token: widening what it accepts is a change to
- * the path a paying clinic answers on, for the benefit of a path it does not
- * use.
+ * the mature path, for the benefit of one that does not use it.
  */
 function twilioValidationLive(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();

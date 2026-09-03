@@ -16,8 +16,8 @@ import { STEPS } from "../lib/callState.js";
 // model had nothing and filled the gap.
 //
 // This is NOT a speech-to-speech defect. buildSystemInstruction is shared, so
-// the cascade has the identical gap on a paying clinic's calls -- it had simply
-// never been asked to read the calling number back.
+// the cascade has the identical gap -- it had simply never been asked to read
+// the calling number back.
 //
 // Worse than a refusal, which is what LVX4 was: `book_appointment` ran on that
 // same call, and a fabricated number in a booking is a caller who never gets

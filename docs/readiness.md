@@ -14,15 +14,35 @@ professional is required. Nothing here substitutes for that.
 
 **There are two products, and only one of them is the experiment.**
 
-- **The cascade** — Deepgram → Gemini → ElevenLabs, on `/twilio/voice`. It
-  serves a paying clinic today. It is tier 3 in the fallback design and the
-  last thing standing when everything else is down.
-- **The Live front-end** — Gemini Live on `/twilio/live-voice`. Fourteen real
-  calls, every one of them made by the owner. It is an upgrade path.
+- **The cascade** — Deepgram → Gemini → ElevenLabs, on `/twilio/voice`. It is
+  the mature one: fallbacks, transcripts, months of fixes behind it. It is tier
+  3 in the fallback design and the last thing standing when everything else is
+  down.
+- **The Live front-end** — Gemini Live on `/twilio/live-voice`. Fourteen laptop
+  calls and a handful of deployed ones, every one of them made by the owner. It
+  is an upgrade path.
+
+**Corrected 2026-09-03: there is no customer.** Earlier drafts of this document
+and of the backlog said the cascade "serves a paying clinic today". It does not.
+Nobody pays, and no member of the public reaches either front-end — Digile Media
+is a friend's business used as a test tenant. The claim appeared in nine places
+and two of them were load-bearing arguments rather than colour, so it is worth
+being exact about what changes:
+
+- **Shared-file changes are cheap.** "It is shared with the cascade, which
+  serves a paying clinic" was the standing reason to be careful with
+  `services/tools.js`, `capabilities/appointments.js` and the prompt. With no
+  callers on either path, the cost of a regression is a test suite and a
+  redeploy. Care is still warranted for the eval band's sake; fear is not.
+- **The P1 tier means what it says.** "Before the first paying customer" is a
+  real deadline in the future, not a description of today.
+- **Nothing about compliance gets easier.** Every item in section 3 has external
+  lead time and none of it starts when the money does.
 
 Almost everything written about the Live front-end in the backlog is about
-whether an *upgrade* is ready. It is not, and that does not block selling,
-because the thing you would sell is already answering a real clinic's phone.
+whether an *upgrade* is ready. It is not — and the cascade is not selling to
+anyone either, so "does not block selling" is no longer the point. The point is
+which of the two a prospect should be asked to judge.
 
 The rest of this document is the honest list for each.
 
@@ -44,11 +64,11 @@ What a prospect DOES perceive, in the order it will cost you the meeting:
 
 | # | what they hear | entry |
 |---|---|---|
-| 0 | books the appointment **without ever asking their name** | **LVX40** |
-| 1 | asks to book, gets "someone will call you back" | **LVX34** |
-| 2 | cancels two things, is told it still has them, then cannot book | **LVX33** |
-| 3 | four questions in one breath | LVX25 |
-| 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 |
+| 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40** — FIXED offline 2026-09-03, unverified on a call |
+| 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34** — FIXED offline 2026-09-03, unverified on a call |
+| 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33** — FIXED offline 2026-09-03, unverified on a call |
+| 3 | four questions in one breath | LVX25 — never observed on Brightwork; verify before fixing |
+| 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 — never observed on Brightwork; verify before fixing |
 | 5 | ~~offers midnight and 11 PM appointments~~ | **GONE** — Brightwork has real hours |
 | 6 | a UK callback number read out in US digit grouping | LVX26 — US tenant, not on the demo path |
 | 7 | a 1.4–2.2 s pause before every reply | measured, unfixed |
@@ -66,31 +86,44 @@ and the leak guard shred the call. See LVX37. A demo rehearsal that had only
 ever happened on the laptop would have met that for the first time in front of a
 prospect.
 
-**1 and 2 are demo-killers and they are the same demo-killer twice**: the
-assistant fails to do the one thing it is being demonstrated to do. Everything
-else on this list is a wince; those two are a no.
+**Rows 0, 1 and 2 are demo-killers and they are the same demo-killer three
+times**: the assistant fails to do the one thing it is being demonstrated to do.
+Everything else on this list is a wince; those three are a no.
 
-**5 is free and has the best ratio on the page.** Digile Media's
-`business_hours` are 00:00–23:59, so availability correctly offers midnight. A
-prospect cannot tell config from defect, and "would you like midnight?" reads as
-broken software. **Give the demo tenant real hours.**
+**All three were fixed on 2026-09-03 and none has taken a call.** Offline green
+is not evidence. What is left for them is one deployed booking call and one
+deployed cancel-several-then-book call — see the backlog's entries for what each
+is trying to falsify.
 
-**8 has to be re-measured before it is believed.** The 2.2 s was traced to
-Norton's TLS interception on the development machine and has never been measured
-anywhere else. If the demo is served from Cloud Run it may simply not be there.
+**5 was the free one and it is already spent.** Digile Media's `business_hours`
+are 00:00–23:59, so availability correctly offered midnight — a prospect cannot
+tell config from defect, and "would you like midnight?" reads as broken
+software. Closed by making Brightwork the demo tenant rather than by editing
+anyone's hours.
+
+**8 was re-measured and it is gone.** The 2.2 s was Norton's TLS interception on
+the development machine: `connect_ms` reads 16–22 ms on the Railway deployment
+against 2,286 ms on the laptop. It does not exist where the product runs, and
+the wider consequence stands — any latency measured on that laptop over an idle
+connection carries the same penalty.
 
 ### Which front-end does the prospect call?
 
-An unresolved question and it should be answered deliberately rather than by
-whichever one happens to be pointed at the number.
+Answered by A1 below — Live answers, cascade as the fallback — but the trade is
+still worth stating.
 
-- **The cascade** is what serves a paying clinic, has fallbacks, and does not
-  fabricate. It is also the one the owner has heard least recently.
+- **The cascade** has fallbacks, writes transcripts, and does not fabricate. It
+  is also the one the owner has heard least recently.
 - **The Live front-end** is the one that sounds better — that was the entire
   reason for the architecture — and it is the one with all eight rows above.
   **It has no fallback: a failure is silence, not voicemail.** Demoing it means
-  accepting that risk in front of a prospect, on a path with no deployed home
-  today (it runs locally behind a cloudflared tunnel).
+  accepting that risk in front of a prospect.
+
+**It does now have a deployed home.** As of 2026-09-03 it runs on Railway
+staging from `feat/s2s-frontend`, with its own Postgres and Brightwork Family
+Dental as the tenant; `+18176011171` points at `/twilio/live-voice`. The
+cloudflared quick tunnel this document was written against is no longer how it
+is reached.
 
 ### Everything needed, in full
 
@@ -123,6 +156,14 @@ than the full tier design in section 2.
 `LIVE_BUSINESS_PHONE=+441372656055` stays the mechanism: a US test number
 answers with the real tenant's config, nothing else changed.
 
+**Superseded in practice on 2026-09-03, and for a better reason than
+convenience.** The staging deployment carries **Brightwork Family Dental**, and
+`+18176011171` resolves to it natively — no `LIVE_BUSINESS_PHONE` at all.
+Brightwork has real business hours, which is what closed row 5 of the table
+above; Digile Media's are `00:00–23:59` and it offers midnight appointments
+correctly. A prospect cannot tell config from defect, so the demo tenant is
+Brightwork and the override stays unset.
+
 **Standing cost of that choice:** `+18176011171` is `ASSISTANT_NUMBER`, which
 `npm run probe` dials, so every test round repoints it and must restore it
 afterwards (`docs/live-frontend-RESTORE.md` §3, and verify by reading the number
@@ -134,7 +175,7 @@ The original framing of both decisions follows.
 #### A (original). Two decisions, before any work starts
 
 1. **Which front-end answers the phone.** The cascade has fallbacks, writes
-   transcripts, serves a paying clinic and does not fabricate. The Live
+   transcripts and does not fabricate. The Live
    front-end sounds better — which is the entire reason it exists — and carries
    every row in the table above, has no fallback, and has no deployed home.
    Choosing the cascade deletes most of groups B, C and E.
@@ -146,18 +187,25 @@ The original framing of both decisions follows.
 
 #### B. What they hear — the eight rows above
 
-Ordered by cost to the meeting. **LVX34 and LVX33 are the two that matter**;
-they are the same failure twice, the assistant not doing the thing it is being
-demonstrated to do. Then LVX25, LVX35, LVX26, and the free config fix.
+Ordered by cost to the meeting. **LVX40, LVX34 and LVX33 were the three that
+mattered**; they are the same failure three times, the assistant not doing the
+thing it is being demonstrated to do. All three are fixed as of 2026-09-03 and
+all three are unverified on a call.
+
+What remains here is LVX41 — an audible hard cut whose content nobody has
+captured — then LVX25 and LVX35 **if they reproduce on Brightwork**, then LVX26,
+which is not on the demo path at all.
 
 #### C. Infrastructure that survives a demo
 
-- **The Live front-end has no deployed home.** `/twilio/live-voice` is mounted
+- ~~**The Live front-end has no deployed home.**~~ **CLOSED 2026-09-03.** It runs
+  on Railway staging from `feat/s2s-frontend`, with its own Postgres and
+  Brightwork Family Dental as the tenant. `/twilio/live-voice` is mounted
   unconditionally in `server.js` — there is no feature flag — so deploying the
-  app deploys the route. What it needs in that environment is `GEMINI_API_KEY`
-  (Secret Manager, via `scripts/push-secrets.js`) and a Twilio number pointed at
-  it. Running it from a laptop tunnel during a live prospect call is a choice,
-  not a default; quick-tunnel URLs die with the process.
+  app deploys the route; what that environment needs is `GEMINI_API_KEY` and a
+  Twilio number pointed at it. Two things learned getting there: Railway prefers
+  a Dockerfile over Nixpacks when it finds one, and `scripts/migrate.js` needs
+  `--init-if-empty` against an empty database or it fails at 002.
 - **There is NO fallback. A Live failure is silence** — not voicemail, not the
   cascade. Tiers 2a/2b/3 do not exist. On a prospect call that is the worst
   available outcome, and it is the strongest single argument for demoing the
@@ -170,9 +218,12 @@ demonstrated to do. Then LVX25, LVX35, LVX26, and the free config fix.
 #### D. A tenant that sounds like a real business
 
 The demo tenant is a product surface, and Digile Media is a test fixture.
+**Resolved by changing tenant rather than by editing config**: the demo is
+Brightwork Family Dental, which has real hours. The rest of this list is what
+Digile Media would still need if it were ever the one dialled.
 
-- **`business_hours` 00:00–23:59** is why it offers midnight. Free to fix,
-  biggest ratio on this page.
+- ~~**`business_hours` 00:00–23:59** is why it offers midnight.~~ **GONE on the
+  demo path** — Brightwork has real hours. Still true of Digile Media.
 - **`main_phone` is a mobile**, not the line callers dial, so the goodbye reads
   out the wrong number.
 - **Intake fields drive LVX25.** Four configured fields are what get conjoined
@@ -216,10 +267,25 @@ prospect's call still sounds wrong.
 
 ### The honest shortest path
 
-Decide A1 and A2. Fix **LVX34** and **LVX33**. Give the demo tenant **real
-business hours** and a sane `main_phone`. Capture the caller's half of the
-transcript so the next round is diagnosable. Then LVX25 and LVX35 if there is
-time.
+**Updated 2026-09-03, second pass.** A1 and A2 are decided. LVX40, LVX34 and
+LVX33 are fixed, the caller's half of the transcript is now captured, and the
+demo tenant has real business hours because it is Brightwork rather than Digile
+Media.
+
+What is left, in order:
+
+1. **Deploy and make the three calls.** Everything above is offline, and the
+   only thing that settles any of it is a real call. Diff the deployed
+   environment against the local `.env` FIRST — that is the trap that cost five
+   hypotheses last sitting.
+2. **LVX41** — one outbound leak still fires with marker mode off and it is
+   audibly hard-cut. Its content is unknown, and `matched` will not name it:
+   that field is a tool-name label and is null for anything structural. The
+   `text` on `live_debug_leak_text` is the evidence.
+3. **LVX25 and LVX35** only if they reproduce on Brightwork. Both were seen on
+   Digile Media and neither has ever been observed on the demo tenant.
+4. **An eval band for the reworded spelling gate**, ~$20 across two arms, which
+   proves the cascade did not regress and proves nothing about the Live path.
 
 None of it is compliance work, and none of it is large.
 
@@ -340,7 +406,7 @@ is not a formality and it is the item with a lead time you do not control.
 
 ## 4. The shortest honest path
 
-**To sell to one more friendly customer, on the cascade:** close O1 and O2, add
+**To sell to the FIRST customer, on the cascade:** close O1 and O2, add
 vendor alerting (O6), get call review (D3) so an incident is answerable, and
 *start* the DPIA and the DPAs. Weeks, not months.
 
