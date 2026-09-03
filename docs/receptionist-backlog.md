@@ -2778,17 +2778,53 @@ it: `finish()` has the tenant, the call row and the config already in scope.
 **Done when:** a Live call's row is completed, scoped, and summarised the way a
 cascade call's is.
 
-### LVX31 · The claim guard is blind to a REFUSED tool call `[gcp]` · P1
+### LVX31 · The claim guard is blind to a REFUSED tool call `[gcp]` · **P1 — CLOSED 2026-09-03**
 
 `realToolCallsThisTurn` is incremented for **attempted** calls, at
 `lib/voice/live/index.js:1155`, before `guards.before()` can refuse one. So the
 claim guard's `!realToolCallsThisTurn` condition is false whenever the model
 merely *tried*.
 
-**PARTLY CLOSED 2026-09-03, as a side effect of LVX34.** Refused calls are now
-counted apart from attempted ones, so the condition can be expressed correctly.
-`LIVE_CLAIM_GUARD` stays unset, so nothing acts on it — what changed is that the
-count is no longer wrong. The original analysis, unedited:
+**CLOSED 2026-09-03, and it was worth closing for a reason that is not "it was
+a bug".**
+
+The counter is the designated INPUT to a decision nobody has made yet: whether
+`LIVE_CLAIM_GUARD` may ever be turned to `act`. The ladder's own rule is count
+first, act only once the number says how often it fires when nothing is wrong.
+So the counter's accuracy is the thing that decision rests on — and it was
+**biased low, in the direction that makes the guard look quieter and therefore
+safer than it is.**
+
+**Demonstrated on a deployed call before it was fixed.** Run A, 2026-09-03: the
+spelling gate refused a write, the assistant then told the caller something was
+done, `postcall_claim_without_row` fired — and `live_claim_without_action`
+stayed **0**, because the refused call had counted as an attempt and switched
+the guard off.
+
+**Fixed by counting tools that actually EXECUTED**, attempts minus refusals,
+with `refusedCalls` covering every refusal shape rather than only the
+action-tool ones LVX34 needed. **Both halves of the condition moved**, and the
+second is not an afterthought: leaving `toolRanPrevTurn` on attempts would let a
+turn that tried and was refused grant the NEXT turn's claim immunity, which is a
+new blind spot in the shape of the one being closed.
+
+**Pre-registered, so a rise is not misread:** this will fire MORE often than
+before, including on calls where the model corrected itself a turn later. That
+is the counter seeing cases it was blind to. `LIVE_CLAIM_GUARD` stays unset;
+nothing acts.
+
+**Two tests had encoded the old behaviour and both were inverted deliberately:**
+
+- `tests/livePostCall.test.js` asserted `toolBacked: true` for a claim behind a
+  refused booking. It was RIGHT to — it pinned the hole. It now asserts false.
+- `tests/liveClaimGuard.test.js`'s two "stays silent when the tool ran" cases
+  were driving `book_appointment` with no verified slot, so **the availability
+  invariant was refusing every one of them** while the tests believed they had
+  run a successful tool. They passed only because the guard counted attempts.
+  The fixture now uses a tool no invariant blocks. A test that cannot tell a
+  refusal from a success is not testing the thing it names.
+
+The original analysis, unedited:
 
 A model whose `book_appointment` the availability invariant refuses, and which
 then tells the caller it is booked, **does not trip
