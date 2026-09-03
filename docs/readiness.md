@@ -64,10 +64,10 @@ What a prospect DOES perceive, in the order it will cost you the meeting:
 
 | # | what they hear | entry |
 |---|---|---|
-| 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40** — FIXED offline 2026-09-03, unverified on a call |
-| 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34** — FIXED offline 2026-09-03, unverified on a call |
-| 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33** — FIXED offline 2026-09-03, unverified on a call |
-| 3 | four questions in one breath | LVX25 — never observed on Brightwork; verify before fixing |
+| 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40 — VERIFIED on a call 2026-09-03**: it asked, and the row carries the name |
+| 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34 — VERIFIED on a call 2026-09-03**: the gate refused, it asked for the spelling and waited, then booked |
+| 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33** — fixed offline, **still unexercised**: no call has cancelled anything yet |
+| 3 | four questions in one breath | **LVX25 — REPRODUCED 2026-09-03**, twice on one call. Still open |
 | 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 — never observed on Brightwork; verify before fixing |
 | 5 | ~~offers midnight and 11 PM appointments~~ | **GONE** — Brightwork has real hours |
 | 6 | a UK callback number read out in US digit grouping | LVX26 — US tenant, not on the demo path |
@@ -90,10 +90,18 @@ prospect.
 times**: the assistant fails to do the one thing it is being demonstrated to do.
 Everything else on this list is a wince; those three are a no.
 
-**All three were fixed on 2026-09-03 and none has taken a call.** Offline green
-is not evidence. What is left for them is one deployed booking call and one
-deployed cancel-several-then-book call — see the backlog's entries for what each
-is trying to falsify.
+**Two of the three are now verified on a real call, with the transcript and the
+database row both read.** LVX40 asked for the name and wrote it; LVX34's gate
+refused, the assistant asked for the spelling and waited rather than promising a
+callback, and then booked. `postcall_verify` matched the claim to the row.
+
+**LVX33 is still unexercised** — no call this session has cancelled anything, so
+the batch path has never been entered. Fixed offline, unproven.
+
+The verification was done on the LOCAL rig, not staging, and that is the lesson
+rather than a shortcut: with no database access, "no row" and "never tried" are
+the same observation, so four staging calls could not settle what one local call
+did.
 
 **5 was the free one and it is already spent.** Digile Media's `business_hours`
 are 00:00–23:59, so availability correctly offered midnight — a prospect cannot

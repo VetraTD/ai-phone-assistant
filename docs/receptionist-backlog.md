@@ -2207,6 +2207,93 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+## The local rig settled it, 2026-09-03 — LVX40 and LVX34 VERIFIED
+
+Two runs against `localhost:3000` with the throwaway docker Postgres, Digile
+Media on `+441372656055`, `POSTCALL_VERIFY=count` and `LIVE_DEBUG_TRANSCRIPT=1`
+set explicitly to match the deployment. ~$0.30.
+
+**This is the configuration that should have been used first.** Staging could
+never answer these questions, because with no database access "no row" and
+"never tried" are the same observation. Locally both the transcript and the row
+are readable, and the two together settle in one call what four staging calls
+left open.
+
+### LVX40 · VERIFIED — the row carries a name
+
+```
+client_name:  "Jane Fitzgerald"
+client_phone: +14699338890
+scheduled_at: 2026-09-08T09:00:00Z   (10:00 BST, exactly what was agreed)
+call_id:      set
+```
+
+The assistant asked for the name **before** booking — turn 2, unprompted — and
+the row is not null. `postcall_verify` agreed: `booked_rows: 1, claims: 1,
+verdict: ok`, so LVX29's read matched the claim to the row on the same call.
+
+### LVX34 · VERIFIED, with the transcript rather than a counter
+
+> turn 6: "Lovely. Just to make sure I get the spelling right, could you spell
+> Fitzgerald for me? And is there anything else I can help you with today?"
+> turn 7 (after the spelling): "Thanks, Jane. I've booked your strategy call for
+> next Tuesday, September the 8th, at 10 am..."
+
+The gate refused, the model **asked for the spelling and waited**, and then
+booked. No callback promise, no take-a-message. That is the defect not
+reproducing, on the exact path it was found on, with both sides of the
+conversation on the record.
+
+### LVX25 reproduced twice on the same call, and one of them is new
+
+> turn 2: "Can I start with your name, company, and what industry you're in?"
+
+Three asks in one breath, on the booking path — the entry's own shape.
+
+**And turn 6 is a second instance nobody had catalogued**: the spelling request
+and "is there anything else I can help you with today?" in the same breath, with
+the booking not yet made. That is LVX35's inverted ordering as well — "anything
+else" asked *before* the action is confirmed — arriving through the spelling
+gate rather than through `end_call`.
+
+### The first run failed, and the instrument was what failed
+
+Run 1 used the original `demo_booking` script. It desynced on turn 2: the
+assistant asked for a name and company, the caller answered with tooth pain, and
+the call never recovered — eight turns, no time ever agreed, no booking. It
+would have read as "the fix does not work" to anyone reading counters alone.
+
+Three separate faults, all in the harness:
+
+1. **The script answered questions in the wrong order.** Lines now follow what is
+   actually asked, name second because the name is asked second.
+2. **The script was written for the wrong tenant.** "Tooth pain" at a marketing
+   agency triggered the medical-advice guardrail, correctly. Dental symptoms
+   belong to Brightwork, not Digile Media.
+3. **The STT mis-transcribed the synthetic caller.** "It's Nithin Dodla" arrived
+   as **"Nathan Daddario"**, and the spelling "N, I, T, H, I, N. D, O, D, L, A"
+   arrived as **"n i t h i n v o d l a"** — the D became a V. A scripted caller
+   whose name is unreliably transcribed cannot test name handling, so the script
+   now uses a name the transcriber gets right. The mis-hearing is a property of
+   the harness's TTS voice, not evidence about real callers.
+
+**And a trap in the audio cache worth its own line.** `synthesizeCallerAudio`
+skips a line whose FILE exists, so changing a line's TEXT leaves the old audio
+in place — seven of eight lines were stale after the rewrite and the tool
+reported "7 already cached" as if that were good news. `--force` is not
+optional after an edit. Same family as scripted eval fixtures encoding old
+behaviour.
+
+### What this does NOT settle
+
+- **LVX33.** The cancel path was not run. It needs its own call and three
+  future appointments on the caller.
+- **Staging run A's `postcall_claim_without_row`.** Different tenant, different
+  script, and the local runs cannot speak to it. Its transcript is in the
+  Railway logs.
+- Anything about latency or turn-taking. Norton, and digital silence between
+  utterances.
+
 ## Two scripted calls on the deployed build, 2026-09-03 — and it wrote nothing
 
 Runs A and B, `a25ea8a` on Railway staging, ~$0.40. Both are full conversations:
