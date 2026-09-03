@@ -1774,11 +1774,19 @@ tenant for testing.
 
 ## Session state at 2026-09-02 close
 
-**`+18176011171` IS CURRENTLY REPOINTED** at a local machine through an
-ephemeral `trycloudflare.com` tunnel, which will not survive a restart. Its
-captured before-state and the one-command restore are in
-`docs/live-frontend-RESTORE.md` §3. Until it is restored, **`npm run probe` is
-broken** -- that number is `ASSISTANT_NUMBER`.
+**`+18176011171` IS RESTORED.** It was repointed at a local tunnel for four
+test calls and put back at session close, verified by reading the number back
+from Twilio rather than by trusting the write:
+
+```
+voiceUrl        https://ai-phone-assistant-staging.up.railway.app/twilio/voice
+statusCallback  https://ai-phone-assistant-staging.up.railway.app/twilio/status
+```
+
+Field-for-field identical to the captured before-state, and staging answers 200
+there. **`npm run probe` works again.** To test the Live front-end from this
+number again, repoint it per `docs/live-frontend-RESTORE.md` §3 and put it back
+afterwards.
 
 Local test rig, if it needs rebuilding: `docs/live-frontend-RESTORE.md` §4 has
 the whole recipe (docker Postgres on 55432, migrate, import Digile Media's

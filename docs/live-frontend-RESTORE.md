@@ -113,6 +113,7 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
+| **status** | **RESTORED 2026-09-02.** Repointed for four test calls, put back at session close and verified by re-reading the number from Twilio. `npm run probe` works again. |
 
 **Two things this number is, beyond a test line:**
 
