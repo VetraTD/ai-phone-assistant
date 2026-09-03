@@ -1867,12 +1867,22 @@ tenant for testing.
 
 ---
 
-## Session state at 2026-09-03 close — third sitting, the three demo P0s fixed
+## Session state at 2026-09-03 close — third sitting, the three demo P0s VERIFIED
 
-**Nothing was spent. No call was made, no probe was run, no eval was run.**
-Everything below is offline, and the standing rule applies to all of it:
-**offline green is not evidence.** Suite 166 files / 2,902 tests, from 165 /
-2,882.
+**~$0.75 spent across seven scripted calls**, four against Railway staging and
+three against a local rig. Suite 166 files / 2,905 tests, from 165 / 2,882.
+
+**All three demo-killers are verified on real calls**, with the transcript and
+the database row both read: LVX40 asks for the name and writes it, LVX34's gate
+refusal is answered by asking rather than by promising a callback, and LVX33's
+three-in-one-turn cancel leaves nothing behind and does not block the next
+booking.
+
+**The single most useful thing this sitting produced is not a fix.** It is that
+**staging cannot answer a behaviour question and the local rig can.** With no
+database access, "no row" and "never tried" are the same observation — four
+staging calls left every P0 open, and the first local call closed two of them.
+Whatever the next question is, ask it on `localhost` first.
 
 ### What shipped, all on `feat/s2s-frontend`
 
@@ -1910,20 +1920,24 @@ plausible cause stops the reading.
 
 ### Open, in the order worth doing
 
-1. **Deploy and make the three calls.** Diff the deployed environment against
-   the local `.env` FIRST — `VOICE_INTENT_MARKER` cost five hypotheses because
-   nobody compared the two configs. Call 1 books, giving a name only when asked:
-   LVX40, LVX34, LVX41 and LVX25 all at once. Call 2 cancels several then books:
-   LVX33 and LVX35. Call 3 is the reserve.
-2. **LVX41** — read the `text` on `live_debug_leak_text`, not `matched`.
-3. **LVX25 and LVX35** only if they reproduce on Brightwork. Existence checks,
-   not comparisons: one call showing the behaviour keeps the entry open, one
-   call not showing it closes nothing.
-4. **The eval band for the reworded gate**, ~$20 across two arms, and the
-   recorded band needs re-measuring at 45 scenarios anyway. It proves the
-   cascade did not regress; it cannot prove the Live path improved.
-5. **Rebuild the WebSocket harness and COMMIT it this time.** See the correction
-   below.
+1. **A call from a real handset.** Everything verified this sitting was verified
+   through a harness that sends synthesised speech and digital silence between
+   utterances. It cannot hear, it cannot be interrupted, and it says nothing
+   about how any of this SOUNDS — which is the entire question a prospect on a
+   test call is answering.
+2. **Staging run A's `postcall_claim_without_row`.** One deployed call claimed a
+   completed action with no row behind it. Its transcript is in the Railway logs
+   under caller `+14699338899`, around 20:13–20:15 UTC on 2026-09-03. It is
+   either LVX27 live or a desync of the pre-fix script; nothing else can tell.
+3. **LVX25**, reproduced twice on one local call — three asks in one breath on
+   the booking path, and the spelling request bundled with "anything else". The
+   fix is shared prompt text, so it belongs with the eval band rather than in
+   front of it.
+4. **LVX41** has not reproduced in seven calls. Read the `text` on
+   `live_debug_leak_text`, never `matched`, if it ever does.
+5. **The eval band (LVX43)**, ~$20 across two arms, before the first customer.
+   It proves the cascade did not regress; it cannot prove the Live path
+   improved.
 
 ## Deployed to Railway staging, 2026-09-03 — and the silence was ours
 
