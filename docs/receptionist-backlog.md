@@ -1917,6 +1917,31 @@ matched shapes) is a decision, not an obvious edit.
 **Done when:** a sanitizer log line cannot carry caller speech, or the field is
 named so the existing redaction catches it.
 
+**FIXED 2026-09-03**, pulled in by the owner. Both lines now carry a shape
+instead of the sentence: `outbound_sanitized` reports `chars` and `rules`
+(`arg_blob` / `call_shape` / `structural` / `registry` / `unspeakable`), and
+`internal_term_stripped` reports `chars` and the matched `terms`.
+
+Two notes on why that shape and not simply less.
+
+The second option in the entry above -- rename the field so the existing
+redaction catches it -- turns out not to be a fix at all.
+`tests/logPhiLint.test.js` FAILS THE BUILD when a `PHI_FIELD_NAMES` entry
+appears in a logger call, and `transcript` is on that list. Renaming would
+break the build rather than redact, which is the lint working as designed: the
+rule is that PHI does not go to a logger, not that it is redacted on the way.
+
+And the replacement had to stay useful or the text comes back. What anyone
+reading these lines actually wants is WHAT tripped the guard, and that is
+answerable without quoting the caller. `rules` also splits a distinction the
+shared `internal_term_leaks` counter cannot make -- a model inventing syntax
+and a model naming one of this tenant's real tools aloud have different fixes
+-- which required evaluating the structural and registry tests separately
+rather than short-circuiting them.
+
+Covered by `tests/sanitizerLogPhi.test.js`, which asserts on the absence of a
+caller's name and number in what was logged.
+
 **LVX22 · `end_call` fired in the middle of a booking** `[gcp]` · P1
 
 The owner: "the call also just ended itself out of the blue while trying to book
