@@ -1727,6 +1727,26 @@ missing is the backstop for when the model never asks.
 **Done when:** a silent caller is nudged and then released, and the counters say
 which happened.
 
+**Implementation pointers, so this does not have to be rediscovered:**
+
+- The cascade's wording is `buildSilenceNudge(stage, step, intent, config)` in
+  `lib/voice/session.js`, which reads `getStrings(config)` -- so a ported ladder
+  speaks the business's language rather than hardcoded English.
+- The Live path already has the hang-up primitive: `armExit("end_call")` in
+  `lib/voice/live/index.js` queues the exit behind a playback mark and has a
+  backstop timer. The silence ladder's final rung should call THAT, not
+  `finish()` directly, or it cuts off whatever it just said.
+- Silence is measurable there already: `lastVoicedMs` is maintained per frame
+  and `isPlaying()` says whether we are the one talking. A nudge must only fire
+  while NOT playing.
+- Speaking a nudge on this path means `session.sendClientContent(...)`, the same
+  mechanism as the greeting kick -- there is no TTS leg to speak it directly.
+- `metrics.js` already registers `nudges_fired`, `nudges_suppressed` and
+  `silence_hangups`; reuse them rather than adding Live-specific names.
+- Watch the interaction with LVX17: `live.connect()` takes ~2.2 s, so a nudge
+  timer started at socket open would be counting while the caller is still
+  waiting to be greeted.
+
 **LVX20 · The assistant repeats itself, cause unknown** `[gcp]` · P2
 
 Reported on two separate calls: it says a phrase, stops partway, then says the
@@ -1749,3 +1769,24 @@ configuration. Its `business_hours` are `00:00-23:59` every day and its timezone
 is `Europe/London`. A London business quoting London time to a caller is
 correct; it only reads as wrong because a US handset is being pointed at a UK
 tenant for testing.
+
+---
+
+## Session state at 2026-09-02 close
+
+**`+18176011171` IS CURRENTLY REPOINTED** at a local machine through an
+ephemeral `trycloudflare.com` tunnel, which will not survive a restart. Its
+captured before-state and the one-command restore are in
+`docs/live-frontend-RESTORE.md` §3. Until it is restored, **`npm run probe` is
+broken** -- that number is `ASSISTANT_NUMBER`.
+
+Local test rig, if it needs rebuilding: `docs/live-frontend-RESTORE.md` §4 has
+the whole recipe (docker Postgres on 55432, migrate, import Digile Media's
+config from Supabase, `LIVE_BUSINESS_PHONE=+441372656055`). ngrok cannot
+authenticate on that machine -- `x509: certificate signed by unknown authority`,
+TLS interception -- so cloudflared is the tunnel that works.
+
+Open and worth doing in order: **LVX19** (silence ladder, well-specified above),
+**LVX20** (needs a call to produce `live_multipart_audio` lines, not analysis),
+then **LVX16's** remaining half -- the model still has to be observed getting a
+read-back right on a real call now that the country code is stripped.
