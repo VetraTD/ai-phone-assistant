@@ -2032,6 +2032,58 @@ model says next.
 honest answer to the caller, or to produce this, on a configuration production
 actually runs.
 
+**REPRODUCED ON THE PRODUCTION CONFIGURATION, 2026-09-03. This is now the most
+serious open item on this front-end.** The entry above said it did not
+establish that the model fabricates when the tools are present and working.
+A later call established exactly that.
+
+Arm 0, full prompt, all ten tools declared, transcript capture on. The caller
+booked from scratch. The assistant:
+
+> "We also have appointments available at nine AM, nine thirty AM, ten AM,
+> ten thirty AM, and eleven AM that day. Do any of those work for you?"
+
+> "Thanks, N A T H A N D O D L A — I've booked your free strategy call for
+> 10 AM on Monday, September 7th."
+
+**The log for that call contains no tool events of any kind** -- no
+`live_step_transition`, no guard counters, nothing. The database has no row for
+7 September. The availability was invented and the booking never happened.
+
+**What rules out configuration as the cause:** the PREVIOUS call ran in the
+same server process, on the same prompt with the same ten tools, and called
+`reschedule_appointment_db` successfully, with the row to prove it. One call
+apart. So this is not a missing declaration, a disabled capability or a broken
+tool path. The model simply did not call anything, and narrated the outcome
+instead.
+
+(One part of that call was legitimate and is worth not mis-reading: it knew
+about the caller's existing appointment without a lookup because
+`fetchCallerContext` puts it in the prompt at session start.)
+
+**Consequence, plainly:** a caller was told they had a 10 AM Monday
+appointment. The business has no record of it. Nobody would find out until
+they arrived. This is the failure the whole tool layer exists to prevent, and
+it happens above the tool layer, where none of the guards can see it -- the
+availability invariant, the idempotency cache and the round cap all only fire
+on calls that are actually made.
+
+**This also reframes LVX23.** The bisect was asking whether the tools or the
+prompt made the model confused. Neither: the same configuration produces a
+clean, correct, tool-using call and a fully fabricated one on consecutive
+attempts. The variable is the model, and the fault is intermittent.
+
+**Candidate directions, none tested:**
+- A turn-level invariant: the assistant claims a completed action while
+  `completedActionThisTurn` is false. That is detectable with what is already
+  in hand -- the reply text is in `turnReplyText` and the tool record is in the
+  reducer -- and it is the same shape as the promise backstop, which fires on
+  a promise with no tool call. This one would fire on a CLAIM with no tool
+  call, which is worse and is currently unguarded.
+- Whether the cascade does this too. It has the same prompt and the same tools
+  and the promise backstop already, but nothing that checks a claim of
+  completion against what ran.
+
 **Also observed, and it is the arm behaving correctly:** it could not end the
 call, because `end_call` is a tool and this arm has none. One nudge fired at
 stage 0 before the caller hung up. That is the exact case the silence ladder is
