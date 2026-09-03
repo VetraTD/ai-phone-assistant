@@ -1990,6 +1990,53 @@ Same call: **three `book_appointment` calls with different arguments**, plus a
 not a re-fire. That is a confused flow, not a duplicate-execution bug, and the
 idempotency guard correctly had nothing to say about it.
 
+### From the arm-1 call, 2026-09-03 (full prompt, NO tools)
+
+**LVX27 · Given no way to book, the model said it had booked** `[gcp]` · **P0**
+
+Arm 1 of the LVX23 bisect: `prompt: "full", tools: "none"`, confirmed in
+`live_bisect_arm`. The owner asked to cancel, was told **no appointments could
+be found**, booked instead, and was told **the appointment was booked**.
+
+The log shows **zero tool calls and zero step transitions for the whole call**.
+There was no lookup. There was no booking. Both were narrated.
+
+**Why this is not just an artefact of an artificial arm.** The arm is
+artificial -- production declares ten tools -- but what it measured is the
+model's DISPOSITION under the production prompt when it cannot do the thing it
+has been told it can do. Production reaches that same state by ordinary
+routes:
+
+- a business with the appointments capability switched off, which is the
+  supported configuration K1 is about;
+- the availability invariant refusing a booking (`guards.js` returns
+  `allow: false` with an instruction to check first);
+- any tool erroring, timing out, or coming back `success: false`.
+
+In every one of those the model is told "you cannot do this right now". This
+call says what it may do next: claim it did it anyway.
+
+It is the same family as **LVX16** (invented a caller's phone number) and it is
+worse in consequence. A wrong number is a reminder that does not arrive. A
+fabricated booking is a caller who believes they have an appointment, a
+business with no record of it, and nobody aware until the caller turns up.
+
+**What this does NOT establish:** that it happens when the tools are present
+and working. Every other call this session had ten tools and the bookings were
+real. Do not report this as a production defect until it is reproduced with
+tools declared and failing, which is a harness question and not a phone call --
+`npm run chat` or the eval suite can force a tool failure and watch what the
+model says next.
+
+**Done when:** a tool that refuses or fails is shown either to produce an
+honest answer to the caller, or to produce this, on a configuration production
+actually runs.
+
+**Also observed, and it is the arm behaving correctly:** it could not end the
+call, because `end_call` is a tool and this arm has none. One nudge fired at
+stage 0 before the caller hung up. That is the exact case the silence ladder is
+the backstop for -- LVX19's justification, seen from the other side.
+
 ### From the second arm-0 call, 2026-09-03 (the first with a working ladder)
 
 Owner's verdict: "much better than it was before. Still some issues but
