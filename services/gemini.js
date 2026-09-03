@@ -63,7 +63,9 @@ const PROMISE_BACKSTOP = process.env.GEMINI_PROMISE_BACKSTOP !== "false";
  * @param {RegExp} promiseRe
  * @returns {boolean}
  */
-function promisedAction(text, promiseRe) {
+// Exported for the Live front-end, which needs the same shape test at its own
+// turn boundary. Pure: a string and a regex in, a boolean out.
+export function promisedAction(text, promiseRe) {
   const body = (text || "").trim();
   if (!body || !(promiseRe instanceof RegExp)) return false;
   if (!promiseRe.test(body)) return false;
