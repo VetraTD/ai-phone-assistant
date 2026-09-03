@@ -134,7 +134,7 @@ async function boot() {
     settle: () => new Promise((r) => setImmediate(r)),
     /** The greeting reaching the caller is what arms the ladder. */
     greet: () => live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio() } }] } } }),
-    speakAudio: () => live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(3000) } }] } } }),
+    speakAudio: (ms = 3000) => live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(ms) } }] } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
     quiet: (ms) => feed(SILENCE, ms),
     talk: (ms) => feed(VOICED, ms),
@@ -209,6 +209,23 @@ describe("LVX19 silence ladder", () => {
 
     // Still one: the ladder went back to the bottom rung.
     expect(getLatencyStats().turnTaking.nudges_fired).toBe(1);
+  });
+
+  it("does not nudge the instant its own reply finishes", async () => {
+    // The defect this file was written to prevent and did not, caught on the
+    // first real call. The ladder's clock reset only on the CALLER's voice, so
+    // a reply longer than the first threshold left the clock already past it
+    // the moment our own audio stopped. The caller heard "I'm still here
+    // whenever you're ready" the instant the assistant finished speaking, five
+    // times in one call -- and because a nudge tells the model to say one line
+    // "and nothing else", it stopped calling tools at all and could not cancel
+    // an appointment it had the tools to cancel.
+    const s = await boot();
+    s.greet();
+    s.speakAudio(8_000);
+    s.quiet(9_000); // 8 s of that is our own audio; 1 s is real silence
+
+    expect(getLatencyStats().turnTaking.nudges_fired).toBe(0);
   });
 
   it("does not nudge over its own voice", async () => {

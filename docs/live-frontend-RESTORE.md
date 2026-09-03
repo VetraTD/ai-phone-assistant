@@ -113,7 +113,7 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **RESTORED 2026-09-02.** Repointed for four test calls, put back at session close and verified by re-reading the number from Twilio. `npm run probe` works again. |
+| **status** | **CURRENTLY REPOINTED — 2026-09-03, for the LVX23 bisect sitting.** Now on `https://contract-ethernet-speech-gathering.trycloudflare.com/twilio/live-voice`. The values in the rows above were re-read live from Twilio immediately before the change and matched this table field for field, so they are good to restore from. **`npm run probe` is broken until this is put back.** |
 
 **Two things this number is, beyond a test line:**
 

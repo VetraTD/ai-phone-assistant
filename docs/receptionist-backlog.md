@@ -1776,6 +1776,35 @@ line it is given. There is no TTS leg here, so a nudge is a request to the
 model to say specific words, and it will sometimes paraphrase. `nudges_fired`
 counts attempts, not compliance, and nothing offline can tell the two apart.
 
+**FIRST CALL, 2026-09-03: the ladder was broken, and it broke the call.** Five
+nudges in 133 seconds, every one logged at `stage: 0`, and the owner heard
+"I'm still here whenever you're ready" the instant each reply finished.
+
+**Cause: the ladder's clock reset only on the CALLER's voice, never on the end
+of our own.** A reply longer than the 6 s first threshold therefore left the
+clock already past it the moment our audio stopped. The design note for this
+entry predicted exactly that failure -- "if the assistant is speaking for 10 s,
+the instant playback ends silence looks like 10 s" -- and the code was then
+written the other way, because the opposite risk (a nudge resetting the ladder
+so a call never ends) was the one in mind. Both are avoidable at once, and the
+cascade already does: reset the CLOCK on our own speech, reset the STAGE only
+on the caller's, and arm each rung with the GAP to the next rather than the
+total. `armSilenceTimer` computes exactly those deltas at
+`lib/voice/session.js`.
+
+**The second-order damage is the part worth remembering.** A nudge said "say
+exactly this, word for word, and nothing else". Arriving after every single
+reply, that instruction suppressed tool calling for the whole call: the owner
+asked to cancel an appointment, got circles and an offer to take a message, and
+the log shows **zero tool calls** on a session with all ten declared and
+`cancel_appointment_db` among them. A prompt injected by a guard is still a
+prompt, and "nothing else" means nothing else.
+
+Fixed, with `tests/liveSilence.test.js` reproducing the timing offline first.
+"and nothing else" is gone as well -- correct timing is the real fix, but the
+wording only needs to be the business's own, which does not require forbidding
+everything else on the turn.
+
 **LVX20 · The assistant repeats itself, cause unknown** `[gcp]` · P2
 
 Reported on two separate calls: it says a phrase, stops partway, then says the
