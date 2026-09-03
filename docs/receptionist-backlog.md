@@ -1831,6 +1831,63 @@ adjacent data and should be a deliberate, time-boxed decision.
 **Done when:** either the outbound text is guarded on this path, or it is
 established that it cannot leak and the reason is written down.
 
+**GUARD BUILT 2026-09-03, and NOT yet verified on a call.**
+`lib/voice/live/leakGuard.js` + `inspectOutbound` in `lib/voice/live/index.js`.
+The detector is the cascade's own `sanitizeOutbound`, used as a predicate --
+which matters more than it sounds, because a transcript of SPOKEN audio has no
+underscores (`cancel_appointment_db` comes back as "cancel appointment db") and
+`speakableText.js` already builds every registry regex to span whitespace OR
+underscores. A matcher written fresh here would have missed every spoken leak,
+which is the only kind this path can produce.
+
+Three things are worth stating about what it can and cannot do:
+
+- **The cut is real but its window is unmeasured.** `outputAudioTranscription`
+  lags the audio it describes; `audioOut` paces that audio out over real time.
+  Whether the first lag is shorter than the second is what decides whether
+  there was ever anything left to cut, and no offline test can answer it.
+  `live_outbound_cuts` and `live_outbound_cut_missed` are separate counters for
+  exactly this, and `cut_window_ms` is logged per leak. **Read those before
+  believing the guard works.**
+- **The cut is HARD, not the barge path's 120 ms taper.** A taper drops only
+  what `audioOut` still holds and lets Twilio finish playing its own buffer --
+  which for a leak is precisely the audio that must not be heard. `clearAudio`
+  now takes a fade override for this.
+- **The recovery is a request, not a forcing function.** The cascade re-asks
+  with `toolConfig: { mode: "ANY", allowedFunctionNames: [target] }`. A Live
+  session fixes its tools at connect and `sendClientContent` carries no
+  `toolConfig`, so this can only tell the model what it did and ask it to
+  continue plainly.
+
+### Found while building the LVX21 guard (2026-09-03)
+
+**LVX24 · The sanitizers log the text they caught, and it is caller speech** `[gcp]` · P1
+
+`lib/voice/speakableText.js` logs `{ original: text.slice(0, 200) }` in both
+`outbound_sanitized` and `internal_term_stripped`. That text is the
+ASSISTANT's own words, which on these calls routinely contain the caller's
+name, phone number and appointment time -- a read-back is one of the commonest
+lines on the line, which is why `echoGuard` normalises digit runs at all.
+
+`tests/logPhiLint.test.js` does not catch it and `lib/logger.js` does not
+redact it, because both work from `PHI_FIELD_NAMES` and the field here is
+called `original`. The lint's own header says it is aimed at the accident of
+passing along a variable in scope; this is the other shape -- PHI arriving as
+the VALUE of a field with an innocent name.
+
+**This is pre-existing on the cascade**, where it fires whenever a leak is
+caught in production. The Live leak guard did not create it, but it does make
+it fire on a second front-end, and it breaks a promise made in that guard's own
+plan ("the matched name only, never the transcript"): the Live log line honours
+it and the shared detector does not.
+
+Not fixed: the change is one line in a file the cascade runs on every sentence
+of every call, and what should replace the text (nothing / a length / the
+matched shapes) is a decision, not an obvious edit.
+
+**Done when:** a sanitizer log line cannot carry caller speech, or the field is
+named so the existing redaction catches it.
+
 **LVX22 · `end_call` fired in the middle of a booking** `[gcp]` · P1
 
 The owner: "the call also just ended itself out of the blue while trying to book
