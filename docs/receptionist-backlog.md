@@ -2098,6 +2098,40 @@ with `close_reason: end_call_mark`, so **the goodbye played out in full before
 the line closed**. That is LVX19's design confirmed on a real call, and it is
 the first time any of it has been.
 
+**LVX28 · The spelling ask lands at the end, and is read back letter by letter** `[gcp]` · P1
+
+Reported three times now, and captured verbatim on 2026-09-03:
+
+> turn 4:  "Thanks, Nathan Dodla — and I'll use the number you're calling from..."
+> turn 10: "Before I finalise the booking, could you spell your full name for me,
+>           just to make sure I have it correct?"
+> turn 11: "Thanks, N A T H A N D O D L A — I've booked your free strategy call..."
+
+Six turns between giving the name and being asked to spell it. The owner: "it
+is currently asking for the spelling all the way at the end of the appointment
+process and it is odd and not good."
+
+**Both halves come from the same place.** `services/tools.js` enforces the
+spelling requirement when `book_appointment` is CALLED, and its instruction to
+the model is to "ask the caller to spell it, and read the letters back". A gate
+that fires at booking time necessarily puts the ask at the end of the flow, and
+"read the letters back" is what produces "N A T H A N D O D L A" spliced into a
+confirmation sentence. The model is doing what it was told.
+
+**Why it is not simply moved:** the gate can only fire when a tool is called,
+so asking earlier is not a change to the gate but to what prompts the name
+collection in the first place. And `services/tools.js` is SHARED with the
+cascade, which serves a paying clinic, so the blast radius is both front-ends.
+
+Worth separating when it is fixed:
+- **when** the ask happens (at name capture, not at booking);
+- **how** the confirmation reads. Checking the letters and then saying
+  "Thanks, Nathan" is what a person does; reciting the letters back inside the
+  booking confirmation is not.
+
+The owner's own weighting, from the first report: "not that crazy just as long
+as it asks for the spelling anytime." So: real, reproducible, and not urgent.
+
 **LVX25 · It asks three or four questions in one breath** `[gcp]` · P1
 
 The owner: "it asks like multiple questions at a time and it is a bit
@@ -2146,6 +2180,23 @@ different place from the prompt's guardrails block and a much smaller change.
 
 **Done when:** a fresh booking is made on the full prompt with the transcript
 capture on, and the intake turns are read rather than recalled.
+
+**CONFIRMED 2026-09-03 on the intake path, and the counting instrument was
+wrong.** The fresh-booking call reproduced it:
+
+> turn 3: "What name should the appointment be under, and what's the best
+>          callback number?"                                    -- two asks
+> turn 4: "...what company and industry are you in, and what do you sell?"
+>                                                               -- three asks
+
+The first analysis of that transcript counted QUESTION MARKS and reported
+"questions=1" for both turns, which is how a conjoined ask hides. Same lesson
+as the probe whose printed verdict measured the wrong quantity: an instrument
+that reports a number can still be reporting the wrong one.
+
+So the revised hypothesis holds. Batching is the tenant's configured intake
+FIELDS being conjoined into one turn, on the booking path only -- the
+reschedule call never reached intake and asked one thing per turn throughout.
 
 **LVX26 · A UK callback number is read out in US grouping** `[gcp]` · P1
 
