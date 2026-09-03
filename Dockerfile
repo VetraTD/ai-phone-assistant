@@ -9,6 +9,23 @@
 # that matters, at the worst time. Debian slim costs about 40MB more and removes
 # an entire class of surprise.
 
+# ---- Who actually builds with this file ------------------------------------
+#
+# CLOUD BUILD does. Railway does NOT, and that is deliberate: `railway.json`
+# pins Railway to NIXPACKS.
+#
+# Railway auto-detects its builder and prefers a Dockerfile when it finds one.
+# This file arrived on feat/s2s-frontend, so the first staging deploy from that
+# branch switched Railway off Nixpacks -- which had built the app fine for
+# months -- and onto this, where it failed in five seconds. The `--mount=type=secret`
+# below is BuildKit-only; a builder without BuildKit cannot parse it at all.
+#
+# Rather than debug someone else's builder to reach a phone call, Railway is
+# pinned back to the path that already worked. If this image is ever wanted on
+# Railway, the portable change is to drop the secret mount for a plain build
+# ARG -- a CA certificate is not a secret, so the mount was only ever buying
+# build-context hygiene.
+
 # ---- deps -------------------------------------------------------------------
 FROM node:22-slim AS deps
 WORKDIR /app
