@@ -2067,6 +2067,34 @@ do this, on the same prompt, for the same tenant? It has been in front of real
 callers for months. Same prompt behaving differently on the two front-ends
 points at the surface, not the text.
 
+**REFUTED 2026-09-03, by the second arm-0 call, with a transcript.** The
+attribution above was nearly made and would have been wrong.
+
+After the arm-2 call the reasoning was: arm 0 batched four questions, arm 2
+asked one or two, tools identical, therefore the prompt. A second arm-0 call --
+same prompt, same ten tools, same code -- then asked **one question per turn on
+seven of nine turns and two on the other two. Never four.**
+
+So batching is not a property of the configuration, and the arm-0-versus-arm-2
+comparison was an N=1 difference read as a cause. This repository already knew
+better: *"never compare two arms at N=1: the cache probe gave opposite verdicts
+on consecutive runs."*
+
+**What actually differs between the two arm-0 calls is the PATH, not the
+config.** The batching call was a NEW booking, which runs Digile Media's own
+intake -- name, company, issue faced, preferred time. The clean call
+rescheduled an EXISTING appointment and never reached intake at all. The arm-2
+call did book, but on the minimal prompt, which has no intake fields to ask, so
+its one-at-a-time behaviour is not evidence about phrasing either.
+
+**Revised hypothesis, untested:** the four questions are the configured intake
+FIELDS being rendered into one turn, not the guardrails or the tools. That
+points at how `buildSystemInstruction` presents required fields, which is a
+different place from the prompt's guardrails block and a much smaller change.
+
+**Done when:** a fresh booking is made on the full prompt with the transcript
+capture on, and the intake turns are read rather than recalled.
+
 **LVX26 · A UK callback number is read out in US grouping** `[gcp]` · P1
 
 The owner heard the silence goodbye "make up a random number". It did not --
