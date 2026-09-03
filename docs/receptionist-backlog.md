@@ -2132,6 +2132,28 @@ Worth separating when it is fixed:
 The owner's own weighting, from the first report: "not that crazy just as long
 as it asks for the spelling anytime." So: real, reproducible, and not urgent.
 
+**WORSE THAN THAT, on a captured call 2026-09-03: the row is written BEFORE the
+spelling is checked.**
+
+> turn 10: "Yes, it's booked for Monday September 7th at ten AM."
+> turn 11: "I have Nithin, N I T H I N, Dodla, D O D L A. Is that correct?"
+
+`book_appointment` completed on turn 10 -- the step transition and the database
+row both say so -- and the spelling was confirmed on turn 11, afterwards. The
+gate in `services/tools.js` exists precisely to stop that: it refuses to record
+a name until the caller has spelled it. It did not fire here.
+
+The name was right, so nothing broke. The ordering is the defect: a MISHEARD
+name is written first and the correction arrives after the row exists, with
+nothing to reconcile it against. That upgrades this from an ergonomics
+complaint to a data-integrity one.
+
+**Worth establishing before fixing:** why the gate did not fire. It may be
+scoped to configured hard names, or to a config this tenant does not set, in
+which case the ask on turn 11 was the model's own initiative rather than the
+gate's -- which would also explain why it lands wherever the model feels like
+putting it.
+
 **LVX25 · It asks three or four questions in one breath** `[gcp]` · P1
 
 The owner: "it asks like multiple questions at a time and it is a bit
