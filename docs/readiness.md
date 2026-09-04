@@ -62,8 +62,16 @@ minute before. Do not spend the demo run-up on them.
 
 What a prospect DOES perceive, in the order it will cost you the meeting:
 
+**Rewritten 2026-09-03 after a six-call round** by a person making ordinary
+calls. It fixed the top of this list and put something worse above it. Rows A
+to D are new.
+
 | # | what they hear | entry |
 |---|---|---|
+| **A** | asks "do you take my insurance?" and is told **yes, invented** — "I've confirmed we accept Blue Cross Blue Shield" | **LVX66 · P0** — no such information exists in the tenant. Nothing detects it |
+| **B** | is told the practice is **closed on a day it is open**, and given the wrong closing time | **LVX55 · P0** — the prompt carries one day of hours; it extrapolates the week |
+| **C** | is told an appointment is **"today"** when it is tomorrow, and offered times that **already passed** | **LVX61 / LVX65 · P0** — the prompt states the date and time explicitly |
+| **D** | asks for something the practice does not do and is **walked into a booking anyway** | **LVX63 · P1** — it reinterprets rather than declining |
 | 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40 — VERIFIED on a call 2026-09-03**: it asked, and the row carries the name |
 | 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34 — VERIFIED on a call 2026-09-03**: the gate refused, it asked for the spelling and waited, then booked |
 | 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33 — VERIFIED on a call 2026-09-03**: three cancelled in one turn, none left behind, and the next booking was allowed |
@@ -86,9 +94,24 @@ and the leak guard shred the call. See LVX37. A demo rehearsal that had only
 ever happened on the laptop would have met that for the first time in front of a
 prospect.
 
-**Rows 0, 1 and 2 are demo-killers and they are the same demo-killer three
-times**: the assistant fails to do the one thing it is being demonstrated to do.
-Everything else on this list is a wince; those three are a no.
+**Rows 0, 1 and 2 were demo-killers and they are now fixed.** They were the same
+demo-killer three times: the assistant failing to do the one thing it is being
+demonstrated to do. All three are verified on real calls, with the transcript
+and the database row both read.
+
+**Row A replaces them, and it is worse.** The three fixed rows were failures to
+ACT. Row A is a failure to be TRUTHFUL, and on a demo call specifically that is
+the more dangerous kind: a prospect probes. "Do you take my insurance?" is among
+the first questions any caller asks, and on 2026-09-03 it was answered with an
+invented insurer and the words "I've confirmed". A missing appointment is
+discovered at the front desk; a rejected insurance claim is discovered weeks
+later, by the patient.
+
+**And nothing catches rows A or B, structurally.** Every guard built for LVX27 —
+the claim ledger, the write ledger, `live_claim_without_action`,
+`postcall_claim_without_row` — detects claims that an ACTION COMPLETED. These
+are claims about FACTS. `postcall_verify` returned `verdict: ok` on the call that
+invented an insurer, and was correct by its own rules.
 
 **Two of the three are now verified on a real call, with the transcript and the
 database row both read.** LVX40 asked for the name and wrote it; LVX34's gate
@@ -281,27 +304,44 @@ prospect's call still sounds wrong.
 
 ### The honest shortest path
 
-**Updated 2026-09-03, second pass.** A1 and A2 are decided. LVX40, LVX34 and
-LVX33 are fixed, the caller's half of the transcript is now captured, and the
-demo tenant has real business hours because it is Brightwork rather than Digile
-Media.
+**Rewritten 2026-09-03, third pass, after six calls made by a person.**
 
-What is left, in order:
+The three original demo-killers are fixed and verified on real calls. The
+deployment works, the local rig works, and across six calls — including
+deliberately awkward ones — **not one bad row was written**. Every appointment
+carried the right name, the right time and the right number; two cancellations
+in one breath both landed; changing your mind twice produced no phantom.
 
-1. **Deploy and make the three calls.** Everything above is offline, and the
-   only thing that settles any of it is a real call. Diff the deployed
-   environment against the local `.env` FIRST — that is the trap that cost five
-   hypotheses last sitting.
-2. **LVX41** — one outbound leak still fires with marker mode off and it is
-   audibly hard-cut. Its content is unknown, and `matched` will not name it:
-   that field is a tool-name label and is null for anything structural. The
-   `text` on `live_debug_leak_text` is the evidence.
-3. **LVX25 and LVX35** only if they reproduce on Brightwork. Both were seen on
-   Digile Media and neither has ever been observed on the demo tenant.
-4. **An eval band for the reworded spelling gate**, ~$20 across two arms, which
-   proves the cascade did not regress and proves nothing about the Live path.
+**And it is not demo-ready, for a reason that did not exist that morning.**
 
-None of it is compliance work, and none of it is large.
+The round exposed an asymmetry worth stating plainly, because it decides what
+to build next: **every guard in this system protects the database, and nothing
+protects the conversation.** That is history rather than accident — each guard
+was built after a defect that damaged data, so the data path is now genuinely
+well defended. The conversation has no equivalent: no ledger of what the
+assistant asserted, no comparison against the tenant's own configuration, and
+leak guards that catch implementation VOCABULARY while missing implementation
+FRAMING.
+
+So everything that went wrong on those six calls went wrong in what was SAID:
+an invented insurer, an invented service, the wrong opening hours, tomorrow
+called today, times offered that had already passed, and the system describing
+itself to the caller as "user" and "the calendar".
+
+In order:
+
+1. **LVX66 — it invents facts about the business.** Needs a decision, not just
+   code: refuse every factual question the configuration cannot answer (safe,
+   much less useful), ground answers in the knowledge table and refuse outside
+   it (correct, needs the table populated per tenant), or detect assertions the
+   way completions are detected (a new ledger, and the same pattern limits that
+   made LVX57 miss half its cases).
+2. **LVX55 — put the weekly hours in the prompt.** Cheap, clean, and removes two
+   symptoms seen on two separate calls.
+3. **LVX57 — the claim detector misses half the claims made.** It is the
+   instrument every other judgement is made with.
+
+None of it is compliance work. Only the first is large.
 
 ---
 
