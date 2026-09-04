@@ -549,11 +549,21 @@ describe("spelling guidance — the letters are authoritative", () => {
   //
   // Whether to ASK is a per-call budget and is rightly suppressed for someone
   // whose name you already hold. How to READ an answer you already have is not.
-  it("states that the letters beat what was heard", () => {
+  // REWORDED 2026-09-04 (LVX62), and the assertions moved with it rather than
+  // being deleted. The rule still prefers the letters; what went is the clause
+  // claiming letters cannot be misheard, which is an assumption about a
+  // separate ASR stage and is false on a front-end where the model IS the
+  // transcriber -- spelled letters were misheard twice in one evening, D as V
+  // and T as G. Everything these tests were protecting still holds.
+  it("states that the letters normally beat what was heard", () => {
     const prefix = buildStaticSystemPrefix(config, extras);
-    expect(prefix).toMatch(/THE LETTERS WIN/);
-    expect(prefix).toMatch(/spelling is right and what you heard is wrong/i);
+    expect(prefix).toMatch(/the letters normally win/i);
     expect(prefix).toMatch(/rebuild the name from the letters/i);
+  });
+
+  it("no longer justifies itself with a claim that is false here", () => {
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).not.toMatch(/does not mishear letters/i);
   });
 
   it("says to use the rebuilt name in TOOL CALLS, not just when reading it back", () => {
@@ -567,19 +577,19 @@ describe("spelling guidance — the letters are authoritative", () => {
   // THE REGRESSION TEST FOR THE ACTUAL BUG. `extras` is a returning caller with
   // a name on file — the exact case where the first attempt vanished.
   it("is present for a RETURNING caller, whose name is already on file", () => {
-    expect(buildStaticSystemPrefix(config, { ...extras }).match(/THE LETTERS WIN/)).toBeTruthy();
+    expect(buildStaticSystemPrefix(config, { ...extras }).match(/the letters normally win/i)).toBeTruthy();
   });
 
   it("is present for a first-time caller too", () => {
     expect(
-      buildStaticSystemPrefix(config, { ...extras, callerContext: null }).match(/THE LETTERS WIN/)
+      buildStaticSystemPrefix(config, { ...extras, callerContext: null }).match(/the letters normally win/i)
     ).toBeTruthy();
   });
 
   it("does not live in the dynamic tail, where a gate could hide it", () => {
     for (const ctx of [{ ...extras }, { ...extras, callerContext: null }]) {
       const tail = buildDynamicTail("gather_details", "book_appointment", config, ctx);
-      expect(tail).not.toMatch(/THE LETTERS WIN/);
+      expect(tail).not.toMatch(/the letters normally win/i);
     }
   });
 });

@@ -150,6 +150,39 @@ describe("LVX60 — the office being closed is said when it is relevant", () => 
   });
 });
 
+describe("LVX62 — 'the letters win' keeps the rule and drops the false reason", () => {
+  const prefix = () => buildStaticSystemPrefix(brightwork(), {});
+
+  it("no longer claims letters cannot be misheard", () => {
+    // The old justification -- "speech recognition ... does not mishear letters
+    // the same way" -- is an assumption about a separate ASR stage. Here the
+    // model IS the transcriber, and spelled letters were misheard twice in one
+    // evening: D as V, and T as G.
+    expect(prefix()).not.toContain("does not mishear letters");
+  });
+
+  it("still prefers the letters in the ordinary case", () => {
+    // The original reasoning holds where letters and sound agree: a spoken
+    // read-back cannot catch a letter error, because the candidates sound
+    // alike. Reversing the rule would give that back.
+    expect(prefix()).toContain("the letters normally win");
+    expect(prefix()).toContain("rebuild the name from the letters");
+  });
+
+  it("gives a path for letters that are themselves suspect", () => {
+    // Neither "overwrite silently" nor "ignore the spelling". On the call that
+    // found this, following the old rule would have written "Nighin Dodla"; the
+    // model disobeyed and was right, and that disobedience was load-bearing.
+    expect(prefix()).toContain("say the letters back one at a time");
+  });
+
+  it("does not send the caller round the loop again", () => {
+    // Being asked to spell it twice is the repetition the whole spelling
+    // apparatus keeps having to be pulled back from.
+    expect(prefix()).toContain("Never ask them to spell it a second time");
+  });
+});
+
 describe("LVX61 — the server computes the relative day", () => {
   afterEach(() => vi.useRealTimers());
 

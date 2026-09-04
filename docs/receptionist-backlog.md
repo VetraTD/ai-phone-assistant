@@ -48,12 +48,12 @@ Status means:
 | **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
-| **LVX62** | "the letters win" assumes letters transcribe intact; here they do not | **OPEN · P1** |
+| **LVX62** | "the letters win" assumes letters transcribe intact; here they do not | **FIXED, UNVERIFIED** — rule kept, false reason dropped, conflict path added; NO eval band |
 | **LVX63** | an off-domain request is absorbed into the booking flow, not declined | **FIXED, UNVERIFIED** |
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **FIXED, UNVERIFIED** — same rule as LVX66 |
-| **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** |
+| **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** — a knowledge row is the fix, not a rule; see scripts/seed-knowledge.js |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **FIXED, UNVERIFIED** — the prompt was ordering it |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **FIXED, UNVERIFIED** — the tool is no longer declared for a tenant that cannot text |

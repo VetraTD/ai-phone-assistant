@@ -1094,7 +1094,32 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // budget, correctly suppressed for someone whose name you already hold. This
   // is about HOW TO READ an answer you already have, which is true whenever a
   // spelling arrives and has nothing to do with who is calling.
-  toolContract += `- When a caller spells a name, THE LETTERS WIN. If the spelling disagrees with how the name first sounded, the spelling is right and what you heard is wrong: rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. Speech recognition mishears spoken names constantly and does not mishear letters the same way, which is the whole reason a spelling is worth having.\n`;
+  // REPLACED 2026-09-04, not reversed and not added beside. LVX62.
+  //
+  // The old wording justified itself with "speech recognition mishears spoken
+  // names constantly and does not mishear letters the same way, which is the
+  // whole reason a spelling is worth having." That second clause is an
+  // assumption about a SEPARATE ASR STAGE, and on this front-end the model IS
+  // the transcriber. Spelled letters were misheard on two calls in one evening:
+  // a D heard as V, and a T heard as G ("n i g h i n d o d l a" for Nithin).
+  //
+  // Following the old rule on that turn would have written "Nighin Dodla". The
+  // model ignored it, inferred "Nithin Dodla", and was right -- so its
+  // DISOBEDIENCE was load-bearing, and nothing guaranteed it would happen
+  // again. A rule whose stated reason is false is a rule the model is entitled
+  // to weigh against everything else it knows, which is not a property to ship.
+  //
+  // The original reasoning still holds where the letters and the sound agree: a
+  // spoken read-back cannot catch a letter error, because the two candidates
+  // sound alike. So "letters win" stays for the case it was written for, and
+  // the case it was never written for -- letters that are themselves suspect --
+  // gets an explicit path that is neither "overwrite silently" nor "ignore the
+  // spelling". Read the letters back AS LETTERS and let the caller settle it.
+  //
+  // This is the change in this round carrying the most uncertainty: it is prompt
+  // text on the path an eval band would measure, and no band has been run
+  // (LVX43 notes the reworded spelling gate has never had one either).
+  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too. If the letters produce something that does not look like a name, or they differ from what you heard by a single letter, do not just overwrite it: say the letters back one at a time and ask the caller to confirm those letters, and use what they tell you. Never ask them to spell it a second time from scratch.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   if (appointmentsEnabled) {
     toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
