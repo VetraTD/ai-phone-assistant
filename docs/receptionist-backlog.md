@@ -656,13 +656,74 @@ The log corroborates it exactly, four times in one call:
 
 `nudges_fired: 4` on one call.
 
-**The mechanism is visible and it is not our VAD.** The word was captured — it
-appears as the PREFIX of the transcript that arrives 28 seconds later. So the
-vendor received the audio, transcribed it, and did not treat it as a complete
-turn: it held the turn open waiting for more speech. Nothing on our side
-discarded it (`echo_suppressed_interim` and `echo_suppressed_final` are both 0),
-and audio was plainly arriving (`in_frames_idle_nonzero: 6202`,
-`in_rms_idle_max: 15621`).
+**One reading of the mechanism, and the evidence for it is weaker than it looked.**
+The word appears as the PREFIX of the transcript that arrives 28 seconds later,
+which reads as: the vendor received the audio, transcribed it, and held the turn
+open waiting for more speech. Audio was plainly arriving
+(`in_frames_idle_nonzero: 6202`, `in_rms_idle_max: 15621`).
+
+### CORRECTION, 2026-09-04 — "nothing on our side discarded it" does not follow
+
+This entry originally said *"Nothing on our side discarded it
+(`echo_suppressed_interim` and `echo_suppressed_final` are both 0)"*. **Neither
+counter can see the thing that discards audio on this path.**
+
+- **`echo_suppressed_interim` is bumped only by the cascade**
+  (`lib/voice/session.js:3730`). Gemini Live has no interim transcript channel, so
+  it reads 0 on every Live call ever made, on every arm, whatever happens. It is
+  not evidence about anything.
+- **`echo_suppressed_final` is the CONTENT echo guard** (`echoGuard.classify`,
+  `lib/voice/live/index.js:1581`). It compares transcript text against what we
+  just spoke. It has no visibility into the audio path at all.
+
+**The gate that actually drops caller audio has no counter.**
+`lib/voice/live/halfDuplex.js:72-102` withholds every inbound frame while our own
+audio is playing, holds them in a bounded 500 ms ring, and releases them ONLY on a
+confirmed barge — `voiceActive` (200 ms of continuous voiced frames,
+`inboundVad.js:39`) **and** `voicedRunMs >= 300`. When playback ends without that,
+`lookback.length = 0` and the frames are gone:
+
+```js
+if (!playing) {
+  // Playback is over. The withheld frames were our own echo and the room;
+  // releasing them now would hand the model a burst of audio the caller
+  // never spoke. Drop them and reset the latch for the next reply.
+  lookback.length = 0;
+```
+
+`forward.length` is computed at `live/index.js:1375` and thrown away. **This
+applies in every arm, including `vendor`** (`halfDuplex.js:41-44`) — so if this is
+the mechanism, changing `LIVE_TURN_END` cannot fix it.
+
+**That makes a short answer landing while the assistant is still speaking need
+~300 ms of sustained voiced energy to exist at all**, and "Okay" and "No" are
+borderline. It also explains the discriminator the entry could not find: "Ah!"
+ended four turns and is the SHORTEST utterance on the call — plausibly because it
+fell after playback had finished, where the gate does not apply. The candidate the
+entry listed as "where the utterance falls relative to the assistant's own audio"
+is the one with a mechanism behind it.
+
+**Both readings are still live, and they predict different data:**
+
+| | H1 — our gate dropped it | H2 — the vendor held the turn open |
+|---|---|---|
+| frames forwarded for that utterance | **0** | > 0 |
+| `inputTranscription` ever arrives | never | late, merged into the next |
+| fixed by | barge threshold / lookback release | vendor VAD params, or a manual arm |
+| does changing `LIVE_TURN_END` help | **no** | yes |
+
+H2 is not idle either: arm `vendor` sends **no VAD configuration whatsoever** —
+`turnEnd/vendorAd.js:55-57` returns `{}`, so `automaticActivityDetection` runs at
+Gemini's defaults. `silenceDurationMs`, `prefixPaddingMs` and
+`startOfSpeechSensitivity` are settable **while staying automatic**, and nothing in
+this repository has ever set them. That is a smaller first step than moving to an
+unmeasured manual arm.
+
+**A note on how this was nearly settled the wrong way.** Two counters reading 0
+were taken as exoneration. One of them is structurally incapable of being non-zero
+here and the other watches a different subsystem. A fault-only counter reads zero
+for a clean run and for a run that never got there — and a counter from the wrong
+front-end reads zero always.
 
 **It is not simply "short".** "Yes." ended a turn correctly at the spelling
 read-back, and "Ah!" ended one four separate times. So length alone does not

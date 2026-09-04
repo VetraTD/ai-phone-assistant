@@ -62,20 +62,28 @@ minute before. Do not spend the demo run-up on them.
 
 What a prospect DOES perceive, in the order it will cost you the meeting:
 
-**Rewritten 2026-09-03 after a six-call round** by a person making ordinary
-calls. It fixed the top of this list and put something worse above it. Rows A
-to D are new.
+**Rewritten again 2026-09-04 after a nine-call round** on the local rig, every
+call transcribed and reconciled against the database. The round closed rows A, B,
+C and D — every one of them a thing the assistant SAID wrongly — and put above
+them the first entry on this list that is the assistant not answering at all.
+
+**Read the two new top rows before anything else.** Rows A to D are struck
+through because they are verified closed on real calls, not because they were
+argued away.
 
 | # | what they hear | entry |
 |---|---|---|
-| **A** | asks "do you take my insurance?" and is told **yes, invented** — "I've confirmed we accept Blue Cross Blue Shield" | **LVX66 · P0** — no such information exists in the tenant. Nothing detects it |
-| **B** | is told the practice is **closed on a day it is open**, and given the wrong closing time | **LVX55 · P0** — the prompt carries one day of hours; it extrapolates the week |
-| **C** | is told an appointment is **"today"** when it is tomorrow, and offered times that **already passed** | **LVX61 / LVX65 · P0** — the prompt states the date and time explicitly |
-| **D** | asks for something the practice does not do and is **walked into a booking anyway** | **LVX63 · P1** — it reinterprets rather than declining |
+| **★** | says "okay" or "no" and gets **ten seconds of silence**, then "I'm still here whenever you're ready" | **LVX70 · P0 — the top of this list.** Four times on one call. Mechanism NOT established |
+| **†** | it **speaks its own instructions** — "Acknowledge." / "Please pause there for a moment" | **LVX75 · P0** — heard once in nine calls. Ordinary English, so no leak guard can catch it |
+| **A** | ~~asks "do you take my insurance?" and is told **yes, invented**~~ | **LVX66 — VERIFIED 2026-09-04 on the knowledge-row path** (call 1). The empty-table sourcing rule is still UNVERIFIED |
+| **B** | ~~is told the practice is **closed on a day it is open**~~ | **LVX55 — VERIFIED** on call 1, 2026-09-04: all four hours facts correct |
+| **C** | ~~is told an appointment is **"today"** when it is tomorrow, and offered times that **already passed**~~ | **LVX61 — VERIFIED** on call 2, 2026-09-04. LVX65 fixed, unverified |
+| **D** | ~~asks for something the practice does not do and is **walked into a booking anyway**~~ | **LVX63 — VERIFIED** on call 5: Uber and the weather, both declined |
 | 0 | ~~books the appointment **without ever asking their name**~~ | **LVX40 — VERIFIED on a call 2026-09-03**: it asked, and the row carries the name |
 | 1 | ~~asks to book, gets "someone will call you back"~~ | **LVX34 — VERIFIED on a call 2026-09-03**: the gate refused, it asked for the spelling and waited, then booked |
 | 2 | ~~cancels two things, is told it still has them, then cannot book~~ | **LVX33 — VERIFIED on a call 2026-09-03**: three cancelled in one turn, none left behind, and the next booking was allowed |
-| 3 | four questions in one breath | **LVX25 — REPRODUCED 2026-09-03**, twice on one call. Still open |
+| 3 | four questions in one breath | **LVX25 — REPRODUCED repeatedly**, latest 2026-09-04. Seven prompt instructions already say not to. Still open |
+| 3b | **"is there anything else?" closing nearly every turn**, including after a plain factual answer | the tic — five of five turns on two separate calls. No counter, and the clearest "this is not a person" signal on a demo call |
 | 4 | hangs up the moment something succeeds, without asking if there is anything else | LVX35 — never observed on Brightwork; verify before fixing |
 | 5 | ~~offers midnight and 11 PM appointments~~ | **GONE** — Brightwork has real hours |
 | 6 | a UK callback number read out in US digit grouping | LVX26 — US tenant, not on the demo path |
@@ -99,33 +107,57 @@ demo-killer three times: the assistant failing to do the one thing it is being
 demonstrated to do. All three are verified on real calls, with the transcript
 and the database row both read.
 
-**Row A replaces them, and it is worse.** The three fixed rows were failures to
-ACT. Row A is a failure to be TRUTHFUL, and on a demo call specifically that is
-the more dangerous kind: a prospect probes. "Do you take my insurance?" is among
-the first questions any caller asks, and on 2026-09-03 it was answered with an
-invented insurer and the words "I've confirmed". A missing appointment is
-discovered at the front desk; a rejected insurance claim is discovered weeks
-later, by the patient.
+**Row A was worse than all three, and the 2026-09-04 round closed it.** The
+fixed rows were failures to ACT; row A was a failure to be TRUTHFUL, which on a
+demo call is the more dangerous kind because a prospect probes. On the
+verification round the assistant sourced its answer from a `business_knowledge`
+row and did not invent an insurer. **The empty-table case — what it says when
+there is no row to source from — is still UNVERIFIED**, and that is the half a
+prospect asking about an unusual insurer would actually hit.
 
-**And nothing catches rows A or B, structurally.** Every guard built for LVX27 —
-the claim ledger, the write ledger, `live_claim_without_action`,
-`postcall_claim_without_row` — detects claims that an ACTION COMPLETED. These
-are claims about FACTS. `postcall_verify` returned `verdict: ok` on the call that
-invented an insurer, and was correct by its own rules.
+**★ replaces every one of them, and it is a different kind of bad.** Rows A to D
+are all things the assistant SAID wrongly. LVX70 is the assistant **not
+answering at all**: the caller says "okay", hears nothing, and ten seconds later
+is told "I'm still here whenever you're ready." A prospect reads that as broken
+software before they get far enough to probe an insurance answer, and it needs no
+domain knowledge to notice. It also made one call 308 seconds long instead of
+about ninety, and cost on this path is quadratic in length.
 
-**Two of the three are now verified on a real call, with the transcript and the
-database row both read.** LVX40 asked for the name and wrote it; LVX34's gate
-refused, the assistant asked for the spelling and waited rather than promising a
-callback, and then booked. `postcall_verify` matched the claim to the row.
+**The mechanism is not established, and that is deliberate.** "Yes." ended a turn
+correctly and "Ah!" ended four, so length alone does not explain it. Two
+candidates are live and they have different fixes — see LVX70 in the backlog.
+Nothing about turn-taking changes until an instrumented call says which.
 
-**LVX33 is now verified too.** Three appointments cancelled in a single turn,
-all three `cancelled` in the database, none left in the snapshot — and the
-booking the caller asked for immediately afterwards reached the availability
-check instead of being refused, which is the half they actually felt.
+**The structural gap that produced row A has not closed — the model simply
+behaved.** Every guard built for LVX27 — the claim ledger, the write ledger,
+`live_claim_without_action`, `postcall_claim_without_row` — detects claims that
+an ACTION COMPLETED. Row A was a claim about a FACT, and `postcall_verify`
+returned `verdict: ok` on the call that invented an insurer, correctly by its own
+rules. LVX68 scopes the one narrow piece of that which IS answerable for free:
+not "is it true", but "did you check anything at all".
 
-**All three demo-killers are verified on real calls.** What remains on this list
-is LVX25 (reproduced twice today, shared prompt text, belongs with the eval
-band), LVX35's ordering, and the 1.4–2.2 s reply pause.
+**Row † lives in the same blind spot, one level further out.** "Acknowledge." and
+"Please pause there for a moment" are ordinary English in ordinary sentences, so
+`internal_term_leaks`, `live_outbound_leaks` and `intent_marker_leaks` all read 0
+and were all correct. The guard family catches leaked SYNTAX and misses leaked
+FRAMING — LVX54 and LVX64 exactly.
+
+**All three are verified on real calls, with the transcript and the database row
+both read.** LVX40 asked for the name and wrote it; LVX34's gate refused, the
+assistant asked for the spelling and waited rather than promising a callback,
+then booked; LVX33 cancelled three appointments in a single turn with none left
+in the snapshot, and the booking asked for immediately afterwards reached the
+availability check instead of being refused — the half the caller actually felt.
+
+**What remains on this list, in order:** ★ LVX70 (silence on a short answer),
+† LVX75 (it speaks its own instructions), 3 LVX25 and 3b the "anything else"
+tic, 4 LVX35's ordering, and 7 the 1.4–2.2 s reply pause.
+
+**And one caveat that applies to half of the strikethroughs above.** Five guards
+shipped in the 2026-09-04 round never fired, because the model behaved well —
+LVX56, LVX53, LVX71 and LVX74. A verified ROW is not the same as a verified
+GUARD, and the two are distinguishable only where a positive counter sits beside
+the fault counter. Anything new on this page gets one.
 
 The verification was done on the LOCAL rig, not staging, and that is the lesson
 rather than a shortcut: with no database access, "no row" and "never tried" are
