@@ -149,7 +149,8 @@ function gateExecutor({ stash = true, retryFails = false } = {}) {
   return { execute, calls, bookCalls: () => calls.filter((f) => f.name === "book_appointment") };
 }
 
-async function boot(opts) {
+async function boot(opts = {}) {
+  const bookArgs = opts.args || BOOK;
   const ws = new FakeSocket();
   const live = fakeLive();
   const { execute, calls, bookCalls } = gateExecutor(opts);
@@ -187,13 +188,28 @@ async function boot(opts) {
       });
       await settle();
       await settle();
-      live.push({ toolCall: { functionCalls: [{ id: "1", name: "book_appointment", args: BOOK }] } });
+      live.push({ toolCall: { functionCalls: [{ id: "1", name: "book_appointment", args: bookArgs }] } });
       await settle();
       await settle();
     },
-    /** The caller spells their name. This is what settles the spelling. */
+    /**
+     * The caller spells their name, and the turn then ENDS.
+     *
+     * Both halves matter. The spelling settles the gate; the turnComplete is
+     * what gives the model its own chance to re-issue the write first, which
+     * is deliberately preferred over ours because its version carries the
+     * corrected spelling and ours cannot.
+     */
     async spell(text = "n i t h i n  d o d l a") {
       live.push({ serverContent: { inputTranscription: { text } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /** The model re-issues the booking itself, the way it is supposed to. */
+    async modelRebooks(args) {
+      live.push({ toolCall: { functionCalls: [{ id: "m", name: "book_appointment", args }] } });
       await settle();
       await settle();
     },
@@ -222,13 +238,17 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
   });
 
   it("tells the model the booking is real, so its next sentence is true", async () => {
-    const s = await boot();
+    // No client_name in the refused args -- a booking for a caller whose name
+    // was already on file. Nothing about the spelling is at stake, so the plain
+    // note applies rather than the name one.
+    const s = await boot({ args: { scheduled_at: BOOK.scheduled_at, notes: "cleaning" } });
     await s.book();
     await s.spell();
 
     const note = s.notes().find((t) => /has now been completed and saved/.test(t));
     expect(note).toBeTruthy();
     expect(note).toMatch(/do NOT call the booking tool again/i);
+    expect(c().write_retry_name_unspelled).toBe(0);
   });
 
   it("tells the model plainly when the retry FAILED, and not to claim it", async () => {
@@ -267,6 +287,42 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
 
     expect(s.bookCalls()).toHaveLength(1);
     expect(c().write_retry_attempted).toBe(0);
+  });
+
+  it("stands down when the MODEL re-issues the write itself", async () => {
+    // The model's own retry is better than ours and must win: it carries the
+    // name the caller just spelled, and the replayed arguments do not. A
+    // successful write clears the stash, which is also what stops the booking
+    // being made twice.
+    const s = await boot();
+    await s.book();
+    await s.modelRebooks({ ...BOOK, client_name: "Nithin Dodla" });
+    await s.spell();
+
+    expect(s.bookCalls()).toHaveLength(2);
+    expect(s.bookCalls()[1].args.client_name).toBe("Nithin Dodla");
+    expect(c().write_retry_attempted).toBe(0);
+  });
+
+  it("tells the model the saved name is the UNSPELLED one", async () => {
+    // Call 5, and the reason this note exists. The caller said "Nitin Dodla",
+    // spelled "N I T H I N", the assistant read the letters back correctly --
+    // and the row was written "Nitin Dodla", because the retry replays the
+    // arguments as they were when the gate refused.
+    //
+    // The letters are not assembled in code on purpose: LVX62 records that a
+    // spelled "D" has arrived as "V" here, and applyCallerSpellingSignal only
+    // ever sets a boolean. The model heard them; it is asked to correct the
+    // row through the tool that exists for it.
+    const s = await boot();
+    await s.book();
+    await s.spell();
+
+    expect(c().write_retried_after_spelling).toBe(1);
+    expect(c().write_retry_name_unspelled).toBe(1);
+    const note = s.notes().find((t) => /BEFORE the caller spelled it/.test(t));
+    expect(note).toBeTruthy();
+    expect(note).toMatch(/call correct_appointment_name/i);
   });
 
   it("does nothing on ordinary caller speech that is not a spelling", async () => {

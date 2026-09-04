@@ -57,7 +57,7 @@ Status means:
 | **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **SHIPPED, NOT WORKING** — reworded :1705, heard again on the next call. :907 now reworded too; a third recurrence means the eval band, not a fourth guess |
 | **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **BOTH HALVES FIXED, NOT EXERCISED** — the not_found refusal, and the id now resolved in code from the caller's own snapshot |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **REFUSAL SHIPPED AND REVERTED** the same day — it fired and made the call worse. The write is now RE-ISSUED BY US when the spelling arrives. NOT EXERCISED |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **THE BOOKING SURVIVED on call 5** — the retry fired, the row is real, no dead air. It wrote the PRE-SPELLING name; now deferred to turn end so the model's own retry wins |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **MECHANISM SETTLED**, fix shipped and **NOT EXERCISED** — call 2 never spoke over the assistant, so the gate had nothing to release |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **SCOPED 2026-09-04** — design and cost written down, not built |
@@ -115,6 +115,84 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## Call 5 of the instrumented round, 2026-09-04 — the booking SURVIVED, and the retry wrote the wrong name
+
+**The row exists.** Four consecutive calls lost a booking on this path; this one
+did not.
+
+| | |
+|---|---|
+| `write_retry_attempted` / `write_retried_after_spelling` | 1 / 1 |
+| `live_write_retried` | `tool: book_appointment, ok: true` |
+| the row | `f771e2fd` — Monday 7 Sep 16:00 America/Chicago, notes "cleaning", scheduled |
+| `postcall_write_abandoned` | **0** |
+| `nudges_fired` / `end_call_refused_abandoned` | **0 / 0** — no dead air, nothing blocking the exit |
+
+The model never re-called the tool. It said *"Your cleaning is all set"* and the
+booking was real anyway, because the write no longer depends on it.
+
+### But it wrote the PRE-SPELLING name, and that is the fix's own fault
+
+The caller said "Nitin Dodla", spelled **N I T H I N**, the assistant read the
+letters back correctly — and the row says **"Nitin Dodla"**.
+
+`applyCallerSpellingSignal` only ever sets a BOOLEAN. It does not assemble a
+name, and nothing else does either: **the MODEL is what turns "n i t h i n" into
+"Nithin" and re-calls the tool with it.** That is the entire purpose of the
+spelling gate. The retry replayed the arguments as they stood when the gate
+refused, so it rescued the booking and defeated the gate in the same move.
+
+**Two changes, 2026-09-04:**
+
+1. **The retry now waits for the end of the turn**, not for the arriving
+   transcript. Firing on the letters races the model's own retry, and the
+   model's is BETTER because it carries the corrected spelling. A successful
+   write of the same tool now CLEARS the stash — which is LVX72's own
+   definition of an abandoned write ("refused and not since succeeded") and is
+   also what stops a double booking.
+2. **When the retry does fire on a booking whose name was at stake**, the model
+   is told the saved name is the un-spelled one and to call
+   `correct_appointment_name` with the spelling it just heard.
+
+**The letters are deliberately NOT assembled in code.** LVX62 records that
+spelled letters do not transcribe reliably on this front-end — a spelled "D"
+has arrived as "V" — and splitting a run of letters into first and last name is
+guesswork on top. The model heard them; it is asked to use the tool that exists
+for it.
+
+**The residual failure mode is a saved booking with a slightly wrong name**,
+against four calls that saved nothing. Counter `write_retry_name_unspelled`.
+
+### The claim detector missed the claim
+
+`verdict: row_without_claim`, `claims: 0`. Turn 9 said *"Your cleaning is all
+set"* and `completionClaimRe`'s clause-boundary branch requires
+`(?:your|the|that|this)\s+(?:appointment|booking|call)` — **"cleaning" is not in
+that noun list.** So a completion claim naming the SERVICE rather than the
+generic noun is invisible.
+
+Not patched. Widening a noun list is the phrasing treadmill this file warns
+about, and it is recorded here so a low `claims` count is not read as a quiet
+call. Same family as LVX57.
+
+### And a fabrication nothing caught
+
+Turn 8, the caller asked for a note — *"could you put that I have some dirt in
+the back"* — and the assistant said **"I've added that note for you."** The row's
+notes reads `"cleaning"`. No tool was called carrying that note
+(`write_consent_checked: 1`, the single refused booking).
+
+So it was false when said, and the retry then wrote the stale arguments and made
+it permanent. This is the LVX48 class — a claim to have updated a record with no
+tool behind it — and neither the claim detector nor the write ledger saw it,
+because a booking DID happen; it just was not the one described.
+
+### Still open and unchanged
+
+`live_stacked_questions: 2`, `live_closing_tic: 3` out of ten turns. The tic
+regex still undercounts — turn 3's *"Did you have another question, or is there
+anything else I can help you with today?"* is both a stacked question and a tic.
 
 ## Call 4 of the instrumented round, 2026-09-04 — the guard fired, and the call got WORSE
 
