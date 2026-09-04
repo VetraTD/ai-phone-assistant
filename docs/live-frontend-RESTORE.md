@@ -113,7 +113,8 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **RESTORED to Railway staging 2026-09-03, but NOT to the captured `voiceUrl`.** Corrected 2026-09-04 by re-reading the number from Twilio: it points at **`/twilio/live-voice`**, not the `/twilio/voice` captured above. The host is alive and `npm run probe` works, so nothing is broken — but the probe now dials the **Live** front-end rather than the cascade, and any number it reports is a Live number. `readiness.md:161` was the accurate document and this row was not. The cloudflared tunnel and the local server are shut down; that tunnel URL is dead and a future rig gets a new one. |
+| **status** | **RESTORED 2026-09-04 after a six-call verification round**, to `https://ai-phone-assistant-staging.up.railway.app/twilio/live-voice` + `/twilio/status`, and verified by re-reading the number from Twilio and comparing **all four fields one at a time**. The cloudflared quick tunnel is torn down and returns 502; that URL is dead and a future rig gets a new one. |
+| **correction** | The 2026-09-03 row said the number had been put back "field-for-field" to the captured `voiceUrl` of `/twilio/voice`. It had not: re-reading it on 2026-09-04 returned **`/twilio/live-voice`**. Nothing was broken by it — the host was alive — but `npm run probe` was dialling the **Live** front-end rather than the cascade, so any number it reported was a Live number and not comparable with earlier cascade runs. `readiness.md:161` was the accurate document and this table was not. **Reading a number back is not enough on its own if the read-back is only glanced at.** |
 
 ### Testing against a laptop, and why it is cloudflared and not ngrok
 
