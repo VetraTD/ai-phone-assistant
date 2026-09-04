@@ -1702,7 +1702,25 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
           ? `As soon as you understand, name it on the intent line, `
           : `As soon as you understand, call set_call_intent with the appropriate intent, `) +
         `then start helping in the same turn. Keep this response to 1–2 sentences. ` +
-        `Acknowledge the caller's request and ask the first relevant question — ONE question, not two. ` +
+        // LVX75. The model SPOKE this line: a caller heard "Acknowledge." as the
+        // first word of a turn, and the owner confirmed hearing it. A bullet
+        // opening on a bare imperative verb that is also an ordinary speakable
+        // word is more echo-prone than one opening on a noun phrase, so the
+        // verb is no longer the first thing on the line.
+        //
+        // This is a HUNCH, and it is labelled one. It was heard ONCE in nine
+        // calls, so no realistic number of calls can confirm the fix; only the
+        // eval band could, and it was not spent. Recorded as FIXED, UNVERIFIED
+        // and it stays that way -- claiming otherwise would be the
+        // "shipped, not working" state LVX44 made expensive.
+        //
+        // The sibling line at :907 is deliberately NOT touched. It sits in the
+        // static prefix, which is the explicit-cache unit and is pinned by ten
+        // *.static.txt snapshots -- a much larger blast radius for the same
+        // unmeasured hunch. And "Please pause there for a moment", the other
+        // thing the owner heard, appears nowhere in this repository at all, so
+        // neither change can explain it.
+        `Start with a brief acknowledgement, then ask the first relevant question — ONE question, not two. ` +
         `In particular, do not pair an open "how can I help you?" with a second, more specific question in ` +
         `the same turn: if you are going to offer concrete options, offer them on their own.`
       );

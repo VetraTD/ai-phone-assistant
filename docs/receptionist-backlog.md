@@ -53,14 +53,14 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
-| **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **OPEN · P0** — heard by the owner |
-| **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **HALF FIXED, NOT EXERCISED** — the change path works end to end, but the not_found refusal never fired |
+| **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **FIXED, UNVERIFIED — and unverifiable at N=1.** One of the two lines reworded; heard once in nine calls |
+| **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **BOTH HALVES FIXED, NOT EXERCISED** — the not_found refusal, and the id now resolved in code from the caller's own snapshot |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED** on a real call 2026-09-04 — verdict write_abandoned where the old code said ok; still not PREVENTED |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED**; prevention is now COUNTED at the end_call gate and still refuses nothing — deliberately |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
-| **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0** — found on call 3, 4x in one call |
-| **LVX68** | it claims to have CHECKED something when no tool ran | **TO SCOPE** — narrow, exact ground truth, after the round |
-| **LVX69** | a tenant cannot require identity before a record is DISCLOSED, only before a write | **TO SCOPE** — after the round |
+| **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0 — INSTRUMENTED, not yet diagnosed.** The old evidence was void; two hypotheses, one call decides |
+| **LVX68** | it claims to have CHECKED something when no tool ran | **SCOPED 2026-09-04** — design and cost written down, not built |
+| **LVX69** | a tenant cannot require identity before a record is DISCLOSED, only before a write | **SCOPED 2026-09-04** — design and cost written down, not built |
 | **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** — a knowledge row is the fix, not a rule; see scripts/seed-knowledge.js |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **FIXED, UNVERIFIED** — the prompt was ordering it |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
@@ -73,7 +73,7 @@ Status means:
 | **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
 | **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
 | **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
-| **LVX25** | three or four questions in one breath | **OPEN · P1** — reproduced twice on one call |
+| **LVX25** | three or four questions in one breath | **OPEN · P1 — now COUNTED.** Seven prompt instructions already say not to; an eighth was refused |
 | **LVX28** | a name "already on file" is trusted though it was never spelled | **PARTLY CLOSED** — the bypass now needs the caller; the row itself still carries no provenance |
 | **LVX51** | the greeting plays twice | **NOT REPRODUCED** on call 1 with no health check — one kick, one greeting |
 | **LVX43** | the reworded spelling gate has never had an eval band (~$20) | **OPEN · P2** |
@@ -198,6 +198,29 @@ rule, never shipped as a decision.
 **Done when:** a caller never hears a word that exists only in the instructions,
 and whichever change achieves it was tested rather than reasoned about.
 
+### FIXED, UNVERIFIED — 2026-09-04, and it will stay unverified
+
+`services/gemini.js:1705` now reads *"Start with a brief acknowledgement, then
+ask the first relevant question — ONE question, not two."* The bare imperative
+verb is no longer the first word on the line.
+
+**`:907` was deliberately NOT touched.** It sits in the static prefix, which is
+the Gemini explicit-cache unit and is pinned by ten `*.static.txt` snapshots.
+That is a much larger blast radius for the same unmeasured hunch, and the
+snapshot diff confirms the change landed in the dynamic tail only — ten
+`tail.identify_intent` files, zero `.static.txt`.
+
+**The status is the honest part.** This was heard ONCE in nine calls. No
+realistic number of rig calls can confirm it; only the eval band (~$20) could,
+and the owner chose not to spend it. So the entry stays `FIXED, UNVERIFIED`
+rather than being upgraded on the next clean call — a clean call is what nine of
+nine already were for this defect. Reading a clean call as confirmation is
+exactly how LVX44 reached "shipped, not working".
+
+**And it cannot be the whole answer.** "Please pause there for a moment" appears
+nowhere in this repository. A reword of a line we own cannot explain a line we
+do not.
+
 ### LVX74 · "Not found" is spoken to the caller as "not yours" `[gcp]` · **P0 — found verifying LVX72**
 
 The caller asked to change the name on their own appointment, booked under their
@@ -257,6 +280,42 @@ renders dates and names and no ids. Every change tool therefore depends on
 Putting ids in the prompt is not a disclosure question — the lookup tool already
 returns them — but it enlarges the frozen prompt and deserves deciding rather
 than drifting into.
+
+### DECIDED 2026-09-04 — remove the pressure, do not answer it
+
+Owner's choice among four candidates. **The ids are resolved in code, and the
+prompt does not change.**
+
+`services/db.js:1513-1518` already projects `id` onto every
+`callerContext.upcomingAppointments` element at call start, and
+`capabilities/appointments.js` already reads that array in `upcomingForCaller()`
+and `whichAppointmentMessage()`. So `resolveAppointmentId(ctx, suppliedId)` now
+answers a MISSING id from the caller's own snapshot when exactly one appointment
+is upcoming, at all three change tools.
+
+**Why this beats putting ids in CALLER CONTEXT**, which was the obvious reading:
+
+- The prompt is frozen at connect on this front-end (LVX46), so anything added
+  is paid for once and can never be corrected mid-call.
+- The only defence against the model reading a UUID aloud would be a prompt
+  rule, which is the class of thing this file keeps recording does not hold.
+- It **removes** a round-trip rather than adding one. `whichAppointmentMessage`
+  currently hands the id back and asks the model to call again with it, and reply
+  p50 is 1.3–2.5 s — the caller feels every added turn.
+
+**Two things it deliberately does not do.** It does not touch a SUPPLIED id:
+overriding an explicit instruction on a guess is a different and worse failure,
+and the invented-id case is already answered by the `not_found` refusal above.
+And it does not widen ownership — the snapshot is keyed on the caller's own
+number and cannot contain anyone else's rows, but `verifyAppointmentIdentity`
+still runs on whatever comes back and still fails closed. A test pins that.
+
+Counter `write_appointment_id_resolved`, positive; the fault half is the
+existing `write_refused_appointment_not_found`.
+
+**NOT EXERCISED.** Two of the five new tests fail without the resolver; the other
+three assert unchanged behaviour and pass either way, which is the point of
+having them. No call has hit it.
 
 ### LVX73 · The vendor can emit a transcription fragment that was never spoken `[gcp]` · P1
 
@@ -356,6 +415,40 @@ bounded and uses machinery that already exists, and it carries a real
 hair-trigger risk (a caller who changed their mind mid-change would be held on
 the line), so it deserves its own decision rather than being bolted on. **Not
 done. Recorded as the next step.**
+
+### DECIDED 2026-09-04 — COUNT the refusal, do not make it
+
+The owner's choice, and the reasoning is the part worth keeping.
+
+Refusing a hang-up is the one guard on this page whose failure mode is holding a
+caller on the line against their will. LVX21 is what a hair trigger costs here:
+0.5 s of audio delivered in 25 seconds. The question that decides whether
+refusing is safe is **"on real calls, how often would a caller have been held?"**
+— and nothing could answer it, because the abandoned set was computed only in
+`finish()`, after the call was over.
+
+`turnState()` now derives it per turn, the same way `finish()` derives it, and
+the `end_call` gate counts:
+
+- `end_call_abandoned_check_ran` — positive twin
+- `end_call_would_refuse_abandoned` — the number that decides
+
+**It refuses nothing**, and a test asserts the call still ends, so that starting
+to refuse has to be a deliberate change rather than a side effect of one.
+
+Counted on a REFUSED `end_call` as well as an accepted one: the abandoned write
+is the interesting fact whatever the gate decides about the hang-up, and
+sampling it only on accepted hang-ups would bias the number by a different
+refusal.
+
+`services/tools.js` is shared with the cascade, which passes no abandoned set at
+all. The check no-ops there and `end_call_abandoned_check_ran` stays 0, which is
+the honest reading rather than a silent pass.
+
+**The wire is asserted separately** in `tests/liveToolContext.test.js`. That ctx
+object is copied field by field by hand, and a field produced by `turnState()`
+and not copied is exactly how the hesitation gate sat unreachable for the life of
+a deployment while `end_call_refused_hesitation` read 0 throughout.
 
 The wire is asserted separately in `tests/livePostCall.test.js` and fails
 without it — the LVX45 lesson: the module had tests, the session had tests, and
@@ -788,6 +881,54 @@ nothing is wrong.
 **Done when:** a claim to have checked, with no tool executed on the turn, is
 counted.
 
+### SCOPED 2026-09-04 — the design, and what it costs
+
+**Not built.** The owner asked for a design and a number; this is both.
+
+**Shape: a second claim detector beside the first, with its own ledger width.**
+`live_claim_without_action` already has exactly the structure this needs, and
+`auditTurn()` already computes the only input — `toolsRanThisTurn()`, which is
+`realToolCallsThisTurn - refusedCallsThisTurn > 0`, plus `toolRanPrevTurn` for a
+claim that trails its tool by one turn.
+
+| | |
+|---|---|
+| new regex | `verificationClaimRe` in `lib/voice/strings.js`, `en` and `es` |
+| vocabulary | confirmed / checked / verified / looked up / double-checked, in the first person: "I've confirmed", "I can confirm", "I checked and", "I've looked that up" |
+| new counters | `live_verification_claim_detected` (positive) and `live_claim_to_have_checked` (fault) |
+| where | `auditTurn()`, beside the LVX27 block at `lib/voice/live/index.js` |
+| acts? | **No.** Count only, `LIVE_CLAIM_GUARD` stays unset |
+| runtime cost | one regex test per assistant turn. No model round-trip, no database read |
+| build cost | ~1 hour: regex in two locales, ~15 lines in `auditTurn`, two counter registrations, one test file with a phrasing table |
+
+**Two widths, exactly as the claim ledger has two.** The positive counter fires on
+every detected verification claim including the tool-backed ones — that is the
+denominator, and it is what tells "the model never says this" apart from "the
+detector never matched". The fault counter fires only when no tool ran this turn
+and none ran last turn.
+
+**IT MUST NOT JOIN `claimsThisCall`.** That ledger is reconciled against database
+rows by `postcall_verify`. "I've confirmed we accept Blue Cross Blue Shield" is
+not a claim that a ROW exists, so pushing it there would make `reconcile()` look
+for one, find nothing, and file `claim_without_row` — manufacturing precisely the
+false alarm LVX57 showed trains people to ignore the instrument. Separate regex,
+separate counter, and it never touches the ledger.
+
+**What it catches, and what it does not.** It catches the half that turns a wrong
+answer into a financial decision: the caller hears "I've confirmed" and acts on
+it. It does not catch "we do offer clear aligners" — that is a claim about a
+FACT, needs a semantic comparison against config, and the only way to make that
+comparison is a model call. On the happy path that is a new round-trip the caller
+feels; after the call it cannot un-say anything to someone who has already hung
+up. Measured answer to the owner's question: **not the general fact detector, yes
+to this narrow one.**
+
+**Known limit, stated up front.** `completionClaimRe` missed all four
+verification phrasings observed on 2026-09-04, so this starts from a list of four
+and will miss a fifth. That is the phrasing treadmill this file warns about, and
+it is acceptable here only because the counter acts on nothing: a miss costs a
+count, not a caller.
+
 ### LVX69 · A tenant cannot require identity before DISCLOSING a record `[twice]` · P1 — to scope
 
 `capabilities.appointments.require.identity` takes built-in fields (name, dob)
@@ -812,6 +953,67 @@ matters. Tagged `[twice]` because it touches the tool response shape.
 
 **Done when:** a tenant configuring an identity requirement gets it enforced
 before disclosure, not only before a write.
+
+### SCOPED 2026-09-04 — the design, and what it costs
+
+**Not built.** Design and number, as asked.
+
+**The problem restated precisely.** `checkRequirements` is called inside the
+`actionTools` branch of `services/tools.js`, so `capabilities.appointments.require.identity`
+gates WRITES only. A lookup is protected by two things of very unequal strength:
+structurally, `listAppointmentsByCaller` is keyed on the caller's phone number
+and can only ever return that number's rows; and NNR rule 4, which is a prompt
+rule and therefore a request. Whoever holds the phone gets the details read back
+to them.
+
+Gating the lookup itself is not the answer, and the reason is already written in
+`services/tools.js`: it "would stop the receptionist finding the record it needs
+in order to ask the caller about it — locking the door and the key inside."
+
+**The design: a verification STUB from the lookup.**
+
+The lookup stays ungated and still runs. When a tenant has configured an identity
+requirement and it is not yet satisfied on this call, the tool returns **field
+names, never values**:
+
+```json
+{ "found": true, "count": 2,
+  "verify": ["date_of_birth"],
+  "message": "[not caller speech] A record exists for this number. Before reading
+              anything back, ask the caller for their date of birth and call
+              confirm_caller_identity with their answer." }
+```
+
+The rows themselves are held in the pack scratchpad, which the model cannot read.
+`confirm_caller_identity` compares the caller's answer **in code** against the
+held rows, marks the call verified in `capabilityState`, and a second lookup then
+returns the appointments normally.
+
+**That is the structural half, and it is the whole point.** The model cannot
+recite what it was never given, so this does not depend on the model choosing to
+obey — which is the distinction that separates this from NNR rule 4 and from
+every prompt rule this file has recorded failing.
+
+| | |
+|---|---|
+| touches | `capabilities/appointments.js` (lookup response + a new confirm tool), `lib/capabilities/requirements.js` (a disclosure-time variant of `checkRequirements`) |
+| tag | **`[twice]`** — it changes a tool RESPONSE shape, so the eval fixtures and the prompt snapshots both move |
+| new counters | `identity_stub_issued` / `identity_confirmed` (positive pair), `identity_confirm_failed` (fault) |
+| runtime cost | one extra tool round-trip per call, and **only** for tenants that configure it. Zero for everyone else |
+| build cost | ~half a day, most of it in the eval fixtures rather than the code |
+
+**Three risks worth naming before anyone starts.**
+
+1. **A caller who cannot answer is locked out of their own appointment.** The
+   stub needs a bounded escape — after two failed attempts, fall through to
+   message-taking rather than looping. Without that this is LVX21's shape again:
+   a guard that costs the caller the call.
+2. **Field names can themselves disclose.** `verify: ["policy_number"]` tells a
+   stranger the practice holds one. Names only, and the tenant chooses them.
+3. **It must not double up with the write gate.** Once identity is confirmed for
+   disclosure, `checkRequirements` on a subsequent write must see it as satisfied,
+   or the caller is asked for their date of birth twice in one call — which reads
+   as the assistant not listening, and is the LVX44 complaint in a new place.
 
 ## Call 2 of the verification round, 2026-09-04 — LVX61 and LVX59 VERIFIED
 
@@ -4902,6 +5104,58 @@ demo list in `docs/readiness.md`.
 > marketing challenge?"
 
 Four asks in one breath, on the booking path, exactly as the entry predicts.
+
+### COUNTED, not instructed — 2026-09-04
+
+**There were already SEVEN instructions**, which is the finding that decided the
+approach:
+
+| where | text |
+|---|---|
+| `services/gemini.js:906` | "One question at a time. Never stack questions." |
+| `services/gemini.js:1705` | "ONE question, not two", plus do not pair an open "how can I help you?" with a specific one |
+| `capabilities/appointments.js:597` | "ask for it one item per turn" |
+| `capabilities/appointments.js:605` | "one question at a time" |
+| `capabilities/appointments.js:628` | "Reschedule flow, one question at a time" |
+| `capabilities/quotes.js:74` | "One question at a time:" |
+| `capabilities/messages.js:83` | "one question at a time" |
+
+An eighth makes the other seven weaker. And on this front-end the prompt is
+frozen at connect (LVX46), so a prompt fix is turn-0 text that cannot be
+reinforced later even in principle.
+
+So it is counted in `auditTurn()` instead — the same place the claim guard and
+the spelling cap are counted, for the same reason: "at most once" in a prompt
+does not hold in this codebase, and a number does.
+
+- `live_reply_turns_checked` — positive twin
+- `live_stacked_questions` — more than one `?` in one assistant turn
+- `live_closing_tic` — "is there anything else…", anywhere in the turn
+
+**Counting `?` rather than matching phrasings**, on two grounds. It is exact and
+free — no model round-trip on the happy path, where reply p50 is 1.3–2.5 s. And
+it is immune to LVX73: a vendor transcription fragment that was never spoken
+cannot manufacture a question mark, where a phrasing list could be tripped by
+one. The tic regex matches WORDS and is **not** immune, which is why the two are
+separate counters rather than one "verbal tic" number.
+
+**It undercounts by construction, and that is pinned by a test.** "Can I start
+with your name, company, and what industry you're in?" is three asks and one
+question mark, so it counts zero. A conjunction parser would catch it and would
+be the phrasing treadmill this file already warns about. Recorded so nobody reads
+a low number as a fix.
+
+**No turn note is sent.** Count first; act once the counter says how often this
+fires when nothing is wrong. That is the ladder `live_claim_without_action`
+climbed, and it is why `LIVE_CLAIM_GUARD` could be left unset without losing the
+evidence.
+
+### The "anything else" tic now has a number too
+
+It closed nearly every turn of all nine calls of the 2026-09-04 round — five of
+five on one, five consecutive on another — and had never been counted, because it
+is not a defect with a victim. It is the clearest "this is not a person" signal a
+prospect gets, and it is now row 3b of readiness.md §0.
 
 ### Turn latency, measured on two real calls
 

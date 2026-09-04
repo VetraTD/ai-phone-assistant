@@ -157,3 +157,110 @@ describe("LVX74 — an id that resolves to nothing", () => {
     expect(getLatencyStats().turnTaking.write_refused_appointment_not_found).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX74's OTHER half: the model has no legitimate route to an appointment_id.
+//
+// CALLER CONTEXT renders dates and names and no ids, so every change tool
+// depends on get_caller_appointments_from_db having run first and nothing
+// enforces it. The design was pushing the model into guessing, and LVX71's
+// refusal -- which tells it to call again WITH an id -- made that pressure
+// stronger.
+//
+// The decision taken, 2026-09-04: remove the pressure rather than answer it.
+// fetchCallerContext already projects `id` onto every upcomingAppointments
+// element at call start, so when the caller has exactly one upcoming
+// appointment a change tool called with no id is unambiguous and can be
+// answered in code. Ids are NOT put in the prompt: that enlarges a prompt
+// frozen at connect (LVX46), and the only defence against the model reading a
+// UUID aloud would be a prompt rule.
+// ---------------------------------------------------------------------------
+describe("LVX74 — an appointment_id the model never had", () => {
+  it("resolves the id from the caller's own snapshot when only one is upcoming", async () => {
+    mockGetAppointmentById.mockResolvedValue(MINE);
+    mockUpdateAppointment.mockResolvedValue(true);
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc1", name: "correct_appointment_name", args: { client_name: "Marcus Bell" } },
+      ctx
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    // Acted on the caller's real row, not on anything the model invented.
+    expect(mockUpdateAppointment).toHaveBeenCalledWith(
+      "appt-mine",
+      { client_name: "Marcus Bell" },
+      "biz-1"
+    );
+    expect(getLatencyStats().turnTaking.write_appointment_id_resolved).toBe(1);
+  });
+
+  it("resolves for cancel and reschedule too, not only the name change", async () => {
+    mockGetAppointmentById.mockResolvedValue(MINE);
+    mockUpdateAppointmentStatus.mockResolvedValue(true);
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc1", name: "cancel_appointment_db", args: {} },
+      ctx
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(getLatencyStats().turnTaking.write_appointment_id_resolved).toBe(1);
+  });
+
+  it("still refuses when the caller has SEVERAL upcoming appointments", async () => {
+    // Genuinely ambiguous, so the LVX71 refusal is the right answer and is
+    // unchanged. Resolving here would pick one of the caller's appointments at
+    // random and cancel it.
+    const two = {
+      ...ctx,
+      callerContext: {
+        ...ctx.callerContext,
+        upcomingAppointments: [MINE, { ...MINE, id: "appt-second", scheduled_at: "2026-09-11T14:00:00Z" }],
+      },
+    };
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc1", name: "cancel_appointment_db", args: {} },
+      two
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(getLatencyStats().turnTaking.write_appointment_id_resolved).toBe(0);
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not substitute an id the model DID supply", async () => {
+    // Overriding an explicit instruction on a guess is a different and worse
+    // failure. The invented-id case is already answered by the not_found
+    // refusal above, which tells the model to look the appointments up.
+    mockGetAppointmentById.mockResolvedValue(null);
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc1", name: "cancel_appointment_db", args: { appointment_id: "invented" } },
+      ctx
+    );
+
+    expect(mockGetAppointmentById).toHaveBeenCalledWith("invented", "biz-1");
+    expect(functionResponse.response.success).toBe(false);
+    expect(getLatencyStats().turnTaking.write_appointment_id_resolved).toBe(0);
+  });
+
+  it("does not widen ownership — identity still runs on the resolved id", async () => {
+    // The snapshot is keyed on the caller's own number and cannot contain
+    // anyone else's rows, but the check must not be skipped on that argument.
+    mockGetAppointmentById.mockResolvedValue({
+      ...MINE,
+      client_phone: "+15550001111",
+      client_name: "Someone Else",
+    });
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc1", name: "cancel_appointment_db", args: {} },
+      ctx
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+  });
+});

@@ -2152,7 +2152,7 @@ function identityMismatchResult(fc, reason = "not_owner") {
 async function cancelAppointment(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
-  const appointmentId = fc.args?.appointment_id || scratch(ctx).selectedAppointmentId;
+  const appointmentId = resolveAppointmentId(ctx, fc.args?.appointment_id);
   if (!appointmentId) {
     return {
       functionResponse: {
@@ -2260,12 +2260,76 @@ async function cancelAppointment(fc, ctx) {
  * proving the appointment is theirs. That ordering matters here more than
  * anywhere: the name is the thing under dispute.
  */
+/**
+ * The appointment_id a change tool should act on.
+ *
+ * LVX74. The model has no legitimate route to an appointment_id: CALLER CONTEXT
+ * renders dates and names and NO ids (services/gemini.js buildCallerContextSection),
+ * so the only source of a real one is get_caller_appointments_from_db, and
+ * nothing enforces that it ran. On the call that found this, none had, the model
+ * supplied something anyway, the row was not found, and the caller was told
+ * their own appointment was not booked under their number.
+ *
+ * The design was PUSHING it into guessing, and LVX71's refusal -- which now
+ * tells it to call again WITH an appointment_id -- made that pressure stronger.
+ *
+ * The fix is to remove the pressure rather than to answer it. The ids are
+ * already loaded: services/db.js fetchCallerContext projects `id` onto every
+ * upcomingAppointments element at call start, and this file already reads that
+ * array in upcomingForCaller() and whichAppointmentMessage(). When the caller
+ * has exactly one upcoming appointment, a change tool called with no id is
+ * unambiguous, and answering it in code removes a whole round-trip the caller
+ * would otherwise wait through -- whichAppointmentMessage currently hands the
+ * id back and asks the model to call again with it.
+ *
+ * TWO THINGS THIS DELIBERATELY DOES NOT DO.
+ *
+ * It does not touch a SUPPLIED id. Substituting one would mean overriding an
+ * explicit instruction on a guess, and the case where the model invents an id
+ * is already handled correctly by the not_found refusal, which tells it to look
+ * the appointments up. Only a MISSING id is filled in.
+ *
+ * It does not widen ownership. The snapshot is keyed on the caller's own phone
+ * number and can only contain that number's rows, and verifyAppointmentIdentity
+ * still runs on whatever comes back and still fails closed.
+ *
+ * Ids are not put in the prompt. That was the other candidate and it is worse:
+ * it enlarges a prompt frozen at connect (LVX46), and the only defence against
+ * the model reading a UUID aloud would be a prompt rule -- the class of thing
+ * this codebase keeps finding does not hold.
+ *
+ * @param {object} ctx - tool context, for the caller snapshot and scratchpad
+ * @param {string|undefined} suppliedId - fc.args.appointment_id, if any
+ * @param {string|null} [extraFallback] - a tool-specific scratchpad id, checked
+ *   after selectedAppointmentId to preserve each site's existing precedence
+ * @returns {string|null}
+ */
+function resolveAppointmentId(ctx, suppliedId, extraFallback = null) {
+  if (suppliedId) return suppliedId;
+
+  const scratched = scratch(ctx).selectedAppointmentId || extraFallback || null;
+  if (scratched) return scratched;
+
+  const upcoming = upcomingForCaller(ctx);
+  if (upcoming.length === 1 && upcoming[0]?.id) {
+    // The positive counter for this family. write_refused_appointment_not_found
+    // is the fault half; without this one, a call where the model always
+    // supplied a good id and a call where this resolver never ran read the same.
+    bumpCounter("write_appointment_id_resolved");
+    return upcoming[0].id;
+  }
+  return null;
+}
+
 async function correctAppointmentName(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
   const clientName = typeof fc.args?.client_name === "string" ? fc.args.client_name.trim() : "";
-  const appointmentId =
-    fc.args?.appointment_id || scratch(ctx).selectedAppointmentId || scratch(ctx).lastBooked?.id;
+  const appointmentId = resolveAppointmentId(
+    ctx,
+    fc.args?.appointment_id,
+    scratch(ctx).lastBooked?.id || null
+  );
 
   if (!clientName || !appointmentId) {
     const message = !clientName
@@ -2344,7 +2408,7 @@ async function correctAppointmentName(fc, ctx) {
 async function rescheduleAppointment(fc, ctx) {
   if (!ctx?.businessId) return noBusinessResult(fc);
 
-  const appointmentId = fc.args?.appointment_id || scratch(ctx).selectedAppointmentId;
+  const appointmentId = resolveAppointmentId(ctx, fc.args?.appointment_id);
   const newScheduledAt = fc.args?.new_scheduled_at;
 
   if (!appointmentId || !newScheduledAt) {
