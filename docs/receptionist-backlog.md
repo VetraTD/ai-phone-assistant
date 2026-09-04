@@ -31,6 +31,7 @@ Status means:
 
 | | what it is | status |
 |---|---|---|
+| **LVX66** | it invents FACTS about the business — a service, an insurer — and says it confirmed them | **OPEN · P0 — worst found** |
 | **LVX61** | it called tomorrow "today", with the correct date in its prompt | **OPEN · P0** |
 | **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **OPEN · P0** — root cause found, call 3 |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
@@ -51,7 +52,8 @@ Status means:
 | **LVX63** | an off-domain request is absorbed into the booking flow, not declined | **OPEN · P1** |
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **OPEN · P1** — third instance, see LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **OPEN · P1** |
-| **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P1** |
+| **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P0** — same class as LVX66, upgraded |
+| **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **OPEN · P2** |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
@@ -2289,6 +2291,113 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 6 of the clean-slate round, 2026-09-03 — it invented an insurance provider
+
+The awkward call: interruptions, frustration, disfluency, an edge-case service
+question. **No writes, `verdict: ok`** — and two fabrications neither the guards
+nor the reconciler can see.
+
+### LVX66 · It invents FACTS about the business, and says it confirmed them `[gcp]` · **P0 — the most serious defect found in this round**
+
+Two on one call.
+
+> turn 3: "I don't believe we provide Invisalign right now. However, **we do
+> offer clear aligners**, which can achieve similar results."
+
+> turn 4: "**I've confirmed** we accept Blue Cross Blue Shield."
+
+Checked against the tenant. `general_info` reads, in full:
+
+> "Brightwork Family Dental is a general and family dental practice. We handle
+> check-ups, cleanings, fillings, crowns and emergency toothache appointments. We
+> do not give medical or dental advice over the phone."
+
+`custom_instructions` is null. The strings "aligner", "invisalign", "insurance",
+"blue cross" and "provider" appear **nowhere** in the configuration. No tool ran
+on either turn.
+
+**The aligner answer is also self-refuting**: clear aligners are what Invisalign
+is, so it declined a service and offered the same service in the next sentence.
+
+**The insurance one is the worst outcome this system has produced.** It is a
+financial statement about a third party, invented, and prefixed with "I've
+confirmed" — language that tells the caller a check was performed. A caller acts
+on it: they attend, they present a card, and the practice absorbs the
+consequence. It is worse than a fabricated booking, because a missing appointment
+is discovered at the front desk and a rejected claim is discovered weeks later,
+by the patient.
+
+**Nothing caught it, and the reason is structural rather than an oversight.**
+`postcall_verify` returned `verdict: ok, claims: 0` and was correct by its own
+rules. Everything built for LVX27 — `completionClaimRe`, the claim ledger, the
+write ledger, `live_claim_without_action`, `postcall_claim_without_row` — detects
+claims that an **ACTION COMPLETED**. These are claims about **FACTS**. There is
+no ledger for "things the assistant asserted about the business", and no
+comparison against the only source of truth (`general_info`, the knowledge
+table, the capability config).
+
+LVX59 on call 3 — inventing that an appointment was "for a checkup and cleaning"
+— is the same class, and was filed P1 on the strength of a small example. **The
+class is P0.** The severity is set by what a caller does with the invention, and
+the range runs from a wrong expectation to a wrong financial decision.
+
+**Done when:** decided. The honest options are unequal and none is cheap: refuse
+every factual question the configuration does not answer (safe, and makes the
+assistant much less useful); ground answers in the knowledge table and refuse
+outside it (correct, and needs the table populated per tenant); or detect
+assertions about the business the way completions are detected (a new ledger, and
+the same regex limits that made LVX57 miss half its cases).
+
+### LVX67 · The same question gets opposite answers on different calls `[gcp]` · P1
+
+> call 3, turn 3: "What can I expect at that appointment?"
+> → "Usually, for a first appointment, it'll start with a checkup from the
+> dentist and maybe a cleaning."
+
+> call 6, turn 6: "But what can I expect from that appointment?"
+> → "I'm not able to provide medical or dental advice. Would you like to leave a
+> message…?"
+
+Same tenant, same question, opposite handling, three hours apart. The second is
+also wrong on its merits — describing what happens at a check-up is not clinical
+advice, and refusing it makes the assistant useless for the commonest question a
+new patient asks.
+
+This is the non-determinism the whole test method is built around, showing up in
+the SUBSTANCE rather than the phrasing. It is also why one call is never
+evidence: either call alone would have supported a confident and wrong conclusion
+about how the boundary behaves.
+
+### The instrument was blind to the call it was made for
+
+`live_call_summary` reports **13 turns**. `live_debug_assistant_turn` fired
+**6 times**. Seven turns are unrecorded.
+
+The cause is known and is the LVX36 family: `debugTranscript` runs from
+`auditTurn`, `auditTurn` runs on `turnComplete`, and an INTERRUPTED turn never
+completes. This call had **5 barge-ins** — it was the call designed around
+interruption — so more than half of it left no record.
+
+**Worth stating as a standing limitation**, because it silently biases every
+analysis: the transcript over-represents turns the caller let finish. A defect
+that only occurs when the caller interrupts is currently invisible.
+
+### What went right, and one uncomfortable observation
+
+**Barge-in was flawless**: 5 interruptions, 5 clean stops,
+`interrupted_without_local_barge: 0`. It stopped every single time.
+
+It absorbed a badly disfluent turn ("That That honestly feels pretty good, but I
+kind of just want to know what appointments I have What Sorry…") and answered
+correctly. It read the appointment back accurately. It responded to open
+frustration without defensiveness. It wrote nothing. Reply p50 1,682 ms, the best
+of the round.
+
+**And that is the uncomfortable part.** On the call where it invented a service
+and an insurance provider, it was also at its most fluent, most responsive and
+most reassuring. The form was excellent while the substance was made up — which
+is precisely the combination a prospect cannot detect and a patient acts on.
 
 ## Call 5 of the clean-slate round, 2026-09-03 — LVX33 VERIFIED on a human call
 
