@@ -57,10 +57,29 @@ describe("buildLiveTools", () => {
     expect(declared.map((d) => d.name)).toEqual(callToolNames(APPOINTMENTS_CONFIG, EXTRAS));
   });
 
-  it("declares eleven for an appointments business", () => {
+  // Ten and eleven, not "at least ten". The count is the assertion, for the
+  // reason in the header: presence checks are what hid the duplicate bookings.
+  //
+  // The pair is new on 2026-09-04 and the DIFFERENCE is the whole point.
+  // record_sms_consent is now withheld from a tenant that cannot send texts at
+  // all -- because on a real call to exactly such a tenant the assistant opened
+  // by asking for SMS consent, the tool failed twice, and the caller's confused
+  // "Hello." was read as an answer (LVX52). Asserting both numbers means a
+  // future change cannot quietly restore the tool for the tenants it was taken
+  // away from, nor remove it from the ones that use it.
+  it("declares ten for an appointments business that cannot text", () => {
     const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS)[0].functionDeclarations;
 
+    expect(declared).toHaveLength(10);
+    expect(declared.map((d) => d.name)).not.toContain("record_sms_consent");
+  });
+
+  it("declares eleven once that business can text", () => {
+    const texting = { ...APPOINTMENTS_CONFIG, smsFollowupEnabled: true };
+    const declared = buildLiveTools(texting, EXTRAS)[0].functionDeclarations;
+
     expect(declared).toHaveLength(11);
+    expect(declared.map((d) => d.name)).toContain("record_sms_consent");
   });
 
   it("includes the availability check, whose absence is what broke rounds 1 and 2", () => {

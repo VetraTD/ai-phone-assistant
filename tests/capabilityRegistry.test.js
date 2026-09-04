@@ -80,14 +80,50 @@ describe("capability registry — pack contract", () => {
     expect(packForTool("no_such_tool")).toBeNull();
   });
 
-  it("core packs register their tools regardless of configuration", () => {
-    const empty = collectTools({ allowedTasks: [] }).map((d) => d.name);
+  it("core packs register their tools regardless of the operator's module toggles", () => {
+    // allowedTasks is the operator's module switch, and a core pack ignores it.
+    // smsFollowupEnabled is a different kind of fact -- whether the business can
+    // send a text at all -- and is set here so this asserts the contract rather
+    // than the exception below it.
+    const empty = collectTools({ allowedTasks: [], smsFollowupEnabled: true }).map((d) => d.name);
     for (const pack of listPacks()) {
       if (!pack.core) continue;
       for (const name of pack.toolNames) {
         expect(empty, `core pack ${pack.id} must always register ${name}`).toContain(name);
       }
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // The amendment, 2026-09-04, and both halves of it.
+  //
+  // A core pack may withhold a tool for an action the tenant is PHYSICALLY
+  // UNABLE to perform. That is not the same as a capability being switched off,
+  // and the distinction is what keeps the original contract intact.
+  //
+  // The first version of this change was reverted for breaking that contract,
+  // and "register always, refuse in execute()" was the compromise. It did not
+  // work: on a real call to a tenant with texting off, the assistant OPENED by
+  // asking for SMS consent, record_sms_consent failed twice, and the caller's
+  // confused "Hello." was read as an answer. The prompt already said "You
+  // cannot send text messages on this line" and the model raised it anyway.
+  //
+  // The contract's actual purpose -- never let the prompt name a tool that does
+  // not exist -- is preserved, and the second test is what proves it rather
+  // than asserting it. See LVX52.
+  // ---------------------------------------------------------------------------
+  it("a core pack may withhold a tool the tenant cannot possibly use", () => {
+    const names = collectTools({ allowedTasks: [], smsFollowupEnabled: false }).map((d) => d.name);
+    expect(names).not.toContain("record_sms_consent");
+  });
+
+  it("and when it does, the prompt does not name it either", () => {
+    const off = getPack("sms_consent").prompt({ smsFollowupEnabled: false });
+    const rendered = JSON.stringify(off);
+    expect(rendered).not.toContain("record_sms_consent");
+    // It still says what it cannot do, which is the half that stops the model
+    // improvising "I'll text you that" with no tool anywhere in sight.
+    expect(rendered).toContain("cannot send text messages");
   });
 
   it("non-core packs register nothing when their module is not allowed", () => {

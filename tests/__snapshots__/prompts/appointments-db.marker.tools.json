@@ -101,22 +101,6 @@
     }
   },
   {
-    "name": "record_sms_consent",
-    "description": "Record whether the caller agreed to receive a text message. Call this immediately after asking the text-confirmation question, with granted=true if they said yes and granted=false if they said no. Never send or promise a text before this has returned success.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "granted": {
-          "type": "boolean",
-          "description": "true if the caller agreed to be texted, false if they declined"
-        }
-      },
-      "required": [
-        "granted"
-      ]
-    }
-  },
-  {
     "name": "check_appointment_availability",
     "description": "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller names a time OR a day. Given a date and time it answers whether that slot is open, and if available is false you offer the returned alternatives instead of collecting details. Given just a date it returns the times open that day: offer open_times first, and if the caller wants something else that day, offer from all_open_times. Never tell a caller nothing else is available while all_open_times still has times in it. Let them choose — never choose for them.",
     "parameters": {

@@ -37,6 +37,15 @@ export const FIXTURES = {
       _hasCustomGreeting: true,
       timezone: "America/Chicago",
       businessHours: WEEKLY_HOURS,
+      // The ONE archetype that texts, added 2026-09-04 with LVX52.
+      //
+      // record_sms_consent is now withheld from a tenant that cannot send texts
+      // at all, and none of these five fixtures set the flag -- so without this
+      // line, regenerating the snapshots would silently delete every trace of
+      // that declaration and its protocol section from the golden files, and
+      // the drift guard would have nothing left to guard. A clinic that texts
+      // appointment confirmations is also the realistic shape for it.
+      smsFollowupEnabled: true,
       transferPhoneNumber: "+15551230000",
       allowedTasks: normalizeAllowedTasks([
         "book_appointment",

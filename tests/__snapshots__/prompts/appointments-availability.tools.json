@@ -65,11 +65,16 @@
         "in_addition_to_existing": {
           "type": "boolean",
           "description": "Set true ONLY after you have told the caller they already have an upcoming appointment and they confirmed they want this new one AS WELL AS that one. Never set it pre-emptively — booking is refused without it when the caller already has an appointment."
+        },
+        "identity_dob": {
+          "type": "string",
+          "description": "date of birth, as given by the caller. Required — the action will be refused without it."
         }
       },
       "required": [
         "scheduled_at",
-        "client_name"
+        "client_name",
+        "identity_dob"
       ]
     }
   },
@@ -122,22 +127,6 @@
       },
       "required": [
         "reason"
-      ]
-    }
-  },
-  {
-    "name": "record_sms_consent",
-    "description": "Record whether the caller agreed to receive a text message. Call this immediately after asking the text-confirmation question, with granted=true if they said yes and granted=false if they said no. Never send or promise a text before this has returned success.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "granted": {
-          "type": "boolean",
-          "description": "true if the caller agreed to be texted, false if they declined"
-        }
-      },
-      "required": [
-        "granted"
       ]
     }
   },

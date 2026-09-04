@@ -23,9 +23,7 @@ import {
   buildSystemInstruction,
   buildStaticSystemPrefix,
   buildDynamicTail,
-  buildCallTools,
-  buildIntegrationTools,
-  buildDbAppointmentTools,
+  buildAllDeclarations,
 } from "../services/gemini.js";
 import { FIXTURES } from "./fixtures/businessConfigs.js";
 
@@ -75,13 +73,21 @@ describe("golden prompt snapshots — must not move during the capability-packs 
       }
 
       it("tool declarations are byte-identical", async () => {
-        // Assembled exactly as getReplyStreaming does (services/gemini.js:947-955)
-        // so the snapshot covers the real merged tool list, not the pieces.
-        const declarations = [
-          ...(buildCallTools(config.allowedTasks).functionDeclarations || []),
-          ...(buildIntegrationTools(extras.integrations, config).functionDeclarations || []),
-          ...(buildDbAppointmentTools(config, extras).functionDeclarations || []),
-        ];
+        // buildAllDeclarations, which is what production actually calls.
+        //
+        // This used to re-assemble the three builders by hand and pass
+        // `config.allowedTasks` -- an ARRAY -- where production passes the whole
+        // config. That divergence was invisible for as long as every pack
+        // ignored the config object, and it stopped being invisible on
+        // 2026-09-04: record_sms_consent is now withheld from a tenant that
+        // cannot text, the harness handed the pack an array with no
+        // smsFollowupEnabled on it, and the declaration vanished from all five
+        // archetypes at once -- including the one deliberately given texting to
+        // keep covering it.
+        //
+        // A snapshot that assembles the thing itself is not a snapshot of the
+        // thing. Calling the same function production calls is the fix.
+        const declarations = buildAllDeclarations(config, extras);
         await expect(JSON.stringify(declarations, null, 2)).toMatchFileSnapshot(
           `${SNAP_DIR}/${name}.tools.json`
         );
@@ -120,11 +126,10 @@ describe("golden prompt snapshots — marker mode (VOICE_INTENT_MARKER)", () => 
       }
 
       it("tool declarations are byte-identical", async () => {
-        const declarations = [
-          ...(buildCallTools(config.allowedTasks, { markerMode: true }).functionDeclarations || []),
-          ...(buildIntegrationTools(extras.integrations, config).functionDeclarations || []),
-          ...(buildDbAppointmentTools(config, extras).functionDeclarations || []),
-        ];
+        // Same correction as the non-marker block above: production's own
+        // function, with the whole config, not a hand-assembled copy fed an
+        // allowedTasks array.
+        const declarations = buildAllDeclarations(config, extras, true);
         await expect(JSON.stringify(declarations, null, 2)).toMatchFileSnapshot(
           `${SNAP_DIR}/${name}.marker.tools.json`
         );
@@ -209,12 +214,10 @@ describe("prompt structure invariants the refactor must preserve", () => {
     // duplicate name becomes a dispatch ambiguity rather than a harmless
     // shadow. Lock the invariant in now.
     for (const [name, fx] of Object.entries(FIXTURES)) {
-      const declarations = [
-        ...(buildCallTools(fx.config.allowedTasks).functionDeclarations || []),
-        ...(buildIntegrationTools(fx.extras.integrations, fx.config).functionDeclarations || []),
-        ...(buildDbAppointmentTools(fx.config, fx.extras).functionDeclarations || []),
-      ];
-      const names = declarations.map((d) => d.name);
+      // Production's own union, for the same reason as the snapshots above: a
+      // hand-assembled copy fed an allowedTasks array is not the list any call
+      // actually declares.
+      const names = buildAllDeclarations(fx.config, fx.extras).map((d) => d.name);
       expect(new Set(names).size, `${name}: ${names.join(", ")}`).toBe(names.length);
     }
   });

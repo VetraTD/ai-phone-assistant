@@ -95,22 +95,52 @@ export default {
   actionTools: [],
 
   /**
-   * REGISTERED UNCONDITIONALLY, then refused at EXECUTION time when the tenant
-   * does not send caller texts — the same shape transfer.js uses, and for a
-   * related reason.
+   * Registered for every tenant that CAN text, and withheld from one that
+   * cannot. Changed 2026-09-04, reversing an earlier decision on purpose.
    *
-   * The first version gated registration on `smsFollowupEnabled`, which broke
-   * the core-pack contract ("core packs register their tools regardless of
-   * configuration") and was caught by tests/capabilityRegistry.test.js. That
-   * contract exists because a prompt referring to an unregistered tool is the
-   * phantom-tool bug messages.js was made core to kill. Registering always and
-   * deciding in execute() satisfies it without a per-tenant fork in the
-   * registry.
+   * ---------------------------------------------------------------------------
+   * Why the earlier decision was reversed rather than worked around
+   * ---------------------------------------------------------------------------
    *
-   * The PROMPT still forks, and that is where the tenant's switch is honoured.
+   * The first version gated registration on `smsFollowupEnabled` and was
+   * reverted for breaking "core packs register their tools regardless of
+   * configuration". That contract is real and its reason is real: a prompt that
+   * refers to an unregistered tool is the phantom-tool bug messages.js was made
+   * core to kill.
+   *
+   * Registering always and refusing in execute() satisfied the letter of it and
+   * did not work. On a real call to a tenant with texting OFF, the assistant
+   * opened with it -- the caller's first substantive turn was spent on "would
+   * it be okay if we sent you text messages regarding your appointment?" --
+   * record_sms_consent failed twice, and the caller's baffled "Hello." was read
+   * as an answer to the consent question. On an earlier call it narrated the
+   * discovery mid-sentence: "Actually, my mistake, we can't send texts."
+   *
+   * The prompt fork below already says "You cannot send text messages on this
+   * line", and the model raised it anyway. A tool the model does not have is a
+   * tool it cannot raise; that is the only version of this that holds, and it is
+   * the same doctrine as everything else in this repository -- a prompt line is
+   * a request, never a guarantee.
+   *
+   * ---------------------------------------------------------------------------
+   * The contract, amended
+   * ---------------------------------------------------------------------------
+   *
+   * A core pack still ignores `allowedTasks`: the operator's module toggles
+   * cannot strip it. What it may now do is withhold a tool for an action the
+   * tenant is PHYSICALLY UNABLE to perform, which is a different question from
+   * a capability being switched off.
+   *
+   * The phantom-tool risk does not apply, and that is checkable rather than
+   * asserted: when the tool is withheld the prompt does not mention it either --
+   * the fork below emits a guardrail saying texting is unavailable and nothing
+   * that names record_sms_consent. Both halves are pinned in
+   * tests/capabilityRegistry.test.js.
+   *
+   * The execution refusal stays as defence in depth.
    */
-  tools() {
-    return [RECORD_SMS_CONSENT_DECLARATION];
+  tools(config) {
+    return config?.smsFollowupEnabled ? [RECORD_SMS_CONSENT_DECLARATION] : [];
   },
 
   prompt(config) {

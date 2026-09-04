@@ -116,15 +116,21 @@ describe("session start", () => {
     expect(database.lookupBusinessByPhone).toHaveBeenCalledWith("+441372656055");
   });
 
-  it("declares all eleven tools on the session", async () => {
+  it("declares all ten tools this tenant can use on the session", async () => {
     // The single most expensive mistake available here. Rounds 1 and 2
     // declared six and measured a receptionist that could not check
     // availability.
     const { live } = await boot();
     const names = live.sent.config.tools[0].functionDeclarations.map((d) => d.name);
 
-    expect(names).toHaveLength(11);
+    // TEN, not eleven, since 2026-09-04. This fixture is Digile Media, whose
+    // sms_followup_enabled is false, and record_sms_consent is now withheld
+    // from a tenant that cannot text at all -- it opened a real call by asking
+    // for SMS consent it could never act on (LVX52). The count is still the
+    // assertion; what it counts is now the tools this tenant can actually use.
+    expect(names).toHaveLength(10);
     expect(names).toContain("check_appointment_availability");
+    expect(names).not.toContain("record_sms_consent");
   });
 
   it("uses the production system prompt, not a stand-in", async () => {

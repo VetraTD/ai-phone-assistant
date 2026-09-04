@@ -36,7 +36,7 @@ Status means:
 | **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **FIXED, UNVERIFIED** — whole week in the static prefix |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **FIXED, UNVERIFIED** — every action tool, no exception |
 | **LVX57** | the claim detector misses HALF the claims actually made | **FIXED, UNVERIFIED** — all four observed phrasings, limits written down |
-| **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
+| **LVX53** | a name from the record written to a booking the caller never said | **FIXED, UNVERIFIED** — per-call provenance; the durable column is deferred, see below |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **FIXED, UNVERIFIED** — script check, write + note |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **FIXED, UNVERIFIED** — second trigger on the assistant read-back |
@@ -56,7 +56,7 @@ Status means:
 | **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **FIXED, UNVERIFIED** — the prompt was ordering it |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
-| **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
+| **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **FIXED, UNVERIFIED** — the tool is no longer declared for a tenant that cannot text |
 | **LVX54** | it addresses the caller as "user" when it has no name yet | **FIXED, UNVERIFIED** |
 | **LVX49** | rescheduling bypasses the availability invariant | **FIXED, UNVERIFIED** — reschedule is in the map and counted |
 | **LVX47** | appointments revealed one at a time instead of all at once | **NOT REPRODUCED** on call 5 — listed both together |
@@ -66,7 +66,7 @@ Status means:
 | **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
 | **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
 | **LVX25** | three or four questions in one breath | **OPEN · P1** — reproduced twice on one call |
-| **LVX28** | a name "already on file" is trusted though it was never spelled | **OPEN · P1** — now observed, see LVX53 |
+| **LVX28** | a name "already on file" is trusted though it was never spelled | **PARTLY CLOSED** — the bypass now needs the caller; the row itself still carries no provenance |
 | **LVX51** | the greeting plays twice | **PROBABLY NOT REAL** — likely this session's own health check in the log |
 | **LVX43** | the reworded spelling gate has never had an eval band (~$20) | **OPEN · P2** |
 | **LVX38** | four parallel queries on one Postgres client | **OPEN · P2** |
@@ -83,6 +83,40 @@ they sat in a conversation for an hour before anybody wrote them down.
 expensive state on this page, because it looks finished from the commit log. A
 regex over caller phrasing was always going to be the weak version of that fix;
 it missed on the first two calls after shipping.
+
+## 2026-09-04 — LVX53 is closed for the CALL, not for the ROW
+
+Deliberate, and the gap is worth stating rather than leaving for someone to
+discover.
+
+The defect is closed where it was observed. `shouldConfirmSpelling`
+(`lib/nameQuality.js`) no longer lets a name that is already on file silence the
+spelling gate unless the CALLER said that name on this call — which is exactly
+what did not happen on 2026-09-03, when the caller was never intelligibly
+transcribed and the model lifted "Nithin Vodla" off an existing row.
+
+**Note where the silence actually came from**, because the entry guessed and the
+guess was close but not right. It was not `callerHasNameOnFile` — that gates the
+prompt block, in `services/gemini.js`. It was `shouldConfirmSpelling` returning
+`false` for any name already on file, on the reasoning *"the record IS the
+spelling — the business has had it right since the last call"*. Sound for a
+caller who names themselves and is recognised; wrong when the name did not come
+from the caller at all.
+
+What is NOT done is the entry's own **Done when**: *a name's provenance travels
+with it — a row written without a confirmed spelling cannot serve as "on file"
+for the next call.* That needs a column (`appointments.name_source`:
+`spelled` | `heard` | `on_file`), a migration, and changes to the projection,
+RLS and the dashboard mirror. It is the only schema change this round would have
+required and it was left out on purpose, so the per-call gate could be verified
+on a real call by itself rather than bundled with a migration.
+
+**The residue is real.** The two `Nithin Vodla` rows already in the local
+database still look equally authoritative, and a row written today from a
+mis-hearing is still trusted by every later call on which the caller does happen
+to say that name. The gate stops a name being taken FROM the record; it does not
+make the record honest about where it came from. LVX28 is downgraded to PARTLY
+CLOSED for that reason, not closed.
 
 ## 2026-09-04 — three things established by reading, before any call
 

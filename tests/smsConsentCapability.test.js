@@ -30,10 +30,30 @@ function makeCtx(overrides = {}) {
 const fc = (granted) => ({ id: "fc1", name: "record_sms_consent", args: { granted } });
 
 describe("sms_consent pack — registration", () => {
-  it("registers its tool regardless of configuration (the core-pack contract)", () => {
-    expect(pack.tools(DISABLED).map((t) => t.name)).toEqual(["record_sms_consent"]);
+  // REVERSED 2026-09-04, deliberately. This used to assert that the tool was
+  // registered for a tenant that cannot text, on the core-pack contract
+  // ("register always, refuse in execute()"). That satisfied the contract and
+  // did not work: on a real call to a tenant with texting off the assistant
+  // OPENED by asking for SMS consent, record_sms_consent failed twice, and the
+  // caller's baffled "Hello." was read as an answer to the consent question.
+  // On an earlier call it narrated the discovery mid-sentence -- "Actually, my
+  // mistake, we can't send texts."
+  //
+  // The prompt fork already said "You cannot send text messages on this line"
+  // and the model raised it anyway. A tool the model does not have is a tool it
+  // cannot raise. See LVX52, and the amended contract in
+  // tests/capabilityRegistry.test.js.
+  it("is withheld from a tenant that cannot send texts at all", () => {
+    expect(pack.tools(DISABLED)).toEqual([]);
+  });
+
+  it("is registered for a tenant that can", () => {
     expect(pack.tools(ENABLED).map((t) => t.name)).toEqual(["record_sms_consent"]);
   });
+
+  // The execution-time refusal stays as defence in depth and keeps its own
+  // test further down this file ("sms_consent pack — execute"). Withholding the
+  // declaration is the fix; refusing the call is the belt.
 
   it("is not an action tool — agreeing to a text must not unlock a same-turn hangup", () => {
     expect(pack.actionTools).toEqual([]);

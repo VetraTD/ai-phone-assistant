@@ -100,22 +100,6 @@
     }
   },
   {
-    "name": "record_sms_consent",
-    "description": "Record whether the caller agreed to receive a text message. Call this immediately after asking the text-confirmation question, with granted=true if they said yes and granted=false if they said no. Never send or promise a text before this has returned success.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "granted": {
-          "type": "boolean",
-          "description": "true if the caller agreed to be texted, false if they declined"
-        }
-      },
-      "required": [
-        "granted"
-      ]
-    }
-  },
-  {
     "name": "open_case_file",
     "description": "Open a new case file in the practice management system.",
     "parameters": {

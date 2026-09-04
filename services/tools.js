@@ -446,6 +446,10 @@ export async function executeToolCall(fc, ctx) {
               callerContext: ctx?.callerContext,
               spellingSettled: ctx?.spellingSettled,
               policy: spellPolicy(),
+              // LVX53: an on-file name only silences the gate when the CALLER
+              // said it on this call. Absent on the cascade, which threads no
+              // transcript, so the bypass there is unchanged.
+              callerSaidThisCall: ctx?.callerSaidThisCall ?? null,
             })
           ) {
             // Worded as an unfinished step, not a failure. LVX34: the model

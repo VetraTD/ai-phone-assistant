@@ -106,9 +106,13 @@ describe("LVX23 bisect arms", () => {
     delete process.env.LIVE_PROMPT;
   });
 
-  it("arm 0 is unchanged: the full prompt and all eleven tools", async () => {
+  it("arm 0 is unchanged: the full prompt and every tool this tenant has", async () => {
     const cfg = await boot();
-    expect(declaredNames(cfg)).toHaveLength(11);
+    // Ten since 2026-09-04: this fixture is Digile Media, which cannot text, and
+    // record_sms_consent is withheld from a tenant that cannot use it (LVX52).
+    // The arm is still "unchanged" -- what changed is the tenant's tool set,
+    // not this arm's treatment of it.
+    expect(declaredNames(cfg)).toHaveLength(10);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 
@@ -118,9 +122,9 @@ describe("LVX23 bisect arms", () => {
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 
-  it("arm 2 keeps all eleven tools and shrinks only the prompt", async () => {
+  it("arm 2 keeps every tool and shrinks only the prompt", async () => {
     const cfg = await boot({ LIVE_PROMPT: "minimal" });
-    expect(declaredNames(cfg)).toHaveLength(11);
+    expect(declaredNames(cfg)).toHaveLength(10);
     expect(instruction(cfg).length).toBeLessThan(2_000);
   });
 
@@ -140,7 +144,7 @@ describe("LVX23 bisect arms", () => {
     process.env.LIVE_TOOLS = "none";
     process.env.LIVE_PROMPT = "minimal";
     const cfg = await boot({});
-    expect(declaredNames(cfg)).toHaveLength(11);
+    expect(declaredNames(cfg)).toHaveLength(10);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 });
