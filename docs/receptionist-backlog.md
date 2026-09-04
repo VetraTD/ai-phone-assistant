@@ -43,7 +43,8 @@ Status means:
 | **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
-| **LVX52** | it narrates its own tool failures to the caller | **OPEN · P1** |
+| **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
+| **LVX54** | it addresses the caller as "user" when it has no name yet | **OPEN · P1** |
 | **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
 | **LVX47** | appointments revealed one at a time instead of all at once | **OPEN · P1** |
 | **LVX46** | the Live prompt is frozen at connect — a vendor constraint | **OPEN · P1** |
@@ -53,7 +54,7 @@ Status means:
 | **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
 | **LVX25** | three or four questions in one breath | **OPEN · P1** — reproduced twice on one call |
 | **LVX28** | a name "already on file" is trusted though it was never spelled | **OPEN · P1** — now observed, see LVX53 |
-| **LVX51** | the greeting plays twice | **OPEN · P2** |
+| **LVX51** | the greeting plays twice | **PROBABLY NOT REAL** — likely this session's own health check in the log |
 | **LVX43** | the reworded spelling gate has never had an eval band (~$20) | **OPEN · P2** |
 | **LVX38** | four parallel queries on one Postgres client | **OPEN · P2** |
 | **LVX41** | an outbound leak fired once with marker mode off | **NOT REPRODUCED** in seven calls |
@@ -2277,6 +2278,121 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 1 of the clean-slate round, 2026-09-03 — the core path holds
+
+First call after clearing the database: no appointments, no call history, no name
+on file. A genuine first-time caller, which is the state the spelling gate was
+designed for and had not been tested in.
+
+**The booking is correct in every field.**
+
+```
+name    "Nithin Dodla"      <- the CORRECTED spelling
+phone   +14699338887        from caller ID
+when    Fri 4 Sep 15:30 America/Chicago
+notes   "dental appointment"
+call_id set
+```
+
+`postcall_verify`: `booked_rows 1, claims 2, verdict ok`. The caller asked
+outright — *"the appointment is confirmed and booked, correct?"* — and the yes
+was true.
+
+### LVX34 and LVX40 VERIFIED again, on the case that matters most
+
+This is stronger evidence than the run that first verified them, because the
+caller had **no name on file** — so `shouldConfirmSpelling` was armed rather than
+short-circuited by `callerHasNameOnFile`, which is what silenced it on every
+earlier call.
+
+What happened, in order: the caller said "Nathan Dodla", the model attempted
+`book_appointment`, **the gate refused it** (`tool_duration book_appointment
+success:false`), the model asked for the spelling and waited, the caller spelled
+`n i t h i n d o d l a`, and **the letters won** — the second
+`book_appointment` succeeded and the row reads "Nithin Dodla".
+
+That is the whole mechanism working end to end against a real mis-hearing: gate
+refuses, model asks instead of deferring, spelling overrides what was heard, row
+is right.
+
+**And the spelling landed at a reasonable moment** — one turn after the name,
+before the booking was announced. Note carefully that **LVX44's nudge did not
+fire**: the caller said "let's do uh Nathan Dodla", which `nameGivenRe` cannot
+match. The good timing came from the GATE, not from the fix. See LVX44.
+
+### LVX54 · It calls the caller "user" `[gcp]` · P1
+
+Turn 7, verbatim:
+
+> "**user?** Did you still want to book that appointment for three thirty p m
+> tomorrow? I just need a name to put it under."
+
+**Backend vocabulary spoken to a caller.** It happened at the one moment in the
+call when it had no name yet and was trying to address them; from turn 11 onward,
+once it had one, it says "Nithin".
+
+**No guard can catch this and that is the point.** `internal_term_leaks` and
+`sanitizeOutbound` key on structural syntax and a list of implementation words —
+`api`, `webhook`, `supabase`, snake_case identifiers. `user` is an ordinary
+English word in an ordinary English sentence. Pattern matching cannot separate
+"user?" addressed to a caller from a legitimate use of the word.
+
+So the fix is upstream, not in the guard: the model should have a form of address
+to fall back on when it has no name, and it clearly does not.
+
+**Done when:** a caller who has not yet given a name is never addressed by a
+placeholder.
+
+### LVX52 reproduced, and worse than recorded
+
+The entry says the model raised SMS consent and retracted mid-sentence. On this
+call it **led with it** — the caller's first substantive turn was spent on it:
+
+> turn 2: "Okay, I can help with that. To get started, would it be okay if we
+> sent you text messages regarding your appointment?"
+
+`record_sms_consent` then failed **twice** (`tool_duration ... success:false`
+×2). The tenant has `sms_followup_enabled = false`.
+
+**And it mis-parsed the reply.** The caller, plainly thrown, said "Hello." The
+assistant answered "I understand." and moved on — treating a confused greeting as
+an answer to a consent question. Nothing recorded a mis-parse, because nothing
+can: the tool did not run, so there is no refusal to count.
+
+This raises the priority. It is no longer a mid-call wince; it is the first thing
+a prospect hears, and it is a question about a capability the business does not
+have. The fix direction is unchanged and is upstream: **do not declare
+`record_sms_consent` for a tenant that cannot send SMS.** A tool the model does
+not have is a tool it cannot raise.
+
+### LVX51 is probably NOT real — recorded as an error of mine
+
+The doubled greeting logged earlier is most likely my own doing. This call
+produced **one** greeting, and the log shows `live_stream_initiated: 2` against
+`live_stream_start: 1` — the second webhook is the signed health check this
+session sends before handing the number over, which returns TwiML and never
+opens a socket.
+
+The earlier calls had the same health check in front of them. Two turns of
+identical greeting text remain unexplained under that theory, so this is
+DOWNGRADED rather than closed, and the next clean call decides it.
+
+**Worth stating as a method note:** an instrument that injects its own traffic
+into the log it is reading will manufacture defects. The health check is useful
+and should keep running; it needs to be excluded when the log is read.
+
+### Two smaller things, both about sounding like a person
+
+- **"And could I have your phone number, please? Spaced out digit by digit."** A
+  form instruction, not something a receptionist says. Nobody asks a caller to
+  space out their digits.
+- **It asked for the name before the time was settled** (turn 4), then had to ask
+  again at 6 and again at 7 when the caller hesitated. Three asks for one name
+  because it started collecting too early.
+
+Neither is a defect with a counter. Both are the difference between working and
+being pleasant to deal with, which is the thing the demo is actually judged on.
 
 ## From the two local-rig calls, 2026-09-03 night — five recorded late
 
