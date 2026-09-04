@@ -31,8 +31,10 @@ Status means:
 
 | | what it is | status |
 |---|---|---|
+| **LVX61** | it called tomorrow "today", with the correct date in its prompt | **OPEN · P0** |
 | **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **OPEN · P0** — root cause found, call 3 |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
+| **LVX57** | the claim detector misses HALF the claims actually made | **OPEN · P0** — upgraded, call 4 |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **OPEN · P0** |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
@@ -45,7 +47,7 @@ Status means:
 | **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
-| **LVX57** | the claim detector missed a real claim — one article's difference | **OPEN · P1** |
+| **LVX62** | "the letters win" assumes letters transcribe intact; here they do not | **OPEN · P1** |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P1** |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **OPEN · P2** |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
@@ -2284,6 +2286,121 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 4 of the clean-slate round, 2026-09-03 — mind changed twice, no phantom row
+
+The caller booked Monday 16:00, changed to Sunday (refused), changed to Tuesday
+12:00, and only Tuesday was written. **Two rows in the database, both correct.**
+Changing your mind twice mid-booking produced no duplicate and no orphan, which
+is the thing the idempotency anchor and the availability guard exist for.
+
+`verified_slots: 19` across four availability checks. Sunday was refused
+correctly — "Closed Sunday" is the one weekday fact the prompt actually states.
+
+**A dropped call immediately preceded it**: `turns: 0`, `close: twilio_stop`, no
+audio, no writes. Cause unknown; recorded so a pattern would be visible if it
+recurs.
+
+### LVX61 · It called tomorrow "today", with the correct date in its prompt `[gcp]` · **P0**
+
+Turn 2:
+
+> "I see you already have an appointment scheduled for **today, Friday, September
+> 4th**, at 3 pm."
+
+It was **Thursday 3 September, 21:37**. September 4th was the next day.
+
+**This is not the LVX55 shape.** The hours defect is missing data — the model
+cannot state a schedule it was never given. Here the prompt is correct and
+explicit:
+
+```
+Current: Thursday, September 3, 2026, 9:37 PM (America/Chicago).
+When scheduling, always calculate from this real date. Never invent dates OR
+times: if the caller has named a day but not an hour, ask or offer — never
+assume one.
+```
+
+The model had the date, had an instruction to calculate from it, and still said
+"today" about tomorrow. Nothing detects it: no tool was involved, the appointment
+it described is real, and the only wrong word is a relative one.
+
+**Why it is a P0 rather than a wince.** A caller told their appointment is today
+when it is tomorrow acts on it — they turn up on the wrong day, or they panic
+about one they think they are missing. It is the same class of harm as a
+fabricated booking: the caller leaves with a false belief they will act on.
+
+**LVX46 compounds it but is not the cause here.** `Current:` is resolved once at
+connect, so a long call or one crossing midnight drifts — and one of this
+evening's calls did cross midnight. On this call the prompt was correct and the
+model was wrong anyway.
+
+**Done when:** a relative day reference is right, or the assistant stops using
+relative words for anything it has an absolute date for.
+
+### LVX57 upgraded to P0 — it misses HALF the claims actually made
+
+Recorded after call 2 as one article's difference. Four real claims have now been
+observed and the pattern was tested against all four:
+
+| what the assistant actually said | detected |
+|---|---|
+| "Your appointment for Tuesday, September 8th, at 12 pm **is all set**." | **MISS** |
+| "**the** appointment is now updated under Nathan Dodla" | **MISS** |
+| "Your appointment is set" | match |
+| "you're all set" | match |
+
+**Two breaks, both ordinary English.** Any words between "appointment" and "is"
+defeat `your\s+(?:appointment|booking|call)\s+(?:is|has been)\s+…`, and "all set"
+defeats a pattern expecting "set".
+
+**A 50% miss rate on observed phrasings**, and `postcall_verify` reported
+`row_without_claim` on two consecutive calls where a claim was plainly made. That
+is not a miscount — it is the fabrication detector failing to see the thing it
+exists to see, and reporting a false alarm in its place, which trains whoever
+reads it to ignore it.
+
+Widening the regex fixes these four and not the fifth phrasing. The question
+worth asking is whether claim detection belongs in a pattern at all.
+
+### LVX62 · "The letters win" is unsound on this front-end `[gcp]` · P1
+
+The caller spelled their name and the transcript recorded `n i g h i n d o d l a`
+— a spoken **T heard as G**. The prompt's rule is explicit and emphatic:
+
+> "When a caller spells a name, THE LETTERS WIN. If the spelling disagrees with
+> how the name first sounded, the spelling is right and what you heard is wrong:
+> rebuild the name from the letters and use THAT everywhere after… Speech
+> recognition mishears spoken names constantly and does not mishear letters the
+> same way, which is the whole reason a spelling is worth having."
+
+Following it would have written **"Nighin Dodla"**. The model ignored it, inferred
+"Nithin Dodla", and was right.
+
+**The rule's stated justification is false on this front-end.** "Does not mishear
+letters the same way" is an assumption about a separate ASR stage. Here the model
+IS the transcriber, and spelled letters have now been misheard on two calls in
+one evening — a D as V, and a T as G. The remedy for a misheard name has the same
+failure mode as the disease.
+
+**This is a genuine tension, not a simple fix.** The rule exists because a spoken
+read-back cannot catch a letter error, and that reasoning still holds. What is
+false is the premise that letters arrive intact. Options, none tested: a phonetic
+alphabet ("D for Delta"), reading letters back and asking for confirmation of the
+letters themselves, or treating a spelling that disagrees with a plausible name as
+a signal to ask again rather than to overwrite.
+
+Recorded now because the model's disobedience is currently load-bearing: it
+produced the right name tonight, and nothing guarantees it will next time.
+
+### Smaller
+
+- **"Monday morning" was answered with 8:00 am, 12:30 pm and 4:30 pm.** Two of
+  three are not morning. The constraint the caller gave was dropped.
+- **Three questions in one breath** at turn 5 — is this in addition to the
+  existing one, what is the full name, what is the best number. LVX25.
+- **The spelling request came bundled with "anything else"** again (turn 10),
+  matching calls 2 and 3.
 
 ## Call 3 of the clean-slate round, 2026-09-03 — LVX55's root cause found
 
