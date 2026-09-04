@@ -77,6 +77,44 @@ describe("completionClaimRe — other real completion shapes", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// The false positive the widening created, caught on the first real call after
+// it shipped (call 4 of the verification round, 2026-09-04).
+//
+// Adding `the|that|this` to the third branch was necessary -- "the appointment
+// is now updated" was one of the two measured misses -- and it immediately
+// produced the mirror-image defect: `postcall_verify` reported
+// `claim_without_row` on a call where nothing whatsoever had been claimed.
+//
+// A false alarm is the specific failure this whole entry warns about, because
+// it trains whoever reads the ledger to ignore it. So it gets its own block
+// rather than being folded into the negatives below.
+// ---------------------------------------------------------------------------
+describe("completionClaimRe — a relative clause is not a claim", () => {
+  it("does not fire on the sentence that produced a false claim_without_row", () => {
+    expect(
+      en.test(
+        "I apologize, I misread that. Since you're calling from a different number, " +
+          "would you mind telling me the last four digits of the phone number the " +
+          "appointment is booked under?"
+      )
+    ).toBe(false);
+  });
+
+  it("does not fire on the same shape in other phrasings", () => {
+    // The phrase sits INSIDE a noun phrase, directly after another noun. That
+    // position is what makes it a relative clause; the vocabulary is identical
+    // to a real claim, so vocabulary cannot be the discriminator.
+    expect(en.test("What is the phone number the appointment is booked under?")).toBe(false);
+    expect(en.test("Can you confirm the name the appointment is booked under?")).toBe(false);
+  });
+
+  it("still fires when the same words start a clause", () => {
+    expect(en.test("Okay, that appointment is booked.")).toBe(true);
+    expect(en.test("the appointment is now updated under Nathan Dodla")).toBe(true);
+  });
+});
+
 describe("completionClaimRe — what must NOT count as a completion", () => {
   // A claim guard that fires on ordinary conversation is worse than one that
   // misses: live_claim_without_action becomes noise, and with LIVE_CLAIM_GUARD
