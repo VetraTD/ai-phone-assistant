@@ -32,7 +32,7 @@ import { sttProviderFor } from "./lib/voice/sttStream.js";
 import { assertSttEncryption } from "./lib/voice/sttGoogle.js";
 import { callerAllowlist, callerAllowed, buildRefusedTwiml } from "./lib/callerAllowlist.js";
 import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
-import { getLatencyStats, getCallStats, clearStats } from "./lib/voice/metrics.js";
+import { getLatencyStats, getCallStats, clearStats, bumpCounter } from "./lib/voice/metrics.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import * as voiceHealth from "./lib/voice/health.js";
 import {
@@ -407,6 +407,41 @@ function twilioValidationLive(req, res, next) {
 }
 
 /**
+ * The <Connect><Stream> handoff, shared by both front-ends.
+ *
+ * Extracted because the connect-time fallback turns on the two TwiML strings
+ * being interchangeable, and until now that was true only by inspection: they
+ * were byte-identical except for the websocket path, maintained in two places
+ * a hundred lines apart. A fallback that silently drifted from the thing it
+ * falls back to is worse than none.
+ *
+ * The token is deliberately NOT minted in here. mintMediaStreamToken is called
+ * on each route because that is the one place that has already proved the
+ * request came from Twilio -- and because tests/liveRouteParity.test.js scans
+ * the handler body for it, which is the correct control: a route that stopped
+ * minting would be a route that stopped authenticating its own socket.
+ *
+ * escapeXml on both parameters: every other TwiML site in this codebase escapes
+ * its interpolations, and an unescaped attribute value is an XML-injection hole
+ * even when the only writer is Twilio.
+ *
+ * @param {string} streamPath - "/twilio/live-stream" or "/twilio/media-stream"
+ * @param {string|null} streamToken - from mintMediaStreamToken, null when unsigned
+ */
+function buildStreamTwiml(streamPath, streamToken, businessPhone, callerPhone) {
+  const wsUrl =
+    BASE_URL.replace(/^http/, "ws") +
+    streamPath +
+    (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
+  return (
+    `<Response><Connect><Stream url="${wsUrl}">` +
+    `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
+    `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
+    `</Stream></Connect></Response>`
+  );
+}
+
+/**
  * Answer a call on the speech-to-speech front-end.
  *
  * Mirrors /twilio/voice's <Connect><Stream> handoff, including minting the
@@ -415,9 +450,27 @@ function twilioValidationLive(req, res, next) {
  * a `<Stream url="...">` query string through to the websocket handshake, and
  * a `?token=` form arrives empty.
  *
- * No voicemail fallback and no degraded-mode branch. Tier 1 has not survived a
- * real call yet, and a fallback built before the thing it falls back from is
- * proven is a fallback built on an assumption about how it fails.
+ * CONNECT-TIME FALLBACK, 2026-09-04. Until now a failure anywhere in here was
+ * SILENCE, which is the worst outcome available on a prospect's call: worse
+ * than voicemail, worse than a wrong answer, and the first thing a business
+ * judging call quality would conclude is that the software is broken.
+ *
+ * Two failure shapes, and only one of them is a throw:
+ *
+ *   a throw            -- res.type("text/xml") has already run, so Express's
+ *                         centralized handler sends a JSON body under an XML
+ *                         content type with a 500. Twilio reports 11200 and
+ *                         the caller hears its generic error message.
+ *   a null token       -- NOT a throw. mintMediaStreamToken returns null when
+ *                         it has no signing key, the TwiML then carries a
+ *                         tokenless wss:// URL, and the upgrade is refused with
+ *                         a bare 403 further down this file. The call connects,
+ *                         says nothing, and ends. That is the silence.
+ *
+ * Both now hand back the CASCADE's own <Connect><Stream>. The caller lands on
+ * the mature front-end and never knows. The mid-call half -- an `action` URL on
+ * <Connect> for a socket that drops after the handoff -- is deliberately NOT
+ * built: nobody has tried it here, and this half removes the worst outcome.
  */
 app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
   res.type("text/xml");
@@ -425,69 +478,107 @@ app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
   const businessPhone = req.body.To || "";
   const callerPhone = req.body.From || "";
 
-  // The staging caller allowlist, checked BEFORE anything looks up a business
-  // or opens a socket -- the same rule /twilio/voice applies, and it was
-  // missing here. Without it, dialling the Live number instead of the cascade
-  // number walked straight past the control: a call row created for a caller
-  // who did not mean to reach this environment, and their utterances sent to
-  // AI Studio. Inert in production, where CALLER_ALLOWLIST is unset.
-  if (!callerAllowed(callerPhone, CALLER_ALLOWLIST)) {
-    log.error("caller_not_on_allowlist", {
+  try {
+
+    // The staging caller allowlist, checked BEFORE anything looks up a business
+    // or opens a socket -- the same rule /twilio/voice applies, and it was
+    // missing here. Without it, dialling the Live number instead of the cascade
+    // number walked straight past the control: a call row created for a caller
+    // who did not mean to reach this environment, and their utterances sent to
+    // AI Studio. Inert in production, where CALLER_ALLOWLIST is unset.
+    //
+    // A refusal is a DECISION, not a failure, so it returns from inside the try
+    // and never reaches the cascade fallback below. Falling back here would
+    // route exactly the caller this control exists to turn away.
+    if (!callerAllowed(callerPhone, CALLER_ALLOWLIST)) {
+      log.error("caller_not_on_allowlist", {
+        callSid,
+        severity: "warn",
+        route: "live",
+        allowlistSize: CALLER_ALLOWLIST.numbers.size,
+        reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
+      });
+      return res.send(buildRefusedTwiml());
+    }
+
+    // An unroutable number must never reach the assistant. The cascade refuses
+    // here rather than in the socket, and this path did not refuse at all: the
+    // socket let lookupBusinessByPhone return null and carried on with
+    // loadConfig(null), so an unrouted number was answered by a generic "our
+    // office" assistant. That is precisely the shape of the phone-number routing
+    // bug this codebase has already paid for once.
+    //
+    // A lookup that THREW is not a lookup that found nothing: only a clean miss
+    // refuses, so a database blip does not turn a real business into voicemail.
+    if (db.isEnabled() && businessPhone) {
+      let business = null;
+      let lookupFailed = false;
+      try {
+        business = await db.lookupBusinessByPhone(businessPhone);
+      } catch (err) {
+        log.error("live_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+        lookupFailed = true;
+      }
+      if (!business && !lookupFailed && !process.env.LIVE_BUSINESS_PHONE) {
+        log.error("live_no_business_for_number", { callSid, businessPhone, severity: "warn" });
+        // getProfile is keyed by LOCALE id ("en-GB"), not by country code
+        // ("GB"), and returns the US default for anything it does not recognise
+        // -- so passing a country code gave a UK caller on a UK line an American
+        // voice. The cascade's own unrouted path does this mapping correctly and
+        // its comment records that the bug was already paid for once.
+        const profile = getProfile(
+          countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+        );
+        // Also a DECISION. This number routes nowhere on either front-end, so
+        // handing it to the cascade would answer it with the same generic
+        // assistant the check exists to prevent.
+        return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
+      }
+    }
+
+    const streamToken = mintMediaStreamToken(callSid);
+    // The silent failure, promoted to a throw so the fallback below can see it.
+    // A null token with signing REQUIRED means the socket upgrade will be
+    // refused with a bare 403: Twilio connects, no audio is ever exchanged, and
+    // the caller hears nothing at all. Unsigned-by-configuration is a different
+    // thing and still allowed -- that is what a local rig runs on.
+    if (streamToken === null && mediaStreamTokenRequired()) {
+      throw new Error("live stream token required and not minted");
+    }
+
+    log.info("live_stream_initiated", { callSid, authenticated: streamToken !== null });
+    // The positive twin. Without it, a demo call that connected cleanly and a
+    // demo call that never reached this route at all both read as all zeros.
+    bumpCounter("live_connect_ok");
+
+    return res.send(buildStreamTwiml("/twilio/live-stream", streamToken, businessPhone, callerPhone));
+  } catch (err) {
+    // Hand the caller to the cascade. They never know.
+    bumpCounter("live_connect_fallback");
+    log.error("live_connect_fallback_cascade", {
       callSid,
+      reason: err?.message,
       severity: "warn",
-      route: "live",
-      allowlistSize: CALLER_ALLOWLIST.numbers.size,
-      reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
     });
-    return res.send(buildRefusedTwiml());
-  }
-
-  // An unroutable number must never reach the assistant. The cascade refuses
-  // here rather than in the socket, and this path did not refuse at all: the
-  // socket let lookupBusinessByPhone return null and carried on with
-  // loadConfig(null), so an unrouted number was answered by a generic "our
-  // office" assistant. That is precisely the shape of the phone-number routing
-  // bug this codebase has already paid for once.
-  //
-  // A lookup that THREW is not a lookup that found nothing: only a clean miss
-  // refuses, so a database blip does not turn a real business into voicemail.
-  if (db.isEnabled() && businessPhone) {
-    let business = null;
-    let lookupFailed = false;
     try {
-      business = await db.lookupBusinessByPhone(businessPhone);
-    } catch (err) {
-      log.error("live_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
-      lookupFailed = true;
-    }
-    if (!business && !lookupFailed && !process.env.LIVE_BUSINESS_PHONE) {
-      log.error("live_no_business_for_number", { callSid, businessPhone, severity: "warn" });
-      // getProfile is keyed by LOCALE id ("en-GB"), not by country code
-      // ("GB"), and returns the US default for anything it does not recognise
-      // -- so passing a country code gave a UK caller on a UK line an American
-      // voice. The cascade's own unrouted path does this mapping correctly and
-      // its comment records that the bug was already paid for once.
-      const profile = getProfile(
-        countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+      const cascadeToken = mintMediaStreamToken(callSid);
+      if (cascadeToken === null && mediaStreamTokenRequired()) {
+        throw new Error("cascade stream token required and not minted");
+      }
+      return res.send(buildStreamTwiml("/twilio/media-stream", cascadeToken, businessPhone, callerPhone));
+    } catch (fallbackErr) {
+      // Both front-ends are unreachable -- an unusable CallSid fails to mint on
+      // either path. Voicemail is the floor, and it is still not silence.
+      log.error("live_connect_fallback_failed", {
+        callSid,
+        reason: fallbackErr?.message,
+        severity: "error",
+      });
+      return res.send(
+        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, getProfile("en-US").twimlSayVoice)
       );
-      return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
     }
   }
-
-  const streamToken = mintMediaStreamToken(callSid);
-  const wsUrl =
-    BASE_URL.replace(/^http/, "ws") +
-    "/twilio/live-stream" +
-    (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
-
-  log.info("live_stream_initiated", { callSid, authenticated: streamToken !== null });
-
-  return res.send(
-    `<Response><Connect><Stream url="${wsUrl}">` +
-    `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
-    `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
-    `</Stream></Connect></Response>`
-  );
 });
 
 // ---------------------------------------------------------------------------
@@ -605,20 +696,8 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     // that has already proved the request came from Twilio: `twilioValidation`
     // ran on this route.
     const streamToken = mintMediaStreamToken(callSid);
-    const wsUrl =
-      BASE_URL.replace(/^http/, "ws") +
-      "/twilio/media-stream" +
-      (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
     log.info("media_stream_initiated", { callSid, authenticated: streamToken !== null });
-    // escapeXml on both: every other TwiML site in this codebase escapes its
-    // interpolations, and an unescaped attribute value is an XML-injection hole
-    // even when the only writer is Twilio.
-    return res.send(
-      `<Response><Connect><Stream url="${wsUrl}">` +
-      `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
-      `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
-      `</Stream></Connect></Response>`
-    );
+    return res.send(buildStreamTwiml("/twilio/media-stream", streamToken, businessPhone, callerPhone));
   }
   // Unexpected re-hit after the stream is already connected — there is no
   // legacy TwiML fallback anymore. Nothing useful to do; hang up gracefully.

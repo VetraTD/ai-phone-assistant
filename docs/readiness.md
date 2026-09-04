@@ -184,9 +184,11 @@ still worth stating.
 - **The cascade** has fallbacks, writes transcripts, and does not fabricate. It
   is also the one the owner has heard least recently.
 - **The Live front-end** is the one that sounds better — that was the entire
-  reason for the architecture — and it is the one with all eight rows above.
-  **It has no fallback: a failure is silence, not voicemail.** Demoing it means
-  accepting that risk in front of a prospect.
+  reason for the architecture — and it is the one with all the rows above.
+  ~~**It has no fallback: a failure is silence, not voicemail.**~~ **The
+  connect-time half is built as of 2026-09-04** — a failure before the TwiML is
+  returned now hands the caller to the cascade, and if neither front-end can
+  mint a stream token, to voicemail. A mid-call socket drop is still silence.
 
 **It does now have a deployed home.** As of 2026-09-03 it runs on Railway
 staging from `feat/s2s-frontend`, with its own Postgres and Brightwork Family
@@ -208,10 +210,33 @@ This is the right shape and it is **not a safety net you already have** — tier
 building the fallback is now demo work, not later work. Two halves, and they are
 not equally hard:
 
-- **Connect-time failure** — the cheap and valuable half. `/twilio/live-voice`
-  already loads the tenant and mints a stream token before returning TwiML, so a
-  failure there can return the cascade's `<Connect><Stream>` at
-  `/twilio/media-stream` instead. The caller never knows.
+- **Connect-time failure — BUILT 2026-09-04.** `/twilio/live-voice` now wraps
+  its body and returns the cascade's `<Connect><Stream>` at
+  `/twilio/media-stream` on any throw. The caller never knows. An allowlist
+  refusal and an unrouted number return from *inside* the try and deliberately
+  do not fall back: both are decisions, and routing them to the cascade would
+  serve exactly the caller the control exists to turn away.
+
+  **And the failure that mattered most was not a throw at all.**
+  `mintMediaStreamToken` returns `null` — it does not throw — when it holds no
+  signing key, and the route then emitted a well-formed but *tokenless*
+  `wss://` URL. Twilio connects, the upgrade is refused with a bare 403, and
+  the caller hears nothing. A try/catch would never have seen it.
+
+  That configuration is reachable here, not hypothetical: `twilioValidationLive`
+  accepts a signature from `TWILIO_AUTH_TOKEN` **or** `TWILIO_AUTH_TOKEN_ALT`,
+  while the signing key is `MEDIA_STREAM_SECRET || TWILIO_AUTH_TOKEN`. **A
+  deployment holding only the ALT token validates every webhook perfectly and
+  cannot mint a stream token at all** — so every call is authenticated,
+  accepted, and silent. With two Twilio accounts on this project that is one
+  environment variable away. It is now promoted to a throw, and because both
+  front-ends share the one signing key it lands on voicemail rather than the
+  cascade, which would only move the silent 403 to a different socket.
+
+  Counters `live_connect_ok` / `live_connect_fallback`. The positive twin is not
+  decoration: without it a demo call that connected cleanly and a demo call that
+  never reached the route at all read identically, and "did the number even
+  point at us?" is the first question a failed demo raises.
 - **Mid-call failure** — the socket drops after `<Connect>` has begun. Twilio's
   `<Connect>` accepts an `action` URL that is requested when the connection
   ends, which is the hook: on an abnormal close, hand back the cascade's TwiML
@@ -275,10 +300,12 @@ which is not on the demo path at all.
   Twilio number pointed at it. Two things learned getting there: Railway prefers
   a Dockerfile over Nixpacks when it finds one, and `scripts/migrate.js` needs
   `--init-if-empty` against an empty database or it fails at 002.
-- **There is NO fallback. A Live failure is silence** — not voicemail, not the
-  cascade. Tiers 2a/2b/3 do not exist. On a prospect call that is the worst
-  available outcome, and it is the strongest single argument for demoing the
-  cascade instead.
+- ~~**There is NO fallback. A Live failure is silence.**~~ **Half closed
+  2026-09-04.** A failure at connect time hands the caller to the cascade, or to
+  voicemail when no stream token can be minted on either path. **A mid-call
+  socket drop is still silence** — that needs an `action` URL on `<Connect>`,
+  which nobody has tried here, and it is deliberately not built. Tiers 2a/2b
+  still do not exist.
 - **Concurrency is unmeasured** (O7) and the vendor cap is shared. Two prospects
   at once is untested.
 - A **second handset** has never been used. Every acoustic number in this
