@@ -116,6 +116,66 @@ is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
 
+## The accent, on the DEPLOYMENT — the same trap, a second time
+
+The first verification call on Railway staging sounded British, consistently.
+The log line settled it in one read:
+
+```
+live_session_open  language_code: en-GB  language_source: default  arm: vendor
+```
+
+**`default`.** Not `env` — there is no `LIVE_LANGUAGE_CODE` on Railway. The
+tenant row simply has no locale, and the fallback was a hardcoded `"en-GB"`:
+Digile Media's locale, baked in from when they were the only tenant.
+
+**Reading the tenant's locale fixed ONE database.** Brightwork's row in the
+local throwaway Postgres says `en-US`, which is what was verified on calls 5 and
+6. The deployment has its **own** Postgres, that column is empty there, and the
+fallback ran. An American caller, on an American number, to an American dental
+practice, answered in British English.
+
+**This is the config-only-in-one-environment trap for the second time in this
+project.** The first was `VOICE_INTENT_MARKER` (LVX37): set in production, unset
+locally, fourteen clean laptop calls and every deployed call silent. The lesson
+recorded then was "diff the env before theorising". The lesson this adds is
+narrower and worse: **reading one database and calling it fixed is the same
+mistake wearing different clothes.** A tenant row is configuration too.
+
+**The fallback is no longer a country.** It derives from the number the caller
+DIALLED, using the rule `server.js` already applies twice for the
+unrouted-voicemail voice (`:530`, `:678`): GB gives `en-GB`, everything else
+`en-US`. A tenant that never sets a locale now gets the language of its own
+phone line instead of Digile Media's.
+
+Deliberately the dialled number and not `config.mainPhone` — readiness.md
+records that Digile Media's `main_phone` is a mobile rather than the line
+callers ring, so `main_phone` would be the wrong source.
+
+`language_source` now reports `from_number` for that path, so the next log line
+says which of the three routes was taken rather than collapsing two of them into
+"default".
+
+**Setting the locale on staging's row would ALSO fix it**, and is still worth
+doing. The code change is what stops the next tenant hitting it.
+
+### And the deployed call verified LVX72 end to end
+
+The same call, read from staging's own counters:
+
+```
+spelling_gate_refusals 1 · write_retry_attempted 1 · write_retried_after_spelling 1
+write_retry_name_unspelled 1 · postcall_changed_rows 1 · postcall_booked_rows 1
+postcall_write_abandoned 0 · nudges_fired 0
+```
+
+The gate refused, the model never re-called the tool, we retried, the model
+corrected the name. **On the deployment, not the laptop** — which is where a
+business will hit it.
+
+`live_closing_tic: 3` of nine turns there too, so the tic is not a laptop
+artifact either.
+
 ## Call 6 of the instrumented round, 2026-09-04 — the full designed path ran, end to end
 
 **The row is correct.** One appointment, `ef8e9e0a`, Monday 7 Sep 16:00

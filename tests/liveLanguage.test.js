@@ -62,8 +62,15 @@ function fakeDb(config) {
   };
 }
 
-/** Boot one session and return the config handed to the Live API. */
-async function connectConfig(tenantConfig) {
+/**
+ * Boot one session and return the config handed to the Live API.
+ *
+ * `dialled` is the number the CALLER rang, which is what the locale is derived
+ * from when the tenant row has none -- not config.mainPhone. That distinction
+ * matters: readiness.md records that Digile Media's main_phone is a mobile
+ * rather than the line callers dial, so main_phone would be the wrong source.
+ */
+async function connectConfig(tenantConfig, dialled = "+18176011171") {
   const ws = new FakeSocket();
   const connect = vi.fn(async () => ({
     session: {
@@ -84,7 +91,7 @@ async function connectConfig(tenantConfig) {
   );
   ws.deliver({
     event: "start",
-    start: { callSid: "CA_lang", streamSid: "MZ1", customParameters: { businessPhone: "+18176011171" } },
+    start: { callSid: "CA_lang", streamSid: "MZ1", customParameters: { businessPhone: dialled } },
   });
   await vi.waitFor(() => expect(connect).toHaveBeenCalled());
   return connect.mock.calls[0][0].config;
@@ -117,11 +124,32 @@ describe("the Live voice follows the tenant's locale", () => {
     expect(config.speechConfig.languageCode).toBe("en-GB");
   });
 
-  it("keeps the old default for a tenant with no locale set", async () => {
-    // Digile Media's row reads locale: null today, so this is not hypothetical.
-    // A tenant that has never been given one must behave exactly as before
-    // rather than being silently re-accented by this change.
+  it("derives from the tenant's OWN NUMBER when the row has no locale", async () => {
+    // THE CASE THAT REACHED A REAL CALLER, 2026-09-04.
+    //
+    // Reading the tenant's locale fixed the local database, where Brightwork's
+    // row says "en-US". It did nothing on the deployment, whose own Postgres
+    // has that column empty -- so the fallback ran, and the fallback was a
+    // hardcoded "en-GB": Digile Media's locale, baked in from when they were
+    // the only tenant. An American caller, on an American number, to an
+    // American dental practice, was answered in British English. The log said
+    // it exactly: language_code en-GB, language_source DEFAULT.
+    //
+    // That is the config-only-in-one-environment trap for the second time here.
+    // The first cost fourteen clean laptop calls against a silent deployment
+    // (VOICE_INTENT_MARKER, LVX37). Reading ONE database and calling it fixed
+    // is the same mistake wearing different clothes.
     const config = await connectConfig({ ...BASE, locale: null });
+    expect(config.speechConfig.languageCode).toBe("en-US");
+  });
+
+  it("still derives en-GB for a UK number with no locale", async () => {
+    // Digile Media's row reads locale: null on +44 1372 656055, so the tenant
+    // the old default was silently built for keeps the language it had.
+    const config = await connectConfig(
+      { ...BASE, businessName: "Digile Media", mainPhone: "+441372656055", locale: null },
+      "+441372656055"
+    );
     expect(config.speechConfig.languageCode).toBe("en-GB");
   });
 
