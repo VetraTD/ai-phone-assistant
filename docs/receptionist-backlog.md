@@ -53,7 +53,8 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
-| **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **HALF FIXED, UNVERIFIED** — the false statement is gone; ids still absent from the prompt |
+| **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **OPEN · P0** — heard by the owner |
+| **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **HALF FIXED, NOT EXERCISED** — the change path works end to end, but the not_found refusal never fired |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
 | **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED** on a real call 2026-09-04 — verdict write_abandoned where the old code said ok; still not PREVENTED |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
@@ -113,6 +114,89 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## The verification call for LVX74, 2026-09-04 — the change landed, the fix did not fire
+
+Same script as the call that failed forty minutes earlier, and a clean
+before/after on the row:
+
+| | before | after |
+|---|---|---|
+| verdict | `write_abandoned` | `ok` |
+| abandoned | `["correct_appointment_name"]` | `[]` |
+| changed_rows | 0 | **1** |
+| the caller heard | "not booked under your number" | nothing false |
+
+The Thursday row now reads `Marcus Bell`.
+
+**But `write_refused_appointment_not_found` is 0.** The not-found refusal never
+ran. The model called `get_caller_appointments_from_db` first this time
+(`lookup_tool_context_warm: 1`), got a real id, and the write succeeded. The good
+outcome came from the model taking the correct path unaided, not from the fix
+steering it there.
+
+**That is the FIFTH guard this round to go unexercised because the model behaved
+well** — LVX56, LVX53, LVX71 on call A, LVX74 here. Worth stating as a pattern
+rather than five separate footnotes: **on this front-end a guard is hard to
+verify positively, because the behaviour it defends against is intermittent.**
+The counters are what make the difference between "the guard works" and "the
+guard was never asked" legible at all, and every one of those five was
+distinguishable only because a positive counter existed next to the fault one.
+
+**What this call DID verify, and it is the part worth having:** LVX72's detector
+has now been seen doing both things — firing on the abandoned write on the
+earlier call, and staying silent on the successful one here. A detector that has
+only ever fired is a detector with an unknown false-positive rate.
+
+Also: the spelling was asked in the same turn the name was given, which is
+LVX44's target behaviour, achieved by the model with the nudge not firing
+(`live_spelling_nudge_eligible: 0`).
+
+### LVX75 · It speaks its own instructions `[gcp]` · **P0 — heard by the owner, 2026-09-04**
+
+On the LVX74 verification call, two turns opened with instruction-shaped text,
+and the owner confirms hearing BOTH — so this is speech, not an LVX73 transcript
+artifact:
+
+> "**Please pause there for a moment.** I can help change the name on your
+> appointment for you..."
+> "**Acknowledge.** Thanks, Marcus Bell — just making sure I have that right."
+
+**"Acknowledge" is traceable.** `services/gemini.js:1705` reads *"Acknowledge
+the caller's request and ask the first relevant question — ONE question, not
+two."* The model spoke the verb and then did the thing. `services/gemini.js:907`
+carries a second one: *"- Acknowledge briefly ("Of course.", "Sure thing.")
+before answering."*
+
+**"Please pause there for a moment" is NOT ours** — the string appears nowhere in
+the repository. Instruction-shaped and invented, which is the more worrying half:
+it is not an echo of a specific line, it is the model producing directive
+register as speech.
+
+**Nothing detects it and nothing could.** `internal_term_leaks`,
+`live_outbound_leaks` and `intent_marker_leaks` all read 0, correctly — these are
+ordinary English words in ordinary sentences, which is the LVX54/LVX64 blind
+spot exactly: the guard family catches leaked SYNTAX and misses leaked FRAMING.
+
+**Is it a regression from this session's prompt work? Unproven, and I am a
+suspect.** Both instruction lines are pre-existing and unchanged. What changed on
+2026-09-04 is that two more imperative bullets were added to the IDENTITY list
+immediately after the "Acknowledge briefly" one (the form-of-address and
+no-systems-as-characters rules, LVX54/LVX64), plus a longer non-negotiable rule 1
+and a rewritten letters-win block. A longer, more imperative prompt is a
+plausible contributor and **that is a hypothesis, not a finding** — it was not
+observed on the 2026-09-03 round, but that round asked different questions.
+
+**Cheapest candidate fix, untested:** reword the two lines so neither begins with
+a bare imperative verb that is also a speakable word — "Acknowledge the caller's
+request" becomes "Start with a brief acknowledgement", and similarly at :907. A
+bullet opening with a bare verb is more echo-prone than one opening with a noun
+phrase. **Not done**: it is prompt text on a hunch, and this file's own standing
+rule is that an unmeasured preference gets written as a candidate with a scoring
+rule, never shipped as a decision.
+
+**Done when:** a caller never hears a word that exists only in the instructions,
+and whichever change achieves it was tested rather than reasoned about.
 
 ### LVX74 · "Not found" is spoken to the caller as "not yours" `[gcp]` · **P0 — found verifying LVX72**
 
