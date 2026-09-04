@@ -54,6 +54,81 @@ function dayCheck({ open_times, all_open_times = open_times }) {
 }
 
 const book = (at) => ({ id: "9", name: "book_appointment", args: { scheduled_at: at, caller_name: "Marcus" } });
+const reschedule = (at) => ({
+  id: "10",
+  name: "reschedule_appointment_db",
+  args: { appointment_id: "a1", new_scheduled_at: at },
+});
+
+// ---------------------------------------------------------------------------
+// LVX49 — rescheduling walked around the invariant entirely.
+//
+// AVAILABILITY_SHAPES keys on tool NAME and book_appointment was the whole
+// list, so reschedule_appointment_db -- which writes a time -- came back with
+// slotArg undefined, returned {allow: true} immediately, and was not even
+// counted as unarmed, because looksLikeBooking only matched /^(book|schedule)_/.
+// So a reschedule to an invented time was both unguarded AND invisible, and
+// LVX27's only structural protection covered booking alone.
+//
+// Observed on a real call the same evening: verified_slots: 1 while
+// reschedule_appointment_db succeeded. The slot happened to be real because the
+// model had checked separately; nothing required that it had.
+//
+// This is also the argument against a general update_appointment tool. A
+// field-bag carrying scheduled_at would sit outside this map the same way. A
+// list keyed by name has to be maintained deliberately, and that cost is real
+// and is why it is written down here rather than hidden.
+// ---------------------------------------------------------------------------
+describe("LVX49 — a reschedule writes a time, so it needs a verified slot", () => {
+  const TOOLS = [...BUILTIN_TOOLS, { name: "reschedule_appointment_db" }];
+
+  it("blocks a reschedule to a time nothing ever verified", () => {
+    const g = guards(TOOLS);
+    expect(g.before(reschedule("2026-09-15T15:00:00")).allow).toBe(false);
+    expect(g.counts().availability_blocked).toBe(1);
+  });
+
+  it("allows a reschedule to a slot the availability tool returned", () => {
+    const g = guards(TOOLS);
+    g.after(...Object.values(pointCheckAvailable("2026-09-15T15:00:00")));
+    expect(g.before(reschedule("2026-09-15T15:00:00")).allow).toBe(true);
+  });
+
+  it("allows a reschedule to a time from a day query's full list", () => {
+    const g = guards(TOOLS);
+    g.after(...Object.values(dayCheck({ open_times: ["2026-09-15T14:00:00"], all_open_times: ["2026-09-15T14:00:00", "2026-09-15T16:30:00"] })));
+    expect(g.before(reschedule("2026-09-15T16:30:00")).allow).toBe(true);
+  });
+
+  it("counts a reschedule as unarmed when the business's availability shape is unknown", () => {
+    // The fail-open direction is unchanged -- an EHR clinic registering
+    // get_available_slots still books -- but it is now VISIBLE for a
+    // reschedule, which is what "not even counted" meant.
+    const g = guards([{ name: "get_available_slots" }, { name: "reschedule_appointment_db" }]);
+    expect(g.before(reschedule("2026-09-15T15:00:00")).allow).toBe(true);
+    expect(g.counts().availability_unarmed).toBe(1);
+  });
+});
+
+describe("the POSITIVE availability counter", () => {
+  // Without it, a call where every write was properly checked and a call that
+  // never attempted a write both report availability_blocked: 0. That is the
+  // measure this round added everywhere, after two guards in one day turned out
+  // to be readable only as failures.
+  it("counts a write that passed BECAUSE its slot was verified", () => {
+    const g = guards();
+    g.after(...Object.values(pointCheckAvailable("2026-09-15T14:00:00")));
+    g.before(book("2026-09-15T14:00:00"));
+    expect(g.counts().availability_allowed).toBe(1);
+    expect(g.counts().availability_blocked).toBe(0);
+  });
+
+  it("does not count a tool the invariant does not cover", () => {
+    const g = guards();
+    g.before({ id: "3", name: "end_call", args: {} });
+    expect(g.counts().availability_allowed).toBe(0);
+  });
+});
 
 describe("availability invariant", () => {
   it("blocks a booking for a slot no check ever returned", () => {

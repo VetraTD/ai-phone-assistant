@@ -35,11 +35,11 @@ Status means:
 | **LVX61** | it called tomorrow "today", with the correct date in its prompt | **FIXED, UNVERIFIED** — the server computes the word now |
 | **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **FIXED, UNVERIFIED** — whole week in the static prefix |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **FIXED, UNVERIFIED** — every action tool, no exception |
-| **LVX57** | the claim detector misses HALF the claims actually made | **OPEN · P0** — upgraded, call 4 |
+| **LVX57** | the claim detector misses HALF the claims actually made | **FIXED, UNVERIFIED** — all four observed phrasings, limits written down |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **FIXED, UNVERIFIED** — script check, write + note |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
-| **LVX44** | the spelling is asked at booking time, not when the name is given | **SHIPPED, NOT WORKING** — the nudge missed on the next two calls |
+| **LVX44** | the spelling is asked at booking time, not when the name is given | **FIXED, UNVERIFIED** — second trigger on the assistant read-back |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
@@ -58,7 +58,7 @@ Status means:
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
 | **LVX54** | it addresses the caller as "user" when it has no name yet | **FIXED, UNVERIFIED** |
-| **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
+| **LVX49** | rescheduling bypasses the availability invariant | **FIXED, UNVERIFIED** — reschedule is in the map and counted |
 | **LVX47** | appointments revealed one at a time instead of all at once | **NOT REPRODUCED** on call 5 — listed both together |
 | **LVX46** | the Live prompt is frozen at connect — a vendor constraint | **OPEN · P1** |
 | **LVX42** | the spelling gate's escape hatch writes the misheard name | **OPEN · P1** |
