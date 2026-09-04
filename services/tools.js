@@ -20,6 +20,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { stripFillers } from "../lib/transcriptUtils.js";
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -191,7 +192,29 @@ export async function executeToolCall(fc, ctx) {
       const wrappingUp = ctx?.step === "confirm" || ctx?.step === "ending";
       const didSomething = ctx?.completedActionThisTurn || ctx?.completedActionThisCall;
       const hadConversation = Number(ctx?.callerTurnCount) >= 2;
-      if (wrappingUp || didSomething || hadConversation) {
+
+      // A HESITATION IS NOT AN ANSWER, and it outranks all three gates above.
+      //
+      // Observed on a real call, 2026-09-03: the assistant asked "is there
+      // anything else?", the caller said "umm", and the line closed while they
+      // were still thinking. From the caller's side the call was hung up on
+      // them mid-word.
+      //
+      // The cascade cannot reach this state. Deepgram's text goes through
+      // cleanTranscript, which strips "um"/"uh"/"hmm", so a pure hesitation
+      // arrives as an empty turn and never becomes an answer. On the Live path
+      // the MODEL is the ASR and there is no text stage, so the filler arrives
+      // verbatim and gets interpreted. Same guard, same word list, applied
+      // where the pipeline no longer applies it for us.
+      //
+      // Deliberately narrow: it fires only when the caller said something that
+      // is ENTIRELY filler. Silence is not covered -- an empty lastCallerText
+      // means the caller said nothing at all, which the silence ladder owns,
+      // and treating it here would stop a legitimate close after a goodbye.
+      const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
+      const heardOnlyHesitation = lastCallerText.trim() !== "" && stripFillers(lastCallerText) === "";
+
+      if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation)) {
         const endCallArgs = fc.args ?? {};
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
@@ -214,8 +237,12 @@ export async function executeToolCall(fc, ctx) {
           },
         };
       }
-      const message =
-        "Don't end the call yet. First confirm you've helped with their request and ask if there's anything else they need.";
+      if (heardOnlyHesitation) bumpCounter("end_call_refused_hesitation");
+      const message = heardOnlyHesitation
+        ? "[not caller speech] The caller has not answered yet — all they said was a hesitation " +
+          "(\"um\", \"uh\"). That is someone thinking, not someone saying no. Do not end the call. " +
+          "Wait, or ask again gently."
+        : "Don't end the call yet. First confirm you've helped with their request and ask if there's anything else they need.";
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {

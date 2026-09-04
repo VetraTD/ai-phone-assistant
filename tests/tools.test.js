@@ -1929,3 +1929,83 @@ describe("the spelling gate's refusal reads as an unfinished step, not a failure
     expect(r.message).toMatch(/decline/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A hesitation is not an answer.
+//
+// Reported from a real call, 2026-09-03: the assistant asked "is there anything
+// else?", the caller said "umm", and the line closed while they were still
+// thinking. From the caller's side that is being hung up on mid-word.
+//
+// The cascade cannot reach this state. Deepgram's text goes through
+// cleanTranscript, which strips "um"/"uh"/"hmm", so a pure hesitation arrives
+// as an empty turn and never becomes an answer. On the Live path the MODEL is
+// the ASR and there is no text stage, so the filler arrives verbatim and gets
+// interpreted -- which is why the same guard has to be applied here.
+// ---------------------------------------------------------------------------
+describe("end_call refuses while the caller is still thinking", () => {
+  const endCall = (lastCallerText) =>
+    executeToolCall(
+      { id: "e1", name: "end_call", args: {} },
+      { ...baseCtx, completedActionThisCall: true, callerTurnCount: 4, lastCallerText }
+    );
+
+  it("refuses when the caller's whole turn was filler", async () => {
+    const { functionResponse, stateEffects } = await endCall("umm");
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/hesitation/i);
+    // The caller hears the question again, not an apology.
+    expect(stateEffects.toolResult.message).toMatch(/anything else/i);
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+  });
+
+  it("refuses for the other filler shapes too", async () => {
+    for (const filler of ["uh", "hmm", "um,", "mm-hmm", "mhm", "er"]) {
+      const { functionResponse } = await endCall(filler);
+      expect(functionResponse.response.success, filler).toBe(false);
+    }
+  });
+
+  it("KNOWN GAP: 'uh-huh' is not caught, because stripFillers leaves a fragment", async () => {
+    // Not a decision, a defect in a shared utility, pinned so it is visible.
+    // stripFillers' alternation puts "uh+" before "uh-huh", so "uh-huh" matches
+    // the first branch and leaves "-huh" behind, which has letters and survives
+    // the token filter. "mm-hmm" strips clean only by accident, because the
+    // residue after "mm" is itself matched by "hmm+".
+    //
+    // Left alone deliberately: lib/voice/turnManager.js classifies barge-in
+    // finals with the same function, so reordering it changes cascade
+    // behaviour, and "uh-huh" is a backchannel rather than a pure hesitation
+    // anyway -- arguably a real answer. Recorded in the backlog.
+    const { functionResponse } = await endCall("uh-huh");
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("allows the close when the caller actually answered", async () => {
+    const { functionResponse } = await endCall("No, that's everything, thanks.");
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("allows the close when a filler carries real words with it", async () => {
+    // "um, no that's all" IS an answer. Only an ENTIRELY filler turn qualifies.
+    const { functionResponse } = await endCall("um, no that's all");
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("does not change the cascade, which never sets lastCallerText", async () => {
+    // Deepgram text is already filler-stripped upstream, so the field is absent
+    // there and the gate must behave exactly as it did before.
+    const { functionResponse } = await endCall(undefined);
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("says nothing about hesitation when the refusal is the ordinary one", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "e2", name: "end_call", args: {} },
+      { ...baseCtx, step: "gather_details", callerTurnCount: 0, lastCallerText: "hello" }
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).not.toMatch(/hesitation/i);
+  });
+});

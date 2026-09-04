@@ -2221,6 +2221,131 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+## From the owner's real handset call, 2026-09-03 — two defects and a structural one
+
+The first call on a real phone since the fixes. It booked correctly
+(`postcall_booked_rows 1`, `spelling_gate_refusals 1`) and the owner reported two
+things, both of which reproduce as described.
+
+### LVX44 · The spelling is asked at booking time, not when the name is given `[gcp]` · **P0 — FIXED, unverified on a call**
+
+The owner: *"It said I have everything confirmed for the appointment, anything
+else, and I said no, and then it said I need one more thing which is the spelling
+of name and then it booked. It needs to ask for the spelling right after the
+caller said their name. THIS IS ESSENTIAL."*
+
+**The prompt already says exactly that**, at `services/gemini.js:1502`:
+
+> "When they give you a name you are going to write down, ask them — right then,
+> while you are still taking details — to spell it, and read the letters back. Do
+> not leave it until you are confirming or booking."
+
+And its condition held on this call: the gate fired, which requires the name not
+be on file, which is the same condition that renders that block. **So the model
+was told, in those words, and did it anyway.** That is this repository's own
+doctrine arriving on schedule — a prompt line is a request, never a guarantee.
+
+**The code gate cannot help either, structurally.** It lives inside the
+`actionTools` branch of `services/tools.js`, so it can only fire when the write is
+attempted. Its own comment says so, and `postcall_row_without_claim = 1` on this
+call is the shape that produces: the confirmation the caller heard came BEFORE
+the write, and after the write it hung up.
+
+**Fixed with a counted nudge in the reducer, keyed on what the CALLER said.**
+`nameGivenRe` (en + es) matches a caller introducing themselves — "it's Jane
+Fitzgerald", "my name is…", "this is…" — requiring a capitalised word after the
+lead-in, with an exclusion list for the capitalised words that follow "it's" and
+are not names (weekdays, months, "Tomorrow", "Fine"). When it matches, the
+spelling is unsettled, and the assistant's own reply did not already ask, the
+guard sends a turn note telling it to ask NOW. Counted as
+`live_spelling_ask_nudged`, **once per call** — a nudge that can repeat is the
+shape that let the leak guard destroy a call (LVX21).
+
+Keyed on the caller and not on the assistant's read-back on purpose: a caller
+says it plainly, a read-back can be phrased a hundred ways. Like `spellRequestRe`
+this can be widened but never completed, and a miss costs the nudge, not the
+guarantee — the write gate still refuses.
+
+**No `/i` flag, deliberately**, because `[A-Z]` is doing real work; the lead-in
+spells its own case instead. That was caught by a table of twelve real phrasings,
+not by inspection.
+
+**Done when:** a real call asks for the spelling in the turn the name is given.
+
+### LVX45 · It hung up on a hesitation `[gcp]` · **P0 — FIXED, unverified on a call**
+
+The owner: *"It just ended the call after it said Anything else. I said umm and
+it just straight up ended the call and was unexpected."*
+
+**"umm" was read as an answer.** `end_call`'s gate opens on
+`completedActionThisCall`, so from the first successful action the model may close
+whenever it likes — the LVX22/LVX35 family. What is new is why a hesitation
+counted as consent.
+
+**The cascade cannot reach this state.** Deepgram's text goes through
+`cleanTranscript`, which strips "um"/"uh"/"hmm", so a pure hesitation arrives as an
+empty turn and never becomes an answer. `lib/voice/turnManager.js` already uses
+empty-after-strip to classify a barge-in final as noise. **On the Live path the
+MODEL is the ASR** — there is no text stage at all — so the filler reaches it
+verbatim and gets interpreted.
+
+**Fixed by applying the same word list where the pipeline no longer applies it
+for us.** The Live reducer threads `turnUserText` into the tool context, and the
+`end_call` gate refuses when the caller's last utterance is entirely filler:
+counted as `end_call_refused_hesitation`, with the existing caller-safe line
+("Is there anything else I can help you with?") re-asking rather than apologising.
+
+Deliberately narrow. Only an ENTIRELY filler turn qualifies — "um, no that's all"
+is an answer and still closes. Silence is not covered either: an empty
+`lastCallerText` means the caller said nothing, which the silence ladder owns, and
+treating it here would block a legitimate close after a goodbye. The cascade
+never sets the field, so its behaviour is byte-identical.
+
+**Done when:** a real call says "umm" after "anything else?" and stays open.
+
+### LVX46 · The Live front-end runs a FROZEN prompt `[gcp]` · P1
+
+Found while investigating LVX44. Recorded, not fixed, and larger than either
+defect above.
+
+`buildSystemInstruction(state.step, state.intent, config, extras)` is called
+**once**, at `lib/voice/live/index.js:1761`, inside the session setup — and nothing
+rebuilds it. The cascade calls it **every turn**.
+
+**This is a vendor constraint, not an oversight.** The Live session object exposes
+`sendClientContent`, `sendRealtimeInput`, `sendToolResponse` and `close`;
+`systemInstruction` is a setup-time parameter with no update path.
+
+The consequence is that **every dynamic section is stuck at turn 0**:
+
+- the step machine advances and logs `live_step_transition`, but the model keeps
+  `identify_intent` guidance for the entire call;
+- `SPELLING SETTLED` never replaces `SPELLING NOT YET CONFIRMED`, so the block
+  written specifically to stop the assistant re-asking cannot do its job;
+- caller-context updates — including the snapshot LVX33 works so hard to keep
+  honest — never reach the prompt.
+
+Half the prompt machinery is inert on this front-end, and nobody had noticed
+because the cascade's copy works.
+
+**Done when:** the dynamic sections are delivered per turn some other way (turn
+notes are the only channel that exists), or each is replaced by a counted guard
+the way LVX44 just was.
+
+### `stripFillers` misses "uh-huh" `[cheap]` · P2
+
+`stripFillers("uh-huh")` returns `"-huh"`, not `""`. The alternation puts `uh+`
+before `uh-huh`, so the first branch wins and leaves a fragment with letters in
+it, which survives the token filter. `"mm-hmm"` strips clean only by accident —
+the residue after `mm` is itself matched by `hmm+`.
+
+**Recorded, not fixed.** `lib/voice/turnManager.js` classifies barge-in finals
+with the same function, so reordering the alternation changes cascade behaviour
+and wants its own evidence. And "uh-huh" is a backchannel rather than a
+hesitation — arguably a real answer — so it is not obvious it belongs in the list
+at all. Pinned by a test in `tests/tools.test.js` that asserts the current
+behaviour and says why.
+
 ## The local rig settled it, 2026-09-03 — LVX40 and LVX34 VERIFIED
 
 Two runs against `localhost:3000` with the throwaway docker Postgres, Digile

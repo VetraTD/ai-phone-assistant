@@ -135,6 +135,7 @@ async function boot(verdict = "refuse") {
     live,
     settle,
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
+    hear: (text) => live.push({ serverContent: { inputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
     async callTool(name = "book_appointment") {
       live.push({ toolCall: { functionCalls: [{ id: `d${(toolId += 1)}`, name, args: { n: toolId } }] } });
@@ -257,6 +258,57 @@ describe("a refused write answered with a callback promise", () => {
     await s.settle();
 
     expect(stat("live_claim_without_action")).toBe(1);
+  });
+
+  it("nudges for the spelling in the turn the caller gives their name", async () => {
+    // LVX-owner-2026-09-03. The prompt already says to ask right then, and on a
+    // real call the model collected everything, said "that's all confirmed,
+    // anything else?", heard "no", and only THEN asked. A prompt line is a
+    // request; this is the counted nudge at the moment the name arrives.
+    const s = await boot("allow");
+    s.hear("Hi, it's Jane Fitzgerald.");
+    s.say("Lovely, thanks. What day suits you?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+    expect(JSON.stringify(notes(s.live))).toContain("spell it NOW");
+  });
+
+  it("stays quiet when the assistant already asked for the spelling itself", async () => {
+    const s = await boot("allow");
+    s.hear("Hi, it's Jane Fitzgerald.");
+    s.say("Thanks. Could you spell that for me?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(0);
+  });
+
+  it("does not fire on a capitalised word that is not a name", async () => {
+    // "It's Tuesday" is the false positive a booking call produces constantly.
+    const s = await boot("allow");
+    s.hear("It's Tuesday that works best for me.");
+    s.say("Tuesday it is.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(0);
+  });
+
+  it("spends the nudge at most once per call", async () => {
+    const s = await boot("allow");
+    s.hear("It's Jane Fitzgerald.");
+    s.say("Lovely.");
+    s.endTurn();
+    await s.settle();
+
+    s.hear("Sorry, my name is Jane Fitzgerald.");
+    s.say("Got it.");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
   });
 
   it("the count does not survive the turn it belongs to", async () => {
