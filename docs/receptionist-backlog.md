@@ -392,6 +392,35 @@ the model the id it is missing. The control flow is deliberately unchanged:
 resolving an id inside a message builder would move an ownership decision
 somewhere it does not belong.
 
+### SUPERSEDED on that one branch, 2026-09-04, by LVX74's resolver
+
+The single-appointment refusal is no longer the path a caller takes. LVX74's
+`resolveAppointmentId` fills a missing id from the same snapshot **before** any
+of the three change tools reaches a refusal, so a caller with exactly one
+appointment is not refused at all and does not wait through the extra
+round-trip. That is this entry's own stated goal, reached one layer earlier —
+and it honours the reasoning above rather than contradicting it: the id is
+resolved in the TOOL, where ownership is already decided, not inside a message
+builder.
+
+**The branch is kept as a backstop and is now correct on its own.** Two things
+were reconciled to make that true:
+
+- `whichAppointmentMessage` read `callerContext.upcomingAppointments`
+  **unfiltered** while `resolveAppointmentId` filters to the future. A caller
+  whose only appointment was in the PAST therefore got the resolver returning
+  null and then this message asserting they have "exactly one upcoming
+  appointment", naming a date that had been and gone. Both now use
+  `upcomingForCaller()`.
+- `tests/whichAppointment.test.js` pinned the refusal TEXT. It now asserts the
+  better outcome — no refusal, the caller's own row acted on, ownership still
+  verified — plus a second test that exercises the backstop directly, because a
+  branch nothing reaches is a branch that rots.
+
+**This is the one regression the full suite caught this sitting**, and it is
+worth the line: the resolver was written, its own five tests passed, and a test
+three files away was the only thing that noticed the interaction.
+
 ### LVX72 — DETECTED, and that is not the same as fixed
 
 `postcall_verify` now returns **`write_abandoned`** when an action tool was
