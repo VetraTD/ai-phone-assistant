@@ -29,13 +29,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockGetAppointmentById = vi.fn();
 const mockUpdateAppointment = vi.fn();
 const mockListAppointmentsByCaller = vi.fn();
+const mockUpdateAppointmentStatus = vi.fn();
 vi.mock("../services/db.js", () => ({
   createAppointment: vi.fn(),
   createAppointmentIfAvailable: vi.fn(),
   countScheduledOverlapping: vi.fn().mockResolvedValue(0),
   listScheduledBetween: vi.fn().mockResolvedValue([]),
   listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
-  updateAppointmentStatus: vi.fn(),
+  updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
   updateAppointment: (...a) => mockUpdateAppointment(...a),
   getAppointmentById: (...a) => mockGetAppointmentById(...a),
 }));
@@ -145,13 +146,49 @@ describe("LVX71 — the refusal has to say what to do next", () => {
   // The control flow is deliberately not changed here: resolving the id inside
   // a message builder would move an ownership decision somewhere it does not
   // belong. The model is handed the id instead, which is what it was missing.
-  it("hands over the id rather than asking which, when there is only one", async () => {
+  it("does not refuse AT ALL when the caller has only one appointment", async () => {
+    // CHANGED 2026-09-04, and it is LVX71's own goal reached one layer earlier.
+    //
+    // This used to assert the refusal text -- that it handed the model the id
+    // and told it not to ask which. That was the best available answer while
+    // the id could only come from the model, and it still cost a round-trip the
+    // caller waits through, at a reply p50 of 1.3-2.5 s.
+    //
+    // LVX74's resolver now fills a missing appointment_id from the caller's own
+    // call-start snapshot when exactly one is upcoming, so there is nothing to
+    // refuse. Ownership is unchanged: verifyAppointmentIdentity still runs on
+    // the resolved id and still fails closed, which is what the mock below is
+    // for.
     const one = { callCount: 1, lastCallSummary: null, upcomingAppointments: [TWO_ON_FILE.upcomingAppointments[0]] };
+    mockGetAppointmentById.mockResolvedValue({
+      id: "sat-1",
+      client_name: "Nithin Dodla",
+      client_phone: "+14699338887",
+      scheduled_at: "2026-09-05T15:00:00Z",
+      status: "scheduled",
+    });
+    mockUpdateAppointmentStatus.mockResolvedValue(true);
+
     const { functionResponse } = await call("cancel_appointment_db", {}, one);
-    const m = functionResponse.response.message;
-    expect(m).toContain("exactly one upcoming appointment");
-    expect(m).toContain("sat-1");
-    // Asking a caller WHICH one, when there is only one, is its own defect.
-    expect(m).toMatch(/do not ask the caller which/i);
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockGetAppointmentById).toHaveBeenCalledWith("sat-1", "biz-1");
+  });
+
+  it("still refuses, with the id, if the resolver is ever bypassed", async () => {
+    // The backstop, exercised directly. whichAppointmentMessage's
+    // single-appointment branch is no longer on the path a caller takes, and a
+    // branch nothing reaches is a branch that rots -- so this pins it against
+    // the day the resolver is narrowed. Bypassed here by supplying an id the
+    // resolver will not touch and that resolves to nothing, then asserting the
+    // OTHER refusal still names what is missing.
+    const one = { callCount: 1, lastCallSummary: null, upcomingAppointments: [TWO_ON_FILE.upcomingAppointments[0]] };
+    mockGetAppointmentById.mockResolvedValue(null);
+
+    const { functionResponse } = await call("cancel_appointment_db", { appointment_id: "invented" }, one);
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/get_caller_appointments_from_db/);
+    expect(functionResponse.response.message).not.toMatch(/booked under your number/i);
   });
 });

@@ -681,7 +681,12 @@ const IDENTITY_MISMATCH_MESSAGE =
  * @returns {string} model-facing refusal text
  */
 function whichAppointmentMessage(ctx, toolName) {
-  const upcoming = ctx?.callerContext?.upcomingAppointments || [];
+  // upcomingForCaller, not the raw array. The two disagreed: this read the
+  // snapshot unfiltered while resolveAppointmentId filters to the future, so a
+  // caller whose only appointment was in the PAST got resolveAppointmentId
+  // returning null and then this message asserting they have "exactly one
+  // upcoming appointment" and naming a date that has been and gone.
+  const upcoming = upcomingForCaller(ctx);
   const timezone = ctx?.config?.timezone || DEFAULT_TIMEZONE;
   const profile = resolveProfile(ctx?.config);
 
@@ -697,6 +702,13 @@ function whichAppointmentMessage(ctx, toolName) {
   }
 
   if (upcoming.length === 1) {
+    // BACKSTOP as of 2026-09-04, not the primary path. resolveAppointmentId now
+    // fills a missing id from this same snapshot before any of the three change
+    // tools reaches a refusal, so the caller is not refused at all and does not
+    // wait through a round-trip. This branch survives because the layers should
+    // each be correct on their own: if the resolver is ever narrowed, being
+    // asked "which appointment?" when you have one must not come back with it.
+    //
     // The declaration promises appointment_id is "optional if caller has one
     // appointment", and the code only delivers that when a previous lookup has
     // left an id in the pack scratchpad. So a caller with exactly one gets
