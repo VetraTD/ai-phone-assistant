@@ -272,68 +272,43 @@ export async function executeToolCall(fc, ctx) {
           });
 
           // -----------------------------------------------------------------
-          // AND NOW IT REFUSES. Shipped 2026-09-04 on three calls of evidence.
+          // IT REFUSED FOR ONE CALL, AND THE CALL GOT WORSE. Reverted to
+          // counting on 2026-09-04, same day it shipped.
           //
-          // The ladder this climbed, in full, because the numbers are the whole
-          // argument for taking a hair-trigger risk at all:
+          // The evidence that justified shipping it was 0, 0, 1 across three
+          // calls -- two true negatives and one true positive. The evidence
+          // from USING it, on call 4, overturned that. The mechanics were
+          // perfect: end_call_refused_abandoned 1, would_refuse 2, the latch
+          // held and allowed the second attempt. What the caller heard was:
           //
-          //   call 1   end_call_would_refuse_abandoned 0   nothing abandoned
-          //   call 2   0                                   nothing abandoned
-          //   call 3   1                                   book_appointment was
-          //                                                refused for a
-          //                                                spelling, the caller
-          //                                                spelled it, the tool
-          //                                                was never called
-          //                                                again, and the model
-          //                                                said "I've booked
-          //                                                that". booked_rows 0.
+          //   caller> No, that's everything. Thanks.
+          //   asst  > You're all set then. Thanks for calling Brightwork
+          //           Family Dental, and have a great weekend.
+          //           [refused -- and the model then said nothing]
+          //           [~6 s of dead air]
+          //   asst  > I'm still here whenever you're ready.     <- a nudge
           //
-          // Two true negatives and one true positive, no false ones. That is
-          // what "count first, act once the counter says how often it fires
-          // when nothing is wrong" was waiting for.
+          // booked_rows was 0. So the caller was told "you're all set", was
+          // held on the line anyway, and got dead air and a nudge on top. That
+          // is strictly worse than letting them hang up, which is at least
+          // brief.
           //
-          // LATCHED TO ONCE PER CALL, and the latch is owned by the caller of
-          // this function rather than by this stateless module. A guard that
-          // can refuse twice can hold someone on the line indefinitely, and
-          // LVX21 is what a hair trigger costs here: 0.5 s of audio delivered
-          // in 25 seconds. One refusal is a question the caller can answer; two
-          // is a trap.
+          // WHY IT COULD NEVER HAVE WORKED, and this is the part worth keeping:
+          // end_call's own declaration says "You MUST write your warm sign-off
+          // in the SAME response as this call." THE GOODBYE IS ALREADY SPOKEN
+          // BEFORE THIS FUNCTION RUNS. No refusal can retract it, and no
+          // instruction in a refusal can stop it -- the same call proved it
+          // twice, because the hesitation branch's "do NOT say goodbye" was
+          // ignored for exactly the same reason.
           //
-          // Checked BEFORE the hesitation branch on purpose. Both keep the line
-          // open, but only this one tells the model that a write is missing --
-          // and a caller being told their booking exists when it does not is a
-          // worse outcome than a caller being asked twice whether they are done.
-          if (!ctx?.abandonedHangupRefusalSpent) {
-            bumpCounter("end_call_refused_abandoned");
-            const tools = ctx.abandonedWrites.join(", ");
-            return {
-              functionResponse: {
-                id: fc.id,
-                name: fc.name,
-                response: {
-                  success: false,
-                  message:
-                    "[not caller speech] NOT A FAILURE — but do not end the call yet. You called " +
-                    `${tools} earlier, it was refused, and you never called it again, so NOTHING ` +
-                    "was saved. Either call it now with the same details the caller already gave " +
-                    "you, or tell them plainly that it did not go through. Do NOT say it is done " +
-                    "and do NOT say goodbye until one of those two things has happened.",
-                },
-              },
-              stateEffects: {
-                // The latch. Read by lib/voice/live/tools.js, which owns the
-                // per-call state this module deliberately does not hold.
-                endCallAbandonedRefusal: true,
-                toolResult: {
-                  name: fc.name,
-                  success: false,
-                  message: "One moment — let me make sure that's saved before you go.",
-                  callerSafe: true,
-                },
-                toolCallEvent: { name: fc.name, args: fc.args },
-              },
-            };
-          }
+          // A refusal message is a request. Preventing a caller being told
+          // something untrue needs something that does not require the model's
+          // cooperation, which is why the retry is being made OURS -- see the
+          // spelling-gate stash below.
+          //
+          // The counters stay. They are what made this decidable in both
+          // directions, and they are what will show whether the retry works.
+          // -----------------------------------------------------------------
         }
       }
 
@@ -669,6 +644,26 @@ export async function executeToolCall(fc, ctx) {
                 toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 capabilityState: {
                   [pack.id]: {
+                    // THE WRITE THIS GATE JUST REFUSED, kept so it can be
+                    // re-issued in code once the caller answers.
+                    //
+                    // Four calls have now lost a booking on this exact path:
+                    // the gate refuses pending a spelling, the caller spells
+                    // it, and the model never calls the tool again -- it just
+                    // announces the booking. LVX34 rewrote this refusal's text
+                    // to say the request is still live and to call again with
+                    // the same details, and call 4 ignored it, exactly as call
+                    // 6 of the previous round did.
+                    //
+                    // A refusal message is a REQUEST. The caller was told "I
+                    // have you down for a cleaning on Monday" with booked_rows
+                    // 0, so the thing that must not depend on the model's
+                    // cooperation is the write itself.
+                    //
+                    // Nothing here reaches a caller: it is the model's own
+                    // arguments, held in memory for the rest of the call, and
+                    // it is never logged.
+                    pendingWrite: { name: fc.name, args: fc.args || {} },
                     // The backstop above. Counted once per caller turn, so a
                     // detector that never recognises this caller's phrasing
                     // still runs out of refusals rather than looping forever —

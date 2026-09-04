@@ -175,63 +175,32 @@ describe("LVX72 — an abandoned write outstanding at hang-up", () => {
     expect(c().end_call_would_refuse_abandoned).toBe(0);
   });
 
-  it("REFUSES an end_call that arrives with a refused write never retried", async () => {
-    // CHANGED 2026-09-04. This used to assert that the call still ended, so
-    // that starting to refuse had to be a deliberate decision rather than a
-    // side effect. It is now that deliberate decision, on three calls of
-    // evidence: end_call_would_refuse_abandoned read 0, 0, 1 -- silent on two
-    // clean calls, firing once on a booking that was refused for a spelling,
-    // spelled, never retried, and then announced as done with booked_rows 0.
-    const { functionResponse, stateEffects } = await endCall({
+  it("COUNTS but does not refuse — reverted after call 4", async () => {
+    // Shipped refusing on 2026-09-04 on three calls of evidence (0, 0, 1) and
+    // reverted the same day on the fourth, which is the evidence that matters
+    // most: the one where it actually ran.
+    //
+    // The mechanics were perfect -- refused once, latch held, second attempt
+    // allowed. The caller still heard "You're all set then" with booked_rows 0,
+    // was then held on the line, and got six seconds of dead air and a silence
+    // nudge on top. Strictly worse than a short call that ends on a lie.
+    //
+    // It could never have worked. end_call's declaration says "You MUST write
+    // your warm sign-off in the SAME response as this call", so the goodbye is
+    // generated BEFORE this gate runs and no refusal can retract it. The same
+    // call proved it twice: the hesitation branch's "do NOT say goodbye" was
+    // ignored for exactly the same reason.
+    const { functionResponse } = await endCall({
       ...baseCtx,
       abandonedWrites: ["book_appointment"],
     });
 
     expect(c().end_call_abandoned_check_ran).toBe(1);
     expect(c().end_call_would_refuse_abandoned).toBe(1);
-    expect(c().end_call_refused_abandoned).toBe(1);
-    expect(functionResponse.response.success).toBe(false);
-    // Names the tool, because "something was abandoned" is not actionable --
-    // LVX71's mistake one layer up.
-    expect(functionResponse.response.message).toMatch(/book_appointment/);
-    expect(functionResponse.response.message).toMatch(/NOTHING was saved/);
-    // Either finish it or say it did not happen. Both are acceptable; claiming
-    // it is done is not.
-    expect(functionResponse.response.message).toMatch(/tell them plainly that it did not go through/i);
-    expect(functionResponse.response.message).toMatch(/do NOT say goodbye/i);
-    expect(stateEffects.toolResult.callerSafe).toBe(true);
-  });
-
-  it("refuses ONCE — the second attempt goes through", async () => {
-    // The hair trigger this whole ladder existed to avoid. One refusal is a
-    // question the caller can answer; two is a trap, and LVX21 is what that
-    // costs here. The latch is owned by lib/voice/live/tools.js because
-    // services/tools.js is stateless and shared with the cascade.
-    const { functionResponse } = await endCall({
-      ...baseCtx,
-      abandonedWrites: ["book_appointment"],
-      abandonedHangupRefusalSpent: true,
-    });
-
-    expect(functionResponse.response.success).toBe(true);
-    // Still COUNTED, though. The situation has not gone away just because the
-    // refusal is spent, and the two counters diverging is how a second attempt
-    // becomes visible at all.
-    expect(c().end_call_would_refuse_abandoned).toBe(1);
+    // Counted, never refused. The prevention lives in the retry now, where it
+    // does not need the model to cooperate.
     expect(c().end_call_refused_abandoned).toBe(0);
-  });
-
-  it("outranks the hesitation refusal when both apply", async () => {
-    // Both keep the line open, but only this one tells the model a write is
-    // missing. A caller told their booking exists when it does not is a worse
-    // outcome than a caller asked twice whether they are finished.
-    const { functionResponse } = await executeToolCall(
-      { id: "fc1", name: "end_call", args: { reason: "done" } },
-      { ...baseCtx, lastCallerText: "Okay.", abandonedWrites: ["book_appointment"] }
-    );
-
-    expect(functionResponse.response.message).toMatch(/NOTHING was saved/);
-    expect(c().end_call_refused_abandoned).toBe(1);
+    expect(functionResponse.response.success).toBe(true);
   });
 
   it("stays inert for the cascade, which passes no abandoned set at all", async () => {
