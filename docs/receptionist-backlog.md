@@ -2221,6 +2221,61 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+## From the owner's second handset call, 2026-09-03
+
+`postcall_booked_rows 1`, `postcall_changed_rows 3`, `spelling_gate_refusals 2`,
+`live_claim_without_action 1`, `postcall_row_without_claim 1`.
+
+### LVX44's nudge DID NOT FIRE `[gcp]` · **P0 — still open**
+
+`live_spelling_ask_nudged = 0` while `spelling_gate_refusals = 2`. So the
+spelling was still unsettled — the guard's own precondition held — and the
+write-time gate did the work late, exactly as before the fix.
+
+That leaves one candidate: **`nameGivenRe` did not match how the caller
+introduced themselves.** The gate firing twice rules out "spelling already
+settled", and `turnUserText` is populated when `auditTurn` runs (`applyTurn`,
+which clears it, runs after).
+
+**This is the weakness that was declared when the guard was built, arriving
+immediately.** A regex over caller phrasing can be widened but never completed.
+It is the same limit `spellRequestRe` has, and the same reason
+`docs/receptionist-backlog.md` already says prose cannot hold a budget.
+
+**Done when:** the `user_text` for that turn is read out of the log and the
+pattern either covers it or is replaced by something that is not a regex.
+
+### LVX47 · It reveals appointments one at a time, over three turns `[gcp]` · P1
+
+The owner: *"It will say I see you have an appointment, and then after, if I have
+another one scheduled, it will say oh I also see you have this appointment, and
+then after it said I see you have these appointments already for a 3rd time."*
+
+**It is not missing data.** `buildDynamicTail`'s CALLER CONTEXT block lists
+**every** upcoming appointment (`services/gemini.js:823-830`), filtered to
+future-only, and that block is in the system instruction from turn 1. The model
+had all of them before it said a word.
+
+Two things make it worse on this front-end specifically:
+
+- **The greeting is composed by the MODEL, not by the server.** The Live path
+  sends a kick-off message asking the model to greet
+  (`lib/voice/live/index.js:1694`), so what gets mentioned, and when, is the
+  model's choice. The cascade speaks a fixed greeting through TTS.
+- **LVX46.** The prompt is frozen at connect, so the CALLER CONTEXT list cannot
+  update — but `applyToCallerSnapshot` DOES update the snapshot the TOOLS read.
+  A mid-call `get_caller_appointments_from_db` (this call: one, and
+  `lookup_tool_context_warm = 1`) therefore returns a list the frozen prompt does
+  not agree with, which is a second way for appointments to "appear".
+
+**The fix direction is not a prompt line.** The server already has the full list
+before turn 1 — that is what `fetchCallerContext` is for. Composing the greeting
+server-side, the way the cascade does, makes dribbling them out impossible
+rather than discouraged. See the note on what code can and cannot guarantee.
+
+**Done when:** a returning caller with three appointments hears all three once,
+in the first thing the assistant says.
+
 ## From the owner's real handset call, 2026-09-03 — two defects and a structural one
 
 The first call on a real phone since the fixes. It booked correctly
