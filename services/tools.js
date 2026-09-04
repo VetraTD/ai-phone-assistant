@@ -232,6 +232,47 @@ export async function executeToolCall(fc, ctx) {
       const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
       const heardOnlyHesitation = lastCallerText.trim() !== "" && stripFillers(lastCallerText) === "";
 
+      // ---------------------------------------------------------------------
+      // LVX72, COUNT ONLY. This refuses nothing, and that is the decision.
+      //
+      // The defect: a write is refused, the caller answers the refusal, the
+      // model never retries and announces the change as done. postcall_verify
+      // now DETECTS it -- verdict write_abandoned, seen both firing and staying
+      // silent on real calls -- but detection happens after the caller has hung
+      // up believing something happened. The clean prevention is to refuse the
+      // hang-up once while an abandoned write is outstanding.
+      //
+      // Not built yet, on purpose. That gate carries a real hair-trigger risk:
+      // a caller who genuinely changed their mind mid-change would be held on
+      // the line, and this codebase has already paid for a guard with a hair
+      // trigger -- LVX21 delivered 0.5 s of audio in 25 seconds. The question
+      // that decides whether refusing is safe is "how often would a real call
+      // have been held?", and nothing could answer it. Now something can.
+      //
+      // Count first, act once the counter says how often it fires when nothing
+      // is wrong. Same ladder live_claim_without_action climbed.
+      //
+      // Shared with the cascade, which passes no abandonedWrites at all: the
+      // field is undefined there, the check no-ops, and
+      // end_call_abandoned_check_ran stays 0 -- which is the honest reading,
+      // not a silent pass.
+      // ---------------------------------------------------------------------
+      if (Array.isArray(ctx?.abandonedWrites)) {
+        // The positive twin. Distinguishes "no abandoned write" from "the
+        // check never ran", which is the whole reason this file's other
+        // fault-only counters were unreadable.
+        bumpCounter("end_call_abandoned_check_ran");
+        if (ctx.abandonedWrites.length > 0) {
+          bumpCounter("end_call_would_refuse_abandoned");
+          log.error("end_call_abandoned_write_outstanding", {
+            callId: ctx?.callId ?? null,
+            // Tool names only. Nothing here is caller data.
+            tools: ctx.abandonedWrites,
+            severity: "warn",
+          });
+        }
+      }
+
       if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation)) {
         const endCallArgs = fc.args ?? {};
         return {

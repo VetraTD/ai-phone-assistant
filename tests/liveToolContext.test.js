@@ -87,6 +87,30 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.spellingSettled).toBe(true);
   });
 
+  it("carries abandonedWrites through to the tool (the LVX72 wire)", async () => {
+    // Same shape as the LVX45 wire above, and asserted for the same reason:
+    // turnState() produces this and the ctx object copies it by hand, so the
+    // two can drift silently. The end_call counters would then read 0 whether
+    // no write was abandoned or the field never arrived -- and distinguishing
+    // those two is the entire purpose of end_call_abandoned_check_ran.
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 4,
+      lastCallerText: "no thanks",
+      abandonedWrites: ["correct_appointment_name"],
+    }));
+    expect(ctx.abandonedWrites).toEqual(["correct_appointment_name"]);
+  });
+
+  it("normalises a missing abandonedWrites to an array, never undefined", async () => {
+    // An array is what makes the count-only check RUN. undefined makes it
+    // no-op, which is correct for the cascade and wrong here: a Live call that
+    // reported nothing would be indistinguishable from one that was never
+    // asked.
+    const ctx = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, lastCallerText: "no" }));
+    expect(ctx.abandonedWrites).toEqual([]);
+  });
+
   it("rebuilds the context per call so a later tool sees the same turn", async () => {
     const execute = vi.fn(async (fc) => ({
       functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
