@@ -2009,3 +2009,120 @@ describe("end_call refuses while the caller is still thinking", () => {
     expect(functionResponse.response.message).not.toMatch(/hesitation/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Correcting a name that was taken down wrong.
+//
+// From a real call, 2026-09-03. The caller's name was misheard, they corrected
+// it over five turns, and the assistant finally said "I've updated your name in
+// our records and your appointment is confirmed". Nothing had been updated: the
+// row still read the wrong name and changed_rows was 0.
+//
+// The model did not invent an action out of nowhere -- it had no action to
+// take. book, cancel, reschedule and lookup were its whole vocabulary, and
+// updateAppointment had been sitting in CAPABILITY_DEPS with no tool ever
+// calling it.
+// ---------------------------------------------------------------------------
+describe("correct_appointment_name", () => {
+  const APPT = "appt-77";
+  const ctxWith = (extra = {}) => ({
+    ...baseCtx,
+    capabilityState: { appointments: { selectedAppointmentId: APPT, ...extra } },
+  });
+  const call = (args, ctx) =>
+    executeToolCall({ id: "c1", name: "correct_appointment_name", args }, ctx || ctxWith());
+
+  beforeEach(() => {
+    mockUpdateAppointment.mockReset();
+    mockUpdateAppointment.mockResolvedValue(true);
+    mockGetAppointmentById.mockReset();
+    // Same number the caller is ringing from: ownership is proven by phone.
+    mockGetAppointmentById.mockResolvedValue({
+      id: APPT,
+      client_name: "Nithin Vodla",
+      client_phone: baseCtx.callerPhone,
+      scheduled_at: FUTURE_SLOT_ANCHORED,
+    });
+  });
+
+  it("writes the corrected name to the existing row", async () => {
+    const { functionResponse } = await call({ client_name: "Nithin Dodla" });
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockUpdateAppointment).toHaveBeenCalledWith(APPT, { client_name: "Nithin Dodla" }, "biz-1");
+  });
+
+  it("emits an effect the snapshot can tell apart from a cancellation", async () => {
+    // A "changed" effect with an id and no new time is the CANCEL shape. A
+    // rename must carry newClientName or applyToCallerSnapshot deletes the
+    // appointment out from under the caller.
+    const { stateEffects } = await call({ client_name: "Nithin Dodla" });
+
+    expect(stateEffects.capabilityEffects).toEqual([
+      {
+        capability: "appointments",
+        type: "changed",
+        data: { tool: "correct_appointment_name", appointmentId: APPT, newClientName: "Nithin Dodla" },
+      },
+    ]);
+  });
+
+  it("finds the appointment booked earlier in the call, with no lookup", async () => {
+    // The observed case: the caller corrects the name seconds after giving it,
+    // and nothing has set selectedAppointmentId because a booking sets nothing.
+    const { functionResponse } = await call(
+      { client_name: "Nithin Dodla" },
+      { ...baseCtx, capabilityState: { appointments: { lastBooked: { id: APPT, scheduled_at: FUTURE_SLOT_ANCHORED } } } }
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockUpdateAppointment).toHaveBeenCalledWith(APPT, { client_name: "Nithin Dodla" }, "biz-1");
+  });
+
+  it("refuses when it cannot tell which appointment", async () => {
+    const { functionResponse } = await call({ client_name: "Nithin Dodla" }, { ...baseCtx, capabilityState: {} });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an appointment that is not the caller's, and writes nothing", async () => {
+    mockGetAppointmentById.mockResolvedValue({
+      id: APPT,
+      client_name: "Someone Else",
+      client_phone: "+15559999999",
+      scheduled_at: FUTURE_SLOT_ANCHORED,
+    });
+
+    const { functionResponse } = await call({ client_name: "Nithin Dodla" });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("does not accept the corrected name as its own proof of ownership", async () => {
+    // The name is the value under dispute, so it cannot also be the identity
+    // factor. From another number, with no phone_last4, this must refuse even
+    // though the supplied name would "match" what is being written.
+    mockGetAppointmentById.mockResolvedValue({
+      id: APPT,
+      client_name: "Nithin Dodla",
+      client_phone: "+15559999999",
+      scheduled_at: FUTURE_SLOT_ANCHORED,
+    });
+
+    const { functionResponse } = await call({ client_name: "Nithin Dodla" });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("tells the caller plainly when the write fails", async () => {
+    mockUpdateAppointment.mockResolvedValue(false);
+
+    const { functionResponse, stateEffects } = await call({ client_name: "Nithin Dodla" });
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+  });
+});

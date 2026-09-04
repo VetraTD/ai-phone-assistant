@@ -292,6 +292,35 @@ const DB_APPOINTMENT_DECLARATIONS = [
       required: ["new_scheduled_at"],
     },
   },
+  {
+    name: "correct_appointment_name",
+    description:
+      "Correct the name on an appointment that is already booked, when the caller tells you it was " +
+      "taken down wrong. Use this whenever they correct their name AFTER a booking exists - do not " +
+      "just say you have updated it, because nothing changes unless this runs. It updates the " +
+      "existing appointment; it does not create a new one.",
+    parameters: {
+      type: "object",
+      properties: {
+        client_name: {
+          type: "string",
+          description: "The corrected full name, exactly as the caller has now given it.",
+        },
+        appointment_id: {
+          type: "string",
+          description:
+            "Which appointment to correct. Omit it for the one booked or discussed earlier in this call.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under. Only needed when " +
+            "the caller is not calling from that number.",
+        },
+      },
+      required: ["client_name"],
+    },
+  },
 ];
 
 /**
@@ -418,6 +447,17 @@ function applyToCallerSnapshot(effect, engine) {
   let next;
   if (effect.type === "booked") {
     next = [...list, { id: null, client_name: data.client_name || null, scheduled_at: data.scheduled_at }];
+  } else if (data.newClientName && data.appointmentId) {
+    // BEFORE the appointmentId branch below, which removes the row.
+    //
+    // That branch is the cancel path, and it keys on "a changed effect carrying
+    // an id and no new time" -- which is exactly the shape a rename would have
+    // had. Left to fall through, correcting a name would have silently deleted
+    // the appointment from the caller snapshot, and the caller would then have
+    // been told they had none. Same family as LVX33 and not worth repeating.
+    next = list.map((a) =>
+      a?.id && a.id === data.appointmentId ? { ...a, client_name: data.newClientName } : a
+    );
   } else if (data.newScheduledAt) {
     next = list.map((a) =>
       a?.id && a.id === data.appointmentId ? { ...a, scheduled_at: data.newScheduledAt } : a
@@ -965,6 +1005,7 @@ export default {
     "book_appointment",
     "cancel_appointment_db",
     "reschedule_appointment_db",
+    "correct_appointment_name",
     // EHR write tools — listed here so executeToolCall runs checkRequirements
     // (identity / confirmBeforeWrite / businessHoursOnly) on athena clinics too.
     "book_appointment_in_ehr",
@@ -1148,6 +1189,8 @@ export default {
         return cancelAppointment(fc, ctx);
       case "reschedule_appointment_db":
         return rescheduleAppointment(fc, ctx);
+      case "correct_appointment_name":
+        return correctAppointmentName(fc, ctx);
       default:
         // The EHR tools. They are declared by this pack but executed by the
         // integration layer, which owns the athenahealth client.
@@ -1614,6 +1657,11 @@ async function bookAppointment(fc, ctx) {
     "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
   let anchoredScheduledAt = null;
   let alreadyBooked = false;
+  // The row id the adapter hands back. It was being discarded: `booked` is
+  // built from the model's ARGUMENTS, so nothing downstream ever knew which row
+  // had just been written. correct_appointment_name needs it -- a caller
+  // correcting a misheard name seconds later has no lookup to reach it by.
+  let bookedRowId = null;
 
   // ---- Is there anybody to attach this appointment to? --------------------
   //
@@ -1796,6 +1844,7 @@ async function bookAppointment(fc, ctx) {
             if (full) {
               bookMessage = fullMessage;
             } else if (dbId) {
+              bookedRowId = dbId;
               bookSuccess = true;
               bookMessage = "Appointment booked successfully.";
               // `allow` never blocks, but the model should still know — a
@@ -1859,6 +1908,12 @@ async function bookAppointment(fc, ctx) {
             capabilityState: {
               appointments: {
                 lastBooked: {
+                  // The id is here for correct_appointment_name, which is
+                  // otherwise left guessing which row the caller means when
+                  // they correct a name seconds after giving it. The other two
+                  // change tools reach their appointment through a lookup that
+                  // sets selectedAppointmentId; a booking sets nothing.
+                  id: bookedRowId,
                   scheduled_at: booked.scheduled_at,
                   client_name: booked.client_name || null,
                 },
@@ -2046,6 +2101,109 @@ async function cancelAppointment(fc, ctx) {
             ],
           }
         : {}),
+    },
+  };
+}
+
+/**
+ * Correct the name on an appointment that already exists.
+ *
+ * WHY THIS TOOL EXISTS, because its absence is the defect it fixes.
+ *
+ * On a real call on 2026-09-03 the caller's name was misheard, they corrected
+ * it over five turns, and the assistant finally said "I've updated your name in
+ * our records and your appointment is confirmed". Nothing had been updated. The
+ * row still read the wrong name, `changed_rows` was 0, and
+ * `live_claim_without_action` fired.
+ *
+ * The model did not invent an action out of nowhere -- it had no action to
+ * take. book, cancel, reschedule and lookup were the whole of its vocabulary,
+ * and none of them corrects a name. `updateAppointment` had been sitting in
+ * CAPABILITY_DEPS the entire time with no tool ever calling it.
+ *
+ * Correcting a misheard name is an ordinary thing a receptionist does, the more
+ * so on this front-end where the model IS the transcriber: the same call had
+ * the caller's spelled-out "D" arrive as "V".
+ *
+ * Ownership is checked exactly as cancel and reschedule check it, and the
+ * common case passes on the caller's own number -- appointmentBelongsToCaller
+ * matches the phone FIRST, so the name being wrong is not an obstacle to
+ * proving the appointment is theirs. That ordering matters here more than
+ * anywhere: the name is the thing under dispute.
+ */
+async function correctAppointmentName(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const clientName = typeof fc.args?.client_name === "string" ? fc.args.client_name.trim() : "";
+  const appointmentId =
+    fc.args?.appointment_id || scratch(ctx).selectedAppointmentId || scratch(ctx).lastBooked?.id;
+
+  if (!clientName || !appointmentId) {
+    const message = !clientName
+      ? "[not caller speech] No corrected name was given. Ask the caller what the name should be."
+      : "[not caller speech] Which appointment? Look it up first, then call this again.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message: "Missing info." },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    // Deliberately NOT passing the corrected name as the identity factor: it is
+    // the value being changed, so it cannot also be the proof. The phone match
+    // is what carries this, and the name path stays available only via
+    // phone_last4 for a caller ringing from elsewhere.
+    null,
+    fc.args?.phone_last4
+  );
+  if (!identityOk) return identityMismatchResult(fc);
+
+  const ok = await ctx.deps.updateAppointment(appointmentId, { client_name: clientName }, ctx.businessId);
+  if (!ok) {
+    const message = "I wasn't able to update that name just now.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message, callerSafe: true },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: true, message: `The appointment is now under "${clientName}".` },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: `I've corrected that to ${clientName}.`,
+        callerSafe: true,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      // newClientName is what keeps applyToCallerSnapshot from reading this as
+      // a cancellation -- see the branch it added.
+      capabilityEffects: [
+        {
+          capability: "appointments",
+          type: "changed",
+          data: { tool: fc.name, appointmentId, newClientName: clientName },
+        },
+      ],
+      capabilityState: {
+        appointments: {
+          identityVerifiedApptId: appointmentId,
+          callerFacts: { ...(scratch(ctx).callerFacts || {}), Name: clientName },
+        },
+      },
     },
   };
 }

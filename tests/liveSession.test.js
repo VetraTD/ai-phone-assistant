@@ -116,14 +116,14 @@ describe("session start", () => {
     expect(database.lookupBusinessByPhone).toHaveBeenCalledWith("+441372656055");
   });
 
-  it("declares all ten tools on the session", async () => {
+  it("declares all eleven tools on the session", async () => {
     // The single most expensive mistake available here. Rounds 1 and 2
     // declared six and measured a receptionist that could not check
     // availability.
     const { live } = await boot();
     const names = live.sent.config.tools[0].functionDeclarations.map((d) => d.name);
 
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     expect(names).toContain("check_appointment_availability");
   });
 
@@ -160,7 +160,7 @@ describe("tenant context is loaded BEFORE the session is configured", () => {
     // The review finding this replaces: the tenant prefetch was fired and not
     // awaited, then the tool list was built in the same synchronous block, so
     // extras.integrations was ALWAYS []. Every integration tool was missing
-    // from every call, and the old "declares all ten tools" test passed only
+    // from every call, and the old "declares all eleven tools" test passed only
     // because its fake returned no integrations -- it asserted the number it
     // would have got either way.
     const database = fakeDb({

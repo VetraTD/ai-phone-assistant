@@ -106,9 +106,9 @@ describe("LVX23 bisect arms", () => {
     delete process.env.LIVE_PROMPT;
   });
 
-  it("arm 0 is unchanged: the full prompt and all ten tools", async () => {
+  it("arm 0 is unchanged: the full prompt and all eleven tools", async () => {
     const cfg = await boot();
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 
@@ -118,9 +118,9 @@ describe("LVX23 bisect arms", () => {
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 
-  it("arm 2 keeps all ten tools and shrinks only the prompt", async () => {
+  it("arm 2 keeps all eleven tools and shrinks only the prompt", async () => {
     const cfg = await boot({ LIVE_PROMPT: "minimal" });
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeLessThan(2_000);
   });
 
@@ -140,7 +140,7 @@ describe("LVX23 bisect arms", () => {
     process.env.LIVE_TOOLS = "none";
     process.env.LIVE_PROMPT = "minimal";
     const cfg = await boot({});
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 });

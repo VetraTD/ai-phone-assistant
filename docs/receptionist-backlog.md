@@ -2221,6 +2221,82 @@ That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
 
+## LVX48 · It said it had updated the record, and there was no tool to do it `[gcp]` · **P0 — FIXED, unverified on a call**
+
+From the first call on the local rig, 2026-09-03. The caller's name was misheard
+as "Nithin Vodla". They corrected it over **five turns**. The assistant then said:
+
+> "Thank you for clarifying the spelling, Nitin Dodla. **I've updated your name in
+> our records** and your appointment is confirmed for tomorrow at two thirty PM."
+
+The row still read `client_name: "Nithin Vodla"`. `changed_rows: 0`.
+
+**The model did not invent an action out of nowhere — it had no action to
+take.** book, look up, check availability, cancel, reschedule: that was the
+entire vocabulary. Nothing corrects a name on an existing appointment. Faced
+with a caller correcting theirs, the only options were to claim success or to
+refuse, and it claimed.
+
+**`updateAppointment` had been sitting in `CAPABILITY_DEPS` the whole time with
+no tool ever calling it.** A dead capability, and a defect hiding behind it.
+
+**Two guards behaved exactly as designed and neither could save it:**
+
+- **`live_claim_without_action` FIRED.** It was blind to this shape twelve hours
+  earlier; the LVX31 fix, made the same afternoon, is why it saw it. First time
+  that guard has caught a real fabrication in flight.
+- **`postcall_verify` returned `verdict: ok`**, because a booking row did exist.
+  That is the reconciler flaw the backlog already recorded as theoretical —
+  *"unrelated successful writes mask a fabrication"* — observed for the first
+  time. The claim ledger counted two claims and one row and still said ok.
+
+### The fix: `correct_appointment_name`
+
+A new tool on the internal-calendar path, gated like its neighbours.
+
+- **Ownership is proven by PHONE, never by the name.** `appointmentBelongsToCaller`
+  matches the caller's number first, which is what makes this workable at all:
+  the name is the value under dispute, so it cannot also be the proof. The
+  corrected name is deliberately NOT passed as the identity factor, so a caller
+  ringing from another number must still supply `phone_last4`.
+- **It knows which appointment without a lookup.** The row id the adapter
+  returns was being **discarded** — `booked` is built from the model's
+  ARGUMENTS, so nothing downstream ever knew which row had just been written. It
+  is now kept on the `lastBooked` anchor, which is the only way a correction
+  seconds after the booking can find its target. Kept off the booked EFFECT
+  deliberately: that payload feeds notifications and the confirmation SMS.
+- **The effect carries `newClientName`.** Without it `applyToCallerSnapshot`
+  would have read a rename as a CANCELLATION — its cancel branch keys on "a
+  changed effect with an id and no new time", which is exactly a rename's shape.
+  Correcting a name would have silently deleted the appointment from the caller
+  snapshot and the caller would then have been told they had none. Same family
+  as LVX33, caught by reading rather than by shipping.
+
+The tool union goes 10 → 11, so the "all ten tools" assertions and the
+dashboard's hand-mirrored `BUILTIN_TOOL_NAMES` move with it — that mirror is a
+second write path to the integrations table, so a name missing there could still
+be shadowed by a business's own webhook.
+
+**Done when:** a real call corrects a misheard name and the row changes.
+
+### The deeper problem this sits on: spelling is not a reliable channel here
+
+The wrong name existed because **the caller's spelled-out letters were
+themselves misheard**. The transcript of the spelling reads `y n i t h i n v o d
+l a` — the spoken "D" arrived as "V". The assistant then read back exactly what
+it had, and every correction went through the same lossy channel, which is why
+it took five turns and still ended wrong.
+
+Spelling aloud is supposed to be the REMEDY for a misheard name — it is the
+whole justification for the spelling gate, whose comment says "only letters
+catch a letter error". On this front-end the model is the transcriber, so the
+remedy has the same failure mode as the disease.
+
+**Recorded, not fixed.** Candidates, none tested: a phonetic alphabet prompt
+("D for Delta"), reading the name back letter-by-letter for confirmation rather
+than as a word, or accepting that a name corrected twice should be written as
+given and flagged for staff. Worth its own sitting.
+
 ## From the owner's second handset call, 2026-09-03
 
 `postcall_booked_rows 1`, `postcall_changed_rows 3`, `spelling_gate_refusals 2`,

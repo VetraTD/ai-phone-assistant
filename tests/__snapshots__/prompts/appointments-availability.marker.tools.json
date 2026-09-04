@@ -203,5 +203,34 @@
         "identity_dob"
       ]
     }
+  },
+  {
+    "name": "correct_appointment_name",
+    "description": "Correct the name on an appointment that is already booked, when the caller tells you it was taken down wrong. Use this whenever they correct their name AFTER a booking exists - do not just say you have updated it, because nothing changes unless this runs. It updates the existing appointment; it does not create a new one.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name": {
+          "type": "string",
+          "description": "The corrected full name, exactly as the caller has now given it."
+        },
+        "appointment_id": {
+          "type": "string",
+          "description": "Which appointment to correct. Omit it for the one booked or discussed earlier in this call."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under. Only needed when the caller is not calling from that number."
+        },
+        "identity_dob": {
+          "type": "string",
+          "description": "date of birth, as given by the caller. Required — the action will be refused without it."
+        }
+      },
+      "required": [
+        "client_name",
+        "identity_dob"
+      ]
+    }
   }
 ]

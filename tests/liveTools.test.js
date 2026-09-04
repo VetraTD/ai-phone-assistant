@@ -57,10 +57,10 @@ describe("buildLiveTools", () => {
     expect(declared.map((d) => d.name)).toEqual(callToolNames(APPOINTMENTS_CONFIG, EXTRAS));
   });
 
-  it("declares ten for an appointments business", () => {
+  it("declares eleven for an appointments business", () => {
     const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS)[0].functionDeclarations;
 
-    expect(declared).toHaveLength(10);
+    expect(declared).toHaveLength(11);
   });
 
   it("includes the availability check, whose absence is what broke rounds 1 and 2", () => {
