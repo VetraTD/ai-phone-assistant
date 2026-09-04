@@ -113,7 +113,7 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **RESTORED 2026-09-03, late.** Put back to the Railway staging URLs after a six-call local round, and verified field-for-field by re-reading the number from Twilio rather than trusting the update. `npm run probe` works again. The cloudflared tunnel and the local server are shut down; that tunnel URL is dead and a future rig gets a new one. |
+| **status** | **RESTORED to Railway staging 2026-09-03, but NOT to the captured `voiceUrl`.** Corrected 2026-09-04 by re-reading the number from Twilio: it points at **`/twilio/live-voice`**, not the `/twilio/voice` captured above. The host is alive and `npm run probe` works, so nothing is broken — but the probe now dials the **Live** front-end rather than the cascade, and any number it reports is a Live number. `readiness.md:161` was the accurate document and this row was not. The cloudflared tunnel and the local server are shut down; that tunnel URL is dead and a future rig gets a new one. |
 
 ### Testing against a laptop, and why it is cloudflared and not ngrok
 
@@ -231,7 +231,12 @@ Those need a handset.
 ## 6. Putting it back
 
 1. Restore the number from section 3, and **verify by reading it back** rather
-   than trusting the update call.
+   than trusting the update call. This step was performed on 2026-09-03 and the
+   read-back was recorded as "field-for-field"; it was not — `voiceUrl` came
+   back `/twilio/live-voice` when the captured value was `/twilio/voice`.
+   Reading it back is not enough on its own: **compare the fields to the table
+   above one by one**, because a read-back that is glanced at proves as little
+   as an update that is trusted.
 2. Unset `LIVE_BUSINESS_PHONE` wherever it was set.
 3. The Live routes can stay deployed — nothing reaches them without a Twilio
    number pointed at `/twilio/live-voice`, and the cascade's routes are

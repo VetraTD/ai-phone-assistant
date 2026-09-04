@@ -3,7 +3,12 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
-import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
+import {
+  resolveDayHours,
+  formatClockTime,
+  resolveBusinessHoursForPrompt,
+  formatWeeklyHours,
+} from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { greetingTextFor } from "../lib/voice/greeting.js";
 import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
@@ -13,7 +18,7 @@ import { createToolCallTextStripper } from "../lib/toolCallText.js";
 import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
-import { speakableDateTime } from "../lib/capabilities/datetime.js";
+import { speakableDateTime, relativeDayLabel } from "../lib/capabilities/datetime.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import {
   resolveCachedContent,
@@ -833,7 +838,16 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
       //
       // One shared formatter, one shared fallback (lib/capabilities/datetime.js).
       const d = a.scheduled_at ? speakableDateTime(a.scheduled_at, timezone, profile) : "unknown date";
-      return a.client_name ? `${d} (${a.client_name})` : d;
+      // The relative word is computed on the SERVER and handed over.
+      //
+      // The model already has the current date and an instruction to calculate
+      // from it, and on a real call at 21:37 on a Thursday it announced a
+      // Friday appointment as "today". Reusing nowMs, the same instant the
+      // upcoming filter above was taken against, so the list and the word
+      // cannot disagree with each other. See LVX61.
+      const rel = a.scheduled_at ? relativeDayLabel(a.scheduled_at, timezone, nowMs) : null;
+      const when = rel ? `${d} — ${rel}` : d;
+      return a.client_name ? `${when} (${a.client_name})` : when;
     });
     ctx += `\nUpcoming appointments: ${appts.join("; ")}.`;
     // Immediately after the fact it governs, not at the end of the block.
@@ -844,6 +858,10 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
     // available; the deterministic guarantee is book_appointment's guard, which
     // is what actually stops a second row.
     if (rules.length > 0) ctx += `\n${rules.join("\n")}`;
+    // Below the rules rather than above them, so the "do NOT offer to book
+    // another" line keeps the adjacency to the appointment list that it was
+    // deliberately moved up to get.
+    ctx += `\nWhen you mention one of these, use only the relative word written beside it. If none is written, name the weekday and the date — never call a day "today" or "tomorrow" unless it says so above.`;
   }
   // "reference their upcoming appointment if relevant" used to sit in the first
   // sentence. It was removed, not trimmed: it is the direct contradiction of the
@@ -892,7 +910,19 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // reply makes the NEXT reply emphatic too, and the voice escalates over a long
   // call. lib/voice/speakableText.js damps this on the way out regardless; this
   // rule stops it at the source, where the wording can stay natural.
-  identity += `- Never use exclamation marks, and never capitalise a word for emphasis. Warmth comes from your words, not punctuation — you are speaking, not writing.`;
+  identity += `- Never use exclamation marks, and never capitalise a word for emphasis. Warmth comes from your words, not punctuation — you are speaking, not writing.\n`;
+  // Three instances in one evening, and no guard can catch any of them:
+  // "user?" as a form of address, "the calendar needs to know what service
+  // you're looking for", and an unprompted "our office is currently closed".
+  // sanitizeOutbound and internal_term_leaks key on implementation VOCABULARY
+  // (api, webhook, snake_case, JSON) and these are ordinary English words in
+  // ordinary English sentences — the guard family catches leaked syntax and
+  // misses leaked FRAMING. Adding "calendar" or "system" to the leak word list
+  // is not the fix: "let me check the calendar" is what a receptionist says,
+  // and a leak guard with a hair trigger is LVX21. There was no form-of-address
+  // rule here at all, so this competes with nothing. See LVX54, LVX64.
+  identity += `- Until the caller gives you a name, do not address them by any stand-in — no "user", no "caller", no placeholder of any kind. Speak to them directly with no name at all.\n`;
+  identity += `- Never describe the systems behind you as people or as things with needs: not "the calendar needs to know", not "the system requires", not "your record says". Ask for what you need the way a receptionist would — "what are you coming in for?"`;
 
   const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
   if (langs.length > 1) {
@@ -914,7 +944,16 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     // never ran and the model, with no result to work from, described an
     // appointment that did not exist and recited an id that was not in the
     // database. "Never invent" has to name the thing that was invented.
-    `Never invent facts, prices, times, availability, or appointments. If you are not sure, say so and offer to take a message so someone can follow up with the right answer. If a lookup returns nothing, say you cannot find anything under this number — never describe an appointment you were not told about.`,
+    // Extended again on 2026-09-03, after the worst thing this system has said.
+    // Asked "do you take my insurance?", it answered "I've confirmed we accept
+    // Blue Cross Blue Shield" — no insurance information exists anywhere in
+    // that tenant, and no tool ran on the turn. It also offered a service the
+    // practice does not provide, and told a caller what a stored appointment
+    // was for when the row says only "dental appointment". "Never invent" was
+    // already here and was not enough: it does not say WHERE a fact may come
+    // from, and it does not forbid the words that make an invention sound
+    // checked. Both are added. See LVX66, LVX59.
+    `Never invent facts, prices, times, availability, or appointments. Everything you tell a caller about this business — the services it offers and does not offer, what it charges, which insurers or payment methods it takes — must come from BUSINESS INFO, KNOWLEDGE BASE, CUSTOM BUSINESS RULES, or a tool's response on this call. If it is not there, you do not know it: say you will check and offer to take a message so someone can follow up with the right answer. Never say you have confirmed, checked, verified, or looked something up unless a tool actually returned it on this call. When you describe an appointment already on the record, use only what the record holds — the date, the time, and the name it is under; if the caller asks what it is for and the record does not say, tell them it does not say. If a lookup returns nothing, say you cannot find anything under this number — never describe an appointment you were not told about.`,
     `Never claim an action happened unless the tool returned success=true.`,
     // Scoped to details the caller SUPPLIES. An unscoped version made the model
     // solicit a phone number it already had from caller ID, which cost a turn
@@ -934,7 +973,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     );
   }
   nnrRules.push(
-    `If the caller asks for something you cannot do here, say so up front and offer what you CAN do — never attempt it and fail.`,
+    // The second sentence is a different case from the first, and the gap
+    // between them was walked straight through on a real call: asked "can I
+    // book an Uber?", the assistant answered "I understand you want to book an
+    // appointment" and drove into the booking flow. It declines a TREATMENT the
+    // practice does not offer perfectly well; it had nothing at all for a
+    // request that is not about the business. See LVX63.
+    `If the caller asks for something you cannot do here, say so up front and offer what you CAN do — never attempt it and fail. If what they are asking for is not this business's line of work at all, say plainly that it is not something you can help with on this line — never reinterpret it as a request you can handle.`,
     `In an emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose), immediately tell them to call 911 or go to the nearest emergency room. Do not schedule or take a message for emergencies.`
   );
   sections.push(
@@ -946,6 +991,20 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // === BUSINESS INFO ===
   const infoLines = [];
   if (config.mainPhone) infoLines.push(`Phone: ${config.mainPhone}`);
+  // The WHOLE week, and it belongs in the STATIC half. buildDynamicTail carries
+  // only today's window plus "Status: OPEN/CLOSED" — the right data for "are we
+  // open right now", and the whole of what the model had when a caller asked
+  // what the hours were. It extrapolated the rest of the week from that one
+  // day and told them the practice was shut on a Saturday it trades. See
+  // LVX55 and formatWeeklyHours.
+  //
+  // Static rather than tail for two reasons: the week is business-stable, so it
+  // stays cacheable and does not re-bill per turn; and on the Live front-end,
+  // where the prompt is frozen at connect (LVX46), a schedule that cannot go
+  // stale mid-call is worth more than one that is recomputed and then frozen
+  // anyway.
+  const weeklyHours = formatWeeklyHours(config.businessHours);
+  if (weeklyHours) infoLines.push(`Opening hours: ${weeklyHours}`);
   if (config.generalInfo) {
     // Operator free-text: wrapped in the BUSINESS CONFIG delimiters (same
     // prompt-injection treatment as KNOWLEDGE BASE / CUSTOM BUSINESS RULES) and
@@ -1269,14 +1328,20 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
       config.afterHoursPolicy === "book_later" && !canBook ? "take_message" : config.afterHoursPolicy;
 
     let afterHours = `=== AFTER-HOURS BEHAVIOR ===\n`;
-    afterHours += `The office is currently CLOSED. `;
+    // Every branch below used to open with "Inform the caller the office is
+    // closed.", so the unprompted "I also want to let you know that our office
+    // is currently closed" mid-answer was the prompt working exactly as
+    // written — the LVX55 shape again, a defect that reads as a lapse and is
+    // really an instruction. The fact stays; the standing order to announce it
+    // becomes a condition. See LVX60.
+    afterHours += `The office is currently CLOSED. Say so only when it bears on what the caller actually asked — they want to come in now, they ask whether you are open, or it explains what you are offering them instead. Never volunteer it as an aside while answering something else. `;
     switch (effectivePolicy) {
       case "offer_callback":
         // "Ask for their name, number, and preferred callback time" — three
         // asks in one instruction, and the model duly delivered all three in a
         // single breath. Reported from a live call as the assistant still
         // stacking questions, and after-hours is a common path to land on.
-        afterHours += `Inform the caller the office is closed. Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
+        afterHours += `Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
         break;
       case "book_later":
         // "Do NOT book appointments during closed hours" had two readings, and
@@ -1292,14 +1357,14 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         // something explicit caching introduced. Caching only demotes this
         // text from system role to user role, which made the misreading
         // frequent enough to see.
-        afterHours += `Inform the caller the office is closed. Being closed does NOT stop you booking — complete the booking now with book_appointment as normal. The restriction is on the SLOT only: never schedule an appointment for a time when the office is closed.`;
+        afterHours += `Being closed does NOT stop you booking — complete the booking now with book_appointment as normal. The restriction is on the SLOT only: never schedule an appointment for a time when the office is closed.`;
         break;
       case "transfer_if_possible":
-        afterHours += `Inform the caller the office is closed. If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
+        afterHours += `If a transfer is available, offer to connect them. Otherwise, take a message using record_customer_request.`;
         break;
       case "take_message":
       default:
-        afterHours += `Inform the caller the office is closed. Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
+        afterHours += `Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
         break;
     }
     sections.push(afterHours);

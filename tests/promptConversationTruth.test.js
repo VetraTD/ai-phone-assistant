@@ -1,0 +1,188 @@
+// ---------------------------------------------------------------------------
+// The prompt lines that close the conversation-side defects of 2026-09-03.
+//
+// Every one of these is also covered by tests/__snapshots__/prompts/, and that
+// is not enough on its own: a snapshot proves the prompt CHANGED, and `-u`
+// makes any change look intentional. These assertions name the sentence and the
+// defect it closes, so deleting one fails a test that says why it existed.
+//
+// Six calls on a local rig wrote zero bad rows and said seven false things.
+// Each block below is one of them.
+// ---------------------------------------------------------------------------
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { buildStaticSystemPrefix, buildDynamicTail } from "../services/gemini.js";
+
+const BRIGHTWORK_HOURS = {
+  mon: { open: "08:00", close: "17:00", closed: false },
+  tue: { open: "08:00", close: "17:00", closed: false },
+  wed: { open: "08:00", close: "17:00", closed: false },
+  thu: { open: "08:00", close: "17:00", closed: false },
+  fri: { open: "08:00", close: "16:00", closed: false },
+  sat: { open: "09:00", close: "13:00", closed: false },
+  sun: { open: null, close: null, closed: true },
+};
+
+const brightwork = (over = {}) => ({
+  businessName: "Brightwork Family Dental",
+  timezone: "America/Chicago",
+  businessHours: BRIGHTWORK_HOURS,
+  allowedTasks: ["book_appointment", "check_appointment", "cancel_reschedule"],
+  generalInfo:
+    "Brightwork Family Dental is a general and family dental practice. We handle check-ups, cleanings, fillings, crowns and emergency toothache appointments.",
+  customInstructions: null,
+  languagesSpoken: ["en"],
+  afterHoursPolicy: "take_message",
+  capabilities: { appointments: { enabled: true, adapter: "internal" } },
+  ...over,
+});
+
+describe("LVX55 — the whole week is in the prompt, not just today", () => {
+  it("states Friday's earlier close and Saturday's hours in the STATIC prefix", () => {
+    const prefix = buildStaticSystemPrefix(brightwork(), {});
+    // The tenant was told 5 PM on a Friday that shuts at 4, and told the
+    // practice was shut on a Saturday it trades.
+    expect(prefix).toContain("Friday: 8:00 AM – 4:00 PM");
+    expect(prefix).toContain("Saturday: 9:00 AM – 1:00 PM");
+  });
+
+  it("keeps the week OUT of the per-turn tail", () => {
+    // Static, not tail: the week is business-stable, so it stays cacheable and
+    // — on the Live path, where the prompt is frozen at connect — cannot go
+    // stale mid-call. The tail still carries today's window and Status:.
+    const tail = buildDynamicTail("identify_intent", null, brightwork(), {});
+    expect(tail).not.toContain("Saturday: 9:00 AM – 1:00 PM");
+  });
+
+  it("says nothing about a week for an always-open tenant", () => {
+    // Digile Media is configured 00:00-23:59 every day and legitimately offers
+    // midnight appointments. A null schedule must not become an invented one.
+    const prefix = buildStaticSystemPrefix(brightwork({ businessHours: null }), {});
+    expect(prefix).not.toContain("Opening hours:");
+  });
+});
+
+describe("LVX66 / LVX59 — facts about the business have named sources", () => {
+  const prefix = () => buildStaticSystemPrefix(brightwork(), {});
+
+  it("names where a fact may come from", () => {
+    // "Never invent facts" was already here and was not enough: it never said
+    // WHERE a fact may come from.
+    expect(prefix()).toContain(
+      "must come from BUSINESS INFO, KNOWLEDGE BASE, CUSTOM BUSINESS RULES, or a tool's response on this call"
+    );
+  });
+
+  it("forbids the words that make an invention sound checked", () => {
+    // The exact sentence: "I've confirmed we accept Blue Cross Blue Shield."
+    expect(prefix()).toContain(
+      "Never say you have confirmed, checked, verified, or looked something up unless a tool actually returned it on this call"
+    );
+  });
+
+  it("names insurers and payment methods specifically", () => {
+    expect(prefix()).toContain("which insurers or payment methods it takes");
+  });
+
+  it("limits what may be said about a stored appointment", () => {
+    // The row's notes read "dental appointment"; it said "I see that
+    // appointment is for a checkup and cleaning."
+    expect(prefix()).toContain("use only what the record holds");
+  });
+
+  it("carries the sourcing rule even when the knowledge table is EMPTY", () => {
+    // This is the whole point. The only anti-fabrication sentence in the prompt
+    // used to live inside === KNOWLEDGE BASE ===, which renders only when the
+    // table has rows — so for a tenant with none, like Brightwork, the model was
+    // never told not to invent. The insurance answer happened in a prompt that
+    // did not contain the instruction.
+    const withNoKnowledge = buildStaticSystemPrefix(brightwork(), { knowledge: [] });
+    expect(withNoKnowledge).not.toContain("=== KNOWLEDGE BASE ===");
+    expect(withNoKnowledge).toContain("If it is not there, you do not know it");
+  });
+});
+
+describe("LVX63 — an off-domain request is declined, not reinterpreted", () => {
+  it("distinguishes 'cannot do that here' from 'not what this line is for'", () => {
+    // "Yeah, can I book an Uber?" -> "I understand you want to book an
+    // appointment." It declines a treatment the practice does not offer
+    // perfectly well; it had nothing for a request from another domain.
+    expect(buildStaticSystemPrefix(brightwork(), {})).toContain(
+      "not this business's line of work at all"
+    );
+  });
+});
+
+describe("LVX54 / LVX64 — the system is not a character", () => {
+  const prefix = () => buildStaticSystemPrefix(brightwork(), {});
+
+  it("gives a form of address for a caller with no name yet", () => {
+    // Verbatim, turn 7: "user? Did you still want to book that appointment..."
+    expect(prefix()).toContain("do not address them by any stand-in");
+  });
+
+  it("forbids describing internals as actors with needs", () => {
+    // Verbatim: "the calendar needs to know what service you're looking for".
+    expect(prefix()).toContain("Never describe the systems behind you as people");
+  });
+
+  it("does NOT try to catch these with the outbound leak word list", () => {
+    // sanitizeOutbound and internal_term_leaks key on implementation VOCABULARY.
+    // "calendar" is what a receptionist says — "let me check the calendar" — and
+    // a leak guard with a hair trigger is LVX21, which delivered half a second
+    // of audio in twenty-five. The fix is upstream, in the prompt, on purpose.
+    expect(prefix()).toContain("what are you coming in for?");
+  });
+});
+
+describe("LVX60 — the office being closed is said when it is relevant", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("no longer orders the announcement unconditionally", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T02:00:00Z")); // Thu 21:00 Chicago, shut
+    const tail = buildDynamicTail("identify_intent", null, brightwork(), {});
+    expect(tail).toContain("=== AFTER-HOURS BEHAVIOR ===");
+    // Every branch used to open with this, which is why the unprompted "I also
+    // want to let you know that our office is currently closed" was the prompt
+    // working as written rather than a lapse.
+    expect(tail).not.toContain("Inform the caller the office is closed.");
+    expect(tail).toContain("Never volunteer it as an aside while answering something else");
+  });
+});
+
+describe("LVX61 — the server computes the relative day", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const callerContext = {
+    callCount: 2,
+    lastCallSummary: null,
+    upcomingAppointments: [
+      { id: "a1", client_name: "Nithin Dodla", scheduled_at: "2026-09-04T20:00:00Z", notes: null },
+    ],
+  };
+
+  it("writes 'tomorrow' beside an appointment the model called 'today'", () => {
+    vi.useFakeTimers();
+    // The instant of the defect: Thursday 3 September 2026, 21:37 Chicago.
+    vi.setSystemTime(new Date("2026-09-04T02:37:00Z"));
+    const tail = buildDynamicTail("identify_intent", null, brightwork(), { callerContext });
+    expect(tail).toContain("— tomorrow");
+    expect(tail).not.toContain("— today");
+  });
+
+  it("writes 'today' when it really is today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T14:00:00Z")); // Fri 09:00 Chicago
+    const tail = buildDynamicTail("identify_intent", null, brightwork(), { callerContext });
+    expect(tail).toContain("— today");
+  });
+
+  it("gives no relative word further out, and says what to do instead", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T14:00:00Z")); // Tue, three days before
+    const tail = buildDynamicTail("identify_intent", null, brightwork(), { callerContext });
+    expect(tail).not.toContain("— today");
+    expect(tail).not.toContain("— tomorrow");
+    expect(tail).toContain("name the weekday and the date");
+  });
+});

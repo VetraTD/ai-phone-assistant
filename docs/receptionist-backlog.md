@@ -31,9 +31,9 @@ Status means:
 
 | | what it is | status |
 |---|---|---|
-| **LVX66** | it invents FACTS about the business — a service, an insurer — and says it confirmed them | **OPEN · P0 — worst found** |
-| **LVX61** | it called tomorrow "today", with the correct date in its prompt | **OPEN · P0** |
-| **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **OPEN · P0** — root cause found, call 3 |
+| **LVX66** | it invents FACTS about the business — a service, an insurer — and says it confirmed them | **FIXED, UNVERIFIED** — sourcing rule, 2026-09-04 |
+| **LVX61** | it called tomorrow "today", with the correct date in its prompt | **FIXED, UNVERIFIED** — the server computes the word now |
+| **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **FIXED, UNVERIFIED** — whole week in the static prefix |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
 | **LVX57** | the claim detector misses HALF the claims actually made | **OPEN · P0** — upgraded, call 4 |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
@@ -41,7 +41,7 @@ Status means:
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **SHIPPED, NOT WORKING** — the nudge missed on the next two calls |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
-| **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** |
+| **LVX45** | it hung up on a hesitation | **SHIPPED, NOT WORKING** — the gate is wired on one side only and has never fired |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
 | **LVX33** | several cancellations in one turn, only the last one forgotten | **VERIFIED** — on a human call, call 5 |
@@ -49,15 +49,15 @@ Status means:
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
 | **LVX62** | "the letters win" assumes letters transcribe intact; here they do not | **OPEN · P1** |
-| **LVX63** | an off-domain request is absorbed into the booking flow, not declined | **OPEN · P1** |
-| **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **OPEN · P1** — third instance, see LVX54 and LVX60 |
-| **LVX65** | it offers appointment times that have already passed | **OPEN · P1** |
-| **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P0** — same class as LVX66, upgraded |
+| **LVX63** | an off-domain request is absorbed into the booking flow, not declined | **FIXED, UNVERIFIED** |
+| **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
+| **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
+| **LVX59** | it invented what an appointment was for, and said "I see that" | **FIXED, UNVERIFIED** — same rule as LVX66 |
 | **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** |
-| **LVX60** | unprompted "our office is currently closed" mid-answer | **OPEN · P2** |
+| **LVX60** | unprompted "our office is currently closed" mid-answer | **FIXED, UNVERIFIED** — the prompt was ordering it |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
-| **LVX54** | it addresses the caller as "user" when it has no name yet | **OPEN · P1** |
+| **LVX54** | it addresses the caller as "user" when it has no name yet | **FIXED, UNVERIFIED** |
 | **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
 | **LVX47** | appointments revealed one at a time instead of all at once | **NOT REPRODUCED** on call 5 — listed both together |
 | **LVX46** | the Live prompt is frozen at connect — a vendor constraint | **OPEN · P1** |
@@ -83,6 +83,66 @@ they sat in a conversation for an hour before anybody wrote them down.
 expensive state on this page, because it looks finished from the commit log. A
 regex over caller phrasing was always going to be the weak version of that fix;
 it missed on the first two calls after shipping.
+
+## 2026-09-04 — three things established by reading, before any call
+
+Recorded first because each one changes what an item IS, and two of them
+contradict what this file already said.
+
+### LVX45 is SHIPPED, NOT WORKING — the gate has never fired
+
+`turnState()` produces `lastCallerText` (`lib/voice/live/index.js:922`) and
+`services/tools.js:214` reads `ctx?.lastCallerText`. Between them,
+`lib/voice/live/tools.js:135-158` builds the tool context **without copying the
+field**. So on the Live path it is always `undefined`, `heardOnlyHesitation` is
+always `false`, and the hesitation branch is unreachable.
+
+`end_call_refused_hesitation` reads 0 — and that is the negative-counter trap
+stated exactly: a counter that only moves when something is wrong reads zero for
+a clean call and for a call that never reached the code at all.
+
+The unit test (`tests/tools.test.js:1947`) passes `lastCallerText` straight into
+`executeToolCall`, so it exercises `services/tools.js` and **cannot see the
+missing wire**. That is the shape worth remembering: the producer had a test, the
+consumer had a test, and nothing tested that they were connected.
+
+**This also corrects LVX56 below.** It says "the mechanism is already built:
+`lastCallerText` is in the tool context for every tool". The producer is built;
+the tool context does not carry it.
+
+### LVX65 is fabrication, not a filtering failure — and no call was needed
+
+The entry says it is "not established" whether availability returned the whole
+day's slots or the model invented the list, and that it should be settled before
+fixing. It is settled, from the code:
+
+- `adapters/scheduling/internal.js:163` — `if (startMs <= now) continue;` — so
+  `findSlots` never emits a past start.
+- `capabilities/appointments.js:1409` — once the day's close is behind us,
+  `openTimesForDay` returns `PAST_DATETIME_MESSAGE` with `open_times: []`.
+
+At 21:40 against a 17:00 close, the tool **cannot** have returned 8 AM, 12 PM and
+3:30 PM. The model produced them. LVX65 therefore belongs with LVX66 and LVX59 —
+inventing facts — and not with availability.
+
+Note what stayed silent: `live_offer_unverified` fires only when
+`verifiedCount() === 0`, and its own comment says it "does NOT catch a wrong time
+quoted after a genuine check". That call had genuine checks earlier, so the
+guard was blind by design rather than broken.
+
+### The anti-fabrication instruction disappeared exactly when it was needed
+
+`services/gemini.js` rendered `=== KNOWLEDGE BASE ===` — and with it the only
+sentence in the whole prompt saying *"Do not fabricate information beyond what is
+listed here"* — **only when the tenant's `business_knowledge` table has rows**.
+Brightwork has none. So the call that invented an insurer ran a prompt that never
+contained the instruction, and the knowledge machinery itself was fine: table,
+`fetchBusinessKnowledge`, prompt section, and the Live-path fetch at
+`lib/voice/live/index.js:1747` all exist and work.
+
+The sourcing rule now lives in NON-NEGOTIABLE RULES, which renders for every
+tenant, and `tests/promptConversationTruth.test.js` pins the empty-table case
+specifically.
 
 ## Correction, 2026-09-03: there is no paying clinic
 
