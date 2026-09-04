@@ -83,12 +83,24 @@ let toolId = 0;
 // until an availability response has put this exact key on the record.
 const SLOT = "2026-09-07T10:00:00";
 
-async function boot(env = { POSTCALL_VERIFY: "count" }) {
+// `refuse` names tools this run should answer with success:false, for the
+// abandoned-write case (LVX72). Everything else behaves as before.
+async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const verify = vi.fn(async () => ({ verdict: "ok" }));
 
   const execute = vi.fn(async (fc) => {
+    if (refuse.includes(fc.name)) {
+      return {
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: { success: false, message: "[not caller speech] needs a spelling first" },
+        },
+        stateEffects: { toolResult: { name: fc.name, success: false, message: "One moment." } },
+      };
+    }
     if (fc.name === "check_appointment_availability") {
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { open_times: [SLOT] } },
@@ -336,5 +348,48 @@ describe('marker mode is forced off', () => {
 
     expect(cascade).toMatch(/<<intent:/);
     expect(live).not.toMatch(/<<intent:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX72 -- a refused write that was never retried has to reach the post-call
+// read, and the WIRE is what this asserts.
+//
+// lib/postCallVerify.js has its own tests for the verdict. Those would pass
+// with nothing connected to them, which is exactly how LVX45 sat in the tree
+// for a day: the producer had a test, the consumer had a test, and nothing
+// tested that they were joined.
+// ---------------------------------------------------------------------------
+describe("abandoned writes reach the post-call read", () => {
+  it("reports a tool that was refused and never completed", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count" }, ["correct_appointment_name"]);
+    await s.book();
+    await s.callTool("correct_appointment_name", { client_name: "Nathan Dodla", appointment_id: "appt-9" });
+    s.say("So that's Nathan Dodla for the crown on the 10th.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+
+    expect(s.verify).toHaveBeenCalled();
+    expect(s.verify.mock.calls[0][0].abandoned).toEqual(["correct_appointment_name"]);
+  });
+
+  it("reports nothing when the refused tool was afterwards retried", async () => {
+    // A refusal the model acted on is the system working. The spelling gate
+    // refuses on purpose and the retry is the whole point of its wording.
+    const s = await boot({ POSTCALL_VERIFY: "count" }, []);
+    await s.book();
+    await s.callTool("correct_appointment_name", { client_name: "Nathan Dodla", appointment_id: "appt-9" });
+    await s.hangUp();
+
+    expect(s.verify.mock.calls[0][0].abandoned).toEqual([]);
+  });
+
+  it("ignores a refused LOOKUP, which is not a write at all", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count" }, ["check_appointment_availability"]);
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.hangUp();
+
+    expect(s.verify.mock.calls[0][0].abandoned).toEqual([]);
   });
 });

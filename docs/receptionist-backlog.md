@@ -53,8 +53,8 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **OPEN · P0** — found on call 6; postcall_verify said ok |
-| **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **OPEN · P0** — found on call 4 |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTED, NOT PREVENTED** — postcall_verify now says write_abandoned; nothing stops it mid-call |
+| **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0** — found on call 3, 4x in one call |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **TO SCOPE** — narrow, exact ground truth, after the round |
 | **LVX69** | a tenant cannot require identity before a record is DISCLOSED, only before a write | **TO SCOPE** — after the round |
@@ -88,6 +88,55 @@ they sat in a conversation for an hour before anybody wrote them down.
 expensive state on this page, because it looks finished from the commit log. A
 regex over caller phrasing was always going to be the weak version of that fix;
 it missed on the first two calls after shipping.
+
+## 2026-09-04, after the round — LVX71 fixed, LVX72 detected but not prevented
+
+### LVX71 — all three refusal sites rewritten
+
+`cancel_appointment_db`, `correct_appointment_name` and
+`reschedule_appointment_db` all answered "Which appointment?" — two words with
+no instruction. They now follow LVX34's pattern: NOT A FAILURE, what is missing,
+what to do, call again — plus **the candidate dates**, because telling the model
+to ask which one without giving it anything to ask WITH is the same loop one
+level up. Names are deliberately excluded: reading a name out of a record to
+have it confirmed is what non-negotiable rule 4 forbids.
+
+**A contract mismatch found while fixing it, not by a call.** The declaration
+says `appointment_id` is "optional if caller has one appointment", and the code
+only honours that when a PREVIOUS lookup left an id in the pack scratchpad — so
+a caller with exactly one gets refused too, and being asked "which appointment?"
+when you have one is its own defect. The single-appointment refusal now hands
+the model the id it is missing. The control flow is deliberately unchanged:
+resolving an id inside a message builder would move an ownership decision
+somewhere it does not belong.
+
+### LVX72 — DETECTED, and that is not the same as fixed
+
+`postcall_verify` now returns **`write_abandoned`** when an action tool was
+refused and never afterwards succeeded, checked BEFORE the `wroteAnything` test
+that returned `ok` on call 6. Counter `postcall_write_abandoned`, and the tool
+names travel with it — "something was abandoned" is not actionable, which was
+LVX71's mistake one layer up.
+
+**The signal is structural rather than linguistic, and that is the point.** A
+tool refused and never completed is exact, free, and independent of how the
+model phrased anything — where the claim detector missed the sentence entirely
+("so that's Nathan Dodla for the crown" has no completion verb, and is the
+LVX59 class that nothing detects).
+
+**What it does NOT do: prevent it.** The caller on call 6 still hangs up
+believing the name changed; the difference is that the next one is visible in
+the log instead of being reported as `ok`. The clean prevention is the
+`end_call` gate — refuse the hang-up once when an abandoned write is
+outstanding, and tell the model to finish it or say it did not happen. That is
+bounded and uses machinery that already exists, and it carries a real
+hair-trigger risk (a caller who changed their mind mid-change would be held on
+the line), so it deserves its own decision rather than being bolted on. **Not
+done. Recorded as the next step.**
+
+The wire is asserted separately in `tests/livePostCall.test.js` and fails
+without it — the LVX45 lesson: the module had tests, the session had tests, and
+nothing tested that they were joined.
 
 ## Call 6 of the verification round, 2026-09-04 — a change claimed and never written
 

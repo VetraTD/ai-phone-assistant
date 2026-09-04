@@ -655,6 +655,87 @@ const IDENTITY_MISMATCH_MESSAGE =
   "I can only make changes to appointments booked under your number. Let me take a message instead.";
 
 /**
+ * The refusal a change tool gives when it cannot tell WHICH appointment.
+ *
+ * It used to be the two words "Which appointment?", and on a real call that
+ * cost the caller the change they rang up for. The model read `success: false`
+ * as "this cannot be done": it offered a callback, then invented "since you're
+ * calling from a different number, could I have the last four digits" — the
+ * caller ID matched the row exactly, and `existingAppointmentContextRules`
+ * tells it in as many words not to ask that — and then fell back to taking a
+ * message. See LVX71.
+ *
+ * Written to LVX34's pattern, which is the one that works on this model: say it
+ * is NOT a failure, say what is missing, say what to do about it, say to call
+ * again. A bare refusal gets read as an impossibility and take-a-message is the
+ * fallback the prompt offers everywhere else.
+ *
+ * THE DATES ARE INCLUDED and the names are not. The model cannot see which
+ * appointments exist from the refusal alone, so "ask which one" without giving
+ * it anything to ask WITH is the same loop one level up. Dates disambiguate;
+ * a name read out of a record to be confirmed is what non-negotiable rule 4
+ * forbids, so no name goes in here.
+ *
+ * @param {object} ctx - tool context, for callerContext and timezone
+ * @param {string} toolName - the tool to tell the model to call again
+ * @returns {string} model-facing refusal text
+ */
+function whichAppointmentMessage(ctx, toolName) {
+  const upcoming = ctx?.callerContext?.upcomingAppointments || [];
+  const timezone = ctx?.config?.timezone || DEFAULT_TIMEZONE;
+  const profile = resolveProfile(ctx?.config);
+
+  if (upcoming.length === 0) {
+    // Materially different situation: there is nothing to ask the caller to
+    // choose between, so telling the model to ask which one is its own loop.
+    return (
+      "[not caller speech] NOT A FAILURE — but this caller has no upcoming appointments " +
+      "on record under this number, so there is nothing to change. Tell them you cannot " +
+      "find anything under their number and ask whether it might be booked under a " +
+      "different one. Do not take a message unless they ask you to."
+    );
+  }
+
+  if (upcoming.length === 1) {
+    // The declaration promises appointment_id is "optional if caller has one
+    // appointment", and the code only delivers that when a previous lookup has
+    // left an id in the pack scratchpad. So a caller with exactly one gets
+    // refused too, and asking them WHICH is nonsense when there is only one.
+    //
+    // The control flow is left alone deliberately -- resolving the id here
+    // would move an ownership decision into a message builder. Instead the
+    // model is handed the id it is missing, which it already receives from
+    // get_caller_appointments_from_db anyway.
+    const only = upcoming[0];
+    const when = only?.scheduled_at ? speakableDateTime(only.scheduled_at, timezone, profile) : "their appointment";
+    return (
+      `[not caller speech] NOT A FAILURE — the change is still going ahead, it just needs ` +
+      `the appointment_id. This caller has exactly one upcoming appointment, ${when}. Call ` +
+      `${toolName} again with appointment_id set to "${only.id}". Do not ask the caller which ` +
+      `appointment, do not tell them anything went wrong, and do not take a message instead.`
+    );
+  }
+
+  const options = upcoming
+    .map((a) => (a?.scheduled_at ? speakableDateTime(a.scheduled_at, timezone, profile) : null))
+    .filter(Boolean)
+    .join("; ");
+
+  return (
+    `[not caller speech] NOT A FAILURE — the change is still going ahead, it just needs ` +
+    `one more thing first. This caller has more than one appointment, so ${toolName} needs ` +
+    `an appointment_id to know which. Ask the caller which one they mean — these are the ` +
+    `ones on record: ${options} — then call ${toolName} again with appointment_id set to ` +
+    `that appointment. Do not tell the caller anything went wrong, do not offer a callback, ` +
+    `do not take a message instead, and do not ask them to confirm their phone number: they ` +
+    `are already verified by the number they are calling from.`
+  );
+}
+
+/** What the caller hears while the model sorts out which appointment. */
+const WHICH_APPOINTMENT_CALLER_LINE = "Just to make sure I change the right one — which appointment did you mean?";
+
+/**
  * Does the given appointment row belong to the current caller?
  *
  * Two accepted proofs:
@@ -2029,13 +2110,13 @@ async function cancelAppointment(fc, ctx) {
       functionResponse: {
         id: fc.id,
         name: fc.name,
-        response: { success: false, message: "Which appointment?" },
+        response: { success: false, message: whichAppointmentMessage(ctx, fc.name) },
       },
       stateEffects: {
         toolResult: {
           name: fc.name,
           success: false,
-          message: "I need to look up your appointment first.",
+          message: WHICH_APPOINTMENT_CALLER_LINE,
         },
         toolCallEvent: null,
       },
@@ -2141,11 +2222,15 @@ async function correctAppointmentName(fc, ctx) {
   if (!clientName || !appointmentId) {
     const message = !clientName
       ? "[not caller speech] No corrected name was given. Ask the caller what the name should be."
-      : "[not caller speech] Which appointment? Look it up first, then call this again.";
+      : whichAppointmentMessage(ctx, fc.name);
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
       stateEffects: {
-        toolResult: { name: fc.name, success: false, message: "Missing info." },
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: clientName ? WHICH_APPOINTMENT_CALLER_LINE : "Sorry, what name should that be under?",
+        },
         toolCallEvent: null,
       },
     };
@@ -2221,11 +2306,17 @@ async function rescheduleAppointment(fc, ctx) {
         name: fc.name,
         response: {
           success: false,
-          message: !appointmentId ? "Which appointment?" : "New date/time required.",
+          message: !appointmentId
+            ? whichAppointmentMessage(ctx, fc.name)
+            : "[not caller speech] NOT A FAILURE — no new date and time was given. Ask the caller when they would like to move it to, then call this again with new_scheduled_at.",
         },
       },
       stateEffects: {
-        toolResult: { name: fc.name, success: false, message: "Missing info." },
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: !appointmentId ? WHICH_APPOINTMENT_CALLER_LINE : "What time would you like to move it to?",
+        },
         toolCallEvent: null,
       },
     };
