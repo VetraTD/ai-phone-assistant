@@ -214,6 +214,8 @@ async function boot(opts = {}) {
       await settle();
     },
     notes: () => live.sent.clientContent.slice(1).map((m) => m.turns[0].parts[0].text),
+    /** Every note, with whether it asked the model to speak. */
+    noteFrames: () => live.sent.clientContent.slice(1),
   };
 }
 
@@ -323,6 +325,32 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
     const note = s.notes().find((t) => /BEFORE the caller spelled it/.test(t));
     expect(note).toBeTruthy();
     expect(note).toMatch(/call correct_appointment_name/i);
+  });
+
+  it("does not make the model SPEAK after a successful retry", async () => {
+    // Call 6. The retry fired 43 ms after turnComplete and its note, sent with
+    // turnComplete:true, forced an entire extra spoken turn in which the model
+    // repeated its previous sentence word for word. The model had already told
+    // the caller the right thing; the note only needs a tool called.
+    const s = await boot();
+    await s.book();
+    await s.spell();
+
+    const frame = s.noteFrames().find((m) => /BEFORE the caller spelled it/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(false);
+  });
+
+  it("DOES make it speak when the retry failed", async () => {
+    // The one case that must be said out loud: the caller has been told about a
+    // booking that does not exist, and only the model can correct that.
+    const s = await boot({ retryFails: true });
+    await s.book();
+    await s.spell();
+
+    const frame = s.noteFrames().find((m) => /could NOT be completed/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(true);
   });
 
   it("does nothing on ordinary caller speech that is not a spelling", async () => {

@@ -57,7 +57,7 @@ Status means:
 | **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **SHIPPED, NOT WORKING** — reworded :1705, heard again on the next call. :907 now reworded too; a third recurrence means the eval band, not a fourth guess |
 | **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **BOTH HALVES FIXED, NOT EXERCISED** — the not_found refusal, and the id now resolved in code from the caller's own snapshot |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **THE BOOKING SURVIVED on call 5** — the retry fired, the row is real, no dead air. It wrote the PRE-SPELLING name; now deferred to turn end so the model's own retry wins |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **VERIFIED end to end on call 6** — gate refused, we retried, the model corrected the name, one correct row, no dead air, no double booking |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **MECHANISM SETTLED**, fix shipped and **NOT EXERCISED** — call 2 never spoke over the assistant, so the gate had nothing to release |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **SCOPED 2026-09-04** — design and cost written down, not built |
@@ -115,6 +115,72 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## Call 6 of the instrumented round, 2026-09-04 — the full designed path ran, end to end
+
+**The row is correct.** One appointment, `ef8e9e0a`, Monday 7 Sep 16:00
+America/Chicago, and `client_name: "Nithin Dodla"` — the SPELLED name.
+
+Every stage of the design fired in order:
+
+| | |
+|---|---|
+| `spelling_gate_refusals: 1` | the gate refused the booking pending a spelling |
+| `write_retry_attempted / _after_spelling: 1 / 1` | the model never re-called the tool, so we did |
+| `write_retry_name_unspelled: 1` | the saved name was the pre-spelling one, and the model was told so |
+| `postcall_changed_rows: 1` | **the model then called `correct_appointment_name`** |
+| `postcall_write_abandoned: 0`, `nudges_fired: 0`, rows: **1** | no loss, no dead air, no double booking |
+
+That is the whole chain the last three sittings were building, working without
+the model doing the one thing it has never reliably done.
+
+**And it did it through an unusually bad transcription.** The vendor heard "What
+shows do you offer in winner hours?", "I do have velvet at 4:00 p.m.", and the
+name as "Nitin Danda" then "Nitin Dhanda". The row is still right, because the
+spelling is the channel that decides the name and the write no longer depends on
+the model choosing to retry.
+
+### The cost, and it was audible: the note forced a duplicate turn
+
+```
+23:03:30.944  turn 8   "Thanks, Nithin Dodla. I have Monday, September 7th at
+                        4:00 pm for your cleaning. Is there anything else...?"
+23:03:30.987  live_write_retried            <- 43 ms later
+              live_turn_note
+23:03:38.881  turn 9   the identical sentence, again
+```
+
+`sendTurnNote` sends with `turnComplete: true`, which asks the model to REPLY.
+Every other note on this path wants exactly that — they exist because the model
+just said something wrong and needs to say something else. **The write-retry
+note does not.** The model had already told the caller the right thing; the note
+only needed a TOOL called.
+
+**Fixed:** `sendTurnNote` takes `requestReply`, and a SUCCESSFUL retry appends
+its note as context without asking for speech. A FAILED retry still speaks,
+because that is the one case where the caller has been told about a booking that
+does not exist and only the model can correct it out loud.
+
+**The cost of that, stated:** if the call ends before the model's next turn, the
+name correction never happens — leaving the booking saved under the pre-spelling
+name, which is exactly the state we would have been in anyway. UNVERIFIED on a
+call.
+
+### The claim detector missed it again, the same way
+
+`verdict: row_without_claim`, `claims: 0`, while turn 8 said *"I have Monday,
+September 7th at 4:00 pm for your cleaning."* Two calls running, the same cause:
+`completionClaimRe` needs `your/the/that/this` + `appointment|booking|call`, and
+a claim phrased around the SERVICE — "your cleaning" — is invisible. Recorded
+twice now; still not patched, because widening a noun list is the treadmill.
+
+### Still the loudest thing on the call
+
+`live_closing_tic: 4` of ten turns. Turns 2, 3, 4 and 8 all end with it, and
+turn 4 is nothing else: the caller says "Okay" and hears "Is there anything else
+I can help you with?" — which is the LVX76 hesitation refusal working correctly
+(`end_call_refused_hesitation: 1`, one short question, no goodbye) and sounding
+like the tic anyway.
 
 ## Call 5 of the instrumented round, 2026-09-04 — the booking SURVIVED, and the retry wrote the wrong name
 
