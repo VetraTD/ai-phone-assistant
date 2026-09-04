@@ -786,13 +786,25 @@ function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneL
  * @returns {Promise<boolean>}
  */
 async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
-  if (!appointmentId || !ctx?.businessId) return false;
+  if (!appointmentId || !ctx?.businessId) return "not_found";
   // Identity already proven for this appointment earlier in the call (e.g. a
   // cancel verified it, then the caller asks to reschedule the same one) —
   // don't make the caller prove themselves again.
-  if (scratch(ctx).identityVerifiedApptId === appointmentId) return true;
+  if (scratch(ctx).identityVerifiedApptId === appointmentId) return "ok";
   const appointment = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
-  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4);
+  // NOT FOUND and NOT YOURS are different facts, and collapsing them into one
+  // `false` cost a real caller their change. LVX74: they asked to rename their
+  // own appointment, booked under their own number, from that number, and were
+  // told "I'm not able to make changes to appointments that are not booked
+  // under your number" -- spoken verbatim, because that message is callerSafe.
+  //
+  // The row was simply not there. The model had guessed an appointment_id,
+  // because CALLER CONTEXT renders dates and names and NO ids, so the only
+  // source of a real one is get_caller_appointments_from_db and none had run.
+  //
+  // Still fails closed either way. Only the reason changes.
+  if (!appointment) return "not_found";
+  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) ? "ok" : "not_owner";
 }
 
 /**
@@ -2086,8 +2098,44 @@ async function lookupCallerAppointments(fc, ctx) {
   };
 }
 
-/** Shared refusal for a change tool that cannot prove who is calling. */
-function identityMismatchResult(fc) {
+/**
+ * Shared refusal for a change tool that cannot act on the id it was given.
+ *
+ * TWO reasons, and telling them apart is the whole of LVX74. "not_owner" is a
+ * real ownership refusal and keeps the caller-facing wording it always had.
+ * "not_found" is a row that is not there — usually because the model guessed an
+ * appointment_id, which it is pushed into doing because no id appears anywhere
+ * in the prompt. Saying "not booked under your number" to that is false, and
+ * alarming, and it ends the call: the message's own next sentence offers to
+ * take a message instead, and on a real call that is exactly what happened.
+ *
+ * @param {object} fc
+ * @param {"not_owner"|"not_found"} reason
+ */
+function identityMismatchResult(fc, reason = "not_owner") {
+  if (reason === "not_found") {
+    bumpCounter("write_refused_appointment_not_found");
+    const message =
+      "[not caller speech] NOT A FAILURE — that appointment_id could not be found, so " +
+      "nothing was changed. Do NOT tell the caller anything is wrong with their booking " +
+      "and do NOT say it is not under their number: you do not know that, and it is " +
+      "usually not true. Call get_caller_appointments_from_db to get their real " +
+      `appointments, then call ${fc.name} again with the appointment_id it returns.`;
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        // Silent event, same reason the spelling gate's is: nothing ran, so the
+        // session must not narrate work that was declined.
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "One moment — let me pull that up properly.",
+          callerSafe: true,
+        },
+        toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+      },
+    };
+  }
   return {
     functionResponse: {
       id: fc.id,
@@ -2129,7 +2177,7 @@ async function cancelAppointment(fc, ctx) {
     fc.args?.client_name,
     fc.args?.phone_last4
   );
-  if (!identityOk) return identityMismatchResult(fc);
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
 
   const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
     appointmentId,
@@ -2246,7 +2294,7 @@ async function correctAppointmentName(fc, ctx) {
     null,
     fc.args?.phone_last4
   );
-  if (!identityOk) return identityMismatchResult(fc);
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
 
   const ok = await ctx.deps.updateAppointment(appointmentId, { client_name: clientName }, ctx.businessId);
   if (!ok) {
@@ -2328,7 +2376,7 @@ async function rescheduleAppointment(fc, ctx) {
     fc.args?.client_name,
     fc.args?.phone_last4
   );
-  if (!identityOk) return identityMismatchResult(fc);
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
 
   // Anchor the model's datetime to the business timezone before it reaches the
   // database. THIS IS THE FIX FOR THE +1h READ-BACK BUG.

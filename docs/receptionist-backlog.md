@@ -39,7 +39,7 @@ Status means:
 | **LVX53** | a name from the record written to a booking the caller never said | **FIXED, UNVERIFIED** — per-call provenance; the durable column is deferred, see below |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
-| **LVX44** | the spelling is asked at booking time, not when the name is given | **NUDGE STILL NOT FIRING** — 0 for 3; the write gate does the work. Recommend removing the nudge |
+| **LVX44** | the spelling is asked at booking time, not when the name is given | **NUDGE NOT FIRING** — 0 for 2 on the target scenario; KEPT, see the correction below |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
@@ -53,8 +53,9 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
+| **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **HALF FIXED, UNVERIFIED** — the false statement is gone; ids still absent from the prompt |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTED, NOT PREVENTED** — postcall_verify now says write_abandoned; nothing stops it mid-call |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED** on a real call 2026-09-04 — verdict write_abandoned where the old code said ok; still not PREVENTED |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0** — found on call 3, 4x in one call |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **TO SCOPE** — narrow, exact ground truth, after the round |
@@ -89,6 +90,89 @@ they sat in a conversation for an hour before anybody wrote them down.
 expensive state on this page, because it looks finished from the commit log. A
 regex over caller phrasing was always going to be the weak version of that fix;
 it missed on the first two calls after shipping.
+
+### Correction to the LVX44 recommendation, 2026-09-04
+
+Recorded because the owner approved removing the nudge on a number that was
+wrong, and the number is the whole argument.
+
+It was written up as "0 for 3". It is **0 for 2**. Two of those three were the
+target scenario — the original calls where `spelling_gate_refusals` fired, which
+means the write was attempted and the ask happened LATE, which is the defect.
+**Call 6 was not**: the model attempted the write in the same turn the name was
+given, so the ask was never late and the nudge had nothing to be early about.
+
+And it demonstrably fires for a conventional introduction —
+`tests/liveDeferralGuard.test.js` has "Hi, it's Jane Fitzgerald" nudging
+correctly. So it is partial coverage rather than dead weight, and a miss costs
+only the nudge, because the write gate still refuses.
+
+**Kept.** Removing it would give back partial coverage of the thing the owner
+called ESSENTIAL with nothing in its place. What is true is that the trigger has
+missed twice on the case it exists for, and that widening a third phrasing list
+is the treadmill this file already warns about — there is no structural signal
+for "a name was just given" short of write time, which is why it was a regex in
+the first place.
+
+### LVX74 · "Not found" is spoken to the caller as "not yours" `[gcp]` · **P0 — found verifying LVX72**
+
+The caller asked to change the name on their own appointment, booked under their
+own number, from the number it was booked under. They were told:
+
+> "I'm not able to make changes to appointments that are not booked under your
+> number. Can I take a message instead so someone can follow up with you?"
+
+Every word of that is false, and it is `callerSafe: true`, so it is spoken
+verbatim rather than being a model-facing hint.
+
+**Reproduced directly.** `correct_appointment_name` with an `appointment_id`
+that does not exist — an invented UUID, or a non-UUID guess — returns
+`IDENTITY_MISMATCH_MESSAGE` in both the model-facing and caller-facing slots.
+
+**Two separate faults, and they compound.**
+
+1. **`verifyAppointmentIdentity` returns one `false` for two situations.** A row
+   that cannot be FOUND and a row that is not YOURS are different facts, and the
+   message asserts the second when it was the first. Failing closed is right;
+   telling a caller their appointment is not theirs is not.
+2. **The model has no legitimate route to an appointment_id.** The CALLER
+   CONTEXT block renders "Tuesday, September 8 at 2:00 PM (Nithin Dodla); …"
+   with no ids anywhere in the prompt, so an id can only come from
+   `get_caller_appointments_from_db`. On this call no lookup ran
+   (`lookup_tool_context_warm` absent), so the model supplied something anyway
+   and the row was not found. **The design pushes it into guessing**, and LVX71's
+   refusal — which now tells it to call again WITH an appointment_id — makes that
+   pressure stronger, not weaker.
+
+**Fix direction, and the halves are separable.** Distinguishing the two failures
+is small and clearly right: a row that is not found should say so and tell the
+model to look the appointments up first, leaving the identity message for a
+genuine ownership mismatch. Whether to put ids in CALLER CONTEXT is a larger
+design question — they are already returned by the lookup tool, so it is not a
+disclosure question, but it enlarges the frozen prompt.
+
+**Done when:** a caller is never told their own appointment is not theirs, and a
+change tool that cannot find a row says so.
+
+**Half done, 2026-09-04.** `verifyAppointmentIdentity` now returns a REASON
+rather than a bare boolean — `ok` / `not_found` / `not_owner` — and all three
+change tools branch on it. A row that cannot be found no longer produces the
+ownership sentence; the caller hears "One moment — let me pull that up
+properly." and the model is told, in the LVX34 shape, that nothing is wrong with
+the booking and to call `get_caller_appointments_from_db` for a real id first.
+The genuine ownership refusal is unchanged and still fails closed, with its own
+test pinning that it still fires for someone else's row.
+
+Counter `write_refused_appointment_not_found`; the positive twin is the existing
+`postcall_changed_rows`, so a call with neither is a call that never tried.
+
+**The other half is NOT done and is a design question, not a bug fix.** The
+model still has no legitimate route to an `appointment_id`: CALLER CONTEXT
+renders dates and names and no ids. Every change tool therefore depends on
+`get_caller_appointments_from_db` having run first, and nothing enforces that.
+Putting ids in the prompt is not a disclosure question — the lookup tool already
+returns them — but it enlarges the frozen prompt and deserves deciding rather
+than drifting into.
 
 ### LVX73 · The vendor can emit a transcription fragment that was never spoken `[gcp]` · P1
 
