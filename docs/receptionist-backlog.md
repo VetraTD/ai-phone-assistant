@@ -43,18 +43,21 @@ Status means:
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
-| **LVX33** | several cancellations in one turn, only the last one forgotten | **VERIFIED** |
+| **LVX33** | several cancellations in one turn, only the last one forgotten | **VERIFIED** — on a human call, call 5 |
 | **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
 | **LVX62** | "the letters win" assumes letters transcribe intact; here they do not | **OPEN · P1** |
+| **LVX63** | an off-domain request is absorbed into the booking flow, not declined | **OPEN · P1** |
+| **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **OPEN · P1** — third instance, see LVX54 and LVX60 |
+| **LVX65** | it offers appointment times that have already passed | **OPEN · P1** |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P1** |
 | **LVX60** | unprompted "our office is currently closed" mid-answer | **OPEN · P2** |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
 | **LVX54** | it addresses the caller as "user" when it has no name yet | **OPEN · P1** |
 | **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
-| **LVX47** | appointments revealed one at a time instead of all at once | **OPEN · P1** |
+| **LVX47** | appointments revealed one at a time instead of all at once | **NOT REPRODUCED** on call 5 — listed both together |
 | **LVX46** | the Live prompt is frozen at connect — a vendor constraint | **OPEN · P1** |
 | **LVX42** | the spelling gate's escape hatch writes the misheard name | **OPEN · P1** |
 | **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
@@ -2286,6 +2289,119 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 5 of the clean-slate round, 2026-09-03 — LVX33 VERIFIED on a human call
+
+The regression test for the worst bug of the day, run by a person rather than a
+scripted caller.
+
+```
+cancelled  "Nathan Dodla"   Fri Sep 4, 15:00
+cancelled  "Nithin Dodla"   Tue Sep 8, 12:00
+scheduled  "Nithin Dodla"   Wed Sep 9, 15:30   notes="cleaning"
+```
+
+`changed_rows 2, booked_rows 1, claims 1, verdict ok`. Two `cancel_appointment_db`
+calls in one turn, both successful, and then a booking that was **not blocked**.
+
+**Turn 5 is the direct proof, and it is better evidence than the row count.** The
+caller asked whether they had any appointments left. The assistant re-queried
+(`get_caller_appointments_from_db`) and answered:
+
+> "That's right, I've just checked again, and there are no upcoming appointments
+> listed under this number."
+
+With the bug present that turn would have named the phantom pair — that is
+exactly what the original report described, minutes after the cancels. The
+snapshot was clean, so the existing-appointment policy did not fire, so the new
+booking went through. Every link in the chain observed on one call.
+
+**LVX47 did not reproduce either.** Turn 2 listed both appointments together in a
+single reply, correctly, rather than dribbling them out.
+
+### LVX63 · An off-domain request is absorbed into the booking flow `[gcp]` · P1
+
+Turn 6, verbatim:
+
+> caller: "Yeah, can I book an Uber?"
+> assistant: "**I understand you want to book an appointment.** Before we check
+> for available times… is it a checkup, cleaning, filling, or something else?
+> Also, what's your full name?"
+
+It did not decline. It **reinterpreted** a request from another domain as a
+dental booking and drove into the flow.
+
+**And it can decline — that is what makes this specific.** On call 3 it refused
+braces cleanly, naming what the practice does do. A service the practice does not
+offer is handled; a request that is not about the practice at all is absorbed.
+The guardrails cover "we don't do that treatment" and have nothing for "that is
+not what this number is for".
+
+Cheap for a demo to hit: a prospect testing the edges will ask something silly
+early, and being walked into a booking flow reads as not listening.
+
+**Done when:** a request outside the business's domain is declined rather than
+reinterpreted.
+
+### LVX64 · "The calendar needs to know" — the system as a character `[gcp]` · P1
+
+Same turn:
+
+> "Before we check for available times, **the calendar needs to know** what
+> service you're looking for."
+
+The internal system described to the caller as an actor with requirements. A
+receptionist asks "what are you coming in for?"
+
+**Third instance of this shape in one evening**, and the pattern is now clear
+enough to name: `user?` (LVX54), `the calendar needs to know` (here), and
+`Status: CLOSED` leaking as an unprompted announcement (LVX60). None are caught,
+and none CAN be caught by `sanitizeOutbound` or `internal_term_leaks` — those
+detect implementation VOCABULARY (`api`, `webhook`, snake_case, JSON). These are
+ordinary English words describing the system's internals in perfectly natural
+sentences.
+
+**The guard family has a blind spot with a shape**: it catches leaked syntax and
+misses leaked FRAMING. Worth recording as a class rather than three separate
+entries, because the fix is upstream in all three — the model needs to be told
+what it is allowed to describe itself as, not filtered afterwards.
+
+### LVX65 · It offers appointment times that have already passed `[gcp]` · P1
+
+Turn 7, at 21:40 on Thursday, with the practice closed since 17:00:
+
+> "For times available **today**, I have eight A M, twelve P M, or three thirty P
+> M. Do any of those work for you?"
+
+All three are in the past.
+
+**No bad row could result** — `validateBookingTime` refuses a past instant, so an
+acceptance would have been refused at the write. That is the guard working. But
+the caller would have chosen a slot, agreed to it, and then been told no, which
+is a worse experience than never being offered it.
+
+**Same weak grasp of "now" as LVX61**, which called tomorrow "today" on the
+previous call. The prompt states the current date and time explicitly
+(`Current: Thursday, September 3, 2026, 9:37 PM`), so this is not missing data
+either. Whether the availability tool returned the whole day's slots and the
+model failed to filter, or the model invented the list, is not established here
+and should be before it is fixed.
+
+**Done when:** no offered time is in the past.
+
+### Smaller
+
+- **Two questions in one breath, twice.** Turn 6 (service *and* full name) and
+  turn 8 (which time *and* your name). LVX25.
+- **`record_sms_consent` failed again** and this time was not verbalised. LVX52
+  still fires underneath even when the caller does not hear it.
+- **It read two different names for the same caller** — "Nathan Dodla" and
+  "Nithin Dodla" — in one sentence at turn 2, without remarking on it. A person
+  would have asked which was right. Downstream of LVX53's name churn rather than
+  a defect of its own, but a real receptionist's instinct is missing.
+- The claim at turn 12 **was** detected (`claims: 1`), because "that's booked"
+  matches the short form. Consistent with LVX57's measured pattern: the short
+  phrasings are caught, the long ones are not.
 
 ## Call 4 of the clean-slate round, 2026-09-03 — mind changed twice, no phantom row
 
