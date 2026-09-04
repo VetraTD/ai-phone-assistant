@@ -73,9 +73,9 @@ argued away.
 
 | # | what they hear | entry |
 |---|---|---|
-| **★** | says "okay" mid-call and is **said goodbye to**, then hears its whole last answer **read out again** | **LVX76 · P0 — heard by the owner 2026-09-04.** A refused `end_call`; the gate is right, the wording is not |
+| **★** | ~~says "okay" mid-call and is **said goodbye to**, then hears its whole last answer **read out again**~~ | **LVX76 — goodbye and re-read VERIFIED GONE on call 2**, 2026-09-04. A duplicate question survived and is on its second revision |
 | **★★** | says "okay" or "no" and gets **ten seconds of silence**, then "I'm still here whenever you're ready" | **LVX70 · P0 — MECHANISM SETTLED 2026-09-04.** OUR gate withheld and dropped 280 ms of real speech; `LIVE_TURN_END` is irrelevant |
-| **†** | it **speaks its own instructions** — "Acknowledge." / "Please pause there for a moment" | **LVX75 · P0** — heard once in nine calls. Ordinary English, so no leak guard can catch it |
+| **†** | it **speaks its own instructions** — "Acknowledge." / "Please pause there for a moment" | **LVX75 · P0 — SHIPPED, NOT WORKING.** Reworded, heard again on the next call. Second reword shipped; a third recurrence means the eval band |
 | **A** | ~~asks "do you take my insurance?" and is told **yes, invented**~~ | **LVX66 — VERIFIED 2026-09-04 on the knowledge-row path** (call 1). The empty-table sourcing rule is still UNVERIFIED |
 | **B** | ~~is told the practice is **closed on a day it is open**~~ | **LVX55 — VERIFIED** on call 1, 2026-09-04: all four hours facts correct |
 | **C** | ~~is told an appointment is **"today"** when it is tomorrow, and offered times that **already passed**~~ | **LVX61 — VERIFIED** on call 2, 2026-09-04. LVX65 fixed, unverified |

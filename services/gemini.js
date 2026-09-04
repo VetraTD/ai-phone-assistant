@@ -904,7 +904,21 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   identity += `- Never use lists, bullets, or headings — speak naturally.\n`;
   identity += `- Say numbers, times, and prices the way a person would say them aloud.\n`;
   identity += `- One question at a time. Never stack questions.\n`;
-  identity += `- Acknowledge briefly ("Of course.", "Sure thing.") before answering — but don't overdo it.\n`;
+  // LVX75, second attempt. The first reworded :1705 only and the model spoke
+  // "Acknowledge." again on the very next call, so that entry is SHIPPED, NOT
+  // WORKING and this is the only bare-imperative "Acknowledge" left in the
+  // prompt. Owner reopened the decision on that evidence.
+  //
+  // The transform is the same one: a bullet opening on a bare imperative verb
+  // that is also an ordinary speakable word is more echo-prone than one opening
+  // on a noun phrase. It is still a hunch -- but a narrowed one, because one of
+  // the two candidate sources has now been removed and the behaviour persisted.
+  //
+  // This line is in the STATIC prefix, which is the Gemini explicit-cache unit
+  // and is pinned by ten *.static.txt snapshots. That cost was the reason not to
+  // touch it while both lines were untested; it is not a reason once the cheap
+  // one has been tried and failed.
+  identity += `- Begin with a brief acknowledgement ("Of course.", "Sure thing.") before answering — but don't overdo it.\n`;
   // The text-to-speech engine reads exclamation marks and capitals as emphasis,
   // and each turn's spoken text seeds the next turn's prosody — so an emphatic
   // reply makes the NEXT reply emphatic too, and the voice escalates over a long

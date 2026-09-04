@@ -326,16 +326,42 @@ export async function executeToolCall(fc, ctx) {
       // and bound it. It describes what was heard without claiming to know what
       // it meant, and it names the two things that must not happen, because on
       // a real call both of them did.
+      // SECOND REVISION, after call 2. The first one removed the farewell and the
+      // forty-word re-read, and the owner confirmed both were gone. What it did
+      // NOT remove was the caller hearing the same question twice, and that
+      // turned out to be structural rather than phrasing.
+      //
+      // THE MODEL HAS ALREADY SPOKEN BY THE TIME THIS ARRIVES. end_call's own
+      // declaration requires it: "You MUST write your warm sign-off in the SAME
+      // response as this call." So a refused end_call always follows a turn the
+      // caller has already heard. Telling the model to "say one short sentence
+      // asking whether there is anything else" then asks it to say a thing it
+      // usually just said -- and on call 2 it said it twice, rephrased:
+      //
+      //   "Great. Is there anything else I can help you with in terms of our
+      //    opening hours or services?"
+      //   "Great. Is there anything else I can help you with regarding our
+      //    opening hours or services?"
+      //
+      // Two generations concatenated into one turn, both heard. Call 1 did the
+      // same thing under the old wording, hidden behind the louder farewell.
+      //
+      // So the instruction is now CONDITIONAL on what it has already said, and
+      // silence is an allowed outcome. The cost of getting that wrong is bounded
+      // by the silence ladder, which nudges at 6-10 s; the cost of the other
+      // error is a caller asked the same question twice on every refusal.
+      const alreadyAsked =
+        "If you have ALREADY asked in this turn whether there is anything else, say NOTHING " +
+        "further — just wait for their answer. Only if you have not asked yet, say ONE short " +
+        "sentence asking, then stop and wait.";
       const message = heardOnlyHesitation
         ? "[not caller speech] NOT A FAILURE — the caller is still on the line and the call is " +
           "still open. What they said was brief (\"okay\", \"mm\", \"uh\") and does not settle " +
           "whether they are finished. Do NOT say goodbye, do NOT sign off, and do NOT repeat " +
-          "anything you have already said. Say ONE short sentence asking whether there is " +
-          "anything else they need, then stop and wait for their answer."
+          "anything you have already said. " + alreadyAsked
         : "[not caller speech] NOT A FAILURE — the call is still open and the caller is still " +
           "on the line. Do NOT say goodbye and do NOT repeat anything you have already said. " +
-          "Say ONE short sentence asking whether there is anything else they need, then stop " +
-          "and wait for their answer.";
+          alreadyAsked;
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {

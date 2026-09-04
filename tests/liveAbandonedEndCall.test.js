@@ -126,6 +126,21 @@ describe("LVX76 — the refusal that made it say goodbye and repeat itself", () 
     expect(m).not.toMatch(/ask again gently/i);
   });
 
+  it("allows SILENCE when it has already asked — the doubling on call 2", async () => {
+    // end_call's declaration requires the sign-off in the SAME response as the
+    // call, so a refused end_call always follows a turn the caller has already
+    // heard. An unconditional "say one short sentence asking whether there is
+    // anything else" therefore asks for a thing just said, and on call 2 the
+    // caller heard it twice, rephrased. Silence has to be an allowed outcome,
+    // and its cost is bounded by the silence ladder at 6-10 s.
+    const { functionResponse } = await hesitate("Okay.");
+    const m = functionResponse.response.message;
+
+    expect(m).toMatch(/ALREADY asked/i);
+    expect(m).toMatch(/say NOTHING further/i);
+    expect(m).toMatch(/Only if you have not asked yet/i);
+  });
+
   it("leaves the caller-facing line alone — only the model-facing text changed", async () => {
     // The split is the point: the caller hears one short question, and the
     // instructions the model reads are never spoken.
