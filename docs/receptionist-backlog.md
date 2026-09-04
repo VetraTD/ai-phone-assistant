@@ -31,7 +31,7 @@ Status means:
 
 | | what it is | status |
 |---|---|---|
-| **LVX55** | it told a caller the practice was closed on a day it is open | **OPEN · P0** |
+| **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **OPEN · P0** — root cause found, call 3 |
 | **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **OPEN · P0** |
@@ -46,6 +46,8 @@ Status means:
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
 | **LVX57** | the claim detector missed a real claim — one article's difference | **OPEN · P1** |
+| **LVX59** | it invented what an appointment was for, and said "I see that" | **OPEN · P1** |
+| **LVX60** | unprompted "our office is currently closed" mid-answer | **OPEN · P2** |
 | **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
 | **LVX54** | it addresses the caller as "user" when it has no name yet | **OPEN · P1** |
@@ -2282,6 +2284,132 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 3 of the clean-slate round, 2026-09-03 — LVX55's root cause found
+
+An enquiry-only call: what do I have booked, what should I expect, what are your
+hours, and two things the practice does not do. No writes, `verdict: ok`.
+
+### LVX55 · ROOT CAUSE: the prompt carries ONE day of hours, and the model is asked about the week
+
+The prompt's entire statement of opening hours, verbatim, is a single line:
+
+```
+Business hours today (Thursday): 8:00 AM – 5:00 PM. Closed Sunday. Status: CLOSED.
+```
+
+**Today, and Sunday. There is no weekly schedule anywhere in the prompt.**
+
+So when the caller asked what the hours were, the model had one data point and
+extrapolated from it:
+
+> turn 4: "We're open Monday through Friday, from 8 00 AM to 5 00 PM, and we're
+> closed on Sundays."
+> turn 5 (asked to repeat): the identical answer, word for word.
+
+Against the tenant's real configuration:
+
+| | configured | what the caller was told |
+|---|---|---|
+| Mon–Thu | 08:00–17:00 | correct |
+| **Fri** | **08:00–16:00** | **wrong — told 5 PM** |
+| **Sat** | **09:00–13:00** | **omitted entirely — told the practice is shut** |
+| Sun | closed | correct |
+
+**And this is the same root cause as call 2's "we're actually closed that day".**
+That caller asked for Saturday 15:30, `check_appointment_availability` correctly
+refused it (Saturday closes at 13:00), and the model — with no idea Saturday
+existed as a working day — narrated the refusal as a closure. One cause, two
+calls, two different-looking symptoms.
+
+**This reclassifies the defect.** It was recorded as a phrasing lapse after call
+2, on the evidence then available. It is not: it is missing data. The model
+cannot state hours it has never been given, and no amount of prompt wording
+fixes an absent schedule.
+
+**LVX46 compounds it.** `"today (Thursday)"` is resolved once, at connect, and
+the Live prompt never rebuilds — so a call that crosses midnight reports the
+previous day's hours as today's. One of this evening's earlier calls did cross
+midnight.
+
+**Done when:** the full weekly schedule is in the prompt, and a caller asking
+"what are your hours" gets every open day including the ones that differ.
+
+### LVX59 · It invented what an appointment was for `[gcp]` · P1
+
+Turn 3:
+
+> "I see that appointment is for **a checkup and cleaning.**"
+
+The row's `notes` read `"dental appointment"` and nothing else. There is no
+service type on the row at all — the column does not exist on this schema. The
+model invented a service and attributed it to the record with "I see that".
+
+**Nothing catches this and the reason is structural.** `completionClaimRe` and
+the whole LVX27 apparatus detect claims that an ACTION was completed —
+booked, cancelled, rescheduled. This is a claim about the CONTENT of stored data,
+which no guard inspects. `postcall_verify` returned `ok` because no action was
+claimed and no row was wrong; the reconciler compares what was written against
+what was said about writing, never against what was said about what is there.
+
+Smaller than inventing a booking, and the same family: a caller acts on it. Told
+their appointment is a checkup and cleaning, they arrive expecting one.
+
+**Done when:** the assistant states only fields the row actually has, or the
+descriptive claims are checked the way completion claims are.
+
+### LVX60 · Unprompted status announcements `[gcp]` · P2
+
+Turn 3, answering "what can I expect at that appointment":
+
+> "I see that appointment is for a checkup and cleaning. **I also want to let you
+> know that our office is currently closed.** Is there anything else I can help
+> you with?"
+
+True — the call was at 20:52 — and a non-sequitur. It comes from `Status: CLOSED`
+sitting in the prompt with nothing saying when it is worth mentioning. A caller
+who rang about an appointment next week does not need to be told the office is
+shut right now, and hearing it unprompted reads as the system talking about
+itself.
+
+### The "anything else" tic is systematic, not occasional
+
+Turns 2, 3, 4, 5 and 6 — **five out of five** — end with some form of *"Is there
+anything else I can help you with?"*, including immediately after answering a
+factual question. Combined with call 2, where it appended the same phrase to five
+consecutive turns, this is a verbal tic rather than a lapse.
+
+Not a defect with a counter, and one of the clearest "this is not a person"
+signals on a demo call.
+
+### What went right, and it is the hard part
+
+Turn 6, both refusals in one breath — a service not offered, and a request for
+clinical advice:
+
+> "We handle checkups, cleanings, fillings, and crowns, but we do not do braces
+> or give dental advice. Regarding your pain, I'd recommend seeing a healthcare
+> professional."
+
+Named what it does do, declined what it does not, refused to advise, pointed at a
+professional. That is the behaviour the boundaries need and it arrived without
+prompting.
+
+It also read the appointment back accurately (name, date and time all correct),
+handled "say it again" cleanly, and wrote nothing.
+
+### Latency is climbing across the round
+
+| call | reply p50 |
+|---|---|
+| 1 | 1,433 ms |
+| 2 | 1,996 ms |
+| 3 | 2,301 ms |
+
+Same rig, same tenant, same evening. Recorded as an observation, not a
+measurement — this machine's TLS interception makes any absolute number here
+untrustworthy (LVX17), but the TREND is within one machine and one session and is
+worth watching. Three points is not a curve.
 
 ## Call 2 of the clean-slate round, 2026-09-03 — LVX48 VERIFIED, four new defects
 
