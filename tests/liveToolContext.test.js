@@ -1,0 +1,110 @@
+// ---------------------------------------------------------------------------
+// The tool context the Live runner hands to every tool -- and whether it is
+// actually CONNECTED to the thing that produces it.
+//
+// This file exists because of how LVX45 hid. The hesitation gate for end_call
+// shipped, was reviewed, and had a passing unit test; the value it reads was
+// produced correctly by turnState() and never copied into the tool context. So
+// services/tools.js read undefined, heardOnlyHesitation was permanently false,
+// and the gate was unreachable on every Live call that has ever been made.
+//
+// Both halves were tested. tests/tools.test.js passes lastCallerText straight
+// into executeToolCall, which proves the consumer. turnState() proves the
+// producer. Nothing proved the wire between them, and the only counter that
+// could have said so -- end_call_refused_hesitation -- reads 0 whether the gate
+// is working perfectly or missing entirely.
+//
+// So: assert the CONNECTION, at the seam, with the real runner.
+// ---------------------------------------------------------------------------
+import { describe, it, expect, vi } from "vitest";
+import { createToolRunner } from "../lib/voice/live/tools.js";
+
+const CONFIG = {
+  businessName: "Brightwork Family Dental",
+  timezone: "America/Chicago",
+  allowedTasks: ["general_question", "take_message", "book_appointment", "check_appointment"],
+  capabilities: { appointments: { enabled: true }, messages: { enabled: true } },
+  businessHours: {},
+};
+
+/**
+ * Run one tool call through the real runner with a stub executor, and return
+ * the ctx that reached it. The executor is the seam createToolRunner already
+ * exposes for the eval driver, so this exercises the production path rather
+ * than a second copy of it.
+ */
+async function ctxFor(turnState) {
+  const execute = vi.fn(async (fc) => ({
+    functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+  }));
+  const runner = createToolRunner({
+    config: CONFIG,
+    extras: { integrations: [], businessId: "b1", callerPhone: "+14699338887", callId: "c1" },
+    execute,
+    turnState,
+  });
+  await runner.handleToolCall({
+    functionCalls: [{ id: "1", name: "record_customer_request", args: { request_type: "message" } }],
+  });
+  expect(execute).toHaveBeenCalled();
+  return execute.mock.calls[0][1];
+}
+
+describe("Live tool context — the fields tools actually depend on arrive", () => {
+  it("carries lastCallerText through to the tool (the LVX45 wire)", async () => {
+    const ctx = await ctxFor(() => ({
+      step: "gather_details",
+      callerTurnCount: 3,
+      transferAllowed: true,
+      spellingSettled: false,
+      lastCallerText: "Ah!",
+    }));
+    // The exact value matters, not merely that the key exists: a gate reading
+    // "" behaves identically to a gate reading undefined, which is the state
+    // this test was written to make impossible.
+    expect(ctx.lastCallerText).toBe("Ah!");
+  });
+
+  it("normalises a missing lastCallerText to a string, never undefined", async () => {
+    // services/tools.js treats "" as "the caller said nothing", which the
+    // silence ladder owns. undefined would take the same branch by accident
+    // rather than by decision, and that accident is what LVX45 was.
+    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
+    expect(ctx.lastCallerText).toBe("");
+  });
+
+  it("carries the rest of the turn state the gates read", async () => {
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 5,
+      transferAllowed: false,
+      spellingSettled: true,
+      lastCallerText: "yes please",
+    }));
+    expect(ctx.step).toBe("confirm");
+    expect(ctx.callerTurnCount).toBe(5);
+    expect(ctx.transferAllowed).toBe(false);
+    expect(ctx.spellingSettled).toBe(true);
+  });
+
+  it("rebuilds the context per call so a later tool sees the same turn", async () => {
+    const execute = vi.fn(async (fc) => ({
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+    }));
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ step: "gather_details", callerTurnCount: 2, lastCallerText: "umm" }),
+    });
+    await runner.handleToolCall({
+      functionCalls: [
+        { id: "1", name: "record_customer_request", args: { request_type: "message" } },
+        { id: "2", name: "record_customer_request", args: { request_type: "callback" } },
+      ],
+    });
+    for (const call of execute.mock.calls) {
+      expect(call[1].lastCallerText).toBe("umm");
+    }
+  });
+});

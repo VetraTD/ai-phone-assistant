@@ -34,14 +34,14 @@ Status means:
 | **LVX66** | it invents FACTS about the business — a service, an insurer — and says it confirmed them | **FIXED, UNVERIFIED** — sourcing rule, 2026-09-04 |
 | **LVX61** | it called tomorrow "today", with the correct date in its prompt | **FIXED, UNVERIFIED** — the server computes the word now |
 | **LVX55** | the prompt carries ONE day of hours, so it invents the rest of the week | **FIXED, UNVERIFIED** — whole week in the static prefix |
-| **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
+| **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **FIXED, UNVERIFIED** — every action tool, no exception |
 | **LVX57** | the claim detector misses HALF the claims actually made | **OPEN · P0** — upgraded, call 4 |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
-| **LVX50** | unintelligible audio answered as though understood, then booked from | **OPEN · P0** |
+| **LVX50** | unintelligible audio answered as though understood, then booked from | **FIXED, UNVERIFIED** — script check, write + note |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **SHIPPED, NOT WORKING** — the nudge missed on the next two calls |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
-| **LVX45** | it hung up on a hesitation | **SHIPPED, NOT WORKING** — the gate is wired on one side only and has never fired |
+| **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
 | **LVX33** | several cancellations in one turn, only the last one forgotten | **VERIFIED** — on a human call, call 5 |

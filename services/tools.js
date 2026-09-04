@@ -20,7 +20,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
-import { stripFillers } from "../lib/transcriptUtils.js";
+import { stripFillers, isHesitationOnly, isUnusableTranscript } from "../lib/transcriptUtils.js";
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -211,6 +211,24 @@ export async function executeToolCall(fc, ctx) {
       // is ENTIRELY filler. Silence is not covered -- an empty lastCallerText
       // means the caller said nothing at all, which the silence ladder owns,
       // and treating it here would stop a legitimate close after a goodbye.
+      //
+      // stripFillers here, and isHesitationOnly for WRITES below. The two gates
+      // want different predicates and the difference is not an oversight.
+      //
+      // stripFillers' list is wider than "hesitation": it also swallows "Okay",
+      // "Right", "So", "Mm-hmm". For a write that is wrong -- "Okay" is the
+      // commonest way anyone agrees to anything on a phone call, and refusing
+      // to book on it would be its own defect. For a HANG-UP it is right, and
+      // for a reason worth stating: the question this gate follows is "is there
+      // anything else I can help you with?", so an affirmative grunt means
+      // there IS something else, and a vague "okay" is not a no. Being
+      // conservative here costs one turn and asks again; being wrong ends the
+      // call on someone who was still talking.
+      //
+      // NOTE this gate only became reachable on 2026-09-04, when the Live tool
+      // context was finally wired to carry lastCallerText. Its behaviour on
+      // "Okay." is therefore new in practice though old in the code, and is on
+      // the rig call plan to be heard rather than assumed.
       const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
       const heardOnlyHesitation = lastCallerText.trim() !== "" && stripFillers(lastCallerText) === "";
 
@@ -284,6 +302,92 @@ export async function executeToolCall(fc, ctx) {
         // receptionist finding the record it needs in order to ask the caller
         // about it — locking the door and the key inside.
         if ((pack.actionTools || []).includes(fc.name)) {
+          // DID THE CALLER ACTUALLY AGREE TO THIS, AND DID WE HEAR THEM?
+          //
+          // Above every other gate, because both questions are about whether
+          // there is anything to act on at all. A spelling gate on a write the
+          // caller never authorised is checking the spelling of a decision
+          // nobody made.
+          //
+          // Two failures from the same evening, both on the Live front-end and
+          // both structurally impossible on the cascade, where Deepgram text
+          // passes through cleanTranscript before the model ever sees it:
+          //
+          //   LVX56 — the caller said "Ah!" and a reschedule AND a name change
+          //   were executed and announced as done. The LVX45 fix threaded the
+          //   caller's last utterance into the end_call gate ONLY, so the
+          //   hang-up was protected and every write was not.
+          //
+          //   LVX50 — an English turn was transcribed as "에레는", answered
+          //   "Great, 8 AM on Tuesday, September 8th, is available", and booked
+          //   from. The danger is specific to this seam: a misheard time gives a
+          //   wrong row, an invented reading of noise gives a row nobody asked
+          //   for.
+          //
+          // No per-tool exception list. The exception is lexical and lives in
+          // isHesitationOnly, which knows that "Okay" and "Mm-hmm" are answers
+          // and "Ah!" is not -- stripFillers does not, and a gate built on it
+          // would refuse a booking on the commonest confirmation in English.
+          //
+          // Cost when it fires is one turn: the refusal is model-facing, with a
+          // caller-safe line beside it, so the assistant asks a plain question
+          // instead of writing. Never dead air.
+          //
+          // The cascade never sets lastCallerText, so both predicates see "" and
+          // neither branch can fire there -- the same construction that keeps
+          // this file byte-identical for tier 3 today.
+          const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
+          if (lastCallerText.trim() !== "") {
+            const consentRefusal =
+              isHesitationOnly(lastCallerText)
+                ? {
+                    counter: "write_refused_hesitation",
+                    message:
+                      "[not caller speech] The caller has not agreed to this yet — all they said was a " +
+                      'hesitation ("um", "uh", "ah"). That is someone thinking, not someone saying yes. ' +
+                      "Do not write anything. Ask them plainly whether you should go ahead, and wait for a " +
+                      "real answer.",
+                    callerLine: "Sorry — did you want me to go ahead with that?",
+                  }
+                : isUnusableTranscript(lastCallerText)
+                  ? {
+                      counter: "live_unusable_transcript",
+                      message:
+                        "[not caller speech] The caller's last turn did not transcribe as usable speech, so " +
+                        "you do not know what they said. Do not write anything and do not guess at what they " +
+                        "meant. Tell them you did not catch that and ask them to say it again.",
+                      callerLine: "Sorry, I didn't catch that — could you say it again?",
+                    }
+                  : null;
+            if (consentRefusal) {
+              bumpCounter(consentRefusal.counter);
+              return {
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: { success: false, message: consentRefusal.message },
+                },
+                stateEffects: {
+                  // silent, for the same reason the spelling gate's event is:
+                  // nothing ran, so the session must not narrate work that was
+                  // declined. The event still goes out so metrics and the
+                  // transcript record that the model tried.
+                  toolResult: {
+                    name: fc.name,
+                    success: false,
+                    message: consentRefusal.callerLine,
+                    callerSafe: true,
+                  },
+                  toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+                },
+              };
+            }
+            // The positive half. Without it a clean call and a call that never
+            // attempted a write both read zero on the refusal counters, which
+            // is precisely how LVX45 sat in the tree looking fixed.
+            bumpCounter("write_consent_checked");
+          }
+
           // Confirm the spelling of a hard name BEFORE it becomes a record.
           //
           // A live call stored "Venkateshwaria Ayalavarapu" as "Venkateshwaria
