@@ -113,7 +113,36 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **RESTORED 2026-09-03**, after ten calls for the LVX23 bisect. Put back to the Railway staging URLs and verified field-for-field by re-reading the number from Twilio, not by trusting the update. `npm run probe` works again. |
+| **status** | **POINTED AT A LAPTOP, 2026-09-03 evening.** `voiceUrl` and `statusCallback` are on a cloudflared quick tunnel to `localhost:3000` for behaviour testing, verified by reading the number back. **`npm run probe` is broken until this is put back**, and the tunnel URL dies with the process. Restore to the Railway staging URLs in the rows above. Earlier status: RESTORED 2026-09-03 after the LVX23 bisect. |
+
+### Testing against a laptop, and why it is cloudflared and not ngrok
+
+**ngrok cannot authenticate on the development machine.** Its control connection
+fails with `x509: certificate signed by unknown authority` — Norton's TLS
+interception again, the same root cause as LVX17, in a new place. The Go binary
+does not trust Norton's root CA, so it retries forever and the reserved domain
+serves a 404 from ngrok's edge, which reads exactly like a broken server.
+
+**cloudflared is unaffected** and is what the local rig uses. Its quick-tunnel
+URL is random and dies with the process, so `BASE_URL` must match it and the
+Twilio number must be repointed each session. Signature validation covers the
+EXACT url, so a stale `BASE_URL` is a 403 indistinguishable from a wrong token.
+
+Run the server with the deployment's settings, not the laptop's defaults:
+
+```
+BASE_URL="https://<tunnel>.trycloudflare.com" TWILIO_VALIDATE_SIGNATURE=true DATABASE_URL="postgres://vetra:vetra_local_dev@localhost:55432/vetra" POSTCALL_VERIFY=count LIVE_DEBUG_TRANSCRIPT=1 PORT=3000 node server.js
+```
+
+`TWILIO_VALIDATE_SIGNATURE` is `false` in the local `.env` and true on the
+deployment; `POSTCALL_VERIFY` and `LIVE_DEBUG_TRANSCRIPT` are unset locally and
+set there. Left at their local defaults, the rig measures a configuration
+production never runs — which is the LVX37 mistake exactly.
+
+**`+18176011171` resolves to a LOCAL Brightwork Family Dental** on the throwaway
+Postgres, created with real dental hours (Mon-Thu 08:00-17:00, Fri to 16:00, Sat
+morning, Sun closed) so it does not offer midnight appointments the way Digile
+Media legitimately does.
 
 **Two things this number is, beyond a test line:**
 
