@@ -65,6 +65,86 @@ const baseCtx = {
 const endCall = (ctx) => executeToolCall({ id: "fc1", name: "end_call", args: { reason: "done" } }, ctx);
 const c = () => getLatencyStats().turnTaking;
 
+describe("LVX76 — the refusal that made it say goodbye and repeat itself", () => {
+  beforeEach(() => clearStats());
+
+  // -------------------------------------------------------------------------
+  // Confirmed by the owner on a real call, 2026-09-04. The caller said "Okay"
+  // meaning "go on"; the model called end_call; the hesitation gate refused --
+  // CORRECTLY, the caller went on to book -- and handed back:
+  //
+  //   "The caller has not answered yet — all they said was a hesitation
+  //    ("um", "uh") ... Do not end the call. Wait, or ask again gently."
+  //
+  // Two faults, both in the wording. It described an acknowledgement as a
+  // hesitation, which is false; and "ask again" named no object, so the model
+  // re-delivered a forty-word answer verbatim. Then, having been told the call
+  // was not ending, it said goodbye anyway.
+  // -------------------------------------------------------------------------
+
+  const hesitate = (text) =>
+    executeToolCall(
+      { id: "fc1", name: "end_call", args: { reason: "caller is done" } },
+      { ...baseCtx, lastCallerText: text }
+    );
+
+  it("still refuses, and still counts — the DECISION was never the problem", async () => {
+    const { functionResponse } = await hesitate("Okay.");
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(c().end_call_refused_hesitation).toBe(1);
+  });
+
+  it("no longer tells the model the caller hesitated when they said 'okay'", async () => {
+    // A model handed a false description of its input reasons onward from it.
+    const { functionResponse } = await hesitate("Okay.");
+    const m = functionResponse.response.message;
+
+    expect(m).not.toMatch(/has not answered yet/i);
+    expect(m).not.toMatch(/someone thinking/i);
+    // What is actually true, and all that is knowable here.
+    expect(m).toMatch(/does not settle whether they are finished/i);
+  });
+
+  it("forbids the goodbye and the repeat by name", async () => {
+    const { functionResponse } = await hesitate("Okay.");
+    const m = functionResponse.response.message;
+
+    expect(m).toMatch(/do NOT say goodbye/i);
+    expect(m).toMatch(/do NOT sign off/i);
+    expect(m).toMatch(/do NOT repeat anything you have already said/i);
+  });
+
+  it("bounds what to do instead — one sentence, then wait", async () => {
+    // "Ask again gently" named no object, and the model chose the whole
+    // previous turn as the thing to ask again.
+    const { functionResponse } = await hesitate("Umm.");
+    const m = functionResponse.response.message;
+
+    expect(m).toMatch(/ONE short sentence/i);
+    expect(m).toMatch(/wait for their answer/i);
+    expect(m).not.toMatch(/ask again gently/i);
+  });
+
+  it("leaves the caller-facing line alone — only the model-facing text changed", async () => {
+    // The split is the point: the caller hears one short question, and the
+    // instructions the model reads are never spoken.
+    const { stateEffects } = await hesitate("Okay.");
+
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    expect(stateEffects.toolResult.message).toBe("Is there anything else I can help you with?");
+  });
+
+  it("still lets a genuine goodbye through", async () => {
+    // The guard against over-correcting. "No, that's everything" is not a
+    // hesitation and must still end the call.
+    const { functionResponse } = await hesitate("No, that's everything, thanks.");
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(c().end_call_refused_hesitation).toBe(0);
+  });
+});
+
 describe("LVX72 — an abandoned write outstanding at hang-up", () => {
   beforeEach(() => clearStats());
 

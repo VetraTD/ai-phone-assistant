@@ -518,17 +518,26 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(functionResponse.response.success).toBe(true);
     });
 
-    it("rejects end_call during gather_details with the legacy 'don't end yet' message", async () => {
+    it("rejects end_call during gather_details and names what must not happen", async () => {
+      // REWRITTEN 2026-09-04 (LVX76). The message used to be "Don't end the
+      // call yet. First confirm you've helped with their request and ask if
+      // there's anything else they need."
+      //
+      // On a real call the sibling hesitation branch of this same refusal made
+      // the model re-read its entire previous answer and then say goodbye while
+      // the line stayed open. The rewrite follows LVX34's shape and names the
+      // two things that must not happen, because both of them did.
       const fc = { id: "fc8", name: "end_call", args: { reason: "caller wants to hang up" } };
       const ctx = { ...baseCtx, step: "gather_details" };
 
       const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
 
-      expect(functionResponse.response).toEqual({
-        success: false,
-        message:
-          "Don't end the call yet. First confirm you've helped with their request and ask if there's anything else they need.",
-      });
+      expect(functionResponse.response.success).toBe(false);
+      const m = functionResponse.response.message;
+      expect(m).toMatch(/NOT A FAILURE/);
+      expect(m).toMatch(/do NOT say goodbye/i);
+      expect(m).toMatch(/do NOT repeat anything you have already said/i);
+      expect(m).toMatch(/ONE short sentence/i);
       expect(stateEffects.endCallArgs).toBeUndefined();
       expect(stateEffects.toolResult).toEqual({
         name: "end_call",
@@ -1954,7 +1963,15 @@ describe("end_call refuses while the caller is still thinking", () => {
     const { functionResponse, stateEffects } = await endCall("umm");
 
     expect(functionResponse.response.success).toBe(false);
-    expect(functionResponse.response.message).toMatch(/hesitation/i);
+    // The word "hesitation" is deliberately GONE from this message (LVX76).
+    // stripFillers is wide enough to swallow "Okay" as well as "umm", which is
+    // correct for a hang-up, so a message that called every one of them a
+    // hesitation was telling the model something false about half of them --
+    // and it reasoned onward from it. What is asserted now is what is actually
+    // knowable: the caller said something brief, and it does not settle whether
+    // they are finished.
+    expect(functionResponse.response.message).toMatch(/does not settle whether they are finished/i);
+    expect(functionResponse.response.message).toMatch(/do NOT say goodbye/i);
     // The caller hears the question again, not an apology.
     expect(stateEffects.toolResult.message).toMatch(/anything else/i);
     expect(stateEffects.toolResult.callerSafe).toBe(true);

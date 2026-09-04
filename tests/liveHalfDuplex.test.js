@@ -40,6 +40,87 @@ const TALKING = { isActive: true, voicedRunMs: 400 };
 /** A cough: loud, brief, and not an interruption. */
 const COUGH = { isActive: true, voicedRunMs: 200 };
 
+// ---------------------------------------------------------------------------
+// LVX70, measured on a real call 2026-09-04.
+//
+// The gate discarded its ring at the end of playback because the withheld
+// frames were assumed to be echo. One of them was 280 ms of a caller saying
+// "Okay" at RMS 5993, over the top of a long reply -- past the VAD's 200 ms
+// activation, short of the 300 ms barge threshold. All 38 frames were dropped
+// and Gemini never learned the caller had answered.
+//
+// Echo peaks at RMS 211 against inboundVad's floor of 700, so a frame the VAD
+// called VOICED cannot be our own audio coming back. That is the evidence the
+// release rests on, and it is the same evidence this file already trusts.
+// ---------------------------------------------------------------------------
+
+/** 280 ms of real speech during our own playback: the "Okay" that was lost. */
+const SPEAKING_OVER = { voiced: true, isActive: true, voicedRunMs: 280 };
+/** Room tone: below inboundVad's floor, so never voiced. */
+const ROOM = { voiced: false, isActive: false, voicedRunMs: 0 };
+const END_OF_PLAYBACK = { frame: null, playing: false, ...ROOM };
+
+describe("LVX70 — speech withheld during playback is released, not discarded", () => {
+  it("releases the ring when it holds speech", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 14; i++) g.push({ frame: frame(i), playing: true, atMs: i * 20, ...SPEAKING_OVER });
+
+    const out = g.push({ ...END_OF_PLAYBACK, atMs: 280 });
+
+    // 14 frames x 20 ms = 280 ms, past the 200 ms release threshold.
+    expect(out.released).toBe(14);
+    expect(out.forward).toHaveLength(14);
+    expect(out.dropped).toBe(0);
+  });
+
+  it("still discards a ring that holds no speech", () => {
+    // The original reason for dropping, and it has not changed: our own echo
+    // and the room must never be handed to the model as caller audio.
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 20; i++) g.push({ frame: frame(i), playing: true, atMs: i * 20, ...ROOM });
+
+    const out = g.push({ ...END_OF_PLAYBACK, atMs: 400 });
+
+    expect(out.released).toBe(0);
+    expect(out.forward).toEqual([]);
+  });
+
+  it("does not release a cough", () => {
+    // 160 ms, under the 200 ms threshold inboundVad uses to call a burst voice.
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 8; i++) g.push({ frame: frame(i), playing: true, atMs: i * 20, voiced: true, ...COUGH });
+
+    const out = g.push({ ...END_OF_PLAYBACK, atMs: 160 });
+
+    expect(out.released).toBe(0);
+    expect(out.forward).toEqual([]);
+  });
+
+  it("leaves bargeMs alone — a real interruption still cuts in immediately", () => {
+    // The release is not a substitute for the barge and must not weaken it.
+    // A caller talking over us for 400 ms still interrupts on the spot rather
+    // than waiting for our reply to finish.
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 5; i++) g.push({ frame: frame(i), playing: true, atMs: i * 20, ...ROOM });
+
+    const out = g.push({ frame: frame(99), playing: true, atMs: 100, voiced: true, isActive: true, voicedRunMs: 400 });
+
+    expect(out.barge).toBe(true);
+    expect(out.released).toBe(0);
+  });
+
+  it("counts only VOICED frames as dropped when the ring overflows", () => {
+    // The ring is 500 ms. A long reply pushes silence through it continuously,
+    // and counting every frame that fell out reported 2,540 losses on an
+    // utterance whose own 374 frames were every one forwarded.
+    const g = createHalfDuplexGate();
+    let dropped = 0;
+    for (let i = 0; i < 200; i++) dropped += g.push({ frame: frame(i % 256), playing: true, atMs: i * 20, ...ROOM }).dropped;
+
+    expect(dropped).toBe(0);
+  });
+});
+
 describe("the gate itself", () => {
   it("forwards inbound audio when we are not speaking", () => {
     const g = createHalfDuplexGate();

@@ -297,11 +297,45 @@ export async function executeToolCall(fc, ctx) {
         };
       }
       if (heardOnlyHesitation) bumpCounter("end_call_refused_hesitation");
+      // LVX76. This text produced the worst twenty seconds of the 2026-09-04
+      // call, and both faults are in the wording rather than in the decision.
+      //
+      // THE REFUSAL WAS RIGHT. The caller said "Okay" meaning "go on", and they
+      // went on to book an appointment. What the model was handed was:
+      //
+      //   "The caller has not answered yet — all they said was a hesitation
+      //    ("um", "uh") ... Do not end the call. Wait, or ask again gently."
+      //
+      // 1. IT IS FALSE. stripFillers swallows "Okay" as well as "um" and "uh",
+      //    which the note above says in as many words and which is CORRECT for a
+      //    hang-up. But it means this message describes an acknowledgement as a
+      //    hesitation, and a model handed a false description of its input
+      //    reasons onward from it.
+      // 2. "ASK AGAIN" NAMES NO OBJECT. The previous turn had ended in a
+      //    question, so "ask again" was read as "deliver that turn again": it
+      //    re-read a forty-word answer verbatim. The owner, asked directly,
+      //    confirmed hearing it twice in full.
+      //
+      // And having been told the call was not ending, it said goodbye anyway --
+      // "Brightwork Family Dental wishes you well", which is not our signOff and
+      // appears nowhere in this repository. The gate held the line open while
+      // the model closed it in the caller's ears.
+      //
+      // The rewrite follows LVX34's shape, the house pattern for a refusal: say
+      // it is not a failure, say what is actually true, say exactly what to do,
+      // and bound it. It describes what was heard without claiming to know what
+      // it meant, and it names the two things that must not happen, because on
+      // a real call both of them did.
       const message = heardOnlyHesitation
-        ? "[not caller speech] The caller has not answered yet — all they said was a hesitation " +
-          "(\"um\", \"uh\"). That is someone thinking, not someone saying no. Do not end the call. " +
-          "Wait, or ask again gently."
-        : "Don't end the call yet. First confirm you've helped with their request and ask if there's anything else they need.";
+        ? "[not caller speech] NOT A FAILURE — the caller is still on the line and the call is " +
+          "still open. What they said was brief (\"okay\", \"mm\", \"uh\") and does not settle " +
+          "whether they are finished. Do NOT say goodbye, do NOT sign off, and do NOT repeat " +
+          "anything you have already said. Say ONE short sentence asking whether there is " +
+          "anything else they need, then stop and wait for their answer."
+        : "[not caller speech] NOT A FAILURE — the call is still open and the caller is still " +
+          "on the line. Do NOT say goodbye and do NOT repeat anything you have already said. " +
+          "Say ONE short sentence asking whether there is anything else they need, then stop " +
+          "and wait for their answer.";
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {

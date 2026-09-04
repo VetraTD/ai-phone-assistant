@@ -196,11 +196,19 @@ and the reason it was asked rather than assumed.
    `end_call_refused_hesitation: 2`. **That decision was CORRECT** — the caller
    was not finished and went on to book. LVX45's gate has now been exercised on a
    real call for the first time, and it did the right thing.
-3. The model-facing refusal reads: *"Don't end the call yet. **First confirm
-   you've helped with their request** and ask if there's anything else they
-   need."*
-4. The model obeys it literally. It re-reads the whole previous answer to
-   "confirm it helped", asks "anything else", and winds the call down aloud.
+3. **The HESITATION branch fires, not the generic one** — `stripFillers` swallows
+   "Okay" as well as "um"/"uh", which `services/tools.js` says in as many words.
+   So the model is handed:
+
+   > "[not caller speech] The caller has not answered yet — all they said was a
+   > hesitation ("um", "uh"). That is someone thinking, not someone saying no.
+   > Do not end the call. Wait, or ask again gently."
+
+4. **That message asserts something FALSE and then gives an unbounded
+   instruction.** The caller did not hesitate; they said "Okay", which is an
+   acknowledgement. And "ask again gently" names no object — the model's previous
+   turn ended in a question, so "ask again" was read as *deliver that turn
+   again*, and it re-read the whole answer. Then it wound the call down aloud.
 
 **"Brightwork Family Dental wishes you well" is not ours.** It appears nowhere in
 the repository, and the real `signOff` is *"Thank you for calling … Have a great
@@ -211,12 +219,24 @@ call is not ending.
 That is LVX34's shape mirrored, and on a demo call it is worse than LVX34: a
 prospect who hears a goodbye believes the call is over.
 
-**The wording was written for the booking path**, where "confirm you've helped
-with their request" means *read the booking back*. On a general-question call
-with no action to confirm, the only thing there is to re-confirm is the answer
-itself — so it says it again. Reworking it is a REPLACEMENT of text already
-there, which is what LVX34 and LVX71 both did, not an eighth competing
-instruction.
+**The wording was written for a genuine hesitation** — "um", "uh", someone
+mid-thought — where "wait, or ask again gently" is exactly right. It became
+reachable for "Okay" only on 2026-09-04, when the Live tool context was finally
+wired to carry `lastCallerText`, and `services/tools.js` flagged that in its own
+comment: *"Its behaviour on 'Okay.' is therefore new in practice though old in
+the code, and is on the rig call plan to be heard rather than assumed."* **It has
+now been heard.**
+
+Two things are wrong with it and they are separable:
+
+- It tells the model a **falsehood** about what the caller said. A message that
+  misdescribes the input is worse than a vague one, because the model then
+  reasons from it.
+- **"Ask again" names no object.** The correct next move is one short question;
+  what the model did was re-deliver an entire turn.
+
+Rewording is a REPLACEMENT of text already there, which is what LVX34 and LVX71
+both did, not an eighth competing instruction.
 
 **Falsifiable, and the two halves may separate.** If the reword kills the re-read
 but the farewell survives, the farewell is the model winding down on a bare

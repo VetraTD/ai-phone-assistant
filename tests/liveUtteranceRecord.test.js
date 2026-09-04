@@ -216,6 +216,33 @@ describe("LVX70 -- what the vendor was actually given, per caller utterance", ()
     expect(c().live_utterance_late_transcript).toBe(0);
   });
 
+  it("releases withheld speech once our own audio finishes", async () => {
+    // LVX70's fix, end to end. The caller answers over the top of a short
+    // reply; playback ends while they are still within the 500 ms ring, and the
+    // words reach the vendor instead of being discarded.
+    const s = await boot();
+    s.speak(200);
+    s.talk(280);
+    s.quiet(600);
+
+    expect(c().live_gate_speech_released).toBeGreaterThan(0);
+  });
+
+  it("does not blame the vendor for a transcript that could not exist", async () => {
+    // CORRECTED after call 1. An utterance whose audio was never forwarded can
+    // never be transcribed, so counting it as no_transcript blames the vendor
+    // for our own gate -- the exact confusion this instrument exists to end.
+    // It is already counted, once, by live_utterance_all_withheld.
+    const s = await boot();
+    s.speak(3000);
+    s.talk(280);
+    s.quiet(600);
+    s.hangup();
+
+    expect(c().live_utterance_all_withheld).toBe(1);
+    expect(c().live_utterance_no_transcript).toBe(0);
+  });
+
   it("counts a transcript that arrives seconds later, which is the held-turn signature", async () => {
     const s = await boot();
     s.talk(280);
