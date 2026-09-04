@@ -113,7 +113,7 @@ strength of its argument.
 | voiceApplicationSid | *(empty)* |
 | captured at | 2026-09-02, read live from Twilio immediately before repointing |
 | captured by | this session |
-| **status** | **POINTED AT A LAPTOP, 2026-09-03 evening.** `voiceUrl` and `statusCallback` are on a cloudflared quick tunnel to `localhost:3000` for behaviour testing, verified by reading the number back. **`npm run probe` is broken until this is put back**, and the tunnel URL dies with the process. Restore to the Railway staging URLs in the rows above. Earlier status: RESTORED 2026-09-03 after the LVX23 bisect. |
+| **status** | **RESTORED 2026-09-03, late.** Put back to the Railway staging URLs after a six-call local round, and verified field-for-field by re-reading the number from Twilio rather than trusting the update. `npm run probe` works again. The cloudflared tunnel and the local server are shut down; that tunnel URL is dead and a future rig gets a new one. |
 
 ### Testing against a laptop, and why it is cloudflared and not ngrok
 
