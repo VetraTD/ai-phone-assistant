@@ -31,11 +31,13 @@ Status means:
 
 | | what it is | status |
 |---|---|---|
+| **LVX55** | it told a caller the practice was closed on a day it is open | **OPEN · P0** |
+| **LVX56** | a hesitation is accepted as consent for a WRITE, not just a hang-up | **OPEN · P0** |
 | **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **OPEN · P0** |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **SHIPPED, NOT WORKING** — the nudge missed on the next two calls |
-| **LVX48** | it claimed to update a record with no tool able to do it | **FIXED, UNVERIFIED** |
+| **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
@@ -43,6 +45,8 @@ Status means:
 | **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
 | **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
 | **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
+| **LVX57** | the claim detector missed a real claim — one article's difference | **OPEN · P1** |
+| **LVX58** | it asks a question and answers it in the same breath | **OPEN · P1** |
 | **LVX52** | it opens by asking about texts it cannot send, then mis-parses the reply | **OPEN · P1** — reproduced worse on call 1 |
 | **LVX54** | it addresses the caller as "user" when it has no name yet | **OPEN · P1** |
 | **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
@@ -2278,6 +2282,130 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## Call 2 of the clean-slate round, 2026-09-03 — LVX48 VERIFIED, four new defects
+
+A reschedule plus a name change on the appointment call 1 created.
+
+### LVX48 · VERIFIED on a real call
+
+Both writes landed:
+
+```
+name  "Nithin Dodla" -> "Nathan Dodla"
+time  Fri 4 Sep 15:30 -> 15:00 America/Chicago
+```
+
+`correct_appointment_name` was **refused once and then succeeded** — the spelling
+gate fired on it (turn 8, *"could you spell that first name for me?"*), the
+caller spelled it, and the second attempt wrote. That is the gate correctly
+guarding a name-bearing write on a tool that did not exist the previous day, and
+it is the first time a caller's correction has actually reached the database.
+
+The tool's `appointment_id` defaulting was never exercised — the appointment was
+already selected by the lookup at turn 2, so `selectedAppointmentId` was set. The
+`lastBooked.id` path (a correction seconds after booking, with no lookup) remains
+untested.
+
+### LVX55 · It misstates the business's own opening hours `[gcp]` · **P0**
+
+Turn 4. The caller asked for "the day after, same time" — Saturday 15:30:
+
+> "I'm sorry, we're actually **closed that day.**"
+
+**Saturday is open, 09:00–13:00.** The correct answer is that the practice is
+open but shuts at one.
+
+One turn later it phrased the identical situation correctly for Friday — *"our
+hours that day are eight AM to four PM"* — so this is a phrasing lapse, not
+missing data. `check_appointment_availability` did its job; the model narrated
+the refusal as a closure.
+
+**Why this is a P0 rather than a wince.** Every other defect on this page is the
+assistant failing to do something. This one is the assistant **telling a caller
+something false about the business it represents**, in a way the caller has no
+reason to doubt and will act on — someone who wanted a Saturday appointment has
+now been told there is no such thing. Nothing detects it: the tool returned the
+right answer, no guard fires, and the only trace is the transcript.
+
+**Done when:** an out-of-hours request names the hours that DO apply, and never
+reports an open day as closed.
+
+### LVX56 · A hesitation is consent for a WRITE, not just for hanging up `[gcp]` · **P0**
+
+Turn 10. The caller said "Ah!" — nothing else — and the assistant executed
+**both** the reschedule and the name correction, then announced them as done.
+
+**This is a gap in the LVX45 fix, and it is mine.** That guard threads the
+caller's last utterance into the `end_call` gate and refuses to hang up on a
+turn that is entirely filler. It protects the hang-up and nothing else. Every
+other write — book, cancel, reschedule, correct — accepts a filler as agreement.
+
+The mechanism is already built: `lastCallerText` is in the tool context for every
+tool, and `stripFillers` is already imported. What is missing is the decision
+about WHICH writes it should cover, and that is a real decision rather than an
+oversight — a caller who has already given the details and says "mm" while the
+assistant reads them back is agreeing, and refusing there would be its own
+defect. The narrow reading is that a filler must not be the ONLY evidence of
+consent for a write that has not been read back and agreed to.
+
+**Done when:** a turn that is entirely filler cannot be the agreement that
+triggers a write.
+
+### LVX57 · The claim detector missed a real claim `[gcp]` · P1
+
+`postcall_verify` returned `verdict: row_without_claim`, `claims: 0`, on a call
+where the assistant said, at turn 10:
+
+> "the appointment is now updated under Nathan Dodla and rescheduled to Friday,
+> September 4th at 3 00 PM."
+
+`completionClaimRe` requires **"your** appointment is…"; the model said **"the**
+appointment is now updated". One article, and the claim is invisible.
+
+**This is worse than a miscount.** That ledger is the entire basis for catching
+LVX27 — a claim the detector cannot see is a fabrication it cannot catch, and
+`row_without_claim` becomes a false alarm that trains the reader to ignore it.
+
+The regex can be widened, and — the standing lesson on every pattern in this
+codebase — it can never be completed. Worth asking whether claim detection
+belongs in a regex at all, or whether the model should be made to state
+completions in a form the engine can recognise.
+
+**Done when:** the phrasings actually observed on real calls are matched, and the
+limits of matching at all are written down beside it.
+
+### LVX58 · It asks a question and answers it in the same breath `[gcp]` · P1
+
+Turn 2, one turn, verbatim and unedited:
+
+> "I can check that for you. What name is the appointment booked under?**Thanks
+> for that.** Yes, it looks like you have an appointment scheduled for Friday,
+> September 4th at 3 30 PM."
+
+It asked for the name, thanked the caller for an answer they had not given, and
+carried on — it had already found the appointment from the caller ID, so the
+question was never needed.
+
+Related to LVX25 (several questions in one breath) but distinct and worse: this
+is a question the assistant did not need, followed by an acknowledgement of an
+answer that does not exist. To the caller it reads as the assistant hearing
+something they did not say — which is exactly the impression to avoid on a system
+whose open P0s are about saying things nobody asked for.
+
+### Smaller: "anything else" appended to five consecutive turns
+
+Turns 6 through 10 all end with some form of *"And is there anything else I can
+help with today?"*, several of them before anything had been done. Same family as
+LVX35's inverted ordering, showing up as padding rather than as a premature
+close.
+
+### Also confirmed in practice: LVX49
+
+`verified_slots: 1` while `reschedule_appointment_db` succeeded. The reschedule
+wrote a time with no availability verification behind it — recorded this evening
+from reading the code, observed here on a call. The slot happened to be real
+because the model checked separately; nothing enforced that it had.
 
 ## Call 1 of the clean-slate round, 2026-09-03 — the core path holds
 
