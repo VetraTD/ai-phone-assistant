@@ -53,6 +53,7 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
+| **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
 | **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTED, NOT PREVENTED** — postcall_verify now says write_abandoned; nothing stops it mid-call |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0** — found on call 3, 4x in one call |
@@ -88,6 +89,60 @@ they sat in a conversation for an hour before anybody wrote them down.
 expensive state on this page, because it looks finished from the commit log. A
 regex over caller phrasing was always going to be the weak version of that fix;
 it missed on the first two calls after shipping.
+
+### LVX73 · The vendor can emit a transcription fragment that was never spoken `[gcp]` · P1
+
+On the LVX71 verification call, one assistant turn was logged as:
+
+> "**text**Sure, I can help with that. Let me pull up your appointments for you."
+
+The owner, asked directly, did not hear the word "text". So the audio was clean
+and the TRANSCRIPT was not.
+
+**It is not ours.** `debugTranscript` logs `turnReplyText` unmodified, and the
+accumulation is a bare `turnReplyText += sc.outputTranscription.text`
+(`lib/voice/live/index.js`). A fragment arrived whose `.text` was the literal
+string `text`. Every leak counter read 0 — `internal_term_leaks`,
+`live_outbound_leaks`, `intent_marker_leaks`, `text_channel_tool_calls` — which
+is correct, because nothing leaked into speech.
+
+**The blast radius is wider than the transcript, and that is the reason this is
+recorded rather than shrugged at.** `turnReplyText` is one string feeding four
+separate consumers:
+
+- `completionClaimRe` — a spurious fragment could register a claim that was never
+  made, which is the false alarm LVX57 says is worse than a miscount;
+- `spellRequestRe` in the reducer — a false match spends a spelling ask that was
+  never spoken, closing the cap early and letting a mis-heard name through;
+- the outbound leak guard;
+- `promisedAction`.
+
+Observed ONCE, in six turns, so this is a note about a possibility with one
+instance behind it — not a measured rate. **Deliberately not patched**: filtering
+the literal string "text" would be a guess at a vendor behaviour nobody
+understands yet, and a filter on this string is exactly the kind of thing that
+silently eats a real word later.
+
+**Done when:** the rate is known across a batch of calls, and either it is rare
+enough to ignore in writing or there is a rule that does not depend on guessing
+which tokens are spurious.
+
+### Method note: the instrument nearly manufactured a P0 twice in one day
+
+Both were caught only by asking the owner, and neither could have been settled
+from the log:
+
+- **Call 6** — "for a crown" appeared with no caller turn requesting it, which
+  reads as an invented service persisted to the database. The caller HAD said it;
+  the turn was one of two lost to `interrupted_count: 2`, because `auditTurn`
+  runs on `turnComplete`.
+- **The LVX71 call** — "textSure" reads as protocol vocabulary leaking into
+  speech. Nothing was spoken.
+
+The known risk with this instrument was that it UNDER-reports — "a defect that
+only occurs when the caller interrupts is currently invisible". These are the
+opposite: it can make the assistant look worse than it was. A gap in the
+transcript is not evidence, and neither is an oddity in it. Ask.
 
 ## 2026-09-04, after the round — LVX71 fixed, LVX72 detected but not prevented
 
