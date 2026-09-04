@@ -53,12 +53,13 @@ Status means:
 | **LVX64** | the system described to the caller as a character — "the calendar needs to know" | **FIXED, UNVERIFIED** — with LVX54 and LVX60 |
 | **LVX65** | it offers appointment times that have already passed | **FIXED, UNVERIFIED** — it was fabrication, not filtering |
 | **LVX59** | it invented what an appointment was for, and said "I see that" | **VERIFIED** on call 2, 2026-09-04 |
+| **LVX76** | a refused `end_call` makes it say goodbye mid-call and re-read its whole last answer | **OPEN · P0** — both symptoms confirmed by the owner, 2026-09-04 |
 | **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **FIXED, UNVERIFIED — and unverifiable at N=1.** One of the two lines reworded; heard once in nine calls |
 | **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **BOTH HALVES FIXED, NOT EXERCISED** — the not_found refusal, and the id now resolved in code from the caller's own snapshot |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
 | **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED**; prevention is now COUNTED at the end_call gate and still refuses nothing — deliberately |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
-| **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **OPEN · P0 — INSTRUMENTED, not yet diagnosed.** The old evidence was void; two hypotheses, one call decides |
+| **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **MECHANISM SETTLED on a real call** — OUR half-duplex gate withheld and dropped it; `LIVE_TURN_END` is irrelevant. Fix not yet shipped |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **SCOPED 2026-09-04** — design and cost written down, not built |
 | **LVX69** | a tenant cannot require identity before a record is DISCLOSED, only before a write | **SCOPED 2026-09-04** — design and cost written down, not built |
 | **LVX67** | the same question gets opposite answers on different calls | **OPEN · P1** — a knowledge row is the fix, not a rule; see scripts/seed-knowledge.js |
@@ -114,6 +115,164 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## Call 1 of the instrumented round, 2026-09-04 — LVX70's mechanism SETTLED, and two new P0s
+
+The first call with the per-utterance instrument. It answered the question it
+was built for and found something worse on the way.
+
+Booking correct end to end: row `47cd1155`, `Nithin Dodla`, Wed 9 Sep 14:00
+America/Chicago, notes "Cleaning". `postcall_verify` `ok`, `booked_rows: 1`,
+`claims: 1`, `abandoned: []`. Hours all correct. Reply p50 1,781 ms, first audio
+p50 776 ms, worst turn 3,590 ms. `close_reason: end_call_mark`.
+
+### LVX70 · SETTLED — it is OUR gate, and `LIVE_TURN_END` is irrelevant to it
+
+One record decides it. Utterance 3:
+
+```
+duration 740ms   voiced 280ms   peak_rms 5993   playing_at_open: TRUE
+frames 38   ->   forwarded 0    held 38    barge: no
+```
+
+280 ms of real caller speech at RMS 5993, spoken over our own audio,
+**withheld by `lib/voice/live/halfDuplex.js` and never sent to Gemini.**
+`barges: 0`, because `voicedRunMs` reached 280 and `DEFAULT_BARGE_MS` is 300.
+
+**The vendor never had that audio.** No endpointing setting on either side could
+have ended that turn, so no arm of `LIVE_TURN_END` can fix it and none should be
+touched for it. The 2026-09-04 correction to the LVX70 entry — that the two
+counters cited as exoneration cannot see this file — is confirmed by measurement
+rather than by reading.
+
+**What did NOT reproduce: the symptom.** `nudges_fired: 0`. No silence ladder,
+no ten seconds of nothing. This call reproduced the MECHANISM once, not the
+outcome, and that distinction is the honest one to carry forward: one withheld
+utterance in seven is a rate, and the four-in-one-call original was worse.
+
+### The fix, and why it is not the barge threshold
+
+`halfDuplex.js` discards the ring at playback end on the stated grounds that
+"the withheld frames were our own echo and the room". **The VAD already
+separates those.** Measured over nine calls and recorded in that file's own
+header: worst echo frame RMS 211, against `inboundVad`'s floor of 700. Echo
+cannot produce a voiced frame at all. The frames dropped on utterance 3 were
+voiced at 5993 — measured speech, thrown away.
+
+Lowering `bargeMs` 300 -> 200 would also work and buys a worse problem:
+`inboundVad`'s own comment records that a cough is a ~200 ms high-energy burst,
+and that threshold is the only thing that tells a cough from a sentence.
+
+**So: release the ring at playback end when it holds voiced SPEECH, rather than
+dropping it.** Same RMS evidence the file already trusts, `bargeMs` untouched,
+coughs still filtered by the 700 floor. The word arrives a beat late — exactly as
+our own audio ends, which is a natural point to receive it — instead of vanishing.
+
+### LVX76 · A refused `end_call` makes it say goodbye and repeat itself `[gcp]` · **P0 — both symptoms confirmed by the owner**
+
+The worst thing on this call, and it is two symptoms of one text.
+
+```
+CALLER> Okay.
+ASST  > Is there anything else I can help you with right now? Brightwork Family
+        Dental wishes you well.I can help with that. We're a general and family
+        dental practice... [THE ENTIRE PREVIOUS ANSWER, VERBATIM]
+
+CALLER> Okay.
+ASST  > Is there anything else I can help you with right now? Brightwork Family
+        Dental wishes you well.Is there anything else I can help you with right
+        now? Brightwork Family Dental wishes you well.
+```
+
+**Asked directly, the owner heard both**: the services-and-hours answer read out
+twice in full, and a mid-call farewell more than once. So this is speech, not an
+LVX73 transcript artifact — which is what the instrument alone could not settle,
+and the reason it was asked rather than assumed.
+
+**The chain, and every link is in our code:**
+
+1. The caller says "Okay" meaning *go on*. The model calls `end_call`.
+2. `stripFillers("Okay.")` is empty, so the hesitation gate refuses.
+   `end_call_refused_hesitation: 2`. **That decision was CORRECT** — the caller
+   was not finished and went on to book. LVX45's gate has now been exercised on a
+   real call for the first time, and it did the right thing.
+3. The model-facing refusal reads: *"Don't end the call yet. **First confirm
+   you've helped with their request** and ask if there's anything else they
+   need."*
+4. The model obeys it literally. It re-reads the whole previous answer to
+   "confirm it helped", asks "anything else", and winds the call down aloud.
+
+**"Brightwork Family Dental wishes you well" is not ours.** It appears nowhere in
+the repository, and the real `signOff` is *"Thank you for calling … Have a great
+day!"*. It is the model's own farewell, produced in response to being told the
+call is not ending.
+
+**So the gate keeps the line open and the model closes it in the caller's ears.**
+That is LVX34's shape mirrored, and on a demo call it is worse than LVX34: a
+prospect who hears a goodbye believes the call is over.
+
+**The wording was written for the booking path**, where "confirm you've helped
+with their request" means *read the booking back*. On a general-question call
+with no action to confirm, the only thing there is to re-confirm is the answer
+itself — so it says it again. Reworking it is a REPLACEMENT of text already
+there, which is what LVX34 and LVX71 both did, not an eighth competing
+instruction.
+
+**Falsifiable, and the two halves may separate.** If the reword kills the re-read
+but the farewell survives, the farewell is the model winding down on a bare
+"Okay" regardless of what the refusal says, and needs its own answer. Counters
+`end_call_refused_hesitation` (exists) and the new
+`end_call_refusal_spoken_early` are what tell those apart.
+
+**Done when:** a caller who says "okay" mid-call is not said goodbye to, and
+hears nothing repeated.
+
+### The instrument found two defects in ITSELF, and they are mine
+
+Recorded because a number that is wrong is worse than a number that is missing.
+
+- **`live_utterance_late_transcript` is not trustworthy as built.** Attribution is
+  FIFO: the oldest pending utterance without a transcript takes the next one to
+  arrive. Utterance 3 never got one (its audio was never sent), so everything
+  after it shifted by one — `transcript_ms` read 14550, 27748, 43776 and 29624
+  against a measured `input_transcript_lag_ms_p50` of **412**. Those are other
+  utterances' transcripts. The counter measured my bookkeeping, not the vendor.
+- **`dropped` is polluted and means almost nothing.** It counts ring-overflow
+  frames during our own playback, which is mostly silence: 2,540 on an utterance
+  that forwarded all 374 of its own frames. `held` is the honest number, and
+  `held` is what carried the finding.
+
+`observed`, `all_withheld`, `forwarded` and `held` involve no attribution and are
+per-frame. Those hold, and they are the ones the verdict rests on.
+
+### The two counters shipped this morning both earned their place
+
+`live_stacked_questions: 4` and `live_closing_tic: 4`, out of ten assistant
+turns. Turn 7 is the documented LVX25-plus-LVX35 shape verbatim:
+
+> "Just to make sure I have that spelled correctly, could you spell your name for
+> me? Then I'll get that appointment booked. Is there anything else I can help
+> with?"
+
+A spelling request, a promise, and "anything else" — before the booking existed.
+That turn had **no caller speech at all** and is the 2 ms entry in
+`reply_after_last_voice_ms`: the assistant spoke unprompted.
+
+### What went right, and two guards fired for the first time
+
+- **LVX44's nudge FIRED** — `live_spelling_ask_nudged: 1`,
+  `live_spelling_nudge_eligible: 1`. It was 0-for-2 when it was nearly removed.
+  The vendor transcribed the caller as "Nitin Dadla"; the row reads **Nithin
+  Dodla**.
+- **LVX72's count-only wire ran** — `end_call_abandoned_check_ran: 3`,
+  `end_call_would_refuse_abandoned: 0`. First exercise, and it correctly found
+  nothing abandoned. The positive twin is the whole reason that sentence can be
+  written.
+- `live_connect_ok: 1`, `live_connect_fallback: 0`.
+- LVX55, LVX61 and the availability invariant all held: hours correct, the
+  existing Tuesday appointment quoted correctly, `verified_slots: 18`,
+  `live_guard_availability_allowed: 1`, `write_consent_checked: 1`.
+- "Next day, same time" resolved to the right slot.
 
 ## The verification call for LVX74, 2026-09-04 — the change landed, the fix did not fire
 
