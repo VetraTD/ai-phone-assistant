@@ -57,7 +57,7 @@ Status means:
 | **LVX75** | it speaks its own instructions — "Acknowledge.", "Please pause there for a moment" | **SHIPPED, NOT WORKING** — reworded :1705, heard again on the next call. :907 now reworded too; a third recurrence means the eval band, not a fourth guess |
 | **LVX74** | an unfindable appointment_id is spoken to the caller as "not booked under your number" | **BOTH HALVES FIXED, NOT EXERCISED** — the not_found refusal, and the id now resolved in code from the caller's own snapshot |
 | **LVX73** | the vendor emits a transcription fragment that was never spoken | **OPEN · P1** — feeds four guards; observed once |
-| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED**; prevention is now COUNTED at the end_call gate and still refuses nothing — deliberately |
+| **LVX72** | a refused write is answered, never retried, and announced as done | **DETECTOR VERIFIED; REFUSAL SHIPPED 2026-09-04** on three calls of evidence (0, 0, 1), latched to once per call. NOT EXERCISED |
 | **LVX71** | a caller with TWO appointments cannot reschedule — the refusal is two words | **FIXED, UNVERIFIED** — all three refusal sites rewritten |
 | **LVX70** | a short answer ("okay", "no") does not end a turn, so the caller gets silence | **MECHANISM SETTLED**, fix shipped and **NOT EXERCISED** — call 2 never spoke over the assistant, so the gate had nothing to release |
 | **LVX68** | it claims to have CHECKED something when no tool ran | **SCOPED 2026-09-04** — design and cost written down, not built |
@@ -751,6 +751,50 @@ bounded and uses machinery that already exists, and it carries a real
 hair-trigger risk (a caller who changed their mind mid-change would be held on
 the line), so it deserves its own decision rather than being bolted on. **Not
 done. Recorded as the next step.**
+
+### SHIPPED 2026-09-04 — it refuses now, once, on three calls of evidence
+
+The ladder in full, because the numbers are the whole argument for accepting a
+hair-trigger risk at all:
+
+| call | `end_call_would_refuse_abandoned` | what was true |
+|---|---|---|
+| 1 | 0 | nothing abandoned |
+| 2 | 0 | nothing abandoned |
+| 3 | **1** | `book_appointment` refused for a spelling, the caller spelled it, the tool was never called again, and the model said *"I've booked that"*. `booked_rows: 0` |
+
+Two true negatives and one true positive, no false ones. That is exactly what
+"count first, act once the counter says how often it fires when nothing is
+wrong" was waiting for, and it arrived on the third call rather than after a
+round of guessing.
+
+**LATCHED TO ONCE PER CALL**, and the latch is owned by
+`lib/voice/live/tools.js`, not by `services/tools.js` — that module is stateless
+and shared with the cascade. A guard that can refuse twice can hold someone on
+the line indefinitely, and LVX21 is what a hair trigger costs here. One refusal
+is a question the caller can answer; two is a trap.
+
+**Checked BEFORE the hesitation branch.** Both keep the line open, but only this
+one tells the model a write is missing, and a caller told their booking exists
+when it does not is a worse outcome than a caller asked twice whether they are
+finished.
+
+The refusal names the tool and offers two acceptable exits — call it again with
+the details the caller already gave, or say plainly that it did not go through.
+Claiming it is done is the only thing forbidden.
+
+Counter `end_call_refused_abandoned`, which can never exceed 1 per call.
+`end_call_would_refuse_abandoned` keeps counting the SITUATION whether or not
+the refusal is spent, so the two diverging is how a second hang-up attempt on an
+unsaved write becomes visible at all.
+
+**The wire is asserted separately** in `tests/liveToolContext.test.js`: a latch
+that is never set makes the guard fire on every `end_call`, which is the hair
+trigger this whole ladder existed to avoid — and it would look identical from
+`services/tools.js`'s own tests, which is how the hesitation gate sat unreachable
+for the life of a deployment.
+
+**NOT EXERCISED on a call yet.** Call 4's script reproduces the case deliberately.
 
 ### DECIDED 2026-09-04 — COUNT the refusal, do not make it
 

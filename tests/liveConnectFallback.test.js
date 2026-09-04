@@ -202,6 +202,20 @@ describe("a Live failure is no longer silence", () => {
 
     expect(good.text).toContain("/twilio/live-stream/");
     expect(fallen.text).toContain("/twilio/media-stream/");
-    expect(fallen.text.replace("/twilio/media-stream/", "/twilio/live-stream/")).toBe(good.text);
+
+    // The token is stripped before comparing, and that is not laziness.
+    //
+    // It carries a unix-SECOND expiry (exp = floor(now/1000) + ttl), so two
+    // requests that straddle a second boundary mint different tokens and an
+    // exact string comparison fails on the clock rather than on any drift.
+    // This test passed eight runs and then failed on the ninth for precisely
+    // that reason -- ...719 against ...720. The token's own correctness is
+    // covered by tests/mediaStreamToken.test.js; what belongs here is that the
+    // two routes emit the same TwiML SHAPE around it.
+    const shape = (xml) => xml.replace(/(live-stream|media-stream)\/[^"]+/, "$1/<token>");
+
+    expect(shape(fallen.text).replace("/twilio/media-stream/", "/twilio/live-stream/")).toBe(
+      shape(good.text)
+    );
   });
 });

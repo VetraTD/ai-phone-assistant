@@ -111,6 +111,37 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.abandonedWrites).toEqual([]);
   });
 
+  it("starts a call with the abandoned-hangup refusal unspent", async () => {
+    const ctx = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, lastCallerText: "no" }));
+    expect(ctx.abandonedHangupRefusalSpent).toBe(false);
+  });
+
+  it("spends the abandoned-hangup latch when the tool reports it (the LVX72 wire)", async () => {
+    // A latch that is never set makes the guard fire on EVERY end_call, which
+    // is the hair trigger the whole count-first ladder existed to avoid -- and
+    // it would look identical from services/tools.js's own tests, which is how
+    // the hesitation gate sat unreachable for the life of a deployment.
+    const seen = [];
+    const execute = vi.fn(async (fc, ctx) => {
+      seen.push(ctx.abandonedHangupRefusalSpent);
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false } },
+        stateEffects: { endCallAbandonedRefusal: true },
+      };
+    });
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ step: "confirm", callerTurnCount: 4, lastCallerText: "no" }),
+    });
+
+    await runner.handleToolCall({ functionCalls: [{ id: "1", name: "end_call", args: { reason: "done" } }] });
+    await runner.handleToolCall({ functionCalls: [{ id: "2", name: "end_call", args: { reason: "done" } }] });
+
+    expect(seen).toEqual([false, true]);
+  });
+
   it("rebuilds the context per call so a later tool sees the same turn", async () => {
     const execute = vi.fn(async (fc) => ({
       functionResponse: { id: fc.id, name: fc.name, response: { success: true } },

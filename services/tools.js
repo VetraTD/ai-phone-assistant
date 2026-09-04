@@ -270,6 +270,70 @@ export async function executeToolCall(fc, ctx) {
             tools: ctx.abandonedWrites,
             severity: "warn",
           });
+
+          // -----------------------------------------------------------------
+          // AND NOW IT REFUSES. Shipped 2026-09-04 on three calls of evidence.
+          //
+          // The ladder this climbed, in full, because the numbers are the whole
+          // argument for taking a hair-trigger risk at all:
+          //
+          //   call 1   end_call_would_refuse_abandoned 0   nothing abandoned
+          //   call 2   0                                   nothing abandoned
+          //   call 3   1                                   book_appointment was
+          //                                                refused for a
+          //                                                spelling, the caller
+          //                                                spelled it, the tool
+          //                                                was never called
+          //                                                again, and the model
+          //                                                said "I've booked
+          //                                                that". booked_rows 0.
+          //
+          // Two true negatives and one true positive, no false ones. That is
+          // what "count first, act once the counter says how often it fires
+          // when nothing is wrong" was waiting for.
+          //
+          // LATCHED TO ONCE PER CALL, and the latch is owned by the caller of
+          // this function rather than by this stateless module. A guard that
+          // can refuse twice can hold someone on the line indefinitely, and
+          // LVX21 is what a hair trigger costs here: 0.5 s of audio delivered
+          // in 25 seconds. One refusal is a question the caller can answer; two
+          // is a trap.
+          //
+          // Checked BEFORE the hesitation branch on purpose. Both keep the line
+          // open, but only this one tells the model that a write is missing --
+          // and a caller being told their booking exists when it does not is a
+          // worse outcome than a caller being asked twice whether they are done.
+          if (!ctx?.abandonedHangupRefusalSpent) {
+            bumpCounter("end_call_refused_abandoned");
+            const tools = ctx.abandonedWrites.join(", ");
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: {
+                  success: false,
+                  message:
+                    "[not caller speech] NOT A FAILURE — but do not end the call yet. You called " +
+                    `${tools} earlier, it was refused, and you never called it again, so NOTHING ` +
+                    "was saved. Either call it now with the same details the caller already gave " +
+                    "you, or tell them plainly that it did not go through. Do NOT say it is done " +
+                    "and do NOT say goodbye until one of those two things has happened.",
+                },
+              },
+              stateEffects: {
+                // The latch. Read by lib/voice/live/tools.js, which owns the
+                // per-call state this module deliberately does not hold.
+                endCallAbandonedRefusal: true,
+                toolResult: {
+                  name: fc.name,
+                  success: false,
+                  message: "One moment — let me make sure that's saved before you go.",
+                  callerSafe: true,
+                },
+                toolCallEvent: { name: fc.name, args: fc.args },
+              },
+            };
+          }
         }
       }
 
