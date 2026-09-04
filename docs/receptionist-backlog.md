@@ -13,6 +13,63 @@ front of wins already paid for. Update the item's `Done when` line to `DONE
 <date>` rather than deleting it; the history is what stops the same thing being
 re-litigated in three months.
 
+## Index — every open item, 2026-09-03
+
+**Added because "is it all written down?" could not be answered by looking.**
+The entries below are scattered through 3,000 lines in the order they were
+found, which is the right order for evidence and the wrong one for reading.
+
+Status means:
+
+- **VERIFIED** — fixed, and confirmed on a real call with the row or counter read
+  back afterwards.
+- **FIXED, UNVERIFIED** — the code is in and no call has exercised it. Offline
+  green is not evidence.
+- **SHIPPED, NOT WORKING** — the fix is deployed and did not do its job on the
+  next call. Worse than open, because it looks done.
+- **OPEN** — recorded, not fixed.
+
+| | what it is | status |
+|---|---|---|
+| **LVX53** | a name from the record written to a booking the caller never said | **OPEN · P0** |
+| **LVX50** | unintelligible audio answered as though understood, then booked from | **OPEN · P0** |
+| **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
+| **LVX44** | the spelling is asked at booking time, not when the name is given | **SHIPPED, NOT WORKING** — the nudge missed on the next two calls |
+| **LVX48** | it claimed to update a record with no tool able to do it | **FIXED, UNVERIFIED** |
+| **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** |
+| **LVX40** | booked an appointment with no name | **VERIFIED** |
+| **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
+| **LVX33** | several cancellations in one turn, only the last one forgotten | **VERIFIED** |
+| **LVX31** | the claim guard counted attempts, so a refusal switched it off | **CLOSED** |
+| **LVX37** | `VOICE_INTENT_MARKER` made the model speak its own markers | **CLOSED** |
+| **LVX17** | 2.2 s before every greeting | **CLOSED** — it was Norton, on one laptop |
+| **LVX52** | it narrates its own tool failures to the caller | **OPEN · P1** |
+| **LVX49** | rescheduling bypasses the availability invariant | **OPEN · P1** |
+| **LVX47** | appointments revealed one at a time instead of all at once | **OPEN · P1** |
+| **LVX46** | the Live prompt is frozen at connect — a vendor constraint | **OPEN · P1** |
+| **LVX42** | the spelling gate's escape hatch writes the misheard name | **OPEN · P1** |
+| **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
+| **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
+| **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
+| **LVX25** | three or four questions in one breath | **OPEN · P1** — reproduced twice on one call |
+| **LVX28** | a name "already on file" is trusted though it was never spelled | **OPEN · P1** — now observed, see LVX53 |
+| **LVX51** | the greeting plays twice | **OPEN · P2** |
+| **LVX43** | the reworded spelling gate has never had an eval band (~$20) | **OPEN · P2** |
+| **LVX38** | four parallel queries on one Postgres client | **OPEN · P2** |
+| **LVX41** | an outbound leak fired once with marker mode off | **NOT REPRODUCED** in seven calls |
+| **LVX36** | it offered three slots and booked a fourth | **UNRESOLVABLE** — the instrument now exists, the call does not |
+| **LVX21** | can the leak guard cut in time? | **ANSWERED** — seven cut, four missed |
+| **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED** |
+
+**The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
+found on the last two calls of 2026-09-03 and are the reason this index exists:
+they sat in a conversation for an hour before anybody wrote them down.
+
+**And read LVX44's status carefully.** "Shipped and not working" is the most
+expensive state on this page, because it looks finished from the commit log. A
+regex over caller phrasing was always going to be the weak version of that fix;
+it missed on the first two calls after shipping.
+
 ## Correction, 2026-09-03: there is no paying clinic
 
 **This file said "the cascade serves a paying clinic" in four places and
@@ -2220,6 +2277,130 @@ visible rather than papered over.
 That is LVX37 confirmed dead on the deployed build, for a cent and no handset.
 **The two timings above are from this laptop and are Norton-inflated** — see
 LVX17; they are not measurements.
+
+## From the two local-rig calls, 2026-09-03 night — five recorded late
+
+**These five were found on the calls above, discussed at the time, and not
+written down for over an hour.** They are recorded here as a batch because the
+owner asked whether everything was documented and the honest answer was no. Any
+defect that lives only in a conversation is a defect that will be rediscovered.
+
+### LVX49 · Rescheduling bypasses the availability invariant `[gcp]` · P1
+
+Found by a design question — "should the name correction be a subset of a
+general update tool?" — rather than by a call. It predates all of tonight.
+
+`lib/voice/live/guards.js`'s availability invariant is keyed by **tool name**:
+
+```js
+const AVAILABILITY_SHAPES = {
+  check_appointment_availability: {
+    booking: { book_appointment: "scheduled_at" },
+```
+
+`book_appointment` is the entire list. So `reschedule_appointment_db` — which
+writes a time — is not covered: `slotArg` comes back undefined, `guards.before`
+returns `{allow: true}` immediately, and because `looksLikeBooking` only matches
+`/^(book|schedule)_/` it is not even counted as `availability_unarmed`.
+
+**A reschedule to an invented time is therefore unguarded and invisible.** LVX27's
+only structural protection covers booking alone.
+
+**Why this is the argument against a general `update_appointment` tool**, which is
+what the question was really about: a field-bag tool carrying `scheduled_at`
+would sit outside this map too, and would walk around the guard the same way. A
+list keyed by name has to be maintained deliberately, and that is a cost of the
+design worth naming rather than hiding.
+
+**Done when:** every tool that can write a time is in the map, or the invariant
+keys on the ARGUMENT rather than the tool name.
+
+### LVX50 · It answers unintelligible audio as though it understood `[gcp]` · **P0**
+
+Second local call. The caller's turn was transcribed as `에레는` — Korean
+characters, a total ASR failure on English speech. The assistant replied:
+
+> "Great, 8 AM on Tuesday, September 8th, is available."
+
+It invented an interpretation of noise, and the call proceeded to book from it.
+Two turns earlier the same caller said "Uh" twice and got sensible clarifying
+questions, so the model is capable of asking — it simply did not here.
+
+**The danger is specific: this is the input path to a WRITE.** A misheard time or
+name produces a wrong row; an invented interpretation of noise produces a row
+nobody asked for at all.
+
+**No guard exists.** The Live path has no notion of "the transcript is not
+usable" — there is no confidence score, and `stripFillers` only catches
+recognised filler words, not garbage. A script-range check (Latin characters
+expected for an English call) is the cheapest candidate and is untested.
+
+**Done when:** an unintelligible turn produces "sorry, I didn't catch that"
+rather than a confident answer.
+
+### LVX51 · The greeting plays twice `[gcp]` · P2
+
+Both local calls opened with two identical greeting turns, each with an empty
+`user_text`:
+
+> turn 1: "This call may be recorded… How can I help you today?"
+> turn 2: "This call may be recorded… How can I help you today?"
+
+The greeting is kicked by a client message asking the model to greet
+(`lib/voice/live/index.js`, the `greetingSpoken: false` seed). Something is
+producing two turns from one kick, or the kick is sent twice.
+
+Not caller-visible as a defect in every case — the second may arrive while the
+first is still playing — but it doubles the opening and wastes a turn's billing
+on a path where cost is quadratic in length.
+
+**Done when:** one kick produces one greeting.
+
+### LVX52 · It narrates its own tool failures to the caller `[gcp]` · P1
+
+First local call, turn 3, unprompted:
+
+> "First, would it be alright to send you a text message confirmation? Actually,
+> my mistake, we can't send texts, so we'll just carry on here."
+
+The tenant has `sms_followup_enabled = false`, so the consent path had nothing to
+do — and the model narrated that discovery out loud, mid-sentence, having
+already asked the caller a question it could not act on.
+
+**Same family as LVX24 and the internal-term leaks**: internal state reaching the
+caller. It is not a leak of vocabulary, which the outbound guard would catch — it
+is a leak of *system condition*, phrased in perfectly ordinary English, which no
+guard can pattern-match.
+
+The cheapest fix is upstream: do not declare `record_sms_consent` at all for a
+tenant that cannot send SMS. A tool the model does not have is a tool it cannot
+narrate failing.
+
+**Done when:** a tenant with SMS off never has the subject raised.
+
+### LVX53 · A name from the record is written to a new booking the caller never said `[gcp]` · **P0**
+
+Second local call. The caller's name was never intelligibly transcribed on that
+call at all — the relevant turn came through as "Hay en el Tíndala." The
+assistant replied "Thanks, Nithin Vodla" and booked under it.
+
+**It took the name from the existing appointment record**, and the spelling gate
+stayed silent because `callerHasNameOnFile` returns true.
+
+**This is LVX28's data-integrity note, observed.** That entry said:
+
+> "'already on file' trusts a row that may itself never have been spelled. A
+> caller who declines, or who runs out of gate refusals, has their mis-heard name
+> written once — and every later call treats that row as authority and never asks
+> again."
+
+It was written as a worry. The local database now holds **two** rows reading
+`Nithin Vodla`, the second created by a call on which the caller never said a
+name. The wrong value is self-perpetuating, and each new row makes it look
+better established.
+
+**Done when:** a name's provenance travels with it — a row written without a
+confirmed spelling cannot serve as "on file" for the next call.
 
 ## LVX48 · It said it had updated the record, and there was no tool to do it `[gcp]` · **P0 — FIXED, unverified on a call**
 
