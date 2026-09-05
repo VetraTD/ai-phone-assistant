@@ -2843,9 +2843,22 @@ See O1 and O3 — this is the same decision.
 
 ## §7 Platform, ops, security
 
-### O1 · Unauthenticated money-spending endpoints `[twice]` · P0
+### O1 · Unauthenticated money-spending endpoints `[twice]` · **CLOSED on `feat/s2s-frontend`, STILL OPEN ON `main`**
 
-Verified 2026-08-30, still open, and the code says so itself at `server.js:566`:
+**Corrected 2026-09-04.** Both routes now sit behind `requireBusinessAccess`
+(`server.js:1126`, `server.js:1156`) — a real bearer-token check that verifies
+the token, resolves the staff row by account id, and refuses a request reaching
+for another tenant with a logged `cross_tenant_denied`.
+
+**But `main` is 380 commits behind and does NOT have it.** Anything deployed
+from `main` still exposes `POST /api/businesses/:id/phone-numbers/buy`
+unauthenticated — an endpoint that provisions a Twilio number billed to the
+owner. That is now the strongest argument for merging, and it is a merge that
+REMOVES a P0 rather than risking one.
+
+The original entry follows, and it described `main` correctly:
+
+Verified 2026-08-30, and the code said so itself at `server.js:566`:
 
 - `GET  /api/businesses/:id/phone-numbers/available` (`server.js:642`)
 - `POST /api/businesses/:id/phone-numbers/buy` (`server.js:668`) — **provisions a
