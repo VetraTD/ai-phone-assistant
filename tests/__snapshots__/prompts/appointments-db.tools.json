@@ -47,7 +47,7 @@
       "properties": {
         "client_name": {
           "type": "string",
-          "description": "Full name of the client"
+          "description": "The caller's full name, exactly as THEY gave it on this call. Never invent one, never use a placeholder such as 'Jane Doe' or 'John Smith', and never take a name from an earlier record the caller has not confirmed. If they have not told you their name yet, ask them for it and wait for the answer before calling this."
         },
         "scheduled_at": {
           "type": "string",

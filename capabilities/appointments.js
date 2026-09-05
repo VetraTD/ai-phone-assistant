@@ -43,6 +43,7 @@ import {
   capabilityConfig,
   isClosedNow,
 } from "../lib/capabilities/requirements.js";
+import { nameSpokenIn } from "../lib/nameQuality.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
@@ -60,7 +61,26 @@ const BOOK_APPOINTMENT_DECLARATION = {
   parameters: {
     type: "object",
     properties: {
-      client_name: { type: "string", description: "Full name of the client" },
+      client_name: {
+        type: "string",
+        // "Full name of the client" was the whole description, and it never
+        // said whose name, or where it comes from. LVX77, 2026-09-05: the model
+        // called this with "Jane Doe" on a call where the caller had said no
+        // such thing and the appointments table was empty, so it could not have
+        // been read off a record either. The spelling gate refused that booking
+        // correctly; the code-level retry then replayed the refused arguments
+        // and made the invented name permanent.
+        //
+        // The guard that says "do not guess it" only fires when this field is
+        // EMPTY (see booking_refused_no_name below), which is precisely why an
+        // invented name sails past it. Said here instead, where the value is
+        // actually being chosen.
+        description:
+          "The caller's full name, exactly as THEY gave it on this call. Never invent one, never " +
+          "use a placeholder such as 'Jane Doe' or 'John Smith', and never take a name from an " +
+          "earlier record the caller has not confirmed. If they have not told you their name yet, " +
+          "ask them for it and wait for the answer before calling this.",
+      },
       scheduled_at: {
         type: "string",
         description:
@@ -2028,6 +2048,37 @@ async function bookAppointment(fc, ctx) {
   // re-booking. Name is omitted when the caller gave none rather than shown as
   // "null". Merged (not clobbering lastBooked) by the per-capability shallow
   // merge in lib/capabilities/effects.js.
+  // LVX77. Did the caller ever actually SAY the name now going into the row?
+  //
+  // COUNTED, NOT ENFORCED, and the distinction is the whole design. Refusing on
+  // this signal was built and reverted on 2026-09-05: judged against the
+  // caller's own transcript, nameSpokenIn cannot separate a FABRICATED name from
+  // an ASR-MANGLED one, and mangled is the common case here -- the vendor has
+  // rendered one caller as "Nitin Danda", and a spelled name arrives as loose
+  // letters matching no whole word. Over the observed cases it refuses four in
+  // five, two of them legitimate. Enforcing it would trade a rare wrong name for
+  // a commoner missing booking, which is the defect LVX72 exists to prevent and
+  // which is on the do-not-regress list.
+  //
+  // So this OVER-COUNTS by construction and is a screen rather than a verdict.
+  // A non-zero reading means "look at the row", not "the model fabricated". Its
+  // value is that LVX77 was invisible to every instrument on the call that
+  // produced it: postcall_verify returned `ok`.
+  if (booked) {
+    const writtenName = typeof booked.client_name === "string" ? booked.client_name.trim() : "";
+    const heard = typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall.trim() : "";
+    // Both halves required. No transcript means the instrument is absent, and
+    // an absent instrument must never be read as evidence -- the same
+    // construction the on-file spelling bypass uses to stay unchanged for the
+    // cascade, which threads no transcript at all.
+    if (writtenName && heard) {
+      bumpCounter("booking_name_provenance_checked");
+      if (!nameSpokenIn(writtenName, heard)) {
+        bumpCounter("booking_name_never_spoken");
+      }
+    }
+  }
+
   const callerFacts = booked
     ? {
         ...(booked.client_name ? { Name: booked.client_name } : {}),
