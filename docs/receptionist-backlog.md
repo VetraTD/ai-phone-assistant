@@ -44,7 +44,7 @@ Status means:
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **NUDGE NOT FIRING** — 0 for 2 on the target scenario; KEPT, see the correction below |
-| **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED** |
+| **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5 and now has a tool — `add_appointment_note`, **FIXED, UNVERIFIED** |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
@@ -78,7 +78,7 @@ Status means:
 | **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
 | **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
 | **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
-| **LVX25** | three or four questions in one breath | **OPEN · P1 — now COUNTED.** Seven prompt instructions already say not to; an eighth was refused |
+| **LVX25** | three or four questions in one breath | **OPEN · P1 — COUNTED.** Seven prompt instructions already say not to; an eighth was refused. The tic mandate removed 2026-09-05 was itself a stacked-question generator, so the next call's count is the reading |
 | **LVX28** | a name "already on file" is trusted though it was never spelled | **PARTLY CLOSED** — the bypass now needs the caller; the row itself still carries no provenance |
 | **LVX51** | the greeting plays twice | **NOT REPRODUCED** on call 1 with no health check — one kick, one greeting |
 | **LVX43** | the reworded spelling gate has never had an eval band (~$20) | **OPEN · P2** |
@@ -119,6 +119,111 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## 2026-09-05 — the tic was ORDERED, and four things shipped offline
+
+Phase 1 work, from `docs/roadmap.md`. Everything below is **offline-verified
+only**: every test fails before its fix and the suite is green at 186 files /
+3,188 tests, and **not one of these has been on a call.** That distinction is
+what "FIXED, UNVERIFIED" exists to carry, and this round produced four of them.
+
+### The finding: the tic is not drift, it is obedience
+
+The "anything else?" tic closed 3-4 of every 10 assistant turns across nine
+calls. It had been treated as model drift for weeks, under this file's own rule
+that seven instructions already say "one question at a time" and an eighth would
+weaken the other seven.
+
+That rule is right about LVX25 and exactly wrong here. `services/gemini.js`
+carried, in the static tool contract of **every call**:
+
+> you MUST first ask the caller something like "Is there anything else I can help
+> you with?"
+
+A mandate, with the sentence written out for it. **The model was obeying.** There
+was never an eighth instruction to add — only a mandate to delete, which is the
+shape LVX34 and LVX71 both used successfully.
+
+**Counted against the real UK tenant rather than assumed.** Exactly one of our
+instructions produces this in a live prompt. The other two "anything else"
+matches are Digile Media's own text: one an ordinary idiom ("find out why they
+are calling before you ask anything else"), one a correct once-at-the-end
+instruction. Neither is ours to edit — and it means the demo will still hear the
+question once at the end, correctly, which is not the defect.
+
+`services/gemini.js:1752/1760` never appear at all: step-tail guidance, and the
+Live prompt is frozen at connect (LVX46). They are cascade-only.
+
+**`services/tools.js:413` was NOT changed**, against the plan. Its caller-safe
+line is consumed only by the cascade's zero-text fallback
+(`services/gemini.js:2678`) and never reaches a Live call — and in the one case
+it does fire, a refused `end_call` where the model produced no text, "Is there
+anything else I can help you with?" is the correct thing to say, because the call
+is staying open and the caller needs to know why. Changing it would have made the
+mature path worse to fix a defect it does not have.
+
+### The counter was undercounting two of the commonest forms
+
+`live_closing_tic` missed *"Anything else you'd like to know?"* — the headless
+form, uncounted because the leading branch required "is|was there" — and *"What
+else can I help you with?"*, which contains no "anything" at all, so no widening
+around that phrase could ever have reached it.
+
+Widening a phrasing list is normally this file's treadmill. It is safe **here**
+because nothing acts on this counter: a miss costs a number that reads quieter
+than the call was, a false hit one that reads louder, and neither reaches a
+caller. Deliberately not widened to a bare "anything else" — the demo tenant's
+own prompt contains that phrase as an idiom, and a test pins that it stays
+uncounted.
+
+### add_appointment_note — LVX48's shape, in the place it recurred
+
+Call 5's caller asked for a note and was told "I've added that note for you"; the
+row still read `"cleaning"`. No tool had run **because none could**.
+
+It **appends, never replaces**. The row's note was the REASON for the
+appointment; a tool that overwrote it to record a detail about that appointment
+would have destroyed the booking's own subject, silently. The refusal path is the
+other half: with no appointment to attach to it says so and names
+`record_customer_request`, because a bare refusal is what let LVX34 become
+"someone will call you back".
+
+Counters `appointment_note_added` / `appointment_note_refused_no_row`.
+
+### The voice is a tenant setting, and LVX13 had to close first
+
+`LIVE_VOICE` was one module constant for every tenant on the platform. Migration
+041 adds `businesses.live_voice`; precedence is env → column → per-language
+default, keyed on the RESOLVED language so the voice and the accent cannot
+disagree. `live_session_open` now logs `voice` and `voice_source` beside
+`language_source` — and `language_source` moved in the same commit, because it
+was being rebuilt from a separate `process.env` read and would have started
+reporting a source the session did not use.
+
+### The voice comparison answered a different question than the complaint
+
+Five candidates rendered at `en-GB` (`scripts/voice-compare.js`), all five
+accepted, all five audibly distinct by hash. The owner kept **Kore**.
+
+**But the original complaint was not about the voice name.** It was that `en-GB`
+sounds muffled and `en-US` clear — the SAME voice at two `languageCode` values.
+The five-file comparison held the language fixed and varied the voice, so it
+tests "which voice is the best Brit", not the thing that was noticed. A second
+pair (Kore at `en-GB` vs `en-US`) was rendered for the actual axis.
+
+Incidentally settled: `languageCode` **is** honoured. The two renderings differ.
+`lib/voice/live/index.js` had carried "honoured is unproven" since the spike.
+
+### What is NOT done
+
+- **No call has been made.** Every item here is FIXED, UNVERIFIED.
+- The UK tenant exists only in the LOCAL throwaway Postgres. Digile Media's real
+  config imported, hours corrected to their own stated 9-5 (the row said
+  00:00-23:59 while their prose said "Monday to Friday, 9am to 5pm" — the two
+  contradicted each other inside one prompt, LVX55's shape), 15 knowledge rows
+  seeded from their own `general_info` and their website.
+- `+441372656055` is **still pointed at GCP**. Captured in
+  `live-frontend-RESTORE.md` §3, not repointed.
 
 ## The accent, on the DEPLOYMENT — the same trap, a second time
 
@@ -3486,20 +3591,36 @@ unlock `end_call` in that turn.
 **Done when:** a webhook tool can be re-called in one call, or its declaration
 says it may not be.
 
-**LVX13 · Two Live settings bypass their own env seam** `[gcp]` · P3
+**LVX13 · Two Live settings bypass their own env seam** `[gcp]` · **CLOSED 2026-09-05**
 
-`lib/voice/live/index.js` reads `LIVE_VOICE` and `LIVE_LANGUAGE_CODE` from
+`lib/voice/live/index.js` read `LIVE_VOICE` and `LIVE_LANGUAGE_CODE` from
 `process.env` at MODULE LOAD, while everything else on that path
-(`LIVE_MODEL`, `LIVE_SURFACE`, `LIVE_BUSINESS_PHONE`, the turn-end arm) goes
+(`LIVE_MODEL`, `LIVE_SURFACE`, `LIVE_BUSINESS_PHONE`, the turn-end arm) went
 through the injected `deps.env`.
 
-The consequence is small but pointed: a test passing `{ env: { LIVE_VOICE:
-"Puck" } }` silently gets Kore, so the two knobs the call summary REPORTS
-(`voice`, `language_pinned`) are the two that cannot be varied per session --
-nothing can assert the voice actually configured. Move both reads inside the
-handler.
+The consequence was small but pointed: a test passing `{ env: { LIVE_VOICE:
+"Puck" } }` silently got Kore, so the two knobs the call summary REPORTS
+(`voice`, `language_pinned`) were the two that could not be varied per session --
+nothing could assert the voice actually configured.
 
-**Done when:** every Live setting is read from the same place.
+**Closed because it had to be**, not because it came up the queue. Making the
+voice tenant-aware is untestable while the voice cannot be varied per session:
+the first assertion anyone writes passes for the wrong reason. Both reads now go
+through the injected env, `tests/liveVoiceSelection.test.js` asserts the voice
+actually handed to `connect()`, and `tests/liveLanguage.test.js` lost the
+`process.env` save/restore dance it needed only because of this.
+
+**A CORRECTION TO THIS ENTRY.** Its wording -- "silently gets Kore" -- was read
+twice on 2026-09-05 as a statement about the VENDOR: that the Live API ignores an
+unrecognised voice name and substitutes the default. It says no such thing; the
+substitution was ours, at module load. Nothing had ever established what the API
+does with an unknown name.
+
+`scripts/voice-compare.js` has now established part of it: `Kore`, `Puck`,
+`Charon`, `Aoede` and `Leda` are all accepted at `en-GB` and all produce
+**different audio**, verified by hashing. What the API does with a name that is
+not on its list is still unknown, and the script reports byte-identical audio as
+a fault precisely because of that.
 
 **LVX14 · The Live route's voicemail callback is single-token, so an alt-account call loses its recording** `[gcp]` · P3
 
