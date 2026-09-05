@@ -196,6 +196,42 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     expect(c().live_repeat_cut).toBeLessThanOrEqual(3);
   });
 
+  it("cuts a turn that repeats ITSELF, which is what the owner heard", async () => {
+    // 2026-09-05, one logged turn, verbatim. Confirmation, closing question, an
+    // answer to its OWN question, a goodbye -- then all of it again with a
+    // different sign-off. Reported as going "on a tangent and saying four things
+    // it wasn't supposed to say".
+    //
+    // The across-turns check could not see this: it compares against the
+    // PREVIOUS completed turn, and this never ended.
+    const s = await boot();
+    await s.say(
+      "Great, so that's Monday, September 7th at 9 AM for your strategy call. " +
+        "Is there anything else I can help you with today? No? Then thanks for calling " +
+        "Digile Media and have a great day. " +
+        "Great, so that's Monday, September 7th at 9 AM. Is there anything else I can " +
+        "help you with today? Thanks for calling Digile Media, have a great weekend."
+    );
+
+    expect(c().live_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
+  it("leaves a long turn that does not repeat itself alone", async () => {
+    // The within-turn check compares a turn's tail against its own head, so a
+    // long turn is where a false positive would show up first.
+    const s = await boot();
+    await s.say(
+      "Of course. We run Meta ads across Facebook and Instagram, and we also handle " +
+        "Google search campaigns with SEO support alongside them. The team puts together " +
+        "the strategy, writes the copy and reports on performance every month. Would a " +
+        "free strategy call be useful for you?"
+    );
+
+    expect(c().live_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
   it("can be switched off entirely", async () => {
     // Any guard that cuts a caller's audio needs an off switch that does not
     // require a deploy, for the same reason LIVE_TURN_END and LIVE_CLAIM_GUARD
