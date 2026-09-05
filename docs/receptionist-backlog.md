@@ -121,6 +121,50 @@ is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
 
+## The voice, decided by phone — and why the WAV rig could not decide it
+
+**Kore stands.** Aoede was tried on a real call on 2026-09-05 and rejected by ear
+after four turns. The tenant row is back to `Kore`.
+
+### The rig answered a different question than the one that mattered
+
+`scripts/voice-compare.js` renders candidates at **24 kHz**. A phone call is
+**mu-law 8 kHz**, which discards everything above roughly 3.4 kHz. Voices differ
+in how much of their character lives up there, so a voice can survive the file
+and not the line — which is exactly what happened: the owner judged Kore
+acceptable in the WAV and then reported it "not the best quality over the phone
+but it was on the wav file".
+
+The gap was stated when the files were sent ("a phone call is mu-law 8 kHz, so
+the winner will sound thinner on the actual line") and stated again in the
+script's own header. It was still the rig that got built first, because it is
+cheap and because five voices minutes apart is a far better comparison than five
+calls minutes apart. Both of those remain true. What is now also true:
+
+**Only a phone call can settle telephone audio quality.** The file rig narrows a
+long list; it cannot pick the winner. One voice per call, roughly $0.15 each,
+and the comparison is against a remembered call rather than a side-by-side —
+which is weaker, and is the only instrument that exists.
+
+### What the Aoede call did establish
+
+`live_session_open` read `voice: Aoede, voice_source: tenant`. That is migration
+041 verified a **second** time, with a different value, changed by a single
+`UPDATE` with no deploy and no restart of anything but the rig. Switching a
+tenant's voice is now a database row, which is what the item was for.
+
+One observation, recorded rather than diagnosed: turn 1 was the greeting and turn
+2 was *"Hello. How can I help you today?"* — a second, shorter greeting. It is not
+LVX51 (that is the greeting audio playing twice, and there was one
+`live_stream_start`), and the caller may simply have said hello. Noted in case it
+recurs.
+
+### Still unanswered
+
+Whether ANOTHER voice beats Kore over the phone. Puck, Charon and Leda have been
+rendered to file and never dialled. Each is one row and about ninety seconds to
+re-arm the rig, so the cost is a call each, not an afternoon.
+
 ## The SECOND UK-tenant call, 2026-09-05 — this one passes
 
 11 assistant turns, one appointment row, one clean exit. Same rig as the call

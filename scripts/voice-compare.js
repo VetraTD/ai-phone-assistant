@@ -16,9 +16,18 @@
 // This renders the SAME sentence, in the SAME language, to a file per voice.
 // They can be played back to back, in any order, as many times as it takes.
 //
-// What it cannot answer: how any of them sounds after mu-law 8 kHz over the
-// PSTN, which is what a caller actually hears. That is a real gap and the
-// verification call closes it for the winner.
+// WHAT IT CANNOT ANSWER, and this stopped being hypothetical on 2026-09-05.
+//
+// These render at 24 kHz. A phone call is mu-law 8 kHz, which discards
+// everything above roughly 3.4 kHz, and voices differ in how much of their
+// character lives up there. The owner picked Kore from these files and then
+// reported it "not the best quality over the phone but it was on the wav file".
+// Aoede was tried on a real call on the strength of the same files and rejected
+// after four turns.
+//
+// So: THIS RIG NARROWS A LONG LIST. It does not pick the winner. Only a phone
+// call settles telephone audio, one voice per call, and the comparison there is
+// against a remembered call rather than a side-by-side.
 //
 // ---------------------------------------------------------------------------
 // THE TRAP THIS IS BUILT AROUND
