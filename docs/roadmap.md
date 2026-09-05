@@ -89,6 +89,73 @@ business ringing the number can PERCEIVE them. If not, they belong to phase 3.
 
 ---
 
+## The ~1.5 s reply pause — asked 2026-09-04, and the answer is "mostly not ours"
+
+Recorded because it is an obvious thing to want to fix, and the obvious fix is
+the one that must not be made.
+
+**The number is honest.** `reply_after_last_voice_ms` is measured as
+`now() - lastVoicedMs` (`lib/voice/live/index.js:1758`) — from the moment the
+caller stops making sound to the first audio coming back. It is the real
+perceived pause, not an artifact of where a turn boundary is stamped.
+
+The 1,200 ms bookkeeping hangover is **not** part of it. `vendorAd.js` says so
+in as many words — `manual` is false, nothing sends `activityStart`/`activityEnd`,
+and the number "affects only where a turn boundary lands in the log". The
+measurements agree: `first_audio_ms` of 365 ms from a close landing 1,200 ms
+after last voice sums to the ~1,500 ms total.
+
+### What it is made of
+
+| | whose |
+|---|---|
+| Gemini's own VAD deciding the caller's turn ended | **theirs, and the largest share** |
+| model inference to the first audio token | theirs |
+| network round trip to AI Studio | partly ours — region |
+| our audio pacing before the first frame reaches Twilio | ours, small |
+
+**We own perhaps 200–400 ms of the 1,500.**
+
+### DO NOT tighten the vendor VAD
+
+Gemini exposes `silenceDurationMs` and `endOfSpeechSensitivity`, and this
+front-end currently sends **nothing** — `turnEnd/vendorAd.js:55-57` returns `{}`
+and it runs at defaults. Tightening them would make it start speaking sooner,
+and it is the first thing anyone will reach for.
+
+**The probe round of 2026-09-01 already measured the cost:**
+
+> Gemini 3.1 cuts into a trailing-off caller **5/5 at default**, and **3/5 even
+> at `END_SENSITIVITY_LOW` + 1200 ms**. No setting fixes it, and in S2S the VAD
+> is the vendor's.
+
+It is already too eager to end a caller's turn. Making it faster trades directly
+against interrupting people mid-sentence — and a receptionist that talks over a
+customer is a far worse demo than one that pauses for a second and a half.
+
+### What IS safely fixable
+
+- **Shrink the ~3k static prefix (C2).** On Live the whole context is re-billed
+  every turn and the prefix is ~85% of the bill, so this is a latency win AND a
+  cost win with no turn-taking risk. Realistic gain: a couple of hundred
+  milliseconds, not a second.
+- **Region — free in phase 2.** A UK caller reaching a UK server removes a hop.
+  The AI Studio leg stays wherever Google puts it.
+
+### Why it is NOT in phase 1
+
+1. **It is a measurement project, not a fix.** Detecting a 200 ms change needs
+   many calls against a baseline, and this project's own rule is never to
+   compare two arms at N=1.
+2. **The big lever makes a measured problem worse.**
+3. **It is improving without being worked on** — 2,193 ms → 1,781 → ~1,500
+   across successive calls. The original complaint was "2–3 second delay".
+
+Take the region win free in phase 2; fold the prompt shrink into C2, which is
+wanted anyway for the Gemini bill.
+
+---
+
 ## Phase 2 — infrastructure
 
 **Destination: `vetra-uk` (europe-west2), after demo readiness.** Not before —
@@ -193,6 +260,7 @@ Recorded so they are not re-litigated. **Re-derive on request; do not cite.**
 
 Say no now so they do not creep in: the dashboard, transcripts, billing,
 self-serve signup, the multi-vertical matrix, mid-call fallback, concurrency
-testing, the DPIA and transfer assessments. Every one is real. **None is
+testing, the DPIA and transfer assessments, **and the ~1.5 s reply pause** — see
+the section above for why that one is not simply a knob. Every one is real. **None is
 perceivable by a business ringing a number to hear how it sounds**, which is the
 only thing phase 1 is for.
