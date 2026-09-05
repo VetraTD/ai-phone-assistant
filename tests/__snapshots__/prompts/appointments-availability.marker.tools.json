@@ -221,5 +221,39 @@
         "identity_dob"
       ]
     }
+  },
+  {
+    "name": "add_appointment_note",
+    "description": "Add a note to an appointment that is already booked - something the caller wants the business to know before they come in. Use this whenever they ask you to note, add, record or pass on a detail about an existing appointment. It ADDS to any note already there; it does not replace it, and it does not change the date, the time or the name. Do not tell the caller a note has been added unless this has run and returned success.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string",
+          "description": "What to record, in the caller's own words, kept short. Do not include payment card details, passwords or security codes even if the caller offers them."
+        },
+        "appointment_id": {
+          "type": "string",
+          "description": "Which appointment to note. Omit it for the one booked or discussed earlier in this call."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under. Only needed when the caller is not calling from that number."
+        },
+        "identity_name": {
+          "type": "string",
+          "description": "full name, as given by the caller. Required — the action will be refused without it."
+        },
+        "identity_dob": {
+          "type": "string",
+          "description": "date of birth, as given by the caller. Required — the action will be refused without it."
+        }
+      },
+      "required": [
+        "note",
+        "identity_name",
+        "identity_dob"
+      ]
+    }
   }
 ]

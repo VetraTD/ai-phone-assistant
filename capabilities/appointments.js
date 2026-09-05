@@ -321,6 +321,38 @@ const DB_APPOINTMENT_DECLARATIONS = [
       required: ["client_name"],
     },
   },
+  {
+    name: "add_appointment_note",
+    description:
+      "Add a note to an appointment that is already booked - something the caller wants the " +
+      "business to know before they come in. Use this whenever they ask you to note, add, record " +
+      "or pass on a detail about an existing appointment. It ADDS to any note already there; it " +
+      "does not replace it, and it does not change the date, the time or the name. Do not tell " +
+      "the caller a note has been added unless this has run and returned success.",
+    parameters: {
+      type: "object",
+      properties: {
+        note: {
+          type: "string",
+          description:
+            "What to record, in the caller's own words, kept short. Do not include payment card " +
+            "details, passwords or security codes even if the caller offers them.",
+        },
+        appointment_id: {
+          type: "string",
+          description:
+            "Which appointment to note. Omit it for the one booked or discussed earlier in this call.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under. Only needed " +
+            "when the caller is not calling from that number.",
+        },
+      },
+      required: ["note"],
+    },
+  },
 ];
 
 /**
@@ -1111,6 +1143,12 @@ export default {
     "cancel_appointment_db",
     "reschedule_appointment_db",
     "correct_appointment_name",
+    // A note is a WRITE to somebody's record, and being a small one changes
+    // nothing about that. Listed here so executeToolCall runs the same
+    // requirement checks (identity, confirm-before-write, business-hours) every
+    // other change tool gets, and so a saved note unlocks end_call in the same
+    // turn rather than leaving the model unable to close the call.
+    "add_appointment_note",
     // EHR write tools — listed here so executeToolCall runs checkRequirements
     // (identity / confirmBeforeWrite / businessHoursOnly) on athena clinics too.
     "book_appointment_in_ehr",
@@ -1296,6 +1334,8 @@ export default {
         return rescheduleAppointment(fc, ctx);
       case "correct_appointment_name":
         return correctAppointmentName(fc, ctx);
+      case "add_appointment_note":
+        return addAppointmentNote(fc, ctx);
       default:
         // The EHR tools. They are declared by this pack but executed by the
         // integration layer, which owns the athenahealth client.
@@ -2412,6 +2452,209 @@ async function correctAppointmentName(fc, ctx) {
           identityVerifiedApptId: appointmentId,
           callerFacts: { ...(scratch(ctx).callerFacts || {}), Name: clientName },
         },
+      },
+    },
+  };
+}
+
+/**
+ * Add a note to an existing appointment. LVX48, in the place it recurred.
+ *
+ * A caller asked for a detail to be recorded against their booking and was told
+ * "I've added that note for you." No tool had run, because none existed that
+ * could: the pack declared book, check, cancel, reschedule and a name
+ * correction, and nothing that touched `notes`. The row kept the note it had.
+ *
+ * Neither guard caught it. The claim detector was looking for a claim with no
+ * write, and a write HAD happened -- just not the one described. That is the
+ * LVX59 class, and it is why this is a tool and not another prompt rule: no
+ * wording makes a model reliably refuse a reasonable request, and "I cannot do
+ * that" is only honest for as long as it stays true.
+ *
+ * APPENDS, NEVER REPLACES. The row on the call that found this read "cleaning"
+ * -- the reason for the appointment. Overwriting it to record a detail ABOUT
+ * that appointment would destroy the booking's own subject, silently, to
+ * satisfy a smaller request.
+ */
+async function addAppointmentNote(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const note = typeof fc.args?.note === "string" ? fc.args.note.trim() : "";
+  const appointmentId = resolveAppointmentId(
+    ctx,
+    fc.args?.appointment_id,
+    scratch(ctx).lastBooked?.id || null
+  );
+
+  if (!note) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] NOT A FAILURE - no note text was given, so there is nothing to " +
+            "record yet. Ask the caller what they would like noted, then call this again.",
+        },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "Sorry - what would you like me to note down?",
+          callerSafe: true,
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  if (!appointmentId) {
+    // TWO different situations, and collapsing them is LVX74's mistake.
+    //
+    // More than one appointment: whichAppointmentMessage already says exactly
+    // the right thing, so it is reused rather than reworded.
+    //
+    // NONE at all: reused text would be wrong here. Its zero case ends "do not
+    // take a message unless they ask you to", which is correct for a CHANGE --
+    // there is nothing to change and a message is a consolation prize. A note
+    // is different: the caller is trying to tell the business something, and
+    // record_customer_request does precisely that. Refusing without naming it
+    // leaves the model to invent a way out, which is how LVX34 turned a bare
+    // refusal into "someone will call you back".
+    const upcoming = upcomingForCaller(ctx);
+    if (upcoming.length > 0) {
+      return {
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: { success: false, message: whichAppointmentMessage(ctx, fc.name) },
+        },
+        stateEffects: {
+          toolResult: {
+            name: fc.name,
+            success: false,
+            message: WHICH_APPOINTMENT_CALLER_LINE,
+            callerSafe: true,
+          },
+          toolCallEvent: null,
+        },
+      };
+    }
+
+    bumpCounter("appointment_note_refused_no_row");
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] NOT A FAILURE - there is simply no appointment on record under " +
+            "this number to attach a note to, so nothing has been saved and nothing is broken. " +
+            "Tell the caller plainly that you cannot find a booking under their number, so there " +
+            "is nothing to add the note to. Then offer to take a message instead and call " +
+            "record_customer_request with what they said. Do NOT say the note has been added, " +
+            "and do NOT promise anyone will call them back.",
+        },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message:
+            "I can't find a booking under this number to add that to - shall I pass it on as a message instead?",
+          callerSafe: true,
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    // No name is passed as an identity factor, for the same reason
+    // correct_appointment_name passes none: the phone match is what carries
+    // this, and a name the caller offers is not proof of anything.
+    null,
+    fc.args?.phone_last4
+  );
+  if (identityOk !== "ok") {
+    if (identityOk === "not_found") {
+      bumpCounter("appointment_note_refused_no_row");
+    }
+    return identityMismatchResult(fc, identityOk);
+  }
+
+  // Read before write. The existing note is not knowable any other way, and
+  // this is the entire difference between adding a note and destroying one.
+  const existing = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
+  const previous = typeof existing?.notes === "string" ? existing.notes.trim() : "";
+  // Em dash, matching the separator onEffect already uses to join
+  // service_type and notes for the owner notification. One convention for
+  // "two facts about one appointment", not two.
+  const merged = previous ? previous + " — " + note : note;
+
+  const ok = await ctx.deps.updateAppointment(appointmentId, { notes: merged }, ctx.businessId);
+  if (!ok) {
+    // The defect one layer down. A write that did not happen must not be
+    // reported as one -- that is the whole item.
+    const message = "I wasn't able to add that note just now.";
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] The note was NOT saved. Tell the caller it did not go through " +
+            "and offer to pass it on as a message instead. Do not say it has been added.",
+        },
+      },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message, callerSafe: true },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
+  // The positive twin of appointment_note_refused_no_row. Without it a call
+  // where every note saved and a call where the tool was never reached are the
+  // same all-zeros reading -- which is exactly what made LVX45's broken wire
+  // look like a guard that had simply never needed to fire.
+  bumpCounter("appointment_note_added");
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      // The merged note is echoed back so the model can read it to the caller
+      // without re-inventing it, and so it cannot claim the old note was
+      // removed.
+      response: { success: true, message: 'Saved. The appointment note now reads "' + merged + '".' },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: "I've added that to your appointment.",
+        callerSafe: true,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityEffects: [
+        {
+          capability: "appointments",
+          type: "changed",
+          // appointmentNote rather than newClientName: applyToCallerSnapshot
+          // branches on what changed, and a note is not a rename, not a
+          // reschedule and emphatically not a cancellation.
+          data: { tool: fc.name, appointmentId, appointmentNote: merged },
+        },
+      ],
+      capabilityState: {
+        appointments: { identityVerifiedApptId: appointmentId },
       },
     },
   };
