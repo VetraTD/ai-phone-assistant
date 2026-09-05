@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 
@@ -70,7 +70,7 @@ function fakeDb(config) {
  * matters: readiness.md records that Digile Media's main_phone is a mobile
  * rather than the line callers dial, so main_phone would be the wrong source.
  */
-async function connectConfig(tenantConfig, dialled = "+18176011171") {
+async function connectConfig(tenantConfig, dialled = "+18176011171", env = {}) {
   const ws = new FakeSocket();
   const connect = vi.fn(async () => ({
     session: {
@@ -87,7 +87,7 @@ async function connectConfig(tenantConfig, dialled = "+18176011171") {
   await handleLiveSessionConnection(
     ws,
     {},
-    { now: () => 0, connect, database: fakeDb(tenantConfig), env: {}, execute: vi.fn() }
+    { now: () => 0, connect, database: fakeDb(tenantConfig), env, execute: vi.fn() }
   );
   ws.deliver({
     event: "start",
@@ -98,14 +98,6 @@ async function connectConfig(tenantConfig, dialled = "+18176011171") {
 }
 
 describe("the Live voice follows the tenant's locale", () => {
-  const saved = process.env.LIVE_LANGUAGE_CODE;
-  beforeEach(() => {
-    delete process.env.LIVE_LANGUAGE_CODE;
-  });
-  afterEach(() => {
-    if (saved === undefined) delete process.env.LIVE_LANGUAGE_CODE;
-    else process.env.LIVE_LANGUAGE_CODE = saved;
-  });
 
   it("pins en-US for an American tenant", async () => {
     // The demo tenant. Before this, it got en-GB.
@@ -155,8 +147,16 @@ describe("the Live voice follows the tenant's locale", () => {
 
   it("lets an explicit env override win over the tenant", async () => {
     // The rig seam. An operator who sets this is overriding on purpose.
-    process.env.LIVE_LANGUAGE_CODE = "es-US";
-    const config = await connectConfig({ ...BASE, locale: "en-US" });
+    //
+    // THIS TEST USED TO WRITE process.env DIRECTLY, and it had to: the override
+    // was read at MODULE LOAD, so the injected env could not reach it (LVX13).
+    // The save/delete/restore dance around this describe block existed only to
+    // stop that leaking into every other test file sharing the process. Both
+    // are gone now that the setting goes through the same seam as every other
+    // one on this path.
+    const config = await connectConfig({ ...BASE, locale: "en-US" }, "+18176011171", {
+      LIVE_LANGUAGE_CODE: "es-US",
+    });
     expect(config.speechConfig.languageCode).toBe("es-US");
   });
 
