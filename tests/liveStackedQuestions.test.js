@@ -202,6 +202,41 @@ describe('the "anything else" tic', () => {
     expect(c().live_closing_tic).toBe(0);
   });
 
+  it("counts the headless form — no \"is there\" in front of it", async () => {
+    // MISSED BEFORE THIS. The regex led with `(?:is|was)\s+there\s+anything\s+else`,
+    // so "Is there anything else you'd like to know?" was caught by that branch
+    // and the same sentence with the opener dropped was not. A tic the model
+    // shortens is still the tic; a counter that stops seeing it just reports a
+    // quieter call.
+    const s = await boot();
+    await s.say("The All-In-One package runs Meta and Google together. Anything else you'd like to know?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(1);
+  });
+
+  it("counts the \"what else\" rephrasing, which carries no \"anything\" at all", async () => {
+    // MISSED BEFORE THIS, and it is the one the phrasing list could never have
+    // reached by widening around "anything else" -- the words are not in it.
+    const s = await boot();
+    await s.say("I've got that booked for Monday. What else can I help you with today?");
+
+    expect(c().live_closing_tic).toBe(1);
+  });
+
+  it("leaves \"before you ask anything else\" alone — an idiom, not the tic", async () => {
+    // THE FALSE POSITIVE THIS MUST NOT ACQUIRE, and it is not hypothetical:
+    // Digile Media's own custom_instructions open with "Find out why they are
+    // calling before you ask anything else." Widening to a bare "anything else"
+    // would count a phrase in the tenant's prompt as a verbal tic in the
+    // assistant's speech, and the number would stop meaning anything.
+    const s = await boot();
+    await s.say("Before I ask anything else — what's prompted the call today?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(0);
+  });
+
   it("counts nothing at all on a turn with no assistant text", async () => {
     const s = await boot();
     await s.say("");

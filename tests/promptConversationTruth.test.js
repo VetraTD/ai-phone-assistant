@@ -36,6 +36,67 @@ const brightwork = (over = {}) => ({
   ...over,
 });
 
+describe('the "anything else" tic — we stop ORDERING it', () => {
+  // THE FINDING THAT REORDERED THIS WORK, 2026-09-05.
+  //
+  // The tic closed 3-4 of every 10 turns across nine calls and read as the
+  // loudest remaining "this is not a person" signal. It was treated as model
+  // drift for weeks, on the reasoning that seven prompt instructions already say
+  // "one question at a time" and an eighth would weaken the other seven.
+  //
+  // That reasoning was right about STACKED QUESTIONS and wrong about this. The
+  // tic is not a rule the model ignores; it is a rule the model FOLLOWS. The
+  // tool contract carried, on every call: 'you MUST first ask the caller
+  // something like "Is there anything else I can help you with?"'. A mandate,
+  // with the sentence written out for it.
+  //
+  // So there was never an eighth instruction to add. There was a mandate to
+  // delete -- which is the shape LVX34 and LVX71 both used successfully, and the
+  // opposite of the phrasing treadmill.
+  //
+  // Verified against the real UK demo tenant before the change: exactly one of
+  // our instructions produced this, and the other two matches in that prompt
+  // were the tenant's own text -- one an ordinary idiom ("before you ask
+  // anything else"), one a correct once-at-the-end instruction. Neither is ours
+  // to edit.
+
+  it("no longer hands the model the sentence to say", () => {
+    const prefix = buildStaticSystemPrefix(brightwork(), {});
+    // The script itself. This is what the model was reading out, near enough
+    // verbatim, three or four times a call.
+    expect(prefix).not.toContain("Is there anything else I can help you with?");
+    expect(prefix).not.toMatch(/MUST first ask/i);
+  });
+
+  it("still forbids ending the call before the caller is finished", () => {
+    // LOAD-BEARING HALF ONE, and the reason this is a rewrite rather than a
+    // deletion. Removing the mandate outright would leave nothing standing
+    // between the model and LVX35 -- closing the call the moment anything
+    // succeeds. The requirement survives; only the script for satisfying it is
+    // gone.
+    const prefix = buildStaticSystemPrefix(brightwork(), {});
+    expect(prefix).toMatch(/do not call end_call until/i);
+  });
+
+  it("still says the goodbye must share the turn with end_call", () => {
+    // LOAD-BEARING HALF TWO, and it is a mechanical fact rather than a
+    // preference: the call ends the instant the tool runs, so a goodbye planned
+    // for afterwards is never heard by anyone.
+    const prefix = buildStaticSystemPrefix(brightwork(), {});
+    expect(prefix).toContain("IN THE SAME RESPONSE as end_call");
+    expect(prefix).toMatch(/never heard/i);
+  });
+
+  it("names the case that actually produced the tic", () => {
+    // Turn 4 of call 6: the caller said "Okay" and the whole turn was "Is there
+    // anything else I can help you with?" -- asked after a plain factual answer,
+    // with nothing to close. The replacement says when NOT to ask, because
+    // "ask once at the end" without that is what the model was already doing.
+    const prefix = buildStaticSystemPrefix(brightwork(), {});
+    expect(prefix).toMatch(/ordinary answer|every turn|filling a turn/i);
+  });
+});
+
 describe("LVX55 — the whole week is in the prompt, not just today", () => {
   it("states Friday's earlier close and Saturday's hours in the STATIC prefix", () => {
     const prefix = buildStaticSystemPrefix(brightwork(), {});
