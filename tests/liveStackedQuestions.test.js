@@ -150,16 +150,45 @@ describe("LVX25 — stacked questions, counted rather than instructed", () => {
     expect(c().live_stacked_questions).toBe(0);
   });
 
-  it("undercounts the observed shape, and that is recorded rather than widened", async () => {
+  it("NOW counts one question mark with two asks — the decision reversed 2026-09-05", async () => {
     const s = await boot();
-    // The real one, verbatim from the call: three asks, ONE question mark.
+    // The real one, verbatim: three asks, ONE question mark.
     await s.say("Can I start with your name, company, and what industry you're in?");
 
     expect(c().live_reply_turns_checked).toBe(1);
-    // Zero. A conjunction parser would catch it and would be the phrasing
-    // treadmill this repository already warns about; two question marks is the
-    // case a prospect most obviously hears as being interrogated, and it is
-    // exact. The gap is written down so nobody reads a low number as a fix.
+    // THIS ASSERTION USED TO BE 0, deliberately. The reasoning was that a
+    // conjunction parser is the phrasing treadmill this repository warns about,
+    // and that two question marks is the exact, free case.
+    //
+    // Reversed by evidence, not by preference. On 2026-09-05 the model said
+    // "May I get your full name, and what is the best number to reach you on?"
+    // -- one question mark -- the caller answered the first half, and the model
+    // re-asked the second half verbatim THREE TIMES. Five of that call's six
+    // repeats trace to stacked questions, and the counter read 2 for the whole
+    // call while the defect drove all of them.
+    //
+    // A counter that cannot see the dominant cause of the loudest complaint is
+    // not being disciplined, it is being blind. It still acts on nothing, so
+    // the cost of the widening is a number that reads louder.
+    expect(c().live_stacked_questions).toBe(1);
+  });
+
+  it("counts the exact turn that caused three repeats", async () => {
+    // Verbatim from 18:26:19 on 2026-09-05. The caller answered "full name";
+    // the model then asked for the number at 18:26:27, again at 18:26:35 and
+    // again at 18:26:48, and the caller had not spoken once in between.
+    const s = await boot();
+    await s.say("Of course, I can help with that. May I get your full name, and what is the best number to reach you on?");
+
+    expect(c().live_stacked_questions).toBe(1);
+  });
+
+  it("leaves a single question with a list of options alone", async () => {
+    // The shape that must NOT trip it: one question, several answers offered.
+    const s = await boot();
+    await s.say("Would you prefer 9:00 AM, 1:00 PM, or 4:30 PM?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
     expect(c().live_stacked_questions).toBe(0);
   });
 
