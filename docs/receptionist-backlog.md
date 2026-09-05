@@ -86,6 +86,7 @@ Status means:
 | **LVX41** | an outbound leak fired once with marker mode off | **NOT REPRODUCED** in seven calls |
 | **LVX36** | it offered three slots and booked a fourth | **UNRESOLVABLE** — the instrument now exists, the call does not |
 | **LVX21** | can the leak guard cut in time? | **ANSWERED** — seven cut, four missed |
+| **LVX78** | it repeats itself word for word — a whole booking read back twice, a goodbye delivered twice | **OPEN · P1 — NOW COUNTED.** Found by hand after the owner half-remembered it; every counter read clean and `postcall_verify` said `ok` |
 | **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
 | **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway. Did not recur on the next call, which never entered the path; the screen counter over-counts by design and fired on a CORRECT booking |
 
@@ -120,6 +121,106 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+### LVX78 · It repeats itself, word for word `[gcp]` · **P1 — heard by the owner, found by hand**
+
+**How this was found is the point.** The owner said a call "repeated something in
+an unnatural way" and could not remember what. Nothing in this system could
+answer that: no counter, no log line, and `postcall_verify` had returned **`ok`**
+for the call in question. Four calls were read back by hand.
+
+Three instances, none of which anything had seen.
+
+#### 1. The whole booking, read back twice — 16 identical words
+
+Call 2 of 2026-09-05, turns 9 and 10, consecutive:
+
+> **9.** "Got it, Nitin. Thanks for clarifying that. So that's for a half hour
+> strategy call with the team **on Monday, September 7th, at 4 PM, and we'll call
+> you on 469 933 8887**. Does that sound right?"
+>
+> **10.** "Thanks for correcting that, Nithin Dodla — so we have you booked in for
+> a half hour strategy call **on Monday, September 7th, at 4 PM, and we'll call
+> you on 469 933 8887**. Is there anything else I can help with?"
+
+The caller heard the day, the date, the time and their own phone number, twice,
+back to back.
+
+**The trigger was a NAME correction.** Turn 9 read the booking back and asked
+"does that sound right?"; the caller corrected the name; the model re-read the
+**entire booking** rather than the name. That is LVX76's forty-word re-read
+arriving through a different door — LVX76's is caused by a refused `end_call`,
+and here `end_call` ran once and succeeded. **The recorded trigger does not cover
+this case.**
+
+Worth noting what it means for LVX76's own status: its re-read half was called
+fixed on the strength of removing the farewell text. The behaviour is still
+present; only one of its doors was closed.
+
+#### 2. The goodbye, delivered twice — 10 identical words
+
+Call 1 of 2026-09-05, turns 12 and 14, with **our own silence nudge between
+them**:
+
+> **12.** "…Otherwise, **thanks for calling Digile Media and have a great day**."
+> **13.** "I'm still here whenever you're ready."  ← `live_silence_line`
+> **14.** "In that case, **thanks for calling Digile Media and have a great day**."
+
+This is why the counter compares against a WINDOW of recent turns rather than
+only the previous one. A previous-turn-only check reports this call clean.
+
+#### 3. The greeting, delivered twice — 6 identical words
+
+Call 3, turns 1 and 2: the full greeting, then *"Hello. How can I help you
+today?"*. Recorded at the time as an observation and not diagnosed; it is the
+same family. **Not LVX51** — that is the greeting AUDIO playing twice, and there
+was one `live_stream_start`.
+
+### The counter, and why its threshold is not a guess
+
+`longestSharedRun` (lib/transcriptUtils.js) returns the longest run of identical
+words shared by two turns. Exact, free, needs no vocabulary — the same three
+properties that made counting `?` the right shape for stacked questions. It is
+also immune to LVX73 in a way the tic regex is not: a spurious transcription
+fragment cannot manufacture a sixteen-word match with a previous turn.
+
+**Threshold measured over 26 consecutive turn-pairs from three real calls:**
+
+| shared words | pairs |
+|---|---|
+| 0–4 | **24** |
+| 6 | 1 — the doubled greeting |
+| 16 | 1 — the booking re-read |
+
+Nothing landed between 4 and 6, so `REPEAT_RUN_WORDS = 6` sits in a real gap.
+The expected false positive is stated rather than left to be discovered: offering
+a time and then confirming the same time can legitimately share six or seven
+words.
+
+**COUNT ONLY, and here that is arithmetic rather than caution.** By the time
+`auditTurn` runs the model has already spoken; there is nothing left to suppress.
+What the number buys is knowing whether this happens twice a call or twice a
+month before anyone designs a fix.
+
+**The run length is logged and the run itself never is.** The sixteen-word
+instance was the caller's appointment and phone number, which is precisely
+LVX24.
+
+**Done when:** a number exists for how often this fires on a clean call. Then, and
+not before, decide whether a re-read after a correction is worth acting on.
+
+### What this says about the instruments, which is the more useful finding
+
+A caller-perceivable defect ran through at least three calls while every counter
+read clean and `postcall_verify` said `ok`. It was caught because a human
+half-remembered something and asked. That is not a repeatable process.
+
+The pattern this file already records — LVX45's broken wire reading as a guard
+that never needed to fire, LVX70's fix sitting unexercised — is about counters
+that cannot see their own absence. **This is a step worse: a defect nothing was
+looking for at all.** The counters that exist were each added after a specific
+call surfaced a specific complaint, which means the instrument set is shaped
+entirely by what has already gone wrong loudly enough to be noticed.
 
 ## The "American accent" was the ENVIRONMENT, 2026-09-05 — third instance of the same trap
 
