@@ -1,5 +1,9 @@
 # What it takes to sell this
 
+> **For what we are doing next and in what order, see `docs/roadmap.md`.** This
+> page is the honest list of what selling requires; the roadmap is the sequence.
+
+
 **Written 2026-09-03**, at the close of a sitting that put ten real calls
 through the speech-to-speech front-end. It exists because "is it ready?" kept
 getting answered about the wrong product.

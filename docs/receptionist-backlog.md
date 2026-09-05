@@ -1,5 +1,9 @@
 # Receptionist backlog — items to address
 
+> **Sequence lives in `docs/roadmap.md`.** This page is every item with its
+> evidence; the roadmap says which of them we are doing next.
+
+
 Written 2026-08-30 against `dev` @ `92d933f`. Owner-facing working ledger.
 
 **What this is:** every outstanding item on the receptionist itself, with the
