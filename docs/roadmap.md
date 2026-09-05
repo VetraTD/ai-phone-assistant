@@ -40,6 +40,44 @@ weeks after. That decision cascades into most of this list.
 | **Stacked questions** | Same file, same session as the tic. `live_stacked_questions` already counts 1–2 a call. |
 | **A notes tool, or a refusal that admits it cannot** | It told a caller *"I've added that note for you"* with no tool able to do it, and the row kept its old notes. LVX48's shape in a new place, and the same class as the booking bug that took six calls to kill. |
 
+### Definition of done — phase 1 ends with a CALL, not with an empty list
+
+**A UK business rings a UK number and:**
+
+- hears a British voice **the owner has approved** — not merely correct, one
+  they would put in front of a prospect
+- books an appointment that lands in the database with the right name and time
+- is not asked "is there anything else?" three times
+- is not told anything untrue — no phantom booking, no note that was not saved
+- hears no goodbye until the call is actually over
+
+And from the counters: `postcall_verify: ok`, a real row, `nudges_fired: 0`, a
+clean transcript.
+
+### Why that call is not optional
+
+**Everything verified on 2026-09-04 was verified on the US configuration** —
+Brightwork, `+1 817`, `America/Chicago`, `en-US`, Twilio account B. A UK setup
+is a DIFFERENT ENVIRONMENT: new number, new tenant, new locale, new voice, and
+account A. **None of those verifications automatically carry.**
+
+That is the same shape as the two traps this project has already paid for. The
+locale fix worked on two laptop calls and did nothing on the deployment because
+the tenant row differed. `VOICE_INTENT_MARKER` was set in production and unset
+locally, and fourteen clean laptop calls hid a silent deployment. Assuming a UK
+config behaves like the US one would be the third instance.
+
+### The stopping rule
+
+Phase 1 is done **when that call passes** — not when the list above is empty.
+
+Equally: a defect that fires once in nine calls does not block it. LVX75 has had
+two clean calls since its second reword; LVX70's fix has never been exercised at
+all. Neither is worth another day, and both are written down.
+
+If items appear after the passing call, the question to ask is whether a
+business ringing the number can PERCEIVE them. If not, they belong to phase 3.
+
 ### Already done, and verified on real calls
 
 - The abandoned write — gate refuses, we retry in code, the model corrects the
