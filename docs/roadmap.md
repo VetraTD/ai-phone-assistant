@@ -164,10 +164,25 @@ customer is a far worse demo than one that pauses for a second and a half.
 
 ### What IS safely fixable
 
-- **Shrink the ~3k static prefix (C2).** On Live the whole context is re-billed
-  every turn and the prefix is ~85% of the bill, so this is a latency win AND a
-  cost win with no turn-taking risk. Realistic gain: a couple of hundred
-  milliseconds, not a second.
+- **Shrink the ~3k static prefix (C2 — defined in `receptionist-backlog.md`, not
+  here).** On Live the whole context is re-billed every turn and the prefix is
+  ~85% of the bill (measured: 17,675 of 20,754 tokens across six turns), so this
+  is a latency win AND a cost win with no turn-taking risk. Realistic gain: a
+  couple of hundred milliseconds, not a second.
+
+  **Read C2's own entry before starting it**, because it is not the cheap job the
+  line above makes it sound. Do **C1** (prompt caching) first — it makes the same
+  prefix 75-80% cheaper, and if it lands, C2's ceiling drops enough that it may
+  not be worth the regression risk. C1 and C2 are in **direct tension on Vertex**,
+  where shrinking the prefix pushes every tenant below the cache floor; on AI
+  Studio they multiply. And C2 needs an **eval band**, which costs money: a
+  previous "harmless" reword saved 185ms and regressed `name-recall`,
+  `vague-caller` and `cancel-identity`.
+
+  What IS cheap, and is where this session's yield came from: deleting prompt
+  text that is simply WRONG — a stale mandate, an ordering nobody wants, two
+  sections that contradict each other. Those are verifiable by unit test and need
+  no eval band.
 - **Region — free in phase 2.** A UK caller reaching a UK server removes a hop.
   The AI Studio leg stays wherever Google puts it.
 
@@ -180,8 +195,8 @@ customer is a far worse demo than one that pauses for a second and a half.
 3. **It is improving without being worked on** — 2,193 ms → 1,781 → ~1,500
    across successive calls. The original complaint was "2–3 second delay".
 
-Take the region win free in phase 2; fold the prompt shrink into C2, which is
-wanted anyway for the Gemini bill.
+Take the region win free in phase 2; fold the prompt shrink into C2 — but see
+the caveats above, and do C1 before it.
 
 ---
 
