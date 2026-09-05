@@ -122,6 +122,60 @@ is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
 
+### The third and fourth UK-tenant calls, 2026-09-05 — the designed chain ran, and three limits showed
+
+**Call 3** produced 44 seconds of dead air (see the silence entry below). **Call
+4**, after the fix, produced the cleanest run yet: `nudges_fired: 0`,
+`live_repeated_phrase: 0`, and `correct_appointment_name` **ran on a real call
+for the first time**. LVX72's entire designed chain executed end to end — gate
+refuses, we retry in code, the note tells the model the saved name is unspelled,
+**the model corrects it itself**. Three sessions of building, first full run.
+
+**But the silence fix was NOT exercised.** The model spoke before the retry
+fired, so call 4 took the call-6 branch (append silently) which was already
+correct. The branch that produced the dead air never happened. **FIXED,
+UNVERIFIED**, and the absence of nudges is not evidence.
+
+#### LVX79 · The spelling gate is satisfied by spelling PART of a name · **FIXED, UNVERIFIED**
+
+The row reads **`Nithin Dadla`**. The caller is Nithin Dodla.
+
+The model asked *"could you spell that **first name** for me?"*, the caller did,
+and the surname went in exactly as the vendor had misheard it. The gate was
+satisfied because SOME letters arrived — and it cannot tell WHICH part of the
+name they spelled, because `applyCallerSpellingSignal` only ever sets a boolean
+and assembling the letters to find out is what LVX62 rules out.
+
+So the ask is made explicit rather than the gate made cleverer: the refusal and
+the nudge now say **"spell their FULL name, first name and surname"**. A
+replacement of text already there, which is LVX34's shape, not an eighth
+instruction.
+
+**Better than LVX77 and still not the caller's name.** Half a correction is
+closer to right and still wrong on the record.
+
+#### A limit of the repeat detector, observed rather than predicted
+
+Turns 2 and 3 of call 4:
+
+> *"What's the name of your company, and what marketing challenge are you facing?"*
+> *"And what's the main marketing challenge you're facing?"*
+
+A person hears that as being asked twice. `longestSharedRun` saw about five
+shared words and correctly stayed silent, because the WORDING differs.
+**Paraphrased repetition is invisible to a word-run detector**, and closing that
+gap means semantic similarity — an embedding or a model round-trip on the happy
+path, which is the one thing the latency budget forbids. Recorded as a limit, not
+queued as work.
+
+#### Two smaller things, recorded and not chased
+
+- One turn opened mid-thought: *"confirming. Anything else I can do for you?"*
+  Once, cause unknown, probably vendor. The stopping rule applies.
+- `postcall_row_without_claim` again: the model said *"I have your **strategy
+  call** booked in"* and `completionClaimRe` needs `your call`, not `your
+  strategy call`. Same noun-list gap recorded on 2026-09-04, third sighting.
+
 ### LVX78 · It repeats itself, word for word `[gcp]` · **P1 — heard by the owner, found by hand**
 
 **How this was found is the point.** The owner said a call "repeated something in

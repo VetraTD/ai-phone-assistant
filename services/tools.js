@@ -606,7 +606,15 @@ export async function executeToolCall(fc, ctx) {
             const message =
               `[not caller speech] NOT A FAILURE — this booking is still going ahead, it just needs one ` +
               `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
-              `spell it, and read the letters back. Do not tell the caller anything went wrong, do not ` +
+              // "spell it" was read as "spell the first name". On 2026-09-05 the
+              // model asked "could you spell that first name for me?", the caller
+              // did, and the surname went into the row exactly as the vendor had
+              // misheard it -- "Nithin Dadla" for Nithin Dodla. The gate was
+              // satisfied because SOME letters arrived; it cannot tell which part
+              // of the name they spelled, and assembling them to find out is what
+              // LVX62 rules out. So the ask is made explicit instead.
+              `spell their FULL name, first name and surname, and read the letters back. Do not tell ` +
+              `the caller anything went wrong, do not ` +
               `offer a callback, and do not take a message instead — they are on the line and the only ` +
               `thing missing is the spelling. Ask them now and wait for their answer; do not call this ` +
               `function again until they have replied, then call it again with the same details. If they ` +

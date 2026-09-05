@@ -272,7 +272,13 @@ describe("a refused write answered with a callback promise", () => {
     await s.settle();
 
     expect(stat("live_spelling_ask_nudged")).toBe(1);
-    expect(JSON.stringify(notes(s.live))).toContain("spell it NOW");
+    // "spell their FULL name" as of 2026-09-05. The note used to say "spell it
+    // NOW", and on a real call the model read "it" as the first name only: the
+    // caller spelled "N-I-T-H-I-N", the surname went into the row exactly as the
+    // vendor had misheard it, and the gate was satisfied because SOME letters had
+    // arrived. The gate cannot tell which part of a name was spelled, and
+    // assembling the letters to find out is what LVX62 rules out.
+    expect(JSON.stringify(notes(s.live))).toContain("spell their FULL name");
   });
 
   it("stays quiet when the assistant already asked for the spelling itself", async () => {
