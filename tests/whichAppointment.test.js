@@ -24,7 +24,7 @@
 // the model for the fix: say it is not a failure, say what is missing, say what
 // to do, and say to call again.
 // ---------------------------------------------------------------------------
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 
 const mockGetAppointmentById = vi.fn();
 const mockUpdateAppointment = vi.fn();
@@ -70,6 +70,39 @@ const call = (name, args, callerContext = TWO_ON_FILE) =>
   executeToolCall({ id: "fc1", name, args }, ctx(callerContext));
 
 beforeEach(() => vi.clearAllMocks());
+
+// ---------------------------------------------------------------------------
+// THE CLOCK IS FROZEN, and this test learned why the hard way.
+//
+// The fixture below gives the caller two appointments, one on Saturday 5
+// September at 15:00Z. `upcomingForCaller` filters to the FUTURE, so at 15:00Z
+// on 5 September 2026 that row silently stopped counting and this file's whole
+// premise -- a caller with TWO appointments -- became a caller with one. Ten
+// tests went red mid-session, on a change that touched neither this file nor
+// anything it imports.
+//
+// A test whose result depends on when it is run is not a test of the code. The
+// same guard is already used by tests/promptSnapshot.test.js, for the same
+// reason: the dynamic tail renders the current date and would churn every run.
+//
+// Friday 4 September, which is before both fixture appointments and is the day
+// the calls this file was written from actually happened.
+// ---------------------------------------------------------------------------
+const FROZEN_NOW = new Date("2026-09-04T12:00:00Z");
+
+beforeAll(() => {
+  // shouldAdvanceTime, NOT a bare useFakeTimers(). Several of these files settle
+  // async work with a real setTimeout, and a frozen timer queue never fires it:
+  // the run hangs rather than failing, which is the worst way for a test to be
+  // wrong. This pins the DATE while leaving timers working.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 
 describe("LVX71 — the refusal has to say what to do next", () => {
   const NEEDS = [

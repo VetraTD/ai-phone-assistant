@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
@@ -200,9 +200,22 @@ async function boot(opts = {}) {
      * is deliberately preferred over ours because its version carries the
      * corrected spelling and ours cannot.
      */
-    async spell(text = "n i t h i n  d o d l a") {
+    async spell(text = "n i t h i n  d o d l a", reply = "") {
       live.push({ serverContent: { inputTranscription: { text } } });
       await settle();
+      // `reply` is what the MODEL says in the same turn, and whether it says
+      // anything at all is load-bearing as of 2026-09-05.
+      //
+      // Every test here used to leave it empty, which meant they all exercised
+      // a turn where the model produced NO text -- and then asserted the
+      // behaviour that belongs to a turn where it HAD spoken. The assertion was
+      // right about call 6 and its fixture was the opposite case, so the test
+      // passed for the wrong reason and a real defect walked straight through
+      // it: 44 seconds of dead air on a live call.
+      if (reply) {
+        live.push({ serverContent: { outputTranscription: { text: reply } } });
+        await settle();
+      }
       live.push({ serverContent: { turnComplete: true } });
       await settle();
       await settle();
@@ -220,6 +233,32 @@ async function boot(opts = {}) {
 }
 
 const c = () => getLatencyStats().turnTaking;
+
+// ---------------------------------------------------------------------------
+// THE CLOCK IS FROZEN. See tests/whichAppointment.test.js for what happens
+// otherwise: its fixture held an appointment at 15:00Z on 5 September 2026, and
+// at 15:00Z on 5 September 2026 that row stopped being "upcoming". Ten tests
+// went red mid-session on a change that touched nothing they import.
+//
+// Every file carrying a hard-coded date near today has the same shape, so they
+// all get the same guard rather than waiting to find out one at a time. Friday
+// 4 September 2026 sits before every fixture date in this repository.
+// ---------------------------------------------------------------------------
+const FROZEN_NOW = new Date("2026-09-04T12:00:00Z");
+
+beforeAll(() => {
+  // shouldAdvanceTime, NOT a bare useFakeTimers(). Several of these files settle
+  // async work with a real setTimeout, and a frozen timer queue never fires it:
+  // the run hangs rather than failing, which is the worst way for a test to be
+  // wrong. This pins the DATE while leaving timers working.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 
 describe("LVX72 — the refused write is re-issued when the spelling arrives", () => {
   beforeEach(() => clearStats());
@@ -327,18 +366,52 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
     expect(note).toMatch(/call correct_appointment_name/i);
   });
 
-  it("does not make the model SPEAK after a successful retry", async () => {
+  it("does not make the model speak when it has ALREADY spoken this turn", async () => {
     // Call 6. The retry fired 43 ms after turnComplete and its note, sent with
     // turnComplete:true, forced an entire extra spoken turn in which the model
     // repeated its previous sentence word for word. The model had already told
     // the caller the right thing; the note only needs a tool called.
+    //
+    // THE `reply` ARGUMENT IS THE WHOLE TEST. Without it this exercises a turn
+    // where the model said nothing, which is the opposite situation and needs
+    // the opposite answer -- see the test below it. That omission is how a
+    // real defect got past this file.
     const s = await boot();
     await s.book();
-    await s.spell();
+    await s.spell("n i t h i n  d o d l a", "Thanks, Nithin Dodla. I have Monday at 4 pm for you.");
 
     const frame = s.noteFrames().find((m) => /BEFORE the caller spelled it/.test(m.turns[0].parts[0].text));
     expect(frame).toBeTruthy();
     expect(frame.turnComplete).toBe(false);
+  });
+
+  it("DOES make it speak when the model said nothing — the 44 seconds of dead air", async () => {
+    // 2026-09-05, and the worst thing on the call. The caller spelled their
+    // name; the model produced a turn with NO text at all; our retry saved the
+    // booking and then deliberately did not ask the model to say anything.
+    //
+    //   17:41:40  "Thanks -- could you just spell that name for me?"
+    //             (the caller spells it)
+    //   17:41:54  >>> SILENCE NUDGE
+    //   17:42:00  book_appointment ok, note appended with turnComplete:false
+    //   17:42:23  >>> SILENCE NUDGE
+    //   17:42:24  call ends
+    //
+    // There was no turn 11. postcall_verify returned `row_without_claim`: a real
+    // booking the assistant never mentioned to the person who made it.
+    //
+    // The old condition asked whether the retry SUCCEEDED. That is the wrong
+    // question -- success and failure both occur with and without the model
+    // having spoken. The right question is whether the caller is waiting on an
+    // answer, and on this path "the model produced no text this turn" is
+    // exactly that.
+    const s = await boot();
+    await s.book();
+    await s.spell(); // no reply: the model is silent, as it was on the call
+
+    const frame = s.noteFrames().find((m) => /BEFORE the caller spelled it/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(true);
   });
 
   it("DOES make it speak when the retry failed", async () => {
@@ -346,7 +419,10 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
     // booking that does not exist, and only the model can correct that.
     const s = await boot({ retryFails: true });
     await s.book();
-    await s.spell();
+    // WITH the model having spoken, so this proves the failure case still
+    // speaks for its own reason rather than by accidentally sharing the silent
+    // case's answer.
+    await s.spell("n i t h i n  d o d l a", "All booked for you, Nithin.");
 
     const frame = s.noteFrames().find((m) => /could NOT be completed/.test(m.turns[0].parts[0].text));
     expect(frame).toBeTruthy();
