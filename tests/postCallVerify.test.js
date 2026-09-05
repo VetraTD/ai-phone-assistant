@@ -83,6 +83,60 @@ describe("postCallMode", () => {
   });
 });
 
+describe("verifyCall - a note is a change, but not one to text anybody about", () => {
+  // A REGRESSION INTRODUCED BY add_appointment_note, 2026-09-05, caught by
+  // reading the first real call rather than by a test.
+  //
+  // The note tool emits {type:"changed"}, because the row genuinely did change.
+  // That is correct for counting. It is wrong for CONFIRMING: changedRows feeds
+  // `confirmable`, so a caller who merely annotated an existing appointment
+  // became eligible for an "appointment_confirmation" text about a booking that
+  // did not move.
+  //
+  // Latent rather than observed: the verification call ran POSTCALL_VERIFY=count
+  // so nothing was sent, and the note happened to land on the row booked in the
+  // same call, where the id collision hid it anyway. Neither of those is a
+  // property of the design.
+  beforeEach(() => clearStats());
+
+  it("does not text a caller who only added a note to an existing appointment", async () => {
+    const existing = row({ id: "row-old", notes: "Strategy Call \u2014 in renewables" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": existing } });
+
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "changed", tool: "add_appointment_note", appointmentId: "row-old" }],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(out.sent).toHaveLength(0);
+    // Still COUNTED as a changed row: the row did change, and a counter that
+    // lied about that would be the opposite mistake.
+    expect(getLatencyStats().turnTaking.postcall_changed_rows).toBe(1);
+  });
+
+  it("still texts when the appointment really moved and was also noted", async () => {
+    // The note must not SUPPRESS a confirmation either. A reschedule plus a note
+    // on the same row is a real change the caller should hear about.
+    const moved = row({ id: "row-old", scheduled_at: "2026-09-08T09:00:00.000Z" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": moved } });
+
+    await verifyCall(
+      input({
+        writes: [
+          { type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-old" },
+          { type: "changed", tool: "add_appointment_note", appointmentId: "row-old" },
+        ],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("verifyCall - the fabrication case", () => {
   beforeEach(() => clearStats());
 

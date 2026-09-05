@@ -237,6 +237,21 @@ describe('the "anything else" tic', () => {
     expect(c().live_closing_tic).toBe(0);
   });
 
+  it("counts the sign-off form heard on the 2026-09-05 call", async () => {
+    // VERBATIM from turn 12 of the first UK-tenant call, and MISSED by every
+    // branch: "there's" is not "is there", and nothing followed "anything else"
+    // to catch it either. It was the fifth ask in fourteen turns while the
+    // counter reported four.
+    //
+    // It is also the form that matters most, because it is the one bolted onto
+    // a goodbye -- the model trying to end the call and asking on the way out.
+    const s = await boot();
+    await s.say("Just let me know if there's anything else. Otherwise, thanks for calling and have a great day.");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(1);
+  });
+
   it("counts nothing at all on a turn with no assistant text", async () => {
     const s = await boot();
     await s.say("");

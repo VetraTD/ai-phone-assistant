@@ -44,7 +44,7 @@ Status means:
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **NUDGE NOT FIRING** — 0 for 2 on the target scenario; KEPT, see the correction below |
-| **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5 and now has a tool — `add_appointment_note`, **FIXED, UNVERIFIED** |
+| **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5, and `add_appointment_note` is **VERIFIED end to end** on the 2026-09-05 call — tool ran, row appended, claim true |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
 | **LVX34** | a refused write answered with "someone will call you back" | **VERIFIED** |
@@ -86,7 +86,8 @@ Status means:
 | **LVX41** | an outbound leak fired once with marker mode off | **NOT REPRODUCED** in seven calls |
 | **LVX36** | it offered three slots and booked a fourth | **UNRESOLVABLE** — the instrument now exists, the call does not |
 | **LVX21** | can the leak guard cut in time? | **ANSWERED** — seven cut, four missed |
-| **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED** |
+| **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
+| **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -119,6 +120,157 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## The UK-tenant call, 2026-09-05 — two fixes VERIFIED, one SHIPPED NOT WORKING, one new P0
+
+164 seconds, 14 assistant turns, one appointment row. Dialled on `+18176011171`
+(account B) rather than the UK line, because the owner has no UK handset, with
+`LIVE_BUSINESS_PHONE=+441372656055` making the American number answer with Digile
+Media's real config — which is what §0 of `live-frontend-RESTORE.md` says to do
+instead of repointing a real line.
+
+**What that does NOT prove**, stated first so it is not quietly forgotten: the
+account-A webhook path and the `+44 → en-GB` locale derivation were never
+exercised. Both are verified offline — an account-A signature returns 200 and a
+wrong token 403s, and the tenant's `locale` is set explicitly — but the roadmap's
+definition of done says "a UK business rings a UK number", and this was not that.
+
+### LVX48's class — CLOSED. `add_appointment_note` worked end to end
+
+```
+tool_duration  add_appointment_note  13ms  success: true
+row.notes      "Strategy Call — Caller is in the renewable energy sector"
+turn 10        "Sure thing, I've noted that you're in the renewable energy sector."
+```
+
+Appended rather than replaced, em dash intact, and **the claim was true** — which
+is the whole point of the item. On the call that found this defect the identical
+sentence was a fabrication.
+
+### The voice is tenant-aware — VERIFIED
+
+`live_voice_source_tenant: 1`, `language_pinned: true`. The tenant's own
+`live_voice` column was read and honoured on a real call.
+
+### The hours correction and the knowledge rows — VERIFIED
+
+Turn 5: *"Unfortunately, we're not open that late, as our hours that day are nine
+AM to five PM."* It **refused an out-of-hours slot and quoted the right window**,
+and the booking landed Monday 7 Sep 10:00 London. Before the correction this
+tenant was configured 00:00–23:59 and would have accepted it.
+
+Turns 2 and 3 came from the seeded knowledge rows — the pricing non-answer and
+*"we run Meta, so Facebook and Instagram, and Google"*. Nothing invented.
+
+### The tic — SHIPPED, NOT WORKING
+
+Removing our mandate did not stop it. **Five asks in fourteen turns, three of
+them consecutive:**
+
+| turn | text | counted |
+|---|---|---|
+| 3 | "Is there anything else I can help you with regarding our services?" | yes |
+| 9 | "Is there anything else I can help you with today?" | yes |
+| 10 | "Can I help with anything else today?" | yes, by the new branch |
+| 11 | "Anything else I can help with?" | yes |
+| 12 | "Just let me know if there's anything else." | **NO** |
+
+Turn 11 is nothing but the tic, which is the same pathology as call 6's turn 4.
+
+**Two reasons it survived, and only one of them was ours.** The tenant's own
+`custom_instructions` end with "Before ending: read back the caller's details and
+the next step, ask if there is anything else" — so the model is now obeying
+Digile Media rather than us. And a refused `end_call`
+(`end_call_refused_hesitation: 1`) turned one instruction into a loop: turns
+10–14 are five consecutive turns of trying to end the call, with a silence nudge
+(`nudges_fired: 1`) in the middle.
+
+**The prediction made before this call was wrong** and is worth recording as
+such: it was expected to ask once, at the end, correctly. It asked four times.
+
+`live_closing_tic` widened again for the sign-off form. **Third widening; a
+fourth means the eval band, not a fourth guess** — the same rule LVX75 is under.
+
+### The one thing that did improve
+
+`live_stacked_questions: 0` across 14 turns, against a 2–4 per call baseline over
+the previous round. N=1, so it is a reading and not a verdict, and it is
+plausibly a side effect of removing an instruction that bolted a second question
+onto the end of turns.
+
+### LVX77 · A name the caller never said, written to the database `[gcp]` · **P0**
+
+**The row reads `client_name: "Jane Doe"`. The caller said "Nithin Dodla",
+confirmed by the owner.** Turn 9 read back *"Thanks, N-I-T-H-I-N D-O-D-L-A. So, I
+have a strategy call booked for you..."* — and saved something else.
+
+This is NOT LVX53. There, a name was lifted from an existing appointment row.
+**The appointments table was empty when this call started**, so there was nothing
+to lift: the model produced a placeholder name out of nothing and it became a
+database row.
+
+The mechanism is LVX72's fix meeting its own limit:
+
+1. `book_appointment` called with `client_name: "Jane Doe"` → the spelling gate
+   refused (`spelling_gate_refusals: 1`). **The gate did its job.**
+2. The caller spelled the real name; the model read it back correctly.
+3. The model never re-called the tool, so **our retry fired**
+   (`write_retry_attempted: 1`, `live_write_retried ok: true`) — replaying the
+   arguments as they stood when the gate refused. Including the fabricated name.
+4. `write_retry_name_unspelled: 1` fired, telling the model the saved name was
+   the unspelled one and to call `correct_appointment_name`.
+5. **It never did.** The tool list for the whole call is `set_call_intent`,
+   `check_appointment_availability` ×2, `book_appointment` (refused),
+   `book_appointment` (retry, ok), `add_appointment_note`, `end_call` ×2.
+
+So the retry rescues the booking by writing the exact name the gate refused, and
+then depends on the model to correct it — which is the one thing the retry exists
+because the model does not reliably do. On call 6 the model did correct it and
+the design looked complete. It is not complete; it worked once.
+
+**Done when:** the retry cannot write a name the spelling gate refused — either
+it withholds the name, or the correction happens in code rather than by asking.
+
+### And a signal I broke, which is why the row's name went unnoticed by the instrument
+
+`postcall_verify` returned `verdict: ok, booked_rows: 1, changed_rows: 1`.
+
+That `changed_rows: 1` is **`add_appointment_note`**, not a name correction.
+`add_appointment_note` emits `{type:"changed"}` — correctly, the row did change —
+and `postcall_changed_rows` counts every such effect. Call 6's entry above uses
+exactly that counter to conclude *"the model then called
+`correct_appointment_name`"*. **That inference is no longer sound**, and the
+verdict of `ok` on this call is the proof: it saw a booked row and a changed row
+and called it clean while the name was wrong.
+
+Nothing is being reverted — a note IS a change and counting it as one is right.
+What was never sound was inferring a specific TOOL from a generic counter, and
+the per-tool counters (`appointment_note_added`, `write_retry_name_unspelled`)
+are what should be read instead.
+
+**A second, latent consequence, fixed rather than recorded:** `changedRows` also
+feeds `confirmable`, so a caller who merely annotated an existing appointment
+would have been sent an "appointment confirmation" text about a booking that
+never moved. It did not fire here for two reasons that are both accidents — the
+run was `POSTCALL_VERIFY=count`, and the note landed on the row booked in the
+same call, so the id collision hid it behind that booking's own confirmation.
+Note-only changes are now excluded from confirmations; a reschedule that was also
+noted still confirms.
+
+### Counters, in full
+
+```
+live_reply_turns_checked 14   live_closing_tic 4 (should be 5)  live_stacked_questions 0
+live_voice_source_tenant 1    appointment_note_added 1          nudges_fired 1
+spelling_gate_refusals 1      write_retry_attempted 1           write_retry_name_unspelled 1
+postcall_booked_rows 1        postcall_changed_rows 1           postcall_verify ok
+end_call_refused_hesitation 1 end_call_abandoned_check_ran 2    end_call_would_refuse_abandoned 0
+live_claim_detected 1         live_tool_refusals 1              live_connect_ok 2
+```
+
+`live_utterance_late_transcript: 7` is **not quoted** as a fault: the round of
+2026-09-04 established that counter measures a unit mismatch rather than a vendor
+behaviour.
 
 ## 2026-09-05 — the tic was ORDERED, and four things shipped offline
 

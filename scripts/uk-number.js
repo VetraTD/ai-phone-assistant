@@ -27,9 +27,16 @@
 //   node scripts/uk-number.js point https://<tunnel>.trycloudflare.com --confirm
 //   node scripts/uk-number.js restore --confirm
 //
-// Credentials come from Twilio ACCOUNT A, which owns this number. They are not
-// in .env — they live in GCP Secret Manager, and the two variables below are
-// expected to be exported by the caller:
+// UK_NUMBER_TARGET=us selects the American test line instead of the UK one, for
+// the case the demo has to be dialled from a US handset. Its credentials are
+// account B's, which ARE in .env.
+//
+// Credentials are always TWA_SID / TWA_TOK, and which account they must belong
+// to depends on the target -- the script refuses if they do not match.
+//
+// The US line is on account B, whose credentials are the TWILIO_ACCOUNT_SID and
+// TWILIO_AUTH_TOKEN already in .env. The UK line is on account A, whose token is
+// deliberately NOT in .env; it lives in GCP Secret Manager:
 //
 //   export CLOUDSDK_CONFIG=~/.gcloud-vetra2
 //   export TWA_SID=$(gcloud secrets versions access latest \
@@ -39,19 +46,57 @@
 // ---------------------------------------------------------------------------
 import twilio from "twilio";
 
-const NUMBER = "+441372656055";
-
-// The captured state, from docs/live-frontend-RESTORE.md section 3, read live
-// from Twilio on 2026-09-05 BEFORE anything was changed. Hard-coded on purpose:
-// a restore that reads its target from the same place it might have been
-// corrupted is not a restore.
-const CAPTURED = {
-  sid: "PN143d2a428a1d27c601c0419f83309a2a",
-  voiceUrl: "https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/voice",
-  voiceMethod: "POST",
-  statusCallback: "https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/status",
-  statusCallbackMethod: "POST",
+// The captured state for each number this script can move, from
+// docs/live-frontend-RESTORE.md section 3, each read live from Twilio BEFORE
+// anything was changed. Hard-coded on purpose: a restore that reads its target
+// from the same place it might have been corrupted is not a restore.
+//
+// TWO NUMBERS, ON TWO DIFFERENT TWILIO ACCOUNTS, which is why each entry
+// carries its own account prefix. Using one account's credentials against the
+// other's number does not fail loudly -- the number is simply not found, which
+// reads as "it does not exist" rather than "wrong credentials".
+const NUMBERS = {
+  uk: {
+    number: "+441372656055",
+    account: "A",
+    sidPrefix: "AC1828",
+    sid: "PN143d2a428a1d27c601c0419f83309a2a",
+    voiceUrl: "https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/voice",
+    voiceMethod: "POST",
+    statusCallback: "https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/status",
+    statusCallbackMethod: "POST",
+  },
+  // The American test line. Added 2026-09-05 because the owner has no UK
+  // handset, so the demo is dialled here while LIVE_BUSINESS_PHONE makes it
+  // answer with the UK tenant's config -- which is exactly what section 0 says
+  // to do instead of repointing a real line.
+  //
+  // Its captured voiceUrl is Railway STAGING, and already /twilio/live-voice.
+  // Read live on 2026-09-05 and it matched the recorded row -- worth stating,
+  // because the last time this file was trusted rather than checked it was
+  // wrong.
+  //
+  // IT IS ALSO ASSISTANT_NUMBER IN .env, which the latency probe's dial plan
+  // reads. Left pointed at a dead tunnel it silently breaks `npm run probe`.
+  us: {
+    number: "+18176011171",
+    account: "B",
+    sidPrefix: "AC7253",
+    sid: "PN58e27f5f39727c40b279354409155ec3",
+    voiceUrl: "https://ai-phone-assistant-staging.up.railway.app/twilio/live-voice",
+    voiceMethod: "POST",
+    statusCallback: "https://ai-phone-assistant-staging.up.railway.app/twilio/status",
+    statusCallbackMethod: "POST",
+  },
 };
+
+const TARGET = NUMBERS[process.env.UK_NUMBER_TARGET || "uk"];
+if (!TARGET) {
+  console.error("\n  UK_NUMBER_TARGET must be one of: " + Object.keys(NUMBERS).join(", ") + "\n");
+  process.exit(1);
+}
+const NUMBER = TARGET.number;
+const CAPTURED = TARGET;
 
 // Every field compared on the way back. voiceApplicationSid is included because
 // a non-empty one silently overrides voiceUrl, so "voiceUrl is correct" is not
@@ -69,12 +114,14 @@ function client() {
     );
     process.exit(1);
   }
-  if (!sid.startsWith("AC1828")) {
-    // The single most expensive mistake available here. Account B's credentials
-    // are in .env and are the ones already loaded in most shells; used against
-    // this number they do not fail loudly, they simply do not find it, which
-    // reads as "the number does not exist".
-    console.error(`\n  Refusing: TWA_SID is ${sid.slice(0, 6)}..., which is not account A (AC1828...).`);
+  if (!sid.startsWith(TARGET.sidPrefix)) {
+    // The single most expensive mistake available here. Both accounts' tokens
+    // are reachable from this machine, and used against the wrong number they
+    // do not fail loudly.
+    console.error(
+      `\n  Refusing: TWA_SID is ${sid.slice(0, 6)}..., but ${NUMBER} is on account ` +
+        `${TARGET.account} (${TARGET.sidPrefix}...).`
+    );
     console.error("  A number on the wrong account 403s every webhook, and reads as a broken endpoint.\n");
     process.exit(1);
   }
@@ -126,12 +173,13 @@ if (action === "show") {
   const target = {
     voiceUrl: `${base.replace(/\/$/, "")}/twilio/live-voice`,
     voiceMethod: "POST",
-    // DELIBERATELY LEFT AS CAPTURED. /twilio/status is mounted behind the
-    // single-token twilioValidation, so an account-A signature fails there and
-    // Twilio's end-of-call report gets a 403. That is LVX14's shape, it is
-    // accepted for this demo, and it costs nothing a Live call was using: the
-    // Live front-end never files a call record anyway (LVX30). Pointing it at
-    // the tunnel instead would 403 identically and add a field to restore.
+    // DELIBERATELY LEFT AS CAPTURED. On the UK number /twilio/status sits behind
+    // the single-token twilioValidation, so an account-A signature fails there
+    // and the end-of-call report gets a 403 -- LVX14's shape, accepted, and
+    // costing nothing a Live call was using, since the Live front-end files no
+    // call record anyway (LVX30). On the US number the signature passes but
+    // reaches the STAGING deployment rather than this rig, which is harmless for
+    // the same reason. Either way: one less field to restore.
     statusCallback: CAPTURED.statusCallback,
     statusCallbackMethod: CAPTURED.statusCallbackMethod,
   };
@@ -170,7 +218,9 @@ if (action === "show") {
   const ok = verify(after, { ...CAPTURED, voiceApplicationSid: "" });
   console.log(
     ok
-      ? "\n  RESTORED and verified field by field. The number is back on GCP.\n"
+      ? `
+  RESTORED and verified field by field. ${NUMBER} is back on ` + new URL(CAPTURED.voiceUrl).host + `.
+`
       : "\n  NOT RESTORED. Fix the fields listed above before walking away.\n"
   );
   process.exitCode = ok ? 0 : 1;
