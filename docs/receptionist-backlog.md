@@ -121,6 +121,56 @@ is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
 
+## The "American accent" was the ENVIRONMENT, 2026-09-05 — third instance of the same trap
+
+**Not a defect. Closed the same day it was raised.**
+
+The owner reported hearing an American accent on `+18176011171` and asked whether
+`en-GB` was really being sent. It was: both rig calls logged `language_code:
+en-GB, language_source: tenant, language_pinned: true`, and there were zero
+`live_language_code_rejected` events.
+
+**The calls that sounded American were reaching Railway staging, not the rig.**
+The number is restored to staging the moment a test window ends, so every call
+after a teardown goes there — and staging has its own database, with its own
+tenant on that number, whose `locale` is empty. That falls through to
+`from_number` → `+1` → **`en-US`**. An American voice is the CORRECT output
+there. Re-arming the rig made it British again immediately.
+
+**Staging was running the identical commit** — `Build: 82c14d2`, byte-for-byte
+the local HEAD. Same binary, different row, different accent.
+
+That is the third instance of "a tenant row is configuration too" in this file:
+`VOICE_INTENT_MARKER` (LVX37), Brightwork's empty `locale` on the deployment, and
+now this. The first two were defects; this one was a **test that measured the
+wrong environment**, which is a different failure and arguably a worse one,
+because it produces a bug report for code that is working.
+
+**It is also a standing argument for the phase-2 "one shared database" item**,
+independent of anything to do with accents: as long as the local rig and staging
+hold different rows for the same number, every observation has to name which one
+it came from.
+
+### The one thing NOT closed by this
+
+The QUALITY complaint is separate and still stands. *"Not the best quality over
+the phone but it was on the wav file"* was said about the second Kore call, which
+genuinely ran on the rig at `en-GB`. That is about fidelity over mu-law 8 kHz,
+not about accent, and nothing here explains it.
+
+**So the section below should be read narrowly.** Its conclusion — that the WAV
+rig cannot settle telephone audio — is about QUALITY. It is not evidence about
+accent, and the accent question turned out not to be a question at all.
+
+### What was NOT built because of this
+
+A generate-and-drift test — the real prompt, several generated turns, one WAV per
+turn — was designed to chase the hypothesis in `lib/voice/live/index.js:105`
+("one voice being asked to speak British English over content the model is
+generating as American, and drifting"). It was not run, because the evidence it
+was chasing evaporated. Recorded here so it is available if drift is ever heard
+on a call that is definitely on the rig.
+
 ## The voice, decided by phone — and why the WAV rig could not decide it
 
 **Kore stands.** Aoede was tried on a real call on 2026-09-05 and rejected by ear
