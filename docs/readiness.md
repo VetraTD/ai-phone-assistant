@@ -307,6 +307,34 @@ which is not on the demo path at all.
   socket drop is still silence** — that needs an `action` URL on `<Connect>`,
   which nobody has tried here, and it is deliberately not built. Tiers 2a/2b
   still do not exist.
+- **The deploy topology, and the trap in it** (learned 2026-09-04):
+
+  | | branch | URL |
+  |---|---|---|
+  | Railway **staging** | `feat/s2s-frontend` | `ai-phone-assistant-staging.up.railway.app` |
+  | Railway **prod** | `main` | `ai-phone-assistant-production-2300.up.railway.app` |
+  | GCP `voice-uk-prod` | deployed by Terraform | serves `+441372656055` |
+
+  Both Railway services auto-deploy, and the root page prints
+  `Build: <sha> (<branch>)` — **the fastest way to answer "is my commit
+  deployed?", with no token.** The debug endpoint 404s when its token is wrong,
+  which is indistinguishable from a missing route.
+
+  **The trap:** merging `main` forward as a FAST-FORWARD onto a SHA that the
+  staging environment has already built produces **no prod deployment**. There
+  is no new commit for the webhook to react to. It cost twenty minutes on
+  2026-09-04, and **Redeploy does not rescue it** — Redeploy rebuilds the
+  ACTIVE deployment's commit, which is the old one, so it succeeds and changes
+  nothing. The fix is an empty commit on `main`: a SHA Railway has not seen.
+
+- **Vercel cannot deploy this repo** — private GitHub org repository on the
+  Hobby plan. It is a permanently-red check on every commit. It does not block
+  Railway (prod deployed `13265a3` with it already failing), but it means the
+  dashboard frontend is not deploying at all.
+
+- **There is no CI.** No `.github/workflows/`, so nothing runs the 3,169 tests
+  on push. They run only when someone runs them locally.
+
 - **Concurrency is unmeasured** (O7) and the vendor cap is shared. Two prospects
   at once is untested.
 - A **second handset** has never been used. Every acoustic number in this
