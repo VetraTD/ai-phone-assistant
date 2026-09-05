@@ -53,9 +53,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      # v5, not v4. The first CI run warned that v4 targets Node 20, which
+      # GitHub deprecated in September 2025 and is currently force-running on
+      # Node 24 — a warning with a shelf life rather than a permanent state.
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # 22, matching the Dockerfile's node:22-slim rather than package.json's
           # engines floor of >=18. CI should run what production runs; the floor
