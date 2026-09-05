@@ -16,12 +16,16 @@
 --
 -- NO CHECK CONSTRAINT, deliberately, and this is the one place it differs from
 -- 025. `locale` has a closed set this repository owns (lib/voice/localeProfiles
--- PROFILE_IDS). The prebuilt voice names are Google's, they are added to
--- without asking us, and a CHECK would mean a migration every time the vendor
--- ships a voice. The failure mode is also mild rather than sharp: an
--- unrecognised name is not rejected by the Live API, it is silently ignored and
--- the session speaks in the default voice anyway (backlog LVX13). A constraint
--- would convert a cosmetic miss into a refused write.
+-- PROFILE_IDS). The prebuilt voice names are Google's, they are added to without
+-- asking us, and a CHECK would mean a migration every time the vendor ships a
+-- voice -- while a stale constraint would refuse a WRITE for a name that is
+-- perfectly valid at the vendor, which is a worse failure than an odd-sounding
+-- call.
+--
+-- What this project does NOT know, stated rather than assumed: what the Live API
+-- does with a name it does not recognise. Whether it errors, substitutes, or
+-- ignores the field has never been observed here. scripts/voice-compare.js is
+-- what answers that, by rendering candidates and comparing the audio.
 --
 -- Read by services/db.js loadConfig -> config.liveVoice, consumed by
 -- lib/voice/live/index.js resolveLiveVoice(). Precedence there is

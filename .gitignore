@@ -58,3 +58,6 @@ eval/results/tts-readback/
 # Vendor prices are account-specific and go stale; a committed rate is one
 # nobody re-checks. See config/rates.example.json.
 config/rates.json
+
+# Rendered voice candidates (scripts/voice-compare.js). Audio, not source.
+voice-compare/
