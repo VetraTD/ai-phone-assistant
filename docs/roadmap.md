@@ -276,10 +276,15 @@ Recorded so they are not re-litigated. **Re-derive on request; do not cite.**
 - **Vercel cannot deploy this repo** — private org repo on the Hobby plan. A
   permanently-red check that does NOT block Railway, but the dashboard frontend
   is not deploying at all.
-- **There is no CI.** No `.github/workflows/`, so nothing runs the 3,169 tests
-  on push. **Twenty minutes of work, and the highest-leverage item on this
-  page** for a week of long days — this project already has two entries proving
-  how unverified change ends.
+- ~~**There is no CI.**~~ **BUILT 2026-09-05.** `.github/workflows/ci.yml` runs
+  `npm ci && npm test` on every push and pull request, on node 22 to match the
+  Dockerfile rather than package.json's `>=18` floor — CI should run what
+  production runs. Deliberately excluded, each for a stated reason:
+  `check:credentials` (needs a GCP identity, and granting CI one is a blast-radius
+  decision, not a side effect of adding a test runner), `test:db` (needs a live
+  Postgres and belongs in a second job with a service container), and `eval`
+  (costs money per run). So a green tick means exactly one thing: the unit suite
+  passed.
 - **A tenant row is configuration too.** "Diff the env before theorising" is too
   narrow; ask which database you verified against.
 

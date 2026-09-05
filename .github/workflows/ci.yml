@@ -1,0 +1,75 @@
+# -----------------------------------------------------------------------------
+# Run the test suite on every push.
+#
+# WHY THIS DID NOT EXIST UNTIL NOW, and why it is worth twenty minutes.
+#
+# docs/roadmap.md calls this "the highest-leverage item on this page" and it sat
+# unbuilt for a week of long days. Nothing ran the 3,196 tests on push, so the
+# only thing standing between a regression and production was somebody
+# remembering to run vitest before committing.
+#
+# This repository has two entries recording what unverified change costs:
+# VOICE_INTENT_MARKER shipped set in production and unset locally and silenced
+# fourteen calls, and the locale fix that was verified against one database and
+# did nothing on the deployment. Neither was a CI failure exactly, but both are
+# the same family: a change believed correct because nobody had a mechanism to
+# find out otherwise.
+#
+# -----------------------------------------------------------------------------
+# What is deliberately NOT here
+# -----------------------------------------------------------------------------
+#
+# `npm run check:credentials` — the credential-boundary gate. It lists Secret
+# Manager secrets across the GCP projects in terraform.tfvars and fails closed
+# when it cannot reach one ("unverified is not verified"). In CI it cannot reach
+# any of them, so it would fail every run for a reason that has nothing to do
+# with the change under test. Wiring it up means giving CI a GCP identity, which
+# is a real decision about blast radius and not one to make as a side effect of
+# adding a test runner.
+#
+# `npm run test:db` (vitest.db.config.js) — needs a live Postgres. It belongs in
+# a second job with a service container, and is left out of the first version so
+# that a green tick means exactly one thing: the unit suite passed.
+#
+# `npm run eval` — costs real money per run. It is never automatic.
+# -----------------------------------------------------------------------------
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+# Cancelling it keeps the queue honest about what is actually being tested.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The suite runs in about a minute locally. Ten is a generous ceiling that
+    # still turns a hung test into a failure rather than a stuck runner.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22, matching the Dockerfile's node:22-slim rather than package.json's
+          # engines floor of >=18. CI should run what production runs; the floor
+          # says what is tolerated, not what is shipped.
+          node-version: 22
+          cache: npm
+
+      # `ci` and not `install`: it installs from package-lock.json exactly and
+      # fails if the lockfile and package.json disagree, which is itself a check
+      # worth having on every push.
+      - run: npm ci
+
+      # `npm test` is `vitest run`. Called directly rather than piped through
+      # anything: piping vitest through grep swallows its exit code, which is a
+      # trap already written down in this repository's notes and would turn CI
+      # into a green tick that means nothing.
+      - run: npm test
