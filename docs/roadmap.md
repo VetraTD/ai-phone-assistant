@@ -41,6 +41,34 @@ weeks after. That decision cascades into most of this list.
 | **Stacked questions** | Same file, same session as the tic. `live_stacked_questions` already counts 1–2 a call. |
 | ~~**A notes tool, or a refusal that admits it cannot**~~ **FIXED, UNVERIFIED 2026-09-05** | `add_appointment_note`. APPENDS, never replaces — the row's note was the REASON for the appointment. The refusal names `record_customer_request`, because a bare refusal is what let LVX34 become "someone will call you back". |
 
+### THE CALL PASSED, 2026-09-05 — with one leg outstanding
+
+Second UK-tenant call: `Nithin Dodla`, Monday 7 September 16:00 London, the name
+the caller gave and the time the assistant said. Asked "anything else" **once**,
+at the end. `end_call` accepted first time — no refusal, no silence nudge, no
+five-turn goodbye. `postcall_verify: ok`, `nudges_fired: 0`, one real row.
+
+Every criterion below is met **on behaviour**.
+
+**The leg that is outstanding is the NUMBER.** The call was dialled on
+`+18176011171` (account B) with `LIVE_BUSINESS_PHONE`, because there is no UK
+handset here — which is what `live-frontend-RESTORE.md` §0 prescribes instead of
+repointing a real line. The tenant, prompt, voice, locale, hours, tools and
+knowledge were all the real UK ones. Account A's webhook path and the `+44 →
+en-GB` derivation are verified OFFLINE only: an account-A signature returns 200
+against the live route, a wrong token 403s, and the tenant's `locale` is set
+explicitly rather than derived.
+
+So by the sentence at the top of this section — "a UK business rings a UK
+number" — one call on a UK handset still remains. By everything the sentence was
+written to protect, phase 1 is done.
+
+**What the passing call also showed, and it is worth more than the pass:** the
+fix that carried it was LVX44's spelling nudge, an entry that read "NUDGE NOT
+FIRING, 0 for 2" and was one decision away from deletion. Asking for the spelling
+when the name is GIVEN meant the booking succeeded first time, so the
+fabricate-then-replay path that produced LVX77 was never entered at all.
+
 ### Definition of done — phase 1 ends with a CALL, not with an empty list
 
 **A UK business rings a UK number and:**

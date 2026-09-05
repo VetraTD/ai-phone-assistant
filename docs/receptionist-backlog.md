@@ -43,7 +43,7 @@ Status means:
 | **LVX53** | a name from the record written to a booking the caller never said | **FIXED, UNVERIFIED** — per-call provenance; the durable column is deferred, see below |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
 | **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
-| **LVX44** | the spelling is asked at booking time, not when the name is given | **NUDGE NOT FIRING** — 0 for 2 on the target scenario; KEPT, see the correction below |
+| **LVX44** | the spelling is asked at booking time, not when the name is given | **FIRED, and it carried the call** — 1 for 3, and on the call it fired the booking succeeded first time with the right name. Nearly deleted at 0 for 2 |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5, and `add_appointment_note` is **VERIFIED end to end** on the 2026-09-05 call — tool ran, row appended, claim true |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
 | **LVX40** | booked an appointment with no name | **VERIFIED** |
@@ -87,7 +87,7 @@ Status means:
 | **LVX36** | it offered three slots and booked a fourth | **UNRESOLVABLE** — the instrument now exists, the call does not |
 | **LVX21** | can the leak guard cut in time? | **ANSWERED** — seven cut, four missed |
 | **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
-| **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway |
+| **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway. Did not recur on the next call, which never entered the path; the screen counter over-counts by design and fired on a CORRECT booking |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -120,6 +120,98 @@ missed twice on the case it exists for, and that widening a third phrasing list
 is the treadmill this file already warns about — there is no structural signal
 for "a name was just given" short of write time, which is why it was a regex in
 the first place.
+
+## The SECOND UK-tenant call, 2026-09-05 — this one passes
+
+11 assistant turns, one appointment row, one clean exit. Same rig as the call
+before it: `+18176011171` on account B with `LIVE_BUSINESS_PHONE=+441372656055`,
+so the tenant, prompt, voice, tools, hours and knowledge are all the real UK
+ones and the NUMBER is not.
+
+### Against the roadmap's definition of done, line by line
+
+| criterion | result |
+|---|---|
+| a British voice the owner approved | Kore / `en-GB`, `live_voice_source_tenant: 1` |
+| books an appointment with the right name and time | **`Nithin Dodla`, Mon 7 Sep 16:00 London** — the name the caller gave, the time turn 10 said |
+| not asked "is there anything else?" three times | **once**, at the end, after the booking |
+| told nothing untrue | the booking claim was true; `postcall_verify: ok` |
+| no goodbye until the call is over | turn 11's goodbye and `end_call` in the same response |
+| `postcall_verify: ok`, real row, `nudges_fired: 0` | all three |
+
+### What actually fixed the name, and it is not what was expected
+
+`spelling_gate_refusals: 0`. `write_retry_attempted: 0`. **The booking succeeded
+first time**, so LVX77's road — gate refuses, we replay stale arguments — was
+never entered at all.
+
+What did it was **LVX44's nudge firing** (`live_spelling_ask_nudged: 1`,
+`live_spelling_nudge_eligible: 1`): the spelling was asked for when the name was
+GIVEN rather than at booking time, so the name was settled before the write and
+there was nothing to refuse. That entry read **NUDGE NOT FIRING, 0 for 2** and
+was one decision away from being deleted. It is now 1 for 3 on its target
+scenario, and the one time it fired it removed the defect downstream of it.
+
+**So LVX77 is NOT verified fixed.** The fabrication did not recur, on a call that
+never took the path that produces it. The `client_name` description change may
+have helped and cannot be credited at N=1. It stays OPEN with its mechanism
+written down.
+
+### The over-count fired on a CORRECT booking, exactly as designed
+
+`booking_name_never_spoken: 1` — on a row whose name is right. The vendor heard
+"Nitin Dadla" (turn 6 reads it back verbatim), the caller corrected it, and the
+model wrote "Nithin Dodla". The written name is not in the transcript, so the
+screen fired.
+
+This is the false positive the counter was shipped with a test for, seen on the
+first real call it ran on. It is the reason it is a screen and not a gate: had it
+been enforcing, **this call's correct booking would have been refused.**
+
+### The ending, which was five turns last time
+
+`end_call` called once and accepted. No refusal, no silence nudge, no loop.
+Compare the previous call: `end_call` refused on a hesitation, a nudge fired,
+and turns 10-14 were five consecutive attempts to hang up.
+
+### The tic — better, and one call is not a rate
+
+`live_closing_tic: 1` of 11 turns, against 4 of 14 (5 actual) on the call before.
+The one instance is turn 10, after the booking was confirmed and immediately
+before the goodbye — which is a receptionist asking once at the end, and is what
+the tenant's own `custom_instructions` ask for.
+
+**N=1. This is a reading, not a rate**, and this file's own rule is never to
+compare two arms on one call each. What can be said is that the shape changed:
+the previous call's pathology was three consecutive asks and a turn containing
+nothing else, and neither happened here.
+
+### Three blemishes, none of them demo-blocking
+
+- **Turn 5 stacked two asks and was not counted.** *"Can I get your full name and
+  the best number to reach you on, please?"* — two questions, one question mark,
+  so `live_stacked_questions` reads 0. This is the undercount recorded when the
+  counter was built ("your name, company, and what industry you're in"), now
+  observed live rather than predicted.
+- **Turn 9 confirmed the wrong name** — "Got it, Nitin" — and turn 10 corrected
+  itself to "Nithin Dodla". It ended right; it read as flustered.
+- **Turn 2's pricing answer was curter than the knowledge row.** The row offers to
+  get the team to quote on the strategy call; the model said "I'm sorry, I can't
+  quote prices over the phone" and moved on.
+
+Also: `live_unusable_transcript: 1` fired on turn 7's answer and turn 8 said "I'm
+sorry, I didn't catch that" rather than answering something it had not heard —
+LVX50 working on a real call.
+
+### What this call does NOT establish
+
+- **The UK number.** Account A's webhook path and the `+44 → en-GB` derivation are
+  verified offline only (an account-A signature returns 200, a wrong token 403s,
+  and the tenant's locale is set explicitly rather than derived). The roadmap
+  says "a UK business rings a UK number" and this was a US number.
+- **`add_appointment_note`** was not exercised — the caller did not ask for one.
+  It stays VERIFIED from the previous call.
+- **LVX77**, as above.
 
 ## The UK-tenant call, 2026-09-05 — two fixes VERIFIED, one SHIPPED NOT WORKING, one new P0
 
