@@ -42,7 +42,7 @@ Status means:
 | **LVX57** | the claim detector misses HALF the claims actually made | **FIXED, UNVERIFIED** — all four observed phrasings, limits written down |
 | **LVX53** | a name from the record written to a booking the caller never said | **FIXED, UNVERIFIED** — per-call provenance; the durable column is deferred, see below |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
-| **LVX27** | it says it booked something and there is no row | **OPEN · P0** — caught after the fact by LVX29, never prevented |
+| **LVX27** | it says it booked something and there is no row | **PREVENTED ON A CALL 2026-09-06** — the claim guard now acts by default; it caught a false cancellation claim and the model corrected itself aloud, then did the work |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **FIRED, and it carried the call** — 1 for 3, and on the call it fired the booking succeeded first time with the right name. Nearly deleted at 0 for 2 |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5, and `add_appointment_note` is **VERIFIED end to end** on the 2026-09-05 call — tool ran, row appended, claim true |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
@@ -325,6 +325,114 @@ turn — was designed to chase the hypothesis in `lib/voice/live/index.js:105`
 generating as American, and drifting"). It was not run, because the evidence it
 was chasing evaporated. Recorded here so it is available if drift is ever heard
 on a call that is definitely on the rig.
+
+## The full-lifecycle round, 2026-09-06 — eleven calls, and the guards finally ran together
+
+Book, reschedule, cancel, note, message, interrupt, hang up. Every appointment
+tool has now run on a real call, which was not true at the start of the day.
+
+### What is VERIFIED, on a call, with the row read back
+
+| | |
+|---|---|
+| `book_appointment` | row matches what was said, name spelled correctly |
+| `reschedule_appointment_db` | **moved the existing row, did not duplicate it** |
+| `cancel_appointment_db` | correct row, `status: cancelled`, notes preserved |
+| `add_appointment_note` | appended three times, never replaced |
+| `record_customer_request` | row written, right number, right text |
+| `get_caller_appointments_from_db` | found the appointment from the caller's number and quoted it back correctly |
+| knowledge rows | declined "how long until I see results" without inventing a timeframe |
+| the claim guard | **caught a false cancellation claim and the model corrected itself out loud** |
+| the hang-up grace | 1,552-1,558 ms, consistently |
+| refusing to arm on a barge | **5/5** across two calls |
+| the repeat cutter | 0 cuts in 215 checks on the final call — no misfires |
+
+The final call is the one worth keeping: two writes, both landed, everything the
+caller was told was true, and no two guards collided.
+
+### The claim guard is the result of the day
+
+On the cancel call the assistant said *"that appointment... is now cancelled for
+you"* **fourteen seconds before `cancel_appointment_db` ran**. The guard fired,
+the model corrected itself — *"My apologies for the confusion. I've now gone
+ahead and successfully cancelled that appointment"* — and then did it.
+
+LVX27, the oldest open P0 here, caught and repaired mid-call. It had been
+count-only behind `LIVE_CLAIM_GUARD=act` since it was built, with an explicit
+rule attached: act once the counter says how often it fires when nothing is
+wrong. The counter said, on a fabricated booking, and acting on it worked on the
+next call that needed it.
+
+### What is still OPEN, and both are the same shape
+
+**The model will not do the follow-up.** Twice more today:
+
+- `write_retry_name_unspelled` fired, the model was told the saved name was the
+  pre-spelling one, and it did not call `correct_appointment_name`. The row reads
+  `Nitin Dodla` after the caller spelled `N I T H I N`. Third sighting.
+- `record_customer_request` was refused for a spelling, and the model announced
+  the callback anyway. That one is now backstopped in code.
+
+This is LVX34's class and it has resisted three rewordings. **The lesson is in
+this file already**: *"A refusal message is a REQUEST... the thing that must not
+depend on the model's cooperation is the write itself."* Every guard that does
+the thing rather than asking for it has worked; every guard that asks has been
+declined at least once.
+
+### FOUR OF THE DAY'S FIXES INTRODUCED DEFECTS
+
+Recorded because the pattern matters more than any of them:
+
+| the fix | what it broke |
+|---|---|
+| repeat cutter | clipped the greeting, and burned its whole per-call cap in 173 ms |
+| `live_goodbye_armed_exit` | counted an arming the barge check had refused |
+| last-chance message write | called `peekPendingWrite`, which did not exist |
+| stacked-question widening | flagged four of seven single questions |
+
+Each shipped on one call's evidence. Two were caught by a test, one by a probe,
+one by the owner's ear.
+
+**The common cause of the first and third is the same**: a test fixture that
+described a call which cannot happen. Every cutter test put its repeat on the
+FIRST assistant turn, which in a real call is always the greeting. And
+`peekPendingWrite` was called as `runner?.peekPendingWrite?.()` — the optional
+call returned `undefined` in silence, so a missing function looked exactly like a
+working feature.
+
+**A wire that is allowed to be absent is a wire nothing can prove.**
+
+### Twelve guards, and eight of them compete for one channel
+
+Counted rather than felt:
+
+- **8 notes** — claim, offer, promise, deferral, leak, spelling,
+  unusable_transcript, zero_text — all sharing ONE `sendTurnNote` slot per turn,
+  capped at eight per call. Nobody rations something there is enough of.
+- **2 audio cuts** — leak guard (7 of 11 on record), repeat cutter.
+- **2 code-level writes** — the LVX72 retry and the last-chance message. The most
+  reliable things on the path.
+
+On the cancel call the claim guard and the repeat cutter fired within three
+seconds of each other and the owner described the result as "weird". Neither
+misbehaved; they collided. That is what a count of twelve predicts.
+
+**The guard count is a symptom of the architecture, not of poor discipline.** The
+cascade needs almost none of these: its text boundary catches leaks and repeats
+before anyone hears them, and `toolConfig: { mode: "ANY" }` forces a tool call
+rather than asking for one. Live has neither.
+
+### The idea worth carrying forward
+
+`audioOut` plays raw PCM and does not care where it came from, and
+`scripts/voice-compare.js` already renders arbitrary text to PCM **in the
+tenant's own voice**. So a small set of hold lines could be pre-rendered once and
+played from code.
+
+That would close the gap behind half of today's unfixable defects — the dead air,
+the silence after a failed retry, "only the model can break silence" — without a
+voice mismatch. It is the one change that would let a guard ACT where today it can
+only ask.
 
 ## The voice, decided by phone — and why the WAV rig could not decide it
 

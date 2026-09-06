@@ -41,6 +41,27 @@ weeks after. That decision cascades into most of this list.
 | **Stacked questions** | Same file, same session as the tic. `live_stacked_questions` already counts 1–2 a call. |
 | ~~**A notes tool, or a refusal that admits it cannot**~~ **FIXED, UNVERIFIED 2026-09-05** | `add_appointment_note`. APPENDS, never replaces — the row's note was the REASON for the appointment. The refusal names `record_customer_request`, because a bare refusal is what let LVX34 become "someone will call you back". |
 
+### THE FULL LIFECYCLE RAN, 2026-09-06
+
+Eleven calls. Book, reschedule, cancel, note, message, interrupt, hang up —
+**every appointment tool has now run on a real call**, and the final one wrote two
+rows that both matched what the caller was told.
+
+The result of the day is the CLAIM GUARD. It caught a false cancellation claim
+fourteen seconds before the tool ran, the model corrected itself out loud, and
+then did the work. LVX27 — the oldest open P0 — prevented rather than detected.
+
+**What stays open is one shape, not many:** the model will not reliably do a
+follow-up it is asked for. `correct_appointment_name` was declined again, so a
+spelled name still landed wrong. Every guard that DOES the thing has worked;
+every guard that ASKS has been declined at least once. That is the direction of
+the remaining work, and this project wrote the sentence for it long ago: "the
+thing that must not depend on the model's cooperation is the write itself."
+
+**And a caution about pace**: four of the day's own fixes introduced defects, each
+shipped on a single call's evidence. Two were caught by tests whose fixtures
+described a call that cannot happen. Detail in `receptionist-backlog.md`.
+
 ### THE CALL PASSED, 2026-09-05 — with one leg outstanding
 
 Second UK-tenant call: `Nithin Dodla`, Monday 7 September 16:00 London, the name
