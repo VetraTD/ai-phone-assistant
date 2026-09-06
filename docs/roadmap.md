@@ -41,6 +41,24 @@ weeks after. That decision cascades into most of this list.
 | **Stacked questions** | Same file, same session as the tic. `live_stacked_questions` already counts 1–2 a call. |
 | ~~**A notes tool, or a refusal that admits it cannot**~~ **FIXED, UNVERIFIED 2026-09-05** | `add_appointment_note`. APPENDS, never replaces — the row's note was the REASON for the appointment. The refusal names `record_customer_request`, because a bare refusal is what let LVX34 become "someone will call you back". |
 
+### What comes next — and it is not code
+
+The remaining engineering is written up in `receptionist-backlog.md` under "What
+is left, and the honest answer about whether to do it": moving the `deferral`
+note into code, pre-rendered hold lines so a guard can ACT rather than ask,
+re-ranking the note priority, and the follow-up the model will not do
+(`correct_appointment_name`, declined three times, and nobody has an answer).
+
+**The recommendation there is to do none of it before a business tests.** Every
+call of the 2026-09-06 round found something nobody predicted, and four of that
+round's own fixes introduced defects. A real business will find a different list,
+and building against a predicted one spends the effort twice.
+
+**The three things worth doing are not code:** merge the branch, get a UK handset
+for the call that closes phase 1 literally, and start the Google OAuth
+verification and the DPAs — the only items here where a day of delay costs a day
+that cannot be recovered.
+
 ### THE FULL LIFECYCLE RAN, 2026-09-06
 
 Eleven calls. Book, reschedule, cancel, note, message, interrupt, hang up —

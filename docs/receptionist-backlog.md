@@ -326,6 +326,117 @@ generating as American, and drifting"). It was not run, because the evidence it
 was chasing evaporated. Recorded here so it is available if drift is ever heard
 on a call that is definitely on the rig.
 
+## What is left, and the honest answer about whether to do it
+
+Written at the close of the 2026-09-06 round so the list is not carried in
+somebody's head. **The recommendation is at the bottom and it is "mostly do not
+do these yet."**
+
+### The roadmap's own stopping rule, applied
+
+> *"If items appear after the passing call, the question to ask is whether a
+> business ringing the number can PERCEIVE them. If not, they belong to phase 3."*
+
+Against that test:
+
+| item | perceivable by a caller? |
+|---|---|
+| a spelled name landing one letter wrong | **yes**, on the record they receive |
+| two guards colliding | **yes**, once in eleven calls |
+| `deferral` promising a callback with no row | **no** — the caller hears the right thing; only the business notices |
+| dead air after a silent turn | **yes**, but it did not recur once the exit work landed |
+| eight notes sharing one slot | no, not directly |
+
+Most of this is phase 3 by the project's own rule.
+
+### A · MOVE A NOTE TO CODE — `deferral` `[cheap]` · P2
+
+The only note that can move with no new infrastructure. It fires when an action
+was refused this turn AND the model said "someone will get back to you". Today it
+asks the model not to say that. Everything needed to make the promise TRUE is
+already known — the caller's number comes from the call, and the refusal says
+what they wanted — so the write can be done in code, exactly like the
+end-of-call message sweep.
+
+**Done when:** a refused action followed by a callback promise produces a
+`customer_requests` row, asserted by a test that fails first.
+
+**The trade, stated:** callback rows the business did not explicitly ask for. The
+caller was TOLD one was coming, so the row makes the promise true rather than
+inventing something.
+
+### B · PRE-RENDERED HOLD LINES `[medium]` · P2
+
+The single change that unlocks the most. `audioOut` plays raw PCM and does not
+care where it came from; `scripts/voice-compare.js` already renders arbitrary
+text to PCM **in the tenant's own voice**. Render a handful of fixed lines once
+and play them from code.
+
+Two notes become one-liners immediately: `zero_text` (a tool ran and the model
+said nothing) and `unusable_transcript` ("sorry, I didn't catch that"). Both are
+lines the cascade simply plays.
+
+**Done when:** a turn where a tool ran and the model produced no text is filled
+by audio this code played, not by a note asking the model to speak.
+
+**Why it matters beyond those two:** it is the first time a guard on this path
+could ACT rather than ASK. Half the defects of 2026-09-06 were unfixable because
+"only the model can break silence".
+
+### C · RE-RANK THE NOTE PRIORITY `[cheap]` · P3
+
+`sendTurnNote` allows ONE note per turn and eight per call, and position in
+`auditTurn` is the priority order. `spelling` currently outranks notes that
+prevent untruths — and its own job is now quality rather than correctness,
+because the retry and the last-chance write already stop the LOSS. Move it below
+`claim`, `offer` and `deferral`.
+
+### D · THE FOLLOW-UP THE MODEL WILL NOT DO · **OPEN · P1**
+
+`correct_appointment_name` has now been declined three times. A caller spells
+their name letter by letter, the write retry saves the booking under the
+pre-spelling name, `write_retry_name_unspelled` fires, the model is told, and it
+does not call the tool.
+
+**Not a wording problem.** LVX34's class, three rewordings deep. The fix has to be
+something that does not need the model's cooperation, and the honest blocker is
+LVX62: spelled letters do not transcribe reliably here, so code cannot assemble
+the name. **Nobody has an answer to this one yet, and that is the entry.**
+
+### E · NOT WORTH DOING, recorded so it is not re-proposed
+
+- **The `end_call` abandoned refusal.** Asked for on 2026-09-06 and refused with
+  evidence: tried on 2026-09-04, reverted the same day. `end_call`'s declaration
+  makes the goodbye be spoken in the SAME response, so it is already said before
+  the gate runs. The caller heard "you're all set", was held on the line, and got
+  six seconds of dead air and a nudge.
+- **Exempting messages from the spelling gate.** Built and reverted on
+  2026-09-06. Two tests encode that coverage deliberately. The end-of-call sweep
+  solves the loss without removing the protection.
+- **A ninth note.** Eight already share one slot. A ninth makes the other eight
+  less likely to fire.
+
+### The recommendation
+
+**Do none of A-D before a business tests.**
+
+Every call of this round found something nobody predicted — the accent that was
+an environment, the tangent that was one turn, the clipped greeting that was my
+own cutter. **A real business will find a different list than this one**, and
+building against a predicted list first spends the effort twice.
+
+Against that: four of this round's own fixes introduced defects, each shipped on
+a single call's evidence. The marginal fix is now roughly as likely to break
+something as to mend it, which is the point at which more calls beat more code.
+
+**What to do instead**, none of it code: merge the branch, get a UK handset for
+the one call that closes phase 1 literally, and start the Google OAuth
+verification and the DPAs — the only items on this project where a day of delay
+costs a day that cannot be recovered.
+
+**When to revisit:** when a business testing the line reports something in A-D,
+or when the counters say a guard is firing on a clean call.
+
 ## The full-lifecycle round, 2026-09-06 — eleven calls, and the guards finally ran together
 
 Book, reschedule, cancel, note, message, interrupt, hang up. Every appointment
