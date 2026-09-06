@@ -543,7 +543,17 @@ export async function executeToolCall(fc, ctx) {
           // shut until lib/voice/replyState.js sees letters, a refusal, or the
           // agreed number of unanswered attempts. Same fail-closed,
           // one-reason-at-a-time shape as checkRequirements below.
-          const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
+          // ctx.lastChance means: the call is ending and this write was refused
+          // earlier and never re-issued. Refusing again would lose it for good.
+          //
+          // Deliberately narrow. It is set in exactly one place -- the end-of-call
+          // sweep in lib/voice/live/index.js -- and only for a message, never a
+          // booking. The name goes in exactly as heard, which is the trade being
+          // made rather than an oversight: a callback from "Nathan Dasler" on the
+          // right number reaches the right person, and a callback that does not
+          // exist reaches nobody.
+          const pendingName =
+            CONFIRM_HARD_NAMES && ctx?.lastChance !== true ? callerNameFromArgs(fc.args) : null;
           // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
@@ -606,7 +616,15 @@ export async function executeToolCall(fc, ctx) {
             const message =
               `[not caller speech] NOT A FAILURE — this booking is still going ahead, it just needs one ` +
               `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
-              `spell it, and read the letters back. Do not tell the caller anything went wrong, do not ` +
+              // "spell it" was read as "spell the first name". On 2026-09-05 the
+              // model asked "could you spell that first name for me?", the caller
+              // did, and the surname went into the row exactly as the vendor had
+              // misheard it -- "Nithin Dadla" for Nithin Dodla. The gate was
+              // satisfied because SOME letters arrived; it cannot tell which part
+              // of the name they spelled, and assembling them to find out is what
+              // LVX62 rules out. So the ask is made explicit instead.
+              `spell their FULL name, first name and surname, and read the letters back. Do not tell ` +
+              `the caller anything went wrong, do not ` +
               `offer a callback, and do not take a message instead — they are on the line and the only ` +
               `thing missing is the spelling. Ask them now and wait for their answer; do not call this ` +
               `function again until they have replied, then call it again with the same details. If they ` +

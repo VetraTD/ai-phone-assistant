@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { STEPS } from "../lib/callState.js";
+import { getLatencyStats } from "../lib/voice/metrics.js";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 
 // ---------------------------------------------------------------------------
@@ -195,10 +196,25 @@ describe("the turn-end strategy across a reply", () => {
 });
 
 describe("an exit queued behind audio that then gets cleared", () => {
-  it("does not leave the caller in silence waiting for a mark that will never arrive", async () => {
-    // audioOut.clear() empties the queue AND outstandingMarks, so the exit mark
-    // never reaches the wire and Twilio never echoes it. The exit then waited
-    // the full fallback -- fifteen seconds of dead air after a goodbye.
+  // WHY THIS TEST CHANGED, 2026-09-06.
+  //
+  // The original concern is still real: audioOut.clear() empties the queue AND
+  // outstandingMarks, so the exit's mark never reaches the wire, Twilio never
+  // echoes it, and the exit sits out its full fifteen-second backstop. That is
+  // fifteen seconds of dead air after a goodbye, and it is why clearAudio ran
+  // the exit unconditionally.
+  //
+  // But the same line meant that INTERRUPTING A GOODBYE HUNG THE CALLER UP
+  // FASTER, which is the opposite of what interrupting means. The owner asked
+  // for the opposite behaviour in as many words: "if the user barges in the
+  // receptionist doesn't just go straight through and end."
+  //
+  // Both concerns are real, so the caller's own speech separates them. A barge
+  // cancels the exit -- there is no dead air, because they are talking. Any
+  // other clear still runs it, for the original reason, and that half is
+  // asserted below so the regression cannot come back through the other door.
+
+  it("CANCELS the hang-up when the caller interrupts the goodbye", async () => {
     const { ws, live, speak } = await boot({ execute: toolReturning({ endCallArgs: {} }) });
     live.push({ toolCall: { functionCalls: [{ id: "t1", name: "end_call", args: {} }] } });
     await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
@@ -206,7 +222,26 @@ describe("an exit queued behind audio that then gets cleared", () => {
     live.push({ serverContent: { turnComplete: true } });
     await new Promise((r) => setImmediate(r));
 
+    // The vendor reporting the caller spoke over us. This is a barge.
     live.push({ serverContent: { interrupted: true } });
+    await new Promise((r) => setImmediate(r));
+
+    expect(ws.readyState).toBe(1);
+    expect(getLatencyStats().turnTaking.live_exit_cancelled_by_caller).toBe(1);
+  });
+
+  it("still runs the exit when audio is cleared for any other reason", async () => {
+    // The original regression, kept. Here the clear comes from the leak guard
+    // rather than from the caller, so the mark is gone, nobody is speaking, and
+    // waiting out the backstop would be fifteen seconds of silence.
+    const { ws, live, speak } = await boot({ execute: toolReturning({ endCallArgs: {} }) });
+    live.push({ toolCall: { functionCalls: [{ id: "t1", name: "end_call", args: {} }] } });
+    await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
+    speak(4000);
+    live.push({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+
+    live.push({ serverContent: { outputTranscription: { text: "calling cancel_appointment_db now" } } });
     await new Promise((r) => setImmediate(r));
 
     expect(ws.readyState).not.toBe(1);

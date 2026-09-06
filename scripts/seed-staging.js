@@ -39,6 +39,41 @@ const NAME = process.env.SEED_BUSINESS_NAME || "Vetra Staging Test Clinic";
 const EMAIL = process.env.SEED_USER_EMAIL || "staging-test@vetratd.invalid";
 const USER_ID = process.env.SEED_USER_ID || "7a1e9c40-5b2d-4e18-9f33-000000000001";
 
+// ---------------------------------------------------------------------------
+// Locale, timezone, greeting and tier — parameterised 2026-09-04
+// ---------------------------------------------------------------------------
+//
+// These were literals, correct for the one tenant this script existed to make.
+// The market is UK first now, and a UK demo tenant needs Europe/London and
+// en-GB. The alternative was a second seed script, which is how two seeding
+// paths drift until one of them is quietly wrong — this file already carries
+// the reasoning about RLS, the bootstrap function and why the hours are what
+// they are, and none of that should be duplicated.
+//
+// EVERY DEFAULT IS BYTE-IDENTICAL TO WHAT IT REPLACED, because the GCP
+// `vetra-migrate-us-staging` Cloud Run job runs this with no new variables set
+// and must keep producing exactly the row it produced yesterday.
+//
+// The locale matters more than it looks. lib/voice/live/index.js resolves the
+// voice's language as: LIVE_LANGUAGE_CODE → this column → the country of the
+// dialled number. A UK number gets en-GB either way, but leaving the column
+// empty means the row does not say what it is, and an empty column on the
+// deployment is exactly what made the accent fix look done and not be.
+const TIMEZONE = process.env.SEED_TIMEZONE || "America/Chicago";
+const LOCALE = process.env.SEED_LOCALE || "en-US";
+const TIER = process.env.SEED_COMPLIANCE_TIER || "hipaa";
+
+// The greeting is the FIRST THING A CALLER HEARS, so a renamed tenant must not
+// keep announcing itself as the staging test line. Derived from the name when
+// the name was overridden and no greeting was given; otherwise the original
+// literal, unchanged.
+const NAME_OVERRIDDEN = Boolean(process.env.SEED_BUSINESS_NAME);
+const GREETING =
+  process.env.SEED_GREETING ||
+  (NAME_OVERRIDDEN
+    ? `Thanks for calling ${NAME}. How can I help?`
+    : "Thanks for calling the Vetra staging test line. How can I help?");
+
 // Caller-facing SMS follow-ups, off unless asked for (migration 017's default,
 // and O25's gate sits on top of it).
 //
@@ -52,6 +87,28 @@ const USER_ID = process.env.SEED_USER_ID || "7a1e9c40-5b2d-4e18-9f33-00000000000
 //   gcloud run jobs execute vetra-migrate-us-staging --region=us-central1 \
 //     --project=vetra-us-staging-c3a3bd \
 //     --args=scripts/seed-staging.js --update-env-vars=SEED_SMS_FOLLOWUP=true
+//
+// ---------------------------------------------------------------------------
+// Seeding the UK DEMO tenant (phase 1, roadmap.md)
+// ---------------------------------------------------------------------------
+//
+// The number is +441372656055, which lives on Twilio ACCOUNT A. Seeding the row
+// is only half of making that number work — the deployment answering it also
+// needs TWILIO_AUTH_TOKEN_ALT set to account A's token, or every call 403s at
+// the webhook. See docs/roadmap.md phase 1 and the twilio-account-topology note.
+//
+//   DATABASE_URL=... \
+//   SEED_PHONE_NUMBER=+441372656055 \
+//   SEED_BUSINESS_NAME="<the demo business>" \
+//   SEED_TIMEZONE=Europe/London \
+//   SEED_LOCALE=en-GB \
+//   SEED_COMPLIANCE_TIER=standard \
+//   SEED_USER_EMAIL=uk-demo@vetratd.invalid \
+//   SEED_USER_ID=7a1e9c40-5b2d-4e18-9f33-000000000002 \
+//     node scripts/seed-staging.js
+//
+// Then seed its knowledge rows with scripts/seed-knowledge.js --phone, or the
+// assistant will correctly refuse every question a caller asks (LVX66/LVX67).
 const SMS_FOLLOWUP = process.env.SEED_SMS_FOLLOWUP === "true";
 
 const database = process.env.CLOUD_SQL_DATABASE || "";
@@ -63,16 +120,58 @@ const instance = process.env.CLOUD_SQL_INSTANCE || "";
 // Seed data in a production database is indistinguishable from a real tenant
 // once it is there, and it would answer a real phone number. Refusing on the
 // name is cruder than a flag and much harder to get wrong in a hurry.
+//
+// WIDENED 2026-09-04, because the original guard checked ONLY the Cloud SQL
+// variables and this script now has to seed a UK demo tenant on databases that
+// have neither: the local docker rig and Railway, both reached through a plain
+// DATABASE_URL. The old check refused those outright — correctly by its own
+// logic, and uselessly.
+//
+// So there are two routes in, and each one has to prove something:
+//
+//   Cloud SQL   — CLOUD_SQL_DATABASE and CLOUD_SQL_INSTANCE must both say
+//                 "staging", exactly as before. Unchanged.
+//   DATABASE_URL— allowed without ceremony when the host is obviously local;
+//                 anything else needs --confirm.
+//
+// The --confirm posture is lifted from scripts/seed-knowledge.js rather than
+// invented, so the two seeding scripts refuse the same way. The property being
+// protected is unchanged: nobody creates a synthetic business in a production
+// database by running a command they half-remembered.
 // ---------------------------------------------------------------------------
-if (!/staging/i.test(database) || !/staging/i.test(instance)) {
-  console.error(
-    `Refusing to seed: this does not look like staging.\n` +
-      `  CLOUD_SQL_DATABASE = ${JSON.stringify(database)}\n` +
-      `  CLOUD_SQL_INSTANCE = ${JSON.stringify(instance)}\n` +
-      "Both must contain 'staging'. A synthetic business in a production database " +
-      "is a tenant that answers a real phone number."
-  );
-  process.exit(1);
+const CONFIRMED = process.argv.slice(2).includes("--confirm");
+const usingCloudSql = Boolean(instance);
+
+/** A database URL that is obviously a developer's own machine. */
+function looksLocal(url) {
+  return /@(localhost|127\.0\.0\.1|host\.docker\.internal)[:/]/.test(String(url));
+}
+
+if (usingCloudSql) {
+  if (!/staging/i.test(database) || !/staging/i.test(instance)) {
+    console.error(
+      `Refusing to seed: this does not look like staging.\n` +
+        `  CLOUD_SQL_DATABASE = ${JSON.stringify(database)}\n` +
+        `  CLOUD_SQL_INSTANCE = ${JSON.stringify(instance)}\n` +
+        `Both must contain 'staging'. A synthetic business in a production database ` +
+        `is a tenant that answers a real phone number.`
+    );
+    process.exit(1);
+  }
+} else {
+  const url = process.env.DATABASE_URL || "";
+  if (!url) {
+    console.error("Refusing to seed: neither CLOUD_SQL_INSTANCE nor DATABASE_URL is set.");
+    process.exit(1);
+  }
+  if (!looksLocal(url) && !CONFIRMED) {
+    console.error(
+      `Refusing to seed: DATABASE_URL is not obviously a local database and --confirm was not passed.\n` +
+        `A synthetic business in a production database is a tenant that answers a real phone number.\n` +
+        `If this really is a staging or demo database, re-run with --confirm.`
+    );
+    process.exit(1);
+  }
 }
 
 const cfg = {
@@ -83,7 +182,14 @@ const cfg = {
   authType: process.env.CLOUD_SQL_PASSWORD ? "PASSWORD" : "IAM",
 };
 
-const { poolConfig, close } = await cloudSqlPoolConfig(cfg, { connectionTimeoutMillis: 10_000 });
+// Two ways to reach a database, and the Cloud SQL connector is not one of them
+// when no instance was named. cfg is built by hand above, so an empty
+// `instance` used to be handed to the connector regardless and came back as
+// ENOCONNECTIONNAME -- a failure that reads like a broken credential and is
+// really "you did not ask for this path".
+const { poolConfig, close } = usingCloudSql
+  ? await cloudSqlPoolConfig(cfg, { connectionTimeoutMillis: 10_000 })
+  : { poolConfig: { connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10_000 }, close: null };
 const pool = new pg.Pool(poolConfig);
 const client = await pool.connect();
 
@@ -162,7 +268,7 @@ try {
   } else {
     const made = await client.query(
       "SELECT * FROM app_create_business_for_user($1,$2,$3,$4)",
-      [USER_ID, EMAIL, NAME, "America/Chicago"]
+      [USER_ID, EMAIL, NAME, TIMEZONE]
     );
     id = made.rows[0].id;
     console.log(`created: ${id}`);
@@ -184,11 +290,11 @@ try {
     [
       id,
       PHONE,
-      "en-US",
+      LOCALE,
       // Explicit, though it changes nothing while DEPLOYMENT_MODE=hipaa forces
       // the tier anyway. Says out loud what this row is for.
-      "hipaa",
-      "Thanks for calling the Vetra staging test line. How can I help?",
+      TIER,
+      GREETING,
       HOURS,
       // ElevenLabs is refused at client construction in hipaa mode. Naming
       // Google keeps the first turn of every call off that error path.
@@ -203,6 +309,10 @@ try {
   await client.query("COMMIT");
 
   console.log("configured:", JSON.stringify(updated.rows[0]));
+  // Printed because these three decide what a caller HEARS, and none of them
+  // appears in the RETURNING clause above.
+  console.log(`timezone: ${TIMEZONE}  locale: ${LOCALE}  tier: ${TIER}`);
+  console.log(`greeting: ${GREETING}`);
   const total = await client.query("SELECT count(*)::int AS n FROM businesses");
   console.log(`businesses in ${database}: ${total.rows[0].n}`);
 } catch (err) {

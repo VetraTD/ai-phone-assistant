@@ -67,18 +67,18 @@ describe("buildLiveTools", () => {
   // "Hello." was read as an answer (LVX52). Asserting both numbers means a
   // future change cannot quietly restore the tool for the tenants it was taken
   // away from, nor remove it from the ones that use it.
-  it("declares ten for an appointments business that cannot text", () => {
+  it("declares eleven for an appointments business that cannot text", () => {
     const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS)[0].functionDeclarations;
 
-    expect(declared).toHaveLength(10);
+    expect(declared).toHaveLength(11);
     expect(declared.map((d) => d.name)).not.toContain("record_sms_consent");
   });
 
-  it("declares eleven once that business can text", () => {
+  it("declares twelve once that business can text", () => {
     const texting = { ...APPOINTMENTS_CONFIG, smsFollowupEnabled: true };
     const declared = buildLiveTools(texting, EXTRAS)[0].functionDeclarations;
 
-    expect(declared).toHaveLength(11);
+    expect(declared).toHaveLength(12);
     expect(declared.map((d) => d.name)).toContain("record_sms_consent");
   });
 

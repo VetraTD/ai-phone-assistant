@@ -150,16 +150,45 @@ describe("LVX25 — stacked questions, counted rather than instructed", () => {
     expect(c().live_stacked_questions).toBe(0);
   });
 
-  it("undercounts the observed shape, and that is recorded rather than widened", async () => {
+  it("NOW counts one question mark with two asks — the decision reversed 2026-09-05", async () => {
     const s = await boot();
-    // The real one, verbatim from the call: three asks, ONE question mark.
+    // The real one, verbatim: three asks, ONE question mark.
     await s.say("Can I start with your name, company, and what industry you're in?");
 
     expect(c().live_reply_turns_checked).toBe(1);
-    // Zero. A conjunction parser would catch it and would be the phrasing
-    // treadmill this repository already warns about; two question marks is the
-    // case a prospect most obviously hears as being interrogated, and it is
-    // exact. The gap is written down so nobody reads a low number as a fix.
+    // THIS ASSERTION USED TO BE 0, deliberately. The reasoning was that a
+    // conjunction parser is the phrasing treadmill this repository warns about,
+    // and that two question marks is the exact, free case.
+    //
+    // Reversed by evidence, not by preference. On 2026-09-05 the model said
+    // "May I get your full name, and what is the best number to reach you on?"
+    // -- one question mark -- the caller answered the first half, and the model
+    // re-asked the second half verbatim THREE TIMES. Five of that call's six
+    // repeats trace to stacked questions, and the counter read 2 for the whole
+    // call while the defect drove all of them.
+    //
+    // A counter that cannot see the dominant cause of the loudest complaint is
+    // not being disciplined, it is being blind. It still acts on nothing, so
+    // the cost of the widening is a number that reads louder.
+    expect(c().live_stacked_questions).toBe(1);
+  });
+
+  it("counts the exact turn that caused three repeats", async () => {
+    // Verbatim from 18:26:19 on 2026-09-05. The caller answered "full name";
+    // the model then asked for the number at 18:26:27, again at 18:26:35 and
+    // again at 18:26:48, and the caller had not spoken once in between.
+    const s = await boot();
+    await s.say("Of course, I can help with that. May I get your full name, and what is the best number to reach you on?");
+
+    expect(c().live_stacked_questions).toBe(1);
+  });
+
+  it("leaves a single question with a list of options alone", async () => {
+    // The shape that must NOT trip it: one question, several answers offered.
+    const s = await boot();
+    await s.say("Would you prefer 9:00 AM, 1:00 PM, or 4:30 PM?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
     expect(c().live_stacked_questions).toBe(0);
   });
 
@@ -200,6 +229,56 @@ describe('the "anything else" tic', () => {
 
     expect(c().live_reply_turns_checked).toBe(1);
     expect(c().live_closing_tic).toBe(0);
+  });
+
+  it("counts the headless form — no \"is there\" in front of it", async () => {
+    // MISSED BEFORE THIS. The regex led with `(?:is|was)\s+there\s+anything\s+else`,
+    // so "Is there anything else you'd like to know?" was caught by that branch
+    // and the same sentence with the opener dropped was not. A tic the model
+    // shortens is still the tic; a counter that stops seeing it just reports a
+    // quieter call.
+    const s = await boot();
+    await s.say("The All-In-One package runs Meta and Google together. Anything else you'd like to know?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(1);
+  });
+
+  it("counts the \"what else\" rephrasing, which carries no \"anything\" at all", async () => {
+    // MISSED BEFORE THIS, and it is the one the phrasing list could never have
+    // reached by widening around "anything else" -- the words are not in it.
+    const s = await boot();
+    await s.say("I've got that booked for Monday. What else can I help you with today?");
+
+    expect(c().live_closing_tic).toBe(1);
+  });
+
+  it("leaves \"before you ask anything else\" alone — an idiom, not the tic", async () => {
+    // THE FALSE POSITIVE THIS MUST NOT ACQUIRE, and it is not hypothetical:
+    // Digile Media's own custom_instructions open with "Find out why they are
+    // calling before you ask anything else." Widening to a bare "anything else"
+    // would count a phrase in the tenant's prompt as a verbal tic in the
+    // assistant's speech, and the number would stop meaning anything.
+    const s = await boot();
+    await s.say("Before I ask anything else — what's prompted the call today?");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(0);
+  });
+
+  it("counts the sign-off form heard on the 2026-09-05 call", async () => {
+    // VERBATIM from turn 12 of the first UK-tenant call, and MISSED by every
+    // branch: "there's" is not "is there", and nothing followed "anything else"
+    // to catch it either. It was the fifth ask in fourteen turns while the
+    // counter reported four.
+    //
+    // It is also the form that matters most, because it is the one bolted onto
+    // a goodbye -- the model trying to end the call and asking on the way out.
+    const s = await boot();
+    await s.say("Just let me know if there's anything else. Otherwise, thanks for calling and have a great day.");
+
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_closing_tic).toBe(1);
   });
 
   it("counts nothing at all on a turn with no assistant text", async () => {

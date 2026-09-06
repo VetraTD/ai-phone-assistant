@@ -173,6 +173,7 @@ const BUILTIN_TOOL_NAMES = [
   "cancel_appointment_db",
   "reschedule_appointment_db",
   "correct_appointment_name",
+  "add_appointment_note",
   // messages pack
   "record_customer_request",
   // quotes pack

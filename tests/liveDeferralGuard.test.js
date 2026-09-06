@@ -272,7 +272,40 @@ describe("a refused write answered with a callback promise", () => {
     await s.settle();
 
     expect(stat("live_spelling_ask_nudged")).toBe(1);
-    expect(JSON.stringify(notes(s.live))).toContain("spell it NOW");
+    // "spell their FULL name" as of 2026-09-05. The note used to say "spell it
+    // NOW", and on a real call the model read "it" as the first name only: the
+    // caller spelled "N-I-T-H-I-N", the surname went into the row exactly as the
+    // vendor had misheard it, and the gate was satisfied because SOME letters had
+    // arrived. The gate cannot tell which part of a name was spelled, and
+    // assembling the letters to find out is what LVX62 rules out.
+    expect(JSON.stringify(notes(s.live))).toContain("spell their FULL name");
+  });
+
+  it("does NOT force a second spoken turn to deliver that nudge", async () => {
+    // 2026-09-05, and the loudest complaint of the session. This note fires
+    // because the model has JUST SAID a name, so it has always already spoken
+    // this turn. Sent with turnComplete:true it made the model speak AGAIN with
+    // nothing new to say, and what came out was the previous turn reworded:
+    //
+    //   18:26:27  "Thanks, Nitin Dadlani. And what's the best number...?"  + NOTE
+    //   18:26:35  "Thanks, Nitin Dadlani. Can you spell your full name...?
+    //              And what's the best number to reach you on?"
+    //   18:26:40  the caller's first word of the entire exchange
+    //
+    // Three assistant turns, sixteen seconds, no caller speech between any of
+    // them. The debug log calls that three turns; the caller hears one stream
+    // repeating itself, and reported it as the worst thing about the call.
+    const s = await boot("allow");
+    s.hear("Hi, it's Jane Fitzgerald.");
+    s.say("Lovely, thanks. What day suits you?");
+    s.endTurn();
+    await s.settle();
+
+    const frame = s.live.sent.clientContent
+      .slice(1)
+      .find((m) => /spell their FULL name/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(false);
   });
 
   it("stays quiet when the assistant already asked for the spelling itself", async () => {

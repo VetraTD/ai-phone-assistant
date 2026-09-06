@@ -68,6 +68,10 @@ CREATE TABLE businesses (
   -- resolveVoice() and config/voices.js VOICE_CATALOG.
   voice_provider               text DEFAULT 'elevenlabs',
   voice_id                     text,
+  -- Gemini Live prebuilt voice (migration 041). NULL = the per-language
+  -- default. This is the speech-to-speech front-end's voice; voice_id
+  -- above is the cascade's ElevenLabs one, and they are not interchangeable.
+  live_voice                   text,
   -- Caller-facing SMS follow-ups (migration 017) — see
   -- services/notifications.js sendCallerSms(). Opt-in per business.
   sms_followup_enabled         boolean DEFAULT false,

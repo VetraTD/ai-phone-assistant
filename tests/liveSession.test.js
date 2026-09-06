@@ -116,7 +116,7 @@ describe("session start", () => {
     expect(database.lookupBusinessByPhone).toHaveBeenCalledWith("+441372656055");
   });
 
-  it("declares all ten tools this tenant can use on the session", async () => {
+  it("declares all eleven tools this tenant can use on the session", async () => {
     // The single most expensive mistake available here. Rounds 1 and 2
     // declared six and measured a receptionist that could not check
     // availability.
@@ -128,7 +128,7 @@ describe("session start", () => {
     // from a tenant that cannot text at all -- it opened a real call by asking
     // for SMS consent it could never act on (LVX52). The count is still the
     // assertion; what it counts is now the tools this tenant can actually use.
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     expect(names).toContain("check_appointment_availability");
     expect(names).not.toContain("record_sms_consent");
   });

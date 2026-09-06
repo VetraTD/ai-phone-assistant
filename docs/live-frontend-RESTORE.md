@@ -116,6 +116,53 @@ strength of its argument.
 | **status** | **RESTORED 2026-09-04 after a six-call verification round**, to `https://ai-phone-assistant-staging.up.railway.app/twilio/live-voice` + `/twilio/status`, and verified by re-reading the number from Twilio and comparing **all four fields one at a time**. The cloudflared quick tunnel is torn down and returns 502; that URL is dead and a future rig gets a new one. |
 | **correction** | The 2026-09-03 row said the number had been put back "field-for-field" to the captured `voiceUrl` of `/twilio/voice`. It had not: re-reading it on 2026-09-04 returned **`/twilio/live-voice`**. Nothing was broken by it — the host was alive — but `npm run probe` was dialling the **Live** front-end rather than the cascade, so any number it reported was a Live number and not comparable with earlier cascade runs. `readiness.md:161` was the accurate document and this table was not. **Reading a number back is not enough on its own if the read-back is only glanced at.** |
 
+### `+441372656055` — the UK demo number, captured 2026-09-05
+
+**Captured BEFORE anything was changed**, read live from Twilio account A, which
+is the account that owns it. Phase 1's verification call needs a UK number a UK
+handset can dial, and this is the only one there is.
+
+| field | value |
+|---|---|
+| number | `+441372656055` |
+| friendlyName | `441372656055` |
+| account (A / B) | **A** — `AC1828…43b6`, the account whose token GCP holds in `vetra-uk-edc8ca/twilio-auth-token` and which is **not** in the repo's local `.env` |
+| sid | `PN143d2a428a1d27c601c0419f83309a2a` |
+| voiceUrl | `https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/voice` |
+| voiceMethod | `POST` |
+| statusCallback | `https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/status` |
+| statusCallbackMethod | `POST` |
+| voiceApplicationSid | *(empty)* |
+| voiceFallbackUrl | *(empty)* |
+| smsUrl | `https://demo.twilio.com/welcome/sms/reply` — Twilio's stock demo, never ours |
+| captured at | 2026-09-05, read live from Twilio immediately before any change |
+| captured by | this session |
+| **status** | **NOT YET REPOINTED.** Captured first, deliberately, per §1. |
+
+**This is a different account from the number above it**, and that is the whole
+reason this row exists separately. `+18176011171` is on account B, whose token is
+in the local `.env`; this one is on account A, whose token lives only in GCP.
+`twilioValidationLive` accepts either, so `/twilio/live-voice` works once
+`TWILIO_AUTH_TOKEN_ALT` is set — but a number on the wrong account 403s every
+single request, which reads as a broken endpoint rather than a credential.
+
+**`statusCallback` is deliberately left pointing where GCP has it.** It goes to a
+route mounted behind the single-token `twilioValidation` (`server.js:776`), so
+Twilio's end-of-call report — signed by account A — will fail the check and get a
+403. That is **LVX14's shape and it is accepted**: a Live call never reaches
+`/twilio/status` in a useful way anyway (LVX30), so nothing is lost that is not
+already lost, and the caller's experience is unaffected. The cost is one
+`twilio_signature_invalid` log line per call, which looks exactly like a forged
+request and is not. Recorded here so nobody chases it.
+
+**What is at stake while it is repointed.** This is Digile Media's real line and
+people ring it — it is the demo a friend dials on a UK handset. Tiers 2a, 2b and 3
+are not built, but the **connect-time fallback is** and was verified on real calls:
+a failure at pickup hands off in-process to the cascade or to voicemail, never
+silence (`server.js:568`). What that does **not** cover is the host being gone. On
+a laptop rig behind a quick tunnel, a closed laptop is a dead number. Keep the
+window short and restore from this table immediately afterwards.
+
 ### Testing against a laptop, and why it is cloudflared and not ngrok
 
 **ngrok cannot authenticate on the development machine.** Its control connection

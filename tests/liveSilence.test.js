@@ -195,6 +195,16 @@ describe("LVX19 silence ladder", () => {
     expect(s.ws.readyState).toBe(1);
 
     s.markPlayed("live-exit-end_call");
+    // The mark means the goodbye has PLAYED; it no longer means the socket
+    // closes. HANGUP_GRACE_MS (1,500ms, matching the cascade's) now sits between
+    // the two so the caller has a breath to interrupt -- added 2026-09-06, after
+    // a real call closed 73ms after arming and cut the caller off mid-sentence.
+    //
+    // The line this test exists for is unchanged and still asserted above: the
+    // hang-up waits for the goodbye to be HEARD rather than for the model to
+    // stop generating.
+    expect(s.ws.readyState).toBe(1);
+    await new Promise((r) => setTimeout(r, 1_800));
     expect(s.ws.readyState).toBe(3);
   });
 

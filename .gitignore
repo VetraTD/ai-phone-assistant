@@ -58,3 +58,14 @@ eval/results/tts-readback/
 # Vendor prices are account-specific and go stale; a committed rate is one
 # nobody re-checks. See config/rates.example.json.
 config/rates.json
+
+# Rendered voice candidates (scripts/voice-compare.js). Audio, not source.
+voice-compare/
+
+# Scratch copies of the live-call server log, used when analysing a call.
+# They contain LIVE_DEBUG_TRANSCRIPT output: assistant speech, caller names and
+# phone numbers. Three of them reached a commit on 2026-09-06 via `git add -A`,
+# which is LVX24 (caller data where it does not belong) in a new place.
+.s*.log
+.call*.log
+.t*.log

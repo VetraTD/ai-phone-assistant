@@ -8,7 +8,7 @@ import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 // The owner, unprompted: "When I first got gemini live it was working
 // beautifully. Now it seems like it is having issues once connected to
 // everything." The spike had NO tools and a ten-line prompt and was recorded as
-// "it sounds amazing". The current configuration gives the same model ten tools
+// "it sounds amazing". The current configuration gives the same model eleven tools
 // and a ~17,000-character prompt, and the last call produced three bookings, a
 // cancellation, a mid-booking hang-up and audible confusion.
 //
@@ -112,7 +112,7 @@ describe("LVX23 bisect arms", () => {
     // record_sms_consent is withheld from a tenant that cannot use it (LVX52).
     // The arm is still "unchanged" -- what changed is the tenant's tool set,
     // not this arm's treatment of it.
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 
@@ -124,7 +124,7 @@ describe("LVX23 bisect arms", () => {
 
   it("arm 2 keeps every tool and shrinks only the prompt", async () => {
     const cfg = await boot({ LIVE_PROMPT: "minimal" });
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeLessThan(2_000);
   });
 
@@ -144,7 +144,7 @@ describe("LVX23 bisect arms", () => {
     process.env.LIVE_TOOLS = "none";
     process.env.LIVE_PROMPT = "minimal";
     const cfg = await boot({});
-    expect(declaredNames(cfg)).toHaveLength(10);
+    expect(declaredNames(cfg)).toHaveLength(11);
     expect(instruction(cfg).length).toBeGreaterThan(10_000);
   });
 });

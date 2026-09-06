@@ -1147,7 +1147,43 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   toolContract += markerMode
     ? `- Name the intent on the intent line (see INTENT LINE) once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`
     : `- Call set_call_intent once the caller's need is clear. If the caller is vague — a nonspecific reason like wanting to "come in for something" — do NOT guess an intent from it; ask the ONE clarifying question with concrete options FIRST (see GUARDRAILS), and set the intent only from their answer.\n`;
-  toolContract += `- Before ending the call, you MUST first ask the caller something like "Is there anything else I can help you with?" and listen to their answer. Call end_call only after the caller clearly indicates they do not need anything else. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
+  // THE "ANYTHING ELSE?" TIC WAS ORDERED HERE, and that is why nine calls of
+  // prompt-side reasoning never moved it.
+  //
+  // This line used to read: 'you MUST first ask the caller something like "Is
+  // there anything else I can help you with?"'. A mandate, with the sentence
+  // supplied. The model obeyed it — 3 to 4 of every 10 turns across nine calls,
+  // including immediately after plain factual answers, and on one turn as the
+  // ENTIRE reply to a caller who had said "Okay". It reads as the loudest
+  // remaining "this is not a person" signal a prospect gets.
+  //
+  // It was treated as model drift for weeks, under this file's own standing rule
+  // that seven instructions already say "one question at a time" and an eighth
+  // would weaken the other seven. That rule is right about STACKED QUESTIONS,
+  // where the model ignores what it is told. It is exactly wrong here: the tic is
+  // not a rule being ignored, it is a rule being FOLLOWED. There was no eighth
+  // instruction to add, only a mandate to delete — the shape LVX34 and LVX71 both
+  // used, and the opposite of a phrasing treadmill.
+  //
+  // TWO HALVES ARE KEPT, and neither is decoration:
+  //
+  //   Do not end early. Without it nothing stands between the model and LVX35,
+  //   closing the call the moment anything succeeds. The requirement survives;
+  //   only the script for satisfying it is gone.
+  //
+  //   Goodbye in the same response. Mechanical, not stylistic: the call ends the
+  //   instant end_call runs, so a goodbye planned for afterwards is heard by
+  //   nobody.
+  //
+  // WHAT IS ADDED is the negative, because "ask once at the end" on its own is
+  // what the model was already doing. The defect was never the question; it was
+  // asking it as a way to finish an ordinary turn.
+  //
+  // NOT written as a count ("never ask twice"). A cap stated in a prompt does not
+  // hold in this codebase — that is a recorded finding, not a suspicion — so the
+  // instruction describes WHEN the question belongs and `live_closing_tic`
+  // measures whether it worked.
+  toolContract += `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
     // you" in the same response as a lookup call. That is a two-part

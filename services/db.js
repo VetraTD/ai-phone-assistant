@@ -508,6 +508,7 @@ export function loadConfig(business, capabilityRows = null) {
       customInstructions: null,
       voiceProvider: "elevenlabs",
       voiceId: null,
+      liveVoice: null,
       smsFollowupEnabled: false,
       smsTemplates: {},
     };
@@ -555,6 +556,16 @@ export function loadConfig(business, capabilityRows = null) {
     customInstructions: business.custom_instructions || null,
     voiceProvider: business.voice_provider || "elevenlabs",
     voiceId: business.voice_id || null,
+    // The speech-to-speech front-end's prebuilt voice (migration 041). NOT the
+    // same thing as voiceId above, which is an ElevenLabs id for the cascade —
+    // one column serving both would mean a value that is valid for one path and
+    // meaningless on the other, read back wrong by whoever comes next.
+    //
+    // `|| null` rather than a default, so an estate that has not run 041 yet
+    // reads undefined -> null and takes the per-language default, exactly as it
+    // did before the column existed. A tenant row is configuration, and this one
+    // has to be safe to be absent.
+    liveVoice: business.live_voice || null,
     smsFollowupEnabled: !!business.sms_followup_enabled,
     smsTemplates: (business.sms_templates && typeof business.sms_templates === "object") ? business.sms_templates : {},
   };

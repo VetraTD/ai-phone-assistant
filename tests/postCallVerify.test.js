@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { postCallMode, verifyCall } from "../lib/postCallVerify.js";
 
@@ -70,6 +70,32 @@ const input = (over = {}) => ({
   ...over,
 });
 
+// ---------------------------------------------------------------------------
+// THE CLOCK IS FROZEN. See tests/whichAppointment.test.js for what happens
+// otherwise: its fixture held an appointment at 15:00Z on 5 September 2026, and
+// at 15:00Z on 5 September 2026 that row stopped being "upcoming". Ten tests
+// went red mid-session on a change that touched nothing they import.
+//
+// Every file carrying a hard-coded date near today has the same shape, so they
+// all get the same guard rather than waiting to find out one at a time. Friday
+// 4 September 2026 sits before every fixture date in this repository.
+// ---------------------------------------------------------------------------
+const FROZEN_NOW = new Date("2026-09-04T12:00:00Z");
+
+beforeAll(() => {
+  // shouldAdvanceTime, NOT a bare useFakeTimers(). Several of these files settle
+  // async work with a real setTimeout, and a frozen timer queue never fires it:
+  // the run hangs rather than failing, which is the worst way for a test to be
+  // wrong. This pins the DATE while leaving timers working.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
+
 describe("postCallMode", () => {
   it("is off unless explicitly asked for", () => {
     expect(postCallMode({})).toBe("off");
@@ -80,6 +106,60 @@ describe("postCallMode", () => {
   it("reads the two live modes", () => {
     expect(postCallMode({ POSTCALL_VERIFY: "count" })).toBe("count");
     expect(postCallMode({ POSTCALL_VERIFY: "SEND" })).toBe("send");
+  });
+});
+
+describe("verifyCall - a note is a change, but not one to text anybody about", () => {
+  // A REGRESSION INTRODUCED BY add_appointment_note, 2026-09-05, caught by
+  // reading the first real call rather than by a test.
+  //
+  // The note tool emits {type:"changed"}, because the row genuinely did change.
+  // That is correct for counting. It is wrong for CONFIRMING: changedRows feeds
+  // `confirmable`, so a caller who merely annotated an existing appointment
+  // became eligible for an "appointment_confirmation" text about a booking that
+  // did not move.
+  //
+  // Latent rather than observed: the verification call ran POSTCALL_VERIFY=count
+  // so nothing was sent, and the note happened to land on the row booked in the
+  // same call, where the id collision hid it anyway. Neither of those is a
+  // property of the design.
+  beforeEach(() => clearStats());
+
+  it("does not text a caller who only added a note to an existing appointment", async () => {
+    const existing = row({ id: "row-old", notes: "Strategy Call \u2014 in renewables" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": existing } });
+
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "changed", tool: "add_appointment_note", appointmentId: "row-old" }],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(out.sent).toHaveLength(0);
+    // Still COUNTED as a changed row: the row did change, and a counter that
+    // lied about that would be the opposite mistake.
+    expect(getLatencyStats().turnTaking.postcall_changed_rows).toBe(1);
+  });
+
+  it("still texts when the appointment really moved and was also noted", async () => {
+    // The note must not SUPPRESS a confirmation either. A reschedule plus a note
+    // on the same row is a real change the caller should hear about.
+    const moved = row({ id: "row-old", scheduled_at: "2026-09-08T09:00:00.000Z" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": moved } });
+
+    await verifyCall(
+      input({
+        writes: [
+          { type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-old" },
+          { type: "changed", tool: "add_appointment_note", appointmentId: "row-old" },
+        ],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -9,7 +9,7 @@
  * persisting messages at all.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   mergeCapabilityState,
   dispatchCapabilityEffects,
@@ -24,6 +24,32 @@ function makeEngine() {
     captureException,
   };
 }
+
+// ---------------------------------------------------------------------------
+// THE CLOCK IS FROZEN. See tests/whichAppointment.test.js for what happens
+// otherwise: its fixture held an appointment at 15:00Z on 5 September 2026, and
+// at 15:00Z on 5 September 2026 that row stopped being "upcoming". Ten tests
+// went red mid-session on a change that touched nothing they import.
+//
+// Every file carrying a hard-coded date near today has the same shape, so they
+// all get the same guard rather than waiting to find out one at a time. Friday
+// 4 September 2026 sits before every fixture date in this repository.
+// ---------------------------------------------------------------------------
+const FROZEN_NOW = new Date("2026-09-04T12:00:00Z");
+
+beforeAll(() => {
+  // shouldAdvanceTime, NOT a bare useFakeTimers(). Several of these files settle
+  // async work with a real setTimeout, and a frozen timer queue never fires it:
+  // the run hangs rather than failing, which is the worst way for a test to be
+  // wrong. This pins the DATE while leaving timers working.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 
 describe("mergeCapabilityState", () => {
   it("creates the container on first write", () => {
