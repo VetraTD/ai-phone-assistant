@@ -543,7 +543,17 @@ export async function executeToolCall(fc, ctx) {
           // shut until lib/voice/replyState.js sees letters, a refusal, or the
           // agreed number of unanswered attempts. Same fail-closed,
           // one-reason-at-a-time shape as checkRequirements below.
-          const pendingName = CONFIRM_HARD_NAMES ? callerNameFromArgs(fc.args) : null;
+          // ctx.lastChance means: the call is ending and this write was refused
+          // earlier and never re-issued. Refusing again would lose it for good.
+          //
+          // Deliberately narrow. It is set in exactly one place -- the end-of-call
+          // sweep in lib/voice/live/index.js -- and only for a message, never a
+          // booking. The name goes in exactly as heard, which is the trade being
+          // made rather than an oversight: a callback from "Nathan Dasler" on the
+          // right number reaches the right person, and a callback that does not
+          // exist reaches nobody.
+          const pendingName =
+            CONFIRM_HARD_NAMES && ctx?.lastChance !== true ? callerNameFromArgs(fc.args) : null;
           // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
