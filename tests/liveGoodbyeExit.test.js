@@ -112,6 +112,11 @@ async function boot(env = {}) {
       await new Promise((r) => setImmediate(r));
     },
     closed: () => ws.readyState === 3,
+    /** The vendor reporting the caller talked over us. */
+    async vendorInterrupt() {
+      live.push({ serverContent: { interrupted: true } });
+      await new Promise((r) => setImmediate(r));
+    },
     /** Twilio echoing the exit mark back, meaning the audio has played. */
     async markPlayed() {
       ws.deliver({ event: "mark", mark: { name: "live-exit-end_call" }, streamSid: "MZ1" });
@@ -223,6 +228,40 @@ describe("a spoken goodbye arms the hang-up", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("refuses to arm at all when the caller interrupted the goodbye", async () => {
+    // THE CASE THE GRACE WINDOW COULD NOT COVER, 2026-09-06.
+    //
+    //   17:54:41.302  end_call ok
+    //   17:54:44.894  live_exit_armed      <- 3.6s later, at TURN END
+    //   17:54:46.485  live_exit_run
+    //
+    // The caller barged during the goodbye: barges: 1, and the utterance
+    // recorded playing_at_open: true. At that moment pendingExit was still null,
+    // so cancelPendingExit had nothing to cancel -- and we then armed an exit
+    // anyway and hung up on someone already speaking.
+    //
+    // Cancelling an ARMED exit was never going to be enough, because the thing
+    // worth interrupting is the goodbye and the goodbye comes first.
+    const s = await boot();
+    await s.vendorInterrupt();
+    await s.say(GOODBYE);
+
+    expect(c().live_exit_refused_recent_barge).toBe(1);
+    expect(c().live_goodbye_armed_exit).toBe(0);
+    expect(s.closed()).toBe(false);
+  });
+
+  it("still arms normally when nobody interrupted", async () => {
+    // The other side of it. A refusal that fired on every call would simply
+    // stop the assistant ever hanging up, which is the defect it replaced.
+    const s = await boot();
+    await s.say(GOODBYE);
+
+    expect(c().live_exit_refused_recent_barge).toBe(0);
+    expect(c().live_exit_arm_checked).toBe(1);
+    expect(c().live_goodbye_armed_exit).toBe(1);
   });
 
   it("leaves the caller a window to interrupt before it hangs up", async () => {
