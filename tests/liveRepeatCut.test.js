@@ -217,6 +217,33 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     expect(s.cleared).toHaveLength(1);
   });
 
+  it("cuts a SHORT sentence said twice — the doubled goodbye", async () => {
+    // 2026-09-06. The owner: "it said 'Thanks for calling Digile Media have a
+    // great day' twice at the end right next to each other."
+    //
+    // The first within-turn check could not have caught this and never even
+    // looked: it required the turn to be longer than 280 characters before
+    // comparing head against tail, and a doubled goodbye is 142. Gating on
+    // CHARACTERS was arbitrary; what matters is whether there are enough WORDS
+    // for a repeat to be a repeat.
+    const s = await boot();
+    const bye = "You're very welcome. Thanks for calling Digile Media, have a great day.";
+    await s.say(bye + " " + bye);
+
+    expect(c().live_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
+  it("leaves a short turn that says one thing once alone", async () => {
+    // The other side of dropping the length gate: short turns are now examined,
+    // so a short turn is where a false positive would appear first.
+    const s = await boot();
+    await s.say("You're very welcome. Thanks for calling Digile Media, have a great day.");
+
+    expect(c().live_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
   it("leaves a long turn that does not repeat itself alone", async () => {
     // The within-turn check compares a turn's tail against its own head, so a
     // long turn is where a false positive would show up first.
