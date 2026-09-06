@@ -213,8 +213,21 @@ describe("times offered that nothing ever verified", () => {
     }
   });
 
-  it("counts without speaking, like its sibling", async () => {
+  it("NOW speaks, like its sibling — same switch, same evidence", async () => {
+    // Flipped with the claim guard on 2026-09-06. An offer of times nothing
+    // verified is the same defect one step earlier in the call: the caller is
+    // told something that is not backed by anything, and cannot tell.
     const s = await boot();
+    s.say("We have times available at nine AM or ten AM.");
+    s.endTurn();
+    await s.settle();
+
+    expect(offers()).toBe(1);
+    expect(notes(s.live)).toHaveLength(1);
+  });
+
+  it("stays silent when the guard is switched off", async () => {
+    const s = await boot({ LIVE_CLAIM_GUARD: "off" });
     s.say("We have times available at nine AM or ten AM.");
     s.endTurn();
     await s.settle();

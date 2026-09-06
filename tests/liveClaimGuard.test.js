@@ -220,8 +220,35 @@ describe("a claim of completion with nothing behind it", () => {
     }
   });
 
-  it("says nothing to the model by default", async () => {
+  it("NOW speaks by default — the ladder's condition was met on 2026-09-06", async () => {
+    // THIS ASSERTION USED TO BE `toHaveLength(0)`, deliberately. The guard was
+    // opt-in behind LIVE_CLAIM_GUARD=act, with an explicit rule: count first,
+    // act once the counter says how often it fires when nothing is wrong.
+    //
+    // The counter said. On a real call the assistant told the caller "I have you
+    // booked for a strategy call with the team on Monday the 7th of September at
+    // 4:30 PM UK time" and book_appointment NEVER RAN -- the only tools on the
+    // whole call were set_call_intent and check_appointment_availability.
+    // postcall_verify returned claim_without_row, booked_rows: 0, and the owner
+    // came off that call believing it had gone well, because a fabricated
+    // booking is the one defect a caller cannot hear.
+    //
+    // That is LVX27, the oldest open P0 here. Counting it and doing nothing is
+    // no longer the right side of the trade.
     const s = await boot();
+    s.say("I've booked your appointment for Monday.");
+    s.endTurn();
+    await s.settle();
+
+    expect(claims()).toBe(1);
+    expect(notes(s.live)).toHaveLength(1);
+  });
+
+  it("can still be switched off without a deploy", async () => {
+    // Every guard on this path keeps an off switch, for the reason LVX21
+    // exists: the thing you most need mid-incident is a way to stop a guard
+    // being wrong.
+    const s = await boot({ LIVE_CLAIM_GUARD: "off" });
     s.say("I've booked your appointment for Monday.");
     s.endTurn();
     await s.settle();
