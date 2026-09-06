@@ -146,6 +146,13 @@ describe("hanging up after end_call", () => {
     ws.deliver({ event: "mark", mark: { name: mark } });
     await new Promise((r) => setImmediate(r));
 
+    // The mark no longer closes the call on its own: HANGUP_GRACE_MS (1,500ms,
+    // matching the cascade's) now sits between "the goodbye has played" and the
+    // socket closing, so the caller has a breath to interrupt. Added 2026-09-06
+    // after a real call closed 73ms after arming and cut the caller off
+    // mid-sentence. The wait is what this test now has to sit through.
+    await new Promise((r) => setTimeout(r, 1_800));
+
     expect(ws.readyState).not.toBe(1);
   });
 

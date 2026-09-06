@@ -112,6 +112,11 @@ async function boot(env = {}) {
       await new Promise((r) => setImmediate(r));
     },
     closed: () => ws.readyState === 3,
+    /** Twilio echoing the exit mark back, meaning the audio has played. */
+    async markPlayed() {
+      ws.deliver({ event: "mark", mark: { name: "live-exit-end_call" }, streamSid: "MZ1" });
+      await new Promise((r) => setImmediate(r));
+    },
   };
 }
 
@@ -164,6 +169,60 @@ describe("a spoken goodbye arms the hang-up", () => {
 
     expect(c().live_exit_cancelled_by_caller).toBe(1);
     expect(s.closed()).toBe(false);
+  });
+
+  it("does not close the instant the mark comes back", async () => {
+    // 2026-09-06, and the owner heard it: "I tried to interrupt the end call
+    // thing and it just ended the call in the middle of the sentence."
+    //
+    //   17:44:49.305  TOOL end_call ok
+    //   17:44:52.584  live_exit_armed
+    //   17:44:52.657  live_exit_run  trigger: "mark"   <- 73ms later
+    //   17:44:52.657  caller speaking
+    //
+    // The exit waits for an audio MARK, which is meant to mean "the goodbye has
+    // played". The model called end_call without speaking a goodbye at all, so
+    // nothing was queued, the mark bounced straight back, and the call closed
+    // 73 milliseconds after arming. The caller's speech landed in the same
+    // millisecond as the hang-up.
+    //
+    // The cascade has had the answer since before this front-end existed:
+    // HANGUP_GRACE_MS, whose own comment reads "the window has to be long enough
+    // for someone to actually start talking - 800ms is barely a breath... the
+    // cost of being stingy is hanging up on someone mid-sentence."
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const s = await boot();
+      await s.say(GOODBYE);
+      await s.markPlayed();
+
+      // Still up: the grace has not elapsed.
+      expect(s.closed()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(s.closed()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the caller cancel the hang-up inside that window", async () => {
+    // The whole point of the grace. Speech during it calls the exit off, which
+    // is what "if the user barges in the receptionist doesn't just go straight
+    // through and end" actually requires.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const s = await boot();
+      await s.say(GOODBYE);
+      await s.markPlayed();
+      await s.caller("wait, actually one more thing");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(s.closed()).toBe(false);
+      expect(c().live_exit_cancelled_by_caller).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves the caller a window to interrupt before it hangs up", async () => {
