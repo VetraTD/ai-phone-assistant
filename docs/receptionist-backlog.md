@@ -7806,3 +7806,44 @@ model audio an extra 300-500 ms in the local queue while nothing has verified a
 slot, so the lagging transcript can win the race. It was NOT built, because it
 pays dead air on the turn the caller is most engaged, against a perceived pause
 already near 1,500 ms, to buy something no measurement has yet shown is needed.
+
+### LVX81 — probe run 2026-09-07, and what it settled
+
+40 sessions, 8 prebuilt voices, 5 takes each, `en-GB` pinned, 746 s of audio.
+`scripts/probes/voice-drift.mjs`, verdicts pre-registered in
+`scripts/probes/verdicts-voice.json` before the first run.
+
+**Every one of the 40 renderings is byte-distinct.** No voice repeated itself,
+including five takes of `Kore` with identical voice, text and language.
+
+**What that settles: nothing about the accent, and one thing about an
+instrument.** Bit-level difference is expected from sampling, so V1 is not
+refuted by the free mechanical half and still needs the blind rating. But
+non-determinism has a consequence nobody had drawn:
+
+> `scripts/voice-compare.js`'s substitution guard cannot work.
+
+That rig treats identical hashes from two different voice names as proof the API
+ignored a name and handed back one voice twice. Since two renderings of the
+*same* voice are never identical, two names silently collapsing to one voice
+would still produce different hashes. The check can never fire, and its silence
+reads as "all hashes differ, safe to listen and choose" — safety it has not
+established. Recorded in that file rather than deleted, because a collision
+would still mean something and the reasoning is worth keeping.
+
+**Which of the eight prebuilt names the Live API actually accepts remains
+unestablished**, and this class of rig cannot establish it. Detecting a silent
+substitution needs a comparison that survives non-determinism — speaker
+similarity, not a hash — and nobody has built one.
+
+**Still open:** the blind accent rating. Audio is at `voice-drift/audio/`
+(telephone band, through the production resampler), mapping withheld in
+`voice-drift/_mapping/`. V1, V2 and V3 are decided against the pre-registered
+file and not by whoever reads the numbers afterwards.
+
+**The instrument cost more trouble than the measurement.** Two runs failed to
+record their own spend in three distinct ways — an object passed where a number
+was wanted, which destroyed 40 rendered takes; then raw `usageMetadata` handed to
+a rate card keyed differently, which priced 746 s of audio at $0.00. The audio
+was never the unreliable part. Both runs are in the ledger as explicit
+estimates, because neither run's true usage survives.
