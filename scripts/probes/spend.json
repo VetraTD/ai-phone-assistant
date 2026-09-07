@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 8.616065,
+  "spent_usd": 9.416065,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -8446,8 +8446,18 @@
         "audio_out": 444
       },
       "usd": 0.057909600000000006
+    },
+    {
+      "at": "2026-09-07T22:45:04.988Z",
+      "probe": "voice-drift",
+      "arm": "run-1-lost",
+      "model": "gemini-3.1-flash-live-preview",
+      "note": "ESTIMATE, NOT MEASURED. 40 sessions opened, rendered and billed on 2026-09-07; commit() threw because usd was handed price()'s whole object, the catch discarded every take, and the real usageMetadata was lost with it. Recorded at the probe's own per-session reservation of $0.02 so the ledger does not understate the run. The true figure is unknown and cannot now be recovered.",
+      "estimated": true,
+      "sessions": 40,
+      "usd": 0.8
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T14:34:19.941Z"
+  "updated_at": "2026-09-07T22:45:04.990Z"
 }

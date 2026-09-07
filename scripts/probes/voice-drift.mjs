@@ -189,6 +189,36 @@ async function render(voiceName) {
   return { pcm: Buffer.concat(chunks), transcript: transcript.trim(), usage };
 }
 
+/**
+ * Book one session against the shared meter, and never let that lose a take.
+ *
+ * `price()` returns `{ usd, breakdown, unpriced_tokens }`, NOT a number. Handing
+ * the whole object to commit() as `usd` makes the running total a string, and
+ * `state.entries.reduce(...).toFixed` then throws on every subsequent call --
+ * which is exactly what happened on the first run of this probe and cost forty
+ * rendered sessions.
+ *
+ * Wrapped, because a meter that cannot add up is a bookkeeping problem and the
+ * audio is the evidence. A failure here is reported loudly and the take is
+ * kept; the alternative destroyed everything the run paid for.
+ */
+function recordSpend(voice, take, usage) {
+  if (!usage) return;
+  try {
+    commit({
+      probe: "voice-drift",
+      arm: voice,
+      run: take + 1,
+      model: MODEL,
+      usage,
+      usd: price(MODEL, usage).usd,
+    });
+  } catch (err) {
+    console.log(`\n    [meter] NOT RECORDED — ${err?.message || err}`);
+    console.log("    [meter] the session still billed. spend.json now understates the run.");
+  }
+}
+
 /** Fisher-Yates, so file order carries no information about the arm. */
 function shuffle(items) {
   const a = [...items];
@@ -250,20 +280,17 @@ async function main() {
       reserve(`voice-drift ${voice} #${take + 1}`, 0.02);
       const { pcm, transcript, usage } = await render(voice);
 
-      if (usage) {
-        commit({
-          probe: "voice-drift",
-          arm: voice,
-          run: take + 1,
-          model: MODEL,
-          usage,
-          usd: price(MODEL, usage),
-        });
-      }
-
+      // ACCOUNTING RUNS AFTER THE ARTIFACT IS ON DISK, and that ordering is the
+      // whole lesson of the first run. It used to run here, before the files
+      // were written, and a bug in the meter (usd was handed price()'s whole
+      // object instead of its .usd) threw on every take -- so forty sessions
+      // were paid for, rendered, and then discarded by the catch below without
+      // a single WAV reaching disk. The audio is what the money bought; it gets
+      // saved first, and the bookkeeping is never allowed to destroy it.
       if (!pcm.length) {
         console.log(`NO AUDIO — ${transcript.slice(0, 70) || "session produced nothing"}`);
         results.push({ label, voice, take, hash: null, bytes: 0, note: transcript.slice(0, 200) });
+        recordSpend(voice, take, usage);
         consecutiveErrors += 1;
         if (consecutiveErrors >= 3) {
           throw new Error("three consecutive empty renders — aborting (PLAN.md rule 7)");
@@ -280,6 +307,7 @@ async function main() {
       const seconds = (pcm.length / 2 / STUDIO_RATE).toFixed(1);
       console.log(`${seconds}s  ${hash}`);
       results.push({ label, voice, take, hash, bytes: pcm.length, transcript });
+      recordSpend(voice, take, usage);
     } catch (err) {
       console.log(`FAILED — ${err?.message || err}`);
       results.push({ label, voice, take, hash: null, bytes: 0, note: String(err?.message || err) });
@@ -327,7 +355,26 @@ async function main() {
     }
   }
 
-  if (anyDeterministic) {
+  // NOTHING RENDERED IS NOT A RESULT, and the first run printed one anyway.
+  //
+  // With 40 of 40 failed it still reported "renderings differ between takes",
+  // which is a statement about data it did not have, and exited 0. A probe that
+  // cannot come back empty-handed cannot be trusted when it comes back full.
+  const renderedCount = results.filter((r) => r.hash).length;
+  if (renderedCount === 0) {
+    console.log("  INCONCLUSIVE — nothing rendered. No take reached disk, so there is");
+    console.log("  no evidence here for or against any verdict in verdicts-voice.json.");
+    console.log("  Fix the run before reading anything into it.");
+    process.exitCode = 1;
+  } else if (renderedCount < jobs.length) {
+    console.log(`\n  PARTIAL — ${renderedCount} of ${jobs.length} takes rendered.`);
+    console.log("  Arms with fewer takes than the others are not comparable with them.");
+    process.exitCode = 1;
+  }
+
+  if (renderedCount === 0) {
+    // No conclusion, deliberately. Fall through to the failure list below.
+  } else if (anyDeterministic) {
     console.log("\n  A voice whose takes are byte-identical is DETERMINISTIC for this");
     console.log("  (voice, text, language). Session-level drift is then impossible for");
     console.log("  it, and verdicts-voice.json V1 is refuted without anybody listening:");

@@ -129,6 +129,21 @@ export function price(model, usage = {}) {
  * session that errored mid-way still billed for what it consumed.
  */
 export function commit(entry) {
+  // REJECT A BAD usd BEFORE IT REACHES THE LEDGER.
+  //
+  // price() returns { usd, breakdown, unpriced_tokens }, and on 2026-09-07 a
+  // probe passed that whole object through as `usd`. The reduce below then
+  // produced a string, `.toFixed` threw, and it threw on EVERY subsequent call
+  // -- forty rendered sessions were lost to it before anyone read the message.
+  //
+  // Thrown, not coerced. A non-number silently becoming 0 understates real
+  // money, and this file exists to stop spending going unnoticed.
+  if (entry?.usd !== undefined && typeof entry.usd !== "number") {
+    throw new TypeError(
+      `commit(): usd must be a number, got ${typeof entry.usd}. ` +
+      "price() returns an object -- pass price(model, usage).usd, not price(model, usage)."
+    );
+  }
   const state = load();
   state.entries.push({ at: new Date().toISOString(), ...entry });
   state.spent_usd = Number(
