@@ -89,6 +89,9 @@ Status means:
 | **LVX78** | it repeats itself word for word — a whole booking read back twice, a goodbye delivered twice | **OPEN · P1 — NOW COUNTED.** Found by hand after the owner half-remembered it; every counter read clean and `postcall_verify` said `ok` |
 | **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
 | **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway. Did not recur on the next call, which never entered the path; the screen counter over-counts by design and fired on a CORRECT booking |
+| **LVX80** | it names an appointment time BEFORE anything has checked availability | **OPEN · P0** — `live_offer_unverified` fired at 19:38:59 on the first deployed Live call, one second BEFORE `check_appointment_availability` ran at 19:39:00. Caller heard 11:30pm. Detector-only: on Live the audio has already reached the caller |
+| **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever |
+| **LVX82** | the stacked-question counter measures question MARKS, not questions | **OPEN · P1** — `live_stacked_questions` reported `marks: 2` while the caller experienced five. A three-part single-mark question reads as one. The instrument cannot see the shape being complained about |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -7674,3 +7677,74 @@ choose speech-to-speech was measured behaviour on a bare harness.
 **Done when:** the same handset is compared on a reduced tool/prompt
 configuration against the full one, deliberately, rather than inferred from
 memory of how the spike sounded.
+
+---
+
+## LVX80 · LVX81 · LVX82 — the first deployed Live calls, 2026-09-07
+
+**Evidence source:** eight real calls to `+441372656055` between 19:36 and
+19:59 UTC on 2026-09-07, dialled from a **UK handset by a UK friend** — which
+is Phase 1's outstanding leg, closed incidentally. `voice-uk-prod` on
+`818cca8`, `LIVE_SURFACE=aistudio`, `gemini-3.1-flash-live-preview`.
+
+All eight reached tier 1: `live_stream_initiated` -> `live_session_open` in
+250-400ms every time, **zero `live_connect_fallback`, zero
+`live_close_abnormal`, zero `live_session_error`.** The cutover itself worked.
+These three defects are behavioural, not infrastructural.
+
+### LVX80 — it offers a time, THEN checks it
+
+The order is inverted, and the log is unambiguous:
+
+| time | event |
+|---|---|
+| 19:38:59.313 | `live_offer_unverified` (step `gather_details`) |
+| 19:39:00.325 | `check_appointment_availability` (29ms, success) |
+| 19:39:16.548 | `check_appointment_availability` again (120ms, success) |
+| 19:39:28.613 | `book_appointment` + `phi_access` |
+
+`lib/voice/live/index.js:1111-1119` fires when the reply matches
+`S.slotOfferRe` and `verifiedCount() === 0`, then sends `OFFER_NOTE` as a
+correction. **The correction arrives after the caller has heard the time.**
+The calendar lookup was never broken — it was one second late.
+
+The owner's report was "it keeps bringing out 11:30pm". That is this.
+
+### LVX81 — the accent is pinned and drifts anyway
+
+`resolveLiveVoice` returns `Kore` for both `en-GB` and `en-US`
+(`VOICE_BY_LANGUAGE`, `index.js:151-157`), and `speechConfig.languageCode` is
+sent as `en-GB`. Google **accepted** it: `language_pinned: true` on every
+summary, and `connectLive`'s strip-and-retry path (`client.js:127-143`) never
+fired. So this is not the retry silently unpinning language.
+
+Conclusion: Gemini Live's prebuilt voices are not accent-locked, and there is
+no further lever in the API. Unmeasured alternatives: the other ~8 prebuilt
+voices; Vertex 2.5's different voice set. The known-good answer is the
+**cascade**, where the ElevenLabs voice is fixed.
+
+**This is a cost of Live that section 2 of the cutover spec never weighed** —
+it compared latency, cost and behaviour, never voice stability.
+
+### LVX82 — the counter under-reports the complaint
+
+`live_stacked_questions` fired 5x, always `marks: 2`, at steps
+`identify_intent` and `gather_details`. The caller experienced ~5 questions per
+turn. "Can I take your name, date of birth, and what it is for?" is ONE mark
+and THREE questions, and `lib/transcriptUtils.js:623-651` already records that
+the mark-counting heuristic was chosen knowingly.
+
+**Fix the counter before the behaviour.** Until it measures what a caller
+hears, no behavioural fix can be shown to have worked. And per
+`prompt-caps-need-counters`, the behaviour fix itself cannot be a prompt line.
+
+### The structural note that binds all three
+
+On the cascade, model text passes through our code before TTS, so a guard can
+**prevent**. On Live the model's audio goes straight to the caller and the
+transcript arrives afterwards, so every guard here is a **detector**.
+`live_offer_unverified` and `live_stacked_questions` are both alarms that
+cannot block. Any "stop it saying X" requirement is strictly harder on Live
+than it was on the cascade, and that should be decided deliberately rather than
+discovered per call.
+

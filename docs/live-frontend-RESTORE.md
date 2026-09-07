@@ -137,7 +137,7 @@ handset can dial, and this is the only one there is.
 | smsUrl | `https://demo.twilio.com/welcome/sms/reply` — Twilio's stock demo, never ours |
 | captured at | 2026-09-05, read live from Twilio immediately before any change |
 | captured by | this session |
-| **status** | **NOT YET REPOINTED.** Captured first, deliberately, per §1. |
+| **status** | **REPOINTED 2026-09-07 ~17:45 UTC to `/twilio/live-voice`**, read back field-by-field from Twilio (all five OK, no MISMATCH). **DELIBERATELY LEFT POINTED AT LIVE** by the owner's decision on 2026-09-07: no business is taking customer calls on this line at present, so §0's hazard is accepted knowingly rather than overlooked. Eight verification calls followed from a UK handset. Restore with `node scripts/uk-number.js restore --confirm`, which returns it to `/twilio/voice` (the cascade on GCP, NOT Railway). |
 
 **This is a different account from the number above it**, and that is the whole
 reason this row exists separately. `+18176011171` is on account B, whose token is

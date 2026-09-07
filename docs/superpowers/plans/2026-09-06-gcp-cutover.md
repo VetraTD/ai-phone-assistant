@@ -861,3 +861,44 @@ Written down so the next session does not have to rediscover it:
 - **Mid-call silence.** Instrumented by Task 4, not fixed.
 - **Spec §6** — uptime alerting, CI, dashboard frontend hosting, dashboard PHI-access audit. Its own plan.
 - **Precondition 6** — a Google account belonging to Josh holding `billing.admin` and `organizationAdmin`.
+
+---
+
+## Task 5 as EXECUTED, 2026-09-07 — two commands in this plan were wrong
+
+Task 5 ran end to end and all ten steps passed. Two of its commands did not
+work as written and were corrected in flight. Both are recorded here because
+the failure each produces names something else.
+
+**Steps 2 and 7 — the migrate job invocation.** `migrate-job.tf:177-185` sets
+`command = ["node"]` and `args = ["scripts/migrate.js", "--init-if-empty"]`.
+`--args=--status` REPLACES the whole args list, so the container ran
+`node --status` and exited 9 with `bad option: --status`. The working form
+keeps the script path:
+
+```bash
+--args=scripts/migrate.js,--status
+```
+
+**Step 6 — the build command was wrong in three ways at once**, and failed
+with `HTTPError 412: 'us' violates constraint 'constraints/gcp.resourceLocations'`,
+which names a location policy and not any of the three actual mistakes. The
+authoritative command is the one in `cloudbuild.yaml`'s own header (corrected
+2026-09-02): the build belongs to **`vetra-core-edc8ca`**, which owns Artifact
+Registry, with THAT project's deployer service account, and the substitution is
+**`_TAG`**, not `_IMAGE_TAG`:
+
+```bash
+CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit   --config=cloudbuild.yaml   --project=vetra-core-edc8ca   --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com   --substitutions=_TAG=$(git rev-parse --short HEAD)
+```
+
+Build `ad4836e3` SUCCESS in 40s once used.
+
+**Also learned:** `terraform` on this machine needs `TF_DISABLE_PLUGIN_TLS=1`
+on every command that loads provider schemas, or all three providers fail with
+`x509: certificate signed by unknown authority` — a local TLS interceptor
+breaking Terraform's loopback plugin mTLS. Session-local, never committed.
+
+**Result:** `voice-uk-prod` serving `818cca8`, revision
+`voice-uk-prod-00010-jt9`, `041_business_live_voice.sql` applied before the
+roll, all six step-10 reads green, no `[boot] FATAL`.
