@@ -449,3 +449,43 @@ variable "voice_intent_marker" {
   type        = bool
   default     = true
 }
+
+# ---------------------------------------------------------------------------
+# WHICH SURFACE SERVES THE LIVE SESSION, and therefore which company processes
+# the caller's speech.
+#
+# `aistudio` is the Gemini Developer API. It is NOT a Google Cloud service: no
+# ADC, no residency guarantee, no BAA. It is chosen anyway because it is the
+# only surface `gemini-3.1-flash-live-preview` exists on, and because the
+# alternative is a DIFFERENT MODEL that has never taken a call on this system.
+#
+# The latency argument for Vertex does not exist, measured: AI Studio 3.1 model
+# leg p50 1043ms (n=25) against Vertex 2.5 in europe-west1 at 1053ms. And
+# europe-west2 serves NO Live model on any surface - HTTP 400 at the WebSocket
+# upgrade, 24 model/region cells probed - so "the data stays in the UK" cannot
+# be promised for Live at all. The nearest Live region that exists is Belgium.
+#
+# The case for switching is compliance, not performance, and it has a date:
+# before the first paying client, or immediately if 3.1 is withdrawn.
+# ---------------------------------------------------------------------------
+variable "live_surface" {
+  description = "Live front-end surface: `aistudio` (Gemini Developer API) or `vertex`."
+  type        = string
+  default     = "aistudio"
+
+  validation {
+    condition     = contains(["aistudio", "vertex"], var.live_surface)
+    error_message = "live_surface must be `aistudio` or `vertex`. lib/voice/live/client.js resolves anything unrecognised to aistudio silently, which is right while a caller is on the line and wrong in a deploy variable."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# PINNED because it is a `-preview` model. Google can withdraw it on their
+# schedule, not ours. Pinning here makes the response a variable change rather
+# than a code change made under time pressure.
+# ---------------------------------------------------------------------------
+variable "live_model" {
+  description = "Live model id. Must exist on `var.live_surface`."
+  type        = string
+  default     = "gemini-3.1-flash-live-preview"
+}

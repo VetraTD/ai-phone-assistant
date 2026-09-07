@@ -641,6 +641,58 @@ resource "google_cloud_run_v2_service" "this" {
         value = local.stacks[each.value.stack].lane == "uk" ? "eu" : "us"
       }
 
+      # -------------------------------------------------------------------
+      # WHICH COMPANY PROCESSES CALLER SPEECH ON THE LIVE PATH. Rendered
+      # explicitly even though `aistudio` is the code's default, for the same
+      # reason DEEPGRAM_REGION above is: an absent variable and a chosen one
+      # are indistinguishable from the service definition, and this is not a
+      # fact anyone should have to infer.
+      #
+      # Its absence is now also a FATAL boot check - lib/bootChecks.js
+      # checkLiveSurface - because tier 2 catches the client's throw and would
+      # otherwise serve every caller on the cascade in silence.
+      # -------------------------------------------------------------------
+      env {
+        name  = "LIVE_SURFACE"
+        value = var.live_surface
+      }
+
+      env {
+        name  = "LIVE_MODEL"
+        value = var.live_model
+      }
+
+      # -------------------------------------------------------------------
+      # THREE VARIABLES THE VOICE ROUTE READS AND THIS MODULE DELIBERATELY
+      # DOES NOT RENDER. Recorded here so the absence reads as a decision,
+      # not the oversight DEEPGRAM_REGION, CALL_STATE_STORE and DB_POOL_MAX
+      # each were before someone wrote it down.
+      #
+      # TRANSFER_NUMBER - read at server.js:147, lib/voice/session.js:81,
+      # lib/voice/live/index.js:1592 and :2857, defaulting to "". It is the
+      # fallback BEHIND the per-business businesses.transfer_phone_number:
+      # session.js:2506 is `const transferNumber = config.transferPhoneNumber
+      # || TRANSFER_NUMBER;` and :2507 gates on canTransfer. Unset means
+      # canTransfer is false, so session.js:2510-2515 speaks
+      # transferUnavailable and returns - it does not dial and does not hang
+      # up. On the Live path, live/index.js:2857 passes transferAllowed:
+      # false, so the model is never offered transfer language at all.
+      # Rendering an env fallback would give EVERY tenant one shared transfer
+      # number, which is worse than the per-business value being the only
+      # source.
+      #
+      # UNROUTED_TRANSFER_NUMBER - read only at server.js:162-164, at call
+      # time rather than module load. Unset means a call to a number matching
+      # no businesses.phone_number row takes a voicemail (server.js:685-687),
+      # which .env.example:160-173 documents as the intent.
+      # normalizePhoneNumber also degrades a malformed value to voicemail.
+      #
+      # CALL_MAX_DURATION_MINUTES - read at server.js:166 and
+      # lib/voice/session.js:82, default 30 minutes. lib/voice/sttGoogle.js:44's
+      # stream-restart arithmetic assumes 30, so changing it in Terraform alone
+      # would silently desync that comment from behaviour.
+      # -------------------------------------------------------------------
+
       dynamic "env" {
         for_each = var.wire_runtime_secrets ? {
           for name, cfg in var.runtime_secrets : name => cfg
