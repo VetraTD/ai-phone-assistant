@@ -656,28 +656,45 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
 ```
 Expected: a list of applied and pending migrations. 041 (`business_live_voice`) is expected pending. **Record the actual list** — the count is what step 4 verifies against.
 
-- [ ] **Step 3: Apply the Terraform config changes, without touching the image**
+- [ ] **Step 3: Apply the secret container only — its value cannot exist yet, and the service must not roll onto it empty**
+
+`infra/terraform/secrets.tf`'s own header says Cloud Run refuses to start a revision whose secret cannot be resolved, and `cloud-run.tf`'s dynamic `env` block references `gemini-api-key` at `version = "latest"`. A plain `terraform apply` here would create the secret container AND roll the voice service onto it, empty, in the same apply — and that revision fails to start.
+
+This is the U2 pattern (`docs/superpowers/plans/gcp-migration-ledger.md`, "FIVE secret values in `vetra-uk-prod-c3a3bd`, and it cannot happen before a partial apply"): target the secret resource, fill it, then apply the rest.
+
+```bash
+cd infra/terraform
+terraform plan -target='google_secret_manager_secret.runtime' -out=secret.tfplan
+terraform apply secret.tfplan
+```
+Expected: one resource added — `gemini-api-key`'s container, empty, no version. **If the plan also proposes the IAM grant or a new voice service revision here, stop** — this step exists to keep those apart from a secret that still holds nothing.
+
+- [ ] **Step 4: Push the Gemini key value — directly, not through `push-secrets.js`**
+
+`scripts/push-secrets.js`'s `MAPPING` docstring deliberately excludes `ELEVENLABS_API_KEY`, and now names `GEMINI_API_KEY` alongside it for the identical reason: both are UK-lane-only credentials with no BAA, neither secret exists in any US project, and the whole point of `MAPPING` is that a `--project vetra-us-...` invocation cannot inherit them from a shared `.env`. Adding either back to `MAPPING` breaks that boundary. **Do not add it, here or later.**
+
+Add the version directly, and confirm by reading metadata — never the value:
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+printf '%s' 'PASTE THE VALUE HERE — never a variable that could land in a log or shell history' | \
+  gcloud secrets versions add gemini-api-key --project=vetra-uk-edc8ca --data-file=-
+gcloud secrets versions list gemini-api-key --project=vetra-uk-edc8ca --limit=1
+```
+Expected: one version, `ENABLED`, with a `CREATED` timestamp — enough to confirm it landed without the command ever printing what it holds.
+
+- [ ] **Step 5: The full apply, now that the secret has a value**
 
 ```bash
 cd infra/terraform
 terraform plan -out=live.tfplan
 ```
-Read the plan. Expected: one new `google_secret_manager_secret` + its IAM binding, and a new voice service revision carrying `GEMINI_API_KEY`, `LIVE_SURFACE`, `LIVE_MODEL`. **If the plan proposes to replace the Cloud SQL instance or touch the KMS key ring, stop.**
+Read the plan. Expected: the IAM binding granting `gemini-api-key` to the UK runtime service account, and a new voice service revision carrying `GEMINI_API_KEY`, `LIVE_SURFACE`, `LIVE_MODEL` — on the image already running, since `image_tag` is untouched here. **If the plan proposes to replace the Cloud SQL instance or touch the KMS key ring, stop.**
 
 ```bash
 terraform apply live.tfplan
 ```
 
-- [ ] **Step 4: Push the Gemini key value into Secret Manager**
-
-The Terraform apply created the secret container; it holds no value.
-
-```bash
-node scripts/push-secrets.js --project vetra-uk-edc8ca --from .env --dry-run
-```
-Expected: names, lengths and provenance only — the script never prints a value. Confirm `gemini-api-key` appears and its length is plausible. Then drop `--dry-run`.
-
-- [ ] **Step 5: Build the image from `main`**
+- [ ] **Step 6: Build the image from `main`**
 
 ```bash
 CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit \
@@ -691,7 +708,7 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit \
 
 **Do not trust cloudbuild.yaml's own migration guard** (P13) — it overrides WORKDIR with `/workspace`, so it reads the source rather than the image and cannot see what it claims to check.
 
-- [ ] **Step 6: Verify the image by reading it, against `/app`**
+- [ ] **Step 7: Verify the image by reading it, against `/app`**
 
 ```bash
 CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
@@ -700,7 +717,7 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
 ```
 Three controls, as in Phase 4: the migration count matches step 2's list, `041_business_live_voice.sql` is present, and `lib/voice/live/client.js` exists in the image.
 
-- [ ] **Step 7: Run the migrate job — BEFORE the service rolls**
+- [ ] **Step 8: Run the migrate job — BEFORE the service rolls**
 
 ```bash
 CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
@@ -708,7 +725,7 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
 ```
 A service rolling ahead of its schema has bitten this project twice.
 
-- [ ] **Step 8: Roll the voice service**
+- [ ] **Step 9: Roll the voice service**
 
 ```bash
 cd infra/terraform
@@ -717,7 +734,7 @@ terraform apply -var="image_tag=$(git rev-parse --short HEAD)"
 
 `image_tag` defaults to `"0000000"`, a tag that does not exist. Passing it is not optional.
 
-- [ ] **Step 9: Assert on the serving revision — six reads, not "a call worked"**
+- [ ] **Step 10: Assert on the serving revision — six reads, not "a call worked"**
 
 ```bash
 curl -s https://$(cd infra/terraform && terraform output -raw twilio_webhook_base | sed 's|https://||')/
@@ -793,7 +810,7 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud logging read \
   --project vetra-uk-edc8ca --limit 5 --freshness=30m
 ```
 
-Required: `live_connect_ok > 0` **and** `live_connect_fallback == 0`. Non-zero fallback means callers were served by the cascade without knowing — the fallback working, not a caller lost, but not a successful cutover either.
+Required: `live_close_clean > 0` **and** `live_connect_fallback == 0`. **Not `live_connect_ok`** — it bumps inside `/twilio/live-voice`'s try block, which allowlists the caller, looks up the business and mints the stream token, and returns before any model is ever contacted; `createLiveClient` only runs later, inside `connectLive` in the WebSocket handler. A deploy with no Gemini key bumps `live_connect_ok` on every call too: pickup, dead air while `connectLive` throws and the socket closes with no verb behind `<Connect>`, then a hangup — never the cascade, and never distinguishable from a real connection on this counter alone. `live_close_clean` can: it bumps only from the Live socket's `onclose`, after a session that actually opened and closed at code 1000 or 1005 (Task 4 of this plan), so it cannot be reached without a real model session. Non-zero `live_connect_fallback` still means what it always did — callers served by the cascade without knowing; the fallback working, not a caller lost, but not a successful cutover either.
 
 Record `live_close_abnormal` against `live_close_clean`. That ratio is the input to the mid-call fallback decision and this is its first reading.
 

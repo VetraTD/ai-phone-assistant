@@ -641,6 +641,86 @@ resource "google_cloud_run_v2_service" "this" {
         value = local.stacks[each.value.stack].lane == "uk" ? "eu" : "us"
       }
 
+      # -------------------------------------------------------------------
+      # WHICH COMPANY PROCESSES CALLER SPEECH ON THE LIVE PATH. Rendered
+      # explicitly even though `aistudio` is the code's default, for the same
+      # reason DEEPGRAM_REGION above is: an absent variable and a chosen one
+      # are indistinguishable from the service definition, and this is not a
+      # fact anyone should have to infer.
+      #
+      # Its absence is now also a FATAL boot check - lib/bootChecks.js
+      # checkLiveSurface - because /twilio/live-voice never calls
+      # createLiveClient or catches its throw at all: that route only
+      # allowlists, looks up the business and mints a stream token, bumping
+      # `live_connect_ok` before any model is touched. The throw happens
+      # later, inside the WebSocket handler Twilio opens next, and that
+      # handler has no cascade to fall back to — it closes the socket and,
+      # with no verb behind `<Connect>`, Twilio hangs up. A missing
+      # credential would answer every call, bump a healthy-looking counter,
+      # and then go silent and hang up. This boot check is not a second
+      # defence against that; it is the only one.
+      #
+      # ⚠ THESE TWO RENDER UNCONDITIONALLY ON EVERY VOICE SERVICE, unlike
+      # DEEPGRAM_REGION two lines above, which is genuinely lane-conditional.
+      # secrets.tf scopes `gemini-api-key` to `lanes = ["uk"]`, so a US
+      # service can never be granted `GEMINI_API_KEY` — the day `us-prod` is
+      # added to `var.active_stacks`, `voice-us-prod` gets
+      # `LIVE_SURFACE=aistudio` with no credential to back it, and it
+      # crash-loops before it ever listens: `checkLiveSurface` in
+      # `lib/bootChecks.js` raises a FATAL `live_surface_not_configured`, and
+      # `server.js:1551` calls `assertBootConfig()` before the port opens.
+      # `terraform plan` gives no warning at all. This is the boot check
+      # working as designed — the defect is config telling a lane to use a
+      # surface whose credential that lane can never hold, not the refusal to
+      # boot on it. Dormant today: `terraform.tfvars` pins `active_stacks =
+      # ["uk-prod"]`. PARKED, not fixed here — deciding the US lane's Live
+      # surface (vertex? disabled? a per-stack map?) is a design decision the
+      # spec explicitly defers ("vetra-us stays dark, and that is free"), not
+      # something to settle inside a comment-only fix. See the parked finding
+      # in the Phase 2 ledger section.
+      # -------------------------------------------------------------------
+      env {
+        name  = "LIVE_SURFACE"
+        value = var.live_surface
+      }
+
+      env {
+        name  = "LIVE_MODEL"
+        value = var.live_model
+      }
+
+      # -------------------------------------------------------------------
+      # THREE VARIABLES THE VOICE ROUTE READS AND THIS MODULE DELIBERATELY
+      # DOES NOT RENDER. Recorded here so the absence reads as a decision,
+      # not the oversight DEEPGRAM_REGION, CALL_STATE_STORE and DB_POOL_MAX
+      # each were before someone wrote it down.
+      #
+      # TRANSFER_NUMBER - read at server.js:147, lib/voice/session.js:81,
+      # lib/voice/live/index.js:1593 and :2858, defaulting to "". It is the
+      # fallback BEHIND the per-business businesses.transfer_phone_number:
+      # session.js:2506 is `const transferNumber = config.transferPhoneNumber
+      # || TRANSFER_NUMBER;` and :2507 gates on canTransfer. Unset, and ONLY
+      # when the per-business config.transferPhoneNumber is ALSO unset, means
+      # canTransfer is false, so session.js:2510-2515 speaks
+      # transferUnavailable and returns - it does not dial and does not hang
+      # up. In that same both-unset case, the Live path's live/index.js:2858
+      # passes transferAllowed: false, so the model is never offered transfer
+      # language at all. Rendering an env fallback would give EVERY tenant
+      # one shared transfer number, which is worse than the per-business
+      # value being the only source.
+      #
+      # UNROUTED_TRANSFER_NUMBER - read only at server.js:162-164, at call
+      # time rather than module load. Unset means a call to a number matching
+      # no businesses.phone_number row takes a voicemail (server.js:685-687),
+      # which .env.example:163-173 documents as the intent.
+      # normalizePhoneNumber also degrades a malformed value to voicemail.
+      #
+      # CALL_MAX_DURATION_MINUTES - read at server.js:166 and
+      # lib/voice/session.js:82, default 30 minutes. lib/voice/sttGoogle.js:44's
+      # stream-restart arithmetic assumes 30, so changing it in Terraform alone
+      # would silently desync that comment from behaviour.
+      # -------------------------------------------------------------------
+
       dynamic "env" {
         for_each = var.wire_runtime_secrets ? {
           for name, cfg in var.runtime_secrets : name => cfg
