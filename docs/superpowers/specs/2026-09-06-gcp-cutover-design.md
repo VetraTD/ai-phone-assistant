@@ -136,6 +136,32 @@ Allowlist refusals and unrouted numbers return from *inside* the try and
 deliberately do **not** fall back. Both are decisions, and routing them to the
 cascade would serve exactly the caller the control exists to turn away.
 
+### AMENDED 2026-09-07 — an axis this section never weighed
+
+This section compared the two Live surfaces on latency, cost and behaviour. It
+never compared either against the cascade, or against the other, on **voice
+stability**, and the first eight deployed calls found that gap the expensive way.
+
+LVX81: the accent drifted between British, Australian and American **across
+calls**, with the voice pinned to `Kore` and `speechConfig.languageCode` pinned
+to `en-GB`, and with Google *accepting* both — `language_pinned: true` on every
+one of the eight summaries, zero `live_language_code_rejected`, and
+`connectLive`'s strip-and-retry path (`lib/voice/live/client.js:127-143`) never
+fired. The pin is honoured as a request and not as a constraint, and there is no
+further lever in the API.
+
+This is a cost of Live that the comparison as written could not have surfaced,
+because voice was treated as a configuration detail rather than as a property
+that varies. On the cascade the voice is an ElevenLabs voice id and does not
+move. Whatever the measurement in `scripts/probes/verdicts-voice.json` returns,
+the axis belongs in any future front-end comparison, and it is recorded here so
+the next one does not have to rediscover it from a caller.
+
+What is still unknown, and is what that probe exists to settle: whether the
+drift is **between** sessions or **inside** one. Only the first makes "try the
+other prebuilt voices" a candidate fix at all, and nothing so far distinguishes
+them.
+
 ### The Live surface: AI Studio, with Vertex as a measured candidate
 
 `LIVE_SURFACE` is rendered explicitly as `aistudio` (§3); the model stays

@@ -89,9 +89,9 @@ Status means:
 | **LVX78** | it repeats itself word for word — a whole booking read back twice, a goodbye delivered twice | **OPEN · P1 — NOW COUNTED.** Found by hand after the owner half-remembered it; every counter read clean and `postcall_verify` said `ok` |
 | **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
 | **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway. Did not recur on the next call, which never entered the path; the screen counter over-counts by design and fired on a CORRECT booking |
-| **LVX80** | it names an appointment time BEFORE anything has checked availability | **OPEN · P0** — `live_offer_unverified` fired at 19:38:59 on the first deployed Live call, one second BEFORE `check_appointment_availability` ran at 19:39:00. Caller heard 11:30pm. Detector-only: on Live the audio has already reached the caller |
-| **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever |
-| **LVX82** | the stacked-question counter measures question MARKS, not questions | **OPEN · P1** — `live_stacked_questions` reported `marks: 2` while the caller experienced five. A three-part single-mark question reads as one. The instrument cannot see the shape being complained about |
+| **LVX80** | it names an appointment time BEFORE anything has checked availability | **FIXED, UNVERIFIED LIVE · P0** — the detection was always right; it ran in `auditTurn`, which fires on `turnComplete` when only the TAIL of the turn is still queued. Moved to `inspectOffer()`, per fragment, beside the leak guard, where a hard `clearAudio` still has something to drop. `live_offer_cuts` / `live_offer_cut_missed` score it. Offline tests only — the cut-vs-lag race can only be settled by a real call |
+| **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
+| **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -7748,3 +7748,61 @@ cannot block. Any "stop it saying X" requirement is strictly harder on Live
 than it was on the cascade, and that should be decided deliberately rather than
 discovered per call.
 
+
+### RESOLVED 2026-09-07 — the structural note, answered
+
+The note above asked whether a "stop it saying X" guarantee is possible on Live
+at all. It is, but not in the shape the question assumed, and the cascade is not
+the fallback it looked like.
+
+**The state gate cannot be built.** Three independent blocks, each already
+recorded in the code:
+
+- `toolConfig` / `functionCallingConfig` is never set on the Live path.
+  `lib/voice/live/leakGuard.js:77-80`: "a Live session fixes its tools at connect
+  and `sendClientContent` carries no toolConfig. This asks; it cannot compel." —
+  called there "a real gap, not an oversight". The cascade's `mode: "ANY"`
+  (`services/gemini.js:2445`, `:2491`) has no Live equivalent.
+- No mid-session reconfiguration exists. `lib/voice/live/index.js:2894-2901`:
+  "no way to add a tool to a session already in progress."
+- The step is invisible to the model after connect.
+  `buildSystemInstruction(state.step, …)` runs once inside `onStart`, *before*
+  `connect` (`index.js:2987`), so the model only ever sees `identify_intent`.
+  Advancing `state.step` moves our code, not its mouth.
+
+So a tool cannot be made a precondition of the model reaching a step.
+
+**But Live already prevents, and the ceiling was already measured.** `audioOut`
+holds the bulk of every utterance in a local pacing queue and hands Twilio only
+~100 ms of lookahead (`lib/voice/audioOut.js:54`). The leak guard exploits that
+today with a hard clear that drops the local queue and flushes Twilio's buffer,
+and `index.js:1712-1715` records its record: **seven cut, four missed.** A guard
+here is a *truncator*, not a preventer — but truncation is not nothing, and the
+offer guard simply was not using it.
+
+**The cascade is not the safe harbour.** It has no unverified-offer guard and
+never has. `slotOfferRe` lives in shared `lib/voice/strings.js:267` and its only
+readers are `live/index.js` and `eval/fabrication.js`. Retreating repoints the
+number *and* leaves the same guard to be built from scratch on the other side.
+Retreat also cannot be partial: `selectPipelineHandler()` is a constant
+(`server.js:1379-1381`), the front-end is chosen by the Twilio webhook alone, and
+`live_connect_fallback` fires only inside the HTTP POST before TwiML returns.
+
+**What actually shipped**, on `fix/live-offer-and-question-counter`:
+
+- LVX82's counter first, because until it could count, no behaviour fix could be
+  shown to have worked. `countAsks()` returns a lower bound — enough to be
+  monotone and comparable between runs, which is what scoring a fix needs, and
+  explicitly not a census of what the caller heard.
+- LVX80's guard moved from `auditTurn` to `inspectOffer()`, with `LIVE_OFFER_CUT`
+  as its own switch so a bad cut cannot force detection off with it.
+- Both verified **offline only**. The one thing offline tests cannot answer is
+  stated at `index.js:1871-1877`: whether the transcript lag is shorter than the
+  playout pace, and therefore whether there was ever anything to cut.
+
+**The open question this leaves.** If `live_offer_cut_missed` comes back
+dominant from a deployed call, the next lever is a bounded playout hold — holding
+model audio an extra 300-500 ms in the local queue while nothing has verified a
+slot, so the lagging transcript can win the race. It was NOT built, because it
+pays dead air on the turn the caller is most engaged, against a perceived pause
+already near 1,500 ms, to buy something no measurement has yet shown is needed.
