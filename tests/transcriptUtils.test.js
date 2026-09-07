@@ -6,6 +6,8 @@ import {
   extractFinalIntent,
   holdDurationFor,
   classifyHold,
+  countAsks,
+  asksMoreThanOneThing,
 } from "../lib/transcriptUtils.js";
 
 describe("stripFillers()", () => {
@@ -198,4 +200,72 @@ describe("holdDurationFor()", () => {
       expect(holdDurationFor(t)).toBeLessThanOrEqual(3_000);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// LVX82. The first direct tests this function has had -- it was reachable only
+// through the Live socket harness, which asserted the boolean and never the
+// quantity, so the undercount was invisible to every test in the suite.
+// ---------------------------------------------------------------------------
+
+describe("countAsks()", () => {
+  it("counts the turn LVX82 was filed for", () => {
+    // From the deployed calls of 2026-09-07. ONE question mark. The old
+    // instrument logged `marks: 1` for this and the caller heard three asks.
+    expect(countAsks("Can I take your name, date of birth, and what it is for?")).toBe(2);
+  });
+
+  it("scores that turn 2 and not 3, which is the stated limit", () => {
+    // "date of birth" carries no question starter, so the floor misses it.
+    // Widening to catch a bare noun phrase in a list is the phrasing treadmill
+    // lib/transcriptUtils.js was narrowed on 2026-09-05 to escape, and it would
+    // score the sentence below as two.
+    expect(countAsks("What day and time works for you?")).toBe(1);
+  });
+
+  it("counts one ask per question-marked sentence", () => {
+    expect(countAsks("What's your name? And your number? And the day?")).toBe(3);
+    expect(countAsks("Of course. Can I take your name?")).toBe(1);
+    expect(countAsks("Of course. What's your name? And what day were you hoping for?")).toBe(2);
+  });
+
+  it("leaves a single question offering several answers alone", () => {
+    // The shape that must not trip it: one ask, a list of options. ", or" is
+    // not ", and", and nothing here is a second starter clause.
+    expect(countAsks("Would you prefer 9:00 AM, 1:00 PM, or 4:30 PM?")).toBe(1);
+  });
+
+  it("floors the 'Also, …' shape at two without double-counting it", () => {
+    // Two sentences, each with a mark, plus an `also` bolt-on. Adding would
+    // read 3 for two asks.
+    expect(countAsks("What is your name? Also, what is your number?")).toBe(2);
+  });
+
+  it("returns 0 for a turn that asked nothing", () => {
+    expect(countAsks("")).toBe(0);
+    expect(countAsks(null)).toBe(0);
+    expect(countAsks("Thanks, I have that booked for you.")).toBe(0);
+  });
+});
+
+describe("asksMoreThanOneThing() — unchanged for every fixture that already pinned it", () => {
+  // The boolean is now countAsks(text) > 1 rather than a second copy of the
+  // rules. These are the exact strings tests/liveStackedQuestions.test.js
+  // drives through the socket, asserted here directly so a change to the
+  // counting cannot quietly move the guard's verdict.
+  const CASES = [
+    ["Can I start with your name, company, and what industry you're in?", true],
+    ["Of course, I can help with that. May I get your full name, and what is the best number to reach you on?", true],
+    ["Of course. What's your name? And what day were you hoping for?", true],
+    ["What's your name? And your number? And the day?", true],
+    ["Of course. Can I take your name?", false],
+    ["Would you prefer 9:00 AM, 1:00 PM, or 4:30 PM?", false],
+    ["", false],
+  ];
+
+  for (const [text, expected] of CASES) {
+    it(`${expected ? "fires" : "stays quiet"} on ${JSON.stringify(text).slice(0, 58)}`, () => {
+      expect(asksMoreThanOneThing(text)).toBe(expected);
+    });
+  }
 });
