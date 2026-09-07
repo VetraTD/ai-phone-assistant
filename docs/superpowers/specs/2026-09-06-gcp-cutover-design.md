@@ -179,17 +179,25 @@ Terraform edit.
 ### The failure this cutover invites, and the check that stops it
 
 `createLiveClient` **throws** when `GEMINI_API_KEY` is absent and `LIVE_SURFACE`
-is not vertex. Tier 2 catches that throw — correctly. So if the key does not
-reach Secret Manager, **every call silently serves the cascade and sounds
-fine**: "migrated to Live" while running the old stack, with nothing saying so.
+is not vertex, but nothing in `/twilio/live-voice`'s try block ever calls it or
+contacts a model at all — that route only allowlists the caller, looks up the
+business, mints a stream token and returns `<Connect><Stream>`, bumping
+`live_connect_ok` before any model is touched. `createLiveClient` runs later,
+inside `connectLive`, in the WebSocket handler Twilio opens next. So a missing
+key is not caught by the route, and it is not caught by the cascade either: the
+call is answered, `live_connect_ok` bumps, the socket opens, `connectLive`
+throws, and the handler closes it with no verb behind `<Connect>` for Twilio to
+fall back to. **The caller gets pickup, dead air, then a hangup — never the
+cascade.**
 
-Two defences, and both are needed:
-
-1. **A boot check** (§3) that makes the misconfiguration a refused deploy rather
-   than a silent downgrade.
-2. **A deploy gate that asserts both counters**: `live_connect_ok > 0` **and**
-   `live_connect_fallback == 0`. A fault-only counter cannot confirm anything —
-   it reads zero for a clean run and for a run that never got there.
+So this is not two defences. **The boot check (§3) is the only one** — it turns
+the misconfiguration into a refused deploy instead of a live one that answers
+and fails silently. The deploy gate (§4, §7) is not a second defence; it is a
+second *reading*, taken after the fact against a deployment that already
+booted: `live_close_clean > 0`, which is unreachable without a real model
+session actually opening and closing, alongside `live_connect_fallback == 0`.
+`live_connect_ok` alone proves nothing — it bumps in the same place whether the
+key is present or absent.
 
 ### Mid-call fallback: out of scope here, in before the first paying client
 
@@ -274,17 +282,36 @@ worst outcome into a deploy that refuses to start.
 
 The order is load-bearing. It is not one command.
 
-1. `terraform apply` — secrets and env vars only, no image change
-2. Push the Gemini key **value** into Secret Manager (`scripts/push-secrets.js`)
-3. Build from `main` **with `--service-account=vetra-deployer`** — the default
+1. `terraform apply -target='google_secret_manager_secret.runtime'` — the
+   secret container only, empty. Not the full apply: `cloud-run.tf`'s dynamic
+   `env` block references `gemini-api-key` at `version = "latest"`, so applying
+   everything here would create the secret **and** roll the voice service onto
+   it, empty, in the same step, and Cloud Run refuses a revision whose secret
+   cannot be resolved. This is the U2 pattern
+   (`gcp-migration-ledger.md`, "FIVE secret values ... and it cannot happen
+   before a partial apply"): target the secret, fill it, then apply the rest
+2. Push the Gemini key **value** directly —
+   `gcloud secrets versions add gemini-api-key --data-file=-` — confirmed by
+   reading the version's metadata back, never the value. Not
+   `scripts/push-secrets.js`: its `MAPPING` docstring excludes this credential
+   on purpose, the same way it excludes `ELEVENLABS_API_KEY` — both are
+   UK-lane-only with no BAA, and the script exists precisely so a `--project
+   vetra-us-...` invocation cannot inherit either from a shared `.env`
+3. `terraform apply` — the rest: the IAM grant and the voice service revision
+   carrying `GEMINI_API_KEY`, `LIVE_SURFACE`, `LIVE_MODEL`, now that the secret
+   it references has a version
+4. Build from `main` **with `--service-account=vetra-deployer`** — the default
    compute service account 403s on the Cloud Build source bucket
-4. **Run the migrate job before the service rolls.** At minimum 041
+5. **Run the migrate job before the service rolls.** At minimum 041
    (`business_live_voice`); confirm the pending set against the instance rather
    than assuming. A service rolling ahead of its schema has bitten this twice
-5. Roll the voice service
-6. **Assert on the serving revision, not on "a call worked":** `Build:` sha
-   matches, `live_connect_ok > 0`, `live_connect_fallback == 0`,
-   `db_backend cloudsql/IAM`, `call_state_store=pg`, `DEEPGRAM_REGION=eu`
+6. Roll the voice service
+7. **Assert on the serving revision, not on "a call worked":** `Build:` sha
+   matches, `live_close_clean > 0`, `live_connect_fallback == 0`,
+   `db_backend cloudsql/IAM`, `call_state_store=pg`, `DEEPGRAM_REGION=eu`.
+   Not `live_connect_ok` — it bumps before any model is contacted, so a
+   keyless deploy produces it too; `live_close_clean` only bumps after a real
+   session opens and closes
 
 Two traps carried in. `image_tag` defaults to `"0000000"`, a tag that does not
 exist, so a full apply before the build fails on a missing image. And
@@ -336,7 +363,7 @@ itself; all of it is required before a paying client.
   frontend, plus `terraform fmt` exit 0 and `validate` Success
 - New boot check: sabotage-verified in **both** directions — absent key must
   fail the boot, present key must not
-- Post-roll: the six assertions in §4 step 6, read off the serving revision
+- Post-roll: the six assertions in §4 step 7, read off the serving revision
 - The call: book on call 1, and call 1 must be the **cold** one — `cpu_idle`
   evidence only appears on turn one after an idle gap, and a second call spends
   it for ~15 minutes

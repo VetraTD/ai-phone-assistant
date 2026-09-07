@@ -64,6 +64,12 @@ const PROJECT_ID_RE = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
  * BAA, the secret does not exist in any US project, and the entire US/UK split
  * exists so that it cannot. If it ever belongs somewhere it belongs in a UK
  * project, named explicitly, not inherited from a shared .env.
+ *
+ * GEMINI_API_KEY IS DELIBERATELY ABSENT TOO, for the identical reason: the
+ * Gemini Developer API is not a Google Cloud service, no BAA reaches it,
+ * infra/terraform/secrets.tf scopes it `lanes = ["uk"]`, and it must never be
+ * pushable into a US project by a `--project vetra-us-...` invocation of this
+ * script. Push it directly with `gcloud secrets versions add`, not from here.
  */
 const MAPPING = Object.freeze({
   DEEPGRAM_API_KEY: "deepgram-api-key",
