@@ -60,6 +60,13 @@ import { join } from "node:path";
 import { connectLive } from "../../lib/voice/live/client.js";
 import { createDownsampler, mulaw8kToPcm16k } from "../../lib/voice/resample.js";
 import { reserve, commit, price, remaining, CAP_USD, spent } from "./lib/spend.js";
+// The normaliser, not the raw message. Gemini's usageMetadata carries
+// promptTokenCount / responseTokensDetails; the rate card in spend.js is keyed
+// audio_in / audio_out / text_in / text_out. Handing price() the raw object
+// matches nothing and returns $0.00 for a session that really billed -- which
+// is what run 2 of this probe did, forty times, in silence. addUsage's own
+// comment says it exists "so a turn is never silently billed as zero".
+import { emptyUsage, addUsage } from "./lib/geminiUsage.js";
 
 const MODEL = process.env.LIVE_MODEL || "gemini-3.1-flash-live-preview";
 
@@ -125,7 +132,11 @@ function toTelephoneBand(pcm24k) {
 /** One session, one voice, one reading. No tenant, no tools, no real prompt. */
 async function render(voiceName) {
   const chunks = [];
-  let usage = null;
+  // Accumulated, not last-wins: Gemini emits one usageMetadata per turn and
+  // keeping only the final one under-reports. lib/voice/live/summary.js records
+  // that this has broken twice by being re-derived instead of imported.
+  const usage = emptyUsage();
+  let sawUsage = false;
   let transcript = "";
   let done;
   const finished = new Promise((r) => {
@@ -153,7 +164,10 @@ async function render(voiceName) {
     },
     callbacks: {
       onmessage: (msg) => {
-        if (msg?.usageMetadata) usage = msg.usageMetadata;
+        if (msg?.usageMetadata) {
+          sawUsage = true;
+          addUsage(usage, msg.usageMetadata);
+        }
         const sc = msg?.serverContent;
         if (!sc) return;
         for (const part of sc.modelTurn?.parts || []) {
@@ -186,7 +200,7 @@ async function render(voiceName) {
     /* already gone */
   }
 
-  return { pcm: Buffer.concat(chunks), transcript: transcript.trim(), usage };
+  return { pcm: Buffer.concat(chunks), transcript: transcript.trim(), usage: sawUsage ? usage : null };
 }
 
 /**
@@ -203,15 +217,29 @@ async function render(voiceName) {
  * kept; the alternative destroyed everything the run paid for.
  */
 function recordSpend(voice, take, usage) {
-  if (!usage) return;
+  if (!usage) {
+    console.log("\n    [meter] NO usageMetadata on this session — cost unknown, not zero.");
+    return;
+  }
   try {
+    const cost = price(MODEL, usage);
+    const tokens = Object.values(usage).reduce((n, v) => n + (typeof v === "number" ? v : 0), 0);
+    // A priced-at-zero session that really consumed tokens is the failure this
+    // probe has already had once. Say so rather than writing a confident $0.00.
+    if (cost.usd === 0 && tokens > 0) {
+      console.log(
+        `\n    [meter] ${tokens} tokens priced at $0.00 — rate card missed them` +
+          `${cost.error ? ` (${cost.error})` : ""}. Recorded, but the total understates.`
+      );
+    }
     commit({
       probe: "voice-drift",
       arm: voice,
       run: take + 1,
       model: MODEL,
       usage,
-      usd: price(MODEL, usage).usd,
+      unpriced_tokens: cost.unpriced_tokens,
+      usd: cost.usd,
     });
   } catch (err) {
     console.log(`\n    [meter] NOT RECORDED — ${err?.message || err}`);
