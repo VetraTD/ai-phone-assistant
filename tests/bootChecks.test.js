@@ -12,7 +12,8 @@
 // design decision here; see lib/bootChecks.js.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, checkSttConfig, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
+import { checkNotificationConfig, checkDeploymentMode, checkDatabaseConfig, checkSttConfig, checkLiveSurface, assertBootConfig, FATAL, ANNOUNCE } from "../lib/bootChecks.js";
+import { LIVE_MODEL_DEFAULT } from "../lib/voice/live/client.js";
 
 const SID = "AC" + "1".repeat(32);
 const TOKEN = "authtoken1234567890";
@@ -167,7 +168,9 @@ describe("assertBootConfig", () => {
     // DEEPGRAM_API_KEY joined the minimum here when checkSttConfig landed. It
     // is not padding: a `standard` deployment with no STT provider cannot hear,
     // which is fatal by design and was fatal in server.js before it moved.
-    expect(() => assertBootConfig({ DEEPGRAM_API_KEY: "dg-key" }, { log: () => {} })).not.toThrow();
+    expect(() =>
+      assertBootConfig({ DEEPGRAM_API_KEY: "dg-key", GEMINI_API_KEY: "AIza-test-key" }, { log: () => {} })
+    ).not.toThrow();
   });
 
   it("announces every finding through the logger, fatal and non-fatal alike", () => {
@@ -241,7 +244,13 @@ describe("checkDatabaseConfig", () => {
   it("assertBootConfig still boots with no database", () => {
     expect(() =>
       assertBootConfig(
-        { SMTP_USER: "b@e.com", SMTP_PASS: "s", DASHBOARD_URL: "https://d.example", DEEPGRAM_API_KEY: "dg-key" },
+        {
+          SMTP_USER: "b@e.com",
+          SMTP_PASS: "s",
+          DASHBOARD_URL: "https://d.example",
+          DEEPGRAM_API_KEY: "dg-key",
+          GEMINI_API_KEY: "AIza-test-key",
+        },
         { log: () => {} }
       )
     ).not.toThrow();
@@ -423,6 +432,7 @@ describe("a hipaa deployment can now actually boot", () => {
           SMTP_USER: "bot@example.com",
           SMTP_PASS: "pw",
           DASHBOARD_URL: "https://dash.example.com",
+          LIVE_SURFACE: "vertex",
         },
         { log: () => {} }
       )
@@ -461,5 +471,78 @@ describe("server.js STT preflight", () => {
 
   it("verifies STT encryption before the port opens in a covered deployment", () => {
     expect(src).toMatch(/assertSttEncryption/);
+  });
+});
+
+describe("checkLiveSurface — a front-end that cannot connect must not boot", () => {
+  it("aistudio without a key is fatal — tier 2 would mask it and every call would serve the cascade", () => {
+    const { findings } = checkLiveSurface({ DEPLOYMENT_MODE: "standard" });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("live_surface_not_configured");
+  });
+
+  it("aistudio with a key boots", () => {
+    const { findings, surface } = checkLiveSurface({
+      DEPLOYMENT_MODE: "standard",
+      GEMINI_API_KEY: "AIza-test-key",
+    });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(surface).toBe("aistudio");
+  });
+
+  it("vertex without GOOGLE_CLOUD_PROJECT is fatal", () => {
+    const { findings } = checkLiveSurface({ DEPLOYMENT_MODE: "standard", LIVE_SURFACE: "vertex" });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("live_surface_not_configured");
+  });
+
+  it("vertex with a project boots, and needs no key", () => {
+    const { findings, surface } = checkLiveSurface({
+      DEPLOYMENT_MODE: "standard",
+      LIVE_SURFACE: "vertex",
+      GOOGLE_CLOUD_PROJECT: "vetra-uk-edc8ca",
+    });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(surface).toBe("vertex");
+  });
+
+  // checkCoveredVendors CANNOT catch this: NON_COVERED_VENDORS["gemini-developer-api"]
+  // has `credentials: []`, so no credential scan reaches it. assertVendorAllowed
+  // would throw at construction — and tier 2 would swallow that throw too.
+  it("aistudio in hipaa mode is fatal even with a key present", () => {
+    const { findings } = checkLiveSurface({
+      DEPLOYMENT_MODE: "hipaa",
+      GEMINI_API_KEY: "AIza-test-key",
+    });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("live_surface_not_covered");
+  });
+
+  it("announces the surface and model on every boot", () => {
+    const { findings } = checkLiveSurface({
+      DEPLOYMENT_MODE: "standard",
+      GEMINI_API_KEY: "AIza-test-key",
+    });
+    const announced = findings.find((f) => f.code === "live_surface");
+    expect(announced.severity).toBe(ANNOUNCE);
+    expect(announced.detail).toContain("gemini-3.1-flash-live-preview");
+  });
+
+  it("assertBootConfig refuses to boot when the Live surface is unconfigured", () => {
+    expect(() =>
+      assertBootConfig(
+        {
+          DEPLOYMENT_MODE: "standard",
+          DEEPGRAM_API_KEY: "dg-key",
+          DATABASE_URL: "postgres://u:p@localhost:5432/db",
+          IDENTITY_PLATFORM_PROJECT_ID: "vetra-uk-edc8ca",
+        },
+        { log: () => {} }
+      )
+    ).toThrow(/live_surface_not_configured/);
+  });
+
+  // The literal in bootChecks must not drift from the code that actually connects.
+  it("announces the same default the client would use", () => {
+    const { findings } = checkLiveSurface({ DEPLOYMENT_MODE: "standard", GEMINI_API_KEY: "k" });
+    const announced = findings.find((f) => f.code === "live_surface");
+    expect(announced.detail).toContain(LIVE_MODEL_DEFAULT);
   });
 });
