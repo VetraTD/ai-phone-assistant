@@ -79,6 +79,11 @@ variable "runtime_secrets" {
       lanes   = ["uk"]
       purpose = "Text-to-speech. UK ONLY. No BAA, so it must never exist in a US project — this single-element list is the credential boundary the whole project split exists for."
     }
+    gemini-api-key = {
+      env_var = "GEMINI_API_KEY"
+      lanes   = ["uk"]
+      purpose = "The Live front-end's session credential. UK ONLY, and for the same reason as elevenlabs-api-key: the Gemini Developer API is not a Google Cloud service, so no BAA reaches it, and a Live session carries the caller's entire utterance. A US project must never hold it. Note that checkCoveredVendors cannot enforce this at boot - gemini-developer-api has no credential name to scan for - so this lane list IS the control, and lib/bootChecks.js checkLiveSurface is the second line."
+    }
   }
 }
 
