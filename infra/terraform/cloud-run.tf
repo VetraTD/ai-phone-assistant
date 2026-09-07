@@ -649,8 +649,16 @@ resource "google_cloud_run_v2_service" "this" {
       # fact anyone should have to infer.
       #
       # Its absence is now also a FATAL boot check - lib/bootChecks.js
-      # checkLiveSurface - because tier 2 catches the client's throw and would
-      # otherwise serve every caller on the cascade in silence.
+      # checkLiveSurface - because /twilio/live-voice never calls
+      # createLiveClient or catches its throw at all: that route only
+      # allowlists, looks up the business and mints a stream token, bumping
+      # `live_connect_ok` before any model is touched. The throw happens
+      # later, inside the WebSocket handler Twilio opens next, and that
+      # handler has no cascade to fall back to — it closes the socket and,
+      # with no verb behind `<Connect>`, Twilio hangs up. A missing
+      # credential would answer every call, bump a healthy-looking counter,
+      # and then go silent and hang up. This boot check is not a second
+      # defence against that; it is the only one.
       #
       # ⚠ THESE TWO RENDER UNCONDITIONALLY ON EVERY VOICE SERVICE, unlike
       # DEEPGRAM_REGION two lines above, which is genuinely lane-conditional.
@@ -668,7 +676,8 @@ resource "google_cloud_run_v2_service" "this" {
       # ["uk-prod"]`. PARKED, not fixed here — deciding the US lane's Live
       # surface (vertex? disabled? a per-stack map?) is a design decision the
       # spec explicitly defers ("vetra-us stays dark, and that is free"), not
-      # something to settle inside a comment-only fix.
+      # something to settle inside a comment-only fix. See the parked finding
+      # in the Phase 2 ledger section.
       # -------------------------------------------------------------------
       env {
         name  = "LIVE_SURFACE"
@@ -687,14 +696,14 @@ resource "google_cloud_run_v2_service" "this" {
       # each were before someone wrote it down.
       #
       # TRANSFER_NUMBER - read at server.js:147, lib/voice/session.js:81,
-      # lib/voice/live/index.js:1592 and :2857, defaulting to "". It is the
+      # lib/voice/live/index.js:1593 and :2858, defaulting to "". It is the
       # fallback BEHIND the per-business businesses.transfer_phone_number:
       # session.js:2506 is `const transferNumber = config.transferPhoneNumber
       # || TRANSFER_NUMBER;` and :2507 gates on canTransfer. Unset, and ONLY
       # when the per-business config.transferPhoneNumber is ALSO unset, means
       # canTransfer is false, so session.js:2510-2515 speaks
       # transferUnavailable and returns - it does not dial and does not hang
-      # up. In that same both-unset case, the Live path's live/index.js:2857
+      # up. In that same both-unset case, the Live path's live/index.js:2858
       # passes transferAllowed: false, so the model is never offered transfer
       # language at all. Rendering an env fallback would give EVERY tenant
       # one shared transfer number, which is worse than the per-business
