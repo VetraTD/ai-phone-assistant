@@ -44,7 +44,12 @@ class FakeSocket extends EventEmitter {
     this.readyState = 1;
     this.sent = [];
   }
-  send() {}
+  send(raw) {
+    // Recorded so the HARD clear is observable: a tapered clear drops only what
+    // audioOut holds locally, a hard one also sends Twilio `clear`. That event
+    // is the only thing that distinguishes them from outside.
+    this.sent.push(raw);
+  }
   close() {
     this.readyState = 3;
   }
@@ -97,7 +102,7 @@ function fakeDb() {
 
 let toolId = 0;
 
-async function boot(env = {}) {
+async function boot(env = {}, { now = () => 0 } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const execute = vi.fn(async (fc) => ({
@@ -112,7 +117,7 @@ async function boot(env = {}) {
     stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" } },
   }));
   await handleLiveSessionConnection(ws, {}, {
-    now: () => 0,
+    now,
     connect: live.connect,
     database: fakeDb(),
     env,
@@ -130,8 +135,23 @@ async function boot(env = {}) {
     await new Promise((r) => setImmediate(r));
   };
   return {
+    ws,
     live,
     settle,
+    // Put real frames in audioOut's queue, so aiAudioPlayingUntil() is ahead of
+    // the clock and there is something for the guard to cut.
+    //
+    // 24 kHz PCM16 in, 8 kHz mu-law out, decimation 3: one 160-byte Twilio
+    // frame is 20 ms and eats 960 bytes of input. Silence is fine -- the
+    // resampler and framer do not look at the values, only the lengths.
+    audio: (ms) => {
+      const bytes = Math.round((ms / 20) * 960);
+      live.push({
+        serverContent: {
+          modelTurn: { parts: [{ inlineData: { data: Buffer.alloc(bytes).toString("base64") } }] },
+        },
+      });
+    },
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
     async checkAvailability() {
@@ -234,5 +254,126 @@ describe("times offered that nothing ever verified", () => {
 
     expect(offers()).toBe(1);
     expect(notes(s.live)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX80 -- the guard cuts the audio, it does not only complain about it.
+//
+// The order on the first deployed Live call, 2026-09-07, is the whole ticket:
+//
+//   19:38:59.313  live_offer_unverified   (step gather_details)
+//   19:39:00.325  check_appointment_availability   (29 ms, success)
+//
+// The calendar lookup was never broken. It was one second late, and OFFER_NOTE
+// corrected into a caller who had already been told 11:30pm. The owner reported
+// it as "it keeps bringing out 11:30pm".
+//
+// The detection was always right. What was wrong was WHERE it ran: auditTurn
+// fires on turnComplete, by which point the model has stopped generating and
+// audioOut holds only the tail of the turn, so a cut there would chop the
+// harmless end of a sentence and leave the wrong time already heard. It now
+// runs per fragment, beside the leak guard, where there is still queued audio.
+//
+// On this front-end a guard can only ever be a TRUNCATOR, never a preventer:
+// outputAudioTranscription lags the audio it describes. The leak guard's
+// measured record is seven cut and four missed, so both outcomes get their own
+// counter and neither is assumed.
+// ---------------------------------------------------------------------------
+
+const cuts = () => getLatencyStats().turnTaking.live_offer_cuts;
+const missed = () => getLatencyStats().turnTaking.live_offer_cut_missed;
+const clears = (ws) => ws.sent.filter((r) => JSON.parse(r).event === "clear").length;
+
+describe("LVX80 — an unverified offer is cut off, not talked over", () => {
+  beforeEach(() => clearStats());
+
+  it("cuts while the offer is still queued, and takes Twilio's buffer with it", async () => {
+    const s = await boot();
+    // Two seconds of the turn still unplayed when the transcript names it.
+    s.audio(2000);
+    s.say("We have times available at nine AM or ten AM.");
+    await s.settle();
+
+    expect(offers()).toBe(1);
+    expect(cuts()).toBe(1);
+    expect(missed()).toBe(0);
+    // HARD, not tapered. A tapered clear lets Twilio finish playing the ~100 ms
+    // it already holds -- which here is the wrong time.
+    expect(clears(s.ws)).toBe(1);
+  });
+
+  it("records a miss rather than a cut when nothing is left to drop", async () => {
+    const s = await boot();
+    // No audio queued: the transcript arrived after the caller heard all of it.
+    s.say("We have times available at nine AM or ten AM.");
+    await s.settle();
+
+    expect(offers()).toBe(1);
+    expect(cuts()).toBe(0);
+    expect(missed()).toBe(1);
+    expect(clears(s.ws)).toBe(0);
+  });
+
+  it("still sends the note when the cut was too late", async () => {
+    // A caller who has heard the whole wrong time needs the correction MORE,
+    // not less. The note is not conditional on winning the race.
+    const s = await boot();
+    s.say("We have times available at nine AM or ten AM.");
+    await s.settle();
+
+    expect(missed()).toBe(1);
+    expect(notes(s.live)).toHaveLength(1);
+  });
+
+  it("LIVE_OFFER_CUT=off keeps the detection and the note, and stops cutting", async () => {
+    // The note has been in production since 2026-09-06 and is known safe. The
+    // cut is new. Turning the cut off must not cost the evidence needed to
+    // decide what to do next.
+    const s = await boot({ LIVE_OFFER_CUT: "off" });
+    s.audio(2000);
+    s.say("We have times available at nine AM or ten AM.");
+    await s.settle();
+
+    expect(offers()).toBe(1);
+    expect(cuts()).toBe(0);
+    expect(clears(s.ws)).toBe(0);
+    expect(notes(s.live)).toHaveLength(1);
+  });
+
+  it("fires once per turn however many fragments match", async () => {
+    // The repeat cutter fired three times in 173 ms on one real turn and burned
+    // the whole call's cap. Every guard on this path has carried a per-turn
+    // latch since.
+    const s = await boot();
+    s.audio(2000);
+    s.say("We have times available at nine AM or ten AM.");
+    s.say(" We also have openings at two PM.");
+    await s.settle();
+
+    expect(offers()).toBe(1);
+    expect(cuts()).toBe(1);
+  });
+
+  it("does not cut once an availability call has verified something", async () => {
+    const s = await boot();
+    await s.checkAvailability();
+    s.audio(2000);
+    s.say("We have times available at ten AM and ten thirty AM. Do either work?");
+    await s.settle();
+
+    expect(offers()).toBe(0);
+    expect(cuts()).toBe(0);
+    expect(clears(s.ws)).toBe(0);
+  });
+
+  it("does not cut ordinary conversation", async () => {
+    const s = await boot();
+    s.audio(2000);
+    s.say("Your appointment is at ten AM on Monday.");
+    await s.settle();
+
+    expect(offers()).toBe(0);
+    expect(clears(s.ws)).toBe(0);
   });
 });
