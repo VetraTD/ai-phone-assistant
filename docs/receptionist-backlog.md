@@ -7847,3 +7847,61 @@ was wanted, which destroyed 40 rendered takes; then raw `usageMetadata` handed t
 a rate card keyed differently, which priced 746 s of audio at $0.00. The audio
 was never the unreliable part. Both runs are in the ledger as explicit
 estimates, because neither run's true usage survives.
+
+### LVX81 — rated 2026-09-07. V1 REFUTED. It is not a voice-selection problem.
+
+40 takes rated blind by the UK caller who reported the defect, scored against
+`verdicts-voice.json` as written. `scripts/probes/score-voice-drift.mjs`, output
+kept at `scripts/probes/report-voice.txt`.
+
+| voice | takes | result |
+|---|---|---|
+| Kore (incumbent) | 5 | **5 british** |
+| Aoede, Fenrir, Leda, Orus, Puck, Zephyr | 5 each | 5 british |
+| Charon | 5 | 4 british, 1 american |
+
+**V1 — refuted.** Kore's five takes fall in one category. By the rule written
+before the first session opened: *"LVX81 is not a voice-selection problem. Close
+'try the other prebuilt voices' as a non-fix and record that the drift is
+within-call, which no config lever reaches."*
+
+**V2 — no change.** A candidate could only win by being five-of-five british
+while Kore was not. Kore is. **Kore stays**, and no preference is written down as
+a decision.
+
+**V3 — not confirmed.** Seven of eight voices are consistent across all takes.
+
+#### The real finding: the rig did not reproduce the defect
+
+Eight real calls drifted between British, Australian and American. Forty fresh
+sessions reading the same sentence produced British 39 times out of 40 — and the
+single exception was **Charon**, which is not the production voice. Whatever
+causes the drift on a call, it is absent from a one-shot render.
+
+**The honest caution, stated because 98% of takes carry one label:** a rater who
+marks nearly everything the same may not be discriminating. Two things weigh
+against that reading and neither settles it. They did mark one take differently,
+so discrimination is not zero. And that mark is concentrated in a single take of
+a single voice rather than scattered, which is what near-uniform audio looks like
+and not what inattentive rating looks like. It remains a caveat on the strength
+of the result, not on its direction.
+
+#### What this moves LVX81 to
+
+Not "which voice", but "what about a call". Three differences between this rig
+and a real call, none yet tested, in the order they are worth testing:
+
+1. **Conversation.** Every take is one utterance from a fresh session. A real
+   call is multi-turn, and the vendor's own audio conditions on its context.
+2. **The production prompt.** These render with a two-line instruction, not the
+   24,000-character system prompt.
+3. **Caller audio.** These are text-in. A real call feeds the model the caller's
+   voice, and a model that adapts toward its interlocutor would explain an
+   accent that moves during a call and never between renders.
+
+(3) is the one that fits the evidence best and is the cheapest to falsify: the
+same probe, with a UK-accented and a US-accented caller utterance fed in before
+the read-aloud. Not built, not costed, not authorised.
+
+**Cost of the round:** $0.268 measured-equivalent for the rating run, plus the
+same again lost to run 1's meter bug. $9.1521 of $11.00.
