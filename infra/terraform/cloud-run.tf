@@ -651,6 +651,24 @@ resource "google_cloud_run_v2_service" "this" {
       # Its absence is now also a FATAL boot check - lib/bootChecks.js
       # checkLiveSurface - because tier 2 catches the client's throw and would
       # otherwise serve every caller on the cascade in silence.
+      #
+      # ⚠ THESE TWO RENDER UNCONDITIONALLY ON EVERY VOICE SERVICE, unlike
+      # DEEPGRAM_REGION two lines above, which is genuinely lane-conditional.
+      # secrets.tf scopes `gemini-api-key` to `lanes = ["uk"]`, so a US
+      # service can never be granted `GEMINI_API_KEY` — the day `us-prod` is
+      # added to `var.active_stacks`, `voice-us-prod` gets
+      # `LIVE_SURFACE=aistudio` with no credential to back it, and it
+      # crash-loops before it ever listens: `checkLiveSurface` in
+      # `lib/bootChecks.js` raises a FATAL `live_surface_not_configured`, and
+      # `server.js:1551` calls `assertBootConfig()` before the port opens.
+      # `terraform plan` gives no warning at all. This is the boot check
+      # working as designed — the defect is config telling a lane to use a
+      # surface whose credential that lane can never hold, not the refusal to
+      # boot on it. Dormant today: `terraform.tfvars` pins `active_stacks =
+      # ["uk-prod"]`. PARKED, not fixed here — deciding the US lane's Live
+      # surface (vertex? disabled? a per-stack map?) is a design decision the
+      # spec explicitly defers ("vetra-us stays dark, and that is free"), not
+      # something to settle inside a comment-only fix.
       # -------------------------------------------------------------------
       env {
         name  = "LIVE_SURFACE"
@@ -672,19 +690,20 @@ resource "google_cloud_run_v2_service" "this" {
       # lib/voice/live/index.js:1592 and :2857, defaulting to "". It is the
       # fallback BEHIND the per-business businesses.transfer_phone_number:
       # session.js:2506 is `const transferNumber = config.transferPhoneNumber
-      # || TRANSFER_NUMBER;` and :2507 gates on canTransfer. Unset means
+      # || TRANSFER_NUMBER;` and :2507 gates on canTransfer. Unset, and ONLY
+      # when the per-business config.transferPhoneNumber is ALSO unset, means
       # canTransfer is false, so session.js:2510-2515 speaks
       # transferUnavailable and returns - it does not dial and does not hang
-      # up. On the Live path, live/index.js:2857 passes transferAllowed:
-      # false, so the model is never offered transfer language at all.
-      # Rendering an env fallback would give EVERY tenant one shared transfer
-      # number, which is worse than the per-business value being the only
-      # source.
+      # up. In that same both-unset case, the Live path's live/index.js:2857
+      # passes transferAllowed: false, so the model is never offered transfer
+      # language at all. Rendering an env fallback would give EVERY tenant
+      # one shared transfer number, which is worse than the per-business
+      # value being the only source.
       #
       # UNROUTED_TRANSFER_NUMBER - read only at server.js:162-164, at call
       # time rather than module load. Unset means a call to a number matching
       # no businesses.phone_number row takes a voicemail (server.js:685-687),
-      # which .env.example:160-173 documents as the intent.
+      # which .env.example:163-173 documents as the intent.
       # normalizePhoneNumber also degrades a malformed value to voicemail.
       #
       # CALL_MAX_DURATION_MINUTES - read at server.js:166 and
