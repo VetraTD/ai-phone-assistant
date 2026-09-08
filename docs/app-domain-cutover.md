@@ -2,8 +2,14 @@
 
 Status: **waiting on DNS.** Everything on the GCP side is done and applied.
 
-`vetratd.com` stays on Vercel and belongs to the site rebuild. GCP serves only
-the dashboard, on its own subdomain.
+`vetratd.com` stays on Vercel. GCP serves only the dashboard, on its own
+subdomain.
+
+> **Correction, 2026-09-08 — read "One codebase, two sites" at the end of this
+> file before acting on anything above.** `vetratd.com` is NOT a separate
+> project: it is this same frontend, auto-deploying from this repository to
+> Vercel. Earlier sections here said otherwise, on the strength of a comment in
+> `terraform.tfvars`, and that was never checked.
 
 ## Why a subdomain and not a path
 
@@ -73,9 +79,11 @@ owner notification emails link to — points at a path that no longer exists.
   already sent link to `/app`, and the router's `*` route is a 404 page. A
   `<Route path="/app" element={<Navigate to="/" replace />} />` keeps every
   existing bookmark and email working.
-- The in-repo **Landing page is retired**. `vetratd.com` is the marketing site
-  and it is a different codebase on Vercel; the Landing here only ever appeared
-  on the Firebase origin, and an app origin should serve the app.
+- The in-repo **Landing page is retired FROM THE APP BUILD ONLY.** It was
+  originally written here as "retired, because vetratd.com is a different
+  codebase" — which is false, and acting on it would have taken the marketing
+  site down on the next merge. The Landing still ships in the `marketing`
+  build; see "One codebase, two sites" below.
 - `/contact`, `/legal` and `/reset-password` **stay**. The contact form has a
   working SMTP backend, and the login page's "Request access" link points at
   `/contact` — closing self-serve signup depends on that link resolving.
