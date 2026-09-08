@@ -238,3 +238,74 @@ describeDb("unscoped access is denied, which is the whole point", () => {
     expect(id).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX83's write, as the role that will actually make it.
+//
+// The Live front-end now writes a transcript row per speaker per turn, and it
+// does so fire-and-forget: nothing awaits it, and withTenantSafe swallows
+// whatever it returns. That combination means a write that lands and a write
+// that is refused by row-level security look EXACTLY the same from the call —
+// which is precisely the shape of the defect it is fixing. completeCall was
+// running unscoped, matching zero rows, and reporting success for months.
+//
+// So the write is proved here, as vetra_app, under the policies, rather than
+// as the local superuser for whom RLS is inert.
+// ---------------------------------------------------------------------------
+describeDb("the Live transcript write lands under RLS", () => {
+  async function seedCall(tenant, sid) {
+    const { rows } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status)
+       VALUES ($1, $2, '+15556660009', 'in-progress') RETURNING id`,
+      [tenant, sid]
+    );
+    return rows[0].id;
+  }
+
+  it("writes both halves of a turn when it is given a tenant", async () => {
+    const callId = await seedCall(TENANT_A, "CA-live-transcript-0001");
+
+    await db.withTenantSafe(TENANT_A, async () => {
+      await db.addTranscriptEntry(callId, "caller", "I would like to book.", 0);
+      await db.addTranscriptEntry(callId, "ai", "Of course. What day suits you?", 1);
+    });
+
+    const { rows } = await admin.query(
+      `SELECT speaker, message, sequence FROM call_transcripts WHERE call_id = $1 ORDER BY sequence`,
+      [callId]
+    );
+    expect(rows.map((r) => r.speaker)).toEqual(["caller", "ai"]);
+    expect(rows[0].message).toBe("I would like to book.");
+  });
+
+  it("writes NOTHING when no tenant was resolved, and does not throw", async () => {
+    // The Live path reaches this if lookupBusinessByPhone found no business.
+    // It must not take the call down — but it must also not look like it
+    // worked. The row count is the only honest witness.
+    const callId = await seedCall(TENANT_A, "CA-live-transcript-0002");
+
+    await expect(
+      db.withTenantSafe(null, () => db.addTranscriptEntry(callId, "caller", "orphan", 0))
+    ).resolves.not.toThrow();
+
+    const { rows } = await admin.query(
+      `SELECT count(*)::int AS n FROM call_transcripts WHERE call_id = $1`,
+      [callId]
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("cannot attach a row to another tenant's call", async () => {
+    const foreign = await seedCall(TENANT_B, "CA-live-transcript-0003");
+
+    await db.withTenantSafe(TENANT_A, () =>
+      db.addTranscriptEntry(foreign, "caller", "wrong tenant", 0)
+    );
+
+    const { rows } = await admin.query(
+      `SELECT count(*)::int AS n FROM call_transcripts WHERE call_id = $1`,
+      [foreign]
+    );
+    expect(rows[0].n).toBe(0);
+  });
+});

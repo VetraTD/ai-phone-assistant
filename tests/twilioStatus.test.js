@@ -264,6 +264,48 @@ describe("POST /twilio/status", () => {
     });
   });
 
+  describe("the call-completion write", () => {
+    // Every Cloud Run service in this estate runs cpu_idle = true, so CPU is
+    // throttled the instant the response is written. Work scheduled after
+    // res.end() is not guaranteed to run, and the one write that MUST land --
+    // the row's status and duration -- was scheduled exactly that way.
+    //
+    // Nine production calls on 2026-09-07 logged call_ended_status_callback
+    // with CallStatus completed, and their rows still read in-progress. The
+    // proximate cause was LVX30 (no tenant, so FORCE RLS matched zero rows),
+    // which is fixed on the Live path. This closes the other half, which would
+    // have hidden the fix: an un-awaited write that never runs and a scoped
+    // write that matches nothing are indistinguishable from the outside.
+    it("finishes the status/duration write before answering Twilio", async () => {
+      let landed = false;
+      mockCompleteCall.mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        landed = true;
+      });
+
+      const res = await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_await_1", CallStatus: "completed", CallDuration: "42" });
+
+      expect(res.status).toBe(200);
+      expect(landed).toBe(true);
+    });
+
+    it("still answers 200 when the write fails, so Twilio does not retry", async () => {
+      mockCompleteCall.mockImplementation(async () => {
+        throw new Error("connection terminated unexpectedly");
+      });
+
+      const res = await request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_await_2", CallStatus: "completed", CallDuration: "9" });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe("latency rollup", () => {
     it("writes avg/p95 turn latency for a completed call when stats are available", async () => {
       mockGetCallStats.mockReturnValue({ avgMs: 450, p95Ms: 900, count: 4 });
