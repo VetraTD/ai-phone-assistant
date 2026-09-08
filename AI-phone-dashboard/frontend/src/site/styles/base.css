@@ -1,0 +1,275 @@
+/* Public-site base. Every selector is a class under .site-root; no bare
+   element selectors, so nothing here can reach the dashboard and specificity
+   stays flat (later component CSS wins on ties). */
+
+.site-root {
+  font-family: var(--site-font-sans);
+  font-size: var(--site-text-base);
+  line-height: var(--site-leading-body);
+  color: var(--site-ink);
+  background: var(--site-bg);
+  -webkit-text-size-adjust: 100%;
+  overflow-x: clip;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  accent-color: var(--site-accent);
+  caret-color: var(--site-accent);
+}
+
+.site-root ::selection {
+  background: var(--site-teal-soft);
+  color: var(--site-ink);
+}
+
+.site-main {
+  flex: 1 0 auto;
+}
+
+/* Skip link: visible only when focused. */
+.site-skip {
+  position: absolute;
+  left: var(--site-gutter);
+  top: -100px;
+  z-index: 100;
+  padding: var(--site-space-2) var(--site-space-4);
+  background: var(--site-ink);
+  color: var(--site-on-ink);
+  border-radius: var(--site-radius-sm);
+  text-decoration: none;
+}
+.site-skip:focus-visible {
+  top: var(--site-space-2);
+  outline: 3px solid var(--site-focus);
+  outline-offset: 2px;
+}
+
+.site-container {
+  width: 100%;
+  max-width: var(--site-container);
+  margin-inline: auto;
+  padding-inline: var(--site-gutter);
+}
+.site-container--narrow {
+  max-width: var(--site-container-narrow);
+}
+
+.site-section {
+  padding-block: var(--site-section-y);
+}
+.site-section--tint {
+  background: var(--site-bg-tint);
+}
+.site-section--ink {
+  background: var(--site-ink);
+  color: var(--site-on-ink);
+}
+
+/* Type */
+.site-h1,
+.site-h2 {
+  font-family: var(--site-font-display);
+  font-weight: 600;
+  letter-spacing: var(--site-tracking-display);
+  line-height: var(--site-leading-tight);
+  margin: 0;
+  text-wrap: balance;
+}
+.site-h1 {
+  font-size: var(--site-h1);
+}
+.site-h2 {
+  font-size: var(--site-h2);
+}
+.site-h3 {
+  font-family: var(--site-font-sans);
+  font-weight: 600;
+  font-size: var(--site-h3);
+  line-height: 1.25;
+  margin: 0;
+}
+.site-lead {
+  font-size: var(--site-text-lg);
+  line-height: 1.5;
+  color: var(--site-ink-muted);
+  margin: 0;
+  max-width: 34em;
+}
+.site-p {
+  margin: 0;
+  max-width: 62ch;
+}
+.site-muted {
+  color: var(--site-ink-muted);
+}
+.site-small {
+  font-size: var(--site-text-sm);
+}
+.site-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus, everywhere, always visible. */
+.site-root :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--site-focus);
+  outline-offset: 2px;
+  border-radius: var(--site-radius-sm);
+}
+
+/* Links in prose */
+.site-link {
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+.site-link:hover {
+  color: var(--site-accent-hover);
+}
+
+/* Buttons */
+.site-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--site-space-2);
+  min-height: 44px;
+  padding: 0 1.25rem;
+  border-radius: var(--site-radius-pill);
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--site-dur-fast) var(--site-ease),
+    border-color var(--site-dur-fast) var(--site-ease),
+    color var(--site-dur-fast) var(--site-ease);
+  touch-action: manipulation;
+}
+.site-btn--primary {
+  background: var(--site-accent);
+  color: var(--site-accent-ink);
+}
+.site-btn--primary:hover {
+  background: var(--site-accent-hover);
+}
+.site-btn--secondary {
+  background: var(--site-surface);
+  color: var(--site-ink);
+  border-color: var(--site-line-strong);
+}
+.site-btn--secondary:hover {
+  border-color: var(--site-ink);
+}
+.site-btn--ghost {
+  background: transparent;
+  color: var(--site-ink);
+  padding-inline: 0.75rem;
+}
+.site-btn--ghost:hover {
+  color: var(--site-accent-hover);
+}
+.site-btn--on-ink {
+  background: var(--site-on-ink);
+  color: var(--site-ink);
+}
+.site-btn--on-ink:hover {
+  background: #ffffff;
+}
+.site-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The diary page: white, ruled every --site-rule, entries sit on the lines. */
+.site-page {
+  background-color: var(--site-surface);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--site-rule) - 1px),
+    var(--site-line) calc(var(--site-rule) - 1px),
+    var(--site-line) var(--site-rule)
+  );
+  border: 1px solid var(--site-line);
+  border-radius: var(--site-radius-md);
+  overflow: hidden;
+}
+.site-page--flat {
+  border-radius: 0;
+  border-inline: 0;
+}
+
+/* One ruled row: margin label on the left, entry on the right. */
+.site-row {
+  display: grid;
+  grid-template-columns: var(--site-margin) minmax(0, 1fr);
+  min-height: var(--site-rule);
+  align-items: start;
+}
+.site-row__margin {
+  padding-inline: var(--site-space-4) var(--site-space-2);
+  padding-block: calc((var(--site-rule) - 1.6em) / 2) 0;
+  color: var(--site-ink-soft);
+  font-size: var(--site-text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.site-row__entry {
+  padding-inline: var(--site-space-2) var(--site-space-4);
+  padding-block: calc((var(--site-rule) - 1.6em) / 2) 0;
+  min-width: 0;
+}
+
+/* Visually hidden but read by screen readers. */
+.site-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* One authored moment: the hero's entrance. */
+@keyframes site-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .site-rise {
+    animation: site-rise var(--site-dur) var(--site-ease) both;
+  }
+  .site-rise--2 {
+    animation-delay: 80ms;
+  }
+  .site-rise--3 {
+    animation-delay: 160ms;
+  }
+  .site-rise--4 {
+    animation-delay: 260ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-root *,
+  .site-root *::before,
+  .site-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

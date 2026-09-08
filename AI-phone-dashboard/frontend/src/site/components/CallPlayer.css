@@ -1,0 +1,208 @@
+.player {
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--site-shadow);
+}
+
+.player__head {
+  border-bottom: 1px solid var(--site-line-strong);
+  background: var(--site-surface);
+}
+.player__label {
+  color: var(--site-ink-muted);
+  font-weight: 600;
+}
+.player__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--site-space-3);
+  flex-wrap: wrap;
+  padding-block: calc((var(--site-rule) - 1.6em) / 2);
+}
+.player__clinic {
+  font-weight: 600;
+}
+.player__context {
+  font-size: var(--site-text-sm);
+}
+.player__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--site-line-strong);
+  flex: 0 0 auto;
+}
+.player__dot.is-live {
+  background: var(--site-teal-deep);
+  box-shadow: 0 0 0 4px var(--site-teal-soft);
+}
+
+/* Transcript region: fixed height, scrolls on its own. Its rule pitch is one
+   line of text, so every wrapped line sits on a rule the way handwriting sits
+   on a ruled page; the hourly diary keeps the taller 44px pitch. */
+.tx {
+  position: relative;
+}
+.tx__region {
+  --site-rule: 28px;
+  max-height: 308px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--site-line-strong) transparent;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--site-rule) - 1px),
+    var(--site-line) calc(var(--site-rule) - 1px),
+    var(--site-line) var(--site-rule)
+  );
+}
+@media (min-width: 768px) {
+  .tx__region {
+    max-height: 392px;
+  }
+}
+
+.tx-turn {
+  min-height: var(--site-rule);
+}
+.tx-turn .site-row__margin,
+.tx-turn .site-row__entry {
+  padding-block: 0;
+  line-height: var(--site-rule);
+}
+.tx-turn:first-child .site-row__margin,
+.tx-turn:first-child .site-row__entry {
+  padding-top: 0;
+}
+
+.tx-turn__who {
+  font-weight: 600;
+  color: var(--site-ink-soft);
+}
+.tx-turn.is-current .tx-turn__who {
+  color: var(--site-ink);
+}
+.tx-turn__words {
+  margin: 0;
+  color: var(--site-ink-muted);
+  cursor: pointer;
+}
+.tx-turn.is-current .tx-turn__words {
+  color: var(--site-ink);
+}
+
+.tx-word {
+  border-radius: 3px;
+  /* No transition: the highlight is state, and it must never lag the audio
+     or linger on a word once the next one is spoken. */
+}
+.tx-word.is-past {
+  color: var(--site-ink);
+}
+.tx-word.is-active {
+  background: var(--site-teal-soft);
+  color: var(--site-ink);
+  box-shadow: 0 0 0 2px var(--site-teal-soft);
+}
+
+.tx__follow {
+  position: absolute;
+  right: var(--site-space-4);
+  bottom: var(--site-space-3);
+  min-height: 36px;
+  padding: 0 var(--site-space-3);
+  border-radius: var(--site-radius-pill);
+  border: 1px solid var(--site-line-strong);
+  background: var(--site-surface);
+  color: var(--site-ink);
+  font: inherit;
+  font-size: var(--site-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--site-shadow);
+}
+
+/* Controls sit on the page's bottom rule. */
+.player__controls {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--site-space-3);
+  padding: var(--site-space-2) var(--site-space-4) var(--site-space-2) var(--site-space-3);
+  border-top: 1px solid var(--site-line-strong);
+  background: var(--site-surface);
+}
+
+.player__toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--site-accent);
+  color: var(--site-accent-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color var(--site-dur-fast) var(--site-ease);
+}
+.player__toggle:hover {
+  background: var(--site-accent-hover);
+}
+
+.player__time {
+  font-size: var(--site-text-sm);
+  color: var(--site-ink-muted);
+  white-space: nowrap;
+}
+
+/* Range input, themed from the palette rather than the browser's. */
+.player__scrub {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.player__scrub:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.player__scrub::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--site-line-strong);
+}
+.player__scrub::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--site-line-strong);
+}
+.player__scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 2px solid var(--site-surface);
+  background: var(--site-ink);
+  box-shadow: 0 1px 2px rgba(14, 28, 44, 0.2);
+}
+.player__scrub::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--site-surface);
+  background: var(--site-ink);
+  box-shadow: 0 1px 2px rgba(14, 28, 44, 0.2);
+}
+.player__scrub:focus-visible {
+  outline: 3px solid var(--site-focus);
+  outline-offset: 2px;
+  border-radius: var(--site-radius-sm);
+}

@@ -1,0 +1,14 @@
+.page-hero {
+  padding-block: var(--site-space-7) var(--site-space-6);
+}
+.page-hero__title {
+  max-width: 20ch;
+}
+.page-hero__lead {
+  margin-top: var(--site-space-4);
+}
+@media (min-width: 768px) {
+  .page-hero {
+    padding-block: var(--site-space-8) var(--site-space-7);
+  }
+}

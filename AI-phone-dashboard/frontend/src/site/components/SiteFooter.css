@@ -1,0 +1,98 @@
+.site-footer {
+  background: var(--site-ink);
+  color: var(--site-on-ink);
+  padding-block: var(--site-space-8) var(--site-space-6);
+  margin-top: auto;
+}
+
+.site-footer__inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--site-space-7) var(--site-space-5);
+}
+
+.site-footer__brand {
+  grid-column: 1 / -1;
+  max-width: 34ch;
+}
+
+.site-footer .site-footer__logo .vetra-logo-word {
+  color: var(--site-on-ink);
+}
+
+.site-footer__tagline {
+  margin: var(--site-space-4) 0 0;
+  color: var(--site-on-ink);
+}
+.site-footer__hosting {
+  margin: var(--site-space-2) 0 0;
+  color: var(--site-on-ink-muted);
+  font-size: var(--site-text-sm);
+}
+
+.site-footer__heading {
+  margin: 0 0 var(--site-space-3);
+  font-family: var(--site-font-sans);
+  font-size: var(--site-text-base);
+  font-weight: 600;
+  color: var(--site-on-ink);
+}
+
+.site-footer__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-footer__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--site-on-ink-muted);
+  text-decoration: none;
+  transition: color var(--site-dur-fast) var(--site-ease);
+}
+.site-footer__link:hover {
+  color: var(--site-on-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.site-footer__legal {
+  margin-top: var(--site-space-7);
+  padding-top: var(--site-space-5);
+  border-top: 1px solid var(--site-on-ink-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--site-space-2);
+}
+.site-footer__copy {
+  margin: 0;
+  color: var(--site-on-ink-muted);
+  font-size: var(--site-text-sm);
+}
+
+@media (min-width: 768px) {
+  .site-footer__inner {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .site-footer__legal {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: var(--site-space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .site-footer {
+    padding-block: var(--site-space-10) var(--site-space-7);
+  }
+  .site-footer__inner {
+    grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr;
+  }
+  .site-footer__brand {
+    grid-column: auto;
+  }
+}

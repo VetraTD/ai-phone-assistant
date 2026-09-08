@@ -1,0 +1,102 @@
+.diary {
+  display: flex;
+  flex-direction: column;
+}
+
+.diary__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--site-space-3);
+  padding: var(--site-space-4) var(--site-space-4) var(--site-space-3);
+  background: var(--site-surface);
+  border-bottom: 1px solid var(--site-line-strong);
+}
+.diary__date {
+  margin: 0;
+  font-family: var(--site-font-display);
+  font-weight: 600;
+  font-size: var(--site-h3);
+  letter-spacing: var(--site-tracking-display);
+  line-height: 1.1;
+}
+
+.diary__slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 0 auto;
+}
+.diary__foot {
+  margin-top: auto;
+}
+
+.diary__slot--wide {
+  display: none;
+}
+@media (min-width: 768px) {
+  .diary__slot--wide {
+    display: grid;
+  }
+}
+
+.diary__time {
+  color: var(--site-ink-soft);
+}
+
+.diary__entry {
+  display: flex;
+  align-items: center;
+  min-height: var(--site-rule);
+  padding-block: 0;
+}
+
+.diary__pending,
+.diary__written {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--site-space-2);
+  flex-wrap: wrap;
+}
+
+.diary__pending {
+  color: var(--site-ink-muted);
+  padding: 0 var(--site-space-2);
+  margin-left: calc(var(--site-space-2) * -1);
+  border: 1px dashed var(--site-teal-deep);
+  border-radius: var(--site-radius-sm);
+  min-height: 32px;
+}
+
+.diary__written {
+  color: var(--site-ink);
+}
+.diary__what {
+  color: var(--site-ink-muted);
+}
+
+.diary__marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--site-teal-soft);
+  border: 2px solid var(--site-teal-deep);
+  flex: 0 0 auto;
+}
+.diary__marker--ink {
+  background: var(--site-teal);
+  border-color: var(--site-teal-deep);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .diary__slot.is-booked .diary__written {
+    animation: site-rise 360ms var(--site-ease) both;
+  }
+}
+
+.diary__foot {
+  margin: 0;
+  padding: var(--site-space-3) var(--site-space-4);
+  border-top: 1px solid var(--site-line-strong);
+  background: var(--site-surface);
+}

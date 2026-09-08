@@ -1,15 +1,19 @@
 import { Suspense, lazy, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { MARKETING_URL, APP_URL, BUILD_TARGET } from "./siteUrl";
-import Landing from "./Landing.jsx";
+import SiteLayout from "./site/SiteLayout.jsx";
+import HomePage from "./site/pages/HomePage.jsx";
 
 // ---------------------------------------------------------------------------
 // ONE CODEBASE, TWO SITES.
 //
 //   marketing  vetratd.com, on Vercel, auto-deployed from this repository.
-//              Landing at `/`, and every route into the product is an ABSOLUTE
-//              link to the app origin.
-//   app        app.vetratd.com, on Firebase Hosting. Dashboard at `/`.
+//              Public pages at /, /features, /about, /contact, /privacy,
+//              /terms; every route into the product is an ABSOLUTE link to
+//              the app origin.
+//   app        app.vetratd.com, on Firebase Hosting. Dashboard at `/`. Serves
+//              /contact, /privacy and /terms itself (footers link to them);
+//              /features and /about leave for the marketing origin.
 //
 // This split is new only in being DELIBERATE. Both deployments already existed
 // and both built the same route table, which is why vetratd.com's "Log in"
@@ -30,14 +34,24 @@ import Landing from "./Landing.jsx";
 // the fallback route is a 404 — so without the redirect the first thing someone
 // clicking "you have a new appointment" would see is "This page doesn't exist."
 //
+// /legal was the single privacy-and-terms page. It is now two pages; the old
+// path redirects so nothing already printed or linked breaks.
+//
+// HomePage is imported eagerly: it is the marketing build's first paint and
+// must not wait on a chunk. Vite tree-shakes it out of the app build. App
+// stays lazy so the marketing bundle never carries the dashboard.
+//
 // Extracted from main.jsx so it can be rendered in a MemoryRouter and tested;
 // main.jsx calls createRoot at module scope and cannot be imported by a test.
 // ---------------------------------------------------------------------------
 
 const App = lazy(() => import("./App.jsx"));
-const Legal = lazy(() => import("./Legal.jsx"));
-const Contact = lazy(() => import("./Contact.jsx"));
 const ResetPassword = lazy(() => import("./resetPassword.jsx"));
+const FeaturesPage = lazy(() => import("./site/pages/FeaturesPage.jsx"));
+const AboutPage = lazy(() => import("./site/pages/AboutPage.jsx"));
+const ContactPage = lazy(() => import("./site/pages/ContactPage.jsx"));
+const PrivacyPage = lazy(() => import("./site/pages/PrivacyPage.jsx"));
+const TermsPage = lazy(() => import("./site/pages/TermsPage.jsx"));
 
 /**
  * Leave this origin entirely.
@@ -77,19 +91,20 @@ export function NotFound() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "60vh",
         display: "flex",
         flexDirection: "column",
         gap: 12,
         alignItems: "center",
         justifyContent: "center",
         textAlign: "center",
-        color: "#0f172a",
-        fontFamily: "system-ui, sans-serif",
+        color: "#0e1c2c",
+        fontFamily: "inherit",
+        padding: "48px 24px",
       }}
     >
       <h1 style={{ fontSize: 48, margin: 0 }}>404</h1>
-      <p style={{ margin: 0, color: "#64748b" }}>This page doesn&apos;t exist.</p>
+      <p style={{ margin: 0, color: "#56697e" }}>This page doesn&apos;t exist.</p>
       <a href={home} style={{ color: "#3a8ff2", fontWeight: 600 }}>
         {BUILD_TARGET === "app" ? "Back to vetratd.com" : "Back to home"}
       </a>
@@ -108,35 +123,47 @@ export default function AppRoutes() {
             <Route path="/" element={<App />} />
             <Route path="/app" element={<Navigate to="/" replace />} />
             {/*
-              The marketing site is a separate deployment and is not rebuilt
-              when this router changes, so it needs a link that cannot rot.
-              "https://app.vetratd.com" is correct but reads like a bare domain
-              in a nav bar; a Log in button should be able to point at /login.
+              The marketing site links to /login because a nav button should be
+              able to point at a path, not a bare domain. Both land on the root,
+              which is the dashboard (or its sign-in screen).
             */}
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/signin" element={<Navigate to="/" replace />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            {/* Public pages that only the marketing origin serves. */}
+            <Route path="/features" element={<ExternalRedirect to={`${MARKETING_URL}/features`} />} />
+            <Route path="/about" element={<ExternalRedirect to={`${MARKETING_URL}/about`} />} />
+            <Route element={<SiteLayout />}>
+              <Route path="/contact" element={<ContactPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
+            </Route>
+            <Route path="/legal" element={<Navigate to="/privacy" replace />} />
+            <Route path="*" element={<NotFound />} />
           </>
         ) : (
           <>
-            <Route path="/" element={<Landing />} />
             {/*
               Rescues every link already out in the world. vetratd.com/app is
-              in nav bars, bookmarks and anything already sent; it currently
-              loads a dashboard with no configuration and dies. Now it lands on
-              the real one.
+              in nav bars, bookmarks and anything already sent; it used to load
+              a dashboard with no configuration and die. Now it lands on the
+              real one.
             */}
             <Route path="/app" element={<ExternalRedirect to={APP_URL} />} />
             <Route path="/login" element={<ExternalRedirect to={`${APP_URL}/login`} />} />
             <Route path="/signin" element={<ExternalRedirect to={`${APP_URL}/login`} />} />
+            <Route path="/legal" element={<Navigate to="/privacy" replace />} />
+            <Route element={<SiteLayout />}>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/features" element={<FeaturesPage />} />
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="/contact" element={<ContactPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
           </>
         )}
-
-        {/* Both sites: the contact form is where "Get started" leads, and the
-            legal pages are linked from footers on both. */}
-        <Route path="/legal" element={<Legal />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

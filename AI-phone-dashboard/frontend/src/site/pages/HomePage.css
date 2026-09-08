@@ -1,0 +1,63 @@
+.hero {
+  padding-block: var(--site-space-7) var(--site-section-y);
+}
+
+.hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--site-space-5);
+  align-items: start;
+}
+
+.hero__title {
+  max-width: 18ch;
+}
+
+.hero__lead {
+  margin-top: var(--site-space-5);
+}
+
+.hero__cta {
+  margin-top: var(--site-space-5);
+  display: flex;
+  gap: var(--site-space-3);
+  flex-wrap: wrap;
+}
+
+.hero__player {
+  margin-top: var(--site-space-5);
+}
+
+@media (min-width: 768px) {
+  .hero {
+    padding-top: var(--site-space-8);
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    grid-template-areas:
+      "copy diary"
+      "player diary";
+    column-gap: var(--site-space-7);
+    row-gap: var(--site-space-6);
+  }
+  .hero__copy {
+    grid-area: copy;
+  }
+  .hero__player {
+    grid-area: player;
+    margin-top: 0;
+  }
+  .hero__diary {
+    grid-area: diary;
+    /* Fill the column: the ruled page simply continues blank below the last
+       hour, which is what a diary page does. */
+    align-self: stretch;
+    display: flex;
+  }
+  .hero__diary .diary {
+    flex: 1 1 auto;
+  }
+}

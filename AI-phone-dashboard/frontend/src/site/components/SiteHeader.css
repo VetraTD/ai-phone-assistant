@@ -1,0 +1,201 @@
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  /* Solid, not glass: a backdrop-filter here would also make the header the
+     containing block for the fixed-position menu sheet, clipping it to 64px. */
+  background: var(--site-bg);
+  border-bottom: 1px solid var(--site-line);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--site-space-4);
+  min-height: 64px;
+}
+
+/* The logo is a link; give it a real tap target in the bar and the sheet. */
+.site-header .vetra-logo,
+.site-menu .vetra-logo {
+  min-height: 44px;
+  padding-inline-end: var(--site-space-2);
+}
+
+.site-nav {
+  display: none;
+}
+
+.site-nav__link {
+  color: var(--site-ink-muted);
+  text-decoration: none;
+  font-weight: 500;
+  padding: var(--site-space-2) var(--site-space-3);
+  border-radius: var(--site-radius-sm);
+  transition: color var(--site-dur-fast) var(--site-ease);
+}
+.site-nav__link:hover,
+.site-nav__link[aria-current="page"] {
+  color: var(--site-ink);
+}
+.site-nav__link[aria-current="page"] {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.45em;
+  text-decoration-color: var(--site-accent);
+}
+
+.site-header__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--site-space-3);
+}
+
+.site-header__phone,
+.site-header__login {
+  display: none;
+  color: var(--site-ink-muted);
+  text-decoration: none;
+  font-weight: 500;
+  padding: var(--site-space-2) var(--site-space-3);
+}
+.site-header__login:hover,
+.site-header__phone:hover {
+  color: var(--site-ink);
+}
+
+.site-header__cta {
+  min-height: 40px;
+  padding-inline: 1rem;
+}
+
+.site-header__menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: calc(var(--site-space-2) * -1);
+  border: 0;
+  background: transparent;
+  color: var(--site-ink);
+  border-radius: var(--site-radius-sm);
+  cursor: pointer;
+}
+
+@media (max-width: 479px) {
+  .site-header__cta {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .site-header__inner {
+    min-height: 72px;
+    gap: var(--site-space-6);
+  }
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--site-space-1);
+  }
+  .site-header__phone,
+  .site-header__login {
+    display: inline-block;
+  }
+  .site-header__cta {
+    min-height: 44px;
+    padding-inline: 1.25rem;
+  }
+  .site-header__menu {
+    display: none;
+  }
+}
+
+/* The sheet */
+.site-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--site-bg);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Entrance moves the sheet only; it never depends on an animation frame to
+   become visible, so a paused or throttled tab still shows the menu. */
+@media (prefers-reduced-motion: no-preference) {
+  .site-menu {
+    animation: site-menu-in 220ms var(--site-ease);
+  }
+}
+@keyframes site-menu-in {
+  from {
+    transform: translateY(-10px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.site-menu__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  border-bottom: 1px solid var(--site-line);
+}
+
+.site-menu__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: calc(var(--site-space-2) * -1);
+  border: 0;
+  background: transparent;
+  color: var(--site-ink);
+  border-radius: var(--site-radius-sm);
+  cursor: pointer;
+}
+
+.site-menu__nav {
+  display: flex;
+  flex-direction: column;
+  padding-block: var(--site-space-4);
+}
+
+.site-menu__link {
+  display: block;
+  padding: var(--site-space-3) 0;
+  min-height: 44px;
+  font-family: var(--site-font-display);
+  font-weight: 600;
+  font-size: 1.75rem;
+  letter-spacing: var(--site-tracking-display);
+  line-height: 1.2;
+  color: var(--site-ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--site-line);
+}
+
+.site-menu__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--site-space-4);
+  padding-block: var(--site-space-5) var(--site-space-6);
+}
+
+.site-menu__login,
+.site-menu__phone {
+  color: var(--site-ink-muted);
+  font-weight: 500;
+  text-decoration: none;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
