@@ -120,7 +120,7 @@ export default function ResetPassword() {
       <div className="login-shell">
         <div className="login-top-row">
           <a href={MARKETING_URL} className="login-back-home">
-            ← Back to website
+            Back to vetratd.com
           </a>
         </div>
         <div className="login-card-wrap">{children}</div>

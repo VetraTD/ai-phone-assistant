@@ -6,11 +6,12 @@
 // send a signed-out visitor to the dashboard, which bounces them straight back
 // to the sign-in screen they were trying to leave.
 //
-// The marketing site is a DIFFERENT CODEBASE on a different host — vetratd.com,
-// on Vercel — so these are external links, not routes. Deliberately not derived
-// from VITE_SITE_URL: that variable means "the canonical URL of the site this
-// bundle is served from", which is now the app origin, and reusing it here
-// would recreate the loop this exists to prevent.
+// The marketing site is THIS codebase built for a different host — vetratd.com,
+// on Vercel (see BUILD_TARGET below) — but from the app origin it is still an
+// external destination, so these are absolute links, not routes. Deliberately
+// not derived from VITE_SITE_URL: that variable means "the canonical URL of the
+// site this bundle is served from", which is the app origin here, and reusing
+// it would recreate the loop this exists to prevent.
 export const MARKETING_URL = (
   import.meta.env.VITE_MARKETING_URL || "https://www.vetratd.com"
 ).replace(/\/$/, "");

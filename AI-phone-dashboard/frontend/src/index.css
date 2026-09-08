@@ -18,21 +18,9 @@
   --vetra-soft-gradient: linear-gradient(160deg, rgba(58, 143, 242, 0.1), rgba(31, 99, 200, 0.06));
   --vetra-soft-gradient-hover: linear-gradient(160deg, rgba(58, 143, 242, 0.16), rgba(31, 99, 200, 0.12));
 
-  /* Landing page spacing/type/radius scale */
-  --space-section-y: 128px;
-  --space-section-x: 24px;
-  --font-h2: clamp(32px, 5vw, 56px);
-  /* Two-tier headline scale: "major" for the sections carrying the core
-     pitch, "minor" for supporting/utility sections — so the page doesn't
-     read as one flat sequence of equally-loud headings. */
-  --font-h2-major: clamp(38px, 5.2vw, 60px);
-  --font-h2-minor: clamp(28px, 3.4vw, 38px);
-  --font-lead: 19px;
-  --radius-sm: 12px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-pill: 999px;
-  --vetra-bg-neutral: #f5f5f7;
+  /* The public site's own scale lives in src/site/styles/tokens.css, scoped
+     under .site-root. Only the brand colours and the two font stacks are
+     shared from here. */
 
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
