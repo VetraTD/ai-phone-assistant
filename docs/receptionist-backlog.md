@@ -8332,3 +8332,99 @@ and applied `AT TIME ZONE` all along. The tiles simply never used it.
 **Done when** DONE 2026-09-08 for the query; the seven-day-versus-one-day
 mismatch between the tiles and the list beside them is NOT fixed and is still
 a way to misread the page.
+
+---
+
+## Verifying the 2026-09-08 deploy (`e1419d9`) — NOT YET DONE
+
+`voice-uk-prod` and `dashboard-api-uk-prod` both serve `e1419d9`; the dashboard
+frontend is published. LVX30, LVX83, LVX84 and LVX90 are all **FIXED,
+UNVERIFIED LIVE** and stay that way until a real call is taken. Offline green is
+not evidence, and the local rig cannot speak for the deployed estate.
+
+`LIVE_DEBUG_TRANSCRIPT` is **ON** in production for that one-off call.
+
+### The before-picture, so the after is readable
+
+Taken 2026-09-08, immediately after the deploy and before any call on it:
+
+```
+[inspect] calls: {"sid_tail":"a948c7","status":"in-progress","ended_at":null,
+                  "duration_seconds":null,"has_summary":false,"transcript_rows":0}
+   ... nine rows like this, all from 2026-09-07, all Live front-end calls
+[inspect] calls: {"sid_tail":"0a3667","status":"completed","ended_at":"...",
+                  "duration_seconds":297,"has_summary":false,"transcript_rows":31}
+   ... the 2026-09-01 rows, all CASCADE calls
+```
+
+Both writes worked on the cascade and stopped when Live took over. That is LVX30
+and LVX83 in one table, and it is the control this verification reads against.
+
+### Step 1 — take one call to +441372656055
+
+Needs a UK handset. This is the same handset leg outstanding since phase 1.
+
+### Step 2 — read the row
+
+```
+CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
+  --args=scripts/db-inspect.js,--business,+441372656055,--calls,--limit,5 \
+  --project=vetra-uk-edc8ca --region=europe-west2 --wait
+```
+
+PASS is the newest row showing **all** of:
+
+| field | want | proves |
+|---|---|---|
+| `status` | `completed` | LVX30 — `completeCall` now runs scoped and matches its row |
+| `ended_at` | non-null | same |
+| `duration_seconds` | non-null | same |
+| `transcript_rows` | > 0 | LVX83 |
+| `has_summary` | `true` | LVX30 unblocked `server.js:852` |
+| `has_sentiment` | `true` | same |
+
+A row still reading `in-progress` with `transcript_rows: 0` means the deploy
+changed nothing and the diagnosis was wrong. Say so rather than re-running it.
+
+### Step 3 — read the counters
+
+```
+CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud logging read \
+ 'resource.labels.service_name="voice-uk-prod" AND (jsonPayload.event="live_call_summary" OR jsonPayload.event="call_summary_written" OR jsonPayload.event="live_transcript_write_failed" OR jsonPayload.event="db_unscoped_fallback")' \
+  --project=vetra-uk-edc8ca --limit=15 --freshness=30m --format=json
+```
+
+- `live_call_summary.transcript_turns_written` > 0 — the POSITIVE half. A
+  fault-only counter reads zero for a clean call and for a call that never
+  reached the write, which is why this exists.
+- `call_summary_written` **present**. If transcripts land and this never
+  appears, the `cpu_idle` throttle is eating work scheduled after `res.end()`,
+  and the decision to leave the summary block fire-and-forget has to be
+  revisited. That is the whole reason the line was added.
+- `live_transcript_write_failed` absent.
+- `db_unscoped_fallback` for `completeCall` absent. Its PRESENCE would mean the
+  shared-state write did not land and LVX30 is not actually fixed.
+
+### Step 4 — look at the dashboard
+
+Sign in at `https://vetra-core-edc8ca.web.app/app`. The call should carry a
+transcript, a duration, a summary and a sentiment. Nobody has yet seen the
+deployed dashboard signed in — the local rig was verified against real Postgres,
+which is not the same claim.
+
+### Step 5 — turn the debug transcript off
+
+Not a flag to unset; a var to stop passing. Any apply that omits it turns it
+off, which is the trap in the other direction — every apply while it is meant to
+be ON must carry it.
+
+```
+cd infra/terraform && CLOUDSDK_CONFIG=~/.gcloud-vetra2 TF_DISABLE_PLUGIN_TLS=1 \
+  terraform apply -var="image_tag=e1419d9" -var="dashboard_image_tag=e1419d9"
+```
+
+### Then update the rows
+
+LVX30, LVX83, LVX84, LVX90 go to **VERIFIED** with the row and the counters
+quoted, or to **SHIPPED, NOT WORKING** with what actually came back. Not to
+"probably fine".
