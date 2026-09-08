@@ -8401,6 +8401,26 @@ CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud logging read \
   appears, the `cpu_idle` throttle is eating work scheduled after `res.end()`,
   and the decision to leave the summary block fire-and-forget has to be
   revisited. That is the whole reason the line was added.
+
+  **This is the one thing the call is genuinely PREDICTING rather than
+  confirming, and the prediction is not favourable.** Measured 2026-09-08:
+  `generateSummaryAndSentiment` against the real API takes **3.2 seconds** on a
+  six-turn transcript, and returns a correct summary, sentiment and outcome —
+  so the function and the key are both healthy, and the historical absence of
+  summaries was environmental, almost certainly `dbCallId` never reaching
+  `server.js:852`.
+
+  But 3.2 seconds of work scheduled AFTER `res.end()`, on an instance whose CPU
+  is throttled the moment the response is written, is a poor bet. It was left
+  fire-and-forget deliberately: awaiting it puts a 3.2s Gemini call in front of
+  Twilio's callback response, and a hang there earns a retry and a DUPLICATE
+  summary.
+
+  **If `call_summary_written` does not appear, the fix is to move summary
+  generation into the Live path's own `finish()`**, which runs while the
+  WebSocket is still open and CPU is still allocated. That was deliberately NOT
+  done pre-emptively — an unmeasured preference written as a decision is the
+  failure mode this ledger exists to prevent. One call decides it.
 - `live_transcript_write_failed` absent.
 - `db_unscoped_fallback` for `completeCall` absent. Its PRESENCE would mean the
   shared-state write did not land and LVX30 is not actually fixed.
