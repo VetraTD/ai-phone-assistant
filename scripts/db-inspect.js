@@ -73,6 +73,33 @@ const show = (label, rows) => {
 try {
   show("connected as", (await pool.query("SELECT current_user, current_database()")).rows);
 
+  // ---------------------------------------------------------------------
+  // LVX80 — what hours does the UK tenant actually allow?
+  //
+  // The assistant offered "11:30pm" on the first deployed Live calls, and the
+  // fix so far treats that as an offer made before anything checked. That is
+  // established from the log order. What is NOT established is whether 23:30
+  // was ever a legitimate slot: openTimesForDay derives its window straight
+  // from business_hours, so a tenant whose hours run late would have the
+  // availability tool return 23:30 as genuinely open, and the model would be
+  // early rather than wrong.
+  //
+  // The local dev row says 09:00-17:00 Europe/London, which would make 23:30
+  // impossible -- but the local database is not this one, and that is the whole
+  // reason this file exists.
+  //
+  // Read-only. It answers the question; changing anything is a migration's job.
+  // ---------------------------------------------------------------------
+  show(
+    "UK tenant hours (+441372656055)",
+    (
+      await pool.query(
+        `SELECT phone_number, name, timezone, after_hours_policy, business_hours
+           FROM app_lookup_business_by_phone('+441372656055')`
+      )
+    ).rows
+  );
+
   // THE QUESTION THIS WAS BUILT FOR. Postgres requires you to HAVE bypassrls
   // (or be superuser) in order to CREATE a role that has it. If the connecting
   // role has neither, a "give the bootstrap functions a BYPASSRLS owner" fix is
