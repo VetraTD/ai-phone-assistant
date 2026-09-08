@@ -30,23 +30,63 @@ const cfg = {
   authType: process.env.CLOUD_SQL_PASSWORD ? "PASSWORD" : "IAM",
 };
 
-// STAGING ONLY, and the reason is sharper now than when this file was
-// read-only facts about roles.
+// ---------------------------------------------------------------------------
+// THREE MODES, because "is this staging?" was the wrong question to ask once.
 //
-// The transcript dump below prints what a caller SAID. On staging that is a
-// synthetic clinic and the owner's own test calls; in production it would be
-// patient speech, and Cloud Logging is not where that belongs. The whole
-// design keeps transcripts in the database and out of logs.
-if (!/staging/i.test(cfg.database) || !/staging/i.test(cfg.instance)) {
+// This file used to refuse outright anywhere but staging, and that refusal was
+// right for what it did: the transcript dump prints what a caller SAID, which
+// in production is patient speech, and Cloud Logging is not where that belongs.
+//
+// But it made the file useless for the questions actually being asked of
+// production -- "what hours does this tenant allow", "are transcripts being
+// written at all" -- neither of which needs a single word of caller speech.
+// Refusing those pushed every investigation into a code-change-and-deploy loop,
+// and an investigation tool nobody can afford to run is not a control, it is a
+// blind spot with a good excuse.
+//
+// So the gate moves from the FILE to the SECTIONS that print content:
+//
+//   --business <e164>   tenant CONFIG only. Name, timezone, hours, policy.
+//                       No caller speech, no PHI. Safe anywhere.
+//   --counts            row counts per table. Numbers, never content.
+//                       Safe anywhere, and the honest answer to "does the
+//                       database actually work".
+//   (no arguments)      the full audit, including the transcript dump.
+//                       STAGING ONLY, unchanged.
+// ---------------------------------------------------------------------------
+const argv = process.argv.slice(2);
+const argOf = (name) => {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : null;
+};
+const BUSINESS = argOf("business");
+const WANT_COUNTS = argv.includes("--counts");
+const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS;
+
+const looksLikeStaging = /staging/i.test(cfg.database) && /staging/i.test(cfg.instance);
+
+if (!AD_HOC && !looksLikeStaging) {
   console.error(
-    `Refusing to inspect: this does not look like staging.
+    `Refusing the full audit: this does not look like staging.
 ` +
       `  CLOUD_SQL_DATABASE = ${JSON.stringify(cfg.database)}
 ` +
       `  CLOUD_SQL_INSTANCE = ${JSON.stringify(cfg.instance)}
 ` +
-      "This prints transcript text, which in production is patient speech."
+      `The full audit prints transcript text, which in production is patient speech.
+` +
+      "For production, ask a narrower question that carries no caller speech:\n" +
+      "  --args=scripts/db-inspect.js,--counts\n" +
+      "  --args=scripts/db-inspect.js,--business,+441372656055"
   );
+  process.exit(1);
+}
+
+// A phone number reaches a SQL function argument, so it is checked rather than
+// trusted. E.164 only -- nothing else can be a business phone, and a value that
+// is not one is a mistake worth failing on rather than passing through.
+if (BUSINESS && !/^\+[1-9]\d{6,14}$/.test(BUSINESS)) {
+  console.error(`Refusing: --business ${JSON.stringify(BUSINESS)} is not an E.164 number.`);
   process.exit(1);
 }
 
@@ -74,31 +114,80 @@ try {
   show("connected as", (await pool.query("SELECT current_user, current_database()")).rows);
 
   // ---------------------------------------------------------------------
-  // LVX80 — what hours does the UK tenant actually allow?
+  // AD-HOC MODE. Config and counts, never content.
   //
-  // The assistant offered "11:30pm" on the first deployed Live calls, and the
-  // fix so far treats that as an offer made before anything checked. That is
-  // established from the log order. What is NOT established is whether 23:30
-  // was ever a legitimate slot: openTimesForDay derives its window straight
-  // from business_hours, so a tenant whose hours run late would have the
-  // availability tool return 23:30 as genuinely open, and the model would be
-  // early rather than wrong.
+  // The question that produced this: the assistant offered "11:30pm" on the
+  // first deployed Live calls (LVX80). The fix so far treats that as an offer
+  // made before anything checked, which the log order establishes. What it does
+  // NOT establish is whether 23:30 was ever a legitimate slot -- openTimesForDay
+  // derives its whole window from business_hours, so a tenant whose hours run
+  // late would have the availability tool return 23:30 as genuinely open, and
+  // the model would have been EARLY rather than WRONG. Different defect,
+  // different fix.
   //
-  // The local dev row says 09:00-17:00 Europe/London, which would make 23:30
-  // impossible -- but the local database is not this one, and that is the whole
-  // reason this file exists.
-  //
-  // Read-only. It answers the question; changing anything is a migration's job.
+  // The local dev row says 09:00-17:00 Europe/London. That is not this database,
+  // which is the entire reason this file exists.
   // ---------------------------------------------------------------------
-  show(
-    "UK tenant hours (+441372656055)",
-    (
-      await pool.query(
-        `SELECT phone_number, name, timezone, after_hours_policy, business_hours
-           FROM app_lookup_business_by_phone('+441372656055')`
-      )
-    ).rows
-  );
+  let scopedBusinessId = null;
+
+  if (BUSINESS) {
+    const row = await pool.query(
+      `SELECT id, phone_number, name, timezone, after_hours_policy, business_hours
+         FROM app_lookup_business_by_phone($1)`,
+      [BUSINESS]
+    );
+    show(`tenant config ${BUSINESS}`, row.rows);
+    scopedBusinessId = row.rows[0]?.id ?? null;
+    if (!scopedBusinessId) {
+      show(`tenant config ${BUSINESS}`, [
+        { error: "no business routes to this number on THIS database" },
+      ]);
+    }
+  }
+
+  if (WANT_COUNTS) {
+    // Counts only. A count is not content, so this is safe where the transcript
+    // dump is not -- and it is the honest answer to "does the database actually
+    // work", which no amount of reading the code settles.
+    //
+    // SCOPED, or the numbers lie. Every table here is under FORCE row-level
+    // security, so an unscoped count returns 0 and reads as "nothing is being
+    // written" when it means "you did not say who you are". That distinction is
+    // exactly the one this file was written to stop people getting wrong.
+    const TABLES = ["calls", "call_transcripts", "appointments", "sms_consents"];
+    if (!scopedBusinessId) {
+      show("counts", [
+        {
+          skipped: "counts need a tenant to scope to",
+          hint: "pass --business <e164> as well; RLS makes an unscoped count read 0",
+        },
+      ]);
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SELECT set_config('app.business_id', $1, true)`, [scopedBusinessId]);
+        for (const t of TABLES) {
+          try {
+            // Table names come from the constant above and never from argv, so
+            // this interpolation cannot be reached by an argument.
+            const c = await client.query(`SELECT count(*)::int AS n FROM ${t}`);
+            show("counts", [{ table: t, rows: c.rows[0].n }]);
+          } catch (err) {
+            // A missing table is a MIGRATION fact, not a crash.
+            show("counts", [{ table: t, error: err?.message }]);
+          }
+        }
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // The full audit prints caller speech and is staging-only. Everything above
+  // this line is config and numbers, and runs anywhere.
+  if (!AD_HOC) {
 
   // THE QUESTION THIS WAS BUILT FOR. Postgres requires you to HAVE bypassrls
   // (or be superuser) in order to CREATE a role that has it. If the connecting
@@ -240,6 +329,7 @@ try {
       consentClient.release();
     }
   }
+  } // end: full audit, staging only
 } catch (err) {
   console.error("inspect failed:", err?.message || err);
   process.exitCode = 1;

@@ -92,6 +92,7 @@ Status means:
 | **LVX80** | it names an appointment time BEFORE anything has checked availability | **FIXED, UNVERIFIED LIVE · P0** — the detection was always right; it ran in `auditTurn`, which fires on `turnComplete` when only the TAIL of the turn is still queued. Moved to `inspectOffer()`, per fragment, beside the leak guard, where a hard `clearAudio` still has something to drop. `live_offer_cuts` / `live_offer_cut_missed` score it. Offline tests only — the cut-vs-lag race can only be settled by a real call |
 | **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
 | **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
+| **LVX83** | the Live front-end writes no transcripts at all | **OPEN · P1** — `addTranscriptEntry` is called 6 times on the cascade (`lib/voice/session.js`) and **0** times on Live (`lib/voice/live/index.js`). Every call to `+441372656055` leaves a `calls` row with no record of anything that was said. Confirmed against the deployed calls of 2026-09-07 |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -7905,3 +7906,66 @@ the read-aloud. Not built, not costed, not authorised.
 
 **Cost of the round:** $0.268 measured-equivalent for the rating run, plus the
 same again lost to run 1's meter bug. $9.1521 of $11.00.
+
+## LVX83 — the Live front-end writes no transcripts
+
+Found 2026-09-07 while answering a different question: "does the database even
+work?" It mostly does. This part does not.
+
+| write | cascade | Live |
+|---|---|---|
+| `createCall` | 4 | 3 |
+| `addTranscriptEntry` | **6** | **0** |
+| `completeCall` | 0 | 0 — see below, this one is fine |
+
+`docs/roadmap.md:278-281` already recorded the count as 0. This confirms it in
+code and against real traffic: the eight deployed calls of 2026-09-07 each left
+a `calls` row and **no record of a single word spoken**. The dashboard's call
+detail is empty for every call on that number, and there is nothing to read back
+when a caller disputes what was agreed.
+
+### What is NOT broken, checked rather than assumed
+
+- **Call completion works.** `completeCall` appears 0 times in both front-ends
+  because it is not their job — it is called from the Twilio status callback
+  (`server.js:815`). Verified in production: six `call_ended_status_callback`
+  entries reading `completed` from the 2026-09-07 calls.
+- A local harness run leaves its `calls` row stuck at `in-progress` with a null
+  `ended_at`. **That is a harness artifact, not a defect** — the harness is not
+  Twilio and never sends the status callback. Anyone reading a local row as
+  evidence of a production bug will be wrong.
+- **Appointments** go through the shared tool path and the atomic
+  `createAppointmentIfAvailable`, so they should write. Not verified in
+  production, because nothing could read the table until now.
+
+### Why it went unnoticed
+
+The cascade wrote transcripts, the Live front-end was built as ears and mouth
+around the same brain, and transcript persistence lives in neither the brain nor
+the reducer — it sits in `session.js`, which Live does not use. Nothing failed;
+a call simply produced no rows and no error.
+
+This is the shape `negative-counters-cannot-confirm` warns about: an empty
+`call_transcripts` table reads identically for "the feature is off" and "nobody
+called".
+
+### Not fixed here, deliberately
+
+It is not a guard, not a counter, and not part of the LVX80/82 work. It needs
+its own decision — Live has `outputTranscription` and `inputTranscription`
+already flowing through `onServerContent`, so the material exists; what is
+undecided is PHI handling, whether both sides are stored, and how it interacts
+with `DEPLOYMENT_MODE=hipaa`.
+
+### How to check it after any fix
+
+`scripts/db-inspect.js` now answers this in production without printing a word
+of caller speech:
+
+```
+--args=scripts/db-inspect.js,--counts,--business,+441372656055
+```
+
+`call_transcripts` reading 0 against a non-zero `calls` is the defect. The counts
+are scoped to the tenant, because every one of these tables is under FORCE
+row-level security and an unscoped count returns 0 for a working database.
