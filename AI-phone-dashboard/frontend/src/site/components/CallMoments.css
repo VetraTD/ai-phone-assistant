@@ -40,8 +40,12 @@
 }
 
 .moments__hear {
-  display: inline-block;
-  min-height: 28px;
+  /* Sits on its rule like the text around it; the hit area is 44px tall
+     without moving the line. */
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  margin-block: -8px;
   padding: 0;
   border: 0;
   background: transparent;

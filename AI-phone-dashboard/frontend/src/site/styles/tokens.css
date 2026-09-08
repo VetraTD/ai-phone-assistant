@@ -11,7 +11,9 @@
   --site-surface: #ffffff;
   --site-ink: #0e1c2c;
   --site-ink-muted: #56697e;
-  --site-ink-soft: #8497a9;
+  /* Soft is still text (times, speaker names): 4.8:1 on white, so it stays
+     readable at 14px rather than the brand's lighter #8497a9 (2.9:1). */
+  --site-ink-soft: #62748a;
   --site-line: rgba(14, 28, 44, 0.1);
   --site-line-strong: rgba(14, 28, 44, 0.18);
   --site-accent: #3a8ff2;

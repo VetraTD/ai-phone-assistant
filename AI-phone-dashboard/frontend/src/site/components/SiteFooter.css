@@ -16,6 +16,9 @@
   max-width: 34ch;
 }
 
+.site-footer .site-footer__logo {
+  min-height: 44px;
+}
 .site-footer .site-footer__logo .vetra-logo-word {
   color: var(--site-on-ink);
 }
