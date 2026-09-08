@@ -203,6 +203,74 @@ describe("LVX25 — stacked questions, counted rather than instructed", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// LVX82 -- the counter had to be able to count before the behaviour could be
+// fixed, because until it could, no fix could be shown to have worked.
+//
+// The assertion that matters is the first one below. THREE asks in one turn
+// used to be indistinguishable from two: live_stacked_questions is one bump
+// per offending turn either way, so a fix taking a five-part question down to
+// two would have moved it by exactly zero.
+// ---------------------------------------------------------------------------
+
+describe("LVX82 — the asks are counted, not just the turns carrying them", () => {
+  beforeEach(() => clearStats());
+
+  it("counts three asks in one turn as three, where the turn counter reads one", async () => {
+    const s = await boot();
+    await s.say("What's your name? And your number? And the day?");
+
+    // Both numbers, together, are the point. The turn counter cannot tell this
+    // apart from a two-part question; the ask total can.
+    expect(c().live_stacked_questions).toBe(1);
+    expect(c().live_stacked_asks_total).toBe(3);
+  });
+
+  it("counts the LVX82 turn as two asks on one question mark", async () => {
+    const s = await boot();
+    // The shape from the deployed calls of 2026-09-07. The old instrument
+    // logged `marks: 2` on turns like this and could not see this one at all
+    // as anything but a single event.
+    await s.say("Can I take your name, date of birth, and what it is for?");
+
+    expect(c().live_stacked_questions).toBe(1);
+    // TWO, not three. countAsks is a lower bound -- "date of birth" carries no
+    // question starter. Pinned so the floor cannot be quietly raised into the
+    // phrasing treadmill without this test failing.
+    expect(c().live_stacked_asks_total).toBe(2);
+  });
+
+  it("accumulates across turns", async () => {
+    const s = await boot();
+    await s.say("What's your name? And your number?");
+    await s.say("What day? And what time? And is it for you?");
+
+    expect(c().live_reply_turns_checked).toBe(2);
+    expect(c().live_stacked_questions).toBe(2);
+    expect(c().live_stacked_asks_total).toBe(5);
+  });
+
+  it("leaves the ask total at zero when nothing stacked", async () => {
+    const s = await boot();
+    await s.say("Of course. Can I take your name?");
+
+    // The denominator still moves. A run where nothing stacked and a run where
+    // auditTurn never executed must not read the same.
+    expect(c().live_reply_turns_checked).toBe(1);
+    expect(c().live_stacked_questions).toBe(0);
+    expect(c().live_stacked_asks_total).toBe(0);
+  });
+
+  it("still sends no turn note — the counter fix does not act", async () => {
+    const s = await boot();
+    await s.say("What's your name? And your number? And the day?");
+
+    // LVX82's constraint: the counter lands before the behaviour. Anything
+    // that acted here would make the next measurement unreadable.
+    expect(s.notes()).toHaveLength(0);
+  });
+});
+
 describe('the "anything else" tic', () => {
   beforeEach(() => clearStats());
 

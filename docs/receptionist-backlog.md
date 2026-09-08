@@ -89,9 +89,10 @@ Status means:
 | **LVX78** | it repeats itself word for word — a whole booking read back twice, a goodbye delivered twice | **OPEN · P1 — NOW COUNTED.** Found by hand after the owner half-remembered it; every counter read clean and `postcall_verify` said `ok` |
 | **LVX29** | confirm the booking from the database, not from what was said | **VERIFIED**, but its `changed_rows` signal no longer implies a name correction — see LVX77 |
 | **LVX77** | a name the caller NEVER SAID, fabricated and written to the database | **OPEN · P0** — the spelling gate refused it and our own retry wrote it anyway. Did not recur on the next call, which never entered the path; the screen counter over-counts by design and fired on a CORRECT booking |
-| **LVX80** | it names an appointment time BEFORE anything has checked availability | **OPEN · P0** — `live_offer_unverified` fired at 19:38:59 on the first deployed Live call, one second BEFORE `check_appointment_availability` ran at 19:39:00. Caller heard 11:30pm. Detector-only: on Live the audio has already reached the caller |
-| **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever |
-| **LVX82** | the stacked-question counter measures question MARKS, not questions | **OPEN · P1** — `live_stacked_questions` reported `marks: 2` while the caller experienced five. A three-part single-mark question reads as one. The instrument cannot see the shape being complained about |
+| **LVX80** | it names an appointment time BEFORE anything has checked availability | **FIXED, UNVERIFIED LIVE · P0** — the detection was always right; it ran in `auditTurn`, which fires on `turnComplete` when only the TAIL of the turn is still queued. Moved to `inspectOffer()`, per fragment, beside the leak guard, where a hard `clearAudio` still has something to drop. `live_offer_cuts` / `live_offer_cut_missed` score it. Offline tests only — the cut-vs-lag race can only be settled by a real call |
+| **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
+| **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
+| **LVX83** | the Live front-end writes no transcripts at all | **OPEN · P1** — `addTranscriptEntry` is called 6 times on the cascade (`lib/voice/session.js`) and **0** times on Live (`lib/voice/live/index.js`). Every call to `+441372656055` leaves a `calls` row with no record of anything that was said. Confirmed against the deployed calls of 2026-09-07 |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -7748,3 +7749,223 @@ cannot block. Any "stop it saying X" requirement is strictly harder on Live
 than it was on the cascade, and that should be decided deliberately rather than
 discovered per call.
 
+
+### RESOLVED 2026-09-07 — the structural note, answered
+
+The note above asked whether a "stop it saying X" guarantee is possible on Live
+at all. It is, but not in the shape the question assumed, and the cascade is not
+the fallback it looked like.
+
+**The state gate cannot be built.** Three independent blocks, each already
+recorded in the code:
+
+- `toolConfig` / `functionCallingConfig` is never set on the Live path.
+  `lib/voice/live/leakGuard.js:77-80`: "a Live session fixes its tools at connect
+  and `sendClientContent` carries no toolConfig. This asks; it cannot compel." —
+  called there "a real gap, not an oversight". The cascade's `mode: "ANY"`
+  (`services/gemini.js:2445`, `:2491`) has no Live equivalent.
+- No mid-session reconfiguration exists. `lib/voice/live/index.js:2894-2901`:
+  "no way to add a tool to a session already in progress."
+- The step is invisible to the model after connect.
+  `buildSystemInstruction(state.step, …)` runs once inside `onStart`, *before*
+  `connect` (`index.js:2987`), so the model only ever sees `identify_intent`.
+  Advancing `state.step` moves our code, not its mouth.
+
+So a tool cannot be made a precondition of the model reaching a step.
+
+**But Live already prevents, and the ceiling was already measured.** `audioOut`
+holds the bulk of every utterance in a local pacing queue and hands Twilio only
+~100 ms of lookahead (`lib/voice/audioOut.js:54`). The leak guard exploits that
+today with a hard clear that drops the local queue and flushes Twilio's buffer,
+and `index.js:1712-1715` records its record: **seven cut, four missed.** A guard
+here is a *truncator*, not a preventer — but truncation is not nothing, and the
+offer guard simply was not using it.
+
+**The cascade is not the safe harbour.** It has no unverified-offer guard and
+never has. `slotOfferRe` lives in shared `lib/voice/strings.js:267` and its only
+readers are `live/index.js` and `eval/fabrication.js`. Retreating repoints the
+number *and* leaves the same guard to be built from scratch on the other side.
+Retreat also cannot be partial: `selectPipelineHandler()` is a constant
+(`server.js:1379-1381`), the front-end is chosen by the Twilio webhook alone, and
+`live_connect_fallback` fires only inside the HTTP POST before TwiML returns.
+
+**What actually shipped**, on `fix/live-offer-and-question-counter`:
+
+- LVX82's counter first, because until it could count, no behaviour fix could be
+  shown to have worked. `countAsks()` returns a lower bound — enough to be
+  monotone and comparable between runs, which is what scoring a fix needs, and
+  explicitly not a census of what the caller heard.
+- LVX80's guard moved from `auditTurn` to `inspectOffer()`, with `LIVE_OFFER_CUT`
+  as its own switch so a bad cut cannot force detection off with it.
+- Both verified **offline only**. The one thing offline tests cannot answer is
+  stated at `index.js:1871-1877`: whether the transcript lag is shorter than the
+  playout pace, and therefore whether there was ever anything to cut.
+
+**The open question this leaves.** If `live_offer_cut_missed` comes back
+dominant from a deployed call, the next lever is a bounded playout hold — holding
+model audio an extra 300-500 ms in the local queue while nothing has verified a
+slot, so the lagging transcript can win the race. It was NOT built, because it
+pays dead air on the turn the caller is most engaged, against a perceived pause
+already near 1,500 ms, to buy something no measurement has yet shown is needed.
+
+### LVX81 — probe run 2026-09-07, and what it settled
+
+40 sessions, 8 prebuilt voices, 5 takes each, `en-GB` pinned, 746 s of audio.
+`scripts/probes/voice-drift.mjs`, verdicts pre-registered in
+`scripts/probes/verdicts-voice.json` before the first run.
+
+**Every one of the 40 renderings is byte-distinct.** No voice repeated itself,
+including five takes of `Kore` with identical voice, text and language.
+
+**What that settles: nothing about the accent, and one thing about an
+instrument.** Bit-level difference is expected from sampling, so V1 is not
+refuted by the free mechanical half and still needs the blind rating. But
+non-determinism has a consequence nobody had drawn:
+
+> `scripts/voice-compare.js`'s substitution guard cannot work.
+
+That rig treats identical hashes from two different voice names as proof the API
+ignored a name and handed back one voice twice. Since two renderings of the
+*same* voice are never identical, two names silently collapsing to one voice
+would still produce different hashes. The check can never fire, and its silence
+reads as "all hashes differ, safe to listen and choose" — safety it has not
+established. Recorded in that file rather than deleted, because a collision
+would still mean something and the reasoning is worth keeping.
+
+**Which of the eight prebuilt names the Live API actually accepts remains
+unestablished**, and this class of rig cannot establish it. Detecting a silent
+substitution needs a comparison that survives non-determinism — speaker
+similarity, not a hash — and nobody has built one.
+
+**Still open:** the blind accent rating. Audio is at `voice-drift/audio/`
+(telephone band, through the production resampler), mapping withheld in
+`voice-drift/_mapping/`. V1, V2 and V3 are decided against the pre-registered
+file and not by whoever reads the numbers afterwards.
+
+**The instrument cost more trouble than the measurement.** Two runs failed to
+record their own spend in three distinct ways — an object passed where a number
+was wanted, which destroyed 40 rendered takes; then raw `usageMetadata` handed to
+a rate card keyed differently, which priced 746 s of audio at $0.00. The audio
+was never the unreliable part. Both runs are in the ledger as explicit
+estimates, because neither run's true usage survives.
+
+### LVX81 — rated 2026-09-07. V1 REFUTED. It is not a voice-selection problem.
+
+40 takes rated blind by the UK caller who reported the defect, scored against
+`verdicts-voice.json` as written. `scripts/probes/score-voice-drift.mjs`, output
+kept at `scripts/probes/report-voice.txt`.
+
+| voice | takes | result |
+|---|---|---|
+| Kore (incumbent) | 5 | **5 british** |
+| Aoede, Fenrir, Leda, Orus, Puck, Zephyr | 5 each | 5 british |
+| Charon | 5 | 4 british, 1 american |
+
+**V1 — refuted.** Kore's five takes fall in one category. By the rule written
+before the first session opened: *"LVX81 is not a voice-selection problem. Close
+'try the other prebuilt voices' as a non-fix and record that the drift is
+within-call, which no config lever reaches."*
+
+**V2 — no change.** A candidate could only win by being five-of-five british
+while Kore was not. Kore is. **Kore stays**, and no preference is written down as
+a decision.
+
+**V3 — not confirmed.** Seven of eight voices are consistent across all takes.
+
+#### The real finding: the rig did not reproduce the defect
+
+Eight real calls drifted between British, Australian and American. Forty fresh
+sessions reading the same sentence produced British 39 times out of 40 — and the
+single exception was **Charon**, which is not the production voice. Whatever
+causes the drift on a call, it is absent from a one-shot render.
+
+**The honest caution, stated because 98% of takes carry one label:** a rater who
+marks nearly everything the same may not be discriminating. Two things weigh
+against that reading and neither settles it. They did mark one take differently,
+so discrimination is not zero. And that mark is concentrated in a single take of
+a single voice rather than scattered, which is what near-uniform audio looks like
+and not what inattentive rating looks like. It remains a caveat on the strength
+of the result, not on its direction.
+
+#### What this moves LVX81 to
+
+Not "which voice", but "what about a call". Three differences between this rig
+and a real call, none yet tested, in the order they are worth testing:
+
+1. **Conversation.** Every take is one utterance from a fresh session. A real
+   call is multi-turn, and the vendor's own audio conditions on its context.
+2. **The production prompt.** These render with a two-line instruction, not the
+   24,000-character system prompt.
+3. **Caller audio.** These are text-in. A real call feeds the model the caller's
+   voice, and a model that adapts toward its interlocutor would explain an
+   accent that moves during a call and never between renders.
+
+(3) is the one that fits the evidence best and is the cheapest to falsify: the
+same probe, with a UK-accented and a US-accented caller utterance fed in before
+the read-aloud. Not built, not costed, not authorised.
+
+**Cost of the round:** $0.268 measured-equivalent for the rating run, plus the
+same again lost to run 1's meter bug. $9.1521 of $11.00.
+
+## LVX83 — the Live front-end writes no transcripts
+
+Found 2026-09-07 while answering a different question: "does the database even
+work?" It mostly does. This part does not.
+
+| write | cascade | Live |
+|---|---|---|
+| `createCall` | 4 | 3 |
+| `addTranscriptEntry` | **6** | **0** |
+| `completeCall` | 0 | 0 — see below, this one is fine |
+
+`docs/roadmap.md:278-281` already recorded the count as 0. This confirms it in
+code and against real traffic: the eight deployed calls of 2026-09-07 each left
+a `calls` row and **no record of a single word spoken**. The dashboard's call
+detail is empty for every call on that number, and there is nothing to read back
+when a caller disputes what was agreed.
+
+### What is NOT broken, checked rather than assumed
+
+- **Call completion works.** `completeCall` appears 0 times in both front-ends
+  because it is not their job — it is called from the Twilio status callback
+  (`server.js:815`). Verified in production: six `call_ended_status_callback`
+  entries reading `completed` from the 2026-09-07 calls.
+- A local harness run leaves its `calls` row stuck at `in-progress` with a null
+  `ended_at`. **That is a harness artifact, not a defect** — the harness is not
+  Twilio and never sends the status callback. Anyone reading a local row as
+  evidence of a production bug will be wrong.
+- **Appointments** go through the shared tool path and the atomic
+  `createAppointmentIfAvailable`, so they should write. Not verified in
+  production, because nothing could read the table until now.
+
+### Why it went unnoticed
+
+The cascade wrote transcripts, the Live front-end was built as ears and mouth
+around the same brain, and transcript persistence lives in neither the brain nor
+the reducer — it sits in `session.js`, which Live does not use. Nothing failed;
+a call simply produced no rows and no error.
+
+This is the shape `negative-counters-cannot-confirm` warns about: an empty
+`call_transcripts` table reads identically for "the feature is off" and "nobody
+called".
+
+### Not fixed here, deliberately
+
+It is not a guard, not a counter, and not part of the LVX80/82 work. It needs
+its own decision — Live has `outputTranscription` and `inputTranscription`
+already flowing through `onServerContent`, so the material exists; what is
+undecided is PHI handling, whether both sides are stored, and how it interacts
+with `DEPLOYMENT_MODE=hipaa`.
+
+### How to check it after any fix
+
+`scripts/db-inspect.js` now answers this in production without printing a word
+of caller speech:
+
+```
+--args=scripts/db-inspect.js,--counts,--business,+441372656055
+```
+
+`call_transcripts` reading 0 against a non-zero `calls` is the defect. The counts
+are scoped to the tenant, because every one of these tables is under FORCE
+row-level security and an unscoped count returns 0 for a working database.

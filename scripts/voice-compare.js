@@ -43,6 +43,28 @@
 // So every rendering is hashed, and IDENTICAL AUDIO IS REPORTED AS A FAULT
 // rather than as a result. That is the difference between this and a script
 // that merely produces files.
+//
+// ---------------------------------------------------------------------------
+// THAT TRAP IS NOT ACTUALLY CAUGHT. Measured 2026-09-07.
+// ---------------------------------------------------------------------------
+//
+// scripts/probes/voice-drift.mjs rendered the same voice, same sentence, same
+// language five times each across eight prebuilt names. All forty renderings
+// were byte-distinct. Gemini Live is NOT deterministic for a fixed
+// (voice, text, language).
+//
+// Which makes the collision check below vacuous. If two names both silently
+// fell back to one voice, their renderings would differ anyway -- so the hashes
+// would differ, and this script would print "all hashes differ, safe to listen
+// and choose". The check cannot fire, and it fails in the dangerous direction:
+// it reports safety it has not established.
+//
+// It is left in place because a collision would still be evidence of something,
+// and removing it would remove the record of why it was written. But its silence
+// is not a result. Nothing here has established which prebuilt names the API
+// accepts, and this rig cannot establish it. Detecting substitution needs a
+// comparison that survives non-determinism -- a speaker-similarity measure, not
+// a hash -- and nobody has built one.
 // ---------------------------------------------------------------------------
 import "dotenv/config";
 import { createHash } from "node:crypto";

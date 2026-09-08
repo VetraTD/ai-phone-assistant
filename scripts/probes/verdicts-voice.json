@@ -1,0 +1,64 @@
+{
+  "round": "voice-drift",
+  "filed_as": "LVX81",
+  "written_at": "2026-09-07",
+  "written_before_first_run": true,
+  "never_edit": "PLAN.md rule 2. These are pre-registered. If a run produces something these rules do not cover, that is a finding to write in the report, not a reason to edit this file.",
+
+  "the_complaint": "The accent drifts between British, Australian and American across calls. Voice is pinned to Kore and languageCode to en-GB, Google ACCEPTED both (language_pinned: true on all eight summaries of 2026-09-07, zero live_language_code_rejected, connectLive's strip-and-retry never fired), and it drifts anyway.",
+
+  "what_is_actually_unknown": "Whether the drift is SESSION-level (the same pinned voice renders differently from one call to the next) or WITHIN-call (one session wanders as it generates). The eight calls cannot tell these apart, and the two have different consequences: only the first makes 'try the other prebuilt voices' a candidate fix at all.",
+
+  "arms": {
+    "incumbent": "Kore",
+    "candidates": ["Puck", "Charon", "Aoede", "Leda", "Orus", "Zephyr", "Fenrir"],
+    "takes_per_voice": 5,
+    "language": "en-GB",
+    "note": "The candidate list is a starting point to be disproved, not an authority. Nothing in this project has established which prebuilt names the Live API accepts. A name that renders nothing is a reported outcome, not a failed run."
+  },
+
+  "mechanical_check_that_needs_no_ear": {
+    "question": "Are a voice's five takes byte-identical?",
+    "if_identical": "The model is deterministic for this (voice, text, language). Session-level drift is then IMPOSSIBLE, the owner's drift is within-call or context-driven, and changing the prebuilt voice cannot fix it. V1 is answered without anybody listening.",
+    "if_different": "Bit-level difference is expected from sampling and proves NOTHING about accent on its own. It does not confirm drift. Only the blind rating below can."
+  },
+
+  "verdicts": {
+    "V1_is_session_drift_the_mechanism": {
+      "decided_by": "Kore's five takes, blind-rated into accent categories: british | american | australian | other_or_mixed",
+      "confirmed_if": "the five takes do not all fall in one category",
+      "refuted_if": "all five fall in one category",
+      "if_refuted": "LVX81 is not a voice-selection problem. Close 'try the other prebuilt voices' as a non-fix and record that the drift is within-call, which no config lever reaches."
+    },
+    "V2_does_any_candidate_beat_the_incumbent": {
+      "decided_by": "the same blind rating across all arms",
+      "a_candidate_wins_only_if": "all five of its takes rate british AND Kore's five do not",
+      "explicitly_not_a_win": "four of five, or a rating that is merely 'nicer'. Preference is not stability, and this round measures stability.",
+      "if_no_candidate_wins": "Kore stays. The incumbent that already works keeps the benefit of the doubt, and no preference is written down as a decision."
+    },
+    "V3_does_live_have_a_fix_at_all": {
+      "confirmed_if": "no voice has five of five in one category",
+      "means": "LVX81 has no fix inside Live. It becomes a documented COST of the Live front-end rather than an open ticket, and the cascade's fixed ElevenLabs voice remains the only known-good answer."
+    }
+  },
+
+  "rating_protocol": {
+    "blind": "Files are written as take-NN.wav with the voice mapping held in a sibling _mapping directory. Hand the listener the audio directory only.",
+    "listener": "UK ears. The complaint is about a British accent and the raters who can hear it are the ones who called the number.",
+    "band": "Rate the TELEPHONE-band file, not the studio one. On 2026-09-05 Kore was chosen from 24 kHz WAVs and then reported 'not the best quality over the phone but it was on the wav file', and Aoede was rejected on a real call after being picked from the same files. A 24 kHz judgement has already been overturned by 8 kHz once."
+  },
+
+  "what_this_cannot_answer": [
+    "Within-call drift. Every take is one short utterance from a fresh session; a session that wanders over four minutes is a different measurement.",
+    "Anything about the real prompt. These render with a minimal instruction, not the 24,000-character production one.",
+    "Whether a voice that is stable here stays stable under interruption, tool calls or a long call."
+  ],
+
+  "budget": {
+    "meter": "scripts/probes/lib/spend.js, shared with the 2026-09-01 round",
+    "cap_usd": 10.0,
+    "already_spent_usd": 8.616065,
+    "headroom_usd": 1.383935,
+    "estimate": "8 voices x 5 takes = 40 short sessions, a few hundred tokens each plus audio out. Well inside the headroom. reserve() aborts the run rather than breaching."
+  }
+}

@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 8.616065,
+  "spent_usd": 9.152065,
   "entries": [
     {
       "at": "2026-09-02T01:35:35.434Z",
@@ -8446,8 +8446,1198 @@
         "audio_out": 444
       },
       "usd": 0.057909600000000006
+    },
+    {
+      "at": "2026-09-07T22:45:04.988Z",
+      "probe": "voice-drift",
+      "arm": "run-1-lost",
+      "model": "gemini-3.1-flash-live-preview",
+      "note": "ESTIMATE, NOT MEASURED. 40 sessions opened, rendered and billed on 2026-09-07; commit() threw because usd was handed price()'s whole object, the catch discarded every take, and the real usageMetadata was lost with it. Recorded at the probe's own per-session reservation of $0.02 so the ledger does not understate the run. The true figure is unknown and cannot now be recovered.",
+      "estimated": true,
+      "sessions": 40,
+      "usd": 0.8
+    },
+    {
+      "at": "2026-09-07T22:48:40.937Z",
+      "probe": "voice-drift",
+      "arm": "Charon",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 488,
+        "totalTokenCount": 967,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 488
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:49:01.350Z",
+      "probe": "voice-drift",
+      "arm": "Fenrir",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 498,
+        "totalTokenCount": 977,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 498
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:49:19.843Z",
+      "probe": "voice-drift",
+      "arm": "Fenrir",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 452,
+        "totalTokenCount": 931,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 452
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:49:40.354Z",
+      "probe": "voice-drift",
+      "arm": "Fenrir",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 501,
+        "totalTokenCount": 980,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 501
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:49:59.554Z",
+      "probe": "voice-drift",
+      "arm": "Orus",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 461,
+        "totalTokenCount": 940,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 461
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:50:18.745Z",
+      "probe": "voice-drift",
+      "arm": "Zephyr",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 469,
+        "totalTokenCount": 945,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 469
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:50:39.296Z",
+      "probe": "voice-drift",
+      "arm": "Charon",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 502,
+        "totalTokenCount": 981,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 502
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:50:57.678Z",
+      "probe": "voice-drift",
+      "arm": "Leda",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 447,
+        "totalTokenCount": 923,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 447
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:51:16.831Z",
+      "probe": "voice-drift",
+      "arm": "Kore",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 469,
+        "totalTokenCount": 945,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 469
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:51:36.415Z",
+      "probe": "voice-drift",
+      "arm": "Puck",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 479,
+        "totalTokenCount": 958,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 479
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:51:55.539Z",
+      "probe": "voice-drift",
+      "arm": "Aoede",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 464,
+        "totalTokenCount": 940,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 464
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:52:16.754Z",
+      "probe": "voice-drift",
+      "arm": "Zephyr",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 469,
+        "totalTokenCount": 945,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 469
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:52:37.458Z",
+      "probe": "voice-drift",
+      "arm": "Aoede",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 456,
+        "totalTokenCount": 932,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 456
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:52:57.420Z",
+      "probe": "voice-drift",
+      "arm": "Zephyr",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 484,
+        "totalTokenCount": 960,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 484
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:53:17.064Z",
+      "probe": "voice-drift",
+      "arm": "Fenrir",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 481,
+        "totalTokenCount": 960,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 481
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:53:37.093Z",
+      "probe": "voice-drift",
+      "arm": "Leda",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 489,
+        "totalTokenCount": 965,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 489
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:53:56.418Z",
+      "probe": "voice-drift",
+      "arm": "Fenrir",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 470,
+        "totalTokenCount": 949,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 470
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:54:15.135Z",
+      "probe": "voice-drift",
+      "arm": "Puck",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 457,
+        "totalTokenCount": 936,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 457
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:54:33.971Z",
+      "probe": "voice-drift",
+      "arm": "Zephyr",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 451,
+        "totalTokenCount": 927,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 451
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:54:53.841Z",
+      "probe": "voice-drift",
+      "arm": "Puck",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 486,
+        "totalTokenCount": 965,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 486
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:55:15.397Z",
+      "probe": "voice-drift",
+      "arm": "Orus",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 519,
+        "totalTokenCount": 998,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 519
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:55:34.400Z",
+      "probe": "voice-drift",
+      "arm": "Kore",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 465,
+        "totalTokenCount": 941,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 465
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:55:54.976Z",
+      "probe": "voice-drift",
+      "arm": "Puck",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 500,
+        "totalTokenCount": 979,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 500
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:56:16.268Z",
+      "probe": "voice-drift",
+      "arm": "Charon",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 464,
+        "totalTokenCount": 943,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 464
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:56:39.016Z",
+      "probe": "voice-drift",
+      "arm": "Puck",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 504,
+        "totalTokenCount": 983,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 504
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:56:57.520Z",
+      "probe": "voice-drift",
+      "arm": "Aoede",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 445,
+        "totalTokenCount": 921,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 445
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:57:17.226Z",
+      "probe": "voice-drift",
+      "arm": "Kore",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 483,
+        "totalTokenCount": 959,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 483
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:57:39.538Z",
+      "probe": "voice-drift",
+      "arm": "Orus",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 492,
+        "totalTokenCount": 971,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 492
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:57:59.211Z",
+      "probe": "voice-drift",
+      "arm": "Kore",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 473,
+        "totalTokenCount": 949,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 473
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:58:16.907Z",
+      "probe": "voice-drift",
+      "arm": "Charon",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 431,
+        "totalTokenCount": 910,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 431
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:58:35.564Z",
+      "probe": "voice-drift",
+      "arm": "Aoede",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 455,
+        "totalTokenCount": 931,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 455
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:58:54.448Z",
+      "probe": "voice-drift",
+      "arm": "Leda",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 460,
+        "totalTokenCount": 936,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 460
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:59:13.403Z",
+      "probe": "voice-drift",
+      "arm": "Kore",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 462,
+        "totalTokenCount": 938,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 462
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:59:31.726Z",
+      "probe": "voice-drift",
+      "arm": "Leda",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 439,
+        "totalTokenCount": 915,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 439
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T22:59:52.082Z",
+      "probe": "voice-drift",
+      "arm": "Orus",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 493,
+        "totalTokenCount": 972,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 493
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:00:10.784Z",
+      "probe": "voice-drift",
+      "arm": "Zephyr",
+      "run": 4,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 456,
+        "totalTokenCount": 932,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 456
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:00:29.132Z",
+      "probe": "voice-drift",
+      "arm": "Leda",
+      "run": 5,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 446,
+        "totalTokenCount": 922,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 446
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:00:49.673Z",
+      "probe": "voice-drift",
+      "arm": "Charon",
+      "run": 2,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 500,
+        "totalTokenCount": 979,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 500
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:01:10.102Z",
+      "probe": "voice-drift",
+      "arm": "Orus",
+      "run": 1,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 479,
+        "responseTokenCount": 498,
+        "totalTokenCount": 977,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 227
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 498
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:01:30.426Z",
+      "probe": "voice-drift",
+      "arm": "Aoede",
+      "run": 3,
+      "model": "gemini-3.1-flash-live-preview",
+      "usage": {
+        "promptTokenCount": 476,
+        "responseTokenCount": 442,
+        "totalTokenCount": 918,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 227
+          },
+          {
+            "modality": "AUDIO",
+            "tokenCount": 224
+          }
+        ],
+        "responseTokensDetails": [
+          {
+            "modality": "AUDIO",
+            "tokenCount": 442
+          }
+        ]
+      },
+      "usd": 0
+    },
+    {
+      "at": "2026-09-07T23:03:34.081Z",
+      "probe": "voice-drift",
+      "arm": "run-1-correction",
+      "model": "gemini-3.1-flash-live-preview",
+      "estimated": true,
+      "usd": -0.532,
+      "note": "CORRECTION, not new spend. Run 1 was booked at the probe reservation of $0.02/session ($0.80). With the meter now working, a representative 18s render prices at $0.0055 and the repo-measured per-turn figure for 3.1 is $0.0067. Run 1 was 40 equivalent sessions, so ~$0.268. This entry removes the overstatement."
+    },
+    {
+      "at": "2026-09-07T23:03:34.083Z",
+      "probe": "voice-drift",
+      "arm": "run-2-unpriced",
+      "model": "gemini-3.1-flash-live-preview",
+      "estimated": true,
+      "usd": 0.268,
+      "sessions": 40,
+      "audio_seconds": 745.7,
+      "note": "ESTIMATE. Run 2 rendered all 40 takes successfully but every commit priced $0.00, because raw usageMetadata was passed to price() instead of being normalised through addUsage. 746s of audio was produced. Estimated at the repo-measured $0.0067/turn. Fixed in this commit; future runs price themselves."
     }
   ],
   "started_at": "2026-09-02T01:35:35.433Z",
-  "updated_at": "2026-09-02T14:34:19.941Z"
+  "updated_at": "2026-09-07T23:03:34.083Z"
 }

@@ -31,7 +31,18 @@ export const SPEND_FILE = path.join(HERE, "..", "spend.json");
  * 1-2 ran on only one of the two finalists). The original $5.00 covered rounds
  * 1 and 2 and was never breached — $2.2383 of it was spent.
  */
-export const CAP_USD = 10.0;
+/**
+ * Raised again, $10.00 -> $11.00 on 2026-09-07, explicitly authorised by the
+ * owner to fund the LVX81 voice-drift round after the first attempt lost forty
+ * paid sessions to the commit() bug above.
+ *
+ * $9.4161 of the previous cap was spent, $0.80 of it on that lost run and
+ * recorded as an ESTIMATE rather than a measurement, because the usage was
+ * discarded with the audio. The remaining $0.58 could not cover a second
+ * eight-voice pass, and a run that aborts part way leaves arms with unequal
+ * takes -- which the probe now refuses to compare rather than reporting.
+ */
+export const CAP_USD = 11.0;
 
 /** USD per million tokens. */
 export const RATES = {
@@ -129,6 +140,21 @@ export function price(model, usage = {}) {
  * session that errored mid-way still billed for what it consumed.
  */
 export function commit(entry) {
+  // REJECT A BAD usd BEFORE IT REACHES THE LEDGER.
+  //
+  // price() returns { usd, breakdown, unpriced_tokens }, and on 2026-09-07 a
+  // probe passed that whole object through as `usd`. The reduce below then
+  // produced a string, `.toFixed` threw, and it threw on EVERY subsequent call
+  // -- forty rendered sessions were lost to it before anyone read the message.
+  //
+  // Thrown, not coerced. A non-number silently becoming 0 understates real
+  // money, and this file exists to stop spending going unnoticed.
+  if (entry?.usd !== undefined && typeof entry.usd !== "number") {
+    throw new TypeError(
+      `commit(): usd must be a number, got ${typeof entry.usd}. ` +
+      "price() returns an object -- pass price(model, usage).usd, not price(model, usage)."
+    );
+  }
   const state = load();
   state.entries.push({ at: new Date().toISOString(), ...entry });
   state.spent_usd = Number(

@@ -62,6 +62,10 @@ config/rates.json
 # Rendered voice candidates (scripts/voice-compare.js). Audio, not source.
 voice-compare/
 
+# LVX81 drift takes (scripts/probes/voice-drift.mjs). Audio plus the blind
+# mapping, which must not be committed where a rater could read it.
+voice-drift/
+
 # Scratch copies of the live-call server log, used when analysing a call.
 # They contain LIVE_DEBUG_TRANSCRIPT output: assistant speech, caller names and
 # phone numbers. Three of them reached a commit on 2026-09-06 via `git add -A`,
