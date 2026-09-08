@@ -158,3 +158,84 @@ node scripts/deploy-hosting.js --dir dist --site vetra-core-edc8ca --project vet
 `dashboard_url` stays on `https://vetra-core-edc8ca.web.app/app` until that
 last step, so nothing breaks while DNS is pending. The `.web.app` origin is
 never removed from `dashboard_domains` — it stays a working way in.
+
+---
+
+# One codebase, two sites
+
+Discovered 2026-09-08, and it corrects an assumption this document previously
+stated as fact.
+
+**`vetratd.com` is not a different codebase.** It is this same React frontend,
+deployed to Vercel, **auto-deploying from this repository**. Its bundle carries
+our `landing-hero-cta` class and our page title. It was built from an older
+commit with **empty `VITE_*` variables** — no Firebase project id, no API URL
+anywhere in it — which is why `vetratd.com/app` loaded a dashboard that could
+not initialise Firebase and died silently. That is the "Log in button does
+nothing" report.
+
+The earlier claim that the apex "belongs to the friend's rebuild" came from a
+comment in `terraform.tfvars` and was repeated here without checking.
+
+## Why this was about to get worse
+
+The dashboard moved to `/` and the Landing page was retired from the router.
+Because Vercel builds this repository on push, **merging that to `main` would
+have rebuilt `vetratd.com` as a login screen** — the public marketing site
+replaced, silently, with nothing in the repo mentioning Vercel to explain why.
+
+## The split, made deliberate
+
+`VITE_BUILD_TARGET` selects the route table (`src/siteUrl.js`,
+`src/routes.jsx`):
+
+| target | deployed to | `/` | `/app`, `/login`, `/signin` |
+|---|---|---|---|
+| `marketing` (**default**) | vetratd.com, Vercel | Landing | leave the origin → `app.vetratd.com` |
+| `app` | app.vetratd.com, Firebase | dashboard | redirect to `/` |
+
+**The default is `marketing`, and the asymmetry is the point.** Vercel builds
+with whatever environment it happens to have and this repository cannot set it;
+if the flag goes missing there, the public domain keeps serving marketing, which
+is merely stale. Were the default `app`, a forgotten variable would replace
+vetratd.com with a login screen on the next push. The Firebase build passes the
+flag explicitly, and if THAT is ever forgotten the dashboard serves a marketing
+page — wrong, but obvious within seconds. The loud failure is the one to choose.
+
+Vite tree-shakes the unused half: the app build carries no Landing page
+(234 kB against the marketing build's 267 kB).
+
+Marketing's `/app` is an **external** redirect, not `<Navigate>` — which routes
+inside the SPA and would 404 on an absolute URL. That rescues every stale
+`vetratd.com/app` link already in nav bars, bookmarks and inboxes.
+
+## What Vercel needs set
+
+The build works without these; the SITE does not.
+
+| variable | value | why |
+|---|---|---|
+| `VITE_API_URL` | the `dashboard-api-uk-prod` URL | **the contact form posts here.** Unset, it falls back to `http://localhost:3001` and fails silently — and "Get started" now leads to that form |
+| `VITE_APP_URL` | `https://app.vetratd.com` | optional; this is already the default |
+| `VITE_BUILD_TARGET` | **leave unset** | the default is `marketing`, which is what Vercel should build |
+
+CORS needs no change: `https://vetratd.com` and `https://www.vetratd.com` are
+permanent entries in the dashboard API's allow-list
+(`AI-phone-dashboard/backend/src/server.js`), independent of `CORS_ORIGINS`.
+
+## Building the app target
+
+Never publish to Firebase Hosting without the flag:
+
+```
+cd AI-phone-dashboard/frontend
+VITE_BUILD_TARGET=app VITE_API_URL=<dashboard-api url> \
+VITE_FIREBASE_API_KEY=... VITE_FIREBASE_AUTH_DOMAIN=... VITE_FIREBASE_PROJECT_ID=... \
+  npx vite build
+
+# Two guards worth running before publishing:
+grep -rl "landing-hero-cta" dist/assets/*.js && echo "ABORT: marketing build"
+grep -rl "localhost:3001"   dist/assets/*.js && echo "ABORT: localhost baked in"
+
+node scripts/deploy-hosting.js --dir dist --site vetra-core-edc8ca --project vetra-core-edc8ca
+```

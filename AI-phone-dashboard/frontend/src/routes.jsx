@@ -1,37 +1,57 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { MARKETING_URL } from "./siteUrl";
+import { MARKETING_URL, APP_URL, BUILD_TARGET } from "./siteUrl";
+import Landing from "./Landing.jsx";
 
 // ---------------------------------------------------------------------------
-// THE DASHBOARD IS THE ROOT.
+// ONE CODEBASE, TWO SITES.
 //
-// It used to sit at /app, under a `/` that served an in-repo marketing Landing
-// page. That made sense while one Firebase site served both on
-// <project>.web.app. It stopped making sense the moment the dashboard got its
-// own origin: app.vetratd.com/app says "app" twice, and the origin IS the app.
+//   marketing  vetratd.com, on Vercel, auto-deployed from this repository.
+//              Landing at `/`, and every route into the product is an ABSOLUTE
+//              link to the app origin.
+//   app        app.vetratd.com, on Firebase Hosting. Dashboard at `/`.
 //
-// The Landing route is retired rather than moved. vetratd.com is the marketing
-// site, it is a different codebase on Vercel, and it is live — so a second
-// marketing page served from the app origin is a page that can only ever drift
-// out of date. Landing.jsx is left in the tree, unreferenced, so nothing is
-// lost if that decision is revisited; because it is no longer imported it does
-// not ship in the bundle.
+// This split is new only in being DELIBERATE. Both deployments already existed
+// and both built the same route table, which is why vetratd.com's "Log in"
+// button pointed at a relative /app — correct on the origin it was written for,
+// and on vetratd.com a stale dashboard with no Firebase config that loaded
+// nothing at all.
 //
-// /app REDIRECTS, and that is load-bearing rather than tidy. Owner notification
-// emails already sent carry .../app links, DASHBOARD_URL still points there
-// until the domain cutover, and the fallback route is a 404 page — so without
-// this redirect the first thing a member of staff clicking "you have a new
-// appointment" would see is "This page doesn't exist."
+// It also removes a live hazard: with the dashboard moved to `/`, a merge to
+// main would have had Vercel rebuild vetratd.com as a login screen. The public
+// marketing site would have disappeared on a push, with nothing in this
+// repository mentioning Vercel to suggest why.
 //
-// Extracted from main.jsx so it can be rendered inside a MemoryRouter and
-// tested. main.jsx calls createRoot at module scope and cannot be imported by a
-// test without mounting the whole app.
+// THE DASHBOARD IS THE ROOT on the app build. app.vetratd.com/app said "app"
+// twice; the origin IS the app.
+//
+// /app, /login and /signin all redirect there. Notification emails already sent
+// carry /app links and DASHBOARD_URL still points at one until the cutover, and
+// the fallback route is a 404 — so without the redirect the first thing someone
+// clicking "you have a new appointment" would see is "This page doesn't exist."
+//
+// Extracted from main.jsx so it can be rendered in a MemoryRouter and tested;
+// main.jsx calls createRoot at module scope and cannot be imported by a test.
 // ---------------------------------------------------------------------------
 
 const App = lazy(() => import("./App.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
 const Contact = lazy(() => import("./Contact.jsx"));
 const ResetPassword = lazy(() => import("./resetPassword.jsx"));
+
+/**
+ * Leave this origin entirely.
+ *
+ * `<Navigate>` cannot do this — it routes inside the SPA, so it would resolve
+ * an absolute URL as a path and 404. This is what makes an old vetratd.com/app
+ * link land on the dashboard instead of a dead page.
+ */
+export function ExternalRedirect({ to }) {
+  useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+  return <RouteFallback />;
+}
 
 export function RouteFallback() {
   return (
@@ -51,6 +71,9 @@ export function RouteFallback() {
 }
 
 export function NotFound() {
+  // On the app build there is no home page to offer, so this points off-origin
+  // at the marketing site. On the marketing build `/` is the home page.
+  const home = BUILD_TARGET === "app" ? MARKETING_URL : "/";
   return (
     <div
       style={{
@@ -67,37 +90,52 @@ export function NotFound() {
     >
       <h1 style={{ fontSize: 48, margin: 0 }}>404</h1>
       <p style={{ margin: 0, color: "#64748b" }}>This page doesn&apos;t exist.</p>
-      {/* External: this origin no longer has a home page to go back to. */}
-      <a href={MARKETING_URL} style={{ color: "#3a8ff2", fontWeight: 600 }}>
-        Back to vetratd.com
+      <a href={home} style={{ color: "#3a8ff2", fontWeight: 600 }}>
+        {BUILD_TARGET === "app" ? "Back to vetratd.com" : "Back to home"}
       </a>
     </div>
   );
 }
 
 export default function AppRoutes() {
+  const isApp = BUILD_TARGET === "app";
+
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/app" element={<Navigate to="/" replace />} />
-        {/*
-          /login and /signin exist for ONE reason: the marketing site links
-          here, and it is a separate deployment on a different host that we do
-          not redeploy every time this router changes.
+        {isApp ? (
+          <>
+            <Route path="/" element={<App />} />
+            <Route path="/app" element={<Navigate to="/" replace />} />
+            {/*
+              The marketing site is a separate deployment and is not rebuilt
+              when this router changes, so it needs a link that cannot rot.
+              "https://app.vetratd.com" is correct but reads like a bare domain
+              in a nav bar; a Log in button should be able to point at /login.
+            */}
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/signin" element={<Navigate to="/" replace />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+          </>
+        ) : (
+          <>
+            <Route path="/" element={<Landing />} />
+            {/*
+              Rescues every link already out in the world. vetratd.com/app is
+              in nav bars, bookmarks and anything already sent; it currently
+              loads a dashboard with no configuration and dies. Now it lands on
+              the real one.
+            */}
+            <Route path="/app" element={<ExternalRedirect to={APP_URL} />} />
+            <Route path="/login" element={<ExternalRedirect to={`${APP_URL}/login`} />} />
+            <Route path="/signin" element={<ExternalRedirect to={`${APP_URL}/login`} />} />
+          </>
+        )}
 
-          "https://app.vetratd.com" is a correct link but reads like a bare
-          domain in a nav bar, and a marketing page that wants to say "Log in"
-          should be able to link to something that says login. These are
-          redirects rather than routes so there is still exactly ONE canonical
-          URL for the dashboard, and so a stale marketing link can never rot
-          into a 404 the way vetratd.com/app just did.
-        */}
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="/signin" element={<Navigate to="/" replace />} />
+        {/* Both sites: the contact form is where "Get started" leads, and the
+            legal pages are linked from footers on both. */}
         <Route path="/legal" element={<Legal />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

@@ -1,94 +1,162 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import AppRoutes from "../routes.jsx";
-import { MARKETING_URL } from "../siteUrl";
 
 // ---------------------------------------------------------------------------
-// The dashboard is the root, and /app still works.
+// ONE CODEBASE, TWO SITES, and the routing differs between them.
 //
-// app.vetratd.com/app said "app" twice, so the dashboard moved to `/` and the
-// in-repo marketing Landing page retired — vetratd.com is the marketing site
-// and is a different codebase on Vercel.
+//   marketing  vetratd.com on Vercel, auto-deployed from this repo
+//   app        app.vetratd.com on Firebase Hosting
 //
-// THE REDIRECT IS THE PART THAT MATTERS. Owner notification emails already sent
-// carry `.../app` links, and DASHBOARD_URL still points there until the domain
-// cutover. The router's fallback is a 404 page, so without the redirect the
-// first thing a member of staff clicking "you have a new appointment" would
-// have seen is "This page doesn't exist." That is a silent, delayed failure of
-// exactly the kind this change could easily have shipped.
+// Both deployments already existed and both built the SAME route table. That is
+// why vetratd.com's "Log in" pointed at a relative /app: correct on the origin
+// it was written for, and on vetratd.com a stale dashboard with no Firebase
+// configuration that loaded nothing at all.
 //
-// The dashboard itself is mocked. What it renders is App.jsx's business, and
-// mounting it here would drag in Identity Platform, axios and a settings tree;
-// these tests ask one question, which is what each URL resolves to.
+// Two failures are tested here because both were live or imminent:
+//
+//   1. A marketing link into the product must leave the origin. `<Navigate>`
+//      cannot — it routes inside the SPA and would 404 on an absolute URL.
+//   2. /app must not become a dead end on EITHER site. On the app build it is a
+//      redirect to the root; on marketing it is a redirect to the app origin,
+//      which rescues every stale link already in nav bars and inboxes.
+//
+// And the default matters: with the dashboard moved to `/`, a merge to main
+// would have had Vercel rebuild vetratd.com as a login screen. The public
+// marketing site would have vanished on a push.
 // ---------------------------------------------------------------------------
+
+const MARKETING_URL = "https://www.vetratd.com";
+const APP_URL = "https://app.vetratd.com";
 
 vi.mock("../App.jsx", () => ({
   default: () => <div data-testid="dashboard">dashboard</div>,
+}));
+vi.mock("../Landing.jsx", () => ({
+  default: () => <div data-testid="landing">landing</div>,
 }));
 vi.mock("../Legal.jsx", () => ({ default: () => <div>legal</div> }));
 vi.mock("../Contact.jsx", () => ({ default: () => <div data-testid="contact">contact</div> }));
 vi.mock("../resetPassword.jsx", () => ({ default: () => <div>reset</div> }));
 
-const at = (path) =>
-  render(
+/** Load the router fresh with a given build target. */
+async function routerFor(target) {
+  vi.resetModules();
+  vi.doMock("../siteUrl", () => ({ MARKETING_URL, APP_URL, BUILD_TARGET: target }));
+  const mod = await import("../routes.jsx");
+  return mod.default;
+}
+
+async function at(target, path) {
+  const AppRoutes = await routerFor(target);
+  return render(
     <MemoryRouter initialEntries={[path]}>
       <AppRoutes />
     </MemoryRouter>
   );
+}
 
-describe("routing", () => {
+describe("the app build (app.vetratd.com)", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("serves the dashboard at the root", async () => {
-    at("/");
+    await at("app", "/");
     expect(await screen.findByTestId("dashboard")).toBeTruthy();
   });
 
-  it("redirects /app to the root rather than 404ing", async () => {
-    // The failure this prevents is not hypothetical: notification emails
-    // already in people's inboxes point at /app.
-    at("/app");
-    expect(await screen.findByTestId("dashboard")).toBeTruthy();
-  });
-
-  it.each(["/login", "/signin"])(
-    "%s reaches the dashboard, so the marketing site has a stable link",
+  it.each(["/app", "/login", "/signin"])(
+    "%s reaches the dashboard rather than 404ing",
     async (path) => {
-      // The marketing site is a SEPARATE deployment on a different host. It
-      // linked at /app, which stopped existing, and the result was a page that
-      // simply did not load. These aliases exist so a marketing link cannot rot
-      // that way again.
-      at(path);
+      // /app is not hypothetical: notification emails already sent point there,
+      // and DASHBOARD_URL still does until the domain cutover.
+      await at("app", path);
       expect(await screen.findByTestId("dashboard")).toBeTruthy();
     }
   );
 
-  it("still serves /contact, which the login page links to", async () => {
-    // Self-serve signup is closed and the login form's only onward route is
-    // "Request access" -> /contact. If this route goes, that is a dead end for
-    // every prospective customer.
-    at("/contact");
-    expect(await screen.findByTestId("contact")).toBeTruthy();
+  it("does not serve the marketing landing page", async () => {
+    await at("app", "/");
+    expect(screen.queryByTestId("landing")).toBeNull();
   });
 
-  it("shows a 404 for an unknown path", async () => {
-    at("/nope");
-    expect(await screen.findByText("404")).toBeTruthy();
-  });
-
-  it("sends 'back to home' OFF this origin, not to the dashboard", async () => {
-    // The whole point. `<Link to="/">` used to mean "the marketing landing
-    // page". It now means "the dashboard", which bounces a signed-out visitor
-    // straight back to the sign-in screen they were trying to leave.
-    at("/nope");
+  it("sends 'back home' OFF this origin", async () => {
+    // `<Link to="/">` used to mean the marketing page. On this build it means
+    // the dashboard, which bounces a signed-out visitor back to the sign-in
+    // screen they were trying to leave.
+    await at("app", "/nope");
     const link = await screen.findByRole("link", { name: /vetratd\.com/i });
     expect(link.getAttribute("href")).toBe(MARKETING_URL);
-    expect(link.getAttribute("href")).not.toBe("/");
+  });
+});
+
+describe("the marketing build (vetratd.com)", () => {
+  const replace = vi.fn();
+  let original;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    original = window.location;
+    delete window.location;
+    window.location = { ...original, replace };
+  });
+  afterEach(() => {
+    window.location = original;
   });
 
-  it("points at a real external marketing origin", () => {
-    expect(MARKETING_URL).toMatch(/^https:\/\//);
-    expect(MARKETING_URL).not.toMatch(/\/$/);
+  it("serves the landing page at the root", async () => {
+    await at("marketing", "/");
+    expect(await screen.findByTestId("landing")).toBeTruthy();
+  });
+
+  it("never serves the dashboard", async () => {
+    // The dashboard needs Firebase config and an API URL that the Vercel build
+    // does not have. Rendering it there is exactly what produced a Log in
+    // button that loaded nothing.
+    await at("marketing", "/");
+    expect(screen.queryByTestId("dashboard")).toBeNull();
+  });
+
+  it.each([
+    ["/app", APP_URL],
+    ["/login", `${APP_URL}/login`],
+    ["/signin", `${APP_URL}/login`],
+  ])("sends %s to the app origin, leaving this site", async (path, expected) => {
+    await at("marketing", path);
+    expect(replace).toHaveBeenCalledWith(expected);
+  });
+
+  it("keeps its own contact page, which Get started leads to", async () => {
+    await at("marketing", "/contact");
+    expect(await screen.findByTestId("contact")).toBeTruthy();
+    expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("the build target default", () => {
+  // The describes above register a doMock for ../siteUrl to drive the router.
+  // resetModules clears the module registry but NOT the mock registration, so
+  // without this these tests would assert against the last mocked value rather
+  // than the real module's default — and would have passed while proving
+  // nothing about the thing that protects the public site.
+  beforeEach(() => {
+    vi.doUnmock("../siteUrl");
+    vi.resetModules();
+  });
+
+  it("is marketing, so a missing flag cannot replace the public site with a login screen", async () => {
+    // Vercel builds with whatever environment it has and this repository cannot
+    // set it. Defaulting to "app" would mean a forgotten variable silently
+    // replaces vetratd.com on the next push to main.
+    vi.stubEnv("VITE_BUILD_TARGET", "");
+    const { BUILD_TARGET } = await import("../siteUrl");
+    expect(BUILD_TARGET).toBe("marketing");
+    vi.unstubAllEnvs();
+  });
+
+  it("is app only when asked for explicitly", async () => {
+    vi.stubEnv("VITE_BUILD_TARGET", "app");
+    const { BUILD_TARGET } = await import("../siteUrl");
+    expect(BUILD_TARGET).toBe("app");
+    vi.unstubAllEnvs();
   });
 });

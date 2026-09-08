@@ -28,6 +28,7 @@ import {
   getStoredCurrency,
 } from "./landingPricing.js";
 import "./Landing.css";
+import { APP_URL } from "./siteUrl";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
 
@@ -691,9 +692,9 @@ export default function Landing() {
             <a href="#faq">FAQ</a>
           </nav>
           <div className="landing-header-actions">
-            <Link to="/app" className="landing-header-login">
+            <a href={`${APP_URL}/login`} className="landing-header-login">
               Log in
-            </Link>
+            </a>
             <span className="landing-header-divider" aria-hidden="true" />
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-header-phone">
               <Phone className="landing-header-phone-icon" size={16} strokeWidth={2.4} />
@@ -979,9 +980,9 @@ export default function Landing() {
               <PreviewTabs />
             </div>
           </div>
-          <Link to="/app?demo=1" className="landing-cta-secondary landing-preview-cta">
+          <a href={`${APP_URL}/?demo=1`} className="landing-cta-secondary landing-preview-cta">
             Try the guided dashboard demo
-          </Link>
+          </a>
         </div>
       </section>
 
@@ -1015,9 +1016,9 @@ export default function Landing() {
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-cta-secondary">
               Call demo line
             </a>
-            <Link to="/app" className="landing-cta-secondary">
+            <a href={`${APP_URL}/login`} className="landing-cta-secondary">
               Log in
-            </Link>
+            </a>
           </div>
         </div>
       </section>
@@ -1026,7 +1027,7 @@ export default function Landing() {
         <div className="landing-footer-inner">
           <VetraLogo to="/" className="vetra-logo-footer" />
           <div className="landing-footer-links">
-            <Link to="/app">Log in</Link>
+            <a href={`${APP_URL}/login`}>Log in</a>
             <Link to="/contact">Contact</Link>
             <a href={`${privacyOrigin}/legal`}>Privacy Policy</a>
             <Link to="/legal">Terms</Link>
