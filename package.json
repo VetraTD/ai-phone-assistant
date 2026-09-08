@@ -28,7 +28,8 @@
     "db:reset": "node scripts/migrate.js --reset",
     "test:db": "vitest run --config vitest.db.config.js",
     "check:credentials": "node scripts/check-credential-boundary.js",
-    "tts:readback": "node scripts/tts-readback.js"
+    "tts:readback": "node scripts/tts-readback.js",
+    "transcribe:demo": "node scripts/transcribe-demo-call.js"
   },
   "repository": {
     "type": "git",

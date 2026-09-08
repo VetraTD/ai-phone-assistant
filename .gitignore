@@ -73,3 +73,8 @@ voice-drift/
 .s*.log
 .call*.log
 .t*.log
+
+# Impeccable (design tooling) - machine-local state
+.impeccable/review/
+.impeccable/live/
+.impeccable/config.local.json

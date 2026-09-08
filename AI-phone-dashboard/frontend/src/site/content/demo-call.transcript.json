@@ -1,0 +1,2430 @@
+{
+ "version": 1,
+ "source": "/vetra-demo-call.mp3",
+ "duration": 163.32,
+ "speakers": {
+  "0": "Vetra",
+  "1": "Caller"
+ },
+ "words": [
+  {
+   "w": "Thank",
+   "start": 0,
+   "end": 0.32,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 0.32,
+   "end": 0.48,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 0.48,
+   "end": 0.72,
+   "speaker": 0
+  },
+  {
+   "w": "calling",
+   "start": 0.72,
+   "end": 0.96,
+   "speaker": 0
+  },
+  {
+   "w": "Apex",
+   "start": 0.96,
+   "end": 1.36,
+   "speaker": 0
+  },
+  {
+   "w": "Wellness",
+   "start": 1.36,
+   "end": 1.84,
+   "speaker": 0
+  },
+  {
+   "w": "Clinic.",
+   "start": 1.84,
+   "end": 2.48,
+   "speaker": 0
+  },
+  {
+   "w": "I'm",
+   "start": 2.48,
+   "end": 2.64,
+   "speaker": 0
+  },
+  {
+   "w": "the",
+   "start": 2.64,
+   "end": 2.8,
+   "speaker": 0
+  },
+  {
+   "w": "virtual",
+   "start": 2.8,
+   "end": 3.12,
+   "speaker": 0
+  },
+  {
+   "w": "assistant",
+   "start": 3.12,
+   "end": 3.52,
+   "speaker": 0
+  },
+  {
+   "w": "here.",
+   "start": 3.52,
+   "end": 4.16,
+   "speaker": 0
+  },
+  {
+   "w": "How",
+   "start": 4.16,
+   "end": 4.32,
+   "speaker": 0
+  },
+  {
+   "w": "can",
+   "start": 4.32,
+   "end": 4.56,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 4.56,
+   "end": 4.64,
+   "speaker": 0
+  },
+  {
+   "w": "help",
+   "start": 4.64,
+   "end": 4.8,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 4.8,
+   "end": 4.96,
+   "speaker": 0
+  },
+  {
+   "w": "today?",
+   "start": 4.96,
+   "end": 5.6,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 5.6,
+   "end": 6,
+   "speaker": 1
+  },
+  {
+   "w": "need",
+   "start": 6,
+   "end": 6.24,
+   "speaker": 1
+  },
+  {
+   "w": "to",
+   "start": 6.24,
+   "end": 6.32,
+   "speaker": 1
+  },
+  {
+   "w": "book",
+   "start": 6.32,
+   "end": 6.48,
+   "speaker": 1
+  },
+  {
+   "w": "a",
+   "start": 6.48,
+   "end": 6.72,
+   "speaker": 1
+  },
+  {
+   "w": "general",
+   "start": 6.72,
+   "end": 7.12,
+   "speaker": 1
+  },
+  {
+   "w": "health",
+   "start": 7.12,
+   "end": 7.6,
+   "speaker": 1
+  },
+  {
+   "w": "checkup,",
+   "start": 7.6,
+   "end": 8.32,
+   "speaker": 1
+  },
+  {
+   "w": "and",
+   "start": 8.32,
+   "end": 8.48,
+   "speaker": 1
+  },
+  {
+   "w": "I",
+   "start": 8.48,
+   "end": 8.72,
+   "speaker": 1
+  },
+  {
+   "w": "was",
+   "start": 8.72,
+   "end": 8.8,
+   "speaker": 1
+  },
+  {
+   "w": "just",
+   "start": 8.8,
+   "end": 8.96,
+   "speaker": 1
+  },
+  {
+   "w": "wondering",
+   "start": 8.96,
+   "end": 9.2,
+   "speaker": 1
+  },
+  {
+   "w": "if",
+   "start": 9.2,
+   "end": 9.36,
+   "speaker": 1
+  },
+  {
+   "w": "I",
+   "start": 9.36,
+   "end": 9.52,
+   "speaker": 1
+  },
+  {
+   "w": "could",
+   "start": 9.52,
+   "end": 9.6,
+   "speaker": 1
+  },
+  {
+   "w": "get",
+   "start": 9.6,
+   "end": 9.76,
+   "speaker": 1
+  },
+  {
+   "w": "more",
+   "start": 9.76,
+   "end": 10,
+   "speaker": 1
+  },
+  {
+   "w": "information",
+   "start": 10,
+   "end": 10.4,
+   "speaker": 1
+  },
+  {
+   "w": "about",
+   "start": 10.4,
+   "end": 10.72,
+   "speaker": 1
+  },
+  {
+   "w": "it.",
+   "start": 10.72,
+   "end": 10.88,
+   "speaker": 1
+  },
+  {
+   "w": "Absolutely.",
+   "start": 15.88,
+   "end": 16.76,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 16.92,
+   "end": 17.08,
+   "speaker": 0
+  },
+  {
+   "w": "can",
+   "start": 17.08,
+   "end": 17.32,
+   "speaker": 0
+  },
+  {
+   "w": "help",
+   "start": 17.32,
+   "end": 17.48,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 17.48,
+   "end": 17.64,
+   "speaker": 0
+  },
+  {
+   "w": "with",
+   "start": 17.64,
+   "end": 17.8,
+   "speaker": 0
+  },
+  {
+   "w": "that.",
+   "start": 17.8,
+   "end": 18.27,
+   "speaker": 0
+  },
+  {
+   "w": "Our",
+   "start": 18.43,
+   "end": 18.68,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 18.68,
+   "end": 19.08,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 19.08,
+   "end": 19.48,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 19.48,
+   "end": 20.2,
+   "speaker": 0
+  },
+  {
+   "w": "is",
+   "start": 20.2,
+   "end": 20.52,
+   "speaker": 0
+  },
+  {
+   "w": "priced",
+   "start": 20.52,
+   "end": 20.84,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 20.84,
+   "end": 21,
+   "speaker": 0
+  },
+  {
+   "w": "£80",
+   "start": 21,
+   "end": 21.88,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 21.88,
+   "end": 22.12,
+   "speaker": 0
+  },
+  {
+   "w": "covers",
+   "start": 22.12,
+   "end": 22.44,
+   "speaker": 0
+  },
+  {
+   "w": "nonemergency",
+   "start": 22.44,
+   "end": 23.16,
+   "speaker": 0
+  },
+  {
+   "w": "health",
+   "start": 23.16,
+   "end": 23.48,
+   "speaker": 0
+  },
+  {
+   "w": "concerns,",
+   "start": 23.48,
+   "end": 24.28,
+   "speaker": 0
+  },
+  {
+   "w": "repeat",
+   "start": 24.28,
+   "end": 24.68,
+   "speaker": 0
+  },
+  {
+   "w": "prescriptions,",
+   "start": 24.68,
+   "end": 25.56,
+   "speaker": 0
+  },
+  {
+   "w": "referral",
+   "start": 25.64,
+   "end": 26.2,
+   "speaker": 0
+  },
+  {
+   "w": "letters,",
+   "start": 26.2,
+   "end": 26.92,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 26.92,
+   "end": 27.08,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 27.08,
+   "end": 27.48,
+   "speaker": 0
+  },
+  {
+   "w": "medical",
+   "start": 27.48,
+   "end": 27.88,
+   "speaker": 0
+  },
+  {
+   "w": "advice.",
+   "start": 27.88,
+   "end": 28.6,
+   "speaker": 0
+  },
+  {
+   "w": "It",
+   "start": 28.92,
+   "end": 29.15,
+   "speaker": 0
+  },
+  {
+   "w": "runs",
+   "start": 29.15,
+   "end": 29.48,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 29.48,
+   "end": 29.72,
+   "speaker": 0
+  },
+  {
+   "w": "thirty",
+   "start": 29.72,
+   "end": 30.04,
+   "speaker": 0
+  },
+  {
+   "w": "minutes.",
+   "start": 30.04,
+   "end": 30.76,
+   "speaker": 0
+  },
+  {
+   "w": "The",
+   "start": 30.92,
+   "end": 31.15,
+   "speaker": 0
+  },
+  {
+   "w": "office",
+   "start": 31.15,
+   "end": 31.4,
+   "speaker": 0
+  },
+  {
+   "w": "is",
+   "start": 31.4,
+   "end": 32.35,
+   "speaker": 0
+  },
+  {
+   "w": "currently",
+   "start": 31.53,
+   "end": 32.01,
+   "speaker": 0
+  },
+  {
+   "w": "closed,",
+   "start": 32.01,
+   "end": 32.65,
+   "speaker": 0
+  },
+  {
+   "w": "but",
+   "start": 32.65,
+   "end": 32.81,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 32.81,
+   "end": 32.89,
+   "speaker": 0
+  },
+  {
+   "w": "can",
+   "start": 32.89,
+   "end": 33.05,
+   "speaker": 0
+  },
+  {
+   "w": "still",
+   "start": 33.05,
+   "end": 33.29,
+   "speaker": 0
+  },
+  {
+   "w": "book",
+   "start": 33.29,
+   "end": 33.45,
+   "speaker": 0
+  },
+  {
+   "w": "an",
+   "start": 33.45,
+   "end": 33.69,
+   "speaker": 0
+  },
+  {
+   "w": "appointment",
+   "start": 33.69,
+   "end": 33.93,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 33.93,
+   "end": 34.25,
+   "speaker": 0
+  },
+  {
+   "w": "you.",
+   "start": 34.25,
+   "end": 34.73,
+   "speaker": 0
+  },
+  {
+   "w": "Would",
+   "start": 35.05,
+   "end": 35.29,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 35.29,
+   "end": 35.45,
+   "speaker": 0
+  },
+  {
+   "w": "like",
+   "start": 35.45,
+   "end": 35.61,
+   "speaker": 0
+  },
+  {
+   "w": "to",
+   "start": 35.61,
+   "end": 35.69,
+   "speaker": 0
+  },
+  {
+   "w": "book",
+   "start": 35.69,
+   "end": 35.93,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 35.93,
+   "end": 36.09,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 36.09,
+   "end": 36.33,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 36.33,
+   "end": 36.73,
+   "speaker": 0
+  },
+  {
+   "w": "consultation?",
+   "start": 36.73,
+   "end": 37.61,
+   "speaker": 0
+  },
+  {
+   "w": "Yeah.",
+   "start": 38.49,
+   "end": 38.81,
+   "speaker": 1
+  },
+  {
+   "w": "Could",
+   "start": 38.81,
+   "end": 38.97,
+   "speaker": 1
+  },
+  {
+   "w": "you",
+   "start": 38.97,
+   "end": 39.13,
+   "speaker": 1
+  },
+  {
+   "w": "tell",
+   "start": 39.13,
+   "end": 39.29,
+   "speaker": 1
+  },
+  {
+   "w": "me",
+   "start": 39.29,
+   "end": 39.37,
+   "speaker": 1
+  },
+  {
+   "w": "that",
+   "start": 39.37,
+   "end": 39.53,
+   "speaker": 1
+  },
+  {
+   "w": "price",
+   "start": 39.53,
+   "end": 39.77,
+   "speaker": 1
+  },
+  {
+   "w": "one",
+   "start": 39.77,
+   "end": 40.09,
+   "speaker": 1
+  },
+  {
+   "w": "more",
+   "start": 40.09,
+   "end": 40.25,
+   "speaker": 1
+  },
+  {
+   "w": "time?",
+   "start": 40.25,
+   "end": 40.81,
+   "speaker": 1
+  },
+  {
+   "w": "No",
+   "start": 42.41,
+   "end": 42.73,
+   "speaker": 0
+  },
+  {
+   "w": "problem",
+   "start": 42.73,
+   "end": 43.05,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 43.05,
+   "end": 43.29,
+   "speaker": 0
+  },
+  {
+   "w": "all.",
+   "start": 43.29,
+   "end": 43.77,
+   "speaker": 0
+  },
+  {
+   "w": "The",
+   "start": 44.01,
+   "end": 44.25,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 44.25,
+   "end": 44.57,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 44.57,
+   "end": 45.05,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 45.05,
+   "end": 45.69,
+   "speaker": 0
+  },
+  {
+   "w": "is",
+   "start": 45.69,
+   "end": 46.73,
+   "speaker": 0
+  },
+  {
+   "w": "£80.",
+   "start": 45.95,
+   "end": 46.99,
+   "speaker": 0
+  },
+  {
+   "w": "Would",
+   "start": 47.47,
+   "end": 47.79,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 47.79,
+   "end": 47.86,
+   "speaker": 0
+  },
+  {
+   "w": "like",
+   "start": 47.86,
+   "end": 48.03,
+   "speaker": 0
+  },
+  {
+   "w": "to",
+   "start": 48.03,
+   "end": 48.19,
+   "speaker": 0
+  },
+  {
+   "w": "book",
+   "start": 48.19,
+   "end": 48.43,
+   "speaker": 0
+  },
+  {
+   "w": "that",
+   "start": 48.43,
+   "end": 48.67,
+   "speaker": 0
+  },
+  {
+   "w": "appointment?",
+   "start": 48.67,
+   "end": 49.47,
+   "speaker": 0
+  },
+  {
+   "w": "Yes.",
+   "start": 50.03,
+   "end": 50.67,
+   "speaker": 1
+  },
+  {
+   "w": "I'd",
+   "start": 50.67,
+   "end": 50.91,
+   "speaker": 1
+  },
+  {
+   "w": "like",
+   "start": 50.91,
+   "end": 51.07,
+   "speaker": 1
+  },
+  {
+   "w": "to",
+   "start": 51.07,
+   "end": 51.15,
+   "speaker": 1
+  },
+  {
+   "w": "book.",
+   "start": 51.15,
+   "end": 51.7,
+   "speaker": 1
+  },
+  {
+   "w": "Great.",
+   "start": 53.23,
+   "end": 54.02,
+   "speaker": 0
+  },
+  {
+   "w": "The",
+   "start": 54.35,
+   "end": 54.59,
+   "speaker": 0
+  },
+  {
+   "w": "office",
+   "start": 54.59,
+   "end": 54.99,
+   "speaker": 0
+  },
+  {
+   "w": "is",
+   "start": 54.99,
+   "end": 55.23,
+   "speaker": 0
+  },
+  {
+   "w": "currently",
+   "start": 55.23,
+   "end": 55.63,
+   "speaker": 0
+  },
+  {
+   "w": "closed,",
+   "start": 55.63,
+   "end": 56.27,
+   "speaker": 0
+  },
+  {
+   "w": "but",
+   "start": 56.35,
+   "end": 56.5,
+   "speaker": 0
+  },
+  {
+   "w": "I'd",
+   "start": 56.5,
+   "end": 56.75,
+   "speaker": 0
+  },
+  {
+   "w": "be",
+   "start": 56.75,
+   "end": 56.91,
+   "speaker": 0
+  },
+  {
+   "w": "happy",
+   "start": 56.91,
+   "end": 57.15,
+   "speaker": 0
+  },
+  {
+   "w": "to",
+   "start": 57.15,
+   "end": 57.31,
+   "speaker": 0
+  },
+  {
+   "w": "help",
+   "start": 57.31,
+   "end": 57.47,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 57.47,
+   "end": 57.63,
+   "speaker": 0
+  },
+  {
+   "w": "book",
+   "start": 57.63,
+   "end": 57.86,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 57.86,
+   "end": 58.03,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 58.03,
+   "end": 58.35,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 58.35,
+   "end": 58.75,
+   "speaker": 0
+  },
+  {
+   "w": "consultation.",
+   "start": 58.75,
+   "end": 59.39,
+   "speaker": 0
+  },
+  {
+   "w": "Do",
+   "start": 59.92,
+   "end": 60.24,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 60.24,
+   "end": 60.4,
+   "speaker": 0
+  },
+  {
+   "w": "have",
+   "start": 60.4,
+   "end": 60.56,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 60.56,
+   "end": 60.64,
+   "speaker": 0
+  },
+  {
+   "w": "preference",
+   "start": 60.64,
+   "end": 61.04,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 61.04,
+   "end": 61.28,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 61.28,
+   "end": 61.36,
+   "speaker": 0
+  },
+  {
+   "w": "morning",
+   "start": 61.36,
+   "end": 61.68,
+   "speaker": 0
+  },
+  {
+   "w": "or",
+   "start": 61.68,
+   "end": 61.84,
+   "speaker": 0
+  },
+  {
+   "w": "afternoon",
+   "start": 61.84,
+   "end": 62.32,
+   "speaker": 0
+  },
+  {
+   "w": "appointment?",
+   "start": 62.32,
+   "end": 63.12,
+   "speaker": 0
+  },
+  {
+   "w": "And",
+   "start": 63.2,
+   "end": 63.36,
+   "speaker": 0
+  },
+  {
+   "w": "are",
+   "start": 63.36,
+   "end": 63.6,
+   "speaker": 0
+  },
+  {
+   "w": "there",
+   "start": 63.6,
+   "end": 63.76,
+   "speaker": 0
+  },
+  {
+   "w": "any",
+   "start": 63.76,
+   "end": 63.92,
+   "speaker": 0
+  },
+  {
+   "w": "days",
+   "start": 63.92,
+   "end": 64.24,
+   "speaker": 0
+  },
+  {
+   "w": "next",
+   "start": 64.24,
+   "end": 64.56,
+   "speaker": 0
+  },
+  {
+   "w": "week",
+   "start": 64.56,
+   "end": 64.72,
+   "speaker": 0
+  },
+  {
+   "w": "that",
+   "start": 64.72,
+   "end": 64.96,
+   "speaker": 0
+  },
+  {
+   "w": "don't",
+   "start": 64.96,
+   "end": 65.2,
+   "speaker": 0
+  },
+  {
+   "w": "work",
+   "start": 65.2,
+   "end": 65.44,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 65.44,
+   "end": 65.6,
+   "speaker": 0
+  },
+  {
+   "w": "you?",
+   "start": 65.6,
+   "end": 66.08,
+   "speaker": 0
+  },
+  {
+   "w": "No",
+   "start": 67.68,
+   "end": 68,
+   "speaker": 1
+  },
+  {
+   "w": "preferences.",
+   "start": 68,
+   "end": 68.64,
+   "speaker": 1
+  },
+  {
+   "w": "Just",
+   "start": 68.64,
+   "end": 68.8,
+   "speaker": 1
+  },
+  {
+   "w": "give",
+   "start": 68.8,
+   "end": 69.12,
+   "speaker": 1
+  },
+  {
+   "w": "me",
+   "start": 69.12,
+   "end": 69.2,
+   "speaker": 1
+  },
+  {
+   "w": "the",
+   "start": 69.2,
+   "end": 69.36,
+   "speaker": 1
+  },
+  {
+   "w": "soonest",
+   "start": 69.36,
+   "end": 69.76,
+   "speaker": 1
+  },
+  {
+   "w": "availability",
+   "start": 69.76,
+   "end": 70.4,
+   "speaker": 1
+  },
+  {
+   "w": "that",
+   "start": 70.4,
+   "end": 70.72,
+   "speaker": 1
+  },
+  {
+   "w": "you",
+   "start": 70.72,
+   "end": 70.88,
+   "speaker": 1
+  },
+  {
+   "w": "have.",
+   "start": 70.88,
+   "end": 71.04,
+   "speaker": 1
+  },
+  {
+   "w": "No",
+   "start": 75.06,
+   "end": 75.38,
+   "speaker": 0
+  },
+  {
+   "w": "problem",
+   "start": 75.38,
+   "end": 75.69,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 75.69,
+   "end": 75.94,
+   "speaker": 0
+  },
+  {
+   "w": "all.",
+   "start": 75.94,
+   "end": 76.5,
+   "speaker": 0
+  },
+  {
+   "w": "We",
+   "start": 76.58,
+   "end": 76.82,
+   "speaker": 0
+  },
+  {
+   "w": "have",
+   "start": 76.82,
+   "end": 77.06,
+   "speaker": 0
+  },
+  {
+   "w": "availability",
+   "start": 77.06,
+   "end": 77.62,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 77.62,
+   "end": 77.94,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 77.94,
+   "end": 78.1,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 78.1,
+   "end": 78.33,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 78.33,
+   "end": 78.82,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 78.82,
+   "end": 79.62,
+   "speaker": 0
+  },
+  {
+   "w": "on",
+   "start": 79.62,
+   "end": 79.94,
+   "speaker": 0
+  },
+  {
+   "w": "Thursday,",
+   "start": 79.94,
+   "end": 80.5,
+   "speaker": 0
+  },
+  {
+   "w": "June",
+   "start": 80.5,
+   "end": 80.86,
+   "speaker": 0
+  },
+  {
+   "w": "4",
+   "start": 80.86,
+   "end": 81.22,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 81.22,
+   "end": 81.54,
+   "speaker": 0
+  },
+  {
+   "w": "10AM",
+   "start": 81.54,
+   "end": 82.26,
+   "speaker": 0
+  },
+  {
+   "w": "or",
+   "start": 82.26,
+   "end": 82.66,
+   "speaker": 0
+  },
+  {
+   "w": "Friday,",
+   "start": 82.66,
+   "end": 83.14,
+   "speaker": 0
+  },
+  {
+   "w": "June",
+   "start": 83.14,
+   "end": 83.46,
+   "speaker": 0
+  },
+  {
+   "w": "5",
+   "start": 83.46,
+   "end": 83.78,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 83.78,
+   "end": 84.1,
+   "speaker": 0
+  },
+  {
+   "w": "2PM.",
+   "start": 84.1,
+   "end": 84.98,
+   "speaker": 0
+  },
+  {
+   "w": "Do",
+   "start": 85.06,
+   "end": 85.3,
+   "speaker": 0
+  },
+  {
+   "w": "either",
+   "start": 85.3,
+   "end": 85.62,
+   "speaker": 0
+  },
+  {
+   "w": "of",
+   "start": 85.62,
+   "end": 85.86,
+   "speaker": 0
+  },
+  {
+   "w": "those",
+   "start": 85.86,
+   "end": 86.02,
+   "speaker": 0
+  },
+  {
+   "w": "times",
+   "start": 86.02,
+   "end": 86.26,
+   "speaker": 0
+  },
+  {
+   "w": "work",
+   "start": 86.26,
+   "end": 86.58,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 86.58,
+   "end": 86.82,
+   "speaker": 0
+  },
+  {
+   "w": "you?",
+   "start": 86.82,
+   "end": 86.98,
+   "speaker": 0
+  },
+  {
+   "w": "Yeah.",
+   "start": 88.47,
+   "end": 88.79,
+   "speaker": 1
+  },
+  {
+   "w": "Could",
+   "start": 88.79,
+   "end": 88.95,
+   "speaker": 1
+  },
+  {
+   "w": "we",
+   "start": 88.95,
+   "end": 89.11,
+   "speaker": 1
+  },
+  {
+   "w": "do",
+   "start": 89.11,
+   "end": 89.27,
+   "speaker": 1
+  },
+  {
+   "w": "Friday",
+   "start": 89.27,
+   "end": 89.59,
+   "speaker": 1
+  },
+  {
+   "w": "at",
+   "start": 89.59,
+   "end": 89.83,
+   "speaker": 1
+  },
+  {
+   "w": "2PM?",
+   "start": 89.83,
+   "end": 90.63,
+   "speaker": 1
+  },
+  {
+   "w": "Absolutely.",
+   "start": 92.87,
+   "end": 93.83,
+   "speaker": 0
+  },
+  {
+   "w": "For",
+   "start": 94.31,
+   "end": 94.55,
+   "speaker": 0
+  },
+  {
+   "w": "your",
+   "start": 94.55,
+   "end": 94.79,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 94.79,
+   "end": 95.11,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 95.11,
+   "end": 95.51,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 95.51,
+   "end": 96.31,
+   "speaker": 0
+  },
+  {
+   "w": "on",
+   "start": 96.31,
+   "end": 96.71,
+   "speaker": 0
+  },
+  {
+   "w": "Friday,",
+   "start": 96.71,
+   "end": 97.19,
+   "speaker": 0
+  },
+  {
+   "w": "June",
+   "start": 97.19,
+   "end": 97.59,
+   "speaker": 0
+  },
+  {
+   "w": "5",
+   "start": 97.59,
+   "end": 97.99,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 97.99,
+   "end": 98.39,
+   "speaker": 0
+  },
+  {
+   "w": "2PM,",
+   "start": 98.39,
+   "end": 99.27,
+   "speaker": 0
+  },
+  {
+   "w": "could",
+   "start": 99.27,
+   "end": 99.51,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 99.51,
+   "end": 99.67,
+   "speaker": 0
+  },
+  {
+   "w": "please",
+   "start": 99.67,
+   "end": 99.91,
+   "speaker": 0
+  },
+  {
+   "w": "get",
+   "start": 99.91,
+   "end": 100.07,
+   "speaker": 0
+  },
+  {
+   "w": "your",
+   "start": 100.07,
+   "end": 101.27,
+   "speaker": 0
+  },
+  {
+   "w": "full",
+   "start": 100.19,
+   "end": 100.51,
+   "speaker": 0
+  },
+  {
+   "w": "name",
+   "start": 100.51,
+   "end": 100.67,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 100.67,
+   "end": 100.91,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 100.91,
+   "end": 100.99,
+   "speaker": 0
+  },
+  {
+   "w": "contact",
+   "start": 100.99,
+   "end": 101.31,
+   "speaker": 0
+  },
+  {
+   "w": "phone",
+   "start": 101.31,
+   "end": 101.63,
+   "speaker": 0
+  },
+  {
+   "w": "number",
+   "start": 101.63,
+   "end": 101.87,
+   "speaker": 0
+  },
+  {
+   "w": "to",
+   "start": 101.87,
+   "end": 102.1,
+   "speaker": 0
+  },
+  {
+   "w": "confirm",
+   "start": 102.1,
+   "end": 102.42,
+   "speaker": 0
+  },
+  {
+   "w": "the",
+   "start": 102.42,
+   "end": 102.59,
+   "speaker": 0
+  },
+  {
+   "w": "booking?",
+   "start": 102.59,
+   "end": 103.23,
+   "speaker": 0
+  },
+  {
+   "w": "Yeah.",
+   "start": 104.35,
+   "end": 104.67,
+   "speaker": 1
+  },
+  {
+   "w": "My",
+   "start": 104.67,
+   "end": 104.99,
+   "speaker": 1
+  },
+  {
+   "w": "full",
+   "start": 104.99,
+   "end": 105.31,
+   "speaker": 1
+  },
+  {
+   "w": "name",
+   "start": 105.31,
+   "end": 105.63,
+   "speaker": 1
+  },
+  {
+   "w": "is",
+   "start": 105.63,
+   "end": 106.1,
+   "speaker": 1
+  },
+  {
+   "w": "Nathan",
+   "start": 106.1,
+   "end": 106.67,
+   "speaker": 1
+  },
+  {
+   "w": "Smith,",
+   "start": 106.67,
+   "end": 107.47,
+   "speaker": 1
+  },
+  {
+   "w": "and",
+   "start": 107.95,
+   "end": 108.42,
+   "speaker": 1
+  },
+  {
+   "w": "you",
+   "start": 108.51,
+   "end": 108.91,
+   "speaker": 1
+  },
+  {
+   "w": "can",
+   "start": 108.91,
+   "end": 109.06,
+   "speaker": 1
+  },
+  {
+   "w": "just",
+   "start": 109.06,
+   "end": 109.23,
+   "speaker": 1
+  },
+  {
+   "w": "use",
+   "start": 109.23,
+   "end": 109.47,
+   "speaker": 1
+  },
+  {
+   "w": "this",
+   "start": 109.47,
+   "end": 109.87,
+   "speaker": 1
+  },
+  {
+   "w": "phone",
+   "start": 109.87,
+   "end": 110.1,
+   "speaker": 1
+  },
+  {
+   "w": "number",
+   "start": 110.1,
+   "end": 110.35,
+   "speaker": 1
+  },
+  {
+   "w": "that",
+   "start": 110.35,
+   "end": 110.51,
+   "speaker": 1
+  },
+  {
+   "w": "I'm",
+   "start": 110.51,
+   "end": 110.74,
+   "speaker": 1
+  },
+  {
+   "w": "calling",
+   "start": 110.74,
+   "end": 110.99,
+   "speaker": 1
+  },
+  {
+   "w": "from.",
+   "start": 110.99,
+   "end": 111.55,
+   "speaker": 1
+  },
+  {
+   "w": "Okay.",
+   "start": 114.66,
+   "end": 115.06,
+   "speaker": 0
+  },
+  {
+   "w": "So",
+   "start": 115.32,
+   "end": 115.56,
+   "speaker": 0
+  },
+  {
+   "w": "that's",
+   "start": 115.56,
+   "end": 115.88,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 115.88,
+   "end": 115.96,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 115.96,
+   "end": 116.28,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 116.28,
+   "end": 116.6,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 116.6,
+   "end": 117.4,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 117.4,
+   "end": 117.64,
+   "speaker": 0
+  },
+  {
+   "w": "Nathan",
+   "start": 117.64,
+   "end": 118.04,
+   "speaker": 0
+  },
+  {
+   "w": "Smith",
+   "start": 118.04,
+   "end": 118.44,
+   "speaker": 0
+  },
+  {
+   "w": "on",
+   "start": 118.44,
+   "end": 118.76,
+   "speaker": 0
+  },
+  {
+   "w": "Friday,",
+   "start": 118.76,
+   "end": 119.24,
+   "speaker": 0
+  },
+  {
+   "w": "June",
+   "start": 119.24,
+   "end": 119.52,
+   "speaker": 0
+  },
+  {
+   "w": "5",
+   "start": 119.52,
+   "end": 119.8,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 119.8,
+   "end": 120.04,
+   "speaker": 0
+  },
+  {
+   "w": "2PM.",
+   "start": 120.04,
+   "end": 120.92,
+   "speaker": 0
+  },
+  {
+   "w": "Does",
+   "start": 121.16,
+   "end": 121.48,
+   "speaker": 0
+  },
+  {
+   "w": "that",
+   "start": 121.48,
+   "end": 121.72,
+   "speaker": 0
+  },
+  {
+   "w": "sound",
+   "start": 121.72,
+   "end": 121.96,
+   "speaker": 0
+  },
+  {
+   "w": "right?",
+   "start": 121.96,
+   "end": 122.44,
+   "speaker": 0
+  },
+  {
+   "w": "And",
+   "start": 122.44,
+   "end": 122.6,
+   "speaker": 0
+  },
+  {
+   "w": "shall",
+   "start": 122.6,
+   "end": 122.84,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 122.84,
+   "end": 122.92,
+   "speaker": 0
+  },
+  {
+   "w": "go",
+   "start": 122.92,
+   "end": 123.08,
+   "speaker": 0
+  },
+  {
+   "w": "ahead",
+   "start": 123.08,
+   "end": 123.32,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 123.32,
+   "end": 123.48,
+   "speaker": 0
+  },
+  {
+   "w": "book",
+   "start": 123.48,
+   "end": 123.72,
+   "speaker": 0
+  },
+  {
+   "w": "that",
+   "start": 123.72,
+   "end": 123.88,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 123.88,
+   "end": 124.12,
+   "speaker": 0
+  },
+  {
+   "w": "you?",
+   "start": 124.12,
+   "end": 124.6,
+   "speaker": 0
+  },
+  {
+   "w": "Yes.",
+   "start": 124.92,
+   "end": 125.32,
+   "speaker": 1
+  },
+  {
+   "w": "Book",
+   "start": 125.32,
+   "end": 125.56,
+   "speaker": 1
+  },
+  {
+   "w": "that.",
+   "start": 125.56,
+   "end": 125.8,
+   "speaker": 1
+  },
+  {
+   "w": "Absolutely,",
+   "start": 129.2,
+   "end": 129.92,
+   "speaker": 0
+  },
+  {
+   "w": "Nathan.",
+   "start": 129.92,
+   "end": 130.56,
+   "speaker": 0
+  },
+  {
+   "w": "Your",
+   "start": 130.64,
+   "end": 130.88,
+   "speaker": 0
+  },
+  {
+   "w": "general",
+   "start": 130.88,
+   "end": 131.28,
+   "speaker": 0
+  },
+  {
+   "w": "GP",
+   "start": 131.28,
+   "end": 131.68,
+   "speaker": 0
+  },
+  {
+   "w": "consultation",
+   "start": 131.68,
+   "end": 132.4,
+   "speaker": 0
+  },
+  {
+   "w": "is",
+   "start": 132.4,
+   "end": 132.72,
+   "speaker": 0
+  },
+  {
+   "w": "booked",
+   "start": 132.72,
+   "end": 132.96,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 132.96,
+   "end": 133.12,
+   "speaker": 0
+  },
+  {
+   "w": "Friday,",
+   "start": 133.12,
+   "end": 133.68,
+   "speaker": 0
+  },
+  {
+   "w": "June",
+   "start": 133.68,
+   "end": 133.96,
+   "speaker": 0
+  },
+  {
+   "w": "5",
+   "start": 133.96,
+   "end": 134.24,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 134.24,
+   "end": 134.56,
+   "speaker": 0
+  },
+  {
+   "w": "2PM.",
+   "start": 134.56,
+   "end": 135.44,
+   "speaker": 0
+  },
+  {
+   "w": "Just",
+   "start": 135.68,
+   "end": 136,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 136,
+   "end": 136.16,
+   "speaker": 0
+  },
+  {
+   "w": "reminder,",
+   "start": 136.16,
+   "end": 136.88,
+   "speaker": 0
+  },
+  {
+   "w": "cancellations",
+   "start": 136.96,
+   "end": 137.6,
+   "speaker": 0
+  },
+  {
+   "w": "must",
+   "start": 137.6,
+   "end": 137.92,
+   "speaker": 0
+  },
+  {
+   "w": "be",
+   "start": 137.92,
+   "end": 138.07,
+   "speaker": 0
+  },
+  {
+   "w": "made",
+   "start": 138.07,
+   "end": 138.32,
+   "speaker": 0
+  },
+  {
+   "w": "at",
+   "start": 138.32,
+   "end": 138.48,
+   "speaker": 0
+  },
+  {
+   "w": "least",
+   "start": 138.48,
+   "end": 138.72,
+   "speaker": 0
+  },
+  {
+   "w": "twenty",
+   "start": 138.72,
+   "end": 138.96,
+   "speaker": 0
+  },
+  {
+   "w": "four",
+   "start": 138.96,
+   "end": 139.2,
+   "speaker": 0
+  },
+  {
+   "w": "hours",
+   "start": 139.2,
+   "end": 139.44,
+   "speaker": 0
+  },
+  {
+   "w": "in",
+   "start": 139.44,
+   "end": 139.6,
+   "speaker": 0
+  },
+  {
+   "w": "advance",
+   "start": 139.6,
+   "end": 140.07,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 140.07,
+   "end": 140.48,
+   "speaker": 0
+  },
+  {
+   "w": "cancellations",
+   "start": 140.48,
+   "end": 141.12,
+   "speaker": 0
+  },
+  {
+   "w": "within",
+   "start": 141.12,
+   "end": 141.6,
+   "speaker": 0
+  },
+  {
+   "w": "twenty",
+   "start": 141.6,
+   "end": 141.92,
+   "speaker": 0
+  },
+  {
+   "w": "four",
+   "start": 141.92,
+   "end": 142.07,
+   "speaker": 0
+  },
+  {
+   "w": "hours",
+   "start": 142.07,
+   "end": 142.32,
+   "speaker": 0
+  },
+  {
+   "w": "may",
+   "start": 142.32,
+   "end": 142.56,
+   "speaker": 0
+  },
+  {
+   "w": "incur",
+   "start": 142.56,
+   "end": 142.88,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 142.88,
+   "end": 143.04,
+   "speaker": 0
+  },
+  {
+   "w": "£30",
+   "start": 143.04,
+   "end": 143.68,
+   "speaker": 0
+  },
+  {
+   "w": "fee.",
+   "start": 143.68,
+   "end": 144,
+   "speaker": 0
+  },
+  {
+   "w": "Please",
+   "start": 144.29,
+   "end": 144.77,
+   "speaker": 0
+  },
+  {
+   "w": "arrive",
+   "start": 144.77,
+   "end": 145.09,
+   "speaker": 0
+  },
+  {
+   "w": "ten",
+   "start": 145.09,
+   "end": 145.41,
+   "speaker": 0
+  },
+  {
+   "w": "minutes",
+   "start": 145.41,
+   "end": 145.73,
+   "speaker": 0
+  },
+  {
+   "w": "early",
+   "start": 145.73,
+   "end": 146.05,
+   "speaker": 0
+  },
+  {
+   "w": "to",
+   "start": 146.05,
+   "end": 146.21,
+   "speaker": 0
+  },
+  {
+   "w": "complete",
+   "start": 146.21,
+   "end": 146.53,
+   "speaker": 0
+  },
+  {
+   "w": "an",
+   "start": 146.53,
+   "end": 146.77,
+   "speaker": 0
+  },
+  {
+   "w": "intake",
+   "start": 146.77,
+   "end": 147.17,
+   "speaker": 0
+  },
+  {
+   "w": "form",
+   "start": 147.17,
+   "end": 147.41,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 147.41,
+   "end": 147.73,
+   "speaker": 0
+  },
+  {
+   "w": "bring",
+   "start": 147.73,
+   "end": 147.89,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 147.89,
+   "end": 148.05,
+   "speaker": 0
+  },
+  {
+   "w": "valid",
+   "start": 148.05,
+   "end": 148.29,
+   "speaker": 0
+  },
+  {
+   "w": "photo",
+   "start": 148.29,
+   "end": 148.69,
+   "speaker": 0
+  },
+  {
+   "w": "ID",
+   "start": 148.69,
+   "end": 149.09,
+   "speaker": 0
+  },
+  {
+   "w": "and",
+   "start": 149.09,
+   "end": 149.33,
+   "speaker": 0
+  },
+  {
+   "w": "any",
+   "start": 149.33,
+   "end": 149.57,
+   "speaker": 0
+  },
+  {
+   "w": "relevant",
+   "start": 149.57,
+   "end": 149.97,
+   "speaker": 0
+  },
+  {
+   "w": "medical",
+   "start": 149.97,
+   "end": 150.37,
+   "speaker": 0
+  },
+  {
+   "w": "records.",
+   "start": 150.37,
+   "end": 151.09,
+   "speaker": 0
+  },
+  {
+   "w": "Is",
+   "start": 151.65,
+   "end": 151.89,
+   "speaker": 0
+  },
+  {
+   "w": "there",
+   "start": 151.89,
+   "end": 152.05,
+   "speaker": 0
+  },
+  {
+   "w": "anything",
+   "start": 152.05,
+   "end": 152.37,
+   "speaker": 0
+  },
+  {
+   "w": "else",
+   "start": 152.37,
+   "end": 152.53,
+   "speaker": 0
+  },
+  {
+   "w": "I",
+   "start": 152.53,
+   "end": 152.77,
+   "speaker": 0
+  },
+  {
+   "w": "can",
+   "start": 152.77,
+   "end": 152.93,
+   "speaker": 0
+  },
+  {
+   "w": "help",
+   "start": 152.93,
+   "end": 153.09,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 153.09,
+   "end": 153.25,
+   "speaker": 0
+  },
+  {
+   "w": "with",
+   "start": 153.25,
+   "end": 153.41,
+   "speaker": 0
+  },
+  {
+   "w": "today?",
+   "start": 153.41,
+   "end": 154.05,
+   "speaker": 0
+  },
+  {
+   "w": "No.",
+   "start": 154.37,
+   "end": 154.77,
+   "speaker": 1
+  },
+  {
+   "w": "That's",
+   "start": 154.77,
+   "end": 155.01,
+   "speaker": 1
+  },
+  {
+   "w": "it.",
+   "start": 155.01,
+   "end": 155.25,
+   "speaker": 1
+  },
+  {
+   "w": "Thank",
+   "start": 157.71,
+   "end": 158.35,
+   "speaker": 0
+  },
+  {
+   "w": "you",
+   "start": 158.35,
+   "end": 158.51,
+   "speaker": 0
+  },
+  {
+   "w": "for",
+   "start": 158.51,
+   "end": 158.67,
+   "speaker": 0
+  },
+  {
+   "w": "calling",
+   "start": 158.67,
+   "end": 159.15,
+   "speaker": 0
+  },
+  {
+   "w": "Apex",
+   "start": 159.15,
+   "end": 159.63,
+   "speaker": 0
+  },
+  {
+   "w": "Wellness",
+   "start": 159.63,
+   "end": 160.03,
+   "speaker": 0
+  },
+  {
+   "w": "Clinic",
+   "start": 160.03,
+   "end": 160.35,
+   "speaker": 0
+  },
+  {
+   "w": "Nathan.",
+   "start": 160.35,
+   "end": 161.07,
+   "speaker": 0
+  },
+  {
+   "w": "Have",
+   "start": 161.07,
+   "end": 161.31,
+   "speaker": 0
+  },
+  {
+   "w": "a",
+   "start": 161.31,
+   "end": 161.39,
+   "speaker": 0
+  },
+  {
+   "w": "great",
+   "start": 161.39,
+   "end": 161.55,
+   "speaker": 0
+  },
+  {
+   "w": "day.",
+   "start": 161.55,
+   "end": 161.87,
+   "speaker": 0
+  }
+ ],
+ "turns": [
+  {
+   "speaker": 0,
+   "start": 0,
+   "end": 5.6,
+   "from": 0,
+   "to": 18
+  },
+  {
+   "speaker": 1,
+   "start": 5.6,
+   "end": 10.88,
+   "from": 18,
+   "to": 39
+  },
+  {
+   "speaker": 0,
+   "start": 15.88,
+   "end": 37.61,
+   "from": 39,
+   "to": 95
+  },
+  {
+   "speaker": 1,
+   "start": 38.49,
+   "end": 40.81,
+   "from": 95,
+   "to": 105
+  },
+  {
+   "speaker": 0,
+   "start": 42.41,
+   "end": 49.47,
+   "from": 105,
+   "to": 122
+  },
+  {
+   "speaker": 1,
+   "start": 50.03,
+   "end": 51.7,
+   "from": 122,
+   "to": 127
+  },
+  {
+   "speaker": 0,
+   "start": 53.23,
+   "end": 66.08,
+   "from": 127,
+   "to": 168
+  },
+  {
+   "speaker": 1,
+   "start": 67.68,
+   "end": 71.04,
+   "from": 168,
+   "to": 179
+  },
+  {
+   "speaker": 0,
+   "start": 75.06,
+   "end": 86.98,
+   "from": 179,
+   "to": 211
+  },
+  {
+   "speaker": 1,
+   "start": 88.47,
+   "end": 90.63,
+   "from": 211,
+   "to": 218
+  },
+  {
+   "speaker": 0,
+   "start": 92.87,
+   "end": 103.23,
+   "from": 218,
+   "to": 246
+  },
+  {
+   "speaker": 1,
+   "start": 104.35,
+   "end": 111.55,
+   "from": 246,
+   "to": 265
+  },
+  {
+   "speaker": 0,
+   "start": 114.66,
+   "end": 124.6,
+   "from": 265,
+   "to": 295
+  },
+  {
+   "speaker": 1,
+   "start": 124.92,
+   "end": 125.8,
+   "from": 295,
+   "to": 298
+  },
+  {
+   "speaker": 0,
+   "start": 129.2,
+   "end": 154.05,
+   "from": 298,
+   "to": 368
+  },
+  {
+   "speaker": 1,
+   "start": 154.37,
+   "end": 155.25,
+   "from": 368,
+   "to": 371
+  },
+  {
+   "speaker": 0,
+   "start": 157.71,
+   "end": 161.87,
+   "from": 371,
+   "to": 383
+  }
+ ]
+}
