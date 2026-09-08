@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { checkPasswordResetCode, completePasswordReset } from "./auth";
 import "./Login.css";
+import { MARKETING_URL } from "./siteUrl";
 
 // ---------------------------------------------------------------------------
 // Setting a new password from a reset link.
@@ -116,9 +117,9 @@ export default function ResetPassword() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
-          <Link to="/" className="login-back-home">
+          <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
-          </Link>
+          </a>
         </div>
         <div className="login-card-wrap">{children}</div>
       </div>

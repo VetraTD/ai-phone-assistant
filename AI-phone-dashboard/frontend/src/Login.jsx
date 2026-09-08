@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Login.css";
+import { MARKETING_URL } from "./siteUrl";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -69,9 +70,10 @@ export default function Login() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
-          <Link to="/" className="login-back-home">
+          {/* External. This origin is the app now; its root is the dashboard. */}
+          <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
-          </Link>
+          </a>
         </div>
         <div className="login-brand">
           <div className="login-badge">
