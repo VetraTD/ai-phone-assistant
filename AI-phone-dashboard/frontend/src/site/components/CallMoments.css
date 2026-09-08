@@ -1,0 +1,72 @@
+.moments {
+  padding-block: var(--site-rule);
+}
+
+.moments__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.moments__row {
+  padding-bottom: var(--site-rule);
+}
+
+.moments__time {
+  color: var(--site-ink-soft);
+  font-weight: 600;
+}
+
+.moments__entry {
+  max-width: 62ch;
+}
+
+.moments__does {
+  margin: 0;
+  font-weight: 600;
+  color: var(--site-ink);
+}
+
+.moments__excerpt {
+  margin: 0;
+  color: var(--site-ink-muted);
+  quotes: "\201C" "\201D";
+}
+.moments__excerpt::before {
+  content: open-quote;
+}
+.moments__excerpt::after {
+  content: close-quote;
+}
+
+.moments__hear {
+  display: inline-block;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  line-height: var(--site-rule);
+  font-weight: 600;
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+.moments__hear:hover {
+  color: var(--site-accent-hover);
+}
+
+.moments__others {
+  border-top: 1px solid var(--site-line-strong);
+  padding-top: var(--site-rule);
+}
+
+.moments__otherlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--site-ink-muted);
+  max-width: 62ch;
+}

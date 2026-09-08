@@ -1,0 +1,20 @@
+.record {
+  --site-margin: 6.75rem;
+  margin: 0;
+  padding-block: var(--site-rule);
+}
+
+.record__row + .record__row {
+  margin-top: var(--site-rule);
+}
+
+.record__label {
+  color: var(--site-ink-soft);
+  font-weight: 600;
+}
+
+.record__value {
+  margin: 0;
+  color: var(--site-ink);
+  max-width: 58ch;
+}

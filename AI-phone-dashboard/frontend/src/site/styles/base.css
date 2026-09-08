@@ -201,6 +201,27 @@
   border-radius: 0;
   border-inline: 0;
 }
+/* A page ruled per line of text rather than per hourly slot: every wrapped
+   line sits on a rule, the way handwriting does. */
+.site-page--lined {
+  --site-rule: 28px;
+}
+.site-page--lined .site-row__margin,
+.site-page--lined .site-row__entry {
+  padding-block: 0;
+  line-height: var(--site-rule);
+}
+.site-page__pad {
+  padding: 0 var(--site-space-4);
+}
+.site-page__pad--top {
+  padding-top: var(--site-rule);
+}
+
+/* Room for the sticky header when a hash link lands on a section. */
+.site-anchor {
+  scroll-margin-top: 96px;
+}
 
 /* One ruled row: margin label on the left, entry on the right. */
 .site-row {
