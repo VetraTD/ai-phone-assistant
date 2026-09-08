@@ -25,10 +25,6 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  flex: 1 0 auto;
-}
-.diary__foot {
-  margin-top: auto;
 }
 
 .diary__slot--wide {
@@ -71,6 +67,13 @@
 .diary__written {
   color: var(--site-ink);
 }
+/* The written-in entry is in a different hand from the printed labels. */
+.diary__who {
+  font-family: var(--site-font-display);
+  font-weight: 600;
+  font-size: 1.125rem;
+  letter-spacing: var(--site-tracking-display);
+}
 .diary__what {
   color: var(--site-ink-muted);
 }
@@ -94,9 +97,18 @@
   }
 }
 
-.diary__foot {
-  margin: 0;
-  padding: var(--site-space-3) var(--site-space-4);
+/* The day's notes: the page's remaining rules belong to this block, so a
+   taller column reads as room for notes rather than unlabelled hours. */
+.diary__notes {
+  flex: 1 0 auto;
   border-top: 1px solid var(--site-line-strong);
-  background: var(--site-surface);
+  align-items: start;
+}
+.diary__note {
+  margin: 0;
+  color: var(--site-ink-muted);
+  font-size: var(--site-text-sm);
+  line-height: var(--site-rule);
+  padding-block: 0;
+  max-width: 40ch;
 }

@@ -10,7 +10,7 @@
 }
 
 .hero__title {
-  max-width: 18ch;
+  max-width: 20ch;
 }
 
 .hero__lead {
@@ -26,23 +26,6 @@
 
 .hero__player {
   margin-top: var(--site-space-5);
-}
-
-.home__who {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--site-space-5);
-}
-.home__who-text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--site-space-4);
-  color: var(--site-ink-muted);
-  font-size: var(--site-text-lg);
-  line-height: 1.5;
-}
-.home__who-text .site-p {
-  max-width: 34em;
 }
 
 @media (min-width: 768px) {
@@ -69,15 +52,12 @@
   }
   .hero__diary {
     grid-area: diary;
+    /* Same height as the column beside it; the diary's notes block takes the
+       remaining rules, so the page ends with the day's notes, not blank hours. */
     align-self: stretch;
     display: flex;
   }
   .hero__diary .diary {
     flex: 1 1 auto;
-  }
-
-  .home__who {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-    gap: var(--site-space-8);
   }
 }

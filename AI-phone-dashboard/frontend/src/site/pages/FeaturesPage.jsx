@@ -1,8 +1,7 @@
 import { usePageMeta } from "../usePageMeta.js";
 import { FEATURE_GROUPS, NOT_YET } from "../content/features.js";
-import { GO_LIVE } from "../content/siteConfig.js";
 import PageHero from "../components/PageHero.jsx";
-import SiteButton from "../components/SiteButton.jsx";
+import ClosingBand from "../components/ClosingBand.jsx";
 import "./FeaturesPage.css";
 
 export default function FeaturesPage() {
@@ -65,17 +64,7 @@ export default function FeaturesPage() {
         </div>
       </section>
 
-      <section className="site-section site-section--ink closing" aria-labelledby="features-closing">
-        <div className="site-container closing__inner">
-          <h2 id="features-closing" className="site-h2 closing__title">
-            Hear it on your own line.
-          </h2>
-          <p className="closing__lead">Tell us about your business. We set it up with you, and you are {GO_LIVE}.</p>
-          <SiteButton to="/contact" variant="on-ink">
-            Request access
-          </SiteButton>
-        </div>
-      </section>
+      <ClosingBand id="features-closing" title="Hear it on your own line." />
     </>
   );
 }

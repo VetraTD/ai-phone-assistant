@@ -1,8 +1,7 @@
 import { usePageMeta } from "../usePageMeta.js";
 import { ABOUT, isAboutReady } from "../content/about.js";
-import { GO_LIVE } from "../content/siteConfig.js";
 import PageHero from "../components/PageHero.jsx";
-import SiteButton from "../components/SiteButton.jsx";
+import ClosingBand from "../components/ClosingBand.jsx";
 import "./AboutPage.css";
 
 // Content comes from content/about.js. Until the owner fills its OWNER_TODO
@@ -78,17 +77,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="site-section site-section--ink closing" aria-labelledby="about-closing">
-        <div className="site-container closing__inner">
-          <h2 id="about-closing" className="site-h2 closing__title">
-            Talk to us.
-          </h2>
-          <p className="closing__lead">We set every business up ourselves, and you are {GO_LIVE}.</p>
-          <SiteButton to="/contact" variant="on-ink">
-            Request access
-          </SiteButton>
-        </div>
-      </section>
+      <ClosingBand id="about-closing" title="Talk to us." lead="We set every business up ourselves, and you are live in 3 business days." />
     </>
   );
 }

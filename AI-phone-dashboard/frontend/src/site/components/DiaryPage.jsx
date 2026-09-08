@@ -15,7 +15,8 @@ function slotState(hour, currentTime, call) {
  * Today's page of the appointments diary. It stays empty until the
  * receptionist offers the slot, is outlined while the caller decides, and is
  * written in the moment the booking is confirmed. Nothing here is invented:
- * the entry is what the call above actually books.
+ * the entry is what the call above actually books. Below the last hour the
+ * page ends with the day's notes, as a diary page does.
  */
 export default function DiaryPage({ currentTime, call }) {
   const { booking } = call;
@@ -48,7 +49,7 @@ export default function DiaryPage({ currentTime, call }) {
                 {s === "booked" ? (
                   <span className="diary__written">
                     <span className="diary__marker diary__marker--ink" aria-hidden="true" />
-                    <strong>{booking.who}</strong>
+                    <strong className="diary__who">{booking.who}</strong>
                     <span className="diary__what">
                       {booking.what}, {booking.minutes} min
                     </span>
@@ -60,13 +61,16 @@ export default function DiaryPage({ currentTime, call }) {
         })}
       </ol>
 
-      <p className="diary__foot site-small site-muted">
-        {state === "booked"
-          ? "Written into the book by the receptionist during the call."
-          : state === "offered"
-            ? "The receptionist has offered this slot. Play on to hear it booked."
-            : "Play the call to see the booking written in."}
-      </p>
+      <div className="diary__notes site-row">
+        <span className="site-row__margin diary__time">Notes</span>
+        <p className="site-row__entry diary__note">
+          {state === "booked"
+            ? "Closed from 18:00. Booked after hours by the receptionist; the caller was told the cancellation terms and what to bring."
+            : state === "offered"
+              ? "Closed from 18:00. The receptionist has offered this slot; play on to hear it booked."
+              : "Closed from 18:00. Calls are still answered, and bookings go into the next open day. Play the call to see one written in."}
+        </p>
+      </div>
     </div>
   );
 }

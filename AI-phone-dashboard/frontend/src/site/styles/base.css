@@ -18,7 +18,7 @@
 }
 
 .site-root ::selection {
-  background: var(--site-teal-soft);
+  background: color-mix(in srgb, var(--site-accent) 22%, #ffffff);
   color: var(--site-ink);
 }
 
@@ -252,8 +252,22 @@
   }
 }
 
-/* The closing band every public page ends on: ink, one heading, one button. */
-.closing__inner {
+/* The closing band every public page ends on: the diary's last page, in ink.
+   A rule, a margin label, and the entry set left like everything above it. */
+.closing__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--site-space-3);
+  border-top: 1px solid var(--site-on-ink-line);
+  padding-top: var(--site-space-5);
+}
+.closing__margin {
+  color: var(--site-on-ink-muted);
+  font-size: var(--site-text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.closing__entry {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -261,6 +275,7 @@
 }
 .closing__title {
   color: var(--site-on-ink);
+  max-width: 18ch;
 }
 .closing__lead {
   margin: 0;
@@ -269,9 +284,9 @@
   max-width: 34em;
 }
 @media (min-width: 768px) {
-  .closing__inner {
-    align-items: center;
-    text-align: center;
+  .closing__row {
+    grid-template-columns: var(--site-margin) minmax(0, 1fr);
+    gap: var(--site-space-4);
   }
 }
 

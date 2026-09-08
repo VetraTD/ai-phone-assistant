@@ -1,28 +1,39 @@
+/* The form on a 44px-ruled page: one row per field, the field's name in the
+   margin, the input filling the rule it sits on. Below tablet width the name
+   sits above its line. */
+
 .cform {
-  padding: var(--site-space-5) var(--site-space-4) var(--site-space-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--site-space-5);
-  background-image: none;
+  padding-block: var(--site-rule);
 }
 
-.cform__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--site-space-2);
+.cform__row {
+  grid-template-columns: minmax(0, 1fr);
 }
+.cform__row + .cform__row {
+  margin-top: var(--site-rule);
+}
+
 .cform__label {
+  display: block;
+  min-height: 0;
+  padding-block: 0;
+  line-height: var(--site-rule);
+  color: var(--site-ink);
   font-weight: 600;
+  font-size: var(--site-text-base);
+  white-space: normal;
 }
-.cform__help {
-  margin: 0;
-  max-width: 60ch;
+
+.cform__entry {
+  padding-block: 0;
+  padding-inline: var(--site-space-4);
 }
 
 .cform__input {
+  display: block;
   width: 100%;
-  min-height: 48px;
-  padding: 0.7rem 0.9rem;
+  min-height: var(--site-rule);
+  padding: 0 0.9rem;
   font: inherit;
   font-size: max(16px, 1em);
   color: var(--site-ink);
@@ -40,8 +51,19 @@
   outline-offset: 1px;
 }
 .cform__textarea {
+  min-height: calc(var(--site-rule) * 4);
+  padding-block: 0.6rem;
   resize: vertical;
   line-height: 1.5;
+}
+
+.cform__help {
+  margin: 0;
+  padding-top: var(--site-space-2);
+  color: var(--site-ink-muted);
+  font-size: var(--site-text-sm);
+  line-height: 1.5;
+  max-width: 60ch;
 }
 
 .cform__error {
@@ -57,18 +79,39 @@
   align-items: center;
   gap: var(--site-space-4);
   flex-wrap: wrap;
+  min-height: var(--site-rule);
+}
+.cform__alt {
+  color: var(--site-ink-muted);
+  font-size: var(--site-text-sm);
 }
 
 .cform__done {
-  background-image: none;
-  padding-block: var(--site-space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--site-space-4);
 }
-.cform__again {
-  margin-top: var(--site-space-4);
+.cform__done-text {
+  margin: 0;
+  line-height: var(--site-rule);
+  max-width: 50ch;
 }
 
 @media (min-width: 768px) {
   .cform {
-    padding: var(--site-space-6);
+    --site-margin: 9rem;
+  }
+  .cform__row {
+    grid-template-columns: var(--site-margin) minmax(0, 1fr);
+  }
+  .cform__label {
+    padding-inline: var(--site-space-4) var(--site-space-2);
+  }
+  .cform__entry {
+    padding-inline: var(--site-space-2) var(--site-space-4);
+  }
+  .cform__row .cform__label[aria-hidden="true"] {
+    display: block;
   }
 }

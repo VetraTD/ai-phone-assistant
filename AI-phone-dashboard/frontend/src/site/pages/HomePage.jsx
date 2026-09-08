@@ -9,8 +9,26 @@ import DiaryPage from "../components/DiaryPage.jsx";
 import CallMoments from "../components/CallMoments.jsx";
 import SetupDays from "../components/SetupDays.jsx";
 import CallRecord from "../components/CallRecord.jsx";
+import RuledList from "../components/RuledList.jsx";
 import FaqList from "../components/FaqList.jsx";
+import ClosingBand from "../components/ClosingBand.jsx";
 import "./HomePage.css";
+
+const WHO_ROWS = [
+  {
+    label: "For",
+    value:
+      "UK businesses that take bookings and calls all day: dental and medical practices, trades, salons, small law firms. Anywhere the phone rings while you are with someone else.",
+  },
+  {
+    label: "Speaks",
+    value: `${LANGUAGES.slice(0, -1).join(", ")} and ${LANGUAGES[LANGUAGES.length - 1]}, with a choice of voices.`,
+  },
+  {
+    label: "Hosted",
+    value: `${HOSTING_REGION}. UK first; the United States follows.`,
+  },
+];
 
 export default function HomePage() {
   usePageMeta({
@@ -44,12 +62,12 @@ export default function HomePage() {
         <div className="site-container hero__grid">
           <div className="hero__copy">
             <h1 id="hero-title" className="site-h1 hero__title site-rise">
-              A receptionist that answers your phone and keeps your diary.
+              Answers your phone. Keeps your diary.
             </h1>
             <p className="site-lead hero__lead site-rise site-rise--2">
-              Vetra takes the calls you can’t. It books, moves and cancels appointments in your own
-              book, takes messages, and writes down everything that was said. We set it up with you,
-              and you are {GO_LIVE}.
+              Vetra is a receptionist for the calls you can’t take. It books, moves and cancels
+              appointments in your own book, takes messages, and writes down everything that was said.
+              We set it up with you, and you are {GO_LIVE}.
             </p>
             <div className="hero__cta site-rise site-rise--3">
               <SiteButton to="/contact">Request access</SiteButton>
@@ -83,8 +101,8 @@ export default function HomePage() {
       </section>
 
       <section className="site-section site-anchor" id="set-up" aria-labelledby="setup-title">
-        <div className="site-container">
-          <div className="site-head">
+        <div className="site-container site-split">
+          <div className="site-split__head">
             <h2 id="setup-title" className="site-h2">
               Set up with you. Live in three business days.
             </h2>
@@ -93,7 +111,9 @@ export default function HomePage() {
               you go live.
             </p>
           </div>
-          <SetupDays />
+          <div className="site-split__body">
+            <SetupDays />
+          </div>
         </div>
       </section>
 
@@ -115,20 +135,14 @@ export default function HomePage() {
       </section>
 
       <section className="site-section site-anchor" id="who" aria-labelledby="who-title">
-        <div className="site-container home__who">
-          <h2 id="who-title" className="site-h2">
-            Who it is for
-          </h2>
-          <div className="home__who-text">
-            <p className="site-p">
-              UK businesses that take bookings and calls all day: dental and medical practices, trades,
-              salons, small law firms. Anywhere the phone rings while you are with someone else.
-            </p>
-            <p className="site-p">
-              Vetra speaks {LANGUAGES.slice(0, -1).join(", ")} and {LANGUAGES[LANGUAGES.length - 1]},
-              with a choice of voices. Data is hosted in {HOSTING_REGION}. UK first; the United States
-              follows.
-            </p>
+        <div className="site-container site-split">
+          <div className="site-split__head">
+            <h2 id="who-title" className="site-h2">
+              Who it is for
+            </h2>
+          </div>
+          <div className="site-split__body">
+            <RuledList rows={WHO_ROWS} />
           </div>
         </div>
       </section>
@@ -139,9 +153,7 @@ export default function HomePage() {
             <h2 id="faq-title" className="site-h2">
               Questions
             </h2>
-            <p className="site-lead">
-              Anything else, ask us directly when you request access.
-            </p>
+            <p className="site-lead">Anything else, ask us directly when you request access.</p>
           </div>
           <div className="site-split__body">
             <FaqList />
@@ -149,19 +161,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="site-section site-section--ink closing" aria-labelledby="closing-title">
-        <div className="site-container closing__inner">
-          <h2 id="closing-title" className="site-h2 closing__title">
-            Stop losing calls.
-          </h2>
-          <p className="closing__lead">
-            Tell us about your business. We set it up with you, and you are {GO_LIVE}.
-          </p>
-          <SiteButton to="/contact" variant="on-ink">
-            Request access
-          </SiteButton>
-        </div>
-      </section>
+      <ClosingBand id="closing-title" title="Stop losing calls." />
     </>
   );
 }
