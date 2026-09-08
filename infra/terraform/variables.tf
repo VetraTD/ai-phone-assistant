@@ -520,3 +520,31 @@ variable "live_model" {
   type        = string
   default     = "gemini-3.1-flash-live-preview"
 }
+
+# ---------------------------------------------------------------------------
+# WHICH FRONT-END ANSWERS THE PHONE, told to the dashboard.
+#
+# This is not derivable and must not be guessed. Live versus cascade is decided
+# by the Twilio number's `voiceUrl` — /twilio/live-voice against /twilio/voice —
+# which lives at Twilio and appears nowhere in this database or this state.
+#
+# The dashboard needs it because the two front-ends read DIFFERENT columns for
+# the same setting. The cascade reads voice_provider/voice_id (ElevenLabs); the
+# Live front-end reads live_voice and locale. Showing the wrong pair is LVX84:
+# a business picked a voice, watched it save, and heard no change on any call,
+# because the column it wrote is read by a front-end that serves no traffic.
+#
+# So the deployment declares it. A wrong value here shows the wrong picker,
+# which is visible in a second; guessing it from something in the database
+# would produce the same silent failure in a new place.
+# ---------------------------------------------------------------------------
+variable "voice_frontend" {
+  description = "Which front-end serves calls on this stack: `live` or `cascade`. Decides which voice settings the dashboard offers."
+  type        = string
+  default     = "live"
+
+  validation {
+    condition     = contains(["live", "cascade"], var.voice_frontend)
+    error_message = "voice_frontend must be `live` or `cascade`. The dashboard treats anything else as `live`, so a typo would silently keep showing the Live picker."
+  }
+}

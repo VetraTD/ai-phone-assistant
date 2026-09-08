@@ -77,7 +77,7 @@ Status means:
 | **LVX42** | the spelling gate's escape hatch writes the misheard name | **OPEN · P1** |
 | **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
 | **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
-| **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **OPEN · P1** |
+| **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **FIXED, UNVERIFIED LIVE · P0** — `writeCallState(callSid, state)` at pickup plus a `sawCallerFinal` latch after the echo gate, in `lib/voice/live/index.js`. This was the ROOT CAUSE of the in-progress rows, and it is not a wrong SID: with no tenant in the shared store, `completeCall` ran unscoped and FORCE RLS matched zero rows as `vetra_app`. Unblocks `completeCall`, summary/sentiment, missed-call notify and the latency rollup. |
 | **LVX25** | three or four questions in one breath | **OPEN · P1 — COUNTED.** Seven prompt instructions already say not to; an eighth was refused. The tic mandate removed 2026-09-05 was itself a stacked-question generator, so the next call's count is the reading |
 | **LVX28** | a name "already on file" is trusted though it was never spelled | **PARTLY CLOSED** — the bypass now needs the caller; the row itself still carries no provenance |
 | **LVX51** | the greeting plays twice | **NOT REPRODUCED** on call 1 with no health check — one kick, one greeting |
@@ -92,12 +92,14 @@ Status means:
 | **LVX80** | it names an appointment time BEFORE anything has checked availability | **FIXED, UNVERIFIED LIVE · P0** — the detection was always right; it ran in `auditTurn`, which fires on `turnComplete` when only the TAIL of the turn is still queued. Moved to `inspectOffer()`, per fragment, beside the leak guard, where a hard `clearAudio` still has something to drop. `live_offer_cuts` / `live_offer_cut_missed` score it. Offline tests only — the cut-vs-lag race can only be settled by a real call |
 | **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
 | **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
-| **LVX83** | the Live front-end writes no transcripts at all | **OPEN · P1** — `addTranscriptEntry` is called 6 times on the cascade (`lib/voice/session.js`) and **0** times on Live (`lib/voice/live/index.js`). Every call to `+441372656055` leaves a `calls` row with no record of anything that was said. Confirmed against the deployed calls of 2026-09-07 |
-| **LVX84** | the voice picker writes a field the Live front-end never reads | **OPEN · P1** — Settings writes `voice_provider`/`voice_id` (`settingsValidation.js:255-256`); Live reads `live_voice` (`lib/voice/live/index.js:242`) and the dashboard has ZERO references to it. `live_voice` is NULL in prod and `voice_source: default` on every call, so Kore is a fallback rather than a stored choice |
-| **LVX85** | password reset email fails silently | **OPEN · P1** — Identity Platform's reset email was tried 2026-09-01, did not arrive, and the API reported success. `onboard-tenant.js` works around it by printing the `returnOobLink` for an operator to deliver. There is no working self-serve recovery for a customer who forgets a password |
+| **LVX83** | the Live front-end writes no transcripts at all | **FIXED, UNVERIFIED LIVE · P1** — written at `turnComplete` beside `debugTranscript()`, and on barge-in before the accumulators are cleared. Refused under `DEPLOYMENT_MODE=hipaa`, which DIVERGES from the cascade deliberately. Scored by `live_transcript_written` / `live_transcript_write_failed` plus `transcript_turns_written` in `live_call_summary`. Proved as `vetra_app` under FORCE RLS in `tests/db/rlsAppRole.test.js`. |
+| **LVX84** | the voice picker writes a field the Live front-end never reads | **FIXED, UNVERIFIED LIVE · P1** — the picker now writes `live_voice` and `locale`, chosen from `GET /api/live-voices`. The LANGUAGE half was already wired end to end and merely unexposed. The VOICE half ships a candidate list carrying its own evidence, two entries of which are already disproved over a phone line. `VOICE_FRONTEND` declares which front-end serves, because Twilio holds that fact and this database does not. |
+| **LVX85** | password reset email fails silently | **NOT A DELIVERY BUG · P2** — the project contains exactly ONE account and Identity Platform sends from its own `noreply@` (`method: DEFAULT`), both confirmed 2026-09-08. The reset was requested for an address with no account, and `auth.js:193` swallows `auth/user-not-found` as enumeration defence. Telemetry added for every OTHER failure; the swallow stays silent on purpose. |
 | **LVX86** | no way to control pronunciation of a business name | **OPEN · P2** — Gemini Live says "digital" for "Digile". No lexicon, phoneme or SSML support exists anywhere in the codebase, and Live's prebuilt voices accept no pronunciation hints. `custom_instructions` is the only lever and it is a prompt line, so it carries no guarantee and no counter |
 | **LVX87** | the migrate job connects to production as `postgres` | **OPEN · P2** — `db-inspect` reported `current_user: postgres` against `vetra_uk_prod`. If that role carries BYPASSRLS then the tenant scoping in every job-run script is decoration, and the isolation those scripts exist to prove is not being exercised by the path that proves it |
 | **LVX88** | the greeting tells every caller the call is recorded, and it is not | **OPEN · P1** — the opening line says "calls are recorded for quality". On the Live path there is no `<Record>` verb and `addTranscriptEntry` is never called (LVX83), so nothing is recorded and nothing is retained. A statement to callers that is not true, and one that matters the moment anyone asks for their data. Three ways out: record properly, stop saying it, or make it true via LVX83 |
+| **LVX89** | a write that matched no rows is filed as a successful audit record | **OPEN · P1** — `completeCall` calls `noteAccess` with `rowCount: 0` and nothing complains (`services/db.js:869-871`); an UNSCOPED write files nothing at all outside hipaa mode (`:272`). Nine production calls reported `completed` while their rows never moved, and no instrument said so. |
+| **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -6804,7 +6806,58 @@ clinic asks for after an incident.
 it: `finish()` has the tenant, the call row and the config already in scope.
 
 **Done when:** a Live call's row is completed, scoped, and summarised the way a
-cascade call's is.
+cascade call's is. — **FIXED 2026-09-08, UNVERIFIED ON A REAL CALL.**
+
+### FIXED 2026-09-08 — and the reason it mattered was worse than "half-recorded"
+
+The consequence above understates it. This was not only missing enrichment: it
+was the ROOT CAUSE of the dashboard showing calls stuck at `in-progress` with
+no duration, which had been read as a separate bug in the dashboard.
+
+The chain, established from production logs on 2026-09-08 rather than reasoned
+about:
+
+1. Nine calls on 2026-09-07 logged `call_ended_status_callback` with
+   `CallStatus: completed`. So the callback arrived, and it validated — there
+   were **zero** `twilio_signature_invalid` lines, which rules out LVX14 here.
+2. Every one was immediately followed by `db_unscoped_fallback` with
+   `operation: completeCall` — `businessId` was null, because this path never
+   wrote the shared store.
+3. `withTenantSafe(null, …)` therefore never set `app.business_id`, and the
+   voice service connects **by IAM as `vetra_app`**, which migration 029 makes
+   `NOSUPERUSER NOBYPASSRLS` (`infra/terraform/migrate-job.tf:36`). Under FORCE
+   RLS the UPDATE matched **zero rows** and reported success.
+
+`services/db.js:2241-2244` predicted this in writing — *"Once B2 moves this to
+Cloud SQL, where there is no superuser, the same code FAILS CLOSED on its own:
+unscoped queries match no rows."* That day arrived and nothing announced it,
+which is LVX89.
+
+**A trap worth recording:** LVX87 reports `current_user: postgres` on
+production, and reading that as "the service runs as superuser" sends you the
+wrong way entirely. That is the MIGRATE JOB, which connects as superuser on
+purpose and with a different identity. The voice service does not.
+
+**The fix** is `writeCallState(callSid, state)` in `onStart` once `dbCallId` and
+`businessId` are set, plus a `sawCallerFinal` latch after the echo gate — an
+echo of our own greeting is not a caller speaking, and `server.js:873` uses that
+flag to avoid tagging short real calls as spam.
+
+`sawCallerFinal` is a LOCAL, not a field on `state`, and that is load-bearing.
+The cascade hit an ordering bug here: its pickup write carries the whole state
+object, which at that moment includes `sawCallerFinal: false`, so a caller who
+spoke over the greeting could produce latch-then-pickup and have the latch
+undone. This path cannot, because `state` has no such key and `sharedSlice`
+skips `undefined`.
+
+**One thing this newly makes reachable, deliberately:** the summary/sentiment
+block at `server.js:852` now runs, which means one Gemini call per completed
+call, ongoing. That was the owner's decision on 2026-09-08. Because that block
+is still fire-and-forget after `res.end()` and every service runs
+`cpu_idle = true`, it now logs `call_summary_written` when it lands — if that
+line never appears in production while transcripts do, post-response work is
+being eaten by the throttle and the trade has to be revisited. `completeCall`
+itself was moved to `await` for exactly that reason.
 
 ### LVX31 · The claim guard is blind to a REFUSED tool call `[gcp]` · **P1 — CLOSED 2026-09-03**
 
@@ -7975,6 +8028,49 @@ of caller speech:
 are scoped to the tenant, because every one of these tables is under FORCE
 row-level security and an unscoped count returns 0 for a working database.
 
+`--calls` was added 2026-09-08 for the question `--counts` cannot answer — one
+line of metadata per call, no message text:
+
+```
+--args=scripts/db-inspect.js,--business,+441372656055,--calls
+```
+
+### FIXED 2026-09-08 — `Done when` DONE for the write, UNVERIFIED on a real call
+
+Written in `lib/voice/live/index.js` at the `turnComplete` fold, between
+`auditTurn()` and `applyTurn()` — the last moment a whole turn exists, since
+`applyTurn` is what clears the accumulators. Also written on `sc.interrupted`
+BEFORE the clear, because an interrupted turn never reaches `applyTurn` and a
+barged half-spoken confirmation is exactly the turn worth being able to read
+back.
+
+Fire-and-forget in the shape `markCallTransferred` already uses on this path:
+never awaited, never thrown, no `try` in front of a turn.
+
+**The three decisions that were open:**
+
+- **Both sides are stored.** Same reasoning that reversed LVX36 for the debug
+  transcript: one-sided evidence cannot settle "did the caller actually ask for
+  that?".
+- **`DEPLOYMENT_MODE=hipaa` refuses outright**, logging `live_transcript_refused`
+  once per call. This DIVERGES from the cascade, which persists caller text
+  verbatim with no gate at all (`session.js:2810`) — that is not a precedent,
+  it predates the mode existing. Owner decision, 2026-09-08.
+- **No retention policy still.** `docs/compliance/retention-schedule.md` remains
+  a draft that nothing enforces, and this fix now puts caller speech in a table
+  that nothing expires. That is a real new obligation, not a solved one.
+
+**Instruments.** `live_transcript_written` and `live_transcript_write_failed`,
+plus `transcript_turns_written` in `live_call_summary` — the positive count
+exists because a fault-only counter reads zero for a clean call and for a call
+that never reached the write.
+
+**Proved under RLS**, not just against a mock: `tests/db/rlsAppRole.test.js`
+runs the write as `vetra_app` and shows the scoped write lands
+(`phi_access … rowCount: 2, committed: true`), the unscoped one is refused
+(`new row violates row-level security policy for table "call_transcripts"`)
+without throwing, and a cross-tenant write writes nothing.
+
 ## LVX84–LVX87 — found 2026-09-08, while answering questions about something else
 
 All four came out of the owner asking how tenant config works, not from a call.
@@ -8007,6 +8103,38 @@ Two candidate fixes, undecided: point the picker at `live_voice` for Live
 tenants, or hide it and surface the Live voice list instead. A picker that shows
 ElevenLabs accents for a front-end that cannot use them is the worse half.
 
+### FIXED 2026-09-08 — both halves, and they were not equally settled
+
+**Language was already wired end to end and merely unexposed.**
+`businesses.locale` has existed since migration 025, has a CHECK constraint,
+`loadConfig` has carried it as `config.locale` all along, and
+`resolveLiveLanguage` reads it. The dashboard simply never offered it. Options
+come from `LOCALES`, asserted against the schema's own CHECK by
+`liveVoiceSettings.test.js` so the copy cannot drift from the constraint.
+
+**Voice ships a candidate set, and says so in the UI.** There is still no
+vendor-published list of accepted prebuilt names, which is exactly why
+migration 041 gives the column no CHECK. The five offered are
+`scripts/voice-compare.js`'s own list, and each carries its evidence in the
+picker: Kore was chosen from the rendered files and then reported as muffled on
+a real line, and Aoede was tried on a call and rejected after four turns.
+Showing that is deliberate — an owner choosing blind would re-run an experiment
+that has already been run twice.
+
+**`VOICE_FRONTEND` declares which front-end serves.** The dashboard cannot
+derive it: Live versus cascade is decided by the Twilio number's `voiceUrl`,
+which lives at Twilio. Guessing it from anything in the database would
+reproduce this exact bug in a new place.
+
+**Checked, and not armed:** `LIVE_VOICE` and `LIVE_LANGUAGE_CODE` are set
+nowhere in `infra/`, so no env override outranks the tenant column. That is the
+LVX37 trap and it would have made this fix silently inert.
+
+**Still open:** more languages than the three is a bigger job than a longer
+list. Each id needs a profile in `lib/voice/localeProfiles.js` (STT language,
+date style, currency, phone grouping, ringback) plus a migration widening the
+CHECK.
+
 ### LVX85 — password reset fails silently
 
 Identity Platform's reset email was tried on 2026-09-01. It did not arrive and
@@ -8019,6 +8147,37 @@ means there is **no working self-serve recovery**: a customer who forgets a
 password clicks reset, is told an email is on its way, and nothing arrives.
 
 Blocks nothing today. Blocks self-service entirely.
+
+### RESOLVED 2026-09-08 — it was not a delivery failure
+
+Two facts, both read from the live project rather than reasoned about:
+
+- `accounts:query` on `vetra-core-edc8ca` returns **`recordsCount: 1`**. There
+  is exactly one account in the entire project, `nithinjd06@gmail.com`.
+- The reset template's `method` is **`DEFAULT`** — Identity Platform's own
+  `noreply@` sender, not `admin@vetratd.com`, whose suspension was the obvious
+  suspect and is not involved.
+
+So the request was made for an address with no account. `auth.js:193` swallows
+`auth/user-not-found` deliberately, as account-enumeration defence, and
+`Login.jsx:63` then prints the same success sentence either way. Nothing was
+broken. Nothing said so either, and a week went into looking at email delivery.
+
+**What was actually missing was telemetry, and it is only half fixable.** The
+enumeration swallow must STAY silent — logging "user-not-found" to the console
+would hand the answer straight back to anyone with devtools open, which is the
+only audience that matters. So the fix logs `password_reset_failed` for every
+OTHER code and leaves that one branch quiet.
+
+The most valuable case it now catches is `auth/unauthorized-continue-uri`, which
+`messageFor` renders as "Something went wrong signing in. Try again." — the
+exact confusing failure that appears when a new origin is missing from Identity
+Platform's authorized domains. That was live on 2026-09-08: the list was
+`localhost`, `firebaseapp.com`, `web.app` and nothing else.
+
+**Still true:** there is no self-serve recovery for an account that does not
+exist, and there cannot be. The operator path is
+`scripts/onboard-tenant.js:304-317` (`returnOobLink: true`).
 
 ### LVX86 — no pronunciation control
 
@@ -8055,3 +8214,121 @@ is open on the database that matters.
 Unverified: nobody has checked `rolbypassrls` for that role. `db-inspect`
 already queries `pg_roles` for exactly this and its output was not read closely
 enough. That check costs one job run and no code change.
+
+---
+
+## LVX88 — the greeting tells every caller the call is recorded
+
+Filed 2026-09-07 as an index row with no section. This is the section.
+
+**The wording is not the disclosure field.** `greeting.js:25-31` gates
+`recordingDisclosureText` on `businesses.recording_disclosure_enabled`, and for
+Digile Media that column is `false`. The sentence callers actually hear —
+"calls are recorded for quality" — lives in the tenant's own
+`businesses.greeting` free text and reaches the model through the
+`_hasCustomGreeting` branch at `greeting.js:44-46`.
+
+So the claim is operator free-text and **nothing gates it**. The flag designed
+to control exactly this statement is off, and the statement is made anyway.
+
+**Nothing was retained.** There is no `<Record>` verb on either conversational
+path — `tests/recordingPathLint.test.js` allowlists `lib/twiml.js` as the only
+file permitted to emit one, and both uses there are the degraded-mode
+voicemail. Model audio goes to Twilio frames and is dropped by `audioOut.stop()`
+at `finish()`; caller audio goes to the Live session and is never buffered. And
+until LVX83 landed, `addTranscriptEntry` was never called on this path either.
+
+**Owner decision, 2026-09-08: the greeting wording stays as it is.**
+
+The reasoning, recorded so it is not re-litigated. A transcript is not a
+recording in the sense a caller understands the word — "this call is recorded"
+means audio. The practical gap is a subject-access request for "the recording",
+which would be answered with "there isn't one" after the caller was told there
+was. That overstates rather than understates, so it is not a consent trap: a
+caller told they are recorded behaves more carefully, not less. With LVX83 in,
+the exact words of every call ARE now kept, which narrows the gap considerably
+without closing it.
+
+**Status: OPEN, mitigated.** Not closed, because the sentence is still not
+literally true and because the field built to make claims like this is still
+bypassed by free text that nothing checks.
+
+**Done when** one of: the greeting says something true about what is kept; or
+`recording_disclosure_enabled` becomes the only route to a recording claim and
+the greeting free-text is checked against it; or audio recording is actually
+implemented with a retention policy behind it. None of these is scheduled.
+
+---
+
+## LVX89 — a write that matched no rows is filed as a success
+
+Found 2026-09-08 while establishing why nine production calls reported
+`completed` and their rows still read `in-progress` with no duration.
+
+`completeCall` (`services/db.js:814-872`) runs two UPDATEs keyed on
+`twilio_call_sid` and then:
+
+```js
+if (!timing.error || !st.error) {
+  noteAccess("completeCall", { rowCount: (timing.rowCount || 0) + (st.rowCount || 0) });
+}
+```
+
+**`rowCount === 0` is not an error here.** A zero-row UPDATE files a
+`phi_access` record reporting `rowCount: 0` and nothing anywhere complains. And
+when the call runs UNSCOPED — which is what LVX30 caused — there is no tenant
+context at all, so `noteAccess` falls through to `services/db.js:272`, which
+logs only under `DEPLOYMENT_MODE=hipaa`. On this estate that is `standard`, so
+it returns silently and files nothing.
+
+The result is that a write which succeeded and a write which matched nothing
+are indistinguishable from every vantage point: the log, the audit table, and
+the return value. LVX30 was invisible for as long as it was because of this.
+
+The general shape is worth stating plainly, because the codebase has hit it
+before in other forms: **an instrument that reports only faults cannot
+distinguish a clean run from a run that never happened.** The same reasoning
+produced `transcript_turns_written` alongside `live_transcript_write_failed` in
+LVX83's fix.
+
+**Done when** a scoped write that matches zero rows is visible without anyone
+going to look — a counter, a log line at warn, or an audit field that says how
+many rows a write was expected to touch.
+
+---
+
+## LVX90 — the stat tiles counted the database's day
+
+Found 2026-09-08, from the report that all four tiles read 0 beside a list of
+seventeen calls.
+
+Three of the four filtered `started_at::date = CURRENT_DATE`
+(`AI-phone-dashboard/backend/src/routes/analytics.js:13-41`). Both sides of
+that cast resolve in the **database session timezone**, which is UTC on Cloud
+SQL — not `businesses.timezone`. Measured on the local database, whose session
+timezone is also UTC: three calls seeded at 00:15, 12:00 and 23:30 on one
+London day, the old query counts **2**, the correct query counts **3**.
+
+The tiles were also asking a different question from the list beside them: the
+calls list defaults to a **seven-day** window, the tiles to one day, and
+nothing on the page says so. Four zeros next to seventeen rows reads as a
+broken query rather than as two different questions.
+
+Two further defects in the same handler, fixed with it:
+
+- `followups_needed` had **no date bound at all** — a lifetime running total
+  sitting in a row of three counts labelled "today". It also reached
+  `customer_requests` through a join to `calls`, and `call_id` is
+  `ON DELETE SET NULL`, so a request whose call row had been erased was
+  silently dropped. It now scopes on `customer_requests.business_id` directly.
+- The error path returned `res.status(500).send("Server Error")` as text/plain
+  while the frontend reads `err.response.data.error`, so a failing analytics
+  call rendered as a loading skeleton that never resolved.
+
+**Note for whoever adds the next tile:** the timezone-aware pattern was already
+in this file, at the breakdown endpoint, which has read `businesses.timezone`
+and applied `AT TIME ZONE` all along. The tiles simply never used it.
+
+**Done when** DONE 2026-09-08 for the query; the seven-day-versus-one-day
+mismatch between the tiles and the list beside them is NOT fixed and is still
+a way to misread the page.

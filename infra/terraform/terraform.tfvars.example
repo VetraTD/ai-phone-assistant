@@ -497,7 +497,13 @@ twilio_sms_from = {
 # dashboard. Until that entry is here, the custom domain gets the CORS failure
 # described above — which the sign-in PAGE does not trigger, because it makes no
 # API call, so nothing looks wrong until somebody signs in.
-dashboard_domains = ["vetra-core-edc8ca.web.app"]
+# app.vetratd.com added 2026-09-08. The apex stays on Vercel and belongs to the
+# site rebuild; GCP serves only the dashboard, on its own subdomain, so the
+# marketing site's JavaScript cannot reach the dashboard's auth state.
+#
+# Safe to add before DNS exists: this list only widens CORS and Identity
+# Platform's authorized domains. `dashboard_url` below is the actual cutover.
+dashboard_domains = ["vetra-core-edc8ca.web.app", "app.vetratd.com"]
 
 # ---------------------------------------------------------------------------
 # dashboard_url — WHAT OWNER NOTIFICATIONS LINK TO

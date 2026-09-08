@@ -283,6 +283,15 @@ resource "google_cloud_run_v2_service" "dashboard" {
         }
       }
 
+      # LVX84. Which front-end actually answers the phone, so the settings page
+      # offers the voice controls that reach it. See `variable "voice_frontend"`
+      # for why this is declared rather than derived — the answer lives at
+      # Twilio, in the number's voiceUrl, and nowhere in this estate.
+      env {
+        name  = "VOICE_FRONTEND"
+        value = var.voice_frontend
+      }
+
       # SMTP, for the contact form and the digest. Not credentials — a
       # hostname, a port and an address. SMTP_PASS is the only secret and comes
       # from Secret Manager below.
