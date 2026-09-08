@@ -57,14 +57,69 @@ Watch `hostState` (want `HOST_ACTIVE`), `ownershipState` (want
 `OWNERSHIP_ACTIVE`) and `cert.state` (want `CERT_ACTIVE`). Certificate
 provisioning can take up to 24 hours after the records resolve.
 
+## Decided 2026-09-08: the dashboard moves to the ROOT, and `/app` goes away
+
+`app.vetratd.com/app` says "app" twice. Once the dashboard has its own origin,
+the origin IS the app, so `/` should be the dashboard.
+
+**Bundled with the cutover deliberately, not shipped ahead of it.** Doing the
+route change first would leave a window where `dashboard_url` — which is what
+owner notification emails link to — points at a path that no longer exists.
+
+### What changes
+
+- `AI-phone-dashboard/frontend/src/main.jsx`: `/` becomes `<App />`.
+- **`/app` redirects to `/`**, and this is not optional. Notification emails
+  already sent link to `/app`, and the router's `*` route is a 404 page. A
+  `<Route path="/app" element={<Navigate to="/" replace />} />` keeps every
+  existing bookmark and email working.
+- The in-repo **Landing page is retired**. `vetratd.com` is the marketing site
+  and it is a different codebase on Vercel; the Landing here only ever appeared
+  on the Firebase origin, and an app origin should serve the app.
+- `/contact`, `/legal` and `/reset-password` **stay**. The contact form has a
+  working SMTP backend, and the login page's "Request access" link points at
+  `/contact` — closing self-serve signup depends on that link resolving.
+
+### The Terraform validation has to move with it, and it will BLOCK the apply
+
+`infra/terraform/variables.tf` currently refuses a bare origin:
+
+```hcl
+condition     = var.dashboard_url == "" || can(regex("^https://[^/]+/.+", var.dashboard_url))
+error_message = "dashboard_url must be an https:// URL WITH a path — e.g. https://<host>/app. The bare origin serves the marketing page, not the dashboard."
+```
+
+That rule was right and stops being right here: the bare origin will no longer
+serve the marketing page, it will serve the dashboard. Relax it to accept an
+origin with or without a path, and rewrite the message rather than deleting it.
+
+**And fix the second validation while you are there.** The CORS cross-check
+extracts the host with `regex("^https://([^/]+)/", ...)`, which requires a
+trailing slash. Against a bare origin it does not match, the `!can(...)` arm is
+true, and the check passes **vacuously** — it silently stops verifying that the
+host is in `dashboard_domains`. A guard that quietly stops guarding is worse
+than one that never existed, and this one exists specifically because these two
+settings are edited in different places.
+
+### Not done here: deep-linkable sections
+
+`app.vetratd.com/settings`, `/calls` and so on are a SEPARATE piece of work.
+The dashboard's navigation is component state, not routes — there is no
+`useNavigate` anywhere in `App.jsx`, and Settings sub-sections are a `?section=`
+query parameter (`SettingsPage.jsx:117`). Making those real URLs means nested
+routes and lifting tab state into the router inside a 1,755-line file that
+already carries a conditional-hooks problem. Worth doing — it would let an
+appointment notification link to the actual call rather than the dashboard root
+— but it deserves its own session.
+
 ## The last step, AFTER the certificate is live
 
 Sign in on `https://app.vetratd.com/app` and confirm it works **before**
-flipping anything. Then, and only then:
+changing anything. Then make the routing change above, and:
 
 ```hcl
 # infra/terraform/terraform.tfvars
-dashboard_url = "https://app.vetratd.com/app"
+dashboard_url = "https://app.vetratd.com"
 ```
 
 ```
@@ -73,10 +128,16 @@ cd infra/terraform && CLOUDSDK_CONFIG=~/.gcloud-vetra2 TF_DISABLE_PLUGIN_TLS=1 \
                   -var="live_debug_transcript=1"
 ```
 
-**Keep the `/app` path.** Firebase rewrites `**` to `index.html` and the SPA
-routes client-side: `/` is the marketing landing page, `/app` is the dashboard.
-A bare origin sends a member of staff who clicked "you have a new appointment"
-to a marketing page.
+**The `/app` path is dropped in the same change — see the section above.** The
+old rule was "keep the path, because a bare origin sends a member of staff who
+clicked 'you have a new appointment' to a marketing page". That was correct
+while `/` was the Landing page. After this change `/` IS the dashboard on this
+origin, so the bare origin is the right link and the path is the wrong one.
+
+The old hazard does not disappear, it inverts: the danger is now a
+`dashboard_url` still carrying `/app` after the route is gone. That is what the
+`/app` → `/` redirect is for, and why it ships in the same commit rather than
+being tidied up later.
 
 **Keep `-var="live_debug_transcript=1"` on every apply** while that flag is
 meant to be on. It is not in `terraform.tfvars` — it is declared in
