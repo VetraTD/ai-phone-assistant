@@ -67,8 +67,8 @@ export default function HomePage() {
       </section>
 
       <section className="site-section site-section--tint site-anchor" id="on-a-call" aria-labelledby="moments-title">
-        <div className="site-container home__split">
-          <div className="home__split-head">
+        <div className="site-container site-split">
+          <div className="site-split__head">
             <h2 id="moments-title" className="site-h2">
               What happened on that call
             </h2>
@@ -76,7 +76,7 @@ export default function HomePage() {
               Minute by minute. The words are the receptionist’s own; nothing has been rewritten.
             </p>
           </div>
-          <div className="home__split-body">
+          <div className="site-split__body">
             <CallMoments onHear={hear} />
           </div>
         </div>
@@ -84,7 +84,7 @@ export default function HomePage() {
 
       <section className="site-section site-anchor" id="set-up" aria-labelledby="setup-title">
         <div className="site-container">
-          <div className="home__head">
+          <div className="site-head">
             <h2 id="setup-title" className="site-h2">
               Set up with you. Live in three business days.
             </h2>
@@ -98,8 +98,8 @@ export default function HomePage() {
       </section>
 
       <section className="site-section site-section--tint site-anchor" id="afterwards" aria-labelledby="record-title">
-        <div className="site-container home__split">
-          <div className="home__split-head">
+        <div className="site-container site-split">
+          <div className="site-split__head">
             <h2 id="record-title" className="site-h2">
               What you see afterwards
             </h2>
@@ -108,7 +108,7 @@ export default function HomePage() {
               above; the summary line is an example of what the receptionist writes.
             </p>
           </div>
-          <div className="home__split-body">
+          <div className="site-split__body">
             <CallRecord />
           </div>
         </div>
@@ -134,8 +134,8 @@ export default function HomePage() {
       </section>
 
       <section className="site-section site-section--tint site-anchor" id="questions" aria-labelledby="faq-title">
-        <div className="site-container home__split">
-          <div className="home__split-head">
+        <div className="site-container site-split">
+          <div className="site-split__head">
             <h2 id="faq-title" className="site-h2">
               Questions
             </h2>
@@ -143,7 +143,7 @@ export default function HomePage() {
               Anything else, ask us directly when you request access.
             </p>
           </div>
-          <div className="home__split-body">
+          <div className="site-split__body">
             <FaqList />
           </div>
         </div>

@@ -1,0 +1,111 @@
+.legal__head {
+  padding-block: var(--site-space-7) var(--site-space-6);
+}
+.legal__title {
+  max-width: 20ch;
+}
+.legal__meta {
+  margin: var(--site-space-3) 0 0;
+  font-size: var(--site-text-sm);
+}
+.legal__intro {
+  margin-top: var(--site-space-5);
+  color: var(--site-ink-muted);
+}
+
+.legal__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--site-space-6);
+  align-items: start;
+  padding-bottom: var(--site-section-y);
+}
+
+.legal__toc {
+  border-top: 1px solid var(--site-line-strong);
+  border-bottom: 1px solid var(--site-line-strong);
+  padding-block: var(--site-space-4);
+}
+.legal__toc-title {
+  margin: 0 0 var(--site-space-2);
+  font-family: var(--site-font-sans);
+  font-size: var(--site-text-sm);
+  font-weight: 600;
+  color: var(--site-ink-muted);
+}
+.legal__toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.legal__toc-link {
+  display: flex;
+  gap: var(--site-space-3);
+  min-height: 40px;
+  align-items: center;
+  color: var(--site-ink);
+  text-decoration: none;
+  font-size: var(--site-text-sm);
+}
+.legal__toc-link:hover {
+  color: var(--site-accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+.legal__toc-num,
+.legal__num {
+  color: var(--site-ink-soft);
+  min-width: 1.6em;
+  display: inline-block;
+}
+
+.legal__body {
+  background: var(--site-surface);
+  border: 1px solid var(--site-line);
+  border-radius: var(--site-radius-md);
+  padding: var(--site-space-5) var(--site-space-4);
+}
+
+.legal__section + .legal__section {
+  margin-top: var(--site-space-7);
+  padding-top: var(--site-space-6);
+  border-top: 1px solid var(--site-line-strong);
+}
+
+.legal__h2 {
+  margin: 0 0 var(--site-space-4);
+  font-family: var(--site-font-display);
+  font-weight: 600;
+  font-size: var(--site-h3);
+  letter-spacing: var(--site-tracking-display);
+  line-height: 1.2;
+  display: flex;
+  gap: var(--site-space-3);
+  align-items: baseline;
+}
+
+@media (min-width: 768px) {
+  .legal__body {
+    padding: var(--site-space-6);
+  }
+  .legal__head {
+    padding-block: var(--site-space-8) var(--site-space-7);
+  }
+}
+
+@media (min-width: 1024px) {
+  .legal__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr);
+    gap: var(--site-space-8);
+  }
+  .legal__toc {
+    position: sticky;
+    top: 96px;
+    border: 0;
+    padding-block: 0;
+    max-height: calc(100vh - 120px);
+    overflow: auto;
+  }
+}

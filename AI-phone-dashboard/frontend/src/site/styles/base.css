@@ -223,6 +223,109 @@
   scroll-margin-top: 96px;
 }
 
+/* Section layout: heading and lead on the left, the page on the right. */
+.site-head {
+  margin-bottom: var(--site-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--site-space-4);
+}
+.site-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--site-space-6);
+  align-items: start;
+}
+.site-split__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--site-space-4);
+}
+@media (min-width: 1024px) {
+  .site-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: var(--site-space-8);
+  }
+  .site-split__head {
+    position: sticky;
+    top: 96px;
+  }
+}
+
+/* The closing band every public page ends on: ink, one heading, one button. */
+.closing__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--site-space-5);
+}
+.closing__title {
+  color: var(--site-on-ink);
+}
+.closing__lead {
+  margin: 0;
+  color: var(--site-on-ink-muted);
+  font-size: var(--site-text-lg);
+  max-width: 34em;
+}
+@media (min-width: 768px) {
+  .closing__inner {
+    align-items: center;
+    text-align: center;
+  }
+}
+
+/* Long-form text (legal, about). Child combinators only, so nothing leaks. */
+.site-prose {
+  max-width: 65ch;
+}
+.site-prose > p,
+.site-prose > ul,
+.site-prose > ol {
+  margin: 0 0 var(--site-space-4);
+  color: var(--site-ink);
+  line-height: 1.65;
+}
+.site-prose > ul,
+.site-prose > ol {
+  padding-left: 1.25rem;
+}
+.site-prose > ul > li + li,
+.site-prose > ol > li + li {
+  margin-top: var(--site-space-2);
+}
+.site-prose > p:last-child,
+.site-prose > ul:last-child,
+.site-prose > ol:last-child {
+  margin-bottom: 0;
+}
+.site-prose > h3 {
+  margin: var(--site-space-5) 0 var(--site-space-2);
+  font-family: var(--site-font-sans);
+  font-size: var(--site-text-md);
+  font-weight: 600;
+}
+.site-prose > table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--site-space-4);
+  font-size: var(--site-text-sm);
+}
+.site-prose > table th,
+.site-prose > table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--site-space-2) var(--site-space-3) var(--site-space-2) 0;
+  border-bottom: 1px solid var(--site-line);
+}
+.site-prose > table th {
+  font-weight: 600;
+  color: var(--site-ink);
+}
+.site-prose > table td {
+  color: var(--site-ink-muted);
+}
+
 /* One ruled row: margin label on the left, entry on the right. */
 .site-row {
   display: grid;

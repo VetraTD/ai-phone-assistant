@@ -1,8 +1,12 @@
 import { usePageMeta } from "../usePageMeta.js";
-import PageHero from "../components/PageHero.jsx";
+import LegalDocument from "../components/LegalDocument.jsx";
+import { TERMS } from "../content/legal/terms.jsx";
 
-// Phase D renders the full document via LegalDocument.
 export default function TermsPage() {
-  usePageMeta({ title: "Terms of Service", description: "The terms on which Vetra is provided.", path: "/terms" });
-  return <PageHero title="Terms of Service" />;
+  usePageMeta({
+    title: "Terms of Service",
+    description: "The terms on which Vetra provides its receptionist service to businesses.",
+    path: "/terms",
+  });
+  return <LegalDocument doc={TERMS} />;
 }

@@ -1,8 +1,12 @@
 import { usePageMeta } from "../usePageMeta.js";
-import PageHero from "../components/PageHero.jsx";
+import LegalDocument from "../components/LegalDocument.jsx";
+import { PRIVACY } from "../content/legal/privacy.jsx";
 
-// Phase D renders the full document via LegalDocument.
 export default function PrivacyPage() {
-  usePageMeta({ title: "Privacy Policy", description: "How Vetra handles data.", path: "/privacy" });
-  return <PageHero title="Privacy Policy" />;
+  usePageMeta({
+    title: "Privacy Policy",
+    description: "What Vetra collects, why, where it is kept and how long, and your rights.",
+    path: "/privacy",
+  });
+  return <LegalDocument doc={PRIVACY} />;
 }

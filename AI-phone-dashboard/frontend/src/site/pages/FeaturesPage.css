@@ -1,0 +1,58 @@
+.flist__page {
+  margin: 0;
+  padding-block: var(--site-rule);
+}
+
+/* On narrow screens the name sits above its line; from tablet up it takes
+   the diary's margin column, widened to fit. */
+.flist__row {
+  grid-template-columns: minmax(0, 1fr);
+}
+.flist__row + .flist__row {
+  margin-top: var(--site-rule);
+}
+.flist__name {
+  padding-inline: var(--site-space-4);
+  font-weight: 600;
+  color: var(--site-ink);
+  white-space: normal;
+  font-size: var(--site-text-base);
+}
+.flist__detail {
+  margin: 0;
+  padding-inline: var(--site-space-4);
+  color: var(--site-ink-muted);
+  max-width: 58ch;
+}
+
+@media (min-width: 768px) {
+  .flist__page {
+    --site-margin: 12rem;
+  }
+  .flist__row {
+    grid-template-columns: var(--site-margin) minmax(0, 1fr);
+  }
+  .flist__name {
+    padding-inline: var(--site-space-4) var(--site-space-2);
+  }
+  .flist__detail {
+    padding-inline: var(--site-space-2) var(--site-space-4);
+  }
+}
+
+.flist__notyet {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.flist__notyet > li {
+  padding: var(--site-space-3) 0;
+  border-bottom: 1px solid var(--site-line-strong);
+  color: var(--site-ink);
+  max-width: 58ch;
+}
+.flist__notyet-foot {
+  margin-top: var(--site-space-4);
+}
