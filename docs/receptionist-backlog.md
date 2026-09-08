@@ -93,6 +93,10 @@ Status means:
 | **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
 | **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
 | **LVX83** | the Live front-end writes no transcripts at all | **OPEN · P1** — `addTranscriptEntry` is called 6 times on the cascade (`lib/voice/session.js`) and **0** times on Live (`lib/voice/live/index.js`). Every call to `+441372656055` leaves a `calls` row with no record of anything that was said. Confirmed against the deployed calls of 2026-09-07 |
+| **LVX84** | the voice picker writes a field the Live front-end never reads | **OPEN · P1** — Settings writes `voice_provider`/`voice_id` (`settingsValidation.js:255-256`); Live reads `live_voice` (`lib/voice/live/index.js:242`) and the dashboard has ZERO references to it. `live_voice` is NULL in prod and `voice_source: default` on every call, so Kore is a fallback rather than a stored choice |
+| **LVX85** | password reset email fails silently | **OPEN · P1** — Identity Platform's reset email was tried 2026-09-01, did not arrive, and the API reported success. `onboard-tenant.js` works around it by printing the `returnOobLink` for an operator to deliver. There is no working self-serve recovery for a customer who forgets a password |
+| **LVX86** | no way to control pronunciation of a business name | **OPEN · P2** — Gemini Live says "digital" for "Digile". No lexicon, phoneme or SSML support exists anywhere in the codebase, and Live's prebuilt voices accept no pronunciation hints. `custom_instructions` is the only lever and it is a prompt line, so it carries no guarantee and no counter |
+| **LVX87** | the migrate job connects to production as `postgres` | **OPEN · P2** — `db-inspect` reported `current_user: postgres` against `vetra_uk_prod`. If that role carries BYPASSRLS then the tenant scoping in every job-run script is decoration, and the isolation those scripts exist to prove is not being exercised by the path that proves it |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -7969,3 +7973,84 @@ of caller speech:
 `call_transcripts` reading 0 against a non-zero `calls` is the defect. The counts
 are scoped to the tenant, because every one of these tables is under FORCE
 row-level security and an unscoped count returns 0 for a working database.
+
+## LVX84–LVX87 — found 2026-09-08, while answering questions about something else
+
+All four came out of the owner asking how tenant config works, not from a call.
+None was on anybody's list.
+
+### LVX84 — the voice picker writes a field Live never reads
+
+Settings offers eight named voices with accents attached — "Alice, polished and
+professional, with a crisp British accent". Choosing one writes
+`voice_provider` / `voice_id` (`settingsValidation.js:255-256`), which only the
+cascade's ElevenLabs TTS reads. The Live front-end reads `config.liveVoice`
+(`lib/voice/live/index.js:242`), and the dashboard contains **zero** references
+to `live_voice` anywhere.
+
+So on a Live tenant the picker has no effect. Worse, the failure is invisible:
+the UI shows a selected voice and the caller hears a different one.
+
+Confirmed in production: `live_voice` is NULL and every `live_session_open`
+reports `voice_source: default`. Kore is reached through
+`VOICE_BY_LANGUAGE['en-GB']`, not through a stored choice. **The owner's
+intended voice and the running voice agree by coincidence.** Change the default,
+or resolve the language differently, and the voice changes with nothing to say
+it did.
+
+**Not a confounder for LVX81.** The owner confirms they intended Kore, so the
+drift probe measured the right voice and its verdict stands. This is a separate
+defect that happens to touch the same field.
+
+Two candidate fixes, undecided: point the picker at `live_voice` for Live
+tenants, or hide it and surface the Live voice list instead. A picker that shows
+ElevenLabs accents for a front-end that cannot use them is the worse half.
+
+### LVX85 — password reset fails silently
+
+Identity Platform's reset email was tried on 2026-09-01. It did not arrive and
+**the API reported success**. `onboard-tenant.js` documents this and works
+around it by printing the `returnOobLink` for an operator to deliver through a
+channel that can be seen to work.
+
+That is fine while onboarding is concierge and the operator is in the loop. It
+means there is **no working self-serve recovery**: a customer who forgets a
+password clicks reset, is told an email is on its way, and nothing arrives.
+
+Blocks nothing today. Blocks self-service entirely.
+
+### LVX86 — no pronunciation control
+
+Gemini Live pronounces "Digile" as "digital". There is no lexicon, no phoneme
+mapping and no SSML anywhere in the codebase, and Live's prebuilt voices accept
+no pronunciation hints — the audio is generated by the same model that reasons,
+so there is no TTS layer to instruct.
+
+The only lever is `custom_instructions`, which is a prompt line: no guarantee, and
+unlike a stacked question, no counter that could say how often it is wrong. A
+phonetic spelling must NOT go in `businesses.name`, which feeds bookings,
+notifications and confirmations.
+
+Worth noting as a general cost of the Live front-end rather than a bug in it,
+alongside LVX81's voice stability.
+
+### LVX87 — the job runs as `postgres`
+
+`db-inspect` against production reported `current_user: postgres`,
+`current_database: vetra_uk_prod`.
+
+Every script run through the migrate job scopes itself with
+`set_config('app.business_id', ...)` because these tables are under FORCE
+row-level security. If `postgres` carries BYPASSRLS, that scoping is decoration
+and the reads succeed for a reason unrelated to the one the code believes.
+
+The specific risk is not a leak — the job is operator-run — but that
+`c8-rls-proof.js` and `db-inspect` exist to DEMONSTRATE isolation, and a
+superuser demonstrates nothing. `db-inspect.js`'s own header says local `vetra`
+is a superuser with BYPASSRLS and that this permissiveness already hid two
+bootstrap bugs. If production's job path is also superuser, the same blind spot
+is open on the database that matters.
+
+Unverified: nobody has checked `rolbypassrls` for that role. `db-inspect`
+already queries `pg_roles` for exactly this and its output was not read closely
+enough. That check costs one job run and no code change.
