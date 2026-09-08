@@ -100,7 +100,7 @@ Status means:
 | **LVX88** | the greeting tells every caller the call is recorded, and it is not | **OPEN · P1** — the opening line says "calls are recorded for quality". On the Live path there is no `<Record>` verb and `addTranscriptEntry` is never called (LVX83), so nothing is recorded and nothing is retained. A statement to callers that is not true, and one that matters the moment anyone asks for their data. Three ways out: record properly, stop saying it, or make it true via LVX83 |
 | **LVX89** | a write that matched no rows is filed as a successful audit record | **OPEN · P1** — `completeCall` calls `noteAccess` with `rowCount: 0` and nothing complains (`services/db.js:869-871`); an UNSCOPED write files nothing at all outside hipaa mode (`:272`). Nine production calls reported `completed` while their rows never moved, and no instrument said so. |
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
-| **LVX91** | a SECOND dashboard API is still live on Railway | **OPEN · P1, SEVERITY UNCONFIRMED** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. Whether it reaches live data depends on its `DATABASE_URL`, which has not been read. |
+| **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8508,3 +8508,67 @@ did not. Nothing in the GCP estate depends on it.
 **Done when** the service is deleted, or its GitHub deploy is disconnected and
 its database credentials revoked, and `VITE_API_URL` on Vercel points at Cloud
 Run so nothing routes to it.
+
+### LVX91 CONFIRMED 2026-09-08 — it is the pre-migration stack, and it is P0
+
+The owner read the Railway variables. Two facts settle it:
+
+- `DATABASE_URL` = `postgresql://postgres.[...]@aws-1-us-east-1.pooler.supabase.com:5432/postgres`
+- `IDENTITY_PLATFORM_PROJECT_ID` is **not set at all**
+
+The second one corrects an inference recorded above. This section previously
+reasoned that a 401 rather than a 503 on `/api/me` proved the project id was
+set, because `authMiddleware` returns 503 when it is missing. That is true of
+the CURRENT middleware and irrelevant here: the deployed code predates it.
+
+`git` settles the date. Identity Platform replaced Supabase Auth in `257497f`
+on **2026-08-22**. Railway's active deployment is PR #100, **2026-08-18** —
+four days earlier. At that commit
+`AI-phone-dashboard/backend/src/middleware/authMiddleware.js` reads:
+
+```js
+const { createClient } = require("@supabase/supabase-js");
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+...
+const { data, error } = await supabase.auth.getUser(token);
+```
+
+So what is running is the **entire pre-migration stack**: Supabase Postgres,
+Supabase Auth, and a public HTTPS API in front of both. That is precisely the
+architecture the GCP migration was undertaken to leave — private-IP Cloud SQL,
+FORCE row-level security, an unprivileged application role, an audited access
+path. None of those controls exist on this one.
+
+**What is NOT established, and must not be assumed either way:** whether that
+Supabase project still contains caller data. Nobody has looked. `import-tenant.js`
+suggests the migration COPIED data into Cloud SQL rather than moving it, in
+which case the originals are still there — but that is an inference, and this
+entry has already been wrong once by reasoning instead of reading.
+
+### Why this is P0 rather than a tidy-up
+
+The exposure does not depend on Railway. Railway is a front door; the database
+is the room. Even with the service deleted, that Postgres is on the public
+internet with credentials that have not been rotated.
+
+CORS is not a mitigation. Its allow-list covers `vetratd.com` only, and CORS
+constrains browsers — a `curl` reached `/api/me` and received a normal 401.
+
+### Order of work, cheapest control first
+
+1. **Stop or delete the Railway service.** Removes the public API and the
+   GitHub deploy hazard in one action, changes nothing else, reversible.
+2. **Point Vercel's `VITE_API_URL` at Cloud Run.** Until then the marketing
+   contact form posts into this stack.
+3. **Establish what the Supabase project holds.** Row counts per table. That is
+   a question about data, and it decides everything below it.
+4. **Rotate or revoke the Supabase credentials** regardless of the answer — they
+   have sat in a third-party deploy environment for the life of the migration.
+5. **Decide retention.** If it holds caller data that also exists in Cloud SQL,
+   it is a duplicate copy outside every control the migration built, and keeping
+   it needs a reason rather than an oversight.
+
+**Done when** the Railway service is gone, nothing routes to it, and the
+Supabase project has been inventoried and then either decommissioned or
+deliberately retained with its credentials rotated and that decision written
+down.
