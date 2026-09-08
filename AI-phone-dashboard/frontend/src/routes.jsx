@@ -81,6 +81,20 @@ export default function AppRoutes() {
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/app" element={<Navigate to="/" replace />} />
+        {/*
+          /login and /signin exist for ONE reason: the marketing site links
+          here, and it is a separate deployment on a different host that we do
+          not redeploy every time this router changes.
+
+          "https://app.vetratd.com" is a correct link but reads like a bare
+          domain in a nav bar, and a marketing page that wants to say "Log in"
+          should be able to link to something that says login. These are
+          redirects rather than routes so there is still exactly ONE canonical
+          URL for the dashboard, and so a stale marketing link can never rot
+          into a 404 the way vetratd.com/app just did.
+        */}
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/signin" element={<Navigate to="/" replace />} />
         <Route path="/legal" element={<Legal />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/reset-password" element={<ResetPassword />} />

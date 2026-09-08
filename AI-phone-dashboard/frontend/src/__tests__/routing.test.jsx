@@ -52,6 +52,18 @@ describe("routing", () => {
     expect(await screen.findByTestId("dashboard")).toBeTruthy();
   });
 
+  it.each(["/login", "/signin"])(
+    "%s reaches the dashboard, so the marketing site has a stable link",
+    async (path) => {
+      // The marketing site is a SEPARATE deployment on a different host. It
+      // linked at /app, which stopped existing, and the result was a page that
+      // simply did not load. These aliases exist so a marketing link cannot rot
+      // that way again.
+      at(path);
+      expect(await screen.findByTestId("dashboard")).toBeTruthy();
+    }
+  );
+
   it("still serves /contact, which the login page links to", async () => {
     // Self-serve signup is closed and the login form's only onward route is
     // "Request access" -> /contact. If this route goes, that is a dead end for
