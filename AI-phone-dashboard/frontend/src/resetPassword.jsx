@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { checkPasswordResetCode, completePasswordReset } from "./auth";
+import "./site/styles/tokens.css";
+import "./site/styles/base.css";
 import "./Login.css";
 import { MARKETING_URL } from "./siteUrl";
 
@@ -114,7 +116,7 @@ export default function ResetPassword() {
   };
 
   const shell = (children) => (
-    <div className="login-page">
+    <div className="login-page site-root">
       <div className="login-shell">
         <div className="login-top-row">
           <a href={MARKETING_URL} className="login-back-home">

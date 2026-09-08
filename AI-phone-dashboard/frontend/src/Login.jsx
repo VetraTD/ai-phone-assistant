@@ -5,7 +5,9 @@ import { Link } from "react-router-dom";
 // event as the email argument. Vite built it, the tests passed, and the only
 // symptom was a button stuck on "Signing in...".
 import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
-import VetraMark from "./components/VetraMark";
+import VetraLogo from "./components/VetraLogo";
+import "./site/styles/tokens.css";
+import "./site/styles/base.css";
 import "./Login.css";
 import { MARKETING_URL } from "./siteUrl";
 
@@ -67,50 +69,34 @@ export default function Login() {
   };
 
   return (
-    <div className="login-page">
+    <div className="login-page site-root">
       <div className="login-shell">
         <div className="login-top-row">
           {/* External. This origin is the app now; its root is the dashboard. */}
+          <VetraLogo href={MARKETING_URL} />
           <a href={MARKETING_URL} className="login-back-home">
-            ← Back to website
+            Back to vetratd.com
           </a>
         </div>
+
         <div className="login-brand">
-          <div className="login-badge">
-            <VetraMark size={18} className="login-badge-mark" />
-            Welcome back
-          </div>
-
-          <h1>Your calls, handled — even when you&apos;re not there.</h1>
-
+          <h1>Your calls, in writing.</h1>
           <p>
-            Sign in to see every call, booking, and follow-up in one simple dashboard.
-            We keep things organised so you can focus on running your business.
+            Sign in to read the summary and transcript of every call, and the appointments the
+            receptionist has booked into your diary.
           </p>
-
-          <div className="login-features">
-            <div className="login-feature">
-              <span className="login-feature-dot" />
-              <span>Written summary of every call</span>
-            </div>
-
-            <div className="login-feature">
-              <span className="login-feature-dot" />
-              <span>Bookings and messages in one place</span>
-            </div>
-
-            <div className="login-feature">
-              <span className="login-feature-dot" />
-              <span>Follow-ups flagged so nothing gets missed</span>
-            </div>
-          </div>
+          <ul className="login-features site-page site-page--lined">
+            <li className="login-feature">Every call summarised and transcribed</li>
+            <li className="login-feature">Bookings written into your diary</li>
+            <li className="login-feature">Messages and callbacks to return</li>
+          </ul>
         </div>
 
         <div className="login-card-wrap">
           <form className="login-card" onSubmit={signIn}>
             <div className="login-card-header">
               <h2>Sign in</h2>
-              <p>Access your dashboard and manage your business calls.</p>
+              <p>Your dashboard: calls, bookings and messages.</p>
             </div>
 
             <div className="login-form">
@@ -120,8 +106,9 @@ export default function Login() {
                   id="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
                   type="email"
+                  autoComplete="email"
+                  inputMode="email"
                   required
                 />
               </div>
@@ -132,8 +119,8 @@ export default function Login() {
                   id="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
                   type="password"
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -149,15 +136,15 @@ export default function Login() {
                 </button>
               </div>
 
-              {error ? <div className="login-error">{error}</div> : null}
-              {message ? <div className="login-success">{message}</div> : null}
+              {error ? <div className="login-error" role="alert">{error}</div> : null}
+              {message ? <div className="login-success" role="status">{message}</div> : null}
 
               <button className="login-button" disabled={loading}>
                 {loading ? "Signing in..." : "Sign in"}
               </button>
 
               <p className="login-security-note">
-                Your account is protected with secure sign-in and encrypted storage.
+                You are signed out automatically after a period of inactivity.
               </p>
 
               {/*
