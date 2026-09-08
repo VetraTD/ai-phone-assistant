@@ -42,6 +42,35 @@ const ELEVENLABS_VOICE_IDS = [
   "SAz9YHcvj6GT2YYXdXww", // River
 ];
 
+// ---------------------------------------------------------------------------
+// THE LIVE FRONT-END'S TWO SETTINGS, which are not the two above.
+//
+// voice_provider / voice_id are ElevenLabs, and only the cascade reads them.
+// Every production call is served by the Live front-end, which reads
+// businesses.live_voice and businesses.locale. That mismatch is LVX84: a
+// business could change its voice, watch it save, and hear nothing different.
+// ---------------------------------------------------------------------------
+
+// Source of truth: the CHECK constraint on businesses.locale (root repo
+// database/025_business_locale.sql, materialised in database/schema.sql), which
+// in turn mirrors lib/voice/localeProfiles.js PROFILE_IDS. Adding an id here is
+// NOT enough to add a language: each one needs a profile carrying its STT
+// language, date style, currency, phone grouping and ringback, plus a migration
+// widening the CHECK. src/__tests__/liveVoiceSettings.test.js asserts this list
+// against the schema so the drift cannot happen quietly.
+const LOCALES = ["en-US", "en-GB", "es-US"];
+
+// Source of truth: root repo scripts/voice-compare.js, whose own comment says
+// this list is "a starting point to be disproved, not an authority".
+//
+// It is not a vendor-published set and this repository has never established
+// which prebuilt names the Live API accepts, nor what it does with one it does
+// not recognise. That is exactly why migration 041 gives live_voice NO CHECK
+// constraint — a stale constraint would refuse a name that is perfectly valid
+// at the vendor. Validation lives here instead, where widening it is a deploy
+// rather than a migration.
+const LIVE_VOICES = ["Kore", "Puck", "Charon", "Aoede", "Leda"];
+
 // Source of truth: root repo services/notifications.js DEFAULT_SMS_TEMPLATES
 // (and database/017_followups_and_metrics.sql's businesses.sms_templates
 // comment). A business may override the copy for any of these kinds; any
@@ -96,6 +125,8 @@ module.exports = {
   TRANSFER_POLICIES,
   VOICE_PROVIDERS,
   ELEVENLABS_VOICE_IDS,
+  LOCALES,
+  LIVE_VOICES,
   SMS_TEMPLATE_KINDS,
   SMS_TEMPLATE_MAX_LENGTH,
   SMS_TEMPLATE_PLACEHOLDERS,

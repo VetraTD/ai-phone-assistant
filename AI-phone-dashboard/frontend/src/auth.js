@@ -190,7 +190,28 @@ export async function sendPasswordReset(email, { continueUrl } = {}) {
     // Not an error the person should see: it would confirm the address has no
     // account. Everything else — a malformed address, rate limiting — is real
     // feedback about what they typed.
+    //
+    // AND NOT LOGGED EITHER, which is the point people get wrong. Writing
+    // "user-not-found" to the console would hand the enumeration back to
+    // anyone who opens devtools, which is the only place that matters — the
+    // defence is worth nothing if the answer is one panel away.
+    //
+    // This is LVX85, and the investigation went the wrong way for a week
+    // because of it. A reset was requested on 2026-09-01, no email arrived,
+    // and the API reported success — which read as broken delivery. It was
+    // not: Identity Platform sends from its own noreply@ sender (method
+    // DEFAULT), and the project contains exactly ONE account. The request was
+    // for an address that does not exist, and this branch turned that into a
+    // success message. Nothing was broken and nothing said so.
+    //
+    // The gap being closed is the OTHER half: everything that is not
+    // enumeration was equally silent, because this file had no telemetry at
+    // all. auth/unauthorized-continue-uri in particular renders as "Something
+    // went wrong signing in" — the exact confusing failure that appears if a
+    // new origin is not in Identity Platform's authorized domains.
     if (code === "auth/user-not-found") return {};
+    // eslint-disable-next-line no-console
+    console.error("password_reset_failed", { code, continueUrl });
     return { error: messageFor(err) };
   }
 }

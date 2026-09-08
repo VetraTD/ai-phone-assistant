@@ -186,7 +186,12 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
       customer_requests: reqRes.rows,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // The raw Postgres message used to go straight to the browser. It names
+    // tables, columns and constraints, which is free schema reconnaissance for
+    // anyone with a login, and it is no use to the person reading it either.
+    // The detail belongs in the log, where an operator can find it.
+    console.error("call_detail_failed", { callId: req.params?.id, message: err?.message });
+    res.status(500).json({ error: "Could not load this call." });
   }
 }));
 

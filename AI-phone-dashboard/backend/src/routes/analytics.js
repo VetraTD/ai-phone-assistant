@@ -5,40 +5,87 @@ const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 
+// The timezone a business gets when its row does not name one. Same value the
+// breakdown endpoint below already falls back to, and the same one the column
+// defaults to in schema.sql — three places agreeing by having one constant.
+const DEFAULT_TIMEZONE = "America/Chicago";
+
 // Analytics for the authenticated user's business
+//
+// ---------------------------------------------------------------------------
+// "TODAY" IS THE BUSINESS'S TODAY, NOT THE DATABASE'S.
+//
+// Every tile here used to filter `started_at::date = CURRENT_DATE`. Both sides
+// of that cast happen in the database session timezone, which on Cloud SQL is
+// UTC — so the day being counted was UTC's day, for a tenant in London or
+// Chicago who has never thought about UTC in their life. A call taken at 23:30
+// on a British summer evening counted towards tomorrow, and a Chicago
+// afternoon call counted towards tomorrow from 19:00 onwards.
+//
+// The symptom that surfaced it was four tiles reading 0 beside a list of
+// seventeen calls: the list defaults to a seven-day window, the tiles were
+// asking about a different day entirely, and nothing on the page said so.
+//
+// The fix reuses the pattern already in this file — the breakdown endpoint has
+// read businesses.timezone and applied AT TIME ZONE all along. The timezone is
+// a bound parameter, never interpolated: it arrives from a database row, but a
+// row is still not a literal.
+// ---------------------------------------------------------------------------
 router.get("/api/analytics/:businessId", authenticate, withTenantHandler(async (req, res) => {
   try {
     const businessId = req.businessId;
+
+    const tzRes = await pool.query(
+      `SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`,
+      [businessId]
+    );
+    const tz = tzRes.rows[0]?.timezone || DEFAULT_TIMEZONE;
 
     const callsToday = await pool.query(`
       SELECT COUNT(*)
       FROM calls
       WHERE business_id = $1
-      AND started_at::date = CURRENT_DATE
-    `, [businessId]);
+      AND (started_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
+    `, [businessId, tz]);
 
     const appointmentsToday = await pool.query(`
       SELECT COUNT(*)
       FROM appointments a
       JOIN calls c ON a.call_id = c.id
       WHERE c.business_id = $1
-      AND a.created_at::date = CURRENT_DATE
-    `, [businessId]);
+      AND (a.created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
+    `, [businessId, tz]);
 
+    // TWO CHANGES, and both were defects rather than preferences.
+    //
+    // It had no date bound at all, so it was a lifetime running total sitting
+    // in a row of three counts labelled "today" — a number that only ever goes
+    // up and never means anything.
+    //
+    // And it reached customer_requests through a join to calls. `call_id` is
+    // ON DELETE SET NULL, so a request whose call row was removed still exists
+    // and still needs returning, and the join silently dropped exactly those.
+    // customer_requests carries business_id itself; scoping on it directly is
+    // both correct and cheaper.
+    //
+    // NOT a backlog, and it cannot be one: customer_requests has no resolved
+    // or handled column, so nothing in this schema can distinguish a message
+    // that has been returned from one that has not. Counting today's is the
+    // honest reading of the data that exists.
     const followups = await pool.query(`
-      SELECT COUNT(DISTINCT c.id)
-      FROM customer_requests cr
-      JOIN calls c ON cr.call_id = c.id
-      WHERE c.business_id = $1
-    `, [businessId]);
+      SELECT COUNT(*)
+      FROM customer_requests
+      WHERE business_id = $1
+      AND (created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
+    `, [businessId, tz]);
 
     const transferredToday = await pool.query(`
       SELECT COUNT(*)
       FROM calls
       WHERE business_id = $1
-      AND started_at::date = CURRENT_DATE
+      AND (started_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
       AND status = 'transferred'
-    `, [businessId]);
+    `, [businessId, tz]);
 
     res.json({
       calls_today: Number(callsToday.rows[0].count),
@@ -48,8 +95,13 @@ router.get("/api/analytics/:businessId", authenticate, withTenantHandler(async (
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
+    // JSON, like every other route in this app. It answered text/plain
+    // "Server Error", and the dashboard reads err.response.data.error — so a
+    // failing analytics call rendered as a loading skeleton that never
+    // resolved, with nothing anywhere to say why. The message stays generic;
+    // the Postgres text goes to the log, not to the browser.
+    console.error("analytics_failed", err);
+    res.status(500).json({ error: "Could not load analytics." });
   }
 }));
 

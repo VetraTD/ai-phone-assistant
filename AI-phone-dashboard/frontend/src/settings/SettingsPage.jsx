@@ -61,6 +61,13 @@ function snapshotFromBusiness(b) {
     after_hours_policy: AFTER_HOURS_KEYS.includes(b?.after_hours_policy) ? b.after_hours_policy : "take_message",
     voice_provider: b?.voice_provider === "google" ? "google" : "elevenlabs",
     voice_id: b?.voice_id || "",
+    // LVX84. The two the Live front-end actually reads. Both must be in the
+    // snapshot, not just in the picker's markup -- diffSnapshots only ever
+    // sends keys that exist here, so a control editing a key absent from this
+    // object would silently never be saved. Empty string rather than null so
+    // the diff sees a value change rather than a type change.
+    locale: b?.locale || "",
+    live_voice: b?.live_voice || "",
     notification_email: b?.notification_email || "",
     notification_phone: b?.notification_phone || "",
     notifications_enabled: b?.notifications_enabled !== false,

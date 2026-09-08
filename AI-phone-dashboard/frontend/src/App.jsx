@@ -7,7 +7,6 @@ import { LanguageSwitcher, useTranslations } from "./LanguageSwitcher";
 import "./Dashboard.css";
 
 import Login from "./Login";
-import Signup from "./Signup";
 import Onboarding from "./Onboarding";
 import SettingsPage from "./settings/SettingsPage";
 
@@ -433,7 +432,6 @@ function App() {
   };
   // ─────────────────────────────────────────────────────────────────────────
 
-  const [authView, setAuthView] = useState("login");
   const [session, setSession] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -748,9 +746,11 @@ function App() {
     return <LoadingScreen title={t.checkingSession} subtitle={t.checkingSubtitle} />;
 
   if (!session)
-    return authView === "login"
-      ? <Login onSwitchToSignup={() => setAuthView("signup")} />
-      : <Signup onSwitchToLogin={() => setAuthView("login")} />;
+    // Login only. The sign-up route is deliberately closed — see the comment
+    // in Login.jsx: self-serve account creation binds the account to a NEW
+    // empty business, and there is no way to move it to the real one
+    // afterwards. Onboarding is concierge until an invite token exists.
+    return <Login />;
 
   if (needsOnboarding)
     return (

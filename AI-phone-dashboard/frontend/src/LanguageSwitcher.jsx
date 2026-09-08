@@ -158,7 +158,10 @@ export const TRANSLATIONS = {
     transcript: "Transcript",
     aiReceptionist: "Vetra",
     caller: "Caller",
-    noTranscript: "No transcript was captured for this call.",
+    // Reads as a fault otherwise, and for every call taken before transcripts
+    // were switched on it would keep reading as one forever. Says what is
+    // true without implying something broke.
+    noTranscript: "No transcript for this call. Calls answered before transcripts were switched on don't have one.",
     appointments: "Appointments",
     scheduled: "Scheduled",
     status: "Status",
@@ -336,7 +339,7 @@ export const TRANSLATIONS = {
     transcript: "Transcripción",
     aiReceptionist: "Vetra",
     caller: "Llamante",
-    noTranscript: "No se capturó transcripción para esta llamada.",
+    noTranscript: "No hay transcripción de esta llamada. Las llamadas atendidas antes de activar las transcripciones no tienen una.",
     appointments: "Citas",
     scheduled: "Programada",
     status: "Estado",
@@ -511,7 +514,7 @@ export const TRANSLATIONS = {
     transcript: "Transcription",
     aiReceptionist: "Vetra",
     caller: "Appelant",
-    noTranscript: "Aucune transcription capturée pour cet appel.",
+    noTranscript: "Pas de transcription pour cet appel. Les appels reçus avant l'activation des transcriptions n'en ont pas.",
     appointments: "Rendez-vous",
     scheduled: "Programmé",
     status: "Statut",

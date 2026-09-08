@@ -15,6 +15,8 @@ const {
   TRANSFER_POLICIES,
   VOICE_PROVIDERS,
   ELEVENLABS_VOICE_IDS,
+  LOCALES,
+  LIVE_VOICES,
   SMS_TEMPLATE_KINDS,
   SMS_TEMPLATE_MAX_LENGTH,
   SMS_TEMPLATE_PLACEHOLDERS,
@@ -157,6 +159,43 @@ function validateLanguagesSpoken(value) {
   return { value: [...new Set(value)] };
 }
 
+/**
+ * The accent and language this tenant is pinned to.
+ *
+ * NOT validateEnum, because the column is nullable and NULL is a meaningful
+ * value: migration 025 defines it as "derive from the phone number", which is
+ * the correct setting for most tenants and the one a business has to be able
+ * to get back to. validateEnum would refuse the empty string and strand
+ * anyone who ever picked an accent.
+ */
+function validateLocale(value) {
+  if (value === null || value === "") return { value: null };
+  if (typeof value !== "string" || !LOCALES.includes(value)) {
+    return { error: `must be one of: ${LOCALES.join(", ")}` };
+  }
+  return { value };
+}
+
+/**
+ * The Gemini Live prebuilt voice for this tenant.
+ *
+ * Empty clears it back to NULL, which migration 041 defines as "use the
+ * per-language default" — clearing the picker has to be able to reach that
+ * state, so an empty string is a value here and not an error.
+ *
+ * The list is a candidate set rather than a vendor-published one, and the
+ * column deliberately has no CHECK constraint for that reason. Validating here
+ * keeps a typo out of the database while leaving the list a deploy away from
+ * being widened.
+ */
+function validateLiveVoice(value) {
+  if (value === null || value === "") return { value: null };
+  if (typeof value !== "string" || !LIVE_VOICES.includes(value)) {
+    return { error: `must be one of: ${LIVE_VOICES.join(", ")}` };
+  }
+  return { value };
+}
+
 function validateVoiceId(value) {
   if (value === null || value === "") return { value: null };
   if (typeof value !== "string" || !ELEVENLABS_VOICE_IDS.includes(value)) {
@@ -254,6 +293,12 @@ const SETTINGS_FIELD_VALIDATORS = {
   recording_disclosure_text: validateBoundedString(500),
   voice_provider: validateEnum(VOICE_PROVIDERS),
   voice_id: validateVoiceId,
+  // LVX84. The two the Live front-end actually reads. voice_provider/voice_id
+  // above are ElevenLabs and reach only the cascade, which serves no
+  // production traffic — so before these existed, the voice picker was a
+  // control wired to nothing.
+  locale: validateLocale,
+  live_voice: validateLiveVoice,
   notification_email: validateEmail,
   notification_phone: validateE164Phone,
   notifications_enabled: validateBoolean,
