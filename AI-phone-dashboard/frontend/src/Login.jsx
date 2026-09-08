@@ -7,8 +7,9 @@ import { Link } from "react-router-dom";
 import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Login.css";
+import { MARKETING_URL } from "./siteUrl";
 
-export default function Login({ onSwitchToSignup }) {
+export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,9 +70,10 @@ export default function Login({ onSwitchToSignup }) {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
-          <Link to="/" className="login-back-home">
+          {/* External. This origin is the app now; its root is the dashboard. */}
+          <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
-          </Link>
+          </a>
         </div>
         <div className="login-brand">
           <div className="login-badge">
@@ -158,15 +160,32 @@ export default function Login({ onSwitchToSignup }) {
                 Your account is protected with secure sign-in and encrypted storage.
               </p>
 
+              {/*
+                NO SELF-SERVE SIGN-UP, and this is a safety gate rather than a
+                missing feature.
+
+                Creating an account calls app_create_business_for_user, which
+                makes a NEW EMPTY business and binds the account to it. There is
+                no join-an-existing-business path: app_attach_user_to_business is
+                granted to nobody and is operator-only, because taking a business
+                id as an argument would make it a tenant-hopping primitive on a
+                request path.
+
+                So a customer who signs up before their configuration is imported
+                binds themselves to an empty business, and attaching them to the
+                real one then fails with "already belongs to a business". The only
+                recovery is deleting their account. Onboarding is done with them,
+                by hand, and the front door should say so.
+
+                Signup.jsx and Onboarding.jsx are intact and still tested — this
+                is the route being closed, not the code being deleted. It reopens
+                the day there is an invite or claim token to attach against.
+              */}
               <div className="login-footer">
-                <span>Need an account?</span>
-                <button
-                  type="button"
-                  onClick={onSwitchToSignup}
-                  className="login-link"
-                >
-                  Sign up
-                </button>
+                <span>Don&apos;t have an account yet?</span>
+                <Link to="/contact" className="login-link">
+                  Request access
+                </Link>
               </div>
             </div>
           </form>

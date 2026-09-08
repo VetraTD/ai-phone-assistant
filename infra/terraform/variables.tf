@@ -351,8 +351,18 @@ variable "dashboard_url" {
   default     = ""
 
   validation {
-    condition     = var.dashboard_url == "" || can(regex("^https://[^/]+/.+", var.dashboard_url))
-    error_message = "dashboard_url must be an https:// URL WITH a path — e.g. https://<host>/app. The bare origin serves the marketing page, not the dashboard."
+    # RELAXED 2026-09-08, and the old rule was right until the day it wasn't.
+    #
+    # It demanded a path: "The bare origin serves the marketing page, not the
+    # dashboard." That was true while one Firebase site served an in-repo
+    # Landing page at `/` and the dashboard at `/app`. The dashboard has since
+    # moved to the root on its own origin and the Landing page is retired, so
+    # the bare origin IS the dashboard and a path is now the wrong answer.
+    #
+    # Still requires https and a host: an http:// link in a notification email
+    # or a bare hostname with no scheme is a broken link either way.
+    condition     = var.dashboard_url == "" || can(regex("^https://[^/]+(/.*)?$", var.dashboard_url))
+    error_message = "dashboard_url must be an https:// URL — e.g. https://app.vetratd.com. A path is allowed but no longer required; the dashboard now serves from the root of its own origin."
   }
 
   validation {
@@ -360,10 +370,20 @@ variable "dashboard_url" {
     # in versions.tf. The check exists because these two settings are edited in
     # different places for different reasons and nothing else would notice them
     # disagreeing until a clinic reported a broken link.
+    #
+    # THE HOST REGEX LOST ITS TRAILING SLASH, and that was not cosmetic. It read
+    # `^https://([^/]+)/`, which cannot match a bare origin — so the moment
+    # dashboard_url became `https://app.vetratd.com` the `!can(...)` arm went
+    # true and this check passed VACUOUSLY, silently ceasing to verify the one
+    # thing it exists to verify. A guard that quietly stops guarding is worse
+    # than one that was never written, because the plan still comes back green.
+    #
+    # The `!can(...)` arm stays, but now only fires for a URL with no https host
+    # at all — which the validation above already rejects.
     condition = (
       var.dashboard_url == "" ||
-      !can(regex("^https://([^/]+)/", var.dashboard_url)) ||
-      contains(var.dashboard_domains, regex("^https://([^/]+)/", var.dashboard_url)[0])
+      !can(regex("^https://([^/]+)", var.dashboard_url)) ||
+      contains(var.dashboard_domains, regex("^https://([^/]+)", var.dashboard_url)[0])
     )
     error_message = "dashboard_url's host is not in dashboard_domains, so the dashboard API would refuse it on CORS. Add the host there, or point this at one that is already listed."
   }
@@ -519,4 +539,32 @@ variable "live_model" {
   description = "Live model id. Must exist on `var.live_surface`."
   type        = string
   default     = "gemini-3.1-flash-live-preview"
+}
+
+# ---------------------------------------------------------------------------
+# WHICH FRONT-END ANSWERS THE PHONE, told to the dashboard.
+#
+# This is not derivable and must not be guessed. Live versus cascade is decided
+# by the Twilio number's `voiceUrl` — /twilio/live-voice against /twilio/voice —
+# which lives at Twilio and appears nowhere in this database or this state.
+#
+# The dashboard needs it because the two front-ends read DIFFERENT columns for
+# the same setting. The cascade reads voice_provider/voice_id (ElevenLabs); the
+# Live front-end reads live_voice and locale. Showing the wrong pair is LVX84:
+# a business picked a voice, watched it save, and heard no change on any call,
+# because the column it wrote is read by a front-end that serves no traffic.
+#
+# So the deployment declares it. A wrong value here shows the wrong picker,
+# which is visible in a second; guessing it from something in the database
+# would produce the same silent failure in a new place.
+# ---------------------------------------------------------------------------
+variable "voice_frontend" {
+  description = "Which front-end serves calls on this stack: `live` or `cascade`. Decides which voice settings the dashboard offers."
+  type        = string
+  default     = "live"
+
+  validation {
+    condition     = contains(["live", "cascade"], var.voice_frontend)
+    error_message = "voice_frontend must be `live` or `cascade`. The dashboard treats anything else as `live`, so a typo would silently keep showing the Live picker."
+  }
 }

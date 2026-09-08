@@ -812,7 +812,19 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
     //
     // Safe rather than strict: this handler returning 500 makes Twilio RETRY
     // the callback, which turns one failed write into several.
-    db.withTenantSafe(businessId, () => db.completeCall(callSid, status, duration), {
+    //
+    // AWAITED, as of 2026-09-08, and it was not before. Every Cloud Run service
+    // in this estate runs `cpu_idle = true` (cost-controls.tf — it is the
+    // budget), so CPU is throttled the moment res.end() runs and work scheduled
+    // after it is not guaranteed to finish. This is the one write on this
+    // handler that MUST land: without it a completed call keeps a status of
+    // in-progress and a null duration forever, which is what the dashboard was
+    // showing. The await costs a few milliseconds against a Twilio callback
+    // timeout measured in seconds.
+    //
+    // withTenantSafe still swallows, so a failed write is still a 200 and still
+    // does not trigger a retry storm. Only the timing changed.
+    await db.withTenantSafe(businessId, () => db.completeCall(callSid, status, duration), {
       operation: "completeCall",
       callSid,
     });
@@ -877,6 +889,19 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
+        // Deliberately NOT awaited by the handler above, and therefore exposed
+        // to the same cpu_idle throttle completeCall was just moved out of.
+        // Awaiting it instead would put a Gemini round trip in front of
+        // Twilio's callback response, and a hang there earns a retry and a
+        // second summary. So it stays fire-and-forget and says when it lands:
+        // if this line never appears in production while transcripts do, the
+        // throttle is eating post-response work and the trade has to be
+        // revisited. An unmeasured guess in either direction is worse.
+        log.info("call_summary_written", {
+          callSid,
+          transcriptRows: transcript.length,
+          callerTurns: callerTurns.length,
+        });
       }, { operation: "generateSummary", callSid });
     }
 

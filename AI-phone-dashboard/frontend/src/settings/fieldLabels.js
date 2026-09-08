@@ -22,6 +22,8 @@ export const FIELD_LABELS = {
   custom_instructions: { label: "House rules", group: "voice" },
   voice_provider: { label: "Voice", group: "voice" },
   voice_id: { label: "Voice", group: "voice" },
+  live_voice: { label: "Voice", group: "voice" },
+  locale: { label: "Accent and language", group: "voice" },
   languages_spoken: { label: "Languages spoken", group: "voice" },
   recording_disclosure_enabled: { label: "Recording announcement", group: "voice" },
   recording_disclosure_text: { label: "Recording announcement wording", group: "voice" },

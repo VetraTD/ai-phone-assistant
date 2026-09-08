@@ -118,6 +118,77 @@ router.get("/api/voices", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// LVX84: the catalogue for the front-end that actually answers the phone.
+//
+// A SEPARATE ROUTE rather than a wider /api/voices, because that one returns a
+// bare array and the picker and its parity test both read it positionally.
+//
+// EVERY ENTRY CARRIES ITS EVIDENCE, and that is the point of the shape. This
+// list is not a vendor catalogue — it is scripts/voice-compare.js's candidate
+// set, and two of the five have already been heard on a real phone call and
+// found wanting. The rig renders 24 kHz WAV files; a phone call is mu-law 8 kHz
+// and throws away everything above about 3.4 kHz, which is where a lot of a
+// voice's character lives. So a file comparison NARROWS the list and cannot
+// pick the winner.
+//
+// Showing that in the picker is deliberate. An owner choosing blind from five
+// names would re-run an experiment that has already been run twice, and a
+// preference chosen without evidence gets written down as a decision.
+// ---------------------------------------------------------------------------
+const LIVE_VOICE_CATALOG = [
+  {
+    name: "Kore",
+    label: "Kore",
+    evidence:
+      "Currently the default for every language. Picked from the rendered files, then reported as not the best quality over the phone — good on the WAV, muffled on a call.",
+  },
+  {
+    name: "Puck",
+    label: "Puck",
+    evidence: "Rendered as a candidate. Never heard on a real call.",
+  },
+  {
+    name: "Charon",
+    label: "Charon",
+    evidence: "Rendered as a candidate. Never heard on a real call.",
+  },
+  {
+    name: "Aoede",
+    label: "Aoede",
+    evidence: "Tried on a real call on the strength of the rendered file, and rejected after four turns.",
+  },
+  {
+    name: "Leda",
+    label: "Leda",
+    evidence: "Rendered as a candidate. Never heard on a real call.",
+  },
+];
+
+// The accent and language the voice is pinned to. Three, and only three: each
+// id needs a full profile in the root repo (STT language, date style, currency,
+// phone grouping, ringback) and the column's CHECK constraint enforces the set.
+const LOCALE_CATALOG = [
+  { id: "en-GB", label: "British English", description: "British accent and phrasing. Dates as day/month." },
+  { id: "en-US", label: "American English", description: "American accent and phrasing. Dates as month/day." },
+  { id: "es-US", label: "Spanish (US)", description: "Spanish, for callers served from a US number." },
+];
+
+router.get("/api/live-voices", (req, res) => {
+  res.json({
+    // WHICH FRONT-END IS SERVING, declared rather than derived.
+    //
+    // The dashboard genuinely cannot work this out: Live versus cascade is
+    // decided by the Twilio number's voiceUrl (/twilio/live-voice against
+    // /twilio/voice), which lives at Twilio and is not in this database.
+    // Guessing it from anything in here would be a second LVX84 — a control
+    // that looks informed and is not.
+    frontend: (process.env.VOICE_FRONTEND || "live").trim() === "cascade" ? "cascade" : "live",
+    voices: LIVE_VOICE_CATALOG,
+    locales: LOCALE_CATALOG,
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integrations API (list, create/update, definitions) — configured from the
 // dashboard's Settings page, kept alongside the other settings routes.
 // ---------------------------------------------------------------------------

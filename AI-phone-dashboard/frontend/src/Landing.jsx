@@ -28,6 +28,7 @@ import {
   getStoredCurrency,
 } from "./landingPricing.js";
 import "./Landing.css";
+import { APP_URL } from "./siteUrl";
 
 const DEMO_NUMBER = "+1 (817) 601-1171";
 
@@ -691,16 +692,16 @@ export default function Landing() {
             <a href="#faq">FAQ</a>
           </nav>
           <div className="landing-header-actions">
-            <Link to="/app" className="landing-header-login">
+            <a href={`${APP_URL}/login`} className="landing-header-login">
               Log in
-            </Link>
+            </a>
             <span className="landing-header-divider" aria-hidden="true" />
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-header-phone">
               <Phone className="landing-header-phone-icon" size={16} strokeWidth={2.4} />
               {DEMO_NUMBER}
             </a>
-            <Link to="/app" className="landing-header-cta">
-              Get started
+            <Link to="/contact" className="landing-header-cta">
+              Request access
             </Link>
           </div>
         </div>
@@ -716,8 +717,8 @@ export default function Landing() {
               Every call answered, day or night, automatically.
             </p>
             <div className="landing-hero-ctas">
-              <Link to="/app" className="landing-cta-primary landing-hero-cta">
-                Get started
+              <Link to="/contact" className="landing-cta-primary landing-hero-cta">
+                Request access
               </Link>
             </div>
             <p className="landing-hero-trust">
@@ -899,7 +900,7 @@ export default function Landing() {
               <span className="landing-cost-savings-pct">
                 <CountUp value={`${COST_COMPARISON[currency].savingsPct}%`} /> lower cost
               </span>
-              <Link to="/app" className="landing-cta-secondary landing-cost-savings-cta">
+              <Link to="/contact" className="landing-cta-secondary landing-cost-savings-cta">
                 Start saving
               </Link>
             </div>
@@ -979,9 +980,9 @@ export default function Landing() {
               <PreviewTabs />
             </div>
           </div>
-          <Link to="/app?demo=1" className="landing-cta-secondary landing-preview-cta">
+          <a href={`${APP_URL}/?demo=1`} className="landing-cta-secondary landing-preview-cta">
             Try the guided dashboard demo
-          </Link>
+          </a>
         </div>
       </section>
 
@@ -1007,17 +1008,17 @@ export default function Landing() {
         <div className="landing-cta-block-inner">
           <VetraMark size={48} className="landing-cta-block-mark" />
           <h2 className="landing-cta-block-title">Never miss another call.</h2>
-          <p className="landing-cta-block-sub">Create an account, call the demo line, or drop us a message, whatever suits you.</p>
+          <p className="landing-cta-block-sub">Call the demo line, or tell us about your business and we'll set it up with you.</p>
           <div className="landing-cta-block-buttons">
-            <Link to="/app" className="landing-cta-primary">
-              Get started
+            <Link to="/contact" className="landing-cta-primary">
+              Request access
             </Link>
             <a href={`tel:${DEMO_NUMBER.replace(/\s/g, "")}`} className="landing-cta-secondary">
               Call demo line
             </a>
-            <Link to="/contact" className="landing-cta-secondary">
-              Contact us
-            </Link>
+            <a href={`${APP_URL}/login`} className="landing-cta-secondary">
+              Log in
+            </a>
           </div>
         </div>
       </section>
@@ -1026,7 +1027,7 @@ export default function Landing() {
         <div className="landing-footer-inner">
           <VetraLogo to="/" className="vetra-logo-footer" />
           <div className="landing-footer-links">
-            <Link to="/app">Log in</Link>
+            <a href={`${APP_URL}/login`}>Log in</a>
             <Link to="/contact">Contact</Link>
             <a href={`${privacyOrigin}/legal`}>Privacy Policy</a>
             <Link to="/legal">Terms</Link>

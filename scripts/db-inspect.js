@@ -51,6 +51,11 @@ const cfg = {
 //   --counts            row counts per table. Numbers, never content.
 //                       Safe anywhere, and the honest answer to "does the
 //                       database actually work".
+//   --calls             one line of metadata per call: status, ended_at,
+//                       duration, whether a summary exists, how many
+//                       transcript rows. NO message text. Safe anywhere, and
+//                       the answer to "which rows are not being updated",
+//                       which a count cannot give. --limit N, default 25.
 //   (no arguments)      the full audit, including the transcript dump.
 //                       STAGING ONLY, unchanged.
 // ---------------------------------------------------------------------------
@@ -61,7 +66,12 @@ const argOf = (name) => {
 };
 const BUSINESS = argOf("business");
 const WANT_COUNTS = argv.includes("--counts");
-const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS;
+const WANT_CALLS = argv.includes("--calls");
+// Bounded so a tenant with a long history cannot turn one question into a
+// thousand log lines. Cloud Logging drops what it cannot ship, and a truncated
+// answer that looks complete is the failure mode this file already knows about.
+const CALLS_LIMIT = Math.min(Math.max(parseInt(argOf("limit") || "25", 10) || 25, 1), 200);
+const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS;
 
 const looksLikeStaging = /staging/i.test(cfg.database) && /staging/i.test(cfg.instance);
 
@@ -77,7 +87,8 @@ if (!AD_HOC && !looksLikeStaging) {
 ` +
       "For production, ask a narrower question that carries no caller speech:\n" +
       "  --args=scripts/db-inspect.js,--counts\n" +
-      "  --args=scripts/db-inspect.js,--business,+441372656055"
+      "  --args=scripts/db-inspect.js,--business,+441372656055\n" +
+      "  --args=scripts/db-inspect.js,--business,+441372656055,--calls"
   );
   process.exit(1);
 }
@@ -179,6 +190,72 @@ try {
           }
         }
         await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // --calls: one line of METADATA per call. No message text, ever.
+  //
+  // `--counts` answers "is anything being written". It cannot answer the
+  // question that actually came up: nine production calls logged
+  // call_ended_status_callback reading "completed", and the dashboard showed
+  // them still in-progress with no duration. A count of `calls` is the same
+  // number either way.
+  //
+  // What discriminates is per-row: status, ended_at, duration_seconds, and
+  // whether a summary was ever written. None of that is content -- it is the
+  // shape of the row, not a word anyone said -- so it sits on the safe side of
+  // the line this file draws at the top, alongside --counts and --business.
+  //
+  // The SID is truncated to its last six characters. That is enough to join a
+  // row to a log line and not enough to be a handle on the call elsewhere.
+  // ---------------------------------------------------------------------
+  if (WANT_CALLS) {
+    if (!scopedBusinessId) {
+      show("calls", [
+        {
+          skipped: "calls need a tenant to scope to",
+          hint: "pass --business <e164> as well; RLS makes an unscoped select read 0",
+        },
+      ]);
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SELECT set_config('app.business_id', $1, true)`, [scopedBusinessId]);
+        const rows = await client.query(
+          `SELECT right(twilio_call_sid, 6) AS sid_tail,
+                  status,
+                  started_at,
+                  ended_at,
+                  duration_seconds,
+                  (summary IS NOT NULL AND summary <> '') AS has_summary,
+                  sentiment IS NOT NULL AS has_sentiment,
+                  (SELECT count(*)::int FROM call_transcripts t WHERE t.call_id = c.id) AS transcript_rows
+             FROM calls c
+            ORDER BY started_at DESC
+            LIMIT $1`,
+          [CALLS_LIMIT]
+        );
+        show("calls", rows.rows);
+        // The single number the whole investigation turned on, said plainly so
+        // it does not have to be counted by eye across twenty log lines.
+        const stuck = rows.rows.filter((r) => r.ended_at === null).length;
+        show("calls summary", [
+          {
+            listed: rows.rows.length,
+            never_completed: stuck,
+            note:
+              "never_completed counts rows with a null ended_at. A local harness run leaves one " +
+              "legitimately -- it is not Twilio and sends no status callback.",
+          },
+        ]);
+        await client.query("COMMIT");
+      } catch (err) {
+        show("calls", [{ error: err?.message }]);
       } finally {
         client.release();
       }

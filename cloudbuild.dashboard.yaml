@@ -22,10 +22,32 @@
 # Running it
 # ---------------------------------------------------------------------------
 #
-#   CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud builds submit AI-phone-dashboard/backend \
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit AI-phone-dashboard/backend \
 #     --config=cloudbuild.dashboard.yaml \
-#     --project=vetra-shared-c3a3bd \
+#     --project=vetra-core-edc8ca \
+#     --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
 #     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# CORRECTED 2026-09-08, and these are the SAME three mistakes cloudbuild.yaml
+# was corrected for on 2026-09-02. That correction was never carried across, so
+# the one build command in this repository that had already been debugged once
+# was still wrong here:
+#
+#   ~/.gcloud-vetratd    admin@vetratd.com is RESTRICTED at Google and returns
+#                        `access_denied: Account Restricted`. Use
+#                        ~/.gcloud-vetra2.
+#   vetra-shared-c3a3bd  an ATTEMPT-1 project that no longer exists. This file
+#                        is the THIRD to be bitten by that name -- see
+#                        cloudbuild.frontend.yaml:74, and the dashboard
+#                        backend's own .env, which still held it on 2026-09-08
+#                        and had made local sign-in impossible since the estate
+#                        was rebuilt.
+#   no --service-account Cloud Build defaults to the COMPUTE service account,
+#                        which holds no roles here, and fails with a Cloud
+#                        Storage permission error that reads like a missing
+#                        source archive.
+#
+# Verified 2026-09-08: the corrected form builds `dashboard:e1419d9`.
 #
 # Note the SOURCE DIRECTORY argument. Without it gcloud uploads the repository
 # root, where .gcloudignore drops the dashboard and the build fails on a
