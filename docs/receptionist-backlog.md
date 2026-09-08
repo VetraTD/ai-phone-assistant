@@ -100,6 +100,7 @@ Status means:
 | **LVX88** | the greeting tells every caller the call is recorded, and it is not | **OPEN · P1** — the opening line says "calls are recorded for quality". On the Live path there is no `<Record>` verb and `addTranscriptEntry` is never called (LVX83), so nothing is recorded and nothing is retained. A statement to callers that is not true, and one that matters the moment anyone asks for their data. Three ways out: record properly, stop saying it, or make it true via LVX83 |
 | **LVX89** | a write that matched no rows is filed as a successful audit record | **OPEN · P1** — `completeCall` calls `noteAccess` with `rowCount: 0` and nothing complains (`services/db.js:869-871`); an UNSCOPED write files nothing at all outside hipaa mode (`:272`). Nine production calls reported `completed` while their rows never moved, and no instrument said so. |
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
+| **LVX91** | a SECOND dashboard API is still live on Railway | **OPEN · P1, SEVERITY UNCONFIRMED** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. Whether it reaches live data depends on its `DATABASE_URL`, which has not been read. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8448,3 +8449,62 @@ cd infra/terraform && CLOUDSDK_CONFIG=~/.gcloud-vetra2 TF_DISABLE_PLUGIN_TLS=1 \
 LVX30, LVX83, LVX84, LVX90 go to **VERIFIED** with the row and the counters
 quoted, or to **SHIPPED, NOT WORKING** with what actually came back. Not to
 "probably fine".
+
+---
+
+## LVX91 — a second dashboard API is still live on Railway
+
+Found 2026-09-08 while fixing the marketing site's Log in button, which is the
+only reason anybody looked.
+
+`https://ai-phone-assistant-production-1f53.up.railway.app` is **online, in EU
+West, one replica**, running the dashboard backend from a GitHub deploy 21 days
+old (PR #100). It is not a husk:
+
+```
+/health                        200  {"status":"running","service":"dashboard-backend"}
+/api/voices                    200  the full ElevenLabs catalogue
+/api/integrations/definitions  200  real data
+/api/me                        401  {"error":"No authorization header"}
+/api/live-voices               404  (predates 2026-09-08)
+/db-test                       404  (older than the current backend)
+```
+
+The 401 rather than a 503 means `IDENTITY_PLATFORM_PROJECT_ID` **is set** on
+it — `authMiddleware` returns 503 when that variable is missing. So its auth
+path is live and configured.
+
+**CORS is not the control here, and reading it as one would be the mistake.**
+Its allow-list is only `vetratd.com` and `www.vetratd.com` — it refuses
+`app.vetratd.com` and the `.web.app` origin, so `CORS_ORIGINS` is unset and it
+is falling back to the hardcoded production defaults. But CORS constrains
+BROWSERS. A plain `curl` reached `/api/me` and got a normal 401, so the only
+thing standing between this service and its database is the JWT check.
+
+**The unresolved question, and it decides the severity:** what are
+`DATABASE_URL` and `IDENTITY_PLATFORM_PROJECT_ID` set to on that service?
+
+- If the project id is the DEAD `vetra-shared-c3a3bd`, no current token can
+  validate and this is a bill and a merge hazard, nothing more.
+- If it is the live `vetra-core-edc8ca` **and** `DATABASE_URL` reaches real
+  data, then any holder of a valid dashboard token has a second, unmonitored,
+  21-day-old way in, from any client, bypassing every control added since.
+
+**Two live consequences regardless of that answer:**
+
+1. **The contact form has been posting here.** Vercel's `VITE_API_URL` points
+   at this host, so every submission from vetratd.com went to this service
+   rather than to Cloud Run. Whether any arrived is unknown; nobody has checked
+   the mailbox against the traffic.
+2. **It is a merge hazard.** Its deployments are labelled "via GitHub". The
+   last was 21 days ago while `main` has moved considerably, which suggests
+   auto-deploy is off or watching another branch — but that is an inference,
+   not a setting anybody has read, and it is why the 2026-09-08 merge was held.
+
+**The intent to remove it already existed.** The migration ledger's D7 records
+cancelling the Vercel account; Railway was plainly meant to go the same way and
+did not. Nothing in the GCP estate depends on it.
+
+**Done when** the service is deleted, or its GitHub deploy is disconnected and
+its database credentials revoked, and `VITE_API_URL` on Vercel points at Cloud
+Run so nothing routes to it.
