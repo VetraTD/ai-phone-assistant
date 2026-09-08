@@ -101,6 +101,7 @@ Status means:
 | **LVX89** | a write that matched no rows is filed as a successful audit record | **OPEN · P1** — `completeCall` calls `noteAccess` with `rowCount: 0` and nothing complains (`services/db.js:869-871`); an UNSCOPED write files nothing at all outside hipaa mode (`:272`). Nine production calls reported `completed` while their rows never moved, and no instrument said so. |
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
+| **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8572,3 +8573,58 @@ constrains browsers — a `curl` reached `/api/me` and received a normal 401.
 Supabase project has been inventoried and then either decommissioned or
 deliberately retained with its credentials rotated and that decision written
 down.
+
+---
+
+## LVX92 — the bundle would send a live token to a subdomain we no longer own
+
+Found 2026-09-08 while checking that a Vercel redeploy had picked up a corrected
+`VITE_API_URL`. The contact form had; the App chunk turned out to contain a
+SECOND Railway host nobody was looking for.
+
+`AI-phone-dashboard/frontend/src/numberAPI.js` did two things that are fine
+apart and bad together:
+
+```js
+const NUMBER_API_BASE =
+  import.meta.env.VITE_NUMBER_API_URL ||
+  "https://ai-phone-assistant-production-3e90.up.railway.app";   // released
+
+numberApi.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;    // live token
+  return config;
+});
+```
+
+That host is **gone** — it answers `{"status":"error","code":404,"message":
+"Application not found"}`. A dead default would only be broken. A dead default
+on a **released** subdomain, with an interceptor that attaches a valid Identity
+Platform bearer token, is a credential handed to whoever claims the name next.
+
+**This is the A9 hazard in a second place.** The migration ledger records
+removing the Vercel preview domain from the CORS allow-list for exactly this
+reasoning: *"a released `*.vercel.app` subdomain can be claimed by anyone, which
+would hand a stranger a cross-origin foothold against an authenticated
+session."* The same sentence describes this line. A9 fixed the allow-list and
+nobody swept the codebase for the general shape.
+
+**Nothing calls it today**, and that is the argument FOR fixing it rather than
+against. `Onboarding.jsx` is the only consumer, and self-serve onboarding was
+closed on 2026-09-08 — so this is a dormant path with a token in it, which is
+the kind of thing somebody switches back on without reading the file.
+
+**The fix is the absence of a fallback.** Empty means axios uses a relative
+base, so an unset variable produces a 404 on our own origin: loud, local,
+harmless. It cannot simply default to `VITE_API_URL`, because the
+number-purchase endpoints live on the VOICE service (root `server.js:1126`,
+`:1156`), not the dashboard API.
+
+`src/__tests__/numberApiBase.test.js` asserts the base is never an absolute URL
+when unset, and asserts the token is still attached — because it is the pairing
+that matters, and a future change that drops the interceptor would make the
+first assertion pass for the wrong reason.
+
+**Done when** DONE 2026-09-08 for the fallback. Still open: nobody has swept the
+rest of the codebase for other released-host defaults, which is the general
+version of this and of A9.
