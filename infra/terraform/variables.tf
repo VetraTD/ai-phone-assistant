@@ -468,6 +468,37 @@ variable "voice_intent_marker" {
 # The case for switching is compliance, not performance, and it has a date:
 # before the first paying client, or immediately if 3.1 is withdrawn.
 # ---------------------------------------------------------------------------
+variable "live_debug_transcript" {
+  description = <<-EOT
+    Log what the assistant SAID, per turn, as `live_debug_assistant_turn`.
+
+    Empty (the default) is off: lib/voice/live/index.js treats anything but the
+    exact string "1" as disabled, so an unset variable renders an empty env var
+    and changes nothing.
+
+    OFF BY DEFAULT AND MEANT TO STAY THAT WAY. This prints assistant speech,
+    which carries the caller's own details back to them -- their name, their
+    number, their appointment -- so it is PHI even though the words are ours.
+    The code refuses it outright when DEPLOYMENT_MODE=hipaa; this variable is
+    the second gate, for a `standard` deployment where nothing else would stop
+    it.
+
+    Turn it on for a NAMED test call and turn it off after:
+
+      terraform apply -var="image_tag=..." -var="live_debug_transcript=1"
+
+    It exists because the counters answer "did it fire" and not "what did it
+    say", and a behaviour fix needs the sentence.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "1"], var.live_debug_transcript)
+    error_message = "live_debug_transcript must be \"1\" or empty. The code compares against the exact string \"1\", so \"true\" or \"yes\" would read as OFF while looking enabled."
+  }
+}
+
 variable "live_surface" {
   description = "Live front-end surface: `aistudio` (Gemini Developer API) or `vertex`."
   type        = string

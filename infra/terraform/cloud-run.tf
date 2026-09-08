@@ -689,6 +689,15 @@ resource "google_cloud_run_v2_service" "this" {
         value = var.live_model
       }
 
+      # Empty unless a named test call is being run. See the variable's own
+      # description: this prints assistant speech, which carries the caller's
+      # details back to them, and the code refuses it under DEPLOYMENT_MODE=hipaa
+      # regardless of what is set here.
+      env {
+        name  = "LIVE_DEBUG_TRANSCRIPT"
+        value = var.live_debug_transcript
+      }
+
       # -------------------------------------------------------------------
       # THREE VARIABLES THE VOICE ROUTE READS AND THIS MODULE DELIBERATELY
       # DOES NOT RENDER. Recorded here so the absence reads as a decision,
