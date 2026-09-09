@@ -145,7 +145,13 @@ describe("LVX53 end to end — the booking is refused, not written", () => {
     config: {},
     callerContext: ON_FILE,
     callerSaidThisCall,
-    lastCallerText: "Tuesday works",
+    // Consent and ordering both satisfied, so the ONLY thing that can refuse
+    // below is the provenance gate. Added 2026-09-09 with the LVX95 write-order
+    // gate, which sits above this one for the reason the consent gate sits
+    // above the spelling gate: checking whose name is on a write nobody
+    // authorised is checking a decision that was never made.
+    lastCallerText: "Yes, Tuesday works",
+    lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
   });
 
   const book = (c) =>

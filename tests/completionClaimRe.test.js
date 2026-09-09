@@ -214,3 +214,78 @@ describe("completionClaimRe — passive voice and an object between", () => {
     it(`ignores: ${said.slice(0, 52)}`, () => expect(en.test(said)).toBe(false));
   }
 });
+
+// ---------------------------------------------------------------------------
+// LVX97 — the phrasing that was invisible to BOTH detectors, and the wider
+// predicate built for it.
+//
+// Call 156fb2, 2026-09-09, production config with every tool declared and
+// working. `book_appointment` never ran anywhere in the call and the
+// appointments table read 3 before and 3 after, all three cancelled from an
+// earlier call. What the assistant said, forty seconds before the caller rang
+// back to move the appointment it had just invented:
+//
+//   "Thanks, <name>. So, we're all set for your free consultation on
+//    Wednesday, September ninth at one in the afternoon."
+//
+// Zero claim events on a fourteen-turn call. `you're all set` was already
+// covered and `we're all set` was not, and the post-call ledger is filled from
+// the same predicate, so the audit was blind for the same reason the live guard
+// was.
+//
+// TWO REGEXES ON PURPOSE. The wide one drives the ledger and the
+// reconciliation, neither of which speaks; the narrow one still drives the turn
+// note, so nothing about what the model is told mid-call has moved and this
+// round's calls stay comparable with the ten that produced LVX94-98. The
+// difference between their counters is exactly the population being measured.
+// ---------------------------------------------------------------------------
+const enWide = getStrings({ languagesSpoken: ["en"] }).completionClaimWideRe;
+
+describe("completionClaimWideRe — LVX97's phrasing, counted but not spoken to", () => {
+  const WIDE_ONLY = [
+    // The call, verbatim.
+    "So, we're all set for your free consultation on Wednesday, September ninth at one in the afternoon.",
+    "We are all set for your consultation.",
+    "That's finalized for Thursday.",
+    "You're taken care of for Thursday at ten.",
+  ];
+  for (const said of WIDE_ONLY) {
+    it(`wide counts, narrow does not: ${said.slice(0, 44)}`, () => {
+      expect(enWide.test(said)).toBe(true);
+      expect(en.test(said)).toBe(false);
+    });
+  }
+
+  // A STRICT SUPERSET. If this ever fails, live_claim_wide_only stops meaning
+  // "what the widening added" and the two counters can no longer be subtracted.
+  const NARROW_CLAIMS = [
+    "You're all set for Wednesday at one.",
+    "That's confirmed for Wednesday at one in the afternoon.",
+    "So I have you booked for a consultation on Wednesday.",
+    "Both appointments have been canceled for you.",
+    "I've booked you in for Wednesday.",
+  ];
+  for (const said of NARROW_CLAIMS) {
+    it(`superset holds: ${said.slice(0, 44)}`, () => {
+      expect(en.test(said)).toBe(true);
+      expect(enWide.test(said)).toBe(true);
+    });
+  }
+
+  // WHY `we` DID NOT SIMPLY JOIN THE ALTERNATION. These are the sentences that
+  // would have been counted as fabricated bookings if it had, and two of them
+  // are among the commonest things a receptionist says. The reconciliation
+  // notifies a human, so a false positive here costs somebody a phone call.
+  const NOT_CLAIMS_WIDE = [
+    "We're booked up on Wednesday, I'm afraid.",
+    "We're fully booked that morning.",
+    "We're done for today, thanks.",
+    "Okay, we're all done then.",
+    "I have your appointment here in front of me.",
+    "All appointments are confirmed by text.",
+    "...the last four digits of the phone number the appointment is booked under?",
+  ];
+  for (const said of NOT_CLAIMS_WIDE) {
+    it(`wide ignores: ${said.slice(0, 44)}`, () => expect(enWide.test(said)).toBe(false));
+  }
+});

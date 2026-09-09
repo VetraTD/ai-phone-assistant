@@ -238,6 +238,46 @@ export async function notifyAppointmentBooked({ businessId, appointment }) {
 }
 
 /**
+ * Notify when the call claimed something the database does not hold. LVX97.
+ *
+ * SEPARATE from notifyCustomerRequest, and not a parameter on it, because the
+ * sentence is the whole content of the notification. "A caller left a message
+ * or a callback request" is what that one says, and it is FALSE here: nobody
+ * left a message, the receptionist described work it had not done. A
+ * notification that misdescribes the event it is reporting is worse than none,
+ * because it teaches the reader to skim them.
+ *
+ * The wording says what is known and does not accuse. The check compares what
+ * the call said against what the database holds; a write that failed for an
+ * unrelated reason lands here too, and the business needs to ring the caller in
+ * either case.
+ *
+ * Rate-limited like every other owner notification. A tenant whose assistant
+ * fabricates on every call has a bigger problem than a throttled alert, and an
+ * unthrottled path here would be the loudest way to discover it.
+ *
+ * @param {{ businessId: string, callbackNumber?: string|null }} opts
+ */
+export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null }) {
+  if (!NOTIFICATIONS_ENABLED) return;
+  try {
+    if (!checkRateLimit(businessId)) return;
+    const config = await loadBusinessNotificationConfig(businessId);
+    if (!config) return;
+    const sentence =
+      "On a recent call the receptionist told the caller an appointment was booked, cancelled " +
+      "or changed, and no matching record exists. Please check the call and contact the caller" +
+      (callbackNumber ? ` on ${callbackNumber}.` : ".");
+    const subject = `Unconfirmed booking — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
+  } catch (err) {
+    log.error("notify_unconfirmed_claim", { message: err?.message });
+    captureException(err, { businessId });
+  }
+}
+
+/**
  * Notify when a customer request (message/callback) is created.
  * @param {{ businessId: string, customerRequest: { request_type?: string, caller_name?: string, callback_number?: string, message?: string, preferred_time?: string }, call?: { callerNumber?: string } }} opts
  */

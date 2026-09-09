@@ -38,6 +38,7 @@ vi.mock("../lib/sentry.js", () => ({
 }));
 
 import { executeToolCall } from "../services/tools.js";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { parseNaiveDateTime, zonedComponentsToUtcMs } from "../lib/capabilities/datetime.js";
 
 const baseCtx = {
@@ -599,6 +600,47 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
 
       expect(functionResponse.response.success).toBe(false);
       expect(stateEffects.endCallArgs).toBeUndefined();
+    });
+
+    // -----------------------------------------------------------------------
+    // LVX96's instrument gap. Every refusal says WHICH gate said no.
+    //
+    // Until 2026-09-09 only the hesitation branch had a counter. The generic
+    // branch had none, so two refusals on the calls of that evening left no
+    // trace anywhere except `tool_duration success=false` -- a per-tool timing
+    // line, not a decision record. "Why did the gate refuse?" was unanswerable
+    // on both calls where the refusal was then overruled by the sign-off
+    // detector, and both were found by reading the call by hand.
+    //
+    // `endCallRefusal` is the same fact carried per call: bumpCounter writes to
+    // process memory shared by every call on the instance and zeroed by the
+    // next deploy, so a counter alone cannot say which call refused.
+    // -----------------------------------------------------------------------
+    it("names the generic gate as the refuser, in a counter and in stateEffects", async () => {
+      clearStats();
+      const fc = { id: "fc7f", name: "end_call", args: { reason: "premature" } };
+      const ctx = { ...baseCtx, step: "identify_intent", callerTurnCount: 1 };
+
+      const { stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(stateEffects.endCallRefusal).toBe("generic");
+      expect(getLatencyStats().turnTaking.end_call_refused_generic).toBe(1);
+      expect(getLatencyStats().turnTaking.end_call_refused_hesitation).toBeFalsy();
+    });
+
+    it("names the hesitation gate when the caller only hesitated", async () => {
+      // The two branches must stay distinguishable. A single "refused" counter
+      // would have told the 2026-09-09 reader nothing they did not already know
+      // from the tool trace.
+      clearStats();
+      const fc = { id: "fc7g", name: "end_call", args: { reason: "done" } };
+      const ctx = { ...baseCtx, step: "confirm", callerTurnCount: 4, lastCallerText: "umm" };
+
+      const { stateEffects } = await executeToolCall(fc, ctx);
+
+      expect(stateEffects.endCallRefusal).toBe("hesitation");
+      expect(getLatencyStats().turnTaking.end_call_refused_hesitation).toBe(1);
+      expect(getLatencyStats().turnTaking.end_call_refused_generic).toBeFalsy();
     });
   });
 

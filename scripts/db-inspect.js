@@ -46,11 +46,15 @@ const cfg = {
 //
 // So the gate moves from the FILE to the SECTIONS that print content:
 //
-//   --business <e164>   tenant CONFIG only. Name, timezone, hours, policy.
+//   --business <e164>   tenant CONFIG only. Name, timezone, hours, policy,
+//                       allowed_tasks, and whether general_info holds anything.
 //                       No caller speech, no PHI. Safe anywhere.
-//   --counts            row counts per table. Numbers, never content.
-//                       Safe anywhere, and the honest answer to "does the
-//                       database actually work".
+//   --counts            row counts per table, plus the knowledge and capability
+//                       breakdowns. Numbers, never content. Safe anywhere, and
+//                       the honest answer to "does the database actually work".
+//   --appointments      status breakdown and scheduled times. No names, no
+//                       phone numbers, no notes text. Tells `cancelled` from
+//                       `scheduled`, which a count of the table cannot.
 //   --calls             one line of metadata per call: status, ended_at,
 //                       duration, whether a summary exists, how many
 //                       transcript rows. NO message text. Safe anywhere, and
@@ -67,11 +71,22 @@ const argOf = (name) => {
 const BUSINESS = argOf("business");
 const WANT_COUNTS = argv.includes("--counts");
 const WANT_CALLS = argv.includes("--calls");
+// --appointments: the status breakdown and the times.
+//
+// Four blind spots, closed together, and each one cost a call to discover:
+// a rescheduled TIME could not be verified, `cancelled` could not be told from
+// `scheduled`, `--counts` gave one number for a table holding both, and the
+// only way to check a booking existed was to ask the assistant -- which is the
+// thing under test.
+const WANT_APPTS = argv.includes("--appointments");
 // Bounded so a tenant with a long history cannot turn one question into a
 // thousand log lines. Cloud Logging drops what it cannot ship, and a truncated
 // answer that looks complete is the failure mode this file already knows about.
 const CALLS_LIMIT = Math.min(Math.max(parseInt(argOf("limit") || "25", 10) || 25, 1), 200);
-const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS;
+// EVERY new flag belongs in this OR. A flag that is not here leaves AD_HOC
+// false, and the script falls through to the staging-only full audit and exits
+// 1 -- with a message about staging that says nothing about the flag you passed.
+const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS || WANT_APPTS;
 
 const looksLikeStaging = /staging/i.test(cfg.database) && /staging/i.test(cfg.instance);
 
@@ -88,7 +103,8 @@ if (!AD_HOC && !looksLikeStaging) {
       "For production, ask a narrower question that carries no caller speech:\n" +
       "  --args=scripts/db-inspect.js,--counts\n" +
       "  --args=scripts/db-inspect.js,--business,+441372656055\n" +
-      "  --args=scripts/db-inspect.js,--business,+441372656055,--calls"
+      "  --args=scripts/db-inspect.js,--business,+441372656055,--calls\n" +
+      "  --args=scripts/db-inspect.js,--business,+441372656055,--counts,--appointments"
   );
   process.exit(1);
 }
@@ -142,8 +158,24 @@ try {
   let scopedBusinessId = null;
 
   if (BUSINESS) {
+    // app_lookup_business_by_phone RETURNS SETOF businesses, so every column of
+    // the table is already selectable here -- allowed_tasks and general_info
+    // cost no second query and no scope, because the function is SECURITY
+    // DEFINER and sets app.business_id itself when it is unset.
+    //
+    // allowed_tasks is the one that could never be read back after being
+    // written: import-tenant sets it and nothing could confirm it landed. The
+    // default for an unconfigured tenant is book_appointment ONLY, which is why
+    // cancelling was impossible on Brightwork Studio until 2026-09-09.
+    //
+    // general_info is printed as a LENGTH, not as text. It is tenant copy
+    // rather than caller speech, but this file's line is "config and numbers",
+    // and "is there a price configured" is answered by a number.
     const row = await pool.query(
-      `SELECT id, phone_number, name, timezone, after_hours_policy, business_hours
+      `SELECT id, phone_number, name, timezone, after_hours_policy, business_hours,
+              allowed_tasks,
+              (general_info IS NOT NULL AND general_info <> '') AS has_general_info,
+              coalesce(length(general_info), 0) AS general_info_chars
          FROM app_lookup_business_by_phone($1)`,
       [BUSINESS]
     );
@@ -165,7 +197,24 @@ try {
     // security, so an unscoped count returns 0 and reads as "nothing is being
     // written" when it means "you did not say who you are". That distinction is
     // exactly the one this file was written to stop people getting wrong.
-    const TABLES = ["calls", "call_transcripts", "appointments", "sms_consents"];
+    //
+    // customer_requests: the take-message and after-hours path had no row-level
+    // instrument at all, so "did it save the message" was unanswerable from
+    // outside the VPC.
+    //
+    // business_knowledge and business_capabilities: the $3,000 question. The
+    // assistant quoted a price confidently on two consecutive calls. If the
+    // knowledge table is empty and general_info is null, the figure was
+    // invented -- and a price is the worst thing on the list to invent.
+    const TABLES = [
+      "calls",
+      "call_transcripts",
+      "appointments",
+      "sms_consents",
+      "customer_requests",
+      "business_knowledge",
+      "business_capabilities",
+    ];
     if (!scopedBusinessId) {
       show("counts", [
         {
@@ -189,7 +238,104 @@ try {
             show("counts", [{ table: t, error: err?.message }]);
           }
         }
+
+        // A count of business_knowledge does not answer the question. A row
+        // with enabled=false is not served to the model, so "3 rows" and "3
+        // rows, none enabled" are the same number and opposite facts.
+        try {
+          const k = await client.query(
+            `SELECT count(*)::int AS rows,
+                    count(*) FILTER (WHERE enabled)::int AS enabled_rows,
+                    count(DISTINCT category)::int AS categories
+               FROM business_knowledge`
+          );
+          show("knowledge", k.rows);
+        } catch (err) {
+          show("knowledge", [{ error: err?.message }]);
+        }
+
+        // Which capabilities this tenant actually has a row for, and how they
+        // are configured. adapter_config is DELIBERATELY not selected -- it can
+        // hold credentials, and this file prints to Cloud Logging.
+        try {
+          const caps = await client.query(
+            `SELECT capability_id, enabled, adapter, config
+               FROM business_capabilities
+              ORDER BY capability_id`
+          );
+          show("capabilities", caps.rows);
+          if (!caps.rows.length) {
+            show("capabilities", [
+              {
+                note:
+                  "no business_capabilities row: every capability runs on its declared DEFAULTS. " +
+                  "confirmBeforeWrite defaults to false, so a tenant with no row has no " +
+                  "read-back requirement configured.",
+              },
+            ]);
+          }
+        } catch (err) {
+          show("capabilities", [{ error: err?.message }]);
+        }
+
         await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // --appointments: status breakdown and scheduled times. No names, no phones.
+  //
+  // `status` carries NO check constraint (schema.sql:143-156) and
+  // updateAppointmentStatus writes whatever it is given, so this GROUPS rather
+  // than assuming an enum. A value nobody expected showing up here is itself
+  // the finding.
+  //
+  // client_name, client_phone and notes are never selected. They are the
+  // caller's own data and this file's whole line is that config and numbers
+  // travel where content does not.
+  // ---------------------------------------------------------------------
+  if (WANT_APPTS) {
+    if (!scopedBusinessId) {
+      show("appointments", [
+        {
+          skipped: "appointments need a tenant to scope to",
+          hint: "pass --business <e164> as well; RLS makes an unscoped select read 0",
+        },
+      ]);
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SELECT set_config('app.business_id', $1, true)`, [scopedBusinessId]);
+        const breakdown = await client.query(
+          `SELECT status,
+                  count(*)::int AS n,
+                  min(scheduled_at) AS earliest,
+                  max(scheduled_at) AS latest
+             FROM appointments
+            GROUP BY status
+            ORDER BY n DESC`
+        );
+        show("appointments by status", breakdown.rows);
+        const rows = await client.query(
+          `SELECT right(id::text, 6) AS id_tail,
+                  scheduled_at,
+                  status,
+                  created_at,
+                  call_id IS NOT NULL AS from_call,
+                  (notes IS NOT NULL AND notes <> '') AS has_notes
+             FROM appointments
+            ORDER BY scheduled_at DESC
+            LIMIT $1`,
+          [CALLS_LIMIT]
+        );
+        show("appointments", rows.rows);
+        await client.query("COMMIT");
+      } catch (err) {
+        show("appointments", [{ error: err?.message }]);
       } finally {
         client.release();
       }

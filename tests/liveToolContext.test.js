@@ -73,6 +73,29 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.lastCallerText).toBe("");
   });
 
+  it("carries lastReplyText through to the tool (the LVX95 wire)", async () => {
+    // The write-order gate's other half. lastCallerText says whether the caller
+    // agreed; this says whether anything was put to them to agree TO. A gate
+    // with only the first half passes "yes" on a turn where nothing was asked,
+    // which is the honour system it replaces.
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 4,
+      lastCallerText: "Yes, go ahead",
+      lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
+    }));
+    expect(ctx.lastReplyText).toBe("Just to confirm, shall I go ahead and book that for you?");
+  });
+
+  it("normalises a missing lastReplyText to a string, never undefined", async () => {
+    // Fails CLOSED. "" cannot match confirmReadBackRe, so a missing wire
+    // refuses writes rather than waving them through -- the opposite of LVX45,
+    // where an uncopied field made a gate silently unreachable and its counter
+    // read 0 for the life of a deployment.
+    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
+    expect(ctx.lastReplyText).toBe("");
+  });
+
   it("carries the rest of the turn state the gates read", async () => {
     const ctx = await ctxFor(() => ({
       step: "confirm",

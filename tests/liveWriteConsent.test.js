@@ -57,6 +57,18 @@ const ctxWith = (lastCallerText) => ({
   // Settled, so a refusal here is the consent gate and never the spelling gate.
   spellingSettled: true,
   lastCallerText,
+  // ...and a read-back already made, so a refusal here is never the LVX95
+  // write-order gate either. Added 2026-09-09 when that gate shipped and four
+  // tests in this file went red: they were asserting that "Okay" authorises a
+  // write, which is still true, on a fixture where nothing had ever been put to
+  // the caller — which under the new gate is a different refusal for a
+  // different reason.
+  //
+  // The alternative was to weaken the assertions, and that would have been the
+  // wrong trade: this file's subject is WHICH WORDS COUNT AS AGREEMENT, and it
+  // can only test that on a turn where agreement is the only thing in question.
+  // The ordering gate has its own file.
+  lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
 });
 
 const book = (ctx) =>

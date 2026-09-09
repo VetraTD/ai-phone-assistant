@@ -20,7 +20,12 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
-import { stripFillers, isHesitationOnly, isUnusableTranscript } from "../lib/transcriptUtils.js";
+import {
+  stripFillers,
+  isHesitationOnly,
+  isUnusableTranscript,
+  isAffirmative,
+} from "../lib/transcriptUtils.js";
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -37,6 +42,32 @@ import { stripFillers, isHesitationOnly, isUnusableTranscript } from "../lib/tra
  * cannot hold a budget; a counter can.
  */
 const CONFIRM_HARD_NAMES = process.env.VOICE_CONFIRM_HARD_NAMES !== "false";
+
+/**
+ * LVX95's write-order gate, and its off switch. Every guard on this path has one.
+ *
+ * Read per call rather than captured at module load so a revision can be turned
+ * off by an env change without a rebuild -- the same reason LIVE_CLAIM_GUARD
+ * and LIVE_REPEAT_CUT are read the way they are.
+ */
+const writeOrderGateOff = () => process.env.LIVE_WRITE_ORDER_GATE === "off";
+
+/**
+ * How many times the write-order gate may refuse the same pack in one call.
+ *
+ * A CEILING, not a policy, and it is what stops a phrasing list becoming a
+ * livelock. confirmReadBackRe cannot be completed -- the model can always ask
+ * in words nobody listed -- and an unrecognised read-back means refuse, ask,
+ * get a yes, refuse again, forever. The spelling gate has exactly this shape
+ * and solved it exactly this way; `write_order_gate_ceiling` is the number that
+ * says the list is too narrow.
+ *
+ * Two, because one refusal is the intended cost of a write with no read-back
+ * and the second covers a model that rephrased into something unrecognised.
+ * Past that the caller has been asked twice and is being made to wait on our
+ * vocabulary rather than on their own decision.
+ */
+const WRITE_ORDER_MAX_REFUSALS = 2;
 
 
 // ---------------------------------------------------------------------------
@@ -138,6 +169,7 @@ const CAPABILITY_DEPS = {
  *   stateEffects: {
  *     intentArgs?: object|null,
  *     endCallArgs?: object|null,
+ *     endCallRefusal?: "hesitation"|"generic"|null,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
  *     toolCallEvent?: {name: string, args: object, silent?: boolean}|null,
@@ -335,7 +367,22 @@ export async function executeToolCall(fc, ctx) {
           },
         };
       }
-      if (heardOnlyHesitation) bumpCounter("end_call_refused_hesitation");
+      // WHICH gate refused, recorded as a fact rather than inferred later.
+      //
+      // Until now only the hesitation branch had a counter. The generic branch
+      // -- no wrapping-up step, no completed action, fewer than two caller
+      // turns -- had none, so on 2026-09-09 two refusals left no trace anywhere
+      // except `tool_duration success=false`, which is a per-tool timing line
+      // and not a decision record. LVX96 was found by reading a twenty-five
+      // second call by hand for exactly that reason.
+      //
+      // `refusalKind` is also handed back in stateEffects so the Live front-end
+      // can put it in the per-call summary: bumpCounter writes to process
+      // memory that every call on the instance shares and the next deploy
+      // zeroes, so a counter alone cannot answer "why did the gate refuse on
+      // THAT call".
+      const refusalKind = heardOnlyHesitation ? "hesitation" : "generic";
+      bumpCounter(heardOnlyHesitation ? "end_call_refused_hesitation" : "end_call_refused_generic");
       // LVX76. This text produced the worst twenty seconds of the 2026-09-04
       // call, and both faults are in the wording rather than in the decision.
       //
@@ -404,6 +451,9 @@ export async function executeToolCall(fc, ctx) {
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {
+          // Which gate said no. The cascade ignores this field; the Live
+          // front-end folds it into live_call_summary.
+          endCallRefusal: refusalKind,
           toolResult: {
             name: fc.name,
             success: false,
@@ -526,6 +576,143 @@ export async function executeToolCall(fc, ctx) {
             // attempted a write both read zero on the refusal counters, which
             // is precisely how LVX45 sat in the tree looking fixed.
             bumpCounter("write_consent_checked");
+
+            // ---------------------------------------------------------------
+            // DID THE CONFIRMATION COME BEFORE THE WRITE? LVX95.
+            //
+            // Call be9bd6, 2026-09-09, the first Live call able to cancel
+            // anything. Three cancellations committed at 04:53:13; the
+            // confirmation was asked at 04:53:27 and end_call came six seconds
+            // later, without waiting for the answer:
+            //
+            //   04:53:13  cancel_appointment_db  success=true   x3
+            //   04:53:27  "Just to confirm, you'd like to cancel all three?"
+            //   04:53:33  end_call
+            //
+            // Every claim on that call was TRUE. Three tools ran, three rows
+            // changed, tool_duration.success was true on all three. The defect
+            // is ordering: the caller heard a safeguard being applied that had
+            // already been overtaken by the write. Had they answered no, there
+            // was nothing left to stop -- cancel_appointment_db is an UPDATE
+            // that had already returned three rows, and a cancellation is not
+            // recoverable by the caller.
+            //
+            // WHY NOT confirmBeforeWrite. That requirement exists and defaults
+            // off, and turning it on does not fix this: enforcement is a tool
+            // ARGUMENT the model sets about itself
+            // (lib/capabilities/requirements.js:402), so nothing verifies that
+            // a read-back happened, that the caller answered, or that the
+            // answer was yes. It is an honour system, and this call is the
+            // evidence about the honour -- a model that will narrate a
+            // confirmation after the fact is a model that will set the flag
+            // before it.
+            //
+            // BOTH HALVES ARE OBSERVED, NEITHER IS ASSERTED:
+            //   - the assistant's PREVIOUS completed turn put the action to the
+            //     caller (ctx.lastReplyText, threaded from the engine), and
+            //   - the caller's answer reads as agreement (isAffirmative, built
+            //     from their own transcribed words).
+            // The model cannot set either one by choosing an argument.
+            //
+            // SCOPE: every action tool, on every tenant, regardless of
+            // configuration. The owner's decision, 2026-09-09. The cost is a
+            // two-turn exchange on tenants that never asked for one, and the
+            // three bounds below are what make that survivable: a per-call
+            // ceiling, an env off switch, and a would-refuse counter shipped
+            // beside the refusal so its firing rate is readable from the first
+            // call rather than reconstructed afterwards.
+            //
+            // The cascade never sets lastCallerText, so this whole block is
+            // unreachable there and tier 3 is byte-identical -- the same
+            // construction the consent gate above relies on.
+            // ---------------------------------------------------------------
+            const lastReplyText = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
+            const S = getStrings(ctx?.config);
+            const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
+            const callerAgreed = isAffirmative(lastCallerText);
+
+            // The measurement, always, whatever the gate then does. Read
+            // against write_consent_checked: this is how often a write arrives
+            // with a read-back behind it and how often it does not, and it
+            // keeps reporting after the gate is turned off.
+            bumpCounter(readBackMade ? "write_confirm_readback_prev_turn" : "write_confirm_readback_missing");
+
+            const orderScratch = ctx?.capabilityState?.[pack.id] || {};
+            const orderRefusals = Number(orderScratch.writeOrderRefusals) || 0;
+            // Per CALLER TURN, not per tool round, for the reason written on
+            // the spelling gate below: gemini.js rebuilds ctx from merged
+            // capabilityState after every round, so a model calling the same
+            // tool three times inside one turn would burn the whole budget
+            // without the caller ever being asked anything.
+            const orderCallerTurn = Number(ctx?.callerTurnCount) || 0;
+            const orderRefusalIsNew = orderScratch.writeOrderRefusedTurn !== orderCallerTurn;
+
+            if (!readBackMade || !callerAgreed) {
+              bumpCounter("write_order_would_refuse");
+              if (orderRefusals >= WRITE_ORDER_MAX_REFUSALS) {
+                // THE CEILING RELEASES THE WRITE, and says so. A gate that can
+                // refuse forever holds a caller on the line over our own
+                // vocabulary; LVX21 is what a hair trigger on this path costs.
+                bumpCounter("write_order_gate_ceiling");
+                log.error("write_order_gate_ceiling", {
+                  callId: ctx?.callId ?? null,
+                  tool: fc.name,
+                  refusals: orderRefusals,
+                  severity: "warn",
+                });
+              } else if (!writeOrderGateOff()) {
+                bumpCounter("write_order_refused");
+                // Tool name and which half failed. Nothing here is caller data:
+                // the two booleans say whether a read-back was recognised and
+                // whether the answer parsed as agreement, never what was said.
+                log.error("write_order_refused", {
+                  callId: ctx?.callId ?? null,
+                  tool: fc.name,
+                  readBackMade,
+                  callerAgreed,
+                  severity: "warn",
+                });
+                // Worded as an unfinished step, following LVX34's shape: say it
+                // is not a failure, say what is true, say exactly what to do,
+                // and bound it. A refusal that reads as "this cannot be done"
+                // is how the model came to offer a callback instead of asking
+                // the one question it had been asked to ask.
+                const message =
+                  `[not caller speech] NOT A FAILURE — this is still going ahead, it just needs the ` +
+                  `caller's go-ahead first. Read the details back to them in one short sentence — what ` +
+                  `you are about to do, and when — and ask whether to go ahead. Wait for their answer. ` +
+                  `If they say yes, call this again with the same details. Do not tell the caller ` +
+                  `anything went wrong and do not offer a callback.`;
+                return {
+                  functionResponse: {
+                    id: fc.id,
+                    name: fc.name,
+                    response: { success: false, message },
+                  },
+                  stateEffects: {
+                    // silent, like the spelling gate's: nothing ran, so the
+                    // session must not narrate work that was declined.
+                    toolResult: {
+                      name: fc.name,
+                      success: false,
+                      message: "Just to confirm before I do that — shall I go ahead?",
+                      callerSafe: true,
+                    },
+                    toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+                    capabilityState: {
+                      [pack.id]: {
+                        ...(orderRefusalIsNew
+                          ? {
+                              writeOrderRefusals: orderRefusals + 1,
+                              writeOrderRefusedTurn: orderCallerTurn,
+                            }
+                          : {}),
+                      },
+                    },
+                  },
+                };
+              }
+            }
           }
 
           // Confirm the spelling of a hard name BEFORE it becomes a record.

@@ -35,10 +35,23 @@ const row = (over = {}) => ({
   ...over,
 });
 
-function fakeDeps({ booked = [], byId = {}, throws = false, readFails = false } = {}) {
-  const notifications = { sendCallerSms: vi.fn(async () => {}) };
+function fakeDeps({
+  booked = [],
+  byId = {},
+  throws = false,
+  readFails = false,
+  requestId = "req-1",
+} = {}) {
+  const notifications = {
+    sendCallerSms: vi.fn(async () => {}),
+    notifyUnconfirmedClaim: vi.fn(async () => {}),
+  };
   const db = {
     isEnabled: () => true,
+    // LVX97's reconciliation. `requestId: null` is the RLS failure mode made
+    // reachable: the service runs as vetra_app NOBYPASSRLS, so an unscoped
+    // insert matches no policy, writes nothing and reports success.
+    createCustomerRequest: vi.fn(async () => requestId),
     // Mirrors the real withTenantSafe, which CATCHES and returns the fallback
     // (services/db.js:2239). A fake that rethrows would hide the exact bug this
     // module has to survive.
@@ -173,6 +186,69 @@ describe("verifyCall - the fabrication case", () => {
     expect(out.verdict).toBe("claim_without_row");
     expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
     expect(getLatencyStats().turnTaking.postcall_claim_without_row).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // LVX97. THE FABRICATION REACHES A HUMAN, WITHOUT THE MODEL'S COOPERATION.
+  //
+  // The claim note works by asking, and asking is not reliable: on 2026-09-09
+  // the same tenant, same config and same tools produced a retracted claim and
+  // a real booking on one call, and a fabricated consultation denied to the
+  // caller's face on another. This path does not consult the model at all --
+  // it compares what the call said against what the database holds and writes
+  // the disagreement down.
+  // -------------------------------------------------------------------------
+  it("writes a row and notifies the business when a claim has no record behind it", async () => {
+    const deps = fakeDeps({ booked: [] });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    const written = deps.db.createCustomerRequest.mock.calls[0][0];
+    expect(written.requestType).toBe("unconfirmed_claim");
+    expect(written.callId).toBe(CALL_ID);
+    // No caller speech in the row. LVX24 was a sanitizer logging the text it
+    // caught, and the sentence that triggered this carries the caller's name
+    // and their appointment time.
+    expect(written.message).toBeUndefined();
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
+  });
+
+  it("reconciles regardless of mode, because this one goes to the business", async () => {
+    // `send` governs messages to the CALLER. Telling a caller their booking may
+    // have been imagined is not something to do automatically; telling the
+    // business is the entire point.
+    const deps = fakeDeps({ booked: [] });
+
+    await verifyCall(input({ mode: "verify", claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
+  });
+
+  it("counts an insert that wrote nothing as a FAILURE, not as nothing to report", async () => {
+    // The RLS failure mode: a tenantless write matches zero rows and returns
+    // success. A reconciliation that silently did not happen must not read the
+    // same as a call with nothing to reconcile.
+    const deps = fakeDeps({ booked: [], requestId: null });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(getLatencyStats().turnTaking.postcall_claim_reconcile_failed).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBeFalsy();
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("does not reconcile a clean call", async () => {
+    // The control. A reconciliation that fired on every call would pass every
+    // assertion above and tell the business nothing worth reading.
+    const deps = fakeDeps({ booked: [row()] });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBeFalsy();
   });
 
   it("counts a booked effect whose row is not in the database", async () => {
