@@ -102,6 +102,7 @@ Status means:
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
+| **LVX93** | a read-only availability check licenses a "your appointment is booked" claim | **OPEN · P1** — the claim gate's one-turn lookback is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool. On a real call 2026-09-09 a `check_appointment_availability` that ran the previous turn suppressed the guard while `book_appointment` was being REFUSED by the spelling gate, and the caller was told "so I have you booked" 24 seconds before it was true. `ACTION_TOOL_NAMES` is already imported into the same file. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8695,3 +8696,89 @@ still lose the race — so the line stays, and its absence remains the signal.
   production data. These two calls are the first rows that could show it.
 - **Anything from a UK handset.** Both calls originated in the US, so the
   transatlantic leg makes turn-taking and latency unreadable here.
+
+---
+
+## LVX93 — a read licenses a write's claim
+
+Found 2026-09-09, on the second verification call, and found ONLY because LVX83
+had shipped hours earlier. There is no way to see this without the words.
+
+### What the caller heard
+
+```
+VETRA : Okay, and can I get your full name, please?
+CALLER: Yeah, Nitin Dhabe
+VETRA : Thanks, Nitin Dhabe — so I have you booked for a consultation on
+        Wednesday, September ninth, at four thirty p m.        <-- NOT BOOKED
+CALLER: Uh no.
+VETRA : Could you spell out your full name for me...
+VETRA : I'm sorry, but the booking didn't go through. Should I try it again?
+```
+
+### What actually happened
+
+```
+02:09:33  check_appointment_availability   RAN
+02:09:58  book_appointment                 REFUSED by the spelling gate
+~02:10:00 "so I have you booked"           <-- the claim
+02:10:04  live_spelling_ask_nudged
+02:10:22  live_write_retried               <-- LVX72's code retry
+02:10:37  book_appointment                 succeeded
+```
+
+### The mechanism, exactly
+
+`lib/voice/live/index.js:1223`:
+
+```js
+if (claimedCompletion && !toolsRanThisTurn() && !toolRanPrevTurn) {
+```
+
+`toolsRanThisTurn()` is correct and was correct here: attempts minus refusals,
+`1 - 1 = 0`. That is LVX31's fix working.
+
+The hole is the lookback. `toolRanPrevTurn = toolsRanThisTurn()`
+(`:1766`) — **any tool, no distinction between a read and a write.** A
+`check_appointment_availability` that ran on the previous turn therefore
+excuses a "booked" claim on this one.
+
+The lookback exists for a good reason, recorded in its own comment: a claim can
+legitimately trail its tool by a turn ("so that's booked?" / "yes, I've booked
+it"). What it never asked is whether the tool that ran could possibly
+substantiate THIS claim. Checking whether a slot is free cannot.
+
+### The fix, and why it is small
+
+`ACTION_TOOL_NAMES` already exists in `services/gemini.js`, is already imported
+by this very file (`:5`), and is already used to separate actions from reads at
+`:2491` and in `tools.js:116`. The lookback needs to track whether an ACTION
+tool ran, not whether any tool ran.
+
+### DELIBERATELY NOT FIXED THE SAME NIGHT
+
+Three reasons, and the second is the one that matters:
+
+1. The next call is a UK-handset baseline, and changing behaviour the night
+   before destroys the reading it exists to produce.
+2. **The fix may be muted by a latch it does not control.** `sendTurnNote`
+   allows at most ONE note per model turn across every mechanism, and on this
+   call the spelling nudge had already spent that turn's note at 02:10:04. So a
+   correctly-firing claim guard might still have said nothing. That is the
+   "two guards can collide" shape already recorded in this ledger, and it means
+   the obvious one-line change is not obviously sufficient.
+3. The guard is in COUNT mode by design; whether it may ever ACT is a decision
+   LVX31 deliberately left to a measured number.
+
+### Severity, honestly
+
+Not data loss. LVX72's code retry recovered it and the booking landed — the
+caller got their appointment. The damage is trust: told "booked", then told it
+failed, then told it worked. On a demo call that is survivable; to a real
+customer it is the thing they would repeat to someone else.
+
+The two appointment rows in that tenant are NOT a duplicate bug — one per call,
+and the second was explicitly confirmed by the caller ("in addition").
+
+**Done when** the lookback distinguishes an action from a read, AND the note
+budget question in point 2 has an answer.
