@@ -102,7 +102,8 @@ Status means:
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
-| **LVX93** | a read-only availability check licenses a "your appointment is booked" claim | **OPEN · P1** — the claim gate's one-turn lookback is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool. On a real call 2026-09-09 a `check_appointment_availability` that ran the previous turn suppressed the guard while `book_appointment` was being REFUSED by the spelling gate, and the caller was told "so I have you booked" 24 seconds before it was true. `ACTION_TOOL_NAMES` is already imported into the same file. |
+| **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
+| **LVX94** | the claim detector misses "I have YOU booked" | **OPEN · P1** — `completionClaimRe` matches "I've booked you in" but not "I have you booked", "I have you down", "I've got you booked" or "We have you booked". On the 2026-09-09 call the assistant said "so I have you booked" while `book_appointment` had been REFUSED, and `claimedCompletion` was FALSE — so neither the guard nor LVX29's post-call ledger ever saw it. Four `it.fails` tests in `liveClaimGuard.test.js` hold the evidence. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8782,3 +8783,64 @@ and the second was explicitly confirmed by the caller ("in addition").
 
 **Done when** the lookback distinguishes an action from a read, AND the note
 budget question in point 2 has an answer.
+
+---
+
+## LVX94 — the claim detector misses the phrasing the assistant actually used
+
+Found 2026-09-09, while writing a test for LVX93 — which is the only reason it
+was found. The test asserted the LVX93 counter would fire on the sentence from
+the real call, and it did not.
+
+### LVX93's diagnosis was incomplete, and this corrects it
+
+LVX93 records that a read-only `check_appointment_availability` on the previous
+turn suppressed the claim guard. That hole is real and the counter now measures
+it. **But it was not what happened on the call.**
+
+`completionClaimRe` never matched the sentence, so `claimedCompletion` was
+`false` and nothing reached the look-back at all. The guard was not suppressed;
+it was never consulted.
+
+```
+"So I have you booked for a consultation on Wednesday."   MISS   <-- the call
+"I have you down for Wednesday at four thirty."           MISS
+"I've got you booked for Wednesday."                      MISS
+"We have you booked for Wednesday."                       MISS
+"I've booked you in for Wednesday."                       match
+"You're booked in for Monday morning."                    match
+```
+
+The pattern is `I(?:'ve| have)\s+(?:booked|scheduled|...)` — the verb must
+follow immediately. Put the object between them, which is the ordinary way a
+receptionist says it, and it slips through.
+
+### Why this outranks LVX93
+
+The guard's whole purpose is to catch a claim with nothing behind it, and
+**LVX29's post-call claim ledger reads the same predicate** (`:1197`). So a
+claim phrased this way is invisible to both the live guard and the post-call
+audit. The one thing this project describes as the worst it can do — a caller
+hanging up believing they have an appointment — has a phrasing-shaped hole in
+its only two detectors.
+
+### Held as failing tests rather than a note
+
+`tests/liveClaimGuard.test.js` carries four `it.fails` cases asserting the
+CORRECT behaviour. They pass today because the assertion throws, and they go
+red the moment the regex is widened — which is the signal to delete them. A
+failing test describing a real call is worth more than a backlog entry nobody
+greps.
+
+### NOT fixed the same night, and this one was tempting
+
+Widening the regex makes the guard fire on turns it currently ignores, which
+changes what the model is told mid-call. The next call is a UK-handset
+behaviour baseline, and changing behaviour before it destroys the reading. It
+is also the third time tonight that the obvious one-line fix turned out to have
+a second-order effect worth measuring first.
+
+**Done when** the detector matches the object-between construction, the four
+`it.fails` cases are inverted to ordinary assertions, and a call has been taken
+with the wider detector to see how often it now fires on turns where nothing is
+wrong.

@@ -266,3 +266,134 @@ describe("a claim of completion with nothing behind it", () => {
     expect(notes(s.live)).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX93 — a read-only tool must not vouch for a write's claim.
+//
+// The guard above looks back one turn, because a claim can legitimately trail
+// its tool ("so that's booked?" / "yes, I've booked it"). What it never asked
+// is WHICH tool ran. check_appointment_availability is not in
+// ACTION_TOOL_NAMES; checking whether a slot is free cannot substantiate
+// having booked it.
+//
+// Measured on a real call, 2026-09-09: availability ran at 02:09:33,
+// book_appointment was REFUSED by the spelling gate at 02:09:58, and the
+// caller was told "so I have you booked" while the guard stayed silent.
+//
+// COUNTER ONLY. The note condition is deliberately unchanged -- these tests
+// assert that too, because the value of the split is that the number can be
+// corrected without altering what any caller hears.
+// ---------------------------------------------------------------------------
+const unbacked = () => getLatencyStats().turnTaking.live_claim_unbacked_by_action;
+
+describe("LVX93 — a read does not license a write's claim", () => {
+  beforeEach(() => clearStats());
+
+  it("counts the claim when only a READ ran the turn before", async () => {
+    const s = await boot();
+    await s.callTool("check_appointment_availability");
+    s.endTurn();
+    await s.settle();
+
+    // A phrasing completionClaimRe DOES match, so this exercises the
+    // look-back and nothing else. The real call used "I have you booked",
+    // which the detector misses entirely -- that is LVX94, tested separately.
+    s.say("I've booked your consultation for Wednesday at four thirty.");
+    s.endTurn();
+    await s.settle();
+
+    expect(unbacked()).toBe(1);
+  });
+
+  it("stays a COUNTER — the model is told nothing new", async () => {
+    // The whole point of splitting it. If this ever fails, the change stopped
+    // being a measurement and became a second guard, before anyone decided it
+    // should.
+    const s = await boot();
+    await s.callTool("check_appointment_availability");
+    s.endTurn();
+    await s.settle();
+
+    // A phrasing completionClaimRe DOES match, so this exercises the
+    // look-back and nothing else. The real call used "I have you booked",
+    // which the detector misses entirely -- that is LVX94, tested separately.
+    s.say("I've booked your consultation for Wednesday at four thirty.");
+    s.endTurn();
+    await s.settle();
+
+    expect(claims()).toBe(0);
+    // Not "no notes at all" -- the offer guard legitimately fires on a
+    // sentence naming a time nothing verified, and that is a different guard
+    // doing its own job. What must be absent is the CLAIM note.
+    const sent = JSON.stringify(notes(s.live));
+    expect(sent).not.toContain("no tool has run to make it so");
+  });
+
+  it("says nothing when a real ACTION tool ran the turn before", async () => {
+    const s = await boot();
+    await s.callTool("record_customer_request");
+    s.endTurn();
+    await s.settle();
+
+    s.say("I've made a note of that and passed it on.");
+    s.endTurn();
+    await s.settle();
+
+    expect(unbacked()).toBe(0);
+  });
+
+  it("is a superset of the narrow counter, not a replacement", async () => {
+    // No tool at all: both must fire. The DIFFERENCE between the two counters
+    // is exactly LVX93's population, and that only holds if the wider one
+    // covers every case the narrow one does.
+    const s = await boot();
+    s.say("I've booked your free strategy call for 10 AM on Monday.");
+    s.endTurn();
+    await s.settle();
+
+    expect(claims()).toBe(1);
+    expect(unbacked()).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX94 — the detector misses "I have YOU booked".
+//
+// completionClaimRe handles "I've booked you in" but not "I have you booked".
+// The object between the verb phrase and the participle breaks the pattern,
+// and that construction is the ordinary way a receptionist says it.
+//
+// This is not hypothetical. On the verification call of 2026-09-09 the
+// assistant said "so I have you booked for a consultation on Wednesday,
+// September ninth, at four thirty p m" while book_appointment had been REFUSED
+// by the spelling gate. claimedCompletion was FALSE, so neither the guard nor
+// LVX29's post-call claim ledger ever saw it. The look-back hole recorded as
+// LVX93 is real and was NOT what made the guard silent here -- nothing reached
+// it.
+//
+// These are RED until the regex is widened, so they are marked todo rather
+// than deleted: a failing test that describes a real call is worth more than a
+// note in a backlog nobody greps.
+// ---------------------------------------------------------------------------
+describe("LVX94 — phrasings the claim detector misses", () => {
+  const MISSED = [
+    "So I have you booked for a consultation on Wednesday at four thirty.",
+    "I have you down for Wednesday at four thirty.",
+    "I've got you booked for Wednesday.",
+    "We have you booked for Wednesday.",
+  ];
+
+  for (const line of MISSED) {
+    it.fails(`currently MISSES: ${line}`, async () => {
+      clearStats();
+      const s = await boot();
+      s.say(line);
+      s.endTurn();
+      await s.settle();
+      // Asserted as it SHOULD behave. it.fails() passes while this throws, and
+      // starts failing the moment the regex is widened -- which is the signal
+      // to delete this block.
+      expect(claims()).toBe(1);
+    });
+  }
+});
