@@ -64,6 +64,11 @@ variable "runtime_secrets" {
       lanes   = ["us", "uk"]
       purpose = "Twilio account identifier. Not secret in the strict sense, kept alongside the token so the pair cannot drift."
     }
+    twilio-auth-token-alt = {
+      env_var = "TWILIO_AUTH_TOKEN_ALT"
+      lanes   = ["us", "uk"]
+      purpose = "The SECOND Twilio account's token. Twilio signs each webhook with the token of the account that owns the number, so a number bought on account B fails validation against account A's token and 403s every call — with a log line that reads like an attack rather than a config mismatch. `twilioValidationLive` (server.js:390) already accepts either token; this is the value it was written for. LIVE PATH ONLY: `twilioValidation`, the cascade's, stays single-token deliberately, because widening what the mature path accepts is a change made for the benefit of one that does not use it."
+    }
     smtp-password = {
       env_var = "SMTP_PASS"
       lanes   = ["us", "uk"]
