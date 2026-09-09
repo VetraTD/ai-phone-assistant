@@ -104,12 +104,13 @@ Status means:
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
 | **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
 | **LVX94** | the claim detector missed passive voice and "I have YOU booked" | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — widened for both gaps; 14 cases added to `tests/completionClaimRe.test.js`, 7 of them negatives. "all" was tried as a determiner and reverted the same hour: "All appointments are confirmed by text" is policy, not a claim. Deployed as `67cc5c1`. Needs a call where a claim is made with no tool behind it. |
-| **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **VERIFIED ON A CALL 2026-09-09 · P1** — CA7e12d0: `cancel_appointment_db` refused (`readBackMade=false callerAgreed=false`), the model read the appointment back and asked, the caller agreed, and the write went through 4s later. Confirmation now PRECEDES the write instead of trailing it by fourteen seconds. `write_confirm_after_write` 0, `write_order_gate_ceiling` 0. The model complied with a refusal, which is the first counter-example this file holds — n=1. See LVX100. |
+| **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **VERIFIED ON TWO CALLS 2026-09-09 · P1** — CA7e12d0: `cancel_appointment_db` refused (`readBackMade=false callerAgreed=false`), the model read the appointment back and asked, the caller agreed, and the write went through 4s later. Confirmation now PRECEDES the write instead of trailing it by fourteen seconds. `write_confirm_after_write` 0, `write_order_gate_ceiling` 0. The model complied with a refusal, which is the first counter-example this file holds — n=1. See LVX100. |
 | **LVX96** | a refused `end_call` is reversed by the goodbye detector, and by a latch with no reset | **ROUTE B VERIFIED, ROUTE A UNVERIFIED 2026-09-09 · P0** — CA7e12d0: `end_call` succeeded, `armExit` was refused inside the barge window, `live_end_call_latch_cleared` fired and the call continued into "Sure, what is it?". Without it the retry re-arms on the next clear window, on a caller who was just asked a question. Route A never fired: `end_call_refusals={generic:0, hesitation:0}`, readable for the first time. **The clear exposed that `end_call` was being duplicate-suppressed** — see LVX100. |
 | **LVX97** | it fabricated a booking, then told the caller three times they were mistaken | **RECONCILED 2026-09-09, UNVERIFIED LIVE · P0** — the phrasing gap was one alternation: `you're all set` matched and `we're all set` did not. `completionClaimWideRe` is a strict superset driving the ledger and the counters; the NARROW predicate still drives CLAIM_NOTE, so mid-call behaviour is unchanged and this round stays comparable. `claim_without_row` now writes a `customer_requests` row and notifies the business, every time, with no model in the loop. The end_call gate is COUNTED not refusing — see LVX72 for what refusing cost. The $3,000 half is answered and is **not** a fabrication: see LVX99. |
 | **LVX98** | the claim guard works, and the caller hears the model arguing with itself | **COUNTED 2026-09-09 · P2** — `live_apology_turn` / `live_apology_after_note` with a denominator. The output filter is NOT built: `inspectRepeat`'s per-fragment machinery is there for it, and nothing yet says how often an apology opens a turn where nothing is wrong. The guard is deliberately not weakened — it produced the correct outcome, and LVX97 the same night is the silent alternative. |
 | **LVX99** | the $3,000 was configured, and a disabled capability does not silence the prompt | **OPEN · P2** — `custom_instructions` holds a price and `quote_request` is not in `allowed_tasks`, so the assistant quotes and refuses to quote in one turn. Nothing reconciles the tool surface with the prose surface. Also corrects LVX95: the tenant HAS five `business_capabilities` rows, one of them `appointments` with an empty config — not none. |
-| **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — `end_call` is in no pack, so `isWriteTool` called it a write and the idempotency cache suppressed every attempt after the first; a suppressed call never reaches `stateEffects`, so nothing could re-arm once LVX96 cleared the latch. Exempted via `ENGINE_OWNED_TOOLS`. `signOffRe` missed an adverb between ("thanks AGAIN for calling") and a leaving word in the next sentence. Two soft holes in different files became 53 seconds and three goodbyes. |
+| **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **VERIFIED ON A CALL 2026-09-09 · P1** — CA07c2ef: `end_call` succeeded, `armExit` was refused on a barge, the latch cleared, and **the second `end_call` executed** with `duplicate_suppressed: 0`. The call closed 8s later on one goodbye, against 53s and three goodbyes on CA7e12d0. The `signOffRe` widening is shipped but still unexercised — both calls ended through the `end_call` path. |
+| **LVX101** | the model substituted a famous person's name for the caller's | **OPEN · P2** — "Nithin Dodla" became "Nitin Gadkari": not a phonetic mangle, a pattern-completion into a public figure. Distinct from LVX53, where the name came off an existing row and could be checked against. The spelling gate and the write-order read-back both caught it and the row went in correct — the first time two gates have been seen composing end to end. Argues that `shouldConfirmSpelling` must never narrow to "names that look hard". |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9568,6 +9569,96 @@ a latch that never resets hides every defect downstream of it.
   caching is not in force on this deployment.
 - `reply_after_last_voice_ms_p50: 2005`, and it means nothing: a US-originated
   call crosses the Atlantic to reach europe-west2.
+
+---
+
+## LVX101 — LVX100 verified, and the model substituted a famous name
+
+2026-09-09, `voice:ed68a6e` (rev 00021-njr). Two calls, `CA13d397e7` (105 s,
+8 turns) and `CA07c2ef` (48 s, 4 turns). Both closed `end_call_mark`.
+
+### The `end_call` re-arm is VERIFIED, and this is the certification
+
+`CA07c2ef`, and it is the exact sequence CA7e12d0 failed:
+
+```
+13:36:05  end_call   success=TRUE      latch set
+13:36:08  live_exit_refused_recent_barge     the caller talked over the goodbye
+13:36:11  live_end_call_latch_cleared        LVX96 route B
+13:36:18  "Sorry, we're closed on Sundays too..."
+13:36:21  end_call   success=TRUE      <-- THE SECOND ONE EXECUTED
+13:36:28  "...Thanks for calling Brightwork Studio, and have a great day."
+13:36:29  live_exit_run
+```
+
+`duplicate_suppressed: 0`. **Two `end_call` calls on one call and neither was
+suppressed.** On CA7e12d0 the second, third and fourth were all cached
+duplicates, the engine never saw `endCallArgs`, and the call ran 53 seconds past
+its end with three goodbyes in it. Here it closed eight seconds after the second
+request, on one goodbye.
+
+### LVX95's gate, second sighting, and the read-back was better than asked for
+
+`CA13d397e7`:
+
+```
+13:34:36  "Alright, using the number you're calling from, 469 933 8887. To make
+           sure I have your name correct, could you please spell both your first
+           and surname out for me?"
+13:34:49  book_appointment  REFUSED   readBackMade=false callerAgreed=false
+13:35:07  "Got it, N I T H I N. Just to confirm, that's for a free consultation
+           on Wednesday, September 9th at 4 PM, under Nithin Dodla at
+           469 933 8887. Does that all look good now?"
+13:35:12  book_appointment  success=TRUE
+```
+
+The refusal was correct — the previous turn asked for a spelling and put nothing
+to the caller. What came back was a read-back carrying **the date, the time, the
+corrected name and the phone number**, which is more than the gate asks for and
+more than the model volunteered on any call before it.
+
+n=2 for the gate, and both times the model complied with the refusal. Still not
+enough to overturn the standing lesson that a refusal is a request — but it is
+now two counter-examples rather than one, and both refusals name an action.
+
+### THE NEW ONE: it substituted a famous name for the caller's
+
+```
+13:34:20  "Thanks, Nitin Gadkari. And can I get the best callback number?"
+```
+
+The caller said "Nithin Dodla". This is **not** a phonetic mangle — "Dodla" and
+"Gadkari" share nothing. The model pattern-completed a common Indian first name
+into a well-known public figure's full name.
+
+Distinct from LVX53, where the name was lifted from an existing appointment row:
+there the string existed in the caller's own record, here it exists only in the
+model's weights. A record can be checked against; this cannot.
+
+**The gates caught it.** `live_spelling_ask_nudged` fired at 13:34:20, the model
+asked for the spelling, and the write-order gate then forced a read-back of the
+corrected value before the row was written. `client_name` went in as **Nithin
+Dodla**. Two independent gates composing, which is the first time that has been
+observed end to end.
+
+Filed rather than fixed. What it argues for is that `shouldConfirmSpelling` must
+never be narrowed to "names that look hard to spell" — this one looked easy and
+was wrong. Priority **P2**, because the existing gates held.
+
+### Also on these calls
+
+- The caller asked for **4 PM** when the offered times were 9 AM, 1 PM and
+  4:30 PM. The model re-ran `check_appointment_availability` rather than
+  assuming, confirmed 4 PM was open, and booked it. `availability_allowed: 2`,
+  `verified_slots: 16`. Correct behaviour on the exact shape LVX80 was about.
+- `CA07c2ef` said the opening hours THREE times in 48 seconds and closed with
+  "Opened Monday through Friday, nine to five." `live_repeated_phrase` caught
+  one of the three. Quality, not correctness; nothing here acts on it.
+- `end_call_refusals={'generic': 0, 'hesitation': 0}` on both. **Route A remains
+  unverified** — three calls now with a clean zero, which is a readable answer
+  rather than an absent one, and is what this field was added for.
+- `live_claim_*` silent across 12 assistant turns. The widened predicate has now
+  seen 17 ordinary turns without a false positive.
 
 ---
 
