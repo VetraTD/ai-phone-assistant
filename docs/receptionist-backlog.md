@@ -104,6 +104,11 @@ Status means:
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
 | **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
 | **LVX94** | the claim detector missed passive voice and "I have YOU booked" | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — widened for both gaps; 14 cases added to `tests/completionClaimRe.test.js`, 7 of them negatives. "all" was tried as a determiner and reverted the same hour: "All appointments are confirmed by text" is policy, not a claim. Deployed as `67cc5c1`. Needs a call where a claim is made with no tool behind it. |
+| **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **GATED 2026-09-09, UNVERIFIED LIVE · P1** — a write-order gate refuses an action tool unless the PREVIOUS assistant turn read it back (`confirmReadBackRe`) AND the caller's answer parses as agreement (`isAffirmative`, new, bilingual). Both observed by the engine; neither is a tool argument the model sets about itself, which is what `confirmBeforeWrite` could never fix. All action tools, all tenants, per the owner. Bounded by a 2-per-call ceiling, `LIVE_WRITE_ORDER_GATE=off`, and `write_order_would_refuse` counting even when off. `tests/liveWriteOrder.test.js`, certified by removal. |
+| **LVX96** | a refused `end_call` is reversed by the goodbye detector, and by a latch with no reset | **FIXED 2026-09-09, UNVERIFIED LIVE · P0** — two independent routes, both pure state. Route A: a sign-off cannot arm an exit on a turn where `end_call` was refused, scoped to that turn so the 2026-09-06 dangling-line rule survives. Route B: `endCallArmed` was assigned in one place and reset in none; a caller who speaks after a refused arm now clears it. `end_call_refused_generic` added — the branch had no counter at all. `tests/liveExitPrecedence.test.js`, certified by removal. **Needs the call where the assistant signs off, is refused, and the caller keeps talking.** |
+| **LVX97** | it fabricated a booking, then told the caller three times they were mistaken | **RECONCILED 2026-09-09, UNVERIFIED LIVE · P0** — the phrasing gap was one alternation: `you're all set` matched and `we're all set` did not. `completionClaimWideRe` is a strict superset driving the ledger and the counters; the NARROW predicate still drives CLAIM_NOTE, so mid-call behaviour is unchanged and this round stays comparable. `claim_without_row` now writes a `customer_requests` row and notifies the business, every time, with no model in the loop. The end_call gate is COUNTED not refusing — see LVX72 for what refusing cost. The $3,000 half is answered and is **not** a fabrication: see LVX99. |
+| **LVX98** | the claim guard works, and the caller hears the model arguing with itself | **COUNTED 2026-09-09 · P2** — `live_apology_turn` / `live_apology_after_note` with a denominator. The output filter is NOT built: `inspectRepeat`'s per-fragment machinery is there for it, and nothing yet says how often an apology opens a turn where nothing is wrong. The guard is deliberately not weakened — it produced the correct outcome, and LVX97 the same night is the silent alternative. |
+| **LVX99** | the $3,000 was configured, and a disabled capability does not silence the prompt | **OPEN · P2** — `custom_instructions` holds a price and `quote_request` is not in `allowed_tasks`, so the assistant quotes and refuses to quote in one turn. Nothing reconciles the tool surface with the prose surface. Also corrects LVX95: the tenant HAS five `business_capabilities` rows, one of them `appointments` with an empty config — not none. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9372,6 +9377,67 @@ The defect is the channel, not the intervention.
 **Done when:** an internal correction changes what the model DOES on the next
 turn without becoming something the caller hears; and a call exists in which an
 unbacked claim is retracted with at most one short correction spoken aloud.
+
+---
+
+## LVX99 — the $3,000 was CONFIGURED, and the incoherence is the defect
+
+Answered 2026-09-09 by the extended `db-inspect`, on the first run it was
+possible to make. Filed as its own entry because it **reverses** what LVX97 and
+LVX98 both expected.
+
+### What the tenant actually holds
+
+```
+allowed_tasks                       book_appointment, check_appointment, cancel_reschedule
+business_knowledge                  0 rows, 0 enabled
+general_info                        210 chars, mentions_price FALSE
+custom_instructions                 170 chars, mentions_price TRUE
+business_capabilities               5 rows; quotes enabled=FALSE
+appointments                        3 cancelled, 1 scheduled 2026-09-11 18:00Z
+customer_requests                   1
+```
+
+### The figure was not invented
+
+LVX97 records the price as "unverified against the tenant config" and says "if
+it is invented it is LVX66, and a price is the worst thing on that list to
+invent." It is not invented. A price-shaped string sits in
+`custom_instructions`, which is prompt text the model reads on every call, so
+the assistant was repeating something it had been given.
+
+The probe is a BOOLEAN over a pattern (`[$£€]\s*[0-9]`, a figure followed by a
+currency word, or the word "thousand"), not a dump, so it establishes that a
+price is configured and not that this exact price is. That is the honest limit
+of it and it is enough to close the fabrication question.
+
+### The real defect is that two settings disagree
+
+`quote_request` is not in `allowed_tasks` and the `quotes` capability row is
+`enabled=false`, so the model is correctly refused a quoting tool. The price is
+in the prompt anyway. That is what produced the sentence LVX98 recorded, both
+halves of it true and neither reachable from the other:
+
+> "Projects typically start around three thousand dollars ... I can't quote a
+> figure directly here."
+
+**A capability turned off does not remove what the prompt says about it.** The
+tenant configuration has one surface for tools and another for prose, and
+nothing reconciles them — so a business can disable quoting in the dashboard and
+keep quoting on every call.
+
+Not fixed here: record and park. The fix is a coherence check at config load
+(a price in `custom_instructions` with `quote_request` absent is a warning the
+owner should see), and it is a dashboard question as much as an engine one.
+
+### What this also corrects
+
+LVX95 says "Brightwork Studio has no `business_capabilities` row, so the
+requirement was off." It has FIVE rows, including `appointments` with
+`config: {}`. The outcome is the same — an empty config means
+`confirmBeforeWrite` falls to its `false` default — but the reason recorded was
+wrong, and "no row" and "a row with nothing in it" are different things to go
+looking for.
 
 ---
 
