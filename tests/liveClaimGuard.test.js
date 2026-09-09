@@ -357,42 +357,38 @@ describe("LVX93 — a read does not license a write's claim", () => {
 });
 
 // ---------------------------------------------------------------------------
-// LVX94 — the detector misses "I have YOU booked".
+// LVX94 — phrasings the claim detector used to miss.
 //
-// completionClaimRe handles "I've booked you in" but not "I have you booked".
-// The object between the verb phrase and the participle breaks the pattern,
-// and that construction is the ordinary way a receptionist says it.
+// FIXED 2026-09-09. These were `it.fails` cases holding the evidence while the
+// regex was narrow; the regex was widened the same night and they are ordinary
+// assertions now.
 //
-// This is not hypothetical. On the verification call of 2026-09-09 the
-// assistant said "so I have you booked for a consultation on Wednesday,
-// September ninth, at four thirty p m" while book_appointment had been REFUSED
-// by the spelling gate. claimedCompletion was FALSE, so neither the guard nor
-// LVX29's post-call claim ledger ever saw it. The look-back hole recorded as
-// LVX93 is real and was NOT what made the guard silent here -- nothing reached
-// it.
+// Every line here was said by the assistant on a real call while the matching
+// tool had NOT run. Two grammatical gaps, both ordinary receptionist speech:
+// passive voice ("has now been cancelled", "appointments have been cancelled")
+// and an object between the pronoun and the verb ("I have YOU booked").
 //
-// These are RED until the regex is widened, so they are marked todo rather
-// than deleted: a failing test that describes a real call is worth more than a
-// note in a backlog nobody greps.
+// On the call that produced the cancellation lines, no cancel or reschedule
+// tool ran at any point and the rows were still there afterwards. Three false
+// claims, one detected.
 // ---------------------------------------------------------------------------
-describe("LVX94 — phrasings the claim detector misses", () => {
-  const MISSED = [
+describe("LVX94 — phrasings the claim detector once missed", () => {
+  const CLAIMS = [
     "So I have you booked for a consultation on Wednesday at four thirty.",
     "I have you down for Wednesday at four thirty.",
     "I've got you booked for Wednesday.",
     "We have you booked for Wednesday.",
+    "Both appointments have been canceled for you.",
+    "That appointment has now been canceled for you.",
   ];
 
-  for (const line of MISSED) {
-    it.fails(`currently MISSES: ${line}`, async () => {
+  for (const line of CLAIMS) {
+    it(`counts: ${line.slice(0, 48)}`, async () => {
       clearStats();
       const s = await boot();
       s.say(line);
       s.endTurn();
       await s.settle();
-      // Asserted as it SHOULD behave. it.fails() passes while this throws, and
-      // starts failing the moment the regex is widened -- which is the signal
-      // to delete this block.
       expect(claims()).toBe(1);
     });
   }

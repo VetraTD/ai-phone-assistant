@@ -170,3 +170,47 @@ describe("completionClaimRe — Spanish keeps its own phrasings", () => {
     expect(es.test("¿Quiere que reserve la cita?")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX94 — the two grammatical gaps, from real calls on 2026-09-09.
+//
+// Every CLAIMS line below was spoken by the assistant while the matching tool
+// had NOT run. On the cancellation call, no cancel or reschedule tool ran at
+// any point and the appointment rows were still there afterwards: three false
+// claims, of which the regex matched one.
+//
+// The NOT_CLAIMS here are the ones the widening could plausibly have broken.
+// They are the point of this block -- a guard that nags a model which has just
+// done what it said is worse than one that misses.
+// ---------------------------------------------------------------------------
+describe("completionClaimRe — passive voice and an object between", () => {
+  const CLAIMS = [
+    // passive, plural, and the adverb INSIDE the verb phrase
+    "Both appointments have been canceled for you.",
+    "That appointment has now been canceled for you.",
+    "Those bookings have been moved.",
+    // an object between the pronoun and the participle
+    "So I have you booked for a consultation on Wednesday.",
+    "I have you down for Wednesday at four thirty.",
+    "I've got you booked for Wednesday.",
+    "We have you booked for Wednesday.",
+  ];
+  for (const said of CLAIMS) {
+    it(`counts: ${said.slice(0, 52)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  const NOT_CLAIMS = [
+    // "you" must not swallow "your" -- this is the nearest miss of the lot
+    "I have your appointment here in front of me.",
+    "We have your appointment for Friday.",
+    "I have your number written down.",
+    // still a question, still a plan, still a description
+    "Have both appointments been cancelled?",
+    "Would you like both appointments cancelled?",
+    "Both appointments are on Thursday.",
+    "All appointments are confirmed by text.",
+  ];
+  for (const said of NOT_CLAIMS) {
+    it(`ignores: ${said.slice(0, 52)}`, () => expect(en.test(said)).toBe(false));
+  }
+});
