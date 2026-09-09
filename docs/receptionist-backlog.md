@@ -104,11 +104,12 @@ Status means:
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
 | **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
 | **LVX94** | the claim detector missed passive voice and "I have YOU booked" | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — widened for both gaps; 14 cases added to `tests/completionClaimRe.test.js`, 7 of them negatives. "all" was tried as a determiner and reverted the same hour: "All appointments are confirmed by text" is policy, not a claim. Deployed as `67cc5c1`. Needs a call where a claim is made with no tool behind it. |
-| **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **GATED 2026-09-09, UNVERIFIED LIVE · P1** — a write-order gate refuses an action tool unless the PREVIOUS assistant turn read it back (`confirmReadBackRe`) AND the caller's answer parses as agreement (`isAffirmative`, new, bilingual). Both observed by the engine; neither is a tool argument the model sets about itself, which is what `confirmBeforeWrite` could never fix. All action tools, all tenants, per the owner. Bounded by a 2-per-call ceiling, `LIVE_WRITE_ORDER_GATE=off`, and `write_order_would_refuse` counting even when off. `tests/liveWriteOrder.test.js`, certified by removal. |
-| **LVX96** | a refused `end_call` is reversed by the goodbye detector, and by a latch with no reset | **FIXED 2026-09-09, UNVERIFIED LIVE · P0** — two independent routes, both pure state. Route A: a sign-off cannot arm an exit on a turn where `end_call` was refused, scoped to that turn so the 2026-09-06 dangling-line rule survives. Route B: `endCallArmed` was assigned in one place and reset in none; a caller who speaks after a refused arm now clears it. `end_call_refused_generic` added — the branch had no counter at all. `tests/liveExitPrecedence.test.js`, certified by removal. **Needs the call where the assistant signs off, is refused, and the caller keeps talking.** |
+| **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **VERIFIED ON A CALL 2026-09-09 · P1** — CA7e12d0: `cancel_appointment_db` refused (`readBackMade=false callerAgreed=false`), the model read the appointment back and asked, the caller agreed, and the write went through 4s later. Confirmation now PRECEDES the write instead of trailing it by fourteen seconds. `write_confirm_after_write` 0, `write_order_gate_ceiling` 0. The model complied with a refusal, which is the first counter-example this file holds — n=1. See LVX100. |
+| **LVX96** | a refused `end_call` is reversed by the goodbye detector, and by a latch with no reset | **ROUTE B VERIFIED, ROUTE A UNVERIFIED 2026-09-09 · P0** — CA7e12d0: `end_call` succeeded, `armExit` was refused inside the barge window, `live_end_call_latch_cleared` fired and the call continued into "Sure, what is it?". Without it the retry re-arms on the next clear window, on a caller who was just asked a question. Route A never fired: `end_call_refusals={generic:0, hesitation:0}`, readable for the first time. **The clear exposed that `end_call` was being duplicate-suppressed** — see LVX100. |
 | **LVX97** | it fabricated a booking, then told the caller three times they were mistaken | **RECONCILED 2026-09-09, UNVERIFIED LIVE · P0** — the phrasing gap was one alternation: `you're all set` matched and `we're all set` did not. `completionClaimWideRe` is a strict superset driving the ledger and the counters; the NARROW predicate still drives CLAIM_NOTE, so mid-call behaviour is unchanged and this round stays comparable. `claim_without_row` now writes a `customer_requests` row and notifies the business, every time, with no model in the loop. The end_call gate is COUNTED not refusing — see LVX72 for what refusing cost. The $3,000 half is answered and is **not** a fabrication: see LVX99. |
 | **LVX98** | the claim guard works, and the caller hears the model arguing with itself | **COUNTED 2026-09-09 · P2** — `live_apology_turn` / `live_apology_after_note` with a denominator. The output filter is NOT built: `inspectRepeat`'s per-fragment machinery is there for it, and nothing yet says how often an apology opens a turn where nothing is wrong. The guard is deliberately not weakened — it produced the correct outcome, and LVX97 the same night is the silent alternative. |
 | **LVX99** | the $3,000 was configured, and a disabled capability does not silence the prompt | **OPEN · P2** — `custom_instructions` holds a price and `quote_request` is not in `allowed_tasks`, so the assistant quotes and refuses to quote in one turn. Nothing reconciles the tool surface with the prose surface. Also corrects LVX95: the tenant HAS five `business_capabilities` rows, one of them `appointments` with an empty config — not none. |
+| **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — `end_call` is in no pack, so `isWriteTool` called it a write and the idempotency cache suppressed every attempt after the first; a suppressed call never reaches `stateEffects`, so nothing could re-arm once LVX96 cleared the latch. Exempted via `ENGINE_OWNED_TOOLS`. `signOffRe` missed an adverb between ("thanks AGAIN for calling") and a leaving word in the next sentence. Two soft holes in different files became 53 seconds and three goodbyes. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9438,6 +9439,135 @@ requirement was off." It has FIVE rows, including `appointments` with
 `confirmBeforeWrite` falls to its `false` default — but the reason recorded was
 wrong, and "no row" and "a row with nothing in it" are different things to go
 looking for.
+
+---
+
+## LVX100 — call CA7e12d0: two fixes verified, and the two holes they exposed
+
+2026-09-09, `voice:4ed9eae` (rev 00020-xvd), Brightwork Studio, 197 seconds, 16
+turns, `close_reason: end_call_mark`. The first call taken with the LVX95 and
+LVX96 fixes on it.
+
+### LVX95's gate did the thing it was built to do
+
+```
+07:37:24  "...you have an appointment scheduled for Friday, September 11th
+           at one in the afternoon..."
+07:37:29  cancel_appointment_db   REFUSED   readBackMade=false callerAgreed=false
+07:37:37  "Absolutely. Just to confirm, you'd like to cancel your appointment
+           on Friday, September 11th at one in the afternoon? Shall I go
+           ahead with that?"
+07:37:41  cancel_appointment_db   success=TRUE
+07:37:46  "Okay, that appointment has been cancelled."
+```
+
+Against `be9bd6`, where the write landed at 04:53:13 and the confirmation at
+04:53:27: **the confirmation now precedes the write by four seconds instead of
+trailing it by fourteen.** `write_confirm_after_write` did not fire.
+`write_order_gate_ceiling` did not fire — the read-back the model chose was
+already in `confirmReadBackRe`.
+
+**And the model complied with a refusal**, which is the part worth flagging
+rather than celebrating. This file records three refusal texts that failed to
+change behaviour and one code change that did; this is the first counter-example
+in the other direction. n=1. The plausible difference is that the refusal names
+a concrete next action instead of describing a state, and that is a hypothesis,
+not a finding.
+
+### LVX96 route B fired and prevented a hang-up
+
+```
+07:38:02  end_call  success=TRUE              latch set
+07:38:05  live_exit_refused_recent_barge      the caller had barged
+07:38:09  live_end_call_latch_cleared
+07:38:10  "Sure, what is it?"                 the call continues
+```
+
+Without the clear, the end-of-turn retry re-arms at the first clear grace window
+— about 07:38:10, on a caller who had just been asked a question. That is
+LVX96's exact failure mode, on the ordinary path, prevented.
+
+**Route A is still unverified.** `end_call_refusals={'generic': 0,
+'hesitation': 0}` — the gate never refused, so the precedence rule had nothing
+to outrank. That reading is itself new: before this round the per-call record
+carried no refusal counts and the question had no answer.
+
+### THE HOLE ROUTE B OPENED — `end_call` was being deduplicated
+
+`end_call` belongs to no capability pack, so `isWriteTool` treated it as a write
+(no pack ⇒ write, which is the right way to fail for a tool nobody recognises).
+The idempotency cache froze its first success and suppressed every later one:
+
+```
+07:38:17  live_guard_duplicate_suppressed  end_call
+07:38:29  live_guard_duplicate_suppressed  end_call
+07:38:58  live_guard_duplicate_suppressed  end_call
+```
+
+A suppressed call short-circuits before `stateEffects` is read, so `endCallArgs`
+never reached the engine and **nothing could re-arm.** The call ran 53 seconds
+past the point the model wanted to end it.
+
+This was always true. Route B removed the cover: the retry had been re-arming
+from a flag that never went down, so nothing ever needed `end_call` to succeed
+twice. The defect the cache was built for — *"3.1 doubled end_call in 2 of 26
+trials"* — is already covered by `armExit`, which returns false while a
+`pendingExit` exists.
+
+**FIXED** in `ed68a6e`: `ENGINE_OWNED_TOOLS` exempts `end_call` and
+`set_call_intent` from deduplication, at both the suppression check and the
+freeze. Four fixtures asserted the old behaviour and were reversed with the
+reasoning attached.
+
+### AND `signOffRe` MISSED TWO GOODBYES OUT OF THREE
+
+```
+"Thanks again for calling Brightwork Studio. Take care."       MISS
+"I understand. Thanks for calling Brightwork Studio.
+ Take care."                                                   MISS
+"Thanks for calling Brightwork Studio. Have a great day."      match
+```
+
+Two holes. An adverb between "thanks" and "for calling" — LVX94's
+object-between miss, in a different regex, found the same way. And the leaving
+word in the NEXT SENTENCE, which `[^.!?]*` cannot cross.
+
+Soft on its own. Not soft here: with `end_call` suppressed, the sign-off path
+was the only exit the call had left. What the caller heard across those 53
+seconds:
+
+> "Thanks again for calling Brightwork Studio. Take care." → "Sorry, I didn't
+> catch that." → "I understand. Thanks for calling Brightwork Studio. Take
+> care." → **"My apologies, I must have misunderstood. Would you like me to end
+> the call now?"** → "Thanks for calling Brightwork Studio. Have a great day."
+
+Three goodbyes in 42 seconds and the receptionist asking the caller for
+permission to hang up.
+
+**FIXED** in `ed68a6e`: an optional adverb, and a gap that excludes only `?` and
+`!` and is bounded at 80 characters. A bare "take care" is still NOT a farewell
+— "I'll take care of that for you" would arm a hang-up mid-booking, and that
+line is held deliberately.
+
+### The lesson worth keeping
+
+**Two soft holes in different files became one hard failure.** Neither the
+`end_call` cache nor the sign-off regex was doing visible damage alone; the
+first made the second load-bearing. Both were invisible until a state fix
+removed the thing that had been papering over them — which is the general shape:
+a latch that never resets hides every defect downstream of it.
+
+### Also on this call, for the record
+
+- `verified_slots: 16` — a whole day checked from one availability call.
+- `duplicate_suppressed: 3`, all of them `end_call`. Zero real duplicate writes.
+- `live_repeated_phrase` twice, `live_stacked_questions` once, `asks_max: 2`.
+- `live_unusable_transcript` fired once and the note went out.
+- `transcript_turns_written: 16` against `turns: 16`.
+- `cached_in: 0` across 174,249 input tokens and 18 billed turns. Explicit
+  caching is not in force on this deployment.
+- `reply_after_last_voice_ms_p50: 2005`, and it means nothing: a US-originated
+  call crosses the Atlantic to reach europe-west2.
 
 ---
 
