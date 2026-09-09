@@ -371,7 +371,7 @@ function twilioValidation(req, res, next) {
 // ---------------------------------------------------------------------------
 
 /**
- * Signature validation for the Live routes, accepting either Twilio account.
+ * Signature validation accepting EITHER Twilio account.
  *
  * There are two accounts and GCP holds one token. A single-token check makes a
  * number on the other account unvalidatable, which is the corner the spike was
@@ -380,11 +380,30 @@ function twilioValidation(req, res, next) {
  * one day; it is not defensible for a front-end with appointment writes behind
  * it.
  *
- * Deliberately separate from `twilioValidation` above rather than replacing
- * it. The cascade stays single-token: widening what it accepts is a change to
- * the mature path, for the benefit of one that does not use it.
+ * RENAMED from `twilioValidationLive` on 2026-09-08, because the name had
+ * started to mislead. It is not "the Live front-end's validator" -- it is "the
+ * check that does not care which of our accounts owns the number", and
+ * /twilio/status now needs exactly that while belonging to neither front-end.
+ *
+ * Still deliberately separate from `twilioValidation`. The two CALL-ANSWERING
+ * routes stay as they are: /twilio/voice is the mature cascade and widening
+ * what it accepts is a change to tier 3 for the benefit of a path that does
+ * not use it.
+ *
+ * WHY /twilio/status MOVED HERE, and why that is not the same widening.
+ *
+ * It is not a front-end route. It is the call LIFECYCLE callback, and it has
+ * to work for every number the platform serves whoever owns it -- it is what
+ * sets a call's status, its duration, and what triggers the summary.
+ *
+ * LVX14 accepted that account B's callbacks 403 here, with a stated reason: "a
+ * Live call never reaches /twilio/status in a useful way anyway (LVX30)."
+ * LVX30 was fixed on 2026-09-08, so that sentence stopped being true, and the
+ * justification for the 403 expired with it. Measured the same evening: a real
+ * call on +18176011171 wrote 21 transcript rows and then stuck at in-progress
+ * with no duration and no summary, because this callback was refused.
  */
-function twilioValidationLive(req, res, next) {
+function twilioValidationAnyAccount(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();
 
   const authTokens = [process.env.TWILIO_AUTH_TOKEN, process.env.TWILIO_AUTH_TOKEN_ALT];
@@ -472,7 +491,7 @@ function buildStreamTwiml(streamPath, streamToken, businessPhone, callerPhone) {
  * <Connect> for a socket that drops after the handoff -- is deliberately NOT
  * built: nobody has tried it here, and this half removes the worst outcome.
  */
-app.post("/twilio/live-voice", twilioValidationLive, async (req, res) => {
+app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
   res.type("text/xml");
   const callSid = req.body.CallSid;
   const businessPhone = req.body.To || "";
@@ -773,7 +792,7 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
 // Status callback — update call record on terminal status
 // ---------------------------------------------------------------------------
 
-app.post("/twilio/status", twilioValidation, async (req, res) => {
+app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {

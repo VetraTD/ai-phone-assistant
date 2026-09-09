@@ -63,8 +63,29 @@ describe("the Live route applies the controls the cascade route applies", () => 
     expect(live).toContain("mintMediaStreamToken");
   });
 
-  it("validates the Twilio signature", () => {
-    expect(SERVER).toContain('app.post("/twilio/live-voice", twilioValidationLive');
+  it("validates the Twilio signature, accepting either account", () => {
+    expect(SERVER).toContain('app.post("/twilio/live-voice", twilioValidationAnyAccount');
+  });
+});
+
+describe("the call lifecycle callback accepts either Twilio account", () => {
+  // /twilio/status is NOT a front-end route. It is what sets a call's status
+  // and duration and triggers the summary, so it has to work for every number
+  // the platform serves, whoever owns it.
+  //
+  // LVX14 accepted that account B's callbacks 403 here, on the stated grounds
+  // that "a Live call never reaches /twilio/status in a useful way anyway
+  // (LVX30)". LVX30 was fixed on 2026-09-08 and that sentence stopped being
+  // true. Measured the same evening: a real call on +18176011171 wrote 21
+  // transcript rows and then stuck at in-progress with no duration and no
+  // summary, because this callback was refused.
+  it("uses the multi-account validator, not the single-token one", () => {
+    expect(SERVER).toContain('app.post("/twilio/status", twilioValidationAnyAccount');
+    expect(SERVER).not.toContain('app.post("/twilio/status", twilioValidation,');
+  });
+
+  it("reads both tokens", () => {
+    expect(SERVER).toContain("TWILIO_AUTH_TOKEN_ALT");
   });
 });
 
