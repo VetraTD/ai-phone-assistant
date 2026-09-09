@@ -175,7 +175,33 @@ try {
       `SELECT id, phone_number, name, timezone, after_hours_policy, business_hours,
               allowed_tasks,
               (general_info IS NOT NULL AND general_info <> '') AS has_general_info,
-              coalesce(length(general_info), 0) AS general_info_chars
+              coalesce(length(general_info), 0) AS general_info_chars,
+              -- IS THERE A PRICE IN THE PROMPT? LVX66, and the $3,000 question.
+              --
+              -- On two consecutive calls on 2026-09-09 the assistant said
+              -- "our branding and web design projects typically start around
+              -- three thousand dollars", once contradicting itself inside a
+              -- single turn ("...I can't quote a figure directly here"). A
+              -- price is the worst thing on the list to invent, and nothing
+              -- outside the VPC could say whether it was configured.
+              --
+              -- A BOOLEAN, not the text. general_info and custom_instructions
+              -- are the tenant's own copy rather than caller speech, so they
+              -- are on the safe side of this file's line -- but they are free
+              -- text of arbitrary length, and "does a price appear in it" is
+              -- the whole question. A fact answers it; a dump would answer it
+              -- and a great deal else.
+              --
+              -- Both fields, because both reach the model: general_info is
+              -- knowledge and custom_instructions is instruction, and a figure
+              -- in either one is a figure the assistant may repeat.
+              -- NOTE the doubled backslashes. This is a JS template literal, so
+              -- a single \s reaches Postgres as a bare "s" and the pattern
+              -- silently stops matching a currency symbol followed by a space.
+              -- Same family as the heredoc trap already recorded for this repo.
+              (general_info ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand') AS general_info_mentions_price,
+              coalesce(length(custom_instructions), 0) AS custom_instructions_chars,
+              (custom_instructions ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand') AS custom_instructions_mentions_price
          FROM app_lookup_business_by_phone($1)`,
       [BUSINESS]
     );
@@ -246,7 +272,14 @@ try {
           const k = await client.query(
             `SELECT count(*)::int AS rows,
                     count(*) FILTER (WHERE enabled)::int AS enabled_rows,
-                    count(DISTINCT category)::int AS categories
+                    count(DISTINCT category)::int AS categories,
+                    -- Same question as the tenant config's price probe, for the
+                    -- other place an answer can come from. A count of rows says
+                    -- the table is populated; it does not say whether a figure
+                    -- the assistant quoted is in one of them.
+                    count(*) FILTER (
+                      WHERE enabled AND answer ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand'
+                    )::int AS enabled_rows_mentioning_price
                FROM business_knowledge`
           );
           show("knowledge", k.rows);
