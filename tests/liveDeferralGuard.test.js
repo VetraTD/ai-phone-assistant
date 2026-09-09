@@ -65,7 +65,7 @@ function fakeLive() {
   };
 }
 
-function fakeDb() {
+function fakeDb(callerContext = null) {
   return {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Brightwork Family Dental" })),
@@ -80,7 +80,7 @@ function fakeDb() {
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
-    fetchCallerContext: async () => null,
+    fetchCallerContext: async () => callerContext,
   };
 }
 
@@ -89,7 +89,7 @@ let toolId = 0;
 /**
  * @param {"allow"|"refuse"} verdict - what the tool layer does with a write
  */
-async function boot(verdict = "refuse") {
+async function boot(verdict = "refuse", { callerContext = null } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   // The shape services/tools.js returns when the spelling gate holds a write
@@ -116,13 +116,20 @@ async function boot(verdict = "refuse") {
   await handleLiveSessionConnection(ws, {}, {
     now: () => 0,
     connect: live.connect,
-    database: fakeDb(),
+    database: fakeDb(callerContext),
     env: {},
     execute,
   });
   ws.deliver({
     event: "start",
-    start: { callSid: "CA1", streamSid: "MZ1", customParameters: { businessPhone: "+18176011171" } },
+    start: {
+      callSid: "CA1",
+      streamSid: "MZ1",
+      // callerPhone is required for fetchCallerContext to run at all -- without
+      // it the connect-time lookup short-circuits to null and any test about a
+      // returning caller silently exercises a first-time one.
+      customParameters: { businessPhone: "+18176011171", callerPhone: "+14699338887" },
+    },
   });
   await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
   await new Promise((r) => setImmediate(r));
@@ -350,6 +357,43 @@ describe("a refused write answered with a callback promise", () => {
     s.hear("it's for a callback");
     s.say("Sure, what day suits?");
     await s.callTool("record_customer_request", { caller_name: "Nathan Dodla" });
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+
+  it("does not nudge a caller whose name is already on their record", async () => {
+    // 2026-09-09, on a real call. The caller had booked forty minutes earlier,
+    // so "Nithin Dodla" was on their record, correctly spelled. The assistant
+    // read it off the record and used it -- fine -- and the nudge fired anyway
+    // and made it ask for a spelling. What came back was "n i q h i n g o d l a".
+    // The model kept the record's version, but a correct name had just been put
+    // at risk by a question with nothing to gain.
+    //
+    // services/gemini.js's SPELLING NOT YET CONFIRMED block has carried this
+    // exception since it was written. The nudge never had it, and the gap only
+    // surfaced once the tool-argument trigger started firing for returning
+    // callers -- the two regex triggers rarely do.
+    const s = await boot("allow", {
+      callerContext: { upcomingAppointments: [{ client_name: "Nithin Dodla" }] },
+    });
+    s.hear("let's do uh Nathan Dodla");
+    s.say("What day were you thinking of?");
+    await s.callTool("book_appointment", { client_name: "Nithin Dodla" });
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(0);
+  });
+
+  it("still nudges when the record has no name on it", async () => {
+    // The control. An empty record must not silence the nudge -- that is the
+    // ordinary first-time caller, and the whole population this exists for.
+    const s = await boot("allow", { callerContext: { upcomingAppointments: [] } });
+    s.hear("let's do uh Nathan Dodla");
+    s.say("What day were you thinking of?");
+    await s.callTool("book_appointment", { client_name: "Nathan Dodla" });
     s.endTurn();
     await s.settle();
 

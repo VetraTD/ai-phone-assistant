@@ -1052,7 +1052,7 @@ function validateBookingTime(rawScheduledAt, config, deps) {
 // because a rule that is not there cannot be half-followed. The deterministic
 // half of this fix is the two gates that were already shipped.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. Do not ask them to spell anything unless you are told to.\n`;
+  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them to spell it again. Do not ask them to spell anything unless you are told to.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
