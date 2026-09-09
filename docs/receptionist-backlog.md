@@ -111,6 +111,7 @@ Status means:
 | **LVX99** | the $3,000 was configured, and a disabled capability does not silence the prompt | **OPEN · P2** — `custom_instructions` holds a price and `quote_request` is not in `allowed_tasks`, so the assistant quotes and refuses to quote in one turn. Nothing reconciles the tool surface with the prose surface. Also corrects LVX95: the tenant HAS five `business_capabilities` rows, one of them `appointments` with an empty config — not none. |
 | **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **VERIFIED ON A CALL 2026-09-09 · P1** — CA07c2ef: `end_call` succeeded, `armExit` was refused on a barge, the latch cleared, and **the second `end_call` executed** with `duplicate_suppressed: 0`. The call closed 8s later on one goodbye, against 53s and three goodbyes on CA7e12d0. The `signOffRe` widening is shipped but still unexercised — both calls ended through the `end_call` path. |
 | **LVX101** | the model substituted a famous person's name for the caller's | **OPEN · P2** — "Nithin Dodla" became "Nitin Gadkari": not a phonetic mangle, a pattern-completion into a public figure. Distinct from LVX53, where the name came off an existing row and could be checked against. The spelling gate and the write-order read-back both caught it and the row went in correct — the first time two gates have been seen composing end to end. Argues that `shouldConfirmSpelling` must never narrow to "names that look hard". |
+| **LVX102** | the read-back the write gate forces is counted as a repeated phrase | **OPEN · P3** — a confirmation restates the date, time and name, so `live_repeated_phrase` fires on it and the number climbs as the gate works. No audio is cut: `inspectRepeat`'s across-turns branch needs `!callerSpokeSinceLastReply` and the caller always speaks between the refusal and the read-back. An instrument discontinuity dated 2026-09-09, not a defect. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9659,6 +9660,74 @@ was wrong. Priority **P2**, because the existing gates held.
   rather than an absent one, and is what this field was added for.
 - `live_claim_*` silent across 12 assistant turns. The widened predicate has now
   seen 17 ordinary turns without a false positive.
+
+---
+
+## LVX102 — the read-back the gate forces is counted as a repeat
+
+2026-09-09, `CA646d1d37`, 66 s, 5 turns. The call that was supposed to test the
+negation half of `isAffirmative`, and could not, because the model got it right.
+
+### What happened
+
+```
+13:43:42  "I see you have an appointment scheduled for today, Wednesday,
+           September 9th at 4 PM under the name Nithin Dodla. Are you looking
+           to cancel that appointment?"
+   caller> "Yes, but could you make it Thursday instead?"
+13:43:48  check_appointment_availability          <-- NOT a cancel
+13:43:59  "We have some openings on Thursday, September 10th at 9:00 AM,
+           1:00 PM, or 4:30 PM..."
+   caller> "Sorry, ignore that. Yes, please just cancel it."
+13:44:14  "No problem. Just to confirm, you'd like to cancel your appointment
+           for today, Wednesday, September 9th at 4 PM?"
+   caller> "Yes"
+13:44:20  cancel_appointment_db   success=TRUE
+```
+
+**`cancel_appointment_db` was never called on the "Yes, but" turn.** The model
+read the `but` as a reschedule request and went to check Thursday, which is the
+correct reading. The gate was never consulted, so **the negation half is still
+unverified** — it is a backstop for a mistake the model did not make.
+
+Second time today a live test could not run because the behaviour it guards
+against did not occur (see the route A attempt). Worth stating as a rule rather
+than a coincidence: **a guard against a ~20% failure mode cannot be verified on
+demand.** The offline tests are the certification; what the live calls can
+measure is the FALSE-POSITIVE rate, and across five calls the write-order gate
+has fired three times and been right three times.
+
+### What this call DID verify
+
+The gate's ALLOW path on a cancellation, which is the tool LVX95 was filed
+about. Confirmation at 13:44:14, write at 13:44:20 — **six seconds after.**
+On `be9bd6` the three writes committed at 04:53:13 and the confirmation was
+asked at 04:53:27, fourteen seconds later. The ordering on the exact tool that
+produced the entry is now the right way round, with no refusal needed.
+`write_confirm_after_write` 0.
+
+### THE NEW ONE: the gate inflates `live_repeated_phrase`
+
+`live_repeated_phrase` fired at 13:44:14 — on the read-back. It had to: a
+confirmation restates the date, the time and the name, which is exactly what
+13:43:42 already said, and `longestSharedRun` cannot tell a required
+confirmation from an unwanted repeat.
+
+So a guard added to fix an ordering defect makes a different instrument read
+worse, and the number will keep climbing as the gate does its job. Anyone
+reading `live_repeated_phrase` after 2026-09-09 and comparing it to an earlier
+call is comparing two different things.
+
+**No audio was cut, and the reason is structural rather than lucky.**
+`inspectRepeat`'s across-turns branch requires `!callerSpokeSinceLastReply`, and
+the caller always speaks between the refusal and the read-back — that is what
+triggers the retry. So the cutter cannot reach this case by construction. Only
+the count-only detector sees it.
+
+Priority **P3**, and it is an instrument note, not a defect: the fix is either to
+exempt a turn matching `confirmReadBackRe` from the repeat count, or to leave it
+and write the discontinuity down. Written down here either way, because the
+alternative is someone reading a rise in repeats as a regression.
 
 ---
 
