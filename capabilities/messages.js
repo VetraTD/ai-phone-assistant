@@ -65,7 +65,11 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
 const MESSAGE_PROTOCOL_SECTION =
   `=== MESSAGE PROTOCOL ===\n` +
   `TAKING A MESSAGE — follow this exactly:\n` +
-  `1. Name: ask for it, then repeat their FULL name back once — "Thanks, Marcus Bell — " — first name and surname, so they can correct you if you misheard. Do not ask them to spell anything unless you are told to.\n` +
+  // See the note on BOOKING_CONFIRMATION_GUARDRAIL in capabilities/appointments.js
+  // for why the full-name read-back was removed. This pack is `core: true`, so
+  // it renders on BOOKING calls too — leaving the old sentence here would have
+  // reinstated the instruction on exactly the calls the other edit is for.
+  `1. Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard. Once they have spelled it you may use their first name. Do not ask them to spell anything unless you are told to.\n` +
   `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
   `3. Reason: ask briefly what the call is regarding.\n` +
   `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +

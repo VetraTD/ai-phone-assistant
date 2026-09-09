@@ -137,8 +137,12 @@ async function boot(verdict = "refuse") {
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     hear: (text) => live.push({ serverContent: { inputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
-    async callTool(name = "book_appointment") {
-      live.push({ toolCall: { functionCalls: [{ id: `d${(toolId += 1)}`, name, args: { n: toolId } }] } });
+    // `args` is spread over the default so every existing caller keeps the
+    // exact payload it had; only a test that asks for arguments gets them.
+    async callTool(name = "book_appointment", args = {}) {
+      live.push({
+        toolCall: { functionCalls: [{ id: `d${(toolId += 1)}`, name, args: { n: toolId, ...args } }] },
+      });
       await settle();
     },
   };
@@ -306,6 +310,76 @@ describe("a refused write answered with a callback promise", () => {
       .find((m) => /spell their FULL name/.test(m.turns[0].parts[0].text));
     expect(frame).toBeTruthy();
     expect(frame.turnComplete).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // THE THIRD TRIGGER, 2026-09-09. A tool argument is not a phrasing.
+  //
+  // The nudge fired on `nameGivenRe(caller) || nameReadBackRe(assistant)`, and
+  // the second half watched for the assistant repeating the name back — which
+  // the prompt DEMANDED until this date and no longer does, because demanding a
+  // full name before the model has one is what makes it invent the missing
+  // half ("Nithin Dodla" -> "Nitin Dadlani", then "Nitin Gadkari").
+  //
+  // Removing that instruction would otherwise have quietly halved the trigger
+  // coverage, leaving `nameGivenRe` alone — which is already recorded as having
+  // missed two consecutive calls, because "let's do uh Nathan Dodla" has no
+  // lead-in to anchor on and widening the pattern to a bare capitalised word
+  // would fire on every weekday and place name a caller mentions.
+  //
+  // A name in a tool argument cannot be phrased around.
+  // -------------------------------------------------------------------------
+  it("nudges off a name in a tool argument when neither regex can see one", async () => {
+    const s = await boot("allow");
+    // The exact phrasing that defeated nameGivenRe on two real calls, and an
+    // assistant reply that repeats no name at all — which is now the norm.
+    s.hear("let's do uh Nathan Dodla");
+    s.say("What day were you thinking of?");
+    await s.callTool("book_appointment", { client_name: "Nathan Dodla" });
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+
+  it("reads caller_name as well, because the write gate does", async () => {
+    // Same two argument names as services/tools.js's callerNameFromArgs. A
+    // nudge that watched a different set from the gate it is trying to get
+    // ahead of would nudge for writes that were never going to be refused.
+    const s = await boot("allow");
+    s.hear("it's for a callback");
+    s.say("Sure, what day suits?");
+    await s.callTool("record_customer_request", { caller_name: "Nathan Dodla" });
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+
+  it("does not fire on a tool call carrying no name", async () => {
+    // The control. A trigger that fired on any tool call would spend the
+    // call's single nudge on an availability check.
+    const s = await boot("allow");
+    s.hear("do you have anything Tuesday?");
+    s.say("Let me check.");
+    await s.callTool("check_appointment_availability");
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(0);
+  });
+
+  it("does not fire on a blank name argument", async () => {
+    // `""` and `"   "` are what an argument the model declined to fill looks
+    // like, and neither is a name in play.
+    const s = await boot("allow");
+    s.hear("do you have anything Tuesday?");
+    s.say("Let me check.");
+    await s.callTool("book_appointment", { client_name: "   " });
+    s.endTurn();
+    await s.settle();
+
+    expect(stat("live_spelling_ask_nudged")).toBe(0);
   });
 
   it("stays quiet when the assistant already asked for the spelling itself", async () => {

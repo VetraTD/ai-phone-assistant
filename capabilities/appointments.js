@@ -1020,8 +1020,39 @@ function validateBookingTime(rawScheduledAt, config, deps) {
 // fires before a write, consults the caller's records, and is capped by a
 // counter in lib/voice/replyState.js. A rule about what the model did EARLIER
 // is something it has to remember; a refusal it reads this turn is a fact.
+// REVERSED 2026-09-09, and the sentence it replaces is quoted here because the
+// reasoning behind it was sound when it was written.
+//
+//   "repeat their FULL name back once in your very next sentence — 'Thanks,
+//    Marcus Bell — ...' — first name and surname, not just the first. A surname
+//    you never say aloud is one the caller cannot correct, and it is the part
+//    that ends up in the business's records."
+//
+// That rationale is now obsolete, and this repository is what obsoleted it: a
+// SPOKEN read-back cannot convey spelling. A live call stored "Venkateshwaria
+// Ayalavarapu" as "Venkateshwaria Ayalla Varpu" AFTER the assistant said the
+// surname back, because the two sound nearly identical. Only letters catch a
+// letter error, and the spelling gate in services/tools.js now demands them
+// before any name-bearing write, with the write-order gate forcing a read-back
+// of the corrected value on top of that.
+//
+// So the instruction was a weaker version of a job two code gates already do —
+// and it was actively producing the defect it existed to prevent. Asked for a
+// full name before it has one, the model INVENTS the missing half:
+//
+//   2026-09-05  caller said "Nithin Dodla"  ->  "Thanks, Nitin Dadlani."
+//   2026-09-09  caller said "Nithin Dodla"  ->  "Thanks, Nitin Gadkari."
+//
+// Both times the first name survived and the surname was replaced by something
+// the model knows — a public figure, in the second case. That is not a
+// transcription error, it is pattern-completion filling a gap the prompt opened.
+//
+// SUBTRACTIVE ON PURPOSE. This codebase's record with prompt CAPS is bad and
+// well documented; removing a demand is a different bet from adding one,
+// because a rule that is not there cannot be half-followed. The deterministic
+// half of this fix is the two gates that were already shipped.
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- When the caller gives you their name, repeat their FULL name back once in your very next sentence — "Thanks, Marcus Bell — ..." — first name and surname, not just the first. A surname you never say aloud is one the caller cannot correct, and it is the part that ends up in the business's records. Do not ask them to spell anything unless you are told to.\n`;
+  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks." on its own is enough. Once they HAVE spelled it, use their FIRST name in conversation; say the full name only when you read the details back to confirm them. Do not ask them to spell anything unless you are told to.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
