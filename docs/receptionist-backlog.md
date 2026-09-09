@@ -42,7 +42,7 @@ Status means:
 | **LVX57** | the claim detector misses HALF the claims actually made | **FIXED, UNVERIFIED** — all four observed phrasings, limits written down |
 | **LVX53** | a name from the record written to a booking the caller never said | **FIXED, UNVERIFIED** — per-call provenance; the durable column is deferred, see below |
 | **LVX50** | unintelligible audio answered as though understood, then booked from | **PARTLY FIXED** — script case only; fluent-nonsense case observed uncovered on call 5 |
-| **LVX27** | it says it booked something and there is no row | **PREVENTED ON A CALL 2026-09-06** — the claim guard now acts by default; it caught a false cancellation claim and the model corrected itself aloud, then did the work |
+| **LVX27** | it says it booked something and there is no row | **REPRODUCED 2026-09-09 · P0** — three false cancellation claims on one call with NO cancel or reschedule tool called at any point and both rows still present afterwards. The tools were available; the model never invoked them. |
 | **LVX44** | the spelling is asked at booking time, not when the name is given | **FIRED, and it carried the call** — 1 for 3, and on the call it fired the booking succeeded first time with the right name. Nearly deleted at 0 for 2 |
 | **LVX48** | it claimed to update a record with no tool able to do it | **VERIFIED**; the NOTES case recurred on call 5, and `add_appointment_note` is **VERIFIED end to end** on the 2026-09-05 call — tool ran, row appended, claim true |
 | **LVX45** | it hung up on a hesitation | **FIXED, UNVERIFIED** — the wire is repaired; the gate can now fire for the first time |
@@ -103,7 +103,7 @@ Status means:
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
 | **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
-| **LVX94** | the claim detector misses "I have YOU booked" | **OPEN · P1** — `completionClaimRe` matches "I've booked you in" but not "I have you booked", "I have you down", "I've got you booked" or "We have you booked". On the 2026-09-09 call the assistant said "so I have you booked" while `book_appointment` had been REFUSED, and `claimedCompletion` was FALSE — so neither the guard nor LVX29's post-call ledger ever saw it. Four `it.fails` tests in `liveClaimGuard.test.js` hold the evidence. |
+| **LVX94** | the claim detector missed passive voice and "I have YOU booked" | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — widened for both gaps; 14 cases added to `tests/completionClaimRe.test.js`, 7 of them negatives. "all" was tried as a determiner and reverted the same hour: "All appointments are confirmed by text" is policy, not a claim. Deployed as `67cc5c1`. Needs a call where a claim is made with no tool behind it. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -8844,3 +8844,65 @@ a second-order effect worth measuring first.
 `it.fails` cases are inverted to ordinary assertions, and a call has been taken
 with the wider detector to see how often it now fires on turns where nothing is
 wrong.
+
+---
+
+## TEST-CALL PROTOCOL — for the session that verifies this
+
+Production is `voice:67cc5c1` on `voice-uk-prod`. `LIVE_DEBUG_TRANSCRIPT` is
+**ON** — turn it off when the testing is done, by running an apply that simply
+omits the variable.
+
+### Two numbers, and they are not equivalent
+
+| number | tenant | account | good for |
+|---|---|---|---|
+| **+18176011171** | Brightwork Studio, `en-US` | B (needs `TWILIO_AUTH_TOKEN_ALT`) | everything except latency |
+| **+441372656055** | Digile Media, `en-GB` | A | latency, turn-taking, a UK caller ID |
+
+A US-originated call crosses the Atlantic to reach europe-west2, so
+`reply_after_last_voice_ms_p50` is inflated by an unknown amount. Judge
+responsiveness only from a UK handset.
+
+### What is still UNVERIFIED and what call would settle it
+
+1. **LVX94.** Make a claim happen with no tool behind it — ask to CANCEL an
+   appointment. On 2026-09-09 that produced three false claims and no cancel
+   tool call. Want: `live_claim_without_action` > 0, and the assistant
+   correcting itself after CLAIM_NOTE rather than repeating the claim.
+2. **LVX27 itself.** The deeper question the detector does not answer: why did
+   a model holding `cancel_appointment_db` narrate three cancellations without
+   calling it once? A detector catches the lie; it does not make the tool run.
+3. **LVX84's voice half.** Set `live_voice` on Digile Media through the
+   dashboard, then call `+441372656055`. Want `voice_source: tenant`.
+4. **LVX90.** Sign in and look at the tiles and a call detail page against
+   production data. Never once seen.
+
+### The two commands
+
+```
+CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud run jobs execute vetra-migrate-uk-prod \
+  --args=scripts/db-inspect.js,--business,<E164>,--calls,--limit,5 \
+  --project=vetra-uk-edc8ca --region=europe-west2 --wait
+```
+
+```
+CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud logging read \
+ 'resource.labels.service_name="voice-uk-prod" AND jsonPayload.event!="live_utterance" AND jsonPayload.event!="phi_access"' \
+  --project=vetra-uk-edc8ca --limit=60 --freshness=20m \
+  --format="value(timestamp,jsonPayload.event,jsonPayload.tool)"
+```
+
+The second one is the important one and the lesson of 2026-09-09: **read the
+tool trace, not the transcript.** The call SOUNDED like it cancelled two
+appointments. The trace showed no cancel tool ran, and the row count proved it.
+A transcript tells you what was said; only the trace tells you what was done.
+
+### Counters worth reading
+
+- `live_claim_without_action` — a claim with no tool, narrow condition
+- `live_claim_unbacked_by_action` — LVX93, the same with the look-back
+  restricted to ACTION tools. The DIFFERENCE between them is LVX93's population
+- `transcript_turns_written` vs `turns` — should be equal
+- `end_call_abandoned_write_outstanding` — fired on the cancellation call
+- `live_repeated_phrase` — fired five times on that same call
