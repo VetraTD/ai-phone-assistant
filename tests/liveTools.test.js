@@ -237,13 +237,23 @@ describe("the tool runner", () => {
     expect(rec.execute).toHaveBeenCalledTimes(2);
   });
 
-  it("suppresses a doubled end_call without executing it twice", async () => {
-    // Measured: 3.1 doubled end_call in 2 of 26 trials.
+  it("executes a repeated end_call rather than suppressing it", async () => {
+    // REVERSED 2026-09-09 on the evidence of call CA7e12d0. This asserted the
+    // opposite, on the strength of "3.1 doubled end_call in 2 of 26 trials".
+    //
+    // The measurement was real and the remedy was in the wrong place. Arming an
+    // exit is already idempotent -- armExit returns false while a pendingExit
+    // exists -- so a doubled end_call costs nothing there. What the cache cost
+    // was the ability to ask AGAIN after a hang-up had been cancelled, which is
+    // the state LVX96's latch clear creates: end_call succeeded, the caller
+    // barged, the intent was correctly dropped, and the model's next three
+    // requests all came back as cached duplicates whose stateEffects nothing
+    // reads. The call ran 53 seconds past its end with three goodbyes in it.
     const { runner: r, rec } = runner();
     await r.handleToolCall({ functionCalls: [{ id: "a", name: "end_call", args: {} }] });
     await r.handleToolCall({ functionCalls: [{ id: "b", name: "end_call", args: {} }] });
 
-    expect(rec.execute).toHaveBeenCalledTimes(1);
+    expect(rec.execute).toHaveBeenCalledTimes(2);
   });
 
   it("surfaces the state effects the reply reducer needs", async () => {

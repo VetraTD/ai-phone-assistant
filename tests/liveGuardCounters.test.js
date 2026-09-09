@@ -33,9 +33,15 @@ describe("live guard counters reach the metrics snapshot", () => {
   });
 
   it("registers a suppressed duplicate write", () => {
+    // Uses book_appointment, and that changed on 2026-09-09. It used to use
+    // end_call, which was convenient because it needs no verified slot -- and
+    // end_call is no longer deduplicated at all. A repeated hang-up is not a
+    // duplicate write: it writes no row, and the second request is legitimate
+    // exactly when the first was cancelled. See tests/liveGuards.test.js for
+    // the call that established it.
     const g = createToolGuards({ declarations: DECLARATIONS, config: { timezone: "Europe/London" } });
-    const fc = { id: "2", name: "end_call", args: {} };
-    g.after(fc, { functionResponse: { id: "2", name: "end_call", response: { success: true } } });
+    const fc = { id: "2", name: "book_appointment", args: { scheduled_at: "2026-09-15T15:00:00" } };
+    g.after(fc, { functionResponse: { id: "2", name: "book_appointment", response: { success: true } } });
     g.before({ ...fc, id: "3" });
 
     expect(getLatencyStats().turnTaking.live_guard_duplicate_suppressed).toBe(1);

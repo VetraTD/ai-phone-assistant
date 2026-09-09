@@ -285,6 +285,35 @@ describe("LVX96 route B — the hang-up latch has a lifetime", () => {
     expect(s.closed()).toBe(false);
   });
 
+  it("can be re-asked after the latch was cleared", async () => {
+    // THE HOLE THE FIX ABOVE OPENED, closed. Call CA7e12d0, 2026-09-09.
+    //
+    // end_call is in no capability pack, so isWriteTool treated it as a write
+    // and the idempotency cache suppressed every attempt after the first. That
+    // was invisible while endCallArmed was never cleared -- the end-of-turn
+    // retry kept re-arming from a flag that never went down. Clearing the latch
+    // removed the cover, and the model's next three hang-up requests all came
+    // back as cached duplicates whose stateEffects nothing reads. The call ran
+    // 53 seconds past its end and closed only because a sign-off matched.
+    //
+    // The whole sequence, which is what makes this a certification rather than
+    // a unit test of a Set: succeed, be refused, be cleared, ask again, arm.
+    const s = await boot({ endCall: "allow" });
+    await s.endCallTool();
+    await s.vendorInterrupt();
+    await s.say("Thanks for calling, and have a great day!");
+    await s.caller("Sorry, one more thing — can I move Thursday's appointment?");
+    expect(c().live_end_call_latch_cleared).toBe(1);
+
+    // The caller is finished for real this time.
+    s.clock.advance(11_000);
+    await s.endCallTool();
+    await s.say("No problem at all. Goodbye.");
+
+    expect(c().live_guard_duplicate_suppressed).toBeFalsy();
+    expect(s.exitMarks()).toEqual(["live-exit-end_call"]);
+  });
+
   it("leaves the latch alone when the caller does not speak", async () => {
     // The other control. A latch cleared too eagerly means a model that
     // genuinely finished can never hang up, and the silence ladder becomes the
@@ -301,4 +330,52 @@ describe("LVX96 route B — the hang-up latch has a lifetime", () => {
     expect(c().live_end_call_latch_cleared).toBeFalsy();
     expect(s.exitMarks()).toEqual(["live-exit-end_call"]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The sign-off detector, against what the model ACTUALLY said on CA7e12d0.
+//
+// It missed two goodbyes out of three, and the caller heard all three. On that
+// call the miss was expensive rather than cosmetic: end_call was being
+// duplicate-suppressed, so the sign-off path was the only remaining way to end
+// the call at all. Two soft holes in different files became one call running 53
+// seconds past its end.
+// ---------------------------------------------------------------------------
+import { getStrings } from "../lib/voice/strings.js";
+
+describe("signOffRe — the goodbyes it missed on a real call", () => {
+  const re = getStrings({ languagesSpoken: ["en"] }).signOffRe;
+
+  const SIGN_OFFS = [
+    // An adverb between "thanks" and "for calling". Exactly LVX94's
+    // object-between miss, in a different regex.
+    "Thanks again for calling Brightwork Studio. Take care.",
+    // The leaving word in the NEXT SENTENCE: [^.!?]* could not cross the stop.
+    "I understand. Thanks for calling Brightwork Studio. Take care.",
+    // The one that did match, kept so a future narrowing cannot lose it.
+    "Thanks for calling Brightwork Studio. Have a great day.",
+    "Thank you so much for calling Digile Media, goodbye.",
+    "Thanks for calling Digile Media, and have a great day!",
+  ];
+  for (const said of SIGN_OFFS) {
+    it(`arms on: ${said.slice(0, 46)}`, () => expect(re.test(said)).toBe(true));
+  }
+
+  // THE LINE THAT MATTERS. A bare "take care" is NOT a farewell here, because
+  // "I'll take care of that for you" is one of the commonest sentences a
+  // receptionist says and arming a hang-up on it would end calls mid-booking.
+  // The `?`/`!` fence is what keeps the widened gap from reaching across a
+  // question into an unrelated "take care".
+  const NOT_SIGN_OFFS = [
+    "I'll take care of that for you.",
+    "Take care not to double book.",
+    "Thanks for calling — what was the name again? I can take care of it.",
+    "Thanks for calling! What can I do for you?",
+    "Thanks for calling. Could you spell that? I will take care of it.",
+    "Thanks for that, let me check.",
+    "Is there anything else I can help you with today?",
+  ];
+  for (const said of NOT_SIGN_OFFS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => expect(re.test(said)).toBe(false));
+  }
 });

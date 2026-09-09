@@ -256,13 +256,48 @@ describe("idempotent tool execution", () => {
     expect(g.counts().duplicate_suppressed).toBe(1);
   });
 
-  it("suppresses a doubled end_call", () => {
+  // REVERSED 2026-09-09, on the evidence of call CA7e12d0. This asserted that a
+  // doubled end_call was suppressed, and that turned out to be the wrong rule.
+  //
+  // A REPEATED HANG-UP IS NOT A DUPLICATE WRITE. Idempotency exists so a second
+  // booking does not create a second row. end_call writes no row, and the second
+  // request is legitimate exactly when the first one was cancelled -- which is
+  // the case LVX96's latch clear created and this cache then made unrecoverable:
+  // end_call succeeded, armExit was refused inside the barge window, the caller
+  // kept talking so the latch was correctly dropped, and the model's next three
+  // attempts (07:38:17, 07:38:29, 07:38:58) all came back as suppressed
+  // duplicates carrying the cached success. A suppressed call short-circuits
+  // before stateEffects is read, so endCallArgs never reached the engine and
+  // NOTHING COULD RE-ARM. The call ran 53 seconds past its end and closed only
+  // because a sign-off finally matched a regex.
+  //
+  // The original defect this guarded against -- "3.1 doubled end_call in 2 of 26
+  // trials" -- is already covered where it matters: armExit returns false while
+  // a pendingExit exists, so arming twice is a no-op. The cache was protecting
+  // against something the exit path already handles, and breaking something it
+  // does not.
+  it("does NOT suppress a repeated end_call, so a cancelled hang-up can be re-asked", () => {
     const g = guards();
     const fc = { id: "3", name: "end_call", args: {} };
     g.before(fc);
     g.after(fc, { functionResponse: { id: "3", name: "end_call", response: { success: true } } });
 
-    expect(g.before({ ...fc, id: "4" }).allow).toBe(false);
+    const second = g.before({ ...fc, id: "4" });
+    expect(second.allow).toBe(true);
+    expect(g.counts().duplicate_suppressed).toBe(0);
+  });
+
+  it("does not suppress a repeated set_call_intent either", () => {
+    // The other engine-owned tool, and it was caught by the same accident:
+    // isWriteTool resolves a tool to its capability pack and treats "no pack" as
+    // a write, which is the right way to fail for a tool nobody recognises and
+    // the wrong answer for the two this engine owns itself.
+    const g = guards();
+    const fc = { id: "5", name: "set_call_intent", args: { intent: "book" } };
+    g.before(fc);
+    g.after(fc, { functionResponse: { id: "5", name: "set_call_intent", response: { success: true } } });
+
+    expect(g.before({ ...fc, id: "6" }).allow).toBe(true);
   });
 
   it("lets a read run again", () => {
