@@ -179,6 +179,64 @@ describe("LVX21 outbound leak guard", () => {
     expect(recoveryNotes(s.live)).toHaveLength(2);
   });
 
+  // -------------------------------------------------------------------------
+  // THE NOTE IS PART OF THE LOOP, so it is capped. 2026-09-09.
+  //
+  // The leak note goes in as a synthetic USER turn -- the only engine-to-model
+  // channel this API offers with no tool call in flight -- so a model already
+  // emitting meta-text is handed more text and emits more. Measured twice:
+  // LVX37 saw six cycles, `turns: 0`, and a caller who heard silence for the
+  // whole call; 2026-09-09 saw two cycles 3.5 seconds apart before it recovered.
+  //
+  // LVX37 blamed VOICE_INTENT_MARKER. The marker is forced off on this
+  // front-end and the loop happened anyway, so it was A trigger, not THE
+  // mechanism.
+  // -------------------------------------------------------------------------
+  it("stops sending the note after two leaks in one call", async () => {
+    const s = await boot();
+    for (let turn = 0; turn < 4; turn += 1) {
+      s.speak(2000);
+      s.transcribe("Calling cancel_appointment_db now.");
+      s.endTurn();
+    }
+
+    // Four leaking turns, two notes.
+    expect(recoveryNotes(s.live)).toHaveLength(2);
+    expect(getLatencyStats().turnTaking.live_outbound_notes_capped).toBe(2);
+  });
+
+  it("keeps guarding the caller after the note is capped", async () => {
+    // The cap must not uncap the GUARD. Detection, the audio cut and the
+    // counters carry on for the rest of the call -- all that stops is talking
+    // to the model, which is the half that was making it worse.
+    const s = await boot();
+    for (let turn = 0; turn < 4; turn += 1) {
+      s.speak(2000);
+      s.transcribe("Calling cancel_appointment_db now.");
+      s.endTurn();
+    }
+
+    expect(getLatencyStats().turnTaking.live_outbound_leaks).toBe(4);
+    expect(getLatencyStats().turnTaking.live_outbound_cuts).toBe(4);
+  });
+
+  it("does not ask the model to apologise", async () => {
+    // It did, in as many words, and the caller heard "I'm so sorry about that"
+    // on a call where nothing had visibly gone wrong. Do not ask for a
+    // behaviour you do not want the caller to hear.
+    const s = await boot();
+    s.speak(2000);
+    s.transcribe("Calling cancel_appointment_db now.");
+
+    const note = JSON.stringify(recoveryNotes(s.live));
+    // The REQUEST is what mattered, not the word. "Apologise briefly if it
+    // helps" is the exact sentence that produced the spoken apology; the
+    // replacement uses the word only to forbid the behaviour.
+    expect(note).not.toMatch(/apologi[sz]e briefly/i);
+    expect(note).not.toMatch(/apologi[sz]e if it helps/i);
+    expect(note).toMatch(/do not apologi[sz]e for it/i);
+  });
+
   it("counts a leak it was too late to cut, rather than reporting a cut", async () => {
     const s = await boot();
     // Nothing enqueued: the words already reached the caller.
