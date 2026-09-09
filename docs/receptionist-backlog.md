@@ -77,7 +77,7 @@ Status means:
 | **LVX42** | the spelling gate's escape hatch writes the misheard name | **OPEN · P1** |
 | **LVX35** | it closes the call the moment anything succeeds | **OPEN · P1** |
 | **LVX32** | inbound audio discarded during the handshake | **OPEN · P1** |
-| **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **FIXED, UNVERIFIED LIVE · P0** — `writeCallState(callSid, state)` at pickup plus a `sawCallerFinal` latch after the echo gate, in `lib/voice/live/index.js`. This was the ROOT CAUSE of the in-progress rows, and it is not a wrong SID: with no tenant in the shared store, `completeCall` ran unscoped and FORCE RLS matched zero rows as `vetra_app`. Unblocks `completeCall`, summary/sentiment, missed-call notify and the latency rollup. |
+| **LVX30** | a Live call never reaches `/twilio/status`, so half its record is missing | **VERIFIED · P0** — call `…d39221`, 2026-09-09, +18176011171: `status: completed`, `duration_seconds: 169`, `has_summary: true`, `has_sentiment: true`, and NO `db_unscoped_fallback` for `completeCall`. The tenant reached the status handler and the scoped UPDATE matched its row. |
 | **LVX25** | three or four questions in one breath | **OPEN · P1 — COUNTED.** Seven prompt instructions already say not to; an eighth was refused. The tic mandate removed 2026-09-05 was itself a stacked-question generator, so the next call's count is the reading |
 | **LVX28** | a name "already on file" is trusted though it was never spelled | **PARTLY CLOSED** — the bypass now needs the caller; the row itself still carries no provenance |
 | **LVX51** | the greeting plays twice | **NOT REPRODUCED** on call 1 with no health check — one kick, one greeting |
@@ -92,8 +92,8 @@ Status means:
 | **LVX80** | it names an appointment time BEFORE anything has checked availability | **FIXED, UNVERIFIED LIVE · P0** — the detection was always right; it ran in `auditTurn`, which fires on `turnComplete` when only the TAIL of the turn is still queued. Moved to `inspectOffer()`, per fragment, beside the leak guard, where a hard `clearAudio` still has something to drop. `live_offer_cuts` / `live_offer_cut_missed` score it. Offline tests only — the cut-vs-lag race can only be settled by a real call |
 | **LVX81** | the accent drifts between British, Australian and American across calls | **OPEN · P1, MEASUREMENT WRITTEN AND NOT RUN** — voice pinned to `Kore` and `languageCode: en-GB` pinned AND accepted (`language_pinned: true`, zero `live_language_code_rejected`) on all 8 calls, and it drifts anyway. No remaining config lever. `scripts/probes/voice-drift.mjs` + pre-registered `verdicts-voice.json`; needs spend approval. The cutover spec §2 is amended to record that it never weighed voice stability |
 | **LVX82** | the stacked-question counter could not count | **COUNTER FIXED · P1** — the ticket said it measures question marks; it has not since 2026-09-05, when `asksMoreThanOneThing` was OR'd in. The real defect was that it is one bump per offending turn however many things that turn asked, and `marks:` was computed before the OR so it never said which rule fired. Now `countAsks()` + `live_stacked_asks_total`, carried into `live_call_summary` so a deploy stops erasing it. **Behaviour fix still OPEN** and deliberately waiting on a deployed reading |
-| **LVX83** | the Live front-end writes no transcripts at all | **FIXED, UNVERIFIED LIVE · P1** — written at `turnComplete` beside `debugTranscript()`, and on barge-in before the accumulators are cleared. Refused under `DEPLOYMENT_MODE=hipaa`, which DIVERGES from the cascade deliberately. Scored by `live_transcript_written` / `live_transcript_write_failed` plus `transcript_turns_written` in `live_call_summary`. Proved as `vetra_app` under FORCE RLS in `tests/db/rlsAppRole.test.js`. |
-| **LVX84** | the voice picker writes a field the Live front-end never reads | **FIXED, UNVERIFIED LIVE · P1** — the picker now writes `live_voice` and `locale`, chosen from `GET /api/live-voices`. The LANGUAGE half was already wired end to end and merely unexposed. The VOICE half ships a candidate list carrying its own evidence, two entries of which are already disproved over a phone line. `VOICE_FRONTEND` declares which front-end serves, because Twilio holds that fact and this database does not. |
+| **LVX83** | the Live front-end writes no transcripts at all | **VERIFIED · P1** — 29 transcript rows on call `…d39221`, 16 of 16 turns written, 3 barge-ins among them, `transcript_refused: None`. A first call the evening before wrote 21 rows. The Live front-end records what was said. |
+| **LVX84** | the voice picker writes a field the Live front-end never reads | **LANGUAGE VERIFIED, VOICE UNVERIFIED · P1** — `language_source: tenant`, `language_code: en-US` on a real call to the US tenant, so the picker's language half reaches the model. The VOICE half is still unexercised: `live_voice` is unset on that tenant and `voice_source` read `default`. |
 | **LVX85** | password reset email fails silently | **NOT A DELIVERY BUG · P2** — the project contains exactly ONE account and Identity Platform sends from its own `noreply@` (`method: DEFAULT`), both confirmed 2026-09-08. The reset was requested for an address with no account, and `auth.js:193` swallows `auth/user-not-found` as enumeration defence. Telemetry added for every OTHER failure; the swallow stays silent on purpose. |
 | **LVX86** | no way to control pronunciation of a business name | **OPEN · P2** — Gemini Live says "digital" for "Digile". No lexicon, phoneme or SSML support exists anywhere in the codebase, and Live's prebuilt voices accept no pronunciation hints. `custom_instructions` is the only lever and it is a prompt line, so it carries no guarantee and no counter |
 | **LVX87** | the migrate job connects to production as `postgres` | **OPEN · P2** — `db-inspect` reported `current_user: postgres` against `vetra_uk_prod`. If that role carries BYPASSRLS then the tenant scoping in every job-run script is decoration, and the isolation those scripts exist to prove is not being exercised by the path that proves it |
@@ -8628,3 +8628,70 @@ first assertion pass for the wrong reason.
 **Done when** DONE 2026-09-08 for the fallback. Still open: nobody has swept the
 rest of the codebase for other released-host defaults, which is the general
 version of this and of A9.
+
+---
+
+## VERIFIED ON A REAL CALL — 2026-09-09
+
+Two calls to **+18176011171** (Brightwork Studio, `en-US`, account B), against
+`voice-uk-prod` on image `2fe1dc9`, real Cloud SQL, as `vetra_app` under FORCE
+row-level security. The estate's own configuration, not a rig.
+
+### The row
+
+```
+sid_tail d39221  status: completed  duration_seconds: 169
+has_summary: true  has_sentiment: true  transcript_rows: 29
+```
+
+### What each of those settles
+
+| item | evidence |
+|---|---|
+| **LVX83** | 29 transcript rows; `transcript_turns_written: 16` of `turns: 16`; `transcript_refused: None`. Call one wrote 21 rows before the status route was fixed. |
+| **LVX30** | `status: completed`, `duration_seconds: 169`, summary AND sentiment present, and **no `db_unscoped_fallback` for `completeCall`** — the tenant reached the status handler and the scoped UPDATE matched its row. |
+| **LVX84** language | `language_source: tenant`, `language_code: en-US`. |
+| **barge-in** | `interrupted_count: 3`, and all 16 turns still written — `sc.interrupted` writes before clearing, which is a different branch from a normal turn. |
+
+### THE PREDICTION THAT WAS WRONG, and it is the useful part
+
+`call_summary_written` **appeared**, 7 seconds after the status callback.
+
+This backlog recorded, hours earlier, that the summary block was the one thing
+the call was PREDICTING rather than confirming, and that the prediction was
+unfavourable: `generateSummaryAndSentiment` measures 3.2 seconds against the
+real API, and it runs fire-and-forget AFTER `res.end()` on an instance with
+`cpu_idle = true`. The stated fallback was to move generation into the Live
+path's `finish()`.
+
+It completed anyway. Cloud Run did not starve 3.2 seconds of post-response work
+on this call. **That fallback is now unnecessary and should NOT be built.**
+
+Recorded because the instrument is the point. `call_summary_written` was added
+for exactly this question, the answer came from one call, and a design change
+that felt obviously correct beforehand turned out to be unneeded. One
+observation is not a guarantee — a busier instance or a longer transcript could
+still lose the race — so the line stays, and its absence remains the signal.
+
+### Two defects found BY the verification, not by the code
+
+1. **A Cloud Run service has two URLs**, and the signature only matches one.
+   `gcloud run services describe --format='value(status.url)'` returns
+   `voice-uk-prod-qn43z3hljq-nw.a.run.app`; `BASE_URL` on the service is
+   `voice-uk-prod-462445274080.europe-west2.run.app`. `twilioValidation*`
+   computes the signed URL as `BASE_URL + path`, so pointing Twilio at the
+   first form makes every call fail with `live_signature_invalid` and the
+   caller hears "an application error has occurred". Cost one wasted call.
+   **Whatever a webhook is pointed at must equal `BASE_URL`, not merely reach
+   the same service.**
+2. **LVX14**, above. The status callback's single-token check made the whole
+   completion half unverifiable on account B.
+
+### Still not verified
+
+- **The voice half of LVX84.** `live_voice` is unset on this tenant, so
+  `voice_source: default`. Setting it and hearing the difference is untested.
+- **LVX90.** The timezone fix has never been seen in the dashboard UI against
+  production data. These two calls are the first rows that could show it.
+- **Anything from a UK handset.** Both calls originated in the US, so the
+  transatlantic leg makes turn-taking and latency unreadable here.
