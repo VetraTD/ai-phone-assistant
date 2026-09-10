@@ -112,6 +112,38 @@ describe("confirmReadBackRe — LVX107, a word in the middle", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// THE REGRESSION THE FIX ITSELF CAUSED, caught on the next call after deploying.
+//
+// The clause-terminal guard was applied to BOTH the adjacent and the gapped
+// form. Adjacent needs no guard -- nothing can sit between the words to change
+// their meaning -- and applying it there silently narrowed four phrasings that
+// had matched for months, because the adjective no longer ended the clause.
+//
+// A miss here is not cosmetic: services/tools.js keys the escape-hatch budget to
+// "none" when no read-back is recognised, so the ceiling depletes. A fix for
+// LVX107 had started causing the exact harm LVX107 is about.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — the adjective need not end the clause", () => {
+  const READ_BACKS = [
+    "Is that correct for you?",
+    "Is that right for Thursday?",
+    "Is that okay with you?",
+    "Does that sound right to you?",
+    "Does that look good for you?",
+  ];
+  for (const said of READ_BACKS) {
+    it(`recognises: ${said}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  // And the guard still does its job where the ambiguity actually arises: once a
+  // word IS between them, an attributive adjective becomes reachable.
+  it("still rejects the attributive, which is what the guard is for", () => {
+    expect(en.test("Is that the right number to reach you on?")).toBe(false);
+    expect(en.test("Is that the right day for you or would another suit better?")).toBe(false);
+  });
+});
+
 describe("confirmReadBackRe — Spanish is untouched by the widening", () => {
   it("recognises the Spanish read-back", () =>
     expect(es.test("Para confirmar, ¿procedo con la cita del martes?")).toBe(true));
