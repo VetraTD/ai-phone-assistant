@@ -638,7 +638,50 @@ export async function executeToolCall(fc, ctx) {
             bumpCounter(readBackMade ? "write_confirm_readback_prev_turn" : "write_confirm_readback_missing");
 
             const orderScratch = ctx?.capabilityState?.[pack.id] || {};
-            const orderRefusals = Number(orderScratch.writeOrderRefusals) || 0;
+            // ---------------------------------------------------------------
+            // THE CEILING COUNTS ATTEMPTS AT ONE PROPOSAL, NOT REFUSALS IN A
+            // CALL. Corrected 2026-09-09, on the call that first spent it.
+            //
+            // The ceiling exists for a LIVELOCK: the model keeps proposing the
+            // same thing, we keep failing to recognise consent, and the caller
+            // repeats themselves forever. That is a real risk and it needs an
+            // escape.
+            //
+            // What it actually fired on was a caller in mid-negotiation:
+            //
+            //   A: "...you're booking a second appointment? Who is it for?"
+            //   C: "You can use the same name. I actually do Nitin Dodla."
+            //      -> refused: read-back recognised, no agreement. CORRECT.
+            //   A: "You're booking another for Nithin Dodla... Shall I confirm?"
+            //   C: "Yeah, actually, could you change the name to <...>?"
+            //      -> refused: same reason. ALSO CORRECT.
+            //   ...ceiling spent, third write released with no agreement at all.
+            //
+            // Two correct refusals burned the whole budget, and the write that
+            // followed landed on a turn whose only content was the caller
+            // spelling a name. The guarantee the gate exists for -- the caller
+            // said yes to THIS action, immediately before it -- was not met.
+            //
+            // Keying the budget to the PROPOSAL fixes all three cases at once:
+            //
+            //   read-back not recognised  -> key is null every time, so the
+            //     budget depletes and the escape still works.
+            //   consent not recognised (a mis-transcribed "yes" -- and today
+            //     proved the transcript can drop a caller turn entirely) -> the
+            //     model re-reads the SAME proposal, same key, budget depletes,
+            //     escape still works.
+            //   caller changing their mind -> every read-back is a NEW
+            //     proposal, the budget resets, and the gate keeps its teeth for
+            //     as long as the caller keeps moving. Which is correct: there
+            //     is no livelock when the caller is the one changing things.
+            //
+            // A HASH, not the sentence. This lands in capabilityState, which is
+            // per-call memory rather than a log, but the read-back carries the
+            // caller's name and appointment time and there is no reason to keep
+            // it once a number will do.
+            const readBackKey = readBackMade ? textFingerprint(lastReplyText) : "none";
+            const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey;
+            const orderRefusals = sameProposal ? Number(orderScratch.writeOrderRefusals) || 0 : 0;
             // Per CALLER TURN, not per tool round, for the reason written on
             // the spelling gate below: gemini.js rebuilds ctx from merged
             // capabilityState after every round, so a model calling the same
@@ -701,6 +744,12 @@ export async function executeToolCall(fc, ctx) {
                     toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                     capabilityState: {
                       [pack.id]: {
+                        // The key is written on EVERY refusal, even one that
+                        // does not spend a turn's budget: it is what tells the
+                        // next attempt whether this is the same proposal or a
+                        // new one, and that question is independent of whose
+                        // turn it is.
+                        writeOrderReadBackKey: readBackKey,
                         ...(orderRefusalIsNew
                           ? {
                               writeOrderRefusals: orderRefusals + 1,
@@ -940,6 +989,22 @@ export async function executeToolCall(fc, ctx) {
  * @param {object} [args] - the model's tool arguments
  * @returns {string|null} trimmed name, or null when absent/blank/not a string
  */
+/**
+ * A stable number for a sentence, so the write-order gate can tell "the model
+ * is re-proposing the same thing" from "the caller changed what they want"
+ * without keeping the sentence itself.
+ *
+ * djb2. Not a security hash and not trying to be: a collision costs one
+ * proposal sharing another's refusal budget, which is the same outcome the
+ * budget already allows.
+ */
+function textFingerprint(text) {
+  let h = 5381;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i += 1) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return `k${h}`;
+}
+
 function callerNameFromArgs(args) {
   const raw = args?.client_name ?? args?.caller_name;
   if (typeof raw !== "string") return null;

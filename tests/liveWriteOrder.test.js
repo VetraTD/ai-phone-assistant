@@ -66,7 +66,7 @@ import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
 
-const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {} } = {}) => ({
+const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4 } = {}) => ({
   businessId: "biz-1",
   callerPhone: "+15551234567",
   callId: "call-1",
@@ -75,7 +75,9 @@ const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config =
   config,
   // Settled, so nothing below can be the spelling gate.
   spellingSettled: true,
-  callerTurnCount: 4,
+  // The budget is spent per CALLER TURN, so anything driving more than one
+  // attempt has to move this or the second refusal silently costs nothing.
+  callerTurnCount: turn,
   lastCallerText: said,
   lastReplyText: replied,
 });
@@ -191,27 +193,78 @@ describe("LVX95 — a write needs a read-back that happened and a yes that was h
 });
 
 describe("LVX95 — the three bounds, each of which is load-bearing", () => {
-  it("releases the write once the per-call ceiling is spent", async () => {
-    // WITHOUT THIS the gate is a livelock. confirmReadBackRe cannot be
-    // completed -- the model can always ask in words nobody listed -- and an
-    // unrecognised read-back means refuse, ask, get a yes, refuse again,
-    // forever. The spelling gate has the same shape and the same escape hatch.
-    const spent = { appointments: { writeOrderRefusals: 2, writeOrderRefusedTurn: 2 } };
-    const { functionResponse } = await book(
-      ctx({
-        said: "Cancel all three",
-        replied: "You have three appointments coming up.",
-        capabilityState: spent,
-      })
-    );
+  it("releases the write after two attempts at the SAME proposal", async () => {
+    // WITHOUT THIS the gate is a livelock. If the model re-reads a proposal in
+    // words confirmReadBackRe cannot see, or the caller's "yes" is lost in
+    // transcription -- and 2026-09-09 proved a caller turn can vanish from the
+    // transcript entirely -- the write would be refused forever.
+    //
+    // Driven through real refusals rather than seeded state, because the budget
+    // is keyed to the proposal now and a hand-written key would be testing the
+    // fixture rather than the gate.
+    const unchanged = { said: "Cancel all three", replied: READ_BACK };
 
-    expect(functionResponse.response.success).toBe(true);
+    const first = await book(ctx(unchanged));
+    expect(first.functionResponse.response.success).toBe(false);
+    const afterFirst = first.stateEffects.capabilityState;
+
+    const second = await book(ctx({ ...unchanged, capabilityState: afterFirst, turn: 5 }));
+    expect(second.functionResponse.response.success).toBe(false);
+    const afterSecond = second.stateEffects.capabilityState;
+
+    clearStats();
+    const third = await book(ctx({ ...unchanged, capabilityState: afterSecond, turn: 6 }));
+
+    expect(third.functionResponse.response.success).toBe(true);
     expect(counters().write_order_gate_ceiling).toBe(1);
     expect(counters().write_order_refused).toBeFalsy();
     // Still counted as a situation. The ceiling changes what we DO, never what
-    // we know -- the mistake end_call_refused_abandoned made when its situation
-    // counter and its action counter arrived at different times.
+    // we know.
     expect(counters().write_order_would_refuse).toBe(1);
+  });
+
+  it("gives a CHANGED proposal a fresh budget", async () => {
+    // The correction of 2026-09-09, and the call that forced it. Two refusals
+    // were spent on a caller who was still changing their mind:
+    //
+    //   A: "...you're booking a second appointment? Who is it for?"
+    //   C: "You can use the same name. I actually do Nitin Dodla."   refused
+    //   A: "You're booking another for Nithin Dodla... Shall I confirm?"
+    //   C: "Yeah, actually, could you change the name to <...>?"      refused
+    //
+    // Both refusals were CORRECT -- read-back recognised, no agreement given.
+    // They then burned the whole budget, and the write that followed landed on
+    // a turn whose only content was the caller spelling a name.
+    //
+    // There is no livelock when the caller is the one moving: every new
+    // read-back is a new question, and they can end it at any time by agreeing.
+    const first = await book(
+      ctx({ said: "Actually make it Thursday", replied: "Just to confirm, shall I book Tuesday?" })
+    );
+    const second = await book(
+      ctx({
+        said: "No, sorry, Friday",
+        replied: "Just to confirm, shall I book Thursday?",
+        capabilityState: first.stateEffects.capabilityState,
+        turn: 5,
+      })
+    );
+
+    clearStats();
+    const third = await book(
+      ctx({
+        said: "Hmm, what about Monday",
+        replied: "Just to confirm, shall I book Friday?",
+        capabilityState: second.stateEffects.capabilityState,
+        turn: 6,
+      })
+    );
+
+    // Third refusal in a row, and NOT released: each was a different question.
+    expect(third.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
 
   it("spends a refusal only on a NEW caller turn", async () => {
