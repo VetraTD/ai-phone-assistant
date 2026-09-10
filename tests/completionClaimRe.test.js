@@ -289,3 +289,65 @@ describe("completionClaimWideRe — LVX97's phrasing, counted but not spoken to"
     it(`wide ignores: ${said.slice(0, 44)}`, () => expect(enWide.test(said)).toBe(false));
   }
 });
+
+// ---------------------------------------------------------------------------
+// THE OBJECT IS A NOUN PHRASE, NOT ALWAYS THE WORD "you". 2026-09-09, and it
+// cost a fabricated booking that every detector slept through.
+//
+// Call CAc19ef8, on the current revision. `book_appointment` never ran, no row
+// was created, and the assistant said:
+//
+//   "Thanks, Nithin Dodla. I have a consultation booked for you for Tuesday,
+//    September fifteenth at four thirty PM."
+//
+// LVX94 fixed exactly this shape -- an object between the pronoun and the
+// participle -- but only for the pronoun `you`. "a consultation" sits in the
+// same slot and slipped through, and so does "an appointment", which is the
+// word the guard is most obviously about.
+//
+// The second gap is per-tenant and worth stating: `consultation` was not in the
+// noun list at all, and it is Brightwork Studio's actual service name. The most
+// likely booking noun for this tenant was invisible to the guard watching its
+// bookings.
+//
+// WIDENED IN BOTH PREDICATES, not just the wide one. The narrow predicate is
+// what drives CLAIM_NOTE, and a claim nobody tells the model about is a claim
+// it cannot retract. The count-first ladder was the right call while a
+// behaviour baseline was in flight; that round is over and this phrasing has a
+// fabricated booking behind it.
+// ---------------------------------------------------------------------------
+describe("completionClaimRe — a noun phrase between 'I have' and the verb", () => {
+  const CLAIMS = [
+    // The call, verbatim.
+    "Thanks, Nithin Dodla. I have a consultation booked for you for Tuesday, September fifteenth at four thirty PM.",
+    "I have an appointment booked for you.",
+    "I have a booking scheduled for you on Tuesday.",
+    "I have your appointment booked for Thursday.",
+    // The tenant's own noun, in the third branch.
+    "Your consultation is booked for Tuesday.",
+  ];
+  for (const said of CLAIMS) {
+    it(`counts: ${said.slice(0, 46)}`, () => {
+      expect(en.test(said)).toBe(true);
+      expect(enWide.test(said)).toBe(true);
+    });
+  }
+
+  // The widening admits a determiner plus up to two words before the verb, so
+  // these are the sentences that decide whether it went too far. The first is
+  // the nearest miss in the whole file and has guarded this pattern since LVX57.
+  const NOT_CLAIMS = [
+    "I have your appointment here in front of me.",
+    "I have a few times available on Tuesday.",
+    "I have a question about that.",
+    "I have the details of our services here.",
+    "We have your appointment for Friday.",
+    "All appointments are confirmed by text.",
+  ];
+  for (const said of NOT_CLAIMS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => {
+      expect(en.test(said)).toBe(false);
+      expect(enWide.test(said)).toBe(false);
+    });
+  }
+});
