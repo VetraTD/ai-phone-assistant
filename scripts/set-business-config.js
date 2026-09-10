@@ -66,7 +66,19 @@ const has = (name) => argv.includes(`--${name}`);
  * SQL — there is no parameter form for an identifier. Nothing outside this list
  * can reach the statement, whatever is passed.
  */
-const FIELDS = ["name", "greeting", "general_info", "custom_instructions", "timezone"];
+// after_hours_policy is here because it decides BEHAVIOUR, not just prose: a
+// tenant whose rules say "this line is answered around the clock, only
+// bookings are limited to 9-5" needs `book_later`, and with `take_message`
+// the model is told to offer a message instead of booking the moment the
+// office is shut — the prompt and the policy then say opposite things.
+const FIELDS = [
+  "name",
+  "greeting",
+  "general_info",
+  "custom_instructions",
+  "timezone",
+  "after_hours_policy",
+];
 
 const TO = argOf("to");
 const FROM = argOf("from");
