@@ -116,6 +116,7 @@ Status means:
 | **LVX104** | the write-gate ceiling spent itself on correct refusals | **FIXED 2026-09-09 · P1** — two refusals from the NEGATION half (`readBackMade=True, callerAgreed=False`, first live firing and right both times) burned the whole budget, and the released write landed on a turn whose only content was a spelled name. The ceiling is for a livelock; a caller changing their mind is the opposite. Budget now keyed to a fingerprint of the read-back: same proposal keeps the escape, a new proposal resets it. |
 | **LVX105** | the leak note asks for the apology the caller hears | **FIXED 2026-09-09 · P2** — `LEAK_RECOVERY_NOTE` said "Apologise briefly if it helps"; the caller heard "I'm so sorry about that". Fourth in the LVX76/96/98 family and the only one commissioned in writing. **Corrects LVX37**: the marker is forced off on this front-end and the leak loop still happened, so it was A trigger and not THE mechanism. Notes capped at two per call; the guard itself is uncapped. |
 | **LVX106** | the transcript is not what the model heard | **OPEN · P1** — a caller turn with 1,500ms of voiced speech transcribed to ZERO characters, and a proposed cancel-gate keyed on caller text would have refused a legitimate cancellation while passing every test. `isAffirmative(lastCallerText)` is keyed on the same degraded copy. Second half: a failed `gcloud` piped into `grep` reported credentials as missing that are present. Both are absence-of-evidence read as evidence-of-absence. |
+| **LVX107** | three regexes defeated by a word in the middle, and a claim detector patched per-object | **OPEN · P1** — `signOffRe` missed "thanks AGAIN for calling", `confirmReadBackRe` misses "Is that ALL correct?", and `completionClaimRe` has now been widened three times for three object shapes (`you`, a noun phrase, and still-missing proper names). A fourth alternation is the wrong move: loosening the object slot reaches the bare `down` in the verb list and turns "I have your number written down" into a claim. Needs the general form, with the verb side tightened as the object side loosens. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9894,6 +9895,73 @@ went through the pipe, where grep matched nothing. **An empty grep was read as
 Both share a shape: **absence of evidence reported as evidence of absence.** A
 pipeline that swallows an error, and a transcript that silently drops speech,
 both fail by producing nothing rather than by producing a complaint.
+
+---
+
+## LVX107 — three regexes, one bug: a word in the middle
+
+Filed 2026-09-10 after the same failure appeared three times in one evening, in
+three different patterns, each fixed separately without anyone noticing the
+shape.
+
+```
+signOffRe          "thanks AGAIN for calling ... take care"      MISS
+nameReadBackRe     (same shape, fixed 2026-09-04 as LVX94)
+confirmReadBackRe  "Is that ALL correct?"                        MISS
+completionClaimRe  "I have A CONSULTATION booked for you"        MISS
+                   "I have PRIYA RAGHUNATHAN scheduled"          MISS
+```
+
+Every one is an alternation that assumed two words sit next to each other, and
+every one was defeated by an ordinary English word between them. Each was
+patched for the specific phrasing observed; none was patched for the class.
+
+### What it cost, per instance
+
+`signOffRe` — two goodbyes out of three unrecognised on `CA7e12d0`, which
+mattered only because `end_call` was simultaneously being duplicate-suppressed.
+Two soft holes made one hard failure.
+
+`confirmReadBackRe` — on `CAf1e2` the model DID read the booking back
+("Just to make sure I have that right ... Is that all correct?") and the gate
+recorded `readBackMade=False`. The refusal was right by outcome (the caller was
+spelling, not agreeing) and wrong by reason. **That reason is what the escape
+hatch budgets on**, so a phrasing miss here spends the allowance LVX104 is about.
+
+`completionClaimRe` — the expensive one. Three object shapes now:
+
+```
+I have YOU booked            fixed LVX94
+I have A CONSULTATION booked fixed LVX103
+I have PRIYA RAGHUNATHAN scheduled   still missed
+```
+
+The real form is `I have <any object> <completion verb>`, and it has been
+patched one object type at a time across three sessions.
+
+### Why a fourth patch is the wrong move
+
+The negative fixtures are the constraint, and they are load-bearing: widening the
+object slot to "anything" made **"I have your number written down"** a completion
+claim, caught only because a fixture has guarded that sentence since LVX57. The
+verb list carries a bare `down` for "I have you down for Wednesday", and a
+general object slot in front of it reaches straight into ordinary speech.
+
+So the general form needs the VERB side tightened at the same time as the object
+side is loosened, and that is a design job rather than another alternation.
+
+**Done when** the claim detector is expressed as one rule about the sentence
+shape rather than a list of observed objects, every negative in
+`tests/completionClaimRe.test.js` still passes, and the three read-back-style
+patterns tolerate an intervening word without matching across a clause boundary.
+
+### Also on the same call
+
+`postcall_verify` returned **`row_without_claim`** — booked_rows 1, claims 0 —
+on a call where the assistant plainly said "Perfect, that's all done. So you now
+have a consultation scheduled". Benign here (the row exists, nothing was
+fabricated) but it is the same detector gap seen from the other side, and it is
+exactly the false alarm LVX57 warns teaches readers to ignore the ledger.
 
 ---
 
