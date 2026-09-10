@@ -136,13 +136,19 @@ const cols = FIELDS.join(", ");
  * for exactly that reason.
  */
 async function readRow(phone) {
-  const found = await pool.query(`SELECT id FROM app_lookup_business_by_phone($1)`, [phone]);
-  const id = found.rows[0]?.id;
-  if (!id) return null;
+  // EVERY COLUMN FROM THE FUNCTION, never a direct `FROM businesses`.
+  //
+  // The first version resolved the id here and then re-read the row straight
+  // from the table, and the table read came back empty for a number the
+  // function resolves fine — so the two do not see the same rows. db-inspect
+  // has always taken all of it from the function (that is how it computes
+  // custom_instructions_chars), and it is the lookup the voice service itself
+  // routes through, so it is the one that defines which row a caller reaches.
   const res = await pool.query(
-    `SELECT id, phone_number, ${cols} FROM businesses WHERE id = $1`,
-    [id]
+    `SELECT id, phone_number, ${cols} FROM app_lookup_business_by_phone($1)`,
+    [phone]
   );
+  say("lookup", phone, "rows", res.rowCount);
   return res.rows[0] || null;
 }
 
