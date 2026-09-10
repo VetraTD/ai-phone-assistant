@@ -461,12 +461,21 @@ describe("gemini.js — the existing-appointment rule is intent-independent", ()
     },
   });
 
+  // RELATIVE, not a literal. This read "2026-09-10T19:00:00.000Z" and expired at
+  // exactly that instant, taking all four tests below with it -- the rule under
+  // test only appears when the caller HAS an upcoming appointment, and
+  // buildDynamicTail filters that list to the future. Second fixture bomb of the
+  // day; see LVX110 for the one that inverted a safety test.
   const withAppt = {
     callerContext: {
       callCount: 2,
       lastCallSummary: "asked about hours",
       upcomingAppointments: [
-        { id: "a1", client_name: "Boris Johnson", scheduled_at: "2026-09-10T19:00:00.000Z" },
+        {
+          id: "a1",
+          client_name: "Boris Johnson",
+          scheduled_at: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+        },
       ],
     },
   };
