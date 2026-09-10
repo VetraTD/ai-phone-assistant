@@ -135,6 +135,10 @@ COPY scripts/c7-restore-parity.js ./scripts/c7-restore-parity.js
 # needs. Config only: it refuses a payload naming any PHI table.
 COPY scripts/import-tenant.js ./scripts/import-tenant.js
 COPY scripts/attach-tenant-user.js ./scripts/attach-tenant-user.js
+# Operator-config edits. There is no write path to a business row from a
+# workstation -- Cloud SQL is private-IP only and the service exposes no
+# settings endpoint -- so this runs through the migrate job like db-inspect.
+COPY scripts/set-business-config.js ./scripts/set-business-config.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:

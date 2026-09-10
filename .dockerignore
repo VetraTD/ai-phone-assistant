@@ -39,6 +39,7 @@ scripts
 # finding was recorded as closed while remaining true in the only place it
 # could be run.
 !scripts/attach-tenant-user.js
+!scripts/set-business-config.js
 docs
 latency-runs
 infra
