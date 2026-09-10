@@ -112,6 +112,10 @@ Status means:
 | **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **VERIFIED ON A CALL 2026-09-09 · P1** — CA07c2ef: `end_call` succeeded, `armExit` was refused on a barge, the latch cleared, and **the second `end_call` executed** with `duplicate_suppressed: 0`. The call closed 8s later on one goodbye, against 53s and three goodbyes on CA7e12d0. The `signOffRe` widening is shipped but still unexercised — both calls ended through the `end_call` path. |
 | **LVX101** | the model substituted a famous person's name for the caller's | **OPEN · P2** — "Nithin Dodla" became "Nitin Gadkari": not a phonetic mangle, a pattern-completion into a public figure. Distinct from LVX53, where the name came off an existing row and could be checked against. The spelling gate and the write-order read-back both caught it and the row went in correct — the first time two gates have been seen composing end to end. Argues that `shouldConfirmSpelling` must never narrow to "names that look hard". |
 | **LVX102** | the read-back the write gate forces is counted as a repeated phrase | **OPEN · P3** — a confirmation restates the date, time and name, so `live_repeated_phrase` fires on it and the number climbs as the gate works. No audio is cut: `inspectRepeat`'s across-turns branch needs `!callerSpokeSinceLastReply` and the caller always speaks between the refusal and the read-back. An instrument discontinuity dated 2026-09-09, not a defect. |
+| **LVX103** | a fabricated booking, undetected, on the fully-guarded revision | **FIXED 2026-09-09, UNVERIFIED LIVE · P0** — "I have a consultation booked for you" with no tool and no row. Two gaps: LVX94's object-between fix covered only the pronoun `you`, and `consultation` was absent from the noun list — this tenant's own service name. Both predicates widened, noun-phrase branch split out so a bare `down` cannot reach it. Also found `POSTCALL_VERIFY` unset (= off) in production, so the ledger and LVX97's reconciliation had NEVER run; now `count`. |
+| **LVX104** | the write-gate ceiling spent itself on correct refusals | **FIXED 2026-09-09 · P1** — two refusals from the NEGATION half (`readBackMade=True, callerAgreed=False`, first live firing and right both times) burned the whole budget, and the released write landed on a turn whose only content was a spelled name. The ceiling is for a livelock; a caller changing their mind is the opposite. Budget now keyed to a fingerprint of the read-back: same proposal keeps the escape, a new proposal resets it. |
+| **LVX105** | the leak note asks for the apology the caller hears | **FIXED 2026-09-09 · P2** — `LEAK_RECOVERY_NOTE` said "Apologise briefly if it helps"; the caller heard "I'm so sorry about that". Fourth in the LVX76/96/98 family and the only one commissioned in writing. **Corrects LVX37**: the marker is forced off on this front-end and the leak loop still happened, so it was A trigger and not THE mechanism. Notes capped at two per call; the guard itself is uncapped. |
+| **LVX106** | the transcript is not what the model heard | **OPEN · P1** — a caller turn with 1,500ms of voiced speech transcribed to ZERO characters, and a proposed cancel-gate keyed on caller text would have refused a legitimate cancellation while passing every test. `isAffirmative(lastCallerText)` is keyed on the same degraded copy. Second half: a failed `gcloud` piped into `grep` reported credentials as missing that are present. Both are absence-of-evidence read as evidence-of-absence. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9728,6 +9732,168 @@ Priority **P3**, and it is an instrument note, not a defect: the fix is either t
 exempt a turn matching `confirmReadBackRe` from the repeat count, or to leave it
 and write the discontinuity down. Written down here either way, because the
 alternative is someone reading a rise in repeats as a regression.
+
+---
+
+## LVX103 — a fabricated booking on the current revision, and the two gaps behind it
+
+2026-09-09, call `CAc19ef8`. `book_appointment` NEVER RAN, no row was created,
+and the assistant said:
+
+> "Thanks, Nithin Dodla. **I have a consultation booked for you** for Tuesday,
+> September fifteenth at four thirty PM."
+
+Then ended the call warmly. Zero claim events. The caller was told they had an
+appointment that does not exist and nothing anywhere recorded it — LVX27 in its
+purest form, on a revision carrying every guard built that day.
+
+### Two gaps, both verified against the live sentence
+
+**LVX94 fixed "an object between the pronoun and the participle" — but only for
+the pronoun `you`.** A NOUN PHRASE sits in the same slot and slipped through, and
+so did `I have an appointment booked for you`, which is the sentence the guard is
+most obviously about.
+
+**And `consultation` was not in the noun list at all** — Brightwork Studio's own
+service name. The most likely booking noun for this tenant was invisible to the
+guard watching its bookings.
+
+Fixed in both predicates, not just the counting one: the narrow predicate drives
+CLAIM_NOTE, and a claim nobody tells the model about is one it cannot retract.
+
+The noun-phrase branch is SPLIT from the pronoun branch rather than folded in,
+because the shared verb list carries a bare `down` for "I have you down for
+Wednesday". A two-word object in front of it made **"I have your number written
+down"** a completion claim — caught by a negative fixture that has guarded this
+pattern since LVX57.
+
+### The other two things this call showed
+
+**`POSTCALL_VERIFY` was unset in production, and unset means `off`.** So LVX29's
+ledger, the verdicts, and LVX97's reconciliation had never run on any call.
+Turned to `count` the same night and confirmed working on the next call
+(`ok`, booked_rows 1, changed_rows 1, claims 3).
+
+**The write-order gate cannot help here.** It gates writes that are attempted;
+no write was attempted. Every gate built that day acts when the model CALLS a
+tool. Nothing covers the model not acting at all — that is the claim guard's job
+alone, which is why its predicate is load-bearing in a way the others' are not.
+
+---
+
+## LVX104 — the write-gate ceiling fired on the wrong population
+
+The escape hatch shipped with LVX95 spent itself for the first time on
+`CAd72c71`, and it was protecting against the wrong thing.
+
+```
+A: "...you're booking a second appointment? Who is it for?"
+C: "You can use the same name. I actually do Nitin Dodla."      refused
+A: "You're booking another for Nithin Dodla... Shall I confirm?"
+C: "Yeah, actually, could you change the name to <...>?"        refused
+   ...budget spent, third write released with no agreement at all.
+```
+
+Both refusals were **correct**, and both came from the NEGATION half —
+`readBackMade=True, callerAgreed=False`. That half had never fired on a call
+before; this is its first live evidence and it was right twice. The ceiling then
+overrode it, and the booking landed on a turn whose only content was the caller
+spelling a name.
+
+The ceiling was built for a LIVELOCK — the model re-proposes, we cannot
+recognise consent, the caller repeats themselves forever. **A caller in
+mid-negotiation is the opposite situation.** There is no livelock when the caller
+is the one moving; they can end it at any time by agreeing.
+
+**Fixed by keying the budget to a fingerprint of the read-back** rather than
+counting refusals per call. Same proposal twice → the escape still works. New
+proposal → fresh budget, and the gate keeps its teeth for as long as the caller
+keeps changing their mind.
+
+The general shape, worth keeping: **an escape hatch has a population, and it must
+be keyed to that population.** Counting the right event over the wrong scope let
+two correct refusals buy a wrong write.
+
+---
+
+## LVX105 — the leak note asks for the apology the caller hears
+
+`CA9319b8`, 2026-09-09. The guard sanitized 935 characters of the model writing
+out a PLAN for its own turn — *"Your response goes here. Start with an apology
+for the confusing start..."* — and what reached the caller was:
+
+> "**prompt** I'm so sorry about that ? let me look up your appointments..."
+
+Nothing was refused; all ten tools in that window returned `success=True`. The
+trigger was our own note. `LEAK_RECOVERY_NOTE` said **"Apologise briefly if it
+helps"**. We asked for the apology and got it, delivered to a caller who had no
+idea anything had gone wrong.
+
+Fourth member of the LVX76 / LVX96 / LVX98 family, and the first that is not an
+accident of the channel — this one was commissioned in writing. Removed.
+
+### And it corrects LVX37
+
+LVX37 attributes the leak loop to `VOICE_INTENT_MARKER`. **The marker is forced
+off on this front-end** (`lib/voice/live/index.js`, `intentMarker: false` in the
+connect extras, and `intentMarkerEnabled` checks extras before the env var) —
+and the loop happened anyway: leak → note → leak → note, two cycles 3.5s apart.
+
+So the marker was A trigger and not THE mechanism. The mechanism is that the note
+is delivered as a synthetic USER turn — the only engine-to-model channel this API
+offers with no tool call in flight — so a model already emitting meta-text is
+handed more text. Capped at two notes per call; the guard itself is uncapped, so
+the caller stays protected either way.
+
+---
+
+## LVX106 — the transcript is not what the model heard
+
+Filed because both halves were mistakes made FROM the logs this file tells people
+to trust, and both nearly produced a bad change.
+
+### A caller turn that vanished
+
+A call cancelled an appointment and the logged caller turn contained no
+cancellation request. It was reported as "the model invented a cancel intent",
+with a proposed gate: **refuse `cancel_appointment_db` unless the caller has said
+something cancel-shaped**, keyed on `callerSaidThisCall`.
+
+The owner had asked, in plain English. The utterance records settle it:
+
+| utterance | voiced | transcript chars |
+|---|---|---|
+| 8 | 280ms | 28 |
+| 9 | 220ms | 27 (`dropped_voiced: 4`) |
+| 10 | 760ms | 29 (`dropped_voiced: 3`) |
+| **11** | **1,500ms** | **0** |
+| 12 | 1,560ms | 52 |
+
+**Utterance 11 is a second and a half of speech that produced zero characters.**
+The model heard it and acted correctly; the transcript did not.
+
+That gate would have refused a legitimate cancellation, made the caller repeat
+themselves, and **passed every test** — because fixtures contain the text.
+
+**The rule: on this front-end the model IS the ASR and works from audio.
+`lastCallerText` and `callerSaidThisCall` are a degraded copy.** Tool traces and
+row counts are ground truth; caller text is not. Note that
+`isAffirmative(lastCallerText)` — the write-order gate's second half — is keyed
+on exactly this degraded copy, which is more of the reason LVX104 matters.
+
+### A failed command and an absent value look identical
+
+It was also reported that the reconciliation could not notify anyone, because
+`gcloud ... | tr | grep` over the service env returned nothing. The credentials
+are all present (`SMTP_USER`, `SMTP_PASS`, `SMTP_HOST`, `SMTP_FROM_EMAIL`).
+
+The command had failed — the auth token expired mid-session and gcloud's error
+went through the pipe, where grep matched nothing. **An empty grep was read as
+"the variable is not set".** Claimed twice before it was checked.
+
+Both share a shape: **absence of evidence reported as evidence of absence.** A
+pipeline that swallows an error, and a transcript that silently drops speech,
+both fail by producing nothing rather than by producing a complaint.
 
 ---
 
