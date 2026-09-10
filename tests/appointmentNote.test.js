@@ -44,11 +44,27 @@ import { executeToolCall } from "../services/tools.js";
 import { buildAllDeclarations } from "../services/gemini.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
+/**
+ * A FIXTURE DATE MUST NOT BE A LITERAL. Written 2026-09-04 as
+ * "2026-09-10T14:00:00Z" and it went off on 2026-09-10 at 14:00 UTC, six days
+ * later, taking five tests across two files with it.
+ *
+ * capabilities/appointments.js:527 filters upcomingAppointments to `t > now`,
+ * so once this instant passed the caller had ZERO upcoming appointments and
+ * resolveAppointmentId stopped resolving. Two tests then failed for the honest
+ * reason. The third INVERTED: with the only past row filtered out of a
+ * two-appointment list, the "genuinely ambiguous" case became unambiguous and
+ * a write the test exists to forbid went through.
+ *
+ * Nothing in production was wrong on either day. The test was.
+ */
+const inDays = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+
 const MINE = {
   id: "appt-mine",
   client_name: "Nithin Dodla",
   client_phone: "+14699338887",
-  scheduled_at: "2026-09-10T14:00:00Z",
+  scheduled_at: inDays(1),
   status: "scheduled",
   notes: "cleaning",
 };

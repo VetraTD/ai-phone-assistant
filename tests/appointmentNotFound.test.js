@@ -49,11 +49,27 @@ vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 import { executeToolCall } from "../services/tools.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
+/**
+ * A FIXTURE DATE MUST NOT BE A LITERAL. Written 2026-09-04 as
+ * "2026-09-10T14:00:00Z" and it went off on 2026-09-10 at 14:00 UTC, six days
+ * later, taking five tests across two files with it.
+ *
+ * capabilities/appointments.js:527 filters upcomingAppointments to `t > now`,
+ * so once this instant passed the caller had ZERO upcoming appointments and
+ * resolveAppointmentId stopped resolving. Two tests then failed for the honest
+ * reason. The third INVERTED: with the only past row filtered out of a
+ * two-appointment list, the "genuinely ambiguous" case became unambiguous and
+ * a write the test exists to forbid went through.
+ *
+ * Nothing in production was wrong on either day. The test was.
+ */
+const inDays = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+
 const MINE = {
   id: "appt-mine",
   client_name: "Nithin Dodla",
   client_phone: "+14699338887",
-  scheduled_at: "2026-09-10T14:00:00Z",
+  scheduled_at: inDays(1),
   status: "scheduled",
 };
 
@@ -71,7 +87,7 @@ const ctx = {
 const CHANGE_TOOLS = [
   ["correct_appointment_name", { client_name: "Marcus Bell" }],
   ["cancel_appointment_db", {}],
-  ["reschedule_appointment_db", { new_scheduled_at: "2026-09-12T14:00:00" }],
+  ["reschedule_appointment_db", { new_scheduled_at: inDays(3).slice(0, 19) }],
 ];
 
 beforeEach(() => {
@@ -216,7 +232,7 @@ describe("LVX74 — an appointment_id the model never had", () => {
       ...ctx,
       callerContext: {
         ...ctx.callerContext,
-        upcomingAppointments: [MINE, { ...MINE, id: "appt-second", scheduled_at: "2026-09-11T14:00:00Z" }],
+        upcomingAppointments: [MINE, { ...MINE, id: "appt-second", scheduled_at: inDays(2) }],
       },
     };
 
