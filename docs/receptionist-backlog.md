@@ -122,6 +122,7 @@ Status means:
 | **LVX110** | a fixture date expired, five tests failed, and one INVERTED | **FIXED 2026-09-10 · P2** — `main` was not green and the brief said it was. A `scheduled_at` literal written 2026-09-04 aged out at 14:00 UTC on 2026-09-10; `upcomingForCaller` filters to future rows, so the "SEVERAL appointments" ambiguity test became unambiguous and the write it exists to forbid went through. A stale fixture can turn a safety test into its opposite. Dates now derive from `Date.now()`. |
 | **LVX111** | three instruments that describe a call wrongly | **OPEN · P2** — `tool_duration` carries no `callSid`, so filtering a call by id returns every event EXCEPT its tools, on the file that says "read the tool trace, not the transcript"; `GIT_COMMIT_SHA` in the service env disagrees with the deployed image; and the revision that served a call is not the one `describe` reports today. |
 | **LVX112** | the verification call destroyed two appointments and created none | **ROOT CAUSES FIXED 2026-09-10, UNVERIFIED LIVE · P0** — `booked_rows=0`, `changed_rows=2`, caller told "that's all set". The spelling gate's escape hatch read the SAME degraded transcript as the gate (2,180 ms of spelling → 0 characters), so `spellAskMisses` could never advance: unsatisfiable and unexhaustible at once. And two gates alternated, each seeing two of four attempts, so neither reached its own ceiling — LVX104 one level up. Both fixed: the miss is now counted from AUDIO, and the two gates share one budget keyed to the proposal WITHOUT the name. Consent deliberately untouched. Cancellations were correct. Still open: a spoken `[System checks availability]` with a fabricated result, a date string reaching Postgres as a uuid, and the name re-segmented across turns. |
+| **LVX113** | the booking landed, and a fabricated claim chose the wrong tool | **FIXED 2026-09-10, PARTLY VERIFIED LIVE · P1** — `booked_rows=1`, and LVX112's fix is VERIFIED on the same defect: 2,480 ms of spelling transcribed to ZERO again, `spelling_voiced_answer` fired twice, and the spelling gate refused zero writes against two last call. The NEW defect is LVX27's descendant: the guard tells the model its sentence was wrong but cannot undo what the model now BELIEVES, so a claimed-but-unbooked appointment made it call `correct_appointment_name` on a row that did not exist — twice. Of the three refusals that followed, two were correct and one was a phrasing gap (`may I go ahead`). Both fixed: the modal is now a closed class, and a change tool with no target skips the consent question so the pack's own "nothing to change" reason reaches the model. Still open: the name on the row is wrong, and `write_abandoned` is reported on a call that booked correctly. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10415,6 +10416,103 @@ Thursday?"`, `"Is that okay with you?"`, `"Does that sound right to you?"` — a
 miss that **spends the write-gate budget**. A fix for LVX107 had begun causing
 the exact harm LVX107 is about. Fixed, fixtures added; verified it did not
 affect this call, where every read-back used the adjacent form.
+
+---
+
+## LVX113 — the booking landed, and a fabricated claim chose the wrong tool
+
+`CA0c8ce7`, 2026-09-10, on `voice:027d77f`. The call verifying LVX112's two
+fixes. **It booked.**
+
+```
+postcall_verify   booked_rows=1  changed_rows=0  claims=3
+row 562f9f        2026-09-11 14:00Z = Friday 9:00 AM CDT   status: scheduled
+```
+
+### LVX112's fix is VERIFIED, and not by luck
+
+The failure reproduced exactly:
+
+```
+20:19:13   voiced 2,480 ms  ->  transcript 0 characters
+```
+
+The same two and a half seconds of spelling vanishing that broke `CA9e3788`.
+`spelling_voiced_answer` fired twice, the escape hatch advanced, and **the
+spelling gate refused zero writes** — against two on the previous call, with the
+same input class. That is a before/after on the exact defect, not an absence of
+symptoms.
+
+`write_attempt_budget_released` 0: the shared budget was not needed.
+`live_repeated_phrase` 1, `prompted=True`, so the unprompted residue is still 0.
+
+### The new defect: a claim the model then believed
+
+At **20:18:58**, with nothing booked:
+
+> "Perfect, **I have you down for** 9 AM tomorrow, Friday, September 11th…"
+
+Caught correctly — `live_claim_unbacked_by_action`, then
+`live_claim_without_action` and a note at 20:19:52. **But the guard only tells
+the model the sentence was wrong; it does not undo what the model now believes.**
+Having asserted the appointment existed, the model reached for
+`correct_appointment_name` when the name came out wrong. Twice, on a row that did
+not exist.
+
+**This is LVX27's descendant and a different animal.** A fabrication used to be
+a lie told to the caller. Here it became a false premise that selected the wrong
+tool — the model acting on its own hallucination rather than merely voicing it.
+
+### Three refusals, and only one of them was a defect
+
+| turn | refused because |
+|---|---|
+| 20:19:52 "Does that all look right?" | read-back recognised, caller disagreed. **Correct.** |
+| 20:20:07 "**may I go ahead** and confirm…" | read-back NOT recognised. **Phrasing gap.** |
+| 20:20:41 "I'm not sure why it's not updating…" | not a read-back at all. **Correct.** |
+
+Then, both explicitly forbidden by the refusal text it was answering:
+
+> "I'm sorry, it seems I'm still having some trouble updating the name… how
+> about I take your details and have someone from the team call you back?"
+>
+> "**I'm not sure why it's not updating**, and I don't want to keep you on the
+> phone while I figure it out."
+
+At 20:21:01 it used the right tool with a recognised read-back and booked
+immediately. The entire two-and-a-half-minute detour was one premature claim.
+
+### Both fixed
+
+**The modal is a closed class.** `shall I` and `should I` were listed; `may I`
+and `can I` were not. Now one alternation. The verb list after it is what keeps
+"Can I get your full name?" out.
+
+**A change tool with nothing to change is not a consent problem.** The
+write-order gate ran first and asked the wrong question, and its refusal —
+"read the details back and ask whether to go ahead" — is advice for a write that
+could succeed. `whichAppointmentMessage` has had the right words all along ("no
+upcoming appointments on record … there is nothing to change") and never got to
+say them. The pack now answers `hasWriteTarget()` and the engine skips the
+consent question when there is nothing to act on. **Nothing is released**: the
+tool still refuses, with a reason the model can act on, and a change tool that
+DOES have a target is gated exactly as before.
+
+New counter `write_skipped_no_target`: the claim guard sees the sentence, this
+sees what the sentence made the model DO.
+
+### Still open
+
+- **The name on the row is wrong** — "Venkat Ilovarpu", via "Venkat Ayyalaraju".
+  The server holds no record of the letters by design (LVX62), so the corrected
+  spelling exists only in the model's own prior turns. Unchanged.
+- **`verdict=write_abandoned` on a successful call.** The verdict describes
+  tools, not outcomes: `correct_appointment_name` was abandoned, so a call that
+  booked correctly reads as abandoned. Misleading in exactly the direction LVX57
+  warns about — a false alarm teaches readers to ignore the ledger.
+- **The model narrating a gate's refusal to the caller**, and offering a callback
+  the refusal forbids. LVX108's family, now sourced from a refusal rather than a
+  note.
 
 ---
 
