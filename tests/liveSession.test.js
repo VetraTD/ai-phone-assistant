@@ -217,7 +217,28 @@ describe("the greeting", () => {
     const prompt = live.sent.config.systemInstruction.parts[0].text;
 
     expect(prompt).not.toContain("do not greet them again");
-    expect(prompt).toContain("Nothing has been said to the caller yet");
+    expect(prompt).toContain("must be this opening");
+  });
+
+  it("does not leave the opening instruction standing for the whole call", async () => {
+    // 2026-09-10. A caller heard the entire greeting, verbatim, spliced onto the
+    // end of an ordinary sentence three minutes into the call. Nothing re-sent
+    // it: this prompt is frozen at connect (LVX46), and it used to say
+    //
+    //   "Nothing has been said to the caller yet. Open the call by saying
+    //    this..."
+    //
+    // in the PRESENT TENSE for the entire session. At minute three the model was
+    // still reading a live, unretracted instruction to open the call. It obeyed.
+    //
+    // The assertion that matters is the negative one: the prompt must never
+    // again claim, at any point in the call, that nothing has been said.
+    const { live } = await boot();
+    const prompt = live.sent.config.systemInstruction.parts[0].text;
+
+    expect(prompt).not.toContain("Nothing has been said to the caller yet");
+    expect(prompt).toContain("FIRST words on this call");
+    expect(prompt).toContain("never say that opening line again");
   });
 
   it("carries the recording disclosure into the opening line", async () => {

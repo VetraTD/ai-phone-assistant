@@ -1492,10 +1492,41 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     // rather than left with no instruction at all.
     const opening = sanitizeFact(greetingTextFor(config), 400);
     if (opening) {
+      // -------------------------------------------------------------------
+      // THIS SENTENCE USED TO STAY TRUE-SOUNDING FOR THE WHOLE CALL.
+      //
+      // It read "Nothing has been said to the caller yet. Open the call by
+      // saying this...", present tense, with the greeting quoted verbatim. On
+      // this front-end the prompt is FROZEN AT CONNECT (LVX46) and there is no
+      // reconnect or re-kick path anywhere in lib/voice/live/ -- so at minute
+      // three the model was still reading a standing, unretracted instruction
+      // telling it that nothing had been said and to open the call.
+      //
+      // A caller heard the result: the entire opening greeting, verbatim,
+      // spliced onto the end of an ordinary sentence with no space --
+      //
+      //   "I can help with that. What day were you thinking of?Thanks for
+      //    calling Brightwork Studio. You're through to our AI receptionist.
+      //    How can I help you today?"
+      //
+      // Nothing re-sent it. The model re-anchored on an instruction that still
+      // read as outstanding, which is the same splice shape LVX96 records for
+      // the pre-written end_call sign-off.
+      //
+      // The cascade never had this because it gets the opposite line below:
+      // "The caller was already greeted... do not greet them again."
+      //
+      // Reworded to be self-limiting and tense-correct. A prompt cap is not a
+      // fact, though, so it is only half the fix -- lib/voice/live/index.js
+      // carries the other half, which cuts the audio if this is ignored.
+      // -------------------------------------------------------------------
       taskState =
         taskState.replace(/\n+$/, "") +
-        `\nNothing has been said to the caller yet. Open the call by saying this, ` +
-        `in your own natural voice: "${opening}"`;
+        `\nYour FIRST words on this call, before anything else, must be this opening, ` +
+        `in your own natural voice: "${opening}"\n` +
+        `Say it once, at the start of the call only. Once you have spoken it, the caller ` +
+        `has been greeted — never say that opening line again, and never re-introduce ` +
+        `yourself later in the call.`;
     }
   } else if (typeof config.greeting === "string" && config.greeting.trim()) {
     if (config._hasCustomGreeting === true) {

@@ -117,6 +117,14 @@ async function boot() {
       live.push({ serverContent: { turnComplete: true } });
       await new Promise((r) => setImmediate(r));
     },
+    // The caller speaking. Needed by LVX107's tests below: an identical pair of
+    // assistant turns means one thing with silence between them and the
+    // opposite thing with a question between them, and the text alone cannot
+    // tell the two apart.
+    async hear(text) {
+      live.push({ serverContent: { inputTranscription: { text } } });
+      await new Promise((r) => setImmediate(r));
+    },
   };
 }
 
@@ -205,5 +213,83 @@ describe("LVX78 — a repeat is counted", () => {
 
     expect(c().live_repeat_pairs_checked).toBe(0);
     expect(c().live_repeated_phrase).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX102 / LVX107 — the discriminator the CUTTER always had and the COUNTER
+// never did.
+//
+// `inspectRepeat`'s across-turns branch requires `!callerSpokeSinceLastReply`,
+// so a caller who asks the same question twice gets two near-identical answers
+// and no audio is ever cut. This counter had no such condition, so it counted
+// those answers, and it counted every read-back the write-order gate forces —
+// a confirmation restates the date, the time and the name, which is exactly
+// what the turn before it said. 25+ firings in one day, unreadable.
+//
+// The total is deliberately left alone. Splitting rather than redefining is the
+// whole point: LVX102 is on file because a rise in this number reads as a
+// regression to anyone comparing against a call from before the write-order
+// gate shipped.
+// ---------------------------------------------------------------------------
+describe("LVX107 — a repeat the caller asked for is not the same event", () => {
+  beforeEach(() => clearStats());
+
+  // A repeat with the caller silent between the two turns. This is the defect
+  // LVX78 was actually filed for.
+  it("counts an UNPROMPTED restatement, and the total still moves", async () => {
+    const s = await boot();
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+
+    expect(c().live_repeated_phrase).toBe(1);
+    expect(c().live_repeated_phrase_unprompted).toBe(1);
+    expect(c().live_repeated_phrase_responsive).toBeFalsy();
+  });
+
+  // The same two turns, with the caller speaking in between. Identical text,
+  // and it means the opposite thing.
+  it("does NOT count a repeat as unprompted when the caller spoke", async () => {
+    const s = await boot();
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+    await s.hear("Sorry, could you say those times again?");
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+
+    expect(c().live_repeated_phrase).toBe(1);
+    expect(c().live_repeated_phrase_responsive).toBe(1);
+    expect(c().live_repeated_phrase_unprompted).toBeFalsy();
+  });
+
+  // LVX102's own example: the write-order gate refuses, the caller answers, the
+  // model reads the proposal back. That read-back necessarily restates the
+  // previous turn, and the gate working must not look like a defect.
+  it("classes the write-gate read-back as responsive, not a defect", async () => {
+    const s = await boot();
+    await s.say(
+      "I see you have an appointment scheduled for today, Wednesday, September 9th at 4 PM under the name Nithin Dodla. Are you looking to cancel that appointment?"
+    );
+    await s.hear("Yes, please just cancel it.");
+    await s.say(
+      "No problem. Just to confirm, you'd like to cancel your appointment for today, Wednesday, September 9th at 4 PM?"
+    );
+
+    expect(c().live_repeated_phrase).toBe(1);
+    expect(c().live_repeated_phrase_responsive).toBe(1);
+    expect(c().live_repeated_phrase_unprompted).toBeFalsy();
+  });
+
+  // The property that keeps the old series readable.
+  it("the two halves always sum to the untouched total", async () => {
+    const s = await boot();
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+    await s.hear("Right, and what about Tuesday?");
+    await s.say("Monday, September 7th is open, with times at 9 AM, 1 PM, or 4:30 PM. Which works best?");
+
+    const t = c();
+    expect(t.live_repeated_phrase).toBe(2);
+    expect((t.live_repeated_phrase_unprompted || 0) + (t.live_repeated_phrase_responsive || 0)).toBe(
+      t.live_repeated_phrase
+    );
   });
 });

@@ -72,6 +72,11 @@ const CONFIG = {
   businessName: "Digile Media",
   mainPhone: "+441372656055",
   timezone: "Europe/London",
+  // A CONFIGURED greeting, so greetingTextFor() is deterministic here. Without
+  // it the opening is synthesized from the time of day and these tests would
+  // pass or fail depending on the hour they run at.
+  greeting: "Thanks for calling Digile Media. You are through to our AI receptionist. How can I help you today?",
+  _hasCustomGreeting: true,
   allowedTasks: ["general_question"],
   capabilities: {},
   businessHours: {},
@@ -327,5 +332,113 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
 
     expect(c().live_repeat_cut).toBe(0);
     expect(s.cleared).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE OPENING LINE, SPOKEN AGAIN MID-CALL. 2026-09-10.
+//
+// Lives here rather than in a file of its own because it is a branch of this
+// cutter and shares its harness, and because the greeting VETO above is the
+// thing it must not break.
+//
+// What a caller heard, three minutes into a call — the whole greeting, verbatim,
+// spliced onto the end of an ordinary sentence with no space:
+//
+//   "I can help with that. What day were you thinking of?Thanks for calling
+//    Brightwork Studio. You're through to our AI receptionist. How can I help
+//    you today?"
+//
+// Nothing re-sent it. The opening line is written into the system instruction,
+// the prompt is frozen at connect, and it said "Nothing has been said to the
+// caller yet. Open the call by saying this..." in the present tense for the
+// entire call. The model re-anchored on a standing instruction. The wording is
+// now first-turn-only; this is the half that does not rely on the model
+// obeying it.
+//
+// Neither existing branch can reach this case, which is why it is a third one:
+// the caller has just spoken, so `acrossTurns` is disarmed by design, and the
+// greeting shares no long run with the earlier half of its own turn, so
+// `withinTurn` sees nothing either.
+// ---------------------------------------------------------------------------
+const GREETING = CONFIG.greeting;
+
+describe("the opening greeting, re-spoken mid-call", () => {
+  beforeEach(() => clearStats());
+
+  it("cuts the greeting spliced onto the end of an ordinary turn", async () => {
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("Hi, I'd like to book something.");
+    // The real splice: one turn, the useful sentence first, the greeting
+    // arriving behind it. Fragments, because that is how it actually arrives
+    // and it is what lets the cut land on the greeting rather than the answer.
+    s.fragment("I can help with that. What day were you thinking of?");
+    s.fragment(GREETING);
+    await s.endTurn();
+
+    expect(c().live_greeting_respoken).toBe(1);
+    expect(c().live_greeting_respoken_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
+  it("does NOT cut the real greeting — the veto still holds", async () => {
+    // The first thing every caller hears. A mangled greeting is worse than a
+    // doubled one and there is no recovering a first impression.
+    const s = await boot();
+    s.fragment(GREETING);
+    s.fragment(GREETING);
+    await s.endTurn();
+
+    expect(c().live_greeting_respoken).toBeFalsy();
+    expect(s.cleared).toHaveLength(0);
+  });
+
+  it("leaves a short phrase the greeting happens to contain alone", async () => {
+    // "How can I help you today?" is six normalised words and an ordinary thing
+    // to say again after finishing a task. Cutting it would be a worse defect
+    // than the one this branch fixes — hence a threshold of ten, not six.
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("That's all sorted, thanks.");
+    await s.say("Happy to help. How can I help you today?");
+
+    expect(c().live_greeting_respoken).toBeFalsy();
+    expect(s.cleared).toHaveLength(0);
+  });
+
+  it("has an allowance SEPARATE from the general repeat budget", async () => {
+    // A re-greet must not be unprotected because an unrelated loop earlier in
+    // the call already spent MAX_REPEAT_CUTS. Different defect, different
+    // population — LVX104's lesson about an allowance keyed to the wrong one.
+    const s = await boot();
+    await s.say(GREETING);
+    for (let i = 0; i < 4; i += 1) await s.say(SLOTS_A);
+    expect(c().live_repeat_cut).toBe(3);
+
+    await s.caller("Sorry, go on.");
+    s.fragment("Of course. What day suits you?");
+    s.fragment(GREETING);
+    await s.endTurn();
+
+    expect(c().live_greeting_respoken_cut).toBe(1);
+  });
+
+  it("counts a detection even once the cut allowance is spent", async () => {
+    // A fault-only counter reads zero for a clean call and for a call that
+    // never got there. The gap between these two numbers is what says the
+    // caller actually heard one.
+    const s = await boot();
+    await s.say(GREETING);
+    for (let i = 0; i < 3; i += 1) {
+      await s.caller(`Sorry, say that again ${i}.`);
+      s.fragment(`Certainly, one moment number ${i}.`);
+      s.fragment(GREETING);
+      await s.endTurn();
+    }
+
+    expect(c().live_greeting_respoken).toBe(3);
+    expect(c().live_greeting_respoken_cut).toBe(2);
+    expect(s.cleared).toHaveLength(2);
   });
 });
