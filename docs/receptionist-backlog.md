@@ -111,12 +111,16 @@ Status means:
 | **LVX99** | the $3,000 was configured, and a disabled capability does not silence the prompt | **OPEN · P2** — `custom_instructions` holds a price and `quote_request` is not in `allowed_tasks`, so the assistant quotes and refuses to quote in one turn. Nothing reconciles the tool surface with the prose surface. Also corrects LVX95: the tenant HAS five `business_capabilities` rows, one of them `appointments` with an empty config — not none. |
 | **LVX100** | `end_call` was a "duplicate write", and `signOffRe` missed two goodbyes in three | **VERIFIED ON A CALL 2026-09-09 · P1** — CA07c2ef: `end_call` succeeded, `armExit` was refused on a barge, the latch cleared, and **the second `end_call` executed** with `duplicate_suppressed: 0`. The call closed 8s later on one goodbye, against 53s and three goodbyes on CA7e12d0. The `signOffRe` widening is shipped but still unexercised — both calls ended through the `end_call` path. |
 | **LVX101** | the model substituted a famous person's name for the caller's | **OPEN · P2** — "Nithin Dodla" became "Nitin Gadkari": not a phonetic mangle, a pattern-completion into a public figure. Distinct from LVX53, where the name came off an existing row and could be checked against. The spelling gate and the write-order read-back both caught it and the row went in correct — the first time two gates have been seen composing end to end. Argues that `shouldConfirmSpelling` must never narrow to "names that look hard". |
-| **LVX102** | the read-back the write gate forces is counted as a repeated phrase | **OPEN · P3** — a confirmation restates the date, time and name, so `live_repeated_phrase` fires on it and the number climbs as the gate works. No audio is cut: `inspectRepeat`'s across-turns branch needs `!callerSpokeSinceLastReply` and the caller always speaks between the refusal and the read-back. An instrument discontinuity dated 2026-09-09, not a defect. |
+| **LVX102** | the read-back the write gate forces is counted as a repeated phrase | **FIXED 2026-09-10 · P3** — the counter had no caller condition; the CUTTER has required `!callerSpokeSinceLastReply` since LVX78. SPLIT rather than redefined: `live_repeated_phrase` still counts exactly what it counted, and `_unprompted` / `_responsive` sum to it. `_unprompted` is the residue that means something; every write-gate read-back lands in `_responsive`. The old series stays comparable, which is what this entry asked for. |
 | **LVX103** | a fabricated booking, undetected, on the fully-guarded revision | **FIXED 2026-09-09, UNVERIFIED LIVE · P0** — "I have a consultation booked for you" with no tool and no row. Two gaps: LVX94's object-between fix covered only the pronoun `you`, and `consultation` was absent from the noun list — this tenant's own service name. Both predicates widened, noun-phrase branch split out so a bare `down` cannot reach it. Also found `POSTCALL_VERIFY` unset (= off) in production, so the ledger and LVX97's reconciliation had NEVER run; now `count`. |
 | **LVX104** | the write-gate ceiling spent itself on correct refusals | **FIXED 2026-09-09 · P1** — two refusals from the NEGATION half (`readBackMade=True, callerAgreed=False`, first live firing and right both times) burned the whole budget, and the released write landed on a turn whose only content was a spelled name. The ceiling is for a livelock; a caller changing their mind is the opposite. Budget now keyed to a fingerprint of the read-back: same proposal keeps the escape, a new proposal resets it. |
 | **LVX105** | the leak note asks for the apology the caller hears | **FIXED 2026-09-09 · P2** — `LEAK_RECOVERY_NOTE` said "Apologise briefly if it helps"; the caller heard "I'm so sorry about that". Fourth in the LVX76/96/98 family and the only one commissioned in writing. **Corrects LVX37**: the marker is forced off on this front-end and the leak loop still happened, so it was A trigger and not THE mechanism. Notes capped at two per call; the guard itself is uncapped. |
 | **LVX106** | the transcript is not what the model heard | **OPEN · P1** — a caller turn with 1,500ms of voiced speech transcribed to ZERO characters, and a proposed cancel-gate keyed on caller text would have refused a legitimate cancellation while passing every test. `isAffirmative(lastCallerText)` is keyed on the same degraded copy. Second half: a failed `gcloud` piped into `grep` reported credentials as missing that are present. Both are absence-of-evidence read as evidence-of-absence. |
-| **LVX107** | three regexes defeated by a word in the middle, and a claim detector patched per-object | **OPEN · P1** — `signOffRe` missed "thanks AGAIN for calling", `confirmReadBackRe` misses "Is that ALL correct?", and `completionClaimRe` has now been widened three times for three object shapes (`you`, a noun phrase, and still-missing proper names). A fourth alternation is the wrong move: loosening the object slot reaches the bare `down` in the verb list and turns "I have your number written down" into a claim. Needs the general form, with the verb side tightened as the object side loosens. |
+| **LVX107** | three regexes defeated by a word in the middle, and a claim detector patched per-object | **FIXED 2026-09-10, UNVERIFIED LIVE · P1** — the object slot is now one grammatical rule (any 1-3 word run not headed by a closed-class function word) and the verb side tightened to match: `moved|recorded|sent` are provably unsafe in the loose slot. Narrow and wide are now BUILT from shared pieces, so LVX97's drift cannot recur. `confirmReadBackRe` got a bounded gap plus a clause-terminal guard. `signOffRe` already handled "thanks again for calling". Certified 38 positives / 62 negatives, 24 of them verbatim turns from the 2026-09-10 calls; 14 tests go red on removal. It also fixed a PRE-EXISTING false positive: "I have your message recorded for the team" was a fabrication claim. |
+| **LVX108** | every internal control message ends up audible, and the channel is why | **SCOPED, NOT STARTED 2026-09-10 · P1** — LVX76/96/98/105 are one defect with four entries. The scoping pass found a THIRD channel already in the tree: `sendTurnNote(..., { requestReply: false })` appends a note as context without forcing a spoken turn, added for the write-retry note and used at exactly one of seven call sites. The claim note — the one behind LVX98's six escalating apologies — still asks the model to speak immediately, by default, because it predates the alternative. Audio gating is the only complete answer and cannot be costed until the transcript-vs-audio lead is measured; that probe is the next task. |
+| **LVX109** | the greeting spoke itself again three minutes into the call | **FIXED 2026-09-10, UNVERIFIED LIVE · P1** — nothing re-sent it. The opening line lives in a system instruction frozen at connect that said "Nothing has been said to the caller yet" in the present tense for the whole call, so the model re-anchored on a standing instruction. The cascade gets the opposite line. Fixed as wording PLUS a cut branch, because a prompt cap is a request. The first attempt keyed on the first spoken turn and cut a repeat the caller had asked for — caught by two existing tests. |
+| **LVX110** | a fixture date expired, five tests failed, and one INVERTED | **FIXED 2026-09-10 · P2** — `main` was not green and the brief said it was. A `scheduled_at` literal written 2026-09-04 aged out at 14:00 UTC on 2026-09-10; `upcomingForCaller` filters to future rows, so the "SEVERAL appointments" ambiguity test became unambiguous and the write it exists to forbid went through. A stale fixture can turn a safety test into its opposite. Dates now derive from `Date.now()`. |
+| **LVX111** | three instruments that describe a call wrongly | **OPEN · P2** — `tool_duration` carries no `callSid`, so filtering a call by id returns every event EXCEPT its tools, on the file that says "read the tool trace, not the transcript"; `GIT_COMMIT_SHA` in the service env disagrees with the deployed image; and the revision that served a call is not the one `describe` reports today. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -9962,6 +9966,273 @@ on a call where the assistant plainly said "Perfect, that's all done. So you now
 have a consultation scheduled". Benign here (the row exists, nothing was
 fabricated) but it is the same detector gap seen from the other side, and it is
 exactly the false alarm LVX57 warns teaches readers to ignore the ledger.
+
+---
+
+## LVX108 — every internal control message ends up audible, and the channel is why
+
+Scoped 2026-09-10, not implemented. **LVX76, LVX96, LVX98 and LVX105 are one
+defect with four entries.** Three of them were patched individually on
+2026-09-09 — reword the hesitation refusal, clear the end_call latch, delete the
+apology request — and each patch was correct and none of them touched the cause.
+That is the treadmill this entry exists to get off.
+
+### The shape
+
+> Every internal control message this system sends the model ends up audible.
+> Not one of them was written to be heard.
+
+The cascade has a text-to-speech boundary and filters everything crossing it.
+Here **the model IS the voice**, so a mid-turn instruction handed to a speaking
+model has no channel that is not the speaker.
+
+### The channels, measured rather than assumed
+
+| channel | how | reaches the caller? |
+|---|---|---|
+| tool RESPONSE | the `functionResponse` a tool returns | **no** — silent, and this is how every refusal message travels |
+| synthetic user turn, `turnComplete: true` | `sendClientContent`, `sendTurnNote` (`index.js:1029`) | **yes**, and it forces a spoken turn |
+| synthetic user turn, `turnComplete: false` | same call, `{ requestReply: false }` | context only; the model acts at its next natural turn |
+
+**The third row is already in the tree and is the finding of this scoping pass.**
+It was added for the write-retry note after call 6, where a note fired 43 ms
+after `turnComplete` forced an entire extra spoken turn in which the model
+repeated its previous sentence verbatim. The comment at `index.js:1042-1056`
+records it.
+
+Of the six `sendTurnNote` call sites, **exactly one uses it**:
+
+```
+1349  sendTurnNote("claim", CLAIM_NOTE)                       requestReply: true
+1397  sendTurnNote("promise", PROMISE_NOTE)                   requestReply: true
+1484  sendTurnNote("spelling", SPELLING_NOTE)                 requestReply: FALSE
+1504  sendTurnNote("deferral", DEFERRAL_NOTE)                 requestReply: true
+1531  sendTurnNote("unusable_transcript", ...)                requestReply: true
+1541  sendTurnNote("zero_text", ZERO_TEXT_NOTE)               requestReply: true
+3079  the leak note                        requestReply: !ok || !modelSpokeThisTurn
+```
+
+So the claim note — the one that produced six escalating apologies in LVX98 —
+asks the model to speak immediately, by default, because it was written before
+the alternative existed.
+
+### The three options, with their real costs
+
+**1. Send corrections as context (`requestReply: false`).** Nearly free; the
+mechanism is built and exercised. The note lands, and the model corrects itself
+at its next natural turn instead of interrupting to announce that it was wrong.
+Cost: the correction is one turn later, and if the call ends first it never
+happens — which for the claim note is the state we would have been in anyway.
+Risk it does NOT remove: the text is still in context, and LVX105 shows a model
+already emitting meta-text will parrot what it is handed. Lower, not zero.
+
+**2. An audio gate — hold a turn's opening audio until its transcript clears.**
+This is the only option that gives ZERO leakage, and it is not cheap.
+`audioOut` already holds a local queue, but `LOOKAHEAD_MS` defaults to **100 ms**
+(`lib/voice/audioOut.js:54`); everything past that is already inside Twilio.
+Gating means raising that hold to cover the transcript's lead over the audio —
+and **nobody has measured that lead on this front-end.** Until someone does, the
+latency cost of this option is unknown, and it is paid on every turn of every
+call, not just the ones that leak. Measure first.
+
+**3. Defer the note onto the next tool response.** The silent channel already
+exists; the problem is only that it needs a tool call in flight. Most guard
+notes fire in windows where tools also run — LVX98's call ran ten in the window.
+Queue the note and attach it to the next tool response; drop it if no tool runs
+within N turns. No new API surface, no added latency. Cost: some notes never
+land, and the ones that do land late.
+
+### Recommendation
+
+**Option 1 first, then measure for option 2.** Option 1 is a default change on
+five call sites with a mechanism already proven on a sixth, and it removes the
+forced spoken turn, which is what the caller actually hears. Option 3 is more
+machinery than option 1 for a similar outcome. Option 2 is the only complete
+answer and cannot be costed until the transcript-vs-audio lead is measured — so
+that measurement is the real next task, and it is a probe, not a patch.
+
+**Do not start any of this as part of a detector round.** It changes what the
+model is told on every guard firing, and the guards are currently the only thing
+standing between a fabricated booking and a caller.
+
+### Done when
+
+The claim guard fires on a call and the caller hears the model say the right
+thing next, rather than hearing it apologise for having said the wrong one.
+`live_apology_after_note` is the counter that already exists to say so.
+
+---
+
+## LVX109 — the greeting spoke itself again three minutes in, and nothing sent it
+
+Reported 2026-09-10. A caller heard the ENTIRE opening greeting, verbatim,
+concatenated onto the end of an ordinary sentence with no space between them:
+
+> "I can help with that. What day were you thinking of?**Thanks for calling
+> Brightwork Studio. You're through to our AI receptionist. How can I help you
+> today?**"
+
+### It was not re-sent, and looking for the re-send is the trap
+
+The greeting is **not sent as a turn at all** on this front-end. The kick-off
+message is content-free — `"(The caller has just connected. Open the call now.)"`
+(`lib/voice/live/index.js`). There is no reconnect, resume or re-kick path
+anywhere in `lib/voice/live/`, and traffic was 100% on one revision.
+
+The opening line reaches the model exactly once, inside the SYSTEM INSTRUCTION,
+via the `greetingSpoken === false` branch in `services/gemini.js`:
+
+```
+Nothing has been said to the caller yet. Open the call by saying this,
+in your own natural voice: "<greeting>"
+```
+
+**The prompt is frozen at connect (LVX46), so that sentence stayed in the
+present tense for the whole call.** At minute three the model was reading a
+live, unretracted instruction telling it that nothing had been said and to open
+the call. It did what it was told.
+
+The cascade never had this: with `greetingSpoken` absent it gets the opposite
+line, `The caller was already greeted with: "..." — do not greet them again`.
+The inversion added for this front-end removed the retraction along with the
+falsehood, and nobody noticed the retraction was the part doing the work.
+
+Same splice shape as LVX96, where a refused `end_call`'s pre-written sign-off
+landed mid-turn with no space. Two generations, one transcript, no separator.
+
+### Fixed in two halves, because one of them is not a fact
+
+**The wording**, now first-turn-only and tense-correct: "Your FIRST words on this
+call ... Say it once, at the start of the call only ... never say that opening
+line again."
+
+**And a cut**, because a cap written in a prompt is a request. `inspectRepeat`
+gets a third branch keyed to the CONFIGURED opening, with its own allowance
+separate from `MAX_REPEAT_CUTS` — a re-greet must not be unprotected because an
+unrelated loop already spent that budget.
+
+Neither existing branch could reach this case, which is why it is a third:
+`acrossTurns` requires the caller to have been silent and the caller had just
+spoken, and `withinTurn` compares a turn's head against its own tail, which
+share nothing here.
+
+### Two things the first attempt got wrong, caught by tests already in the tree
+
+**Keying on "the first completed assistant turn" instead of the configured
+greeting.** It reads as the obvious choice — that is what the caller actually
+heard — and it broke two existing tests immediately: every later restatement of
+the first turn became a "re-greet", which swallowed ordinary repeats the general
+cutter should count, and **cut a repeat the caller had explicitly asked for.**
+That is the one false positive LVX78 was designed around. The configured line
+cannot make that mistake because an arbitrary first turn does not share ten
+words with it.
+
+**A threshold of six.** `REPEAT_RUN_WORDS` is 6 and "How can I help you today?"
+is six normalised words — an ordinary thing to say again after finishing a task.
+The greeting branch uses **ten**, which also self-disarms for a business whose
+whole greeting is shorter than that, rather than policing a threshold it cannot
+help tripping.
+
+### Done when
+
+A call runs past three minutes with `live_greeting_respoken` at 0. If it is
+non-zero, `live_greeting_respoken_cut` says whether the caller heard it.
+
+---
+
+## LVX110 — a fixture date expired, five tests failed, and one of them inverted
+
+Found 2026-09-10 while running the suite before deploying. `main @ 6c87aba` was
+NOT green: `tests/appointmentNote.test.js` and `tests/appointmentNotFound.test.js`
+had five failures, committed, and the session brief said the only known failure
+was the live-Twilio one. (That one passes — the Twilio account is healthy, and
+`services/twilioNumbers.js` has one commit in its entire history, so it could
+never have been a regression from any recent work.)
+
+### The bomb
+
+```js
+const MINE = { ..., scheduled_at: "2026-09-10T14:00:00Z" };   // written 2026-09-04
+```
+
+`capabilities/appointments.js:527` filters `upcomingAppointments` to `t > now`.
+At 14:00 UTC on 2026-09-10 that row stopped being upcoming, six days after it was
+written, and `resolveAppointmentId` stopped resolving.
+
+**Nothing in production was wrong on either day.**
+
+### The inversion is the part worth keeping
+
+Two tests failed honestly — the id no longer resolved, so the write was refused
+and `success` came back `false` where `true` was expected.
+
+The third is the interesting one. **"still refuses when the caller has SEVERAL
+upcoming appointments"** seeds two rows and asserts a refusal, because picking
+one at random would cancel the wrong appointment. Once the first row aged out of
+the filter, the list held exactly ONE future appointment — so the ambiguous case
+became unambiguous, the id resolved, and the write went through. The test that
+exists to prove a dangerous write is refused reported that the write happened.
+
+A stale fixture does not only make tests fail. **It can quietly convert a safety
+test into its own opposite**, and it reads as a code regression to whoever runs
+the suite next.
+
+### Fixed
+
+Both files now derive their dates from `Date.now()` via a local `inDays(n)`
+helper, with the reason written above it. Test-only; no production code touched.
+
+### The general rule
+
+**A fixture date must not be a literal.** Any test whose subject is filtered by
+"is it in the future" has an expiry date, and the expiry is invisible until it
+passes. Grep for four-digit years in `tests/` before trusting a green suite.
+
+Same family as the eval fixtures that desync after a prompt change: an
+instrument that encodes a moment, then gets read as if it encoded a rule.
+
+---
+
+## LVX111 — three instruments that describe a call wrongly
+
+Collected 2026-09-10 while reading production to ground the detector work. None
+is caller-facing; all three cost time or nearly produced a wrong conclusion.
+
+### 1. `tool_duration` carries no `callSid`, so a call's tool trace vanishes when you filter for it
+
+```
+event=tool_duration;level=INFO;message=tool_duration - end_call;ms=4;success=True;tool=end_call
+```
+
+`services/tools.js` logs it with `{ tool, ms, success }` and nothing else. The
+standing instruction in this file is **"read the tool trace, not the
+transcript"** — and the natural way to read one call's trace is to filter on its
+`callSid`, which returns every event that call emitted EXCEPT its tools.
+
+That produced, briefly, the conclusion that a call which booked and cancelled had
+run no tools at all. `postcall_verify` (`booked_rows 1, changed_rows 2`)
+contradicted it. **Exactly LVX106's shape: absence of evidence read as evidence
+of absence.** The command in the TEST-CALL PROTOCOL only works because it filters
+by service and freshness rather than by call.
+
+Fix is one field. Until then a per-call tool trace has to be reconstructed from
+timestamps, which is worse than it sounds on a service taking concurrent calls.
+
+### 2. `GIT_COMMIT_SHA` disagrees with the deployed image
+
+The service env says `GIT_COMMIT_SHA=67cc5c1`. The image is `voice:d151250`.
+Second member of the family that already contains `image_tag` in
+`infra/terraform/terraform.tfvars`: **a recorded label that is not the artefact,
+and drifts the moment someone deploys without updating it.** Read the image.
+
+### 3. The revision that served a call is not necessarily the one serving now
+
+Calls at 01:14–01:24 were served by `voice-uk-prod-00026-zvl` while traffic was
+100% to `00027-2gt`, because `00027` was created at 01:27 — three minutes after
+the last call ended. Harmless here, and worth writing down: the revision that
+served a call is `resource.labels.revision_name` on its own log lines, not
+whatever `describe` says today. Both revisions shared an image digest, so those
+calls did run the current code — which is what made their evidence usable.
 
 ---
 
