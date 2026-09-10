@@ -144,6 +144,44 @@ describe("confirmReadBackRe — the adjective need not end the clause", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// THE MODAL IS A CLOSED CLASS, so list it as one. Call CA0c8ce7, 2026-09-10:
+//
+//   "I'll update it to Venkat Ilovarpu — MAY I GO AHEAD and confirm the
+//    appointment for 9 AM tomorrow under that name?"
+//
+// recorded readBackMade=false, and the write-order gate refused a correction
+// that had been put to the caller perfectly clearly. `shall I` and `should I`
+// were listed; `may I` and `can I` were not. Same LVX107 shape as the rest of
+// this file -- a pattern written from observed phrasings rather than from the
+// grammar underneath them.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — every modal that fronts the same offer", () => {
+  const READ_BACKS = [
+    "May I go ahead and confirm the appointment for 9 AM tomorrow under that name?",
+    "Can I go ahead and book that for you?",
+    "Shall I go ahead and book that?",
+    "Should I go ahead and cancel it?",
+    "May I book that for you now?",
+    "Can I reschedule that to Thursday for you?",
+  ];
+  for (const said of READ_BACKS) {
+    it(`recognises: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  // The modal alone is not an offer to act. These are questions ABOUT the
+  // caller, not proposals to write anything, and counting them would hand the
+  // write gate a read-back that never happened.
+  const NOT_READ_BACKS = [
+    "Can I get your full name, please?",
+    "May I ask what the appointment is for?",
+    "Can I help with anything else today?",
+  ];
+  for (const said of NOT_READ_BACKS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(false));
+  }
+});
+
 describe("confirmReadBackRe — Spanish is untouched by the widening", () => {
   it("recognises the Spanish read-back", () =>
     expect(es.test("Para confirmar, ¿procedo con la cita del martes?")).toBe(true));
