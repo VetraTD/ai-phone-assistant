@@ -351,3 +351,98 @@ describe("completionClaimRe — a noun phrase between 'I have' and the verb", ()
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// LVX107 — THE GENERAL FORM, AND THE CALLS THAT WROTE IT.
+//
+// The object slot had been widened three times for three object shapes and was
+// about to be widened a fourth. It is now one rule: any 1-3 word run not headed
+// by a closed-class function word, followed by an UNAMBIGUOUS booking
+// participle. See buildCompletionClaimRe in lib/voice/strings.js.
+//
+// Everything in this block marked "live" is a verbatim assistant turn from the
+// production calls of 2026-09-10, taken off `live_debug_assistant_turn` on
+// revision voice-uk-prod-00026-zvl. They are better fixtures than invented ones
+// because they are what this tenant's model actually says, and three of them
+// are the reason `postcall_verify` returned `row_without_claim` with claims: 0
+// on a call whose booking was entirely real.
+// ---------------------------------------------------------------------------
+describe("completionClaimRe — LVX107, the general object form", () => {
+  const CLAIMS = [
+    // The shape LVX107 was filed for: a bare proper name, no determiner.
+    "I have Priya Raghunathan scheduled.",
+    "I have Priya Raghunathan scheduled for Thursday at two.",
+    // live, CAa688b2b1 — the proper name, and then a pronoun that is not `you`.
+    "Okay, so I have Priya Raghunathan scheduled for a free consultation on Friday, September 11th, at 10 AM. Is there anything else she'd like me to note for the appointment?",
+    "Thanks, Priya. I have her scheduled for Friday, September 11th, at 10 AM for a consultation. Is there anything else I can help you with?",
+    // live, CAe1bad30e — the call that returned row_without_claim. Two claims in
+    // one turn, and the old predicate saw neither: "that's ALL done" (the
+    // determiner sat between the copula and the predicate) and a subject of
+    // `you` rather than `I`/`we`.
+    "Perfect, that's all done. So you now have a consultation scheduled for Monday, September 14th, at 1 PM. Can I help you with anything else today?",
+    // The object may be a time or a slot, which needs digits in the run.
+    "I have your slot booked for Thursday.",
+    "I have the 10 AM booked for you.",
+  ];
+  for (const said of CLAIMS) {
+    it(`counts: ${said.slice(0, 46)}`, () => {
+      expect(en.test(said)).toBe(true);
+      expect(enWide.test(said)).toBe(true);
+    });
+  }
+
+  // A loose object slot reaches ordinary speech, and these are the sentences
+  // that prove it did not. The first two are why `moved|recorded|sent` were NOT
+  // promoted into the loose slot alongside the booking participles — with them
+  // there, both of these read as fabricated bookings.
+  const NOT_CLAIMS = [
+    "I have your message recorded for the team.",
+    "I have your details sent over to them.",
+    // Negation. Without `not`/`never` in the stopword list this is a claim, and
+    // it is the sentence the model says when the claim guard has just corrected
+    // it — so a false positive here feeds the loop LVX98 is about.
+    "I have not booked that yet.",
+    "My apologies, I haven't actually booked that yet.",
+    // A third party's booking is not the caller's.
+    "I have another client booked at that time.",
+    "I have two people scheduled ahead of you.",
+    "I have some slots booked already, but Tuesday is free.",
+    "I have to get that booked for you.",
+    "I have nothing scheduled for you at the moment.",
+    // The `you have` subject is new, so the question form has to be excluded:
+    // this is the assistant ASKING, and it must not read as claiming.
+    "Do you have that appointment booked already?",
+    "Did you have a consultation booked with us before?",
+    // live, CAe1bad30e / CAa688b2b1 — offers and proposals from the same calls
+    // as the positives above. Every one of these ran no write and must not.
+    "Sure, for Monday, September 14th, I have openings at 9 AM, 1 PM, or 4 30 PM. Do any of those work for you?",
+    "On Friday, September 11th, I have an opening at 10 in the morning. Does that work for your colleague?",
+    "I have openings on both Thursday, September 10th, and Friday, September 11th. Do any of those days work for you?",
+    // live — "I have that SET for tomorrow" is a proposal; the very next
+    // sentence asks permission. `set` is deliberately absent from the loose
+    // verb list for exactly this reason.
+    "Okay, let me correct that ? Nithin Dodla, spelled N I T H I N, Dodla, D O D L A. I have that set for tomorrow, Friday, September 11th, at 1 30 PM. Shall I go ahead and book that?",
+    // live — in-progress, not complete.
+    "Okay, so I'm booking Monday, September 14th, at 1 PM for Nithin Dodla. Just to confirm, this is in addition to your other appointment on September 11th?",
+    // live — reading an EXISTING row back to the caller.
+    "Sure thing. I see you have an upcoming appointment with Priya Raghunathan on Friday, September 11th at 10 AM. Did you want to add something to that, or were you looking to book a separate consultation?",
+    "Of course. Just so you know, Venkat has an appointment on September 15th and another on September 16th. Are you booking something new, or adding to one of those?",
+  ];
+  for (const said of NOT_CLAIMS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => {
+      expect(en.test(said)).toBe(false);
+      expect(enWide.test(said)).toBe(false);
+    });
+  }
+
+  // LVX97 shipped as two hand-maintained literals and drifted: one alternation
+  // was present in the wide copy and absent from the narrow one. Both are now
+  // assembled from the same pieces, so assert the property directly rather than
+  // trusting that the next person edits both.
+  it("the wide predicate is a superset of the narrow one", () => {
+    const everything = [...CLAIMS, ...NOT_CLAIMS];
+    for (const said of everything) {
+      if (en.test(said)) expect(enWide.test(said)).toBe(true);
+    }
+  });
+});
