@@ -121,6 +121,7 @@ Status means:
 | **LVX109** | the greeting spoke itself again three minutes into the call | **FIXED 2026-09-10, UNVERIFIED LIVE · P1** — nothing re-sent it. The opening line lives in a system instruction frozen at connect that said "Nothing has been said to the caller yet" in the present tense for the whole call, so the model re-anchored on a standing instruction. The cascade gets the opposite line. Fixed as wording PLUS a cut branch, because a prompt cap is a request. The first attempt keyed on the first spoken turn and cut a repeat the caller had asked for — caught by two existing tests. |
 | **LVX110** | a fixture date expired, five tests failed, and one INVERTED | **FIXED 2026-09-10 · P2** — `main` was not green and the brief said it was. A `scheduled_at` literal written 2026-09-04 aged out at 14:00 UTC on 2026-09-10; `upcomingForCaller` filters to future rows, so the "SEVERAL appointments" ambiguity test became unambiguous and the write it exists to forbid went through. A stale fixture can turn a safety test into its opposite. Dates now derive from `Date.now()`. |
 | **LVX111** | three instruments that describe a call wrongly | **OPEN · P2** — `tool_duration` carries no `callSid`, so filtering a call by id returns every event EXCEPT its tools, on the file that says "read the tool trace, not the transcript"; `GIT_COMMIT_SHA` in the service env disagrees with the deployed image; and the revision that served a call is not the one `describe` reports today. |
+| **LVX112** | the verification call destroyed two appointments and created none | **ROOT CAUSES FIXED 2026-09-10, UNVERIFIED LIVE · P0** — `booked_rows=0`, `changed_rows=2`, caller told "that's all set". The spelling gate's escape hatch read the SAME degraded transcript as the gate (2,180 ms of spelling → 0 characters), so `spellAskMisses` could never advance: unsatisfiable and unexhaustible at once. And two gates alternated, each seeing two of four attempts, so neither reached its own ceiling — LVX104 one level up. Both fixed: the miss is now counted from AUDIO, and the two gates share one budget keyed to the proposal WITHOUT the name. Consent deliberately untouched. Cancellations were correct. Still open: a spoken `[System checks availability]` with a fabricated result, a date string reaching Postgres as a uuid, and the name re-segmented across turns. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10271,6 +10272,149 @@ the last call ended. Harmless here, and worth writing down: the revision that
 served a call is `resource.labels.revision_name` on its own log lines, not
 whatever `describe` says today. Both revisions shared an image digest, so those
 calls did run the current code — which is what made their evidence usable.
+
+---
+
+## LVX112 — the verification call: two appointments destroyed, none created
+
+`CA9e3788`, 2026-09-10, on `voice:bfbf3da`. The call placed to verify the
+detector round. It cancelled correctly, then failed to book, told the caller it
+had booked, and hung up.
+
+```
+postcall_verify   verdict=write_abandoned
+                  booked_rows=0  changed_rows=2  claims=2
+                  abandoned=['book_appointment','reschedule_appointment_db']
+```
+
+Ground truth from the database afterwards: **ten rows for this tenant, all
+`cancelled`, none scheduled.** At 19:14:51 the caller heard *"Perfect, thank
+you. So, that's all set for Monday, September 14th at 4:30 PM."*
+
+Net effect: the call **destroyed two real appointments and created none**, which
+is worse than doing nothing.
+
+### The cancellations were correct, and that matters
+
+Worth stating plainly because the rest of this entry is failure. `changed_rows`
+2, exactly the two the caller named, nothing else touched. It also recovered
+from its own error: the first two cancel attempts failed with
+`invalid input syntax for type uuid` because the model passed
+`"Monday, September 14 at 1:00 PM"` as an appointment id; it then called
+`get_caller_appointments_from_db`, got real ids, and retried successfully.
+*"I've cancelled both of those appointments for you"* was **true**.
+
+### Root cause: the gate's escape hatch read the same broken channel as the gate
+
+The utterance records:
+
+| voiced | transcript chars |
+|---|---|
+| **2,180 ms** | **0** |
+| **2,900 ms** | 4 |
+| 1,920 ms | 4 |
+| 3,800 ms | 43 |
+
+`applyCallerSpellingSignal` opens with `if (!userText) return`. On the turns
+where the caller actually spelled, it recorded **neither the spelling nor a
+miss**. So `spellingSettled` could never become true, and `spellAskMisses` — the
+cap whose entire purpose is ending this loop — could never advance.
+**Unsatisfiable and unexhaustible at the same time.**
+
+The model IS the ASR here and heard the caller correctly. Only the guards went
+deaf. LVX106 warned that a gate keyed on caller text was nearly shipped; one
+already was.
+
+**Fixed** by counting the miss from the AUDIO (`applyCallerVoicedAnswer`, at
+utterance close — not in the `inputTranscription` handler, which does not run at
+all when the vendor sends no transcript, which is exactly the case it exists
+for).
+
+**Deliberately not extended to consent.** Voiced audio is evidence the caller
+ANSWERED; it says nothing about WHAT they said. `isAffirmative` is untouched: a
+gate reading a cough as agreement would release writes on callers who never
+agreed, which is far worse than the loop being closed.
+
+### Second cause: two gates alternating, neither ever exhausting
+
+```
+19:13:25  book -> write-order refused
+19:13:52  book -> spelling gate refused
+19:14:43  book -> write-order refused
+19:14:51  book -> spelling gate refused    ...then the model gave up.
+```
+
+`WRITE_ORDER_MAX_REFUSALS` 2, `spellMissCap()` 2 — and each gate saw only two of
+the four attempts, so each counted to two while the caller sat through four.
+**LVX104's rule one level up: an escape hatch has a population, and this one
+spans two gates that cannot see each other.**
+
+Fixed with a shared count of refusals against one attempted write, released at
+three. **The key excludes the client name**, and that is load-bearing: a spelling
+exchange retries the same booking with a corrected name every time, so a
+fingerprint including it would call every correction a new proposal and rebuild
+the livelock. A different TIME does reset it, which LVX104 requires.
+
+### The "are you sure" repetition has the same root
+
+Four confirmation turns before the cancel ran. Two of the refusals were
+**correct** — the caller had genuinely said nothing, and our own silence nudge
+at 19:12:14 proves it. The other two came from
+`callerAgreed = isAffirmative(lastCallerText)` where `lastCallerText` was **four
+characters from 1,920 ms of speech**. The caller answered; the answer did not
+transcribe; the gate concluded they had not agreed and asked again.
+
+Not fixed directly, and deliberately: see above on consent. It is bounded now by
+the shared attempt budget instead.
+
+### Still open
+
+**A stage direction, spoken aloud, with a fabricated result.** 19:15:28:
+
+> "One moment. **[System checks availability]** Okay, that time is still open!"
+
+No availability tool ran between 19:14:56 and 19:15:32. It narrated the check
+and invented the answer. `sanitizeOutbound` cannot see it — no tool name, no
+underscore, no JSON. New shape for the LVX108 family: the model inventing
+meta-text rather than echoing ours.
+
+**A human-readable date reaching Postgres as a uuid.** Two `db_error` lines.
+LVX74's class; the tool layer should reject a non-uuid `appointment_id` before
+the driver does.
+
+**The name re-segmented across turns.** Five spelling turns, `"Y A L A Val A R P
+U"` spoken aloud, and the assistant telling the caller how their own name is
+spelled. At 19:13:39 it emitted the name as one undifferentiated letter stream —
+`V E N K A T A Y A L A V A R U P U` — and `VENKAT + AYALAVARUPU` and
+`VENKATA + YALAVARUPU` are the same stream. It re-split it differently on later
+turns; that is the migrating "A" the owner reported as "regressing to the old
+spelling". Not stale state: the server holds only a boolean, by design
+(`lib/voice/live/index.js:409`, LVX62 — a spelled "D" has arrived as "V"), so
+the corrected spelling exists nowhere except in the model's own prior turns.
+
+**`end_call_abandoned_write_outstanding`** fired, and the last two turns were
+incoherent: a failed reschedule, then *"I'm not finding any appointments under
+this number"* — true, and said to a caller who had just been told they were
+booked.
+
+### What the round DID verify
+
+- **The repeat-counter split.** Six firings, **all `prompted=True`**;
+  `live_repeated_phrase_unprompted` 0. The residue really is nothing.
+- **The greeting fix caused no harm.** `live_greeting_respoken` 0, greeting
+  opened normally, nothing cut.
+- `write_order_gate_ceiling` 0. The claim guard fired correctly on "that's all
+  set" and the model corrected itself on the next turn.
+
+### And it caught a regression shipped an hour earlier
+
+The clause-terminal guard added to `confirmReadBackRe` had been applied to the
+ADJACENT form as well as the gapped one, silently narrowing four phrasings that
+had matched for months — `"Is that correct for you?"`, `"Is that right for
+Thursday?"`, `"Is that okay with you?"`, `"Does that sound right to you?"` — a
+miss that **spends the write-gate budget**. A fix for LVX107 had begun causing
+the exact harm LVX107 is about. Fixed, fixtures added; verified it did not
+affect this call, where every read-back used the adjacent form.
 
 ---
 
