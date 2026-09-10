@@ -125,10 +125,23 @@ const say = (...parts) => console.log("[cfg]", ...parts);
 
 const cols = FIELDS.join(", ");
 
+/**
+ * Resolve through app_lookup_business_by_phone, NOT a direct column match.
+ *
+ * `WHERE phone_number = $1` found nothing for a number db-inspect resolves
+ * fine. That function is what the voice service itself routes through, so it is
+ * also the only lookup that guarantees this script edits the row a caller would
+ * actually reach — and a stored value can carry whitespace that makes an exact
+ * match fail while routing still works. The raw cell is dumped as base64 below
+ * for exactly that reason.
+ */
 async function readRow(phone) {
+  const found = await pool.query(`SELECT id FROM app_lookup_business_by_phone($1)`, [phone]);
+  const id = found.rows[0]?.id;
+  if (!id) return null;
   const res = await pool.query(
-    `SELECT id, phone_number, ${cols} FROM businesses WHERE phone_number = $1`,
-    [phone]
+    `SELECT id, phone_number, ${cols} FROM businesses WHERE id = $1`,
+    [id]
   );
   return res.rows[0] || null;
 }
@@ -136,6 +149,10 @@ async function readRow(phone) {
 /** Base64, so a multi-line value survives the log shipper and can be restored. */
 function dump(label, row) {
   say(`${label} id`, row.id);
+  // Base64 so hidden whitespace in the cell is visible. A leading newline in
+  // a phone-number cell has previously made every other tenant answer as
+  // "our office"; an exact-match lookup failing is the same smell.
+  say(`${label} phone_number b64`, Buffer.from(String(row.phone_number || ""), "utf8").toString("base64"));
   for (const f of FIELDS) {
     const v = row[f];
     const s = v === null || v === undefined ? "" : String(v);
