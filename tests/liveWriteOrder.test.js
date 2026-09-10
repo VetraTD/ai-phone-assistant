@@ -316,3 +316,134 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     expect(counters().write_confirm_readback_missing).toBeFalsy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TWO GATES, ALTERNATING, AND NEITHER ONE EVER EXHAUSTS.
+//
+// Call CA9e3788, 2026-09-10. Four book_appointment attempts, all refused, no
+// row, and the caller was told "that's all set":
+//
+//   19:13:25  book -> write-order refused
+//   19:13:52  book -> spelling gate refused
+//   19:14:43  book -> write-order refused
+//   19:14:51  book -> spelling gate refused      ...then the model gave up.
+//
+// WRITE_ORDER_MAX_REFUSALS is 2 and spellMissCap() is 2, so on paper both are
+// bounded. But each gate only SAW two of the four attempts, so each counted to
+// two while the caller sat through four. Every gate here has an escape hatch
+// keyed to its own refusals, and nothing was counting the thing the caller
+// actually experiences: attempts at this write.
+//
+// LVX104's lesson one level up. An escape hatch has a population, and this
+// population spans two gates that cannot see each other.
+//
+// THE KEY IS THE PROPOSAL WITHOUT THE NAME. A spelling correction changes
+// client_name on every retry -- that is the whole point of the exchange -- so a
+// fingerprint including the name would reset the budget on each correction and
+// rebuild the exact livelock this closes. A different TIME is a new proposal
+// and does reset it, which is what LVX104 requires.
+// ---------------------------------------------------------------------------
+describe("the shared attempt budget — refusals across gates, counted together", () => {
+  // Production merges capabilityState per capability (lib/capabilities/effects.js
+  // mergeCapabilityState), it does not replace it. Two different gates write
+  // different fields on the same pack, so a test that replaced would lose one
+  // gate's bookkeeping and prove nothing.
+  const merge = (prior, patch) => {
+    const out = { ...prior };
+    for (const [cap, value] of Object.entries(patch || {})) {
+      out[cap] = { ...(out[cap] || {}), ...value };
+    }
+    return out;
+  };
+
+  const attempt = ({ capabilityState, turn, said, settled, name = "Marcus Bell", when = FUTURE_SLOT }) =>
+    executeToolCall(
+      { id: "fc1", name: "book_appointment", args: { client_name: name, scheduled_at: when, notes: "consultation" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState,
+        config: {},
+        spellingSettled: settled,
+        callerTurnCount: turn,
+        lastCallerText: said,
+        lastReplyText: READ_BACK,
+      }
+    );
+
+  // The sequence alternates on purpose. Three refusals from ONE gate would trip
+  // that gate's own ceiling of two first, which is correct and is not what this
+  // is about -- the shared budget exists only for the case where no single gate
+  // ever sees enough refusals to act.
+  const alternateToCeiling = async (nameFor = () => "Marcus Bell") => {
+    let cs = {};
+    // spelling refuses: the caller agreed, so write-order is satisfied.
+    const a = await attempt({ capabilityState: cs, turn: 4, said: "Yes", settled: false, name: nameFor(0) });
+    expect(a.functionResponse.response.success).toBe(false);
+    cs = merge(cs, a.stateEffects.capabilityState);
+
+    // write-order refuses: no agreement this time.
+    const b = await attempt({ capabilityState: cs, turn: 5, said: "No, hang on", settled: true, name: nameFor(1) });
+    expect(b.functionResponse.response.success).toBe(false);
+    cs = merge(cs, b.stateEffects.capabilityState);
+
+    // spelling again. Shared count is now three; neither gate is at its own two.
+    const c = await attempt({ capabilityState: cs, turn: 6, said: "Yes", settled: false, name: nameFor(2) });
+    expect(c.functionResponse.response.success).toBe(false);
+    return merge(cs, c.stateEffects.capabilityState);
+  };
+
+  it("releases the write once the ATTEMPT budget is spent, whichever gates refused", async () => {
+    const cs = await alternateToCeiling();
+
+    clearStats();
+    // The write-order gate would refuse again on its own count, which is one of
+    // its permitted two. The shared budget is the only thing that ends this.
+    const d = await attempt({ capabilityState: cs, turn: 7, said: "No, hang on", settled: true });
+
+    expect(d.functionResponse.response.success).toBe(true);
+    expect(counters().write_attempt_budget_released).toBe(1);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("does NOT reset when only the NAME changes — that is the spelling exchange", async () => {
+    // The call that forced this. The caller spells, the model retries with a
+    // different client_name, and if that counted as a new proposal the budget
+    // would restart on every correction and never run out.
+    const names = ["Venkat Yalavarupu", "Venkat Ayalavarupu", "Venkat Yalavarapu"];
+    const cs = await alternateToCeiling((i) => names[i]);
+
+    clearStats();
+    const released = await attempt({
+      capabilityState: cs,
+      turn: 7,
+      said: "No, hang on",
+      settled: true,
+      name: "Venkat Yalavarapu",
+    });
+    expect(released.functionResponse.response.success).toBe(true);
+    expect(counters().write_attempt_budget_released).toBe(1);
+  });
+
+  it("DOES reset when the caller proposes a different time", async () => {
+    // LVX104, preserved. A caller changing their mind is the opposite of a
+    // livelock: there is no trap, because they can end it by agreeing.
+    const cs = await alternateToCeiling();
+
+    clearStats();
+    const other = `${new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10)}T14:00:00`;
+    const fresh = await attempt({
+      capabilityState: cs,
+      turn: 7,
+      said: "No, hang on",
+      settled: true,
+      when: other,
+    });
+    // Still refused, and refused for the RIGHT reason: a new proposal gets a
+    // new budget rather than inheriting a spent one.
+    expect(fresh.functionResponse.response.success).toBe(false);
+    expect(counters().write_attempt_budget_released).toBeFalsy();
+  });
+});

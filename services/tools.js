@@ -69,6 +69,39 @@ const writeOrderGateOff = () => process.env.LIVE_WRITE_ORDER_GATE === "off";
  */
 const WRITE_ORDER_MAX_REFUSALS = 2;
 
+/**
+ * How many times ONE ATTEMPTED WRITE may be refused, counting every gate.
+ *
+ * ---------------------------------------------------------------------------
+ * Why a second ceiling, when both gates already have one
+ * ---------------------------------------------------------------------------
+ *
+ * Call CA9e3788, 2026-09-10. Four `book_appointment` attempts, all refused, no
+ * row created, and the caller told "that's all set":
+ *
+ *   19:13:25  write-order refused
+ *   19:13:52  spelling gate refused
+ *   19:14:43  write-order refused
+ *   19:14:51  spelling gate refused        ...and the model gave up.
+ *
+ * WRITE_ORDER_MAX_REFUSALS is 2 and spellMissCap() is 2, so on paper the caller
+ * could be asked at most twice. In practice each gate SAW only two of the four
+ * attempts, counted to two, and the caller sat through all four. Every escape
+ * hatch here is keyed to its own gate's refusals; nothing was counting the
+ * thing the caller actually experiences.
+ *
+ * LVX104's rule one level up: an escape hatch has a population, and this
+ * population spans two gates that cannot see each other.
+ *
+ * Three, not two: it must not fire BEFORE either gate's own ceiling in the
+ * ordinary single-gate case, or it would silently replace them and weaken the
+ * guard. It exists only for the alternating case, where it is the sole bound.
+ */
+function writeAttemptMaxRefusals() {
+  const v = Number.parseInt(process.env.VOICE_WRITE_ATTEMPT_MAX_REFUSALS, 10);
+  return Number.isFinite(v) && v >= 1 && v <= 10 ? v : 3;
+}
+
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -638,6 +671,8 @@ export async function executeToolCall(fc, ctx) {
             bumpCounter(readBackMade ? "write_confirm_readback_prev_turn" : "write_confirm_readback_missing");
 
             const orderScratch = ctx?.capabilityState?.[pack.id] || {};
+            // Every gate below shares this. See writeAttemptMaxRefusals.
+            const attemptBudget = writeAttemptBudget(ctx, pack.id, fc);
             // ---------------------------------------------------------------
             // THE CEILING COUNTS ATTEMPTS AT ONE PROPOSAL, NOT REFUSALS IN A
             // CALL. Corrected 2026-09-09, on the call that first spent it.
@@ -703,6 +738,18 @@ export async function executeToolCall(fc, ctx) {
                   refusals: orderRefusals,
                   severity: "warn",
                 });
+              } else if (attemptBudget.spent) {
+                // NOT this gate's own ceiling -- the caller has now been
+                // refused three times for this one booking, by whichever gates
+                // happened to be looking. See writeAttemptMaxRefusals.
+                bumpCounter("write_attempt_budget_released");
+                log.error("write_attempt_budget_released", {
+                  callId: ctx?.callId || null,
+                  tool: fc.name,
+                  gate: "write_order",
+                  refusals: attemptBudget.refusals,
+                  severity: "warn",
+                });
               } else if (!writeOrderGateOff()) {
                 bumpCounter("write_order_refused");
                 // Tool name and which half failed. Nothing here is caller data:
@@ -750,6 +797,9 @@ export async function executeToolCall(fc, ctx) {
                         // new one, and that question is independent of whose
                         // turn it is.
                         writeOrderReadBackKey: readBackKey,
+                        // The shared count, so the spelling gate's
+                        // refusals and this one land in the same total.
+                        ...writeAttemptPatch(attemptBudget),
                         ...(orderRefusalIsNew
                           ? {
                               writeOrderRefusals: orderRefusals + 1,
@@ -824,7 +874,37 @@ export async function executeToolCall(fc, ctx) {
           // bounded separately, by MAX_FC_ROUNDS.
           const callerTurn = Number(ctx?.callerTurnCount) || 0;
           const refusalIsNew = gateScratch.spellingGateRefusedTurn !== callerTurn;
+          // THE SHARED CEILING, recomputed here rather than shared through a
+          // variable: the write-order gate sits in a deeper scope, and both
+          // gates reading it from ctx is what keeps them honest about counting
+          // the same thing. See writeAttemptMaxRefusals.
+          const spellAttemptBudget = writeAttemptBudget(ctx, pack.id, fc);
           if (
+            spellAttemptBudget.spent &&
+            pendingName &&
+            gateRefusals < spellMissCap() &&
+            shouldConfirmSpelling({
+              name: pendingName,
+              callerContext: ctx?.callerContext,
+              spellingSettled: ctx?.spellingSettled,
+              policy: spellPolicy(),
+              callerSaidThisCall: ctx?.callerSaidThisCall ?? null,
+            })
+          ) {
+            // This gate would have refused, and on its own count it still had
+            // room to. The caller has been refused three times for this one
+            // write already, by whichever gates were looking, so the booking
+            // goes through with the name as heard -- which is the trade the
+            // spelling gate's own cap already makes, one level up.
+            bumpCounter("write_attempt_budget_released");
+            log.error("write_attempt_budget_released", {
+              callId: ctx?.callId || null,
+              tool: fc.name,
+              gate: "spelling",
+              refusals: spellAttemptBudget.refusals,
+              severity: "warn",
+            });
+          } else if (
             pendingName &&
             gateRefusals < spellMissCap() &&
             shouldConfirmSpelling({
@@ -925,6 +1005,11 @@ export async function executeToolCall(fc, ctx) {
                     // on its own retries inside a single turn.
                     spellingGateRefusals: refusalIsNew ? gateRefusals + 1 : gateRefusals,
                     spellingGateRefusedTurn: callerTurn,
+                    // The SHARED count, so this refusal and the write-order
+                    // gate's land in one total. Four attempts refused by two
+                    // gates used to read as two-and-two, under two separate
+                    // ceilings, while the caller experienced four.
+                    ...writeAttemptPatch(spellAttemptBudget),
                     ...(priorSpellFacts.Name
                       ? {}
                       : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
@@ -998,6 +1083,58 @@ export async function executeToolCall(fc, ctx) {
  * proposal sharing another's refusal budget, which is the same outcome the
  * budget already allows.
  */
+/**
+ * Which write is being attempted — the proposal, WITHOUT the name.
+ *
+ * Excluding the name is the load-bearing decision. A spelling exchange retries
+ * the same booking with a corrected `client_name` every time; that is the whole
+ * point of the exchange. A fingerprint that included it would call every
+ * correction a new proposal, reset the budget, and rebuild the exact livelock
+ * this exists to end.
+ *
+ * A different TIME, or a different appointment, IS a new proposal and does
+ * reset it — which is what LVX104 requires, because a caller changing their
+ * mind is the opposite of a trap.
+ */
+function writeAttemptFingerprint(fc) {
+  const a = fc?.args || {};
+  return textFingerprint(
+    [fc?.name, a.scheduled_at, a.new_scheduled_at, a.appointment_id].map((v) => v || "").join("|")
+  );
+}
+
+/**
+ * The shared budget's view of this attempt. Read from ctx only, so both gates
+ * can compute it independently without sharing a scope.
+ */
+function writeAttemptBudget(ctx, packId, fc) {
+  const scratch = ctx?.capabilityState?.[packId] || {};
+  const key = writeAttemptFingerprint(fc);
+  const sameAttempt = scratch.writeAttemptKey === key;
+  const refusals = sameAttempt ? Number(scratch.writeAttemptRefusals) || 0 : 0;
+  const callerTurn = Number(ctx?.callerTurnCount) || 0;
+  return {
+    key,
+    refusals,
+    spent: refusals >= writeAttemptMaxRefusals(),
+    // Per CALLER TURN, for the reason both gates already document: a model
+    // calling the same tool three times inside one turn must not burn a budget
+    // the caller was never asked to spend.
+    isNewTurn: scratch.writeAttemptRefusedTurn !== callerTurn,
+    callerTurn,
+  };
+}
+
+/** The capabilityState patch every refusal must carry, from either gate. */
+function writeAttemptPatch(budget) {
+  return {
+    writeAttemptKey: budget.key,
+    ...(budget.isNewTurn
+      ? { writeAttemptRefusals: budget.refusals + 1, writeAttemptRefusedTurn: budget.callerTurn }
+      : {}),
+  };
+}
+
 function textFingerprint(text) {
   let h = 5381;
   const s = String(text || "");
