@@ -82,11 +82,14 @@ const CONFIG = {
   businessHours: {},
 };
 
+// Reset per test by the beforeEach below; boot() can swap it for one case.
+let currentConfig = CONFIG;
+
 function fakeDb() {
   return {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Digile Media" })),
-    loadConfig: () => CONFIG,
+    loadConfig: () => currentConfig,
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
@@ -95,9 +98,10 @@ function fakeDb() {
   };
 }
 
-async function boot(env = {}) {
+async function boot(env = {}, configOverride = null) {
   const ws = new FakeSocket();
   const live = fakeLive();
+  if (configOverride) currentConfig = configOverride;
   const cleared = [];
   await handleLiveSessionConnection(
     ws,
@@ -156,7 +160,10 @@ const SLOTS_A =
 const SLOTS_B = "Sure, we have slots open at 9:00 AM, 1:00 PM, or 4:30 PM. Do any of those suit you?";
 
 describe("LVX78 — cutting a repeat the caller has not asked for", () => {
-  beforeEach(() => clearStats());
+  beforeEach(() => {
+    clearStats();
+    currentConfig = CONFIG;
+  });
 
   it("cuts when the model restates itself with no caller speech in between", async () => {
     const s = await boot();
@@ -364,7 +371,10 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
 const GREETING = CONFIG.greeting;
 
 describe("the opening greeting, re-spoken mid-call", () => {
-  beforeEach(() => clearStats());
+  beforeEach(() => {
+    clearStats();
+    currentConfig = CONFIG;
+  });
 
   it("cuts the greeting spliced onto the end of an ordinary turn", async () => {
     const s = await boot();
@@ -389,6 +399,29 @@ describe("the opening greeting, re-spoken mid-call", () => {
     s.fragment(GREETING);
     s.fragment(GREETING);
     await s.endTurn();
+
+    expect(c().live_greeting_respoken).toBeFalsy();
+    expect(s.cleared).toHaveLength(0);
+  });
+
+  it("does NOT cut the recording disclosure repeated as an ANSWER", async () => {
+    // greetingTextFor prepends the disclosure to the opening when a tenant has
+    // it enabled, so it is part of the configured greeting. It is also the one
+    // part of that opening the assistant may legitimately have to say again --
+    // a caller asks "are you recording this?" and gets it verbatim. On a tenant
+    // with a long disclosure that alone clears ten words, so keying on the raw
+    // greetingTextFor output would cut a straight answer to a question about
+    // recording. The branch compares against the greeting WITHOUT it.
+    const disclosed = {
+      ...CONFIG,
+      recordingDisclosureEnabled: true,
+      recordingDisclosureText:
+        "Please be aware that this call may be recorded for quality assurance and staff training purposes.",
+    };
+    const s = await boot({}, disclosed);
+    await s.say(disclosed.recordingDisclosureText + " " + CONFIG.greeting);
+    await s.caller("Sorry, are you recording this call?");
+    await s.say("Yes. " + disclosed.recordingDisclosureText);
 
     expect(c().live_greeting_respoken).toBeFalsy();
     expect(s.cleared).toHaveLength(0);
