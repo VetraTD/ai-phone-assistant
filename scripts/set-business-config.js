@@ -269,6 +269,15 @@ try {
   }
   say("VERIFIED: every field read back exactly as written.");
 } finally {
-  await pool.end().catch(() => {});
-  if (typeof close === "function") await close().catch(() => {});
+  // Both awaited inside try/catch rather than chained off a returned promise:
+  // cloudSqlPoolConfig's close() returns undefined for a direct connection, and
+  // `.catch()` on undefined threw AFTER a successful, verified write — turning a
+  // clean run into a non-zero exit, which is the one signal this script uses to
+  // mean "something went wrong".
+  try {
+    await pool.end();
+  } catch {}
+  try {
+    if (typeof close === "function") await close();
+  } catch {}
 }
