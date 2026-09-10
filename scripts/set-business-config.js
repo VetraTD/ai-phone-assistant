@@ -214,15 +214,39 @@ try {
     process.exit(0);
   }
 
+  // SCOPED, IN A TRANSACTION. The first version updated straight off the pool
+  // and matched ZERO rows.
+  //
+  // Cloud SQL's `postgres` is not BYPASSRLS, whatever `current_user` says, so a
+  // direct write to a tenant table with no `app.business_id` set matches
+  // nothing. Reads got away with it only because app_lookup_business_by_phone
+  // is SECURITY DEFINER. This is the same failure already on file as "a
+  // tenantless write matches zero rows and reports success" — it reported
+  // failure here only because the row count is checked.
+  //
+  // Same shape db-inspect uses for its scoped counts.
   const sets = fields.map((f, i) => `${f} = $${i + 2}`).join(", ");
   const values = fields.map((f) => changes[f]);
-  const res = await pool.query(
-    `UPDATE businesses SET ${sets} WHERE id = $1`,
-    [target.id, ...values]
-  );
-  say("rows updated", res.rowCount);
-  if (res.rowCount !== 1) {
-    console.error(`FAIL: expected to update exactly 1 row, updated ${res.rowCount}.`);
+  const client = await pool.connect();
+  let updated = 0;
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT set_config('app.business_id', $1, true)`, [target.id]);
+    const res = await client.query(`UPDATE businesses SET ${sets} WHERE id = $1`, [target.id, ...values]);
+    updated = res.rowCount;
+    if (updated !== 1) {
+      // ROLLBACK, not just an exit: a write that touched the wrong number of
+      // rows must leave nothing behind to reason about later.
+      await client.query("ROLLBACK");
+    } else {
+      await client.query("COMMIT");
+    }
+  } finally {
+    client.release();
+  }
+  say("rows updated", updated);
+  if (updated !== 1) {
+    console.error(`FAIL: expected to update exactly 1 row, updated ${updated}. Rolled back.`);
     process.exit(1);
   }
 
