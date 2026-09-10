@@ -878,6 +878,19 @@ async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, arg
  * which appointment is being discussed, whose identity has already been
  * proven, and what was booked — the cross-turn idempotency anchor.
  */
+/**
+ * The tools that act on an appointment that must ALREADY EXIST.
+ *
+ * `book_appointment` is deliberately absent: it creates the row, so it always
+ * has something to act on. See hasWriteTarget on the pack.
+ */
+const CHANGE_TOOL_NAMES = [
+  "cancel_appointment_db",
+  "reschedule_appointment_db",
+  "correct_appointment_name",
+  "add_appointment_note",
+];
+
 function scratch(ctx) {
   return ctx?.capabilityState?.appointments || {};
 }
@@ -1184,6 +1197,46 @@ export default {
     ...EHR_APPOINTMENT_DECLARATIONS.map((d) => d.name),
     ...DB_APPOINTMENT_DECLARATIONS.map((d) => d.name),
   ],
+
+  /**
+   * Does this tool have anything to act ON?
+   *
+   * Only ever FALSE for a tool that changes an EXISTING appointment when no
+   * appointment can be found to change. `book_appointment` creates one, so it
+   * always has a target and never reaches here.
+   *
+   * ---------------------------------------------------------------------------
+   * Why the engine asks, instead of finding out when the tool runs
+   * ---------------------------------------------------------------------------
+   *
+   * Call CA0c8ce7, 2026-09-10. The assistant claimed "I have you down for 9 AM
+   * tomorrow" before anything was booked; having told itself the appointment
+   * existed, it then reached for `correct_appointment_name` when the name came
+   * out wrong -- twice, on a row that did not exist.
+   *
+   * The write-order gate in services/tools.js refused both, because that gate
+   * runs first and asks a different question: has the caller agreed? Its
+   * refusal tells the model to read the details back and ask for a go-ahead --
+   * advice for a write that COULD happen. So the model asked again, was refused
+   * again, and finally told the caller "I'm not sure why it's not updating" and
+   * offered a callback.
+   *
+   * `whichAppointmentMessage` has had the right words for this the whole time.
+   * It simply never got to say them. This lets the engine skip a consent
+   * question that cannot be answered usefully and go straight to the tool that
+   * knows the operation is impossible.
+   *
+   * Deliberately NOT a resolver: it must not bump `write_appointment_id_resolved`,
+   * which counts real resolutions, and it must stay cheap enough to call on
+   * every action-tool invocation.
+   */
+  hasWriteTarget(fc, ctx) {
+    if (!CHANGE_TOOL_NAMES.includes(fc?.name)) return true;
+    if (fc?.args?.appointment_id) return true;
+    const held = scratch(ctx);
+    if (held.selectedAppointmentId || held.lastBookedAppointmentId) return true;
+    return upcomingForCaller(ctx).length > 0;
+  },
 
   /**
    * Tools whose success is caller-visible, unlocking same-turn end_call.

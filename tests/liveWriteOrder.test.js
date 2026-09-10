@@ -65,6 +65,7 @@ import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
+const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
 const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4 } = {}) => ({
   businessId: "biz-1",
@@ -445,5 +446,84 @@ describe("the shared attempt budget — refusals across gates, counted together"
     // new budget rather than inheriting a spent one.
     expect(fresh.functionResponse.response.success).toBe(false);
     expect(counters().write_attempt_budget_released).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A CHANGE TOOL WITH NOTHING TO CHANGE IS NOT A CONSENT PROBLEM.
+//
+// Call CA0c8ce7, 2026-09-10. At 20:18:58 the assistant said "Perfect, I have
+// you down for 9 AM tomorrow" with nothing booked -- caught, correctly, as a
+// claim with no action behind it. But the model now believed the appointment
+// existed, so when the name came out wrong it reached for
+// correct_appointment_name instead of book_appointment. TWICE, on a row that
+// did not exist.
+//
+// The write-order gate refused both, and its refusal says "read the details
+// back and ask whether to go ahead" -- advice for a write that could happen.
+// The model dutifully re-asked, was refused again, and then told the caller
+// "I'm not sure why it's not updating" and offered a callback. Two and a half
+// minutes to reach a booking that then worked first time.
+//
+// The pack already has the right words for this ("no upcoming appointments on
+// record ... there is nothing to change"). It just never got to say them,
+// because a gate about CONSENT ran ahead of the tool that knows the operation
+// is impossible. Order of refusals is the fix, not new refusal text.
+// ---------------------------------------------------------------------------
+describe("a change tool with no appointment to change", () => {
+  const correct = (over = {}) =>
+    executeToolCall(
+      { id: "fc1", name: "correct_appointment_name", args: { client_name: "Venkat Ilovarpu" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState: {},
+        config: {},
+        spellingSettled: true,
+        callerTurnCount: 4,
+        // The caller has nothing booked. This is the state the call was in.
+        callerContext: { callCount: 1, upcomingAppointments: [] },
+        lastCallerText: "No, that's still wrong",
+        lastReplyText: "May I go ahead and confirm the appointment under that name?",
+        ...over,
+      }
+    );
+
+  it("says there is nothing to change, not 'shall I go ahead'", async () => {
+    const { functionResponse } = await correct();
+    const message = String(functionResponse.response.message || "");
+
+    expect(functionResponse.response.success).toBe(false);
+    // The useful reason.
+    expect(message).toMatch(/nothing to change|no upcoming appointments/i);
+    // NOT the consent refusal, which sends the model back to ask for a
+    // go-ahead on an operation that cannot succeed however many times it asks.
+    expect(message).not.toMatch(/shall i go ahead/i);
+  });
+
+  it("does not spend a write-order refusal on it", async () => {
+    // The budget is for writes that could land. Spending it here is what let
+    // three refusals stack up on one caller.
+    clearStats();
+    await correct();
+    expect(counters().write_order_refused).toBeFalsy();
+  });
+
+  it("still gates a change tool that DOES have a target", async () => {
+    // The guard must not become a way around the write-order gate. With a real
+    // appointment to act on, consent is required exactly as before.
+    clearStats();
+    const { functionResponse } = await correct({
+      callerContext: {
+        callCount: 1,
+        upcomingAppointments: [
+          { id: "appt-1", client_name: "Venkat", scheduled_at: FUTURE_SLOT_ISO },
+        ],
+      },
+    });
+    expect(functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
   });
 });

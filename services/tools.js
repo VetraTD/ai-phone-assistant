@@ -659,6 +659,22 @@ export async function executeToolCall(fc, ctx) {
             // unreachable there and tier 3 is byte-identical -- the same
             // construction the consent gate above relies on.
             // ---------------------------------------------------------------
+            // A CHANGE TOOL WITH NOTHING TO CHANGE IS NOT A CONSENT PROBLEM.
+            //
+            // Call CA0c8ce7, 2026-09-10: the model claimed a booking that had
+            // not happened, believed itself, and called correct_appointment_name
+            // twice on a row that did not exist. This gate refused both -- and
+            // its refusal says "read the details back and ask whether to go
+            // ahead", which is advice for a write that could succeed. The model
+            // asked again, was refused again, and ended up telling the caller
+            // "I'm not sure why it's not updating" and offering a callback.
+            //
+            // The pack already knows the operation is impossible and has the
+            // words for it. Skipping the consent question here lets it say so.
+            // Nothing is released by this: the tool still refuses, with a reason
+            // the model can act on.
+            const hasTarget = typeof pack.hasWriteTarget === "function" ? pack.hasWriteTarget(fc, ctx) : true;
+            if (!hasTarget) bumpCounter("write_skipped_no_target");
             const lastReplyText = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
             const S = getStrings(ctx?.config);
             const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
@@ -725,7 +741,7 @@ export async function executeToolCall(fc, ctx) {
             const orderCallerTurn = Number(ctx?.callerTurnCount) || 0;
             const orderRefusalIsNew = orderScratch.writeOrderRefusedTurn !== orderCallerTurn;
 
-            if (!readBackMade || !callerAgreed) {
+            if (hasTarget && (!readBackMade || !callerAgreed)) {
               bumpCounter("write_order_would_refuse");
               if (orderRefusals >= WRITE_ORDER_MAX_REFUSALS) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can
