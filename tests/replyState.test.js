@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { STEPS } from "../lib/callState.js";
-import { applyReplyState, systemNoteEntry } from "../lib/voice/replyState.js";
+import {
+  applyReplyState,
+  systemNoteEntry,
+  applyCallerVoicedAnswer,
+  applyCallerSpellingSignal,
+  spellingSettled,
+} from "../lib/voice/replyState.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 // ---------------------------------------------------------------------------
 // replyState.test.js — the pure reply-state reducer extracted from
@@ -233,5 +240,91 @@ describe("applyReplyState", () => {
     expect(state.history[2]).toEqual(systemNoteEntry(["note"]));
     // endCall wins
     expect(state.step).toBe(STEPS.ENDING);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SPELLING GATE'S ESCAPE HATCH READ THE SAME BROKEN CHANNEL AS THE GATE.
+//
+// Call CA9e3788, 2026-09-10. The caller spelled their name three times and the
+// booking never happened. The utterance records say why:
+//
+//     voiced 2,180 ms -> transcript 0 characters
+//     voiced 2,900 ms -> transcript 4 characters
+//
+// applyCallerSpellingSignal opens with `if (!userText) return`, so on the turn
+// where the caller actually spelled, it recorded NOTHING: not the spelling, and
+// not a miss either. spellingSettled therefore could never become true, and the
+// spellAskMisses cap that exists precisely to end this loop could never advance.
+// The gate was unsatisfiable and unexhaustible at the same time.
+//
+// The model is the ASR here and heard the caller perfectly. Only the guards
+// went deaf. So the fix is to stop asking the transcript whether the caller
+// answered, and ask the AUDIO -- which is the one signal that does not lie.
+//
+// DELIBERATELY NOT EXTENDED TO CONSENT. Voiced audio is evidence that the
+// caller ANSWERED; it is not evidence of what they said. Counting it as
+// agreement would let a cough release a write, which is far worse than the
+// loop this closes. isAffirmative is untouched.
+// ---------------------------------------------------------------------------
+describe("applyCallerVoicedAnswer — the caller answered, we just could not read it", () => {
+  const strings = getStrings({ languagesSpoken: ["en"] });
+  const asked = () => ({ spellAskPending: true, spellAsks: 1 });
+
+  it("counts a miss when the caller spoke and nothing transcribed", () => {
+    const state = asked();
+    applyCallerVoicedAnswer(state, 2180);
+    expect(state.spellAskMisses).toBe(1);
+    // The question is closed: they answered it, whatever we managed to hear.
+    expect(state.spellAskPending).toBe(false);
+  });
+
+  it("reaches the cap after the agreed number of unreadable answers", () => {
+    // Two, matching spellMissCap(). This is the whole point: the loop now ends.
+    const state = asked();
+    applyCallerVoicedAnswer(state, 2180);
+    state.spellAskPending = true;
+    applyCallerVoicedAnswer(state, 2900);
+    expect(spellingSettled(state)).toBe(true);
+  });
+
+  it("does nothing when no spelling was asked for", () => {
+    // Otherwise every ordinary caller turn would spend the budget of a question
+    // nobody put to them.
+    const state = { spellAsks: 0 };
+    applyCallerVoicedAnswer(state, 3000);
+    expect(state.spellAskMisses).toBeFalsy();
+  });
+
+  it("ignores a noise-length blip", () => {
+    // 60 ms and 80 ms episodes are all over the same call. A cough is not an
+    // answer, and treating it as one would open the gate on a caller who has
+    // said nothing at all.
+    const state = asked();
+    applyCallerVoicedAnswer(state, 80);
+    expect(state.spellAskMisses).toBeFalsy();
+    expect(state.spellAskPending).toBe(true);
+  });
+
+  it("spends only ONE miss per question, however many episodes arrive", () => {
+    // A barge-in can close several utterances inside one answer. They are one
+    // answer to one question, and must cost one.
+    const state = asked();
+    applyCallerVoicedAnswer(state, 2000);
+    applyCallerVoicedAnswer(state, 2000);
+    applyCallerVoicedAnswer(state, 2000);
+    expect(state.spellAskMisses).toBe(1);
+  });
+
+  it("a late transcript carrying letters still wins", () => {
+    // Ordering safety. The miss is counted when the audio closes; if the text
+    // turns up afterwards and does contain letters, that is better evidence and
+    // it must still be able to settle the question properly.
+    const state = asked();
+    applyCallerVoicedAnswer(state, 2180);
+    expect(state.spellingCaptured).toBeFalsy();
+    applyCallerSpellingSignal(state, "N I T H I N", strings);
+    expect(state.spellingCaptured).toBe(true);
+    expect(spellingSettled(state)).toBe(true);
   });
 });
