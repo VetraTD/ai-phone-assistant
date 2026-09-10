@@ -10127,6 +10127,16 @@ That is the one false positive LVX78 was designed around. The configured line
 cannot make that mistake because an arbitrary first turn does not share ten
 words with it.
 
+**Comparing against the greeting WITH the recording disclosure on it.**
+`greetingTextFor` prepends the disclosure when a tenant has it enabled, so it is
+part of the configured opening — and it is the one part of that opening the
+assistant may legitimately have to repeat. A caller asks "are you recording
+this?" and gets it verbatim; on a tenant with a long disclosure that alone
+clears ten words. The branch would have **cut a straight answer to a question
+about call recording**, which is a worse defect than the re-greet and on the
+worst possible subject. The comparison now excludes it. Found by asking what
+else is in that string, not by a test — the test came after.
+
 **A threshold of six.** `REPEAT_RUN_WORDS` is 6 and "How can I help you today?"
 is six normalised words — an ordinary thing to say again after finishing a task.
 The greeting branch uses **ten**, which also self-disarms for a business whose
@@ -10182,11 +10192,39 @@ the suite next.
 Both files now derive their dates from `Date.now()` via a local `inDays(n)`
 helper, with the reason written above it. Test-only; no production code touched.
 
+### A SECOND one went off twenty minutes later, in a third file
+
+`tests/promptSplit.test.js:469` seeded `upcomingAppointments` with
+`"2026-09-10T19:00:00.000Z"` and expired at exactly that instant — between two
+full-suite runs in the same session. Four more tests, and the same mechanism:
+`buildDynamicTail` only emits the existing-appointment rule when the caller has
+a FUTURE appointment. Also made relative.
+
+### The sweep, so the next one is not a surprise
+
+Thirteen date literals in `tests/` sit inside an `upcomingAppointments` fixture,
+which is the shape that expires. **Ten of them are already in the past** — most
+harmlessly, because their test does not depend on the `> now` filter — and three
+have known expiry dates:
+
+| file | expires |
+|---|---|
+| `tests/capabilityEffects.test.js:282` | 2026-09-12 |
+| `tests/promptSplit.test.js:310` | 2026-09-14 |
+| `tests/nameProvenance.test.js:61` | 2026-09-20 |
+
+The already-expired ten are NOT bulk-rewritten here: for several of them a past
+date is deliberate, and telling those apart needs per-site judgment rather than a
+regex. That is the open work in this entry.
+
 ### The general rule
 
 **A fixture date must not be a literal.** Any test whose subject is filtered by
 "is it in the future" has an expiry date, and the expiry is invisible until it
 passes. Grep for four-digit years in `tests/` before trusting a green suite.
+Two separate bombs went off within twenty minutes of each other on 2026-09-10,
+which is not a coincidence — it is what a cohort of fixtures written in the same
+week looks like when it ages.
 
 Same family as the eval fixtures that desync after a prompt change: an
 instrument that encodes a moment, then gets read as if it encoded a rule.
