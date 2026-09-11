@@ -1392,6 +1392,7 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
     () => {
       if (settled) {
         log.error("tool_late_completion", {
+          callSid: ctx?.callSid ?? null,
           tool: fc?.name,
           ms: Date.now() - startedAt,
           severity: "warn",
@@ -1410,7 +1411,7 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
     if (result === Symbol.for("tool.timeout")) {
       settled = true;
       bumpCounter("tool_timeouts");
-      log.error("tool_timeout", { tool: fc?.name, ms: timeoutMs, severity: "warn" });
+      log.error("tool_timeout", { callSid: ctx?.callSid ?? null, tool: fc?.name, ms: timeoutMs, severity: "warn" });
       return failure("TIMEOUT");
     }
     // PER-TOOL timing. `llm_tool_ms` is first-write-wins across a turn, so it
@@ -1420,15 +1421,31 @@ export async function executeToolCallGuarded(fc, ctx, { timeoutMs = TOOL_TIMEOUT
     // which sits on the booking hot path and can make two round trips — emitted
     // nothing at all. "It takes 4-5 seconds when a tool runs" needs a name
     // attached to be actionable.
+    //
+    // NO callSid MADE THIS EVENT UNJOINABLE. Every per-call investigation on
+    // this path filters on jsonPayload.callSid, and this event carried none --
+    // so a filtered read of a call returns ZERO tool_duration rows and the
+    // tool arguments for any historical call are unrecoverable. Found while
+    // trying to establish which times CA422f58 had actually verified.
+    //
+    // A GATED call is not a failure either. `success !== false` covered both
+    // "the database refused" and "our own gate held this pending a
+    // confirmation", which is the conflation already complained about at
+    // lib/voice/live/tools.js:92, :408 and :626 below, and
+    // lib/voice/metrics.js:469. Split, not replaced: `success` keeps its
+    // meaning so no existing reader moves.
+    const durResponse = result?.functionResponse?.response;
     log.info("tool_duration", {
+      callSid: ctx?.callSid ?? null,
       tool: fc?.name,
       ms: Date.now() - startedAt,
-      success: result?.functionResponse?.response?.success !== false,
+      success: durResponse?.success !== false,
+      gated: durResponse?.gated === true,
     });
     return result;
   } catch (err) {
     // The vendor's own words stop here. They reach the log, never the model.
-    log.error("tool_threw", { tool: fc?.name, reason: err?.message, severity: "warn" });
+    log.error("tool_threw", { callSid: ctx?.callSid ?? null, tool: fc?.name, reason: err?.message, severity: "warn" });
     bumpCounter("tool_errors");
     return failure("UNAVAILABLE");
   } finally {
