@@ -76,6 +76,15 @@ const CONFIG = {
 const SLOT = "2026-09-14T13:00:00";
 /** Naive local, minute precision -- what guards.js stores and the booking gets. */
 const SLOT_KEY = "2026-09-14T13:00";
+/**
+ * A SECOND verified time on the same day.
+ *
+ * Load-bearing rather than scenery: without it, a claim naming 4:30 resolves to
+ * null because the time was never verified, which is indistinguishable from a
+ * claim naming a time that simply is not the one booked. Only a second VERIFIED
+ * slot tests the discriminator that actually exists.
+ */
+const SLOT_OTHER = "2026-09-14T16:30";
 /** Verbatim from the call, and the sentence the whole feature exists for. */
 const CLAIM = "Thanks, John. So, we're all set for Monday, September 14th, at 1 PM";
 /**
@@ -119,7 +128,7 @@ function executor({ bookFails = false } = {}) {
         functionResponse: {
           id: fc.id,
           name: fc.name,
-          response: { success: true, available: true, open_times: [SLOT] },
+          response: { success: true, available: true, open_times: [SLOT, SLOT_OTHER] },
         },
         stateEffects: { toolResult: { name: fc.name, success: true, message: "free" } },
       };
@@ -135,7 +144,20 @@ function executor({ bookFails = false } = {}) {
       stateEffects: {
         toolResult: { name: fc.name, success: true, message: "booked" },
         capabilityEffects: [
-          { capability: "appointments", type: "booked", data: { id: "appt-new", client_name: "John" } },
+          {
+            capability: "appointments",
+            type: "booked",
+            data: {
+              id: "appt-new",
+              client_name: "John",
+              // The ROW's form: an absolute instant, not the naive local string
+              // the model handed in. 13:00 America/Chicago in September is CDT,
+              // UTC-5. Written this way on purpose -- the ledger has to put it
+              // through the guards' own normalisation to compare with a slot
+              // key, and a naive fixture would skip the step that can be wrong.
+              scheduled_at: "2026-09-14T18:00:00.000Z",
+            },
+          },
         ],
       },
     };
@@ -205,6 +227,24 @@ async function boot(opts = {}) {
       live.push({ serverContent: { inputTranscription: { text: callerText } } });
       await settle();
       live.push({ serverContent: { outputTranscription: { text: "And what name should I book that under?" } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+    },
+    /** The model books properly, the way it is supposed to. */
+    async modelBooks(args) {
+      live.push({
+        toolCall: {
+          functionCalls: [
+            {
+              id: "b",
+              name: "book_appointment",
+              args: args || { client_name: "John", scheduled_at: SLOT },
+            },
+          ],
+        },
+      });
+      await settle();
       await settle();
       live.push({ serverContent: { turnComplete: true } });
       await settle();
@@ -342,6 +382,50 @@ describe("what it must refuse to complete", () => {
 
     expect(s.bookCalls()).toHaveLength(1);
     expect(c().claim_completed_in_code).toBe(1);
+  });
+});
+
+describe("a claim the call has already made true", () => {
+  // THE CALL OF 2026-09-11, and the defect this whole block exists for.
+  //
+  //   03:50:38  book_appointment            success
+  //   03:50:59  "We have your strategy call scheduled for Tuesday, September
+  //              15th at 4 30pm. Does that work?"     <- TRUE
+  //   03:51:02  "Before I finish - can I just confirm the time with you?"
+  //   03:51:39  "Just to clarify, the appointment wasn't booked yet."  <- FALSE
+  //
+  // The guard looks back one turn; the booking was two turns back. So it fired
+  // on a true sentence, the ladder asked the caller about an appointment they
+  // already had, and the note then made the assistant deny a row that existed.
+  it("says nothing when a booking earlier in the call already backs it", async () => {
+    const s = await boot();
+    await s.offerTimes();
+    // The model books it properly...
+    await s.modelBooks();
+    // ...then two quiet turns pass, putting the write out of the look-back...
+    await s.quietTurn();
+    // ...and then it describes the booking it really did make.
+    await s.claim("We have your strategy call scheduled for Monday, September 14th at 1 PM. Does that work?");
+
+    const said = s.spoken().join(" ");
+    expect(said).not.toMatch(/Before I finish/);
+    expect(said).not.toMatch(/no tool has run/);
+    expect(c().live_claim_backed_this_call).toBe(1);
+    expect(c().claim_confirm_asked).toBe(0);
+    // Exactly one booking: the model's own. Nothing was re-issued.
+    expect(s.bookCalls()).toHaveLength(1);
+  });
+
+  it("but STILL catches a claim about a different time", async () => {
+    // Books Monday 1 PM, then claims a 4:30 booking that never happened. The
+    // tool matches; the time does not. Silence here would be the new blind spot.
+    const s = await boot();
+    await s.offerTimes();
+    await s.modelBooks();
+    await s.quietTurn();
+    await s.claim("We have your strategy call scheduled for Monday, September 14th at 4 30pm. Does that work?");
+
+    expect(c().live_claim_backed_this_call).toBe(0);
   });
 });
 

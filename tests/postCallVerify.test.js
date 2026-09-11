@@ -610,6 +610,28 @@ describe("verifyCall - what send must not do", () => {
     expect(getLatencyStats().turnTaking.postcall_confirm_skipped_duplicate).toBe(1);
   });
 
+  it("still texts the CLIENT when the caller booked on somebody else's behalf", async () => {
+    // The booking-time sender texts the number that rang us; this one texts the
+    // row. When they differ, two different people are involved and only one of
+    // them has been told. Suppressing here would silence the message to the
+    // person the appointment is actually for.
+    const deps = fakeDeps({ booked: [row({ id: "appt-new", client_phone: "+447426704500" })] });
+
+    const out = await verifyCall(
+      input({
+        callerNumber: "+15551234567",
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "appt-new" }],
+        claims: [{ turn: 3, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(deps.notifications.sendCallerSms.mock.calls[0][1]).toBe("+447426704500");
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_duplicate).toBe(0);
+  });
+
   it("but a CANCELLATION of that same row still confirms", async () => {
     // Only bookings are suppressed. Nothing texts a cancellation at the time it
     // happens, so there is no duplicate to avoid and this must not swallow it.

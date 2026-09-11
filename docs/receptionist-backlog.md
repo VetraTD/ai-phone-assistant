@@ -125,6 +125,7 @@ Status means:
 | **LVX113** | the booking landed, and a fabricated claim chose the wrong tool | **FIXED 2026-09-10, PARTLY VERIFIED LIVE · P1** — `booked_rows=1`, and LVX112's fix is VERIFIED on the same defect: 2,480 ms of spelling transcribed to ZERO again, `spelling_voiced_answer` fired twice, and the spelling gate refused zero writes against two last call. The NEW defect is LVX27's descendant: the guard tells the model its sentence was wrong but cannot undo what the model now BELIEVES, so a claimed-but-unbooked appointment made it call `correct_appointment_name` on a row that did not exist — twice. Of the three refusals that followed, two were correct and one was a phrasing gap (`may I go ahead`). Both fixed: the modal is now a closed class, and a change tool with no target skips the consent question so the pack's own "nothing to change" reason reaches the model. Still open: the name on the row is wrong, and `write_abandoned` is reported on a call that booked correctly. |
 | **LVX114** | a fabricated booking, three guards silent, and a cancelled appointment | **OPEN · P0** — `book_appointment` NEVER CALLED; `booked_rows=0`, caller told "we're all set for Monday" twice and lost the real Friday appointment he arrived with. Three guards silent for three different reasons: the narrow/wide split hides "we're all set" from CLAIM_NOTE; a CANCELLATION vouched for a BOOKING claim; and the post-call verdict has the same hole, which the file already names one paragraph above ("an unrelated success must not vouch"). All three code-driven re-issues need a prior tool call, because the stash IS the call's args — so none could reach a write that was never attempted. BUT both essential fields were recoverable: the slot from `verifiedSlots`, the name from `nameReadBackRe` on the fabricating turn itself. Argues for completing the claim in code rather than cutting the audio. Pronunciation: `speechConfig` accepts only a voice name and a language code, so no deterministic fix exists on this front-end. |
 | **LVX115** | the claim is completed in code, and three detectors stop vouching for the wrong thing | **BUILT 2026-09-11, UNVERIFIED LIVE · P0** — LVX114's direction, shipped. On a completion claim with no matching row the engine recovers the slot from `verifiedSlots` and the name from the turn, verifies each against something that did not come from the model, and performs the booking through `handleToolCall` so every gate still applies; only the consent question is skipped, because the caller has already been told. Per capability via the pack's `claimActions`, and only `booked` is completable — a cancel or a reschedule moves a row that already exists. Also: a cancellation no longer vouches for a booking claim, the narrow/wide predicate split is collapsed so `"we're all set"` reaches CLAIM_NOTE, and `send` is gated on the verdict and de-duplicated. **Kind-matching alone would not have caught LVX114** — the slot recovery is what classifies that sentence. Running the fixtures produced two defects reading had not: `"at 1 AM"` matched the 1 PM slot, and the month was never checked. Still open: a no-consent caller now gets no booking confirmation at all, and a messages claim can never be kind-matched. |
+| **LVX116** | the fix told the caller his real booking had not happened | **FIXED 2026-09-11, UNVERIFIED LIVE · P0** — LVX115's verification call. `book_appointment` succeeded and the row is right (`1324f9`, Tue 15 Sept 16:30, one scheduled row), then the claim guard fired on the TRUE sentence describing it, the new ladder asked the caller to confirm a time he already had, and the note made the assistant say "the appointment wasn't booked yet". Two causes: the guard looks back one turn and the booking was two back — LVX115 built kind-matching for the post-call verdict and never applied it live — and `"4 30pm"` parsed as `"at 4"`, making 16:00 and 16:30 both match and the slot ambiguous. Two more found in the database: the booked effect carried no row id, so the duplicate suppression silently did nothing; and fixing that alone would have left a no-consent caller with NO confirmation, since `sms_consents` is 0 rows and only the post-call sender was transactional. **Verified: `send` sent for the first time (`sent=1`), and the duplicate guard stopped a second booking.** Still unverified: the completion path itself, which was blocked at the slot step every time. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10773,6 +10774,95 @@ for the act, the sentence for the slot, the turn for the name.
 A call provokes a fabricated booking and the appointment exists anyway, at the
 time the caller was told, with `claim_completed_in_code` ≥ 1 and nothing audible
 changed.
+
+---
+
+## LVX116 — the fix told the caller his real booking had not happened
+
+`CA91b543988c8f078c994741af8bf9938b`, 2026-09-11, on `voice:a4a0dc0`. The call
+verifying LVX115. **It booked correctly and then spent ninety seconds denying
+it.**
+
+```
+03:50:38  book_appointment            SUCCESS  -> row 1324f9, Tue 15 Sept 16:30
+03:50:59  "We have your strategy call scheduled for Tuesday, September 15th
+           at 4 30pm. Does that work?"                          <- TRUE
+03:51:02  "Before I finish - can I just confirm the time with you?"   <- OURS
+03:51:23  live_repeat_cut
+03:51:39  "Just to clarify, the appointment wasn't booked yet."       <- FALSE
+03:52:32  book_appointment  -> duplicate suppressed, cached success returned
+03:52:37  "All right, that's all set for you now."
+```
+
+Ground truth: **one** scheduled row, `1324f9`, `2026-09-15T21:30Z` = 16:30
+America/Chicago, created at 03:50:38.294 — the instant the tool ran. Exactly
+what the caller was told. `postcall_verify` `verdict=ok booked_rows=1 claims=3
+sent=1`.
+
+So the outcome was right and the experience was awful, and both halves are ours.
+
+### Cause 1: the ladder could not see a booking two turns back
+
+The claim guard looks back exactly ONE turn (LVX93's known hole). The booking was
+two turns behind the sentence describing it, so the guard fired on a true claim,
+LVX115's ladder asked the caller to confirm a time he already had, and
+`CLAIM_NOTE` then made the assistant deny a row that existed.
+
+**LVX115 built kind-matching for the post-call verdict and did not apply it
+live.** The write ledger spans the whole call and the look-back does not. A claim
+is now checked against what this call actually wrote, matched on the tool AND on
+the time — so "booked Monday, claimed Tuesday" is still caught, while "booked it
+and then described it" is silent. New counter `live_claim_backed_this_call`;
+`live_claim_without_action` is deliberately unchanged, because it measures the
+look-back and that is still worth reading.
+
+This is LVX108's family arriving through a door LVX115 opened: an internal
+control message became audible, and this time it was also FALSE.
+
+### Cause 2: `"4 30pm"` is not `"at 4"`
+
+The transcript renders half past four **without a colon**. `matchClaimSlot`'s
+bare-hour branch rejected an immediately-following meridiem — `" 30pm"` is not
+one — so `at 4` matched, the 16:00 and 16:30 slots both matched, the sentence was
+declared ambiguous and the slot came back `slot_unverified` with
+`verified_slots: 32`.
+
+Same class as the `"at 1 AM"` defect the fixture run caught before LVX115
+shipped, and it survived that fix **because every fixture in the table used the
+colon form.** The call did not. Both of the call's sentences are now fixtures.
+
+### Two more, found in the database rather than the trace
+
+- **The booked effect carried no row id.** `data` is the tool ARGUMENTS
+  (`{...args, scheduled_at}`), not the row, so `data.id` was `undefined`, the
+  write ledger recorded `appointmentId: null`, and LVX115's post-call duplicate
+  suppression **silently did nothing**. A ledger field that is always null reads
+  exactly like "nothing to report". Fixed at the source: the effect carries
+  `bookedRowId`.
+- **Fixing that would have left the caller with no message at all.**
+  `sms_consents` for this tenant is **0 rows**. The booking-time confirmation is
+  consent-gated and was HELD; the post-call one is `transactional` and sent. The
+  only reason `sent=1` is that the suppression was broken. With the id present it
+  would have suppressed the one message that was going out. The booking-time
+  sender is now `transactional` too, by the same owner decision of 2026-09-03 —
+  and the suppression additionally requires the two to reach the SAME NUMBER, so
+  a caller booking on somebody else's behalf still gets the client told.
+
+### What this call did verify
+
+- **`POSTCALL_VERIFY=send` sent, for the first time ever.** `sent=1`, on a tenant
+  with no consent record, through the transactional path.
+- **The duplicate write guard.** The model tried to book the same appointment a
+  second time at 03:52:32 and got the cached success. It is the only reason this
+  call did not end with two appointments.
+- `verdict=ok` with `booked_rows=1` — the kind-matched reconcile agreeing with
+  the database on a real call.
+
+### What it did NOT verify
+
+**The completion path never ran.** It was blocked at the slot step on every
+claim. `claim_completed_in_code` is still 0 on any real call, and LVX115's
+headline remains unverified live.
 
 ---
 

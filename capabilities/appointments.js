@@ -1567,7 +1567,22 @@ export default {
         datetime: data.scheduled_at
           ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
           : "your requested time",
-      })
+      },
+      // TRANSACTIONAL, for the same reason and by the same decision as the
+      // post-call sender in lib/postCallVerify.js: the owner's ruling of
+      // 2026-09-03 is that confirming a booking the caller just made, on a call
+      // they placed, is a service message rather than a marketing one. An
+      // explicit decline still blocks it; only the ABSENCE of a record is
+      // overridden.
+      //
+      // LVX115 is why it is here now rather than only there. These two senders
+      // cover one booking between them, and the post-call one suppresses itself
+      // when this one has already gone out -- so leaving this one consent-gated
+      // while that one was not meant a caller with no consent record got
+      // exactly nothing. The call of 2026-09-11 had sms_consents: 0, and the
+      // only reason a message went out at all was that the suppression was
+      // broken by a missing row id.
+      { transactional: true })
       .catch((err) =>
         log.error("sms_followup_failed", {
           callSid,
@@ -2177,7 +2192,21 @@ async function bookAppointment(fc, ctx) {
   // short-circuit must not re-fire any of them — that is the entire point of
   // the anchor.
   const booked =
-    bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
+    bookSuccess && !alreadyBooked
+      ? { ...args, id: bookedRowId, scheduled_at: anchoredScheduledAt }
+      : null;
+  // THE ROW ID, and it was missing. LVX115, found on the call of 2026-09-11.
+  //
+  // This effect's `data` is the tool ARGUMENTS, not the row -- which is right
+  // for everything that reads it (the confirmation text wants the name and the
+  // time) and wrong for anything that needs to identify WHICH ROW was written.
+  // lib/voice/live/index.js records `data.id` into the write ledger so the
+  // post-call sender can tell which appointments were already confirmed at
+  // booking time; with `id` undefined that suppression silently did nothing and
+  // the caller was lined up for two messages about one appointment.
+  //
+  // A ledger field that is always null is the failure mode this repository
+  // keeps paying for: it reads exactly like "nothing to report".
 
   // Caller facts for the dynamic tail (plan step 2.2): the model re-reads these
   // every turn, so it confirms this booking from memory instead of re-asking or

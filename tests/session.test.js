@@ -2247,7 +2247,8 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect.anything(),
       expect.anything(),
       "appointment_confirmation",
-      expect.objectContaining({ name: "Sam" })
+      expect.objectContaining({ name: "Sam" }),
+      { transactional: true }
     );
   });
 
@@ -2289,7 +2290,12 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect.objectContaining({ businessName: "Test Biz" }),
       "+15559999999",
       "appointment_confirmation",
-      expect.objectContaining({ name: "Alex" })
+      expect.objectContaining({ name: "Alex" }),
+      // LVX115. Transactional, by the same owner decision as the post-call
+      // sender: the two cover one booking between them, and leaving this one
+      // consent-gated while that one was not meant a caller with no consent
+      // record got no confirmation at all.
+      { transactional: true }
     );
   });
 

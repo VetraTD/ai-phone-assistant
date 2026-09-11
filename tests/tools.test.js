@@ -204,7 +204,10 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       {
         capability: "appointments",
         type: "booked",
-        data: { ...args, scheduled_at: FUTURE_SLOT_ANCHORED },
+        // `id` is the ROW, and it is on the effect because the write ledger
+        // needs to say which appointment was written -- LVX115, where a null id
+        // silently disabled the post-call duplicate suppression.
+        data: { ...args, id: "appt-1", scheduled_at: FUTURE_SLOT_ANCHORED },
       },
     ]);
   });

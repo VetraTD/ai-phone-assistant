@@ -165,6 +165,44 @@ describe("matchClaimSlot — what it must refuse", () => {
     ).toBeNull();
   });
 
+  it("a bare hour must not swallow the minutes after it", () => {
+    // FROM THE CALL, 2026-09-11. The transcript renders half past four as
+    // "4 30pm" with NO COLON, and the bare-hour branch read that as "at 4":
+    // the no-meridiem lookahead only rejected an IMMEDIATELY following
+    // meridiem, and " 30pm" is not one. Both 16:00 and 16:30 matched, the
+    // sentence was declared ambiguous, and a booking that existed was reported
+    // as slot_unverified.
+    //
+    // Same class as the "at 1 AM" defect above -- a bare hour accepting a
+    // token that contradicts it -- and it survived that fix because every
+    // fixture in this table used the colon form. The call did not.
+    const sentence =
+      "We have your strategy call scheduled for Tuesday, September 15th at 4 30pm.";
+    expect(matchClaimSlot(sentence, ["2026-09-15T16:00"])).toBeNull();
+    expect(matchClaimSlot(sentence, ["2026-09-15T16:30"])).toBe("2026-09-15T16:30");
+    expect(matchClaimSlot(sentence, ["2026-09-15T16:00", "2026-09-15T16:30"])).toBe(
+      "2026-09-15T16:30"
+    );
+  });
+
+  it("a whole day of open slots does not make every claim ambiguous", () => {
+    // 32 verified slots is what a two-day availability query actually produced.
+    const slots = [];
+    for (let h = 9; h <= 16; h += 1) {
+      for (const day of ["14", "15"]) {
+        slots.push(`2026-09-${day}T${String(h).padStart(2, "0")}:00`);
+        slots.push(`2026-09-${day}T${String(h).padStart(2, "0")}:30`);
+      }
+    }
+    expect(slots).toHaveLength(32);
+    expect(
+      matchClaimSlot(
+        "We have your strategy call scheduled for Tuesday, September 15th at 4 30pm.",
+        slots
+      )
+    ).toBe("2026-09-15T16:30");
+  });
+
   it("minutes must be spoken — '4 PM' cannot reach 4:30", () => {
     expect(
       matchClaimSlot("We're all set for Monday, September 14th, at 4 PM.", ["2026-09-14T16:30"])
