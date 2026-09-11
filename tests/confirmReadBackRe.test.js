@@ -182,6 +182,63 @@ describe("confirmReadBackRe — every modal that fronts the same offer", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// THE VERB AFTER THE MODAL IS ALSO A LIST, and it is also incomplete. Three
+// live misses on 2026-09-11, across two calls, each on a DIFFERENT verb:
+//
+//   CA75a023  "Sure thing, I can cancel your appointment on Monday,
+//              September 14th at 3 00 PM. ARE YOU SURE YOU'D LIKE TO GO AHEAD
+//              with that?"                                    -> refused
+//   CAa2ce4e  "Would you like me to MAKE that change?"         -> refused
+//   CAa2ce4e  "Shall I TRY to make that change now?"           -> ceiling
+//
+// `go ahead` was listed on the `would you like me to` alternation and NOT on
+// the adjacent `you'd like to` one; `make` and `try` were on neither. Three
+// textbook read-backs, three refusals, and on CAa2ce4e the caller was moved
+// from the 2 PM they asked for to 4 PM while being told twice that their time
+// was unavailable -- it was not, check_appointment_availability had just
+// returned it open.
+//
+// FIXED AS ONE SHARED VERB GROUP, not as three more alternations. The three
+// places that front an offer to act had drifted into three different lists,
+// which is the same defect LVX107 fixed for the modal one level up.
+//
+// The verb group is still a CLOSED CLASS and the negatives below are why: it
+// is what keeps "Can I get your full name?" out. A modal plus any verb at all
+// would make the gate stop gating.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — the verb is a closed class too", () => {
+  const READ_BACKS = [
+    // The three live misses, verbatim from the calls.
+    "Sure thing, I can cancel your appointment on Monday, September 14th at 3 00 PM. Are you sure you'd like to go ahead with that?",
+    "Okay, three PM is available on that day. So, we would be rescheduling your appointment from one PM on Wednesday, September sixteenth to three PM on the same date. Would you like me to make that change?",
+    "Okay, four PM is available as well. So, we'd be moving your appointment from one PM on Wednesday, September sixteenth to four PM on the same date. Shall I try to make that change now?",
+    // The same three verbs, isolated, on each of the three alternations.
+    "You'd like to go ahead with that change?",
+    "Would you like me to make that change?",
+    "Shall I try to make that change now?",
+    "Should I update that for you?",
+    "Do you want me to put that through?",
+  ];
+  for (const said of READ_BACKS) {
+    it(`recognises: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  // The negatives the verb group exists to keep out. These are questions ABOUT
+  // the caller, not offers to act, and every one of them is a turn the
+  // assistant says routinely just before collecting a detail.
+  const NOT_READ_BACKS = [
+    "Can I get your full name, please?",
+    "May I ask what the appointment is for?",
+    "Can I help with anything else today?",
+    "Would you like me to check what else is open?",
+    "Shall I see if there is anything earlier?",
+  ];
+  for (const said of NOT_READ_BACKS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(false));
+  }
+});
+
 describe("confirmReadBackRe — Spanish is untouched by the widening", () => {
   it("recognises the Spanish read-back", () =>
     expect(es.test("Para confirmar, ¿procedo con la cita del martes?")).toBe(true));

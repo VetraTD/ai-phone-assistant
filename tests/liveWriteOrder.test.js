@@ -62,12 +62,20 @@ vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 
 import { executeToolCall } from "../services/tools.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
 const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
-const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4 } = {}) => ({
+const ctx = ({
+  said = "Yes",
+  replied = READ_BACK,
+  capabilityState = {},
+  config = {},
+  turn = 4,
+  recentReplyTexts = undefined,
+} = {}) => ({
   businessId: "biz-1",
   callerPhone: "+15551234567",
   callId: "call-1",
@@ -81,6 +89,9 @@ const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config =
   callerTurnCount: turn,
   lastCallerText: said,
   lastReplyText: replied,
+  // Undefined unless a test sets it, so every existing case still exercises the
+  // single-turn path the cascade and older engine revisions use.
+  ...(recentReplyTexts ? { recentReplyTexts } : {}),
 });
 
 const book = (c) =>
@@ -616,5 +627,94 @@ describe("a refusal that only lacks the yes", () => {
     expect(stateEffects.capabilityState.appointments.pendingWrite).toBeFalsy();
     // And this one SHOULD still be told to read the details back.
     expect(String(functionResponse.response.message)).toMatch(/read the details back/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE READ-BACK HAD ONE TURN OF MEMORY, and an ordinary clarifying question
+// erased it. Call CAa2ce4e, 2026-09-11:
+//
+//   A: "Just to confirm, we're moving your appointment from one PM to two PM
+//       on that same date. Is that all right?"        <- read-back, RECOGNISED
+//   C: "Nah, and it's on the same day. Just making sure."   <- a QUESTION
+//   A: "Yes, that's on the same day, Wednesday the sixteenth."  <- an ANSWER
+//   C: "Yeah, I'll do it."                                     <- agreement
+//   -> reschedule_appointment_db REFUSED: readBackMade=false
+//
+// The gate read only `lastReplyText`, so the read-back two turns back was
+// invisible and the caller was refused for having asked a question. The
+// proposal was never withdrawn and never changed; the caller heard the details,
+// checked one of them, and agreed.
+//
+// That call then went 1 PM -> 3 PM -> 4 PM, because the model explained each
+// refusal to the caller as the time being unavailable. It was not.
+//
+// WHAT KEEPS THIS SAFE is the half that does NOT widen: the caller's agreement
+// is still read from their IMMEDIATELY preceding turn. A read-back in the
+// window plus a yes just now is the same guarantee LVX95 asked for -- the
+// caller heard the details, and the caller has just said go ahead. Widening
+// BOTH halves would let an old yes release a new proposal, which is LVX104.
+// ---------------------------------------------------------------------------
+describe("the read-back survives a clarifying question", () => {
+  const PROPOSAL = "Just to confirm, I'm booking that for Thursday at ten. Is that all right?";
+  const CLARIFY_ANSWER = "Yes, that's on the same day, Wednesday, September sixteenth.";
+
+  it("the intervening answer is genuinely not a read-back on its own", () => {
+    // If this ever starts matching, the test below stops testing the window.
+    expect(getStrings({ languagesSpoken: ["en"] }).confirmReadBackRe.test(CLARIFY_ANSWER)).toBe(
+      false
+    );
+  });
+
+  it("allows the write when the read-back was two turns back and the caller has just agreed", async () => {
+    const { functionResponse } = await book(
+      ctx({
+        said: "Yeah, I'll do it.",
+        replied: CLARIFY_ANSWER,
+        recentReplyTexts: [PROPOSAL, CLARIFY_ANSWER],
+      })
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(counters().write_order_refused).toBe(0);
+  });
+
+  it("still refuses when the caller has not agreed, however recent the read-back", async () => {
+    // The half that must NOT widen. A read-back in the window is not consent.
+    const { functionResponse } = await book(
+      ctx({
+        said: "Hold on, let me check my diary",
+        replied: CLARIFY_ANSWER,
+        recentReplyTexts: [PROPOSAL, CLARIFY_ANSWER],
+      })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("still refuses when no turn in the window read anything back", async () => {
+    const { functionResponse } = await book(
+      ctx({
+        said: "Yes, go ahead",
+        replied: "You have three appointments coming up.",
+        recentReplyTexts: [
+          "I'm not finding any upcoming appointments under this number.",
+          "You have three appointments coming up.",
+        ],
+      })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(counters().write_confirm_readback_missing).toBe(1);
+  });
+
+  it("falls back to lastReplyText when the engine sends no window", async () => {
+    // The cascade never sets these fields, and an older revision of the engine
+    // will not send the array. Behaviour there must be exactly what it was.
+    const { functionResponse } = await book(ctx({ said: "Yes, that's right" }));
+    expect(functionResponse.response.success).toBe(true);
   });
 });
