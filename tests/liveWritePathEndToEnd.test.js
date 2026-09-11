@@ -319,6 +319,56 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(s.store.scheduled()).toHaveLength(0);
   });
 
+  // -------------------------------------------------------------------------
+  // THE AVAILABILITY VERDICT DISCRIMINATES, which nothing could previously
+  // assert because nothing recorded it. These three cases all produce
+  // `success: true` from check_appointment_availability and were indistinguishable
+  // in every log and counter in the tree.
+  // -------------------------------------------------------------------------
+  it("records a point check that found the time OPEN, and ties it to one slot", async () => {
+    const s = await boot();
+    await s.checkAvailability(SLOT);
+
+    expect(c().availability_point_open).toBe(1);
+    expect(c().availability_point_taken ?? 0).toBe(0);
+    expect(c().availability_day_listed ?? 0).toBe(0);
+  });
+
+  it("records a point check that found the time TAKEN, and does not tie it to a slot", async () => {
+    // Capacity 1 and the slot already filled, so the check comes back
+    // available:false -- the response that also carries the alternatives the
+    // model is instructed to offer.
+    const s = await boot({
+      seedAppointments: [
+        { business_id: BUSINESS_ID, client_name: "Someone Else", scheduled_at: "2026-09-07T19:00:00.000Z" },
+      ],
+    });
+    await s.checkAvailability(SLOT);
+
+    expect(c().availability_point_taken).toBe(1);
+    expect(c().availability_point_open ?? 0).toBe(0);
+  });
+
+  it("counts a whole-day query per slot, and as no point check at all", async () => {
+    const s = await boot();
+    // A bare date is a day query (capabilities/appointments.js routes it to
+    // openTimesForDay, which returns no `available` field at all).
+    await s.checkAvailability("2026-09-07");
+
+    // THE DISCRIMINATION, and the assertion that matters: a day query yields NO
+    // point verdict at all. openTimesForDay returns no `available` field, by its
+    // own deliberate choice, so "the caller was shown a list" and "the caller's
+    // time was confirmed" are now different facts rather than one success flag.
+    expect(c().availability_point_open ?? 0).toBe(0);
+    expect(c().availability_point_taken ?? 0).toBe(0);
+    // Many slots from one call -- the number that says a caller was browsing
+    // rather than agreeing, and why one combined verifiedSlots count could never
+    // answer "which time did this call confirm". Counted per slot in BOTH the
+    // per-call summary and the process-global counter; they disagreed until a
+    // failing assertion here caught it.
+    expect(c().availability_day_listed).toBeGreaterThan(1);
+  });
+
   it("refuses a time no availability call ever confirmed", async () => {
     const s = await boot();
 
