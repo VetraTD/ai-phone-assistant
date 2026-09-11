@@ -1239,58 +1239,6 @@ export default {
   },
 
   /**
-   * WHAT A CLAIM ABOUT THIS CAPABILITY MEANS. LVX114, 2026-09-11.
-   *
-   * The engine can see that the assistant told the caller something was done.
-   * It cannot know what "done" refers to without asking the pack, and the same
-   * ownership move `hasWriteTarget` made applies: the vocabulary that says
-   * which ACT was claimed is locale (lib/voice/strings.js claimActionProbes),
-   * and which TOOL makes that act true is ours.
-   *
-   * `satisfiedBy` closes the hole that made LVX114 read as a clean call. A
-   * successful `cancel_appointment_db` used to vouch for a fabricated booking,
-   * because lib/postCallVerify.js asked only "did this call write ANYTHING".
-   *
-   * `complete` is the stronger half and is present on exactly one action.
-   * It names the tool the ENGINE may call itself when the claim turns out to be
-   * false and every essential field can be recovered and independently
-   * verified.
-   *
-   * ---------------------------------------------------------------------------
-   * WHY ONLY `booked` MAY BE COMPLETED
-   * ---------------------------------------------------------------------------
-   *
-   * The rule that makes auto-completion defensible is an asymmetry, not a
-   * permission: a wrongly-CREATED appointment is visible in the diary and
-   * cancellable in seconds, while a missing one is invisible until a customer
-   * does not arrive. Creating a row the caller was already told exists is
-   * therefore strictly better than leaving them with nothing.
-   *
-   * That argument RUNS BACKWARDS for the other three. A cancel or a reschedule
-   * moves or destroys a row that already exists, so completing a false claim
-   * about one would do real, quiet damage — and LVX114 is itself a call where a
-   * cancellation destroyed a real appointment. They are declared here so the
-   * post-call verdict can match them, and deliberately carry no `complete`.
-   *
-   * `correct_appointment_name` sits with `noted` rather than alone: both change
-   * a detail on a row without changing whether the appointment exists, which is
-   * the distinction the caller would notice.
-   *
-   * NO OTHER PACK DECLARES THIS YET, and that is a fact about the write ledger
-   * rather than a judgement about the other capabilities: lib/voice/live/index.js
-   * records only `capability === "appointments"` effects into `writes`, so a
-   * messages claim has no write that could ever satisfy it and kind-matching one
-   * would manufacture a false alarm on every call that took a message. An
-   * undeclared action stays `unspecified` and keeps the old any-write rule.
-   */
-  claimActions: {
-    booked: { satisfiedBy: ["book_appointment"], complete: "book_appointment" },
-    cancelled: { satisfiedBy: ["cancel_appointment_db"] },
-    rescheduled: { satisfiedBy: ["reschedule_appointment_db"] },
-    noted: { satisfiedBy: ["add_appointment_note", "correct_appointment_name"] },
-  },
-
-  /**
    * Tools whose success is caller-visible, unlocking same-turn end_call.
    * Previously the hardcoded ACTION_TOOL_NAMES array in services/gemini.js:14.
    */
@@ -1567,22 +1515,7 @@ export default {
         datetime: data.scheduled_at
           ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
           : "your requested time",
-      },
-      // TRANSACTIONAL, for the same reason and by the same decision as the
-      // post-call sender in lib/postCallVerify.js: the owner's ruling of
-      // 2026-09-03 is that confirming a booking the caller just made, on a call
-      // they placed, is a service message rather than a marketing one. An
-      // explicit decline still blocks it; only the ABSENCE of a record is
-      // overridden.
-      //
-      // LVX115 is why it is here now rather than only there. These two senders
-      // cover one booking between them, and the post-call one suppresses itself
-      // when this one has already gone out -- so leaving this one consent-gated
-      // while that one was not meant a caller with no consent record got
-      // exactly nothing. The call of 2026-09-11 had sms_consents: 0, and the
-      // only reason a message went out at all was that the suppression was
-      // broken by a missing row id.
-      { transactional: true })
+      })
       .catch((err) =>
         log.error("sms_followup_failed", {
           callSid,
@@ -2192,21 +2125,7 @@ async function bookAppointment(fc, ctx) {
   // short-circuit must not re-fire any of them — that is the entire point of
   // the anchor.
   const booked =
-    bookSuccess && !alreadyBooked
-      ? { ...args, id: bookedRowId, scheduled_at: anchoredScheduledAt }
-      : null;
-  // THE ROW ID, and it was missing. LVX115, found on the call of 2026-09-11.
-  //
-  // This effect's `data` is the tool ARGUMENTS, not the row -- which is right
-  // for everything that reads it (the confirmation text wants the name and the
-  // time) and wrong for anything that needs to identify WHICH ROW was written.
-  // lib/voice/live/index.js records `data.id` into the write ledger so the
-  // post-call sender can tell which appointments were already confirmed at
-  // booking time; with `id` undefined that suppression silently did nothing and
-  // the caller was lined up for two messages about one appointment.
-  //
-  // A ledger field that is always null is the failure mode this repository
-  // keeps paying for: it reads exactly like "nothing to report".
+    bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
 
   // Caller facts for the dynamic tail (plan step 2.2): the model re-reads these
   // every turn, so it confirms this booking from memory instead of re-asking or

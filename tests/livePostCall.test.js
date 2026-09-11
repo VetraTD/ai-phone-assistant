@@ -113,24 +113,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
         toolResult: { name: fc.name, success: true, message: "ok" },
         capabilityEffects:
           fc.name === "book_appointment"
-            ? [
-                {
-                  capability: "appointments",
-                  type: "booked",
-                  // The row id is on a real booked effect -- the pack emits the row
-                  // createAppointmentIfAvailable returned. A fixture without one
-                  // describes a call that cannot happen, and the duplicate-suppression
-                  // path in lib/postCallVerify.js keys on exactly this field.
-                  // An absolute instant, which is what the row holds. 14:00Z in
-                  // September is 15:00 in Europe/London (BST), and the ledger
-                  // records the local wall clock the guards compare on.
-                  data: {
-                    id: "appt-new",
-                    client_name: "Marcus Bell",
-                    scheduled_at: "2026-09-14T14:00:00.000Z",
-                  },
-                },
-              ]
+            ? [{ capability: "appointments", type: "booked", data: { client_name: "Marcus Bell" } }]
             : [
                 {
                   capability: "appointments",
@@ -273,7 +256,7 @@ describe("the post-call read gets what the call knew", () => {
     await s.hangUp();
 
     expect(arg(s.verify).writes).toEqual([
-      { type: "booked", tool: "book_appointment", appointmentId: "appt-new", slot: "2026-09-14T15:00" },
+      { type: "booked", tool: "book_appointment" },
       { type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-9" },
     ]);
   });

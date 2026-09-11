@@ -560,48 +560,7 @@ export async function executeToolCall(fc, ctx) {
           // neither branch can fire there -- the same construction that keeps
           // this file byte-identical for tier 3 today.
           const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
-
-          // ---------------------------------------------------------------
-          // THE ENGINE COMPLETING ITS OWN CLAIM SKIPS THIS ONE GATE. LVX114.
-          //
-          // Everything below asks a single question: has the caller agreed to
-          // this yet? It is the right question for a write the MODEL proposed,
-          // and it is the reason the model cannot book something nobody asked
-          // for.
-          //
-          // It is the wrong question when the caller has ALREADY BEEN TOLD the
-          // thing is done. On CAbdff67b2 the assistant went straight from "what
-          // name should I book that under?" to "we're all set for Monday,
-          // September 14th, at 1 PM" -- no read-back, no yes, and no
-          // book_appointment either. That caller was going to hang up believing
-          // he had an appointment whatever this gate decided. Refusing the
-          // write does not protect him; it only guarantees the database
-          // disagrees with what he heard. The one remaining choice is whether
-          // the row matches the sentence, and this gate cannot speak to that.
-          //
-          // NOTHING ELSE IS RELAXED, and that is the whole safety argument:
-          //   - the availability invariant still refuses any time no
-          //     check_appointment_availability returned (live/guards.js)
-          //   - the spelling gate still refuses a hard name nobody has spelled,
-          //     and stashes the write for the existing retry
-          //   - checkRequirements still refuses a missing essential field
-          //   - the pack still refuses a booking with no name (LVX77)
-          //   - the duplicate cache still refuses a second identical write
-          //
-          // So the engine cannot originate a booking at an invented time or
-          // under an invented name. It can only originate the one the caller
-          // was already promised.
-          //
-          // Never set by the model, never reachable from a tool argument: the
-          // flag is put on ctx by lib/voice/live/index.js at the one call site
-          // that completes a claim, alongside a counter, so every use of it is
-          // greppable -- the same construction `transactional` uses in
-          // services/notifications.js.
-          // ---------------------------------------------------------------
-          const completingClaim = ctx?.completingClaim === true;
-          if (completingClaim) bumpCounter("write_consent_skipped_completing_claim");
-
-          if (!completingClaim && lastCallerText.trim() !== "") {
+          if (lastCallerText.trim() !== "") {
             const consentRefusal =
               isHesitationOnly(lastCallerText)
                 ? {
