@@ -265,6 +265,36 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(s.store.scheduled()).toHaveLength(1);
     expect(s.store.scheduled()[0].scheduled_at).toContain("2026-09-07");
     expect(s.store.scheduled()[0].client_name).toBe(CLIENT);
+
+    // The write's target is now on the record, relationally. Before this event
+    // existed, no log line anywhere said what time a write aimed at, so no
+    // change to this path could be checked against history.
+    expect(c().write_landed_on_listed_slot ?? 0).toBe(0);
+  });
+
+  it("marks a write that landed on a slot nothing ever point-checked", async () => {
+    // The common real shape: the caller's first choice is taken, the response
+    // carries alternatives the model is instructed to offer, and the booking
+    // lands on one of those -- a time the caller was SHOWN rather than one they
+    // were ASKED about. The availability invariant allows it, correctly. Nothing
+    // measured it until now.
+    const s = await boot({
+      seedAppointments: [
+        { business_id: BUSINESS_ID, client_name: "Someone Else", scheduled_at: "2026-09-07T19:00:00.000Z" },
+      ],
+    });
+
+    await s.checkAvailability(SLOT);
+    expect(c().availability_point_taken).toBe(1);
+
+    // Book one of the alternatives the taken-check put on the table.
+    const alt = "2026-09-07T14:30:00";
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    await s.book({ scheduled_at: alt, client_name: CLIENT });
+
+    expect(s.store.scheduled().length).toBeGreaterThanOrEqual(2);
+    expect(c().write_landed_on_listed_slot).toBe(1);
   });
 
   // -------------------------------------------------------------------------
