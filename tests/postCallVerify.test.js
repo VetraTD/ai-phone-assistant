@@ -217,6 +217,49 @@ describe("verifyCall - the fabrication case", () => {
     expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
   });
 
+  it("LVX121: a fabricated claim escalates even when a write was ALSO abandoned", async () => {
+    // The call of 2026-09-11 06:22-06:24. book_appointment was called and
+    // refused, never retried, and the assistant signed off with "Your
+    // appointment is all set". booked_rows=0.
+    //
+    // The verdict came back `write_abandoned` -- correct about the tool -- and
+    // the reconciliation was gated on `claim_without_row`, so it never ran. The
+    // caller was told they had an appointment, no row existed, and NOBODY WAS
+    // TOLD. A more specific verdict starved the safety net.
+    const deps = fakeDeps({ booked: [] });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 9, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+        abandoned: ["book_appointment"],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("write_abandoned");
+    // The headline is still about the tool. The human is still told.
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
+  });
+
+  it("and a clean abandoned write with no claim still notifies nobody", async () => {
+    // The other half: `write_abandoned` on its own is a tool fact, not a
+    // caller-facing fabrication, and must not start waking people.
+    const deps = fakeDeps({ booked: [row()] });
+
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "booked", tool: "book_appointment" }],
+        claims: [{ turn: 9, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+        abandoned: ["correct_appointment_name"],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
   it("but the booking's OWN write still vouches for it", async () => {
     const deps = fakeDeps({ booked: [row({ id: "appt-new" })] });
 

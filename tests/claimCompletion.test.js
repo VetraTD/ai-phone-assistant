@@ -119,8 +119,9 @@ function fakeDb(callerContext = null) {
  * lib/voice/live/guards.js is what must refuse an unverified time, and a fake
  * that refused as well would hide whether the real guard ever ran.
  */
-function executor({ bookFails = false } = {}) {
+function executor({ bookFails = false, stashOnRefuse = false } = {}) {
   const calls = [];
+  let bookAttempts = 0;
   const execute = vi.fn(async (fc) => {
     calls.push(fc);
     if (fc.name === "check_appointment_availability") {
@@ -145,6 +146,25 @@ function executor({ bookFails = false } = {}) {
               data: { tool: fc.name, appointmentId: fc.args?.appointment_id || "appt-old" },
             },
           ],
+        },
+      };
+    }
+    bookAttempts += 1;
+    // FIRST attempt only, like the real gate: it refuses pending a yes and then
+    // allows the re-issue. A fixture that refused every attempt would make the
+    // sweep's own write fail and prove nothing.
+    if (stashOnRefuse && bookAttempts === 1) {
+      // What the write-order gate does: refuse, and keep the arguments so the
+      // write can be re-issued in code.
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "needs a yes" } },
+        stateEffects: {
+          toolResult: { name: fc.name, success: false, message: "needs a yes" },
+          capabilityState: {
+            appointments: {
+              pendingWrite: { name: fc.name, args: fc.args || {}, reason: "write_order" },
+            },
+          },
         },
       };
     }
@@ -291,6 +311,19 @@ async function boot(opts = {}) {
     },
     /** One assistant turn, whatever the claim predicate makes of it. */
     async say(text) {
+      live.push({ serverContent: { outputTranscription: { text } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /**
+     * A turn that makes a claim AND calls end_call, which is how the last
+     * fabrication of 2026-09-11 escaped the guard.
+     */
+    async endCallTurn(text) {
+      live.push({ toolCall: { functionCalls: [{ id: "e", name: "end_call", args: {} }] } });
+      await settle();
       live.push({ serverContent: { outputTranscription: { text } } });
       await settle();
       live.push({ serverContent: { turnComplete: true } });
@@ -770,5 +803,92 @@ describe("a report of an existing appointment is not a claim", () => {
 
     expect(c().live_claim_reported_existing).toBe(0);
     expect(c().live_claim_action_from_slot).toBe(1);
+  });
+});
+
+
+describe("the sweep uses what the call actually attempted", () => {
+  it("LVX121: re-issues the arguments a refused booking left behind", async () => {
+    // The call of 2026-09-11 06:22-06:24. book_appointment was called at
+    // 06:24:31 and refused by the write-order gate, which stashes the arguments
+    // so a write can be re-issued in code. The sweep went hunting for a name in
+    // recent sentences instead, declined `name_unrecovered`, and the caller --
+    // whose name was sitting in `pendingWrite.args.client_name` -- was told
+    // "Your appointment is all set" and left with nothing.
+    const s = await boot({
+      stashOnRefuse: true,
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    // The model tries to book and is refused; the args are stashed.
+    await s.modelBooks();
+    // The sentence carries no recoverable name at all.
+    await s.say("Your appointment is all set.");
+    await s.hangUp();
+
+    // Two calls: the model's refused attempt, then the sweep re-issuing it.
+    const booked = s.bookCalls();
+    expect(booked).toHaveLength(2);
+    expect(booked[1].args.client_name).toBe("John");
+    // The stash is re-issued VERBATIM -- the arguments the model sent, not a
+    // normalised form. guards.before normalises when it checks them, so the raw
+    // value is what should travel.
+    expect(booked[1].args.scheduled_at).toBe(SLOT);
+    expect(c().sweep_booked_at_close).toBe(1);
+  });
+
+  it("still refuses a stashed booking whose name the caller cannot be shown to have given", async () => {
+    // LVX77 is not relaxed by preferring the stash: the arguments came from the
+    // model like everything else.
+    const s = await boot({ stashOnRefuse: true });
+    await s.offerTimes();
+    await s.modelBooks({ client_name: "Jane Doe", scheduled_at: SLOT });
+    await s.say("Your appointment is all set.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().sweep_declined_no_name).toBe(1);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+});
+
+describe("the name is kept from the first time it is read back", () => {
+  it("LVX121: a read-back outside the recent window still counts", async () => {
+    // "Got it thanks, Nithin" was said at 06:23:18 and the sweep ran at
+    // 06:24:37 -- five turns later, well past the three-turn window, on a call
+    // where the name had been spoken, spelled AND read back.
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.say("Got it thanks, John. And what is the best number to reach you at?");
+    // Four turns that mention no name at all, pushing the read-back out.
+    await s.say("And what company are you with?");
+    await s.say("What industry is that in?");
+    await s.say("What do you sell?");
+    await s.say("Your appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(s.bookCalls()[0].args.client_name).toBe("John");
+    expect(c().sweep_booked_at_close).toBe(1);
+  });
+});
+
+describe("engine tools do not vouch for a claim", () => {
+  it("LVX121: end_call succeeding in the same turn no longer shields a fabrication", async () => {
+    // On 2026-09-11 the final "Your appointment is all set" escaped the claim
+    // guard because end_call happened to succeed on that turn, and the
+    // look-back counted any tool at all.
+    const s = await boot();
+    await s.offerTimes();
+    await s.quietTurn();
+    await s.endCallTurn("We're all set for Monday, September 14th, at 1 PM");
+
+    expect(c().live_claim_without_action).toBe(1);
   });
 });
