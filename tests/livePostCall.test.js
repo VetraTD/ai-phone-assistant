@@ -113,7 +113,17 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
         toolResult: { name: fc.name, success: true, message: "ok" },
         capabilityEffects:
           fc.name === "book_appointment"
-            ? [{ capability: "appointments", type: "booked", data: { client_name: "Marcus Bell" } }]
+            ? [
+                {
+                  capability: "appointments",
+                  type: "booked",
+                  // The row id is on a real booked effect -- the pack emits the row
+                  // createAppointmentIfAvailable returned. A fixture without one
+                  // describes a call that cannot happen, and the duplicate-suppression
+                  // path in lib/postCallVerify.js keys on exactly this field.
+                  data: { id: "appt-new", client_name: "Marcus Bell" },
+                },
+              ]
             : [
                 {
                   capability: "appointments",
@@ -256,7 +266,7 @@ describe("the post-call read gets what the call knew", () => {
     await s.hangUp();
 
     expect(arg(s.verify).writes).toEqual([
-      { type: "booked", tool: "book_appointment" },
+      { type: "booked", tool: "book_appointment", appointmentId: "appt-new" },
       { type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-9" },
     ]);
   });

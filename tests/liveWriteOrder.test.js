@@ -67,7 +67,15 @@ const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slic
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
 const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
-const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4 } = {}) => ({
+const ctx = ({
+  said = "Yes",
+  replied = READ_BACK,
+  capabilityState = {},
+  config = {},
+  turn = 4,
+  completingClaim = undefined,
+} = {}) => ({
+  ...(completingClaim === undefined ? {} : { completingClaim }),
   businessId: "biz-1",
   callerPhone: "+15551234567",
   callId: "call-1",
@@ -616,5 +624,69 @@ describe("a refusal that only lacks the yes", () => {
     expect(stateEffects.capabilityState.appointments.pendingWrite).toBeFalsy();
     // And this one SHOULD still be told to read the details back.
     expect(String(functionResponse.response.message)).toMatch(/read the details back/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX114 — the engine completing its own claim skips this gate, and ONLY this
+// gate.
+//
+// On CAbdff67b2 the assistant went from "what name should I book that under?"
+// straight to "we're all set for Monday, September 14th, at 1 PM", and called
+// nothing. No read-back, no yes. That caller was going to hang up believing he
+// had an appointment whichever way this gate ruled; refusing the write only
+// guaranteed the database disagreed with what he heard.
+//
+// The danger of a flag like this is scope, so both halves are asserted: that it
+// releases the consent question, and that it releases NOTHING ELSE.
+// ---------------------------------------------------------------------------
+describe("completingClaim releases the consent question and nothing else", () => {
+  it("books with no read-back and no yes, which is the whole point", async () => {
+    const out = await book(ctx({ said: "Mm-hmm", replied: "So what name is it under?", completingClaim: true }));
+
+    expect(out.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+    expect(counters().write_consent_skipped_completing_claim).toBe(1);
+    // The gate did not merely pass -- it never ran.
+    expect(counters().write_order_refused).toBe(0);
+    expect(counters().write_refused_hesitation).toBe(0);
+  });
+
+  it("refuses the same call without the flag, which is what makes the test mean anything", async () => {
+    const out = await book(ctx({ said: "Mm-hmm", replied: "So what name is it under?" }));
+
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(counters().write_consent_skipped_completing_claim).toBe(0);
+  });
+
+  it("still refuses a booking with no name — LVX77 is not relaxed by this", async () => {
+    const out = await executeToolCall(
+      { id: "fc1", name: "book_appointment", args: { scheduled_at: FUTURE_SLOT, notes: "consultation" } },
+      ctx({ completingClaim: true })
+    );
+
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("still enforces a tenant's required fields", async () => {
+    const config = { capabilities: { appointments: { require: { requiredFields: ["client_dob"] } } } };
+    const out = await book(ctx({ completingClaim: true, config }));
+
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(out.functionResponse.response.message).toMatch(/client_dob/);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("is off unless it is explicitly true", async () => {
+    // Never set by the model and never read off a tool argument: a truthy-ish
+    // value must not open the gate.
+    for (const value of [undefined, null, false, "true", 1]) {
+      vi.clearAllMocks();
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      const out = await book(ctx({ said: "Mm-hmm", replied: "So what name is it under?", completingClaim: value }));
+      expect(out.functionResponse.response.success).toBe(false);
+    }
   });
 });

@@ -124,6 +124,7 @@ Status means:
 | **LVX112** | the verification call destroyed two appointments and created none | **ROOT CAUSES FIXED 2026-09-10, UNVERIFIED LIVE · P0** — `booked_rows=0`, `changed_rows=2`, caller told "that's all set". The spelling gate's escape hatch read the SAME degraded transcript as the gate (2,180 ms of spelling → 0 characters), so `spellAskMisses` could never advance: unsatisfiable and unexhaustible at once. And two gates alternated, each seeing two of four attempts, so neither reached its own ceiling — LVX104 one level up. Both fixed: the miss is now counted from AUDIO, and the two gates share one budget keyed to the proposal WITHOUT the name. Consent deliberately untouched. Cancellations were correct. Still open: a spoken `[System checks availability]` with a fabricated result, a date string reaching Postgres as a uuid, and the name re-segmented across turns. |
 | **LVX113** | the booking landed, and a fabricated claim chose the wrong tool | **FIXED 2026-09-10, PARTLY VERIFIED LIVE · P1** — `booked_rows=1`, and LVX112's fix is VERIFIED on the same defect: 2,480 ms of spelling transcribed to ZERO again, `spelling_voiced_answer` fired twice, and the spelling gate refused zero writes against two last call. The NEW defect is LVX27's descendant: the guard tells the model its sentence was wrong but cannot undo what the model now BELIEVES, so a claimed-but-unbooked appointment made it call `correct_appointment_name` on a row that did not exist — twice. Of the three refusals that followed, two were correct and one was a phrasing gap (`may I go ahead`). Both fixed: the modal is now a closed class, and a change tool with no target skips the consent question so the pack's own "nothing to change" reason reaches the model. Still open: the name on the row is wrong, and `write_abandoned` is reported on a call that booked correctly. |
 | **LVX114** | a fabricated booking, three guards silent, and a cancelled appointment | **OPEN · P0** — `book_appointment` NEVER CALLED; `booked_rows=0`, caller told "we're all set for Monday" twice and lost the real Friday appointment he arrived with. Three guards silent for three different reasons: the narrow/wide split hides "we're all set" from CLAIM_NOTE; a CANCELLATION vouched for a BOOKING claim; and the post-call verdict has the same hole, which the file already names one paragraph above ("an unrelated success must not vouch"). All three code-driven re-issues need a prior tool call, because the stash IS the call's args — so none could reach a write that was never attempted. BUT both essential fields were recoverable: the slot from `verifiedSlots`, the name from `nameReadBackRe` on the fabricating turn itself. Argues for completing the claim in code rather than cutting the audio. Pronunciation: `speechConfig` accepts only a voice name and a language code, so no deterministic fix exists on this front-end. |
+| **LVX115** | the claim is completed in code, and three detectors stop vouching for the wrong thing | **BUILT 2026-09-11, UNVERIFIED LIVE · P0** — LVX114's direction, shipped. On a completion claim with no matching row the engine recovers the slot from `verifiedSlots` and the name from the turn, verifies each against something that did not come from the model, and performs the booking through `handleToolCall` so every gate still applies; only the consent question is skipped, because the caller has already been told. Per capability via the pack's `claimActions`, and only `booked` is completable — a cancel or a reschedule moves a row that already exists. Also: a cancellation no longer vouches for a booking claim, the narrow/wide predicate split is collapsed so `"we're all set"` reaches CLAIM_NOTE, and `send` is gated on the verdict and de-duplicated. **Kind-matching alone would not have caught LVX114** — the slot recovery is what classifies that sentence. Running the fixtures produced two defects reading had not: `"at 1 AM"` matched the 1 PM slot, and the month was never checked. Still open: a no-consent caller now gets no booking confirmation at all, and a messages claim can never be kind-matched. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10654,6 +10655,124 @@ it a rule: the greeting is handed over as a literal string. `Digile` is a
 near-miss for `digital`, which is what it autocorrects to. The test number's
 greeting now reads **`Dijile Media`** (owner confirms the sound is DIJ-ile);
 `businesses.name` keeps the real spelling for records. Untested on a call.
+
+---
+
+## LVX115 — the claim is completed in code, and three detectors stop vouching for the wrong thing
+
+Built 2026-09-11 on `main`, in answer to LVX114. **Verified offline only — no
+call has been taken.**
+
+The direction LVX114 argued for: do not fight the claim, make it true. On a
+completed-action claim with no matching row, recover the essentials, verify each
+against something that did not come from the model, and perform the action.
+
+### What ships
+
+**The completion.** `completeClaimedBooking` in `lib/voice/live/index.js`,
+modelled on `retryPendingWrite` and going through `runner.handleToolCall` for the
+same reason: the availability invariant, the spelling gate, `checkRequirements`,
+the pack's no-name refusal and the duplicate cache all still apply.
+
+| field | recovered from | verified against something not from the model |
+|---|---|---|
+| WHEN | the claim's own SENTENCE, matched against `verifiedSlots` | `verifiedSlots` is filled only from an availability tool's response, and `guards.before` then refuses the write a second time on the same set |
+| WHO | `callerFacts.Name`, else `nameReadBackRe` on the turn | `nameSpokenIn` over the caller's transcript, **or** a name already on the caller's records |
+
+**The safety rule is enforced twice and neither enforcement is new.** A time the
+model invented has no candidate in `verifiedSlots` to match, and would be blocked
+by the guard even if it did.
+
+**Per capability, not for appointments.** The pack declares `claimActions`
+(`satisfiedBy`, and `complete` for the one action the engine may originate); the
+locale declares `claimActionProbes`. `claimActionMap()` folds every pack the way
+`actionToolNames()` does, because the claim guard runs on reply text and has no
+`fc` to resolve an owner from. Same ownership move `hasWriteTarget` made.
+
+**Only `booked` is completable, and the asymmetry is the reason.** A wrongly
+created appointment is visible in the diary and cancellable in seconds; a cancel
+or a reschedule moves a row that already exists, so completing a false claim
+about one does real damage. LVX114 is itself a call where a cancellation
+destroyed a real appointment. `cancelled`/`rescheduled`/`noted` are declared so
+the verdict can match them, and carry no `complete`.
+
+### The three detector fixes
+
+**1. A cancellation no longer vouches for a booking.** `reconcile` matched
+`claimed && !wroteAnything`, so any write vouched for any claim — which is
+exactly how LVX114 returned `ok`. Claims now carry the act they named and the
+tools that could have performed it, and a claim is satisfied only by a matching
+write. **An unclassified claim keeps the old any-write rule exactly**, and the
+cascade, which passes no `satisfiedBy`, is untouched.
+
+**2. The narrow/wide claim predicate is one predicate.** The split was LVX97's,
+made so a counting round stayed comparable; that round ended, and it was hiding
+`"we're all set"` — the commonest fabrication phrasing — from `CLAIM_NOTE`.
+`live_claim_wide_only` and `live_claim_detected_wide` are deleted rather than
+left pinned at zero.
+
+**3. `send` no longer outruns the verdict.** Gated on a deny-list
+(`write_abandoned`, `row_mismatch`) rather than `=== "ok"`: `row_without_claim`
+must still send, because a real booking the assistant never mentioned is the
+case the send path is most useful for. Duplicates against the pack's own
+booking-time confirmation are suppressed, and a row number that differs from the
+caller ID is counted.
+
+### The finding that changed the design
+
+**Kind-matching alone would NOT have caught LVX114.** The only sentence on that
+call matching any predicate is `"we're all set"`, which names no verb, so a
+cancellation still vouches for it. It only becomes a booking claim because it
+names a time a real availability call had returned — so the slot recovery built
+for the completion is also what makes the post-call verdict see it. The two
+halves are one mechanism, not two.
+
+### Two defects the fixture run produced that reading did not
+
+Settled in a throwaway script against the verbatim claim sentences from LVX94,
+97, 112, 113 and 114 before any of it reached `lib/`:
+
+- **`"at 1 AM"` matched the 1 PM slot.** The bare-hour branch fired without
+  consuming the meridiem that contradicted it, so a sentence that explicitly
+  disagrees with a slot read as one that merely omitted the meridiem. Twelve
+  hours wrong, on the field the caller cares most about.
+- **The month was never checked.** Two verified slots a month apart on the same
+  day number both matched, cancelling each other out as "ambiguous".
+
+And a third, found by the tests rather than by reading: **the claim predicate
+matches the PREDICATE only.** `"we're all set"` is the whole match, so the span
+carries no date. Three windows are needed and conflating them is a bug: the span
+for the act, the sentence for the slot, the turn for the name.
+
+### Still open
+
+- **`send` has still never sent, and there is now a case where it cannot.** The
+  pack's booking-time confirmation is consent-gated and HELD when the caller has
+  no consent record, while the post-call one is `transactional` and would send.
+  Suppressing the post-call duplicate means a **no-consent caller gets no
+  confirmation for a new booking at all**. Not a regression from deployed
+  behaviour — `send` has never been on — but it is a gap in the intended design,
+  and the fix is a consent decision: either pass `transactional` at the
+  booking-time send too, or suppress only when that send actually went out.
+- **A messages claim can never be kind-matched.** `lib/voice/live/index.js`
+  records only `capability === "appointments"` effects into `writes`, so
+  `record_customer_request` has no write that could satisfy a claim about it.
+  This is why the messages pack declares no `claimActions`: doing so would
+  manufacture a false alarm on every call that took a message.
+- **`nameReadBackRe` truncates at an internal apostrophe.** `"Thanks, Sarah
+  O'Brien"` captures `"Sarah O'"`. Pre-existing, and name accuracy is the
+  separate unsolved problem, but it is now a value that can be written rather
+  than only tested against.
+- **`capabilities/_contract.js` has drifted further.** `toolNames`,
+  `actionTools`, `hasWriteTarget` and now `claimActions` are live pack members
+  the typedef does not document.
+- `verdict=write_abandoned` still fires on calls that booked correctly.
+
+### Done when
+
+A call provokes a fabricated booking and the appointment exists anyway, at the
+time the caller was told, with `claim_completed_in_code` ≥ 1 and nothing audible
+changed.
 
 ---
 

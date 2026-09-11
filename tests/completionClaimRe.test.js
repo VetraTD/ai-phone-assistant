@@ -233,31 +233,44 @@ describe("completionClaimRe — passive voice and an object between", () => {
 // the same predicate, so the audit was blind for the same reason the live guard
 // was.
 //
-// TWO REGEXES ON PURPOSE. The wide one drives the ledger and the
-// reconciliation, neither of which speaks; the narrow one still drives the turn
-// note, so nothing about what the model is told mid-call has moved and this
-// round's calls stay comparable with the ten that produced LVX94-98. The
-// difference between their counters is exactly the population being measured.
+// ONE REGEX NOW, AND THE ALIAS MUST STAY AN ALIAS. LVX114, 2026-09-11.
+//
+// These phrasings used to be wide-only: counted in the post-call ledger, and
+// deliberately invisible to CLAIM_NOTE so that one counting round stayed
+// comparable. That round ended, and the split was what let the assistant say
+// "we're all set for Monday, September 14th, at 1 PM" on a call where
+// book_appointment never ran and never be told it had lied.
+//
+// So the assertions below inverted: every one of these now drives the note as
+// well as the ledger. The negatives underneath did NOT move, and they are the
+// reason this was safe to collapse -- "we're booked up on Wednesday" is still
+// silent.
 // ---------------------------------------------------------------------------
 const enWide = getStrings({ languagesSpoken: ["en"] }).completionClaimWideRe;
 
-describe("completionClaimWideRe — LVX97's phrasing, counted but not spoken to", () => {
-  const WIDE_ONLY = [
+describe("completionClaimRe — LVX97's phrasings, now spoken to as well as counted", () => {
+  const ONCE_WIDE_ONLY = [
     // The call, verbatim.
     "So, we're all set for your free consultation on Wednesday, September ninth at one in the afternoon.",
     "We are all set for your consultation.",
     "That's finalized for Thursday.",
     "You're taken care of for Thursday at ten.",
   ];
-  for (const said of WIDE_ONLY) {
-    it(`wide counts, narrow does not: ${said.slice(0, 44)}`, () => {
+  for (const said of ONCE_WIDE_ONLY) {
+    it(`the one predicate catches it: ${said.slice(0, 44)}`, () => {
       expect(enWide.test(said)).toBe(true);
-      expect(en.test(said)).toBe(false);
+      // Was `false` until the collapse. This is the line LVX114 turned over.
+      expect(en.test(said)).toBe(true);
     });
   }
 
-  // A STRICT SUPERSET. If this ever fails, live_claim_wide_only stops meaning
-  // "what the widening added" and the two counters can no longer be subtracted.
+  it("completionClaimWideRe is the same object, not a second predicate to drift from", () => {
+    expect(enWide.source).toBe(en.source);
+    expect(enWide.flags).toBe(en.flags);
+  });
+
+  // Was "a strict superset". Now equality, which is stronger and is what the
+  // assertion directly above pins.
   const NARROW_CLAIMS = [
     "You're all set for Wednesday at one.",
     "That's confirmed for Wednesday at one in the afternoon.",

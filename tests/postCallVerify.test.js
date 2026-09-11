@@ -189,6 +189,114 @@ describe("verifyCall - the fabrication case", () => {
   });
 
   // -------------------------------------------------------------------------
+  // LVX114. A CANCELLATION MUST NOT VOUCH FOR A BOOKING.
+  //
+  // Call CAbdff67b2, the worst of the round. "We're all set for Monday,
+  // September 14th, at 1 PM" with book_appointment never called, and ninety
+  // seconds later a cancel_appointment_db that succeeded -- on the caller's real
+  // Friday appointment. `wroteAnything` went true on the cancellation, the
+  // verdict came back `ok`, and nobody was told. The caller lost a real
+  // appointment, gained an imaginary one, and the ledger called it a clean call.
+  //
+  // The module already said "an unrelated success must not vouch for an
+  // abandoned write" one paragraph above the hole. These are that sentence
+  // applied to `claimed`.
+  // -------------------------------------------------------------------------
+  it("LVX114: a successful cancel does not vouch for a fabricated booking", async () => {
+    const deps = fakeDeps({ booked: [], byId: { "appt-real": row({ id: "appt-real", status: "cancelled" }) } });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 6, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-real" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it("but the booking's OWN write still vouches for it", async () => {
+    const deps = fakeDeps({ booked: [row({ id: "appt-new" })] });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 6, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+        writes: [{ type: "booked", tool: "book_appointment" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("a cancellation claim IS vouched for by a cancellation", async () => {
+    const deps = fakeDeps({ byId: { "appt-real": row({ id: "appt-real", status: "cancelled" }) } });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 6, kind: "claim", action: "cancelled", satisfiedBy: ["cancel_appointment_db"] }],
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-real" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+  });
+
+  it("an UNCLASSIFIED claim keeps the old any-write rule exactly", async () => {
+    // LVX57: a false alarm teaches the reader to ignore the ledger, so a claim
+    // that named no act must not start accusing calls that wrote something.
+    const deps = fakeDeps({ byId: { "appt-real": row({ id: "appt-real", status: "cancelled" }) } });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 6, kind: "claim", action: "unspecified", satisfiedBy: [] }],
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-real" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+  });
+
+  it("the cascade, which passes no satisfiedBy at all, is untouched", async () => {
+    const deps = fakeDeps({ byId: { "appt-real": row({ id: "appt-real", status: "cancelled" }) } });
+
+    const out = await verifyCall(
+      input({
+        claims: [{ turn: 4, kind: "claim" }],
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-real" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+  });
+
+  it("one satisfied claim does not cover a second, unsatisfied one", async () => {
+    // The LVX114 call made two claims. The later one was backed; the earlier one
+    // was the fabrication, and a verdict that stops at the first match would
+    // report the call clean all over again.
+    const deps = fakeDeps({ byId: { "appt-real": row({ id: "appt-real", status: "cancelled" }) } });
+
+    const out = await verifyCall(
+      input({
+        claims: [
+          { turn: 6, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] },
+          { turn: 9, kind: "claim", action: "cancelled", satisfiedBy: ["cancel_appointment_db"] },
+        ],
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-real" }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  // -------------------------------------------------------------------------
   // LVX97. THE FABRICATION REACHES A HUMAN, WITHOUT THE MODEL'S COOPERATION.
   //
   // The claim note works by asking, and asking is not reliable: on 2026-09-09
@@ -434,5 +542,115 @@ describe("verifyCall - never throws into a teardown", () => {
 
     expect(out.verdict).toBe("skipped");
     expect(deps.db.listAppointmentsByCallId).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX114. The three things `send` did that had to stop before the flag moved.
+//
+// No SMS has ever been sent by this path, so the first one it ever sends should
+// not be an accident.
+// ---------------------------------------------------------------------------
+describe("verifyCall - what send must not do", () => {
+  beforeEach(() => clearStats());
+
+  it("does not text a confirmation when the row may carry the wrong name", async () => {
+    // LVX72's shape: the booking succeeded, correct_appointment_name was
+    // refused and never retried, so the row holds a name the caller did not
+    // give. A confirmation quoting it is worse than no confirmation.
+    const deps = fakeDeps({ booked: [row()] });
+
+    const out = await verifyCall(
+      input({ writes: [{ type: "booked" }], abandoned: ["correct_appointment_name"] }),
+      deps
+    );
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_verdict).toBe(1);
+  });
+
+  it("does not text when a tool reported success over a row it cannot read back", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ writes: [{ type: "booked" }] }), deps);
+
+    expect(out.verdict).toBe("row_mismatch");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_verdict).toBe(1);
+  });
+
+  it("STILL texts a real booking the assistant never mentioned", async () => {
+    // row_without_claim is not a fault in the ROW, and getting this backwards
+    // would break the case the send path is most useful for -- a caller who was
+    // booked and never told.
+    const deps = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(input({ writes: [{ type: "booked" }] }), deps);
+
+    expect(out.verdict).toBe("row_without_claim");
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send a SECOND confirmation for a booking the pack already texted", async () => {
+    // capabilities/appointments.js onEffect texts the caller the moment the
+    // booking lands. With consent on file both fire and the caller gets two
+    // messages for one appointment, to two possibly different numbers.
+    const deps = fakeDeps({ booked: [row({ id: "appt-new" })] });
+
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "appt-new" }],
+        claims: [{ turn: 3, kind: "claim", action: "booked", satisfiedBy: ["book_appointment"] }],
+      }),
+      deps
+    );
+
+    expect(out.verdict).toBe("ok");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(out.skipped).toEqual([{ appointmentId: "appt-new", reason: "already_confirmed" }]);
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_duplicate).toBe(1);
+  });
+
+  it("but a CANCELLATION of that same row still confirms", async () => {
+    // Only bookings are suppressed. Nothing texts a cancellation at the time it
+    // happens, so there is no duplicate to avoid and this must not swallow it.
+    // Booked and then cancelled on the same call -- LVX33's shape. The row is
+    // real and readable, so this is not row_mismatch; what changes is that the
+    // outcome the caller needs telling about is the cancellation.
+    const cancelled = row({ id: "appt-new", status: "cancelled" });
+    const deps = fakeDeps({ booked: [cancelled], byId: { "appt-new": cancelled } });
+
+    const out = await verifyCall(
+      input({
+        writes: [
+          { type: "booked", tool: "book_appointment", appointmentId: "appt-new" },
+          { type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-new" },
+        ],
+        claims: [{ turn: 3, kind: "claim", action: "cancelled", satisfiedBy: ["cancel_appointment_db"] }],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(deps.notifications.sendCallerSms.mock.calls[0][2]).toBe("appointment_cancelled");
+  });
+
+  it("counts a row number that is not the number the caller rang from", async () => {
+    // The caller ID is the network's; client_phone is whatever the model
+    // transcribed. One wrong digit texts a stranger. Counted, never redirected.
+    const deps = fakeDeps({ booked: [row({ client_phone: "+447426704500" })] });
+
+    await verifyCall(input({ callerNumber: "+15551234567" }), deps);
+
+    expect(deps.notifications.sendCallerSms.mock.calls[0][1]).toBe("+447426704500");
+    expect(getLatencyStats().turnTaking.postcall_confirm_number_mismatch).toBe(1);
+  });
+
+  it("counts nothing when the row's number IS the caller's", async () => {
+    const deps = fakeDeps({ booked: [row({ client_phone: "+447700900123" })] });
+
+    await verifyCall(input({ callerNumber: "+447700900123" }), deps);
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_confirm_number_mismatch).toBe(0);
   });
 });

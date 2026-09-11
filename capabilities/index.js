@@ -154,3 +154,38 @@ export function actionToolNames() {
   }
   return out;
 }
+
+/**
+ * Every pack's claim vocabulary, folded into one lookup. LVX114.
+ *
+ * The claim guard runs on REPLY TEXT, not on a function call, so there is no
+ * `fc.name` to hand `packForTool` and no single pack to ask — which is exactly
+ * why this is a fold and `hasWriteTarget` is not. Same shape as
+ * actionToolNames() directly above.
+ *
+ * A name collision would be a genuine ambiguity: two packs claiming the same
+ * act would make "booked" mean two different tools and the post-call verdict
+ * could not choose. TOOL_OWNER already throws at import time for tool names and
+ * this follows it — better a boot failure than a verdict nobody can read.
+ *
+ * @returns {Record<string, {capability: string, satisfiedBy: string[], complete?: string}>}
+ */
+export function claimActionMap() {
+  const out = Object.create(null);
+  for (const pack of PACKS) {
+    for (const [action, spec] of Object.entries(pack.claimActions || {})) {
+      if (out[action]) {
+        throw new Error(
+          `Capability claim action "${action}" is declared by both ` +
+            `"${out[action].capability}" and "${pack.id}". Claim actions must be unique.`
+        );
+      }
+      out[action] = {
+        capability: pack.id,
+        satisfiedBy: [...(spec?.satisfiedBy || [])],
+        ...(spec?.complete ? { complete: spec.complete } : {}),
+      };
+    }
+  }
+  return out;
+}

@@ -1239,6 +1239,58 @@ export default {
   },
 
   /**
+   * WHAT A CLAIM ABOUT THIS CAPABILITY MEANS. LVX114, 2026-09-11.
+   *
+   * The engine can see that the assistant told the caller something was done.
+   * It cannot know what "done" refers to without asking the pack, and the same
+   * ownership move `hasWriteTarget` made applies: the vocabulary that says
+   * which ACT was claimed is locale (lib/voice/strings.js claimActionProbes),
+   * and which TOOL makes that act true is ours.
+   *
+   * `satisfiedBy` closes the hole that made LVX114 read as a clean call. A
+   * successful `cancel_appointment_db` used to vouch for a fabricated booking,
+   * because lib/postCallVerify.js asked only "did this call write ANYTHING".
+   *
+   * `complete` is the stronger half and is present on exactly one action.
+   * It names the tool the ENGINE may call itself when the claim turns out to be
+   * false and every essential field can be recovered and independently
+   * verified.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY ONLY `booked` MAY BE COMPLETED
+   * ---------------------------------------------------------------------------
+   *
+   * The rule that makes auto-completion defensible is an asymmetry, not a
+   * permission: a wrongly-CREATED appointment is visible in the diary and
+   * cancellable in seconds, while a missing one is invisible until a customer
+   * does not arrive. Creating a row the caller was already told exists is
+   * therefore strictly better than leaving them with nothing.
+   *
+   * That argument RUNS BACKWARDS for the other three. A cancel or a reschedule
+   * moves or destroys a row that already exists, so completing a false claim
+   * about one would do real, quiet damage — and LVX114 is itself a call where a
+   * cancellation destroyed a real appointment. They are declared here so the
+   * post-call verdict can match them, and deliberately carry no `complete`.
+   *
+   * `correct_appointment_name` sits with `noted` rather than alone: both change
+   * a detail on a row without changing whether the appointment exists, which is
+   * the distinction the caller would notice.
+   *
+   * NO OTHER PACK DECLARES THIS YET, and that is a fact about the write ledger
+   * rather than a judgement about the other capabilities: lib/voice/live/index.js
+   * records only `capability === "appointments"` effects into `writes`, so a
+   * messages claim has no write that could ever satisfy it and kind-matching one
+   * would manufacture a false alarm on every call that took a message. An
+   * undeclared action stays `unspecified` and keeps the old any-write rule.
+   */
+  claimActions: {
+    booked: { satisfiedBy: ["book_appointment"], complete: "book_appointment" },
+    cancelled: { satisfiedBy: ["cancel_appointment_db"] },
+    rescheduled: { satisfiedBy: ["reschedule_appointment_db"] },
+    noted: { satisfiedBy: ["add_appointment_note", "correct_appointment_name"] },
+  },
+
+  /**
    * Tools whose success is caller-visible, unlocking same-turn end_call.
    * Previously the hardcoded ACTION_TOOL_NAMES array in services/gemini.js:14.
    */
