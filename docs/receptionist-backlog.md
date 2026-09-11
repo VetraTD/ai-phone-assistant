@@ -128,6 +128,7 @@ Status means:
 | **LVX116** | the fix told the caller his real booking had not happened | **FIXED 2026-09-11, UNVERIFIED LIVE · P0** — LVX115's verification call. `book_appointment` succeeded and the row is right (`1324f9`, Tue 15 Sept 16:30, one scheduled row), then the claim guard fired on the TRUE sentence describing it, the new ladder asked the caller to confirm a time he already had, and the note made the assistant say "the appointment wasn't booked yet". Two causes: the guard looks back one turn and the booking was two back — LVX115 built kind-matching for the post-call verdict and never applied it live — and `"4 30pm"` parsed as `"at 4"`, making 16:00 and 16:30 both match and the slot ambiguous. Two more found in the database: the booked effect carried no row id, so the duplicate suppression silently did nothing; and fixing that alone would have left a no-consent caller with NO confirmation, since `sms_consents` is 0 rows and only the post-call sender was transactional. **Verified: `send` sent for the first time (`sent=1`), and the duplicate guard stopped a second booking.** Still unverified: the completion path itself, which was blocked at the slot step every time. |
 | **LVX117** | four refusals, zero writes, and the caller got nothing | **DIAGNOSED 2026-09-11 - P1** - 201s, no fabrication anywhere. The cancel was refused twice by the consent gate (the tester had been told not to say yes), so the old appointment survived and the existing-appointment invariant then blocked both bookings in 7ms and 16ms. Two pre-existing defects: a consent refusal reached the caller as "I'm having some trouble cancelling", and the model was handed the real reason verbatim and said "didn't go through for some reason" instead - `in_addition_to_existing` is declared and the policy is `confirm`, so the booking was always available to it. **Verified: `postcall_confirm_skipped_verdict` (no SMS for a booking that does not exist), zero false claims on 14 turns with the collapsed predicate, and two never-exercised paths ran.** |
 | **LVX118** | the guards are not tunable per business, and nothing measures whether they help | **SCOPED, NOT STARTED 2026-09-11 - P2** - the prompt/config split is honoured; the drift is in the gates. `LIVE_WRITE_ORDER_GATE` and `VOICE_SPELL_POLICY` are process-wide env switches, so every tenant gets identical friction, and `require.confirmBeforeWrite: false` does not disable the write-order gate because that gate never reads tenant config. `existingAppointment`'s default lives in a `?:` fallback. **And no counter records whether the caller got what they rang for** - so on 2026-09-11, where neither call failed from a fabrication and both failed from guards, nothing in the system says so. Fix order: one outcome measure, then move the friction policies to tenant config as VALUES of existing kinds. Not inside a detector round. |
+| **LVX119** | the completion path ran, and a cancellation had destroyed its evidence | **FIXED 2026-09-11, UNVERIFIED LIVE - P1** - the fourth verification call, and the first where the completion path EXECUTED. `verdict=ok booked_rows=1 changed_rows=1 sent=1 skipped=['already_confirmed']`. **The `4 30pm` fix works** - no `slot_unverified` on either attempt. It failed on the NAME: the caller SPELLED it (2,880 ms -> 4 transcript characters, so `nameSpokenIn` had nothing to match) and had just CANCELLED their only appointment, which rewrites the live caller snapshot through onEffect and took the name with it. Cancelling destroyed the record that proved the name was theirs. Fixed by freezing the names the caller ARRIVED with - a match, never a source, so LVX77's "Jane Doe" still fails. **Also verified: rung two asks about the field that actually failed, and the duplicate suppression fired.** Two defects exposed: a READ licensed a write's claim (LVX93's hole, first time seen live - a fabricated cancellation went unguarded because a lookup had run the turn before), and CLAIM_NOTE produced a false explanation ("that time isn't available" about a slot availability had just called open). Still open: `nameSpokenIn` is documented as counted-not-enforced and LVX115 made it a hard gate anyway. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10990,6 +10991,116 @@ for individual counters and never at the call level.
 Not to be started inside a detector round: it changes what every guard does on
 every call, and the guards are the only thing standing between a fabricated
 booking and a caller.
+
+---
+
+## LVX119 — the completion path ran, and a cancellation had destroyed its evidence
+
+`CA...`, 2026-09-11 05:09-05:14, on `voice:68f0585`. The fourth verification
+call, and the first one where **the completion path actually executed.**
+
+```
+postcall_verify   verdict=ok  booked_rows=1  changed_rows=1  claims=5
+                  sent=1  skipped=['already_confirmed']
+```
+
+The call ended correctly: the Tuesday appointment was cancelled and a new one
+booked for Monday 14th 4:30 PM. Both real.
+
+### The completion ran twice and got past the slot both times
+
+**The `4 30pm` fix works.** No `slot_unverified` anywhere on this call — the
+claim "you have your strategy call scheduled for Friday, September 11th at 4 30
+PM" resolved to a verified slot on both attempts. That was LVX116's defect and
+it is closed.
+
+It failed on the NAME instead:
+
+| time | reason | why |
+|---|---|---|
+| 05:12:48 | `name_unrecovered` | the turn opened "Thanks. Just to confirm…" — no name to capture |
+| 05:13:07 | `name_provenance`, source `read_back` | captured "Nithin" from "Got it, Nithin", then failed both provenance sources |
+
+**Rung two fired with the right question**: "Before I finish — can I just take
+the name for the booking?" Not the time question. The field-specific ladder works.
+
+### Why both provenance sources were unavailable
+
+**The transcript.** The caller SPELLED their name, and the assistant read the
+spelling back letter by letter. The utterance record:
+
+```
+05:11:26   voiced 2,880 ms  ->  transcript 4 characters
+```
+
+`nameSpokenIn` needs a whole-word token match. The codebase predicted this
+exactly — *"a spelled name arrives as loose letters matching no whole word"* —
+and it is why LVX77 left that check COUNTING rather than enforcing.
+
+**The records.** `state.callerContext` is LIVE: `onEffect` rewrites it after
+every successful book or cancel, which it must, or the model keeps offering to
+cancel an appointment it already cancelled (LVX33). The caller cancelled their
+only appointment at 05:10:24. By the time the booking claim arrived the snapshot
+was empty and the name on it was gone.
+
+**Cancelling destroyed the record that proved the name was theirs.** The most
+careful possible caller — one who cancels tidily and spells their name — is
+exactly the one the gate refuses.
+
+### Fixed by freezing what the caller arrived with
+
+`callerNamesAtStart` is captured once at connect and never updated. Names only,
+no ids, no times, no numbers.
+
+Still a MATCH and never a SOURCE: the name written comes from the model's
+read-back, and this only asks whether the caller's own records already carry it.
+LVX77's "Jane Doe" fails this exactly as it fails the other two.
+
+A genuinely new caller has no records, their spelled name does not transcribe,
+and the completion is refused — which is rung two's job and is the correct
+fallback.
+
+### The design error underneath, and it is still open
+
+`nameSpokenIn` is documented here as **counted, not enforced**:
+
+> *"Refusing on this signal was built and reverted on 2026-09-05… Over the
+> observed cases it refuses four in five, two of them legitimate. Enforcing it
+> would trade a rare wrong name for a commoner missing booking."*
+
+LVX115 made it a hard gate on the completion path anyway. The third source
+softens the commonest failure but does not settle the question of whether that
+gate should exist in that form at all.
+
+### Two other defects this call exposed
+
+**A read licensed a write's claim, live.** At 05:09:47 the assistant said "your
+appointment on Tuesday, September 15th at 4 30 PM is now cancelled" — and
+`cancel_appointment_db` was REFUSED three seconds later.
+`live_claim_unbacked_by_action` fired; `live_claim_without_action` did NOT,
+because `get_caller_appointments_from_db` had run the previous turn. So no note
+and no ladder. **That is LVX93's hole, caught on a real call for the first
+time.** The model corrected itself unprompted at 05:10:17.
+
+**CLAIM_NOTE produced a false explanation.** At 05:13:15: "I apologize, but I
+haven't booked that yet — that time isn't available." The first half is true. The
+second is invented; availability had called that slot open ninety seconds
+earlier. LVX108's family, from a note rather than a refusal.
+
+### What this call verified
+
+- **The completion path executes**, and the slot half of it works.
+- **Rung two asks about the field that actually failed.**
+- **The duplicate suppression fired** — `skipped: ['already_confirmed']`. One
+  booking confirmation (at booking time) and one cancellation confirmation
+  (post-call), instead of two messages about the same booking. LVX116's row-id
+  fix, working.
+- `verdict=ok` on a call that really did book and really did cancel.
+
+### Still not verified
+
+`claim_completed_in_code` is STILL 0 on every real call. The write has never
+been originated in production.
 
 ---
 

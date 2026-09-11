@@ -133,6 +133,21 @@ function executor({ bookFails = false } = {}) {
         stateEffects: { toolResult: { name: fc.name, success: true, message: "free" } },
       };
     }
+    if (fc.name === "cancel_appointment_db") {
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+        stateEffects: {
+          toolResult: { name: fc.name, success: true, message: "cancelled" },
+          capabilityEffects: [
+            {
+              capability: "appointments",
+              type: "changed",
+              data: { tool: fc.name, appointmentId: fc.args?.appointment_id || "appt-old" },
+            },
+          ],
+        },
+      };
+    }
     if (bookFails) {
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "slot gone" } },
@@ -227,6 +242,23 @@ async function boot(opts = {}) {
       live.push({ serverContent: { inputTranscription: { text: callerText } } });
       await settle();
       live.push({ serverContent: { outputTranscription: { text: "And what name should I book that under?" } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+    },
+    /**
+     * The model cancels the caller's existing appointment.
+     *
+     * Load-bearing for LVX119: a successful cancel rewrites the caller snapshot
+     * through onEffect, and the name on it goes with it.
+     */
+    async cancel(id = "appt-old") {
+      live.push({
+        toolCall: {
+          functionCalls: [{ id: "c", name: "cancel_appointment_db", args: { appointment_id: id } }],
+        },
+      });
+      await settle();
       await settle();
       live.push({ serverContent: { turnComplete: true } });
       await settle();
@@ -367,6 +399,30 @@ describe("what it must refuse to complete", () => {
 
     expect(s.bookCalls()).toHaveLength(0);
     expect(c().claim_completion_unrecoverable).toBe(1);
+  });
+
+  it("LVX119: a cancellation must not destroy the name that authorises the re-booking", async () => {
+    // From the call of 2026-09-11. The caller cancelled their only appointment
+    // and then booked a new one. By the time the booking claim arrived, the
+    // live snapshot was empty, the name on it was gone, and the completion was
+    // refused for name_provenance -- on a caller who had just SPELLED their
+    // name, and whose 2,880 ms of spelling reached the transcript as four
+    // characters.
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.cancel("appt-old");
+    // The transcript never carries the name -- exactly as on the real call.
+    await s.quietTurn("");
+    await s.claim();
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(s.bookCalls()[0].args.client_name).toBe("John");
+    expect(c().claim_completed_in_code).toBe(1);
+    expect(c().claim_completion_unrecoverable).toBe(0);
   });
 
   it("accepts a name that is on the caller's own records even if the transcript lost it", async () => {
