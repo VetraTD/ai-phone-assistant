@@ -94,7 +94,10 @@ const BOOK = { scheduled_at: "2026-09-07T16:30:00", client_name: "Nitin Dodla", 
  * succeeds on anything after. `stash` lets a test withhold the pendingWrite so
  * the "nothing to retry" case can be exercised.
  */
-function gateExecutor({ stash = true, retryFails = false } = {}) {
+// `reason` says WHICH gate held the write. A spelling-gate stash carries the
+// unspelled name and must never be re-issued on a caller's "yes"; a
+// write-order stash was held for that yes and nothing else.
+function gateExecutor({ stash = true, retryFails = false, reason = null } = {}) {
   const calls = [];
   let bookAttempts = 0;
   const execute = vi.fn(async (fc) => {
@@ -127,7 +130,7 @@ function gateExecutor({ stash = true, retryFails = false } = {}) {
         stateEffects: {
           toolResult: { name: fc.name, success: false, message: "spell it" },
           capabilityState: stash
-            ? { appointments: { pendingWrite: { name: fc.name, args: fc.args || {} } } }
+            ? { appointments: { pendingWrite: { name: fc.name, args: fc.args || {}, ...(reason ? { reason } : {}) } } }
             : { appointments: { spellingGateRefusals: 1 } },
         },
       };
@@ -436,5 +439,53 @@ describe("LVX72 — the refused write is re-issued when the spelling arrives", (
 
     expect(s.bookCalls()).toHaveLength(1);
     expect(c().write_retry_attempted).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SAME RE-ISSUE, TRIGGERED BY THE CALLER AGREEING.
+//
+// Until now the only thing that reached retryPendingWrite was a settled
+// spelling. But the write-order gate refuses for a different reason — the
+// caller has not been heard to agree — and on call CA6b662e that produced the
+// worst version of it: the model asked "Is that correct?" and called
+// book_appointment SIXTEEN MILLISECONDS later, so the answer it was refused for
+// not having was one it had never waited for.
+//
+// The refusal then told it to read the details back, so the caller confirmed
+// the same booking a second time and was told in between that "the booking
+// didn't go through".
+//
+// With the write stashed, the caller's "yes" is enough: the write goes again
+// through handleToolCall, where the write-order gate and every other one still
+// apply. If it would still refuse, it still refuses.
+// ---------------------------------------------------------------------------
+describe("the refused write is re-issued when the caller agrees", () => {
+  beforeEach(() => clearStats());
+
+  it("books on the caller's yes, without the model asking a second time", async () => {
+    const s = await boot({ reason: "write_order" });
+    await s.book();
+    expect(s.bookCalls()).toHaveLength(1);
+
+    // No letters here — this is agreement, not a spelling. The old trigger
+    // (a settled spelling) cannot fire on it.
+    await s.spell("yes, that's right");
+
+    expect(s.bookCalls()).toHaveLength(2);
+    expect(s.bookCalls()[1].args).toEqual(BOOK);
+    expect(c().write_retry_attempted).toBe(1);
+  });
+
+  it("does not re-issue on a turn that is not agreement", async () => {
+    // The guard that keeps this from being "retry on any caller turn". A
+    // question is not a yes, and re-issuing on one would write something the
+    // caller was still thinking about.
+    const s = await boot({ reason: "write_order" });
+    await s.book();
+    await s.spell("hold on, what time was that again?");
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().write_retry_attempted).toBeFalsy();
   });
 });

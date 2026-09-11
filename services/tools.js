@@ -783,12 +783,32 @@ export async function executeToolCall(fc, ctx) {
                 // and bound it. A refusal that reads as "this cannot be done"
                 // is how the model came to offer a callback instead of asking
                 // the one question it had been asked to ask.
-                const message =
-                  `[not caller speech] NOT A FAILURE — this is still going ahead, it just needs the ` +
-                  `caller's go-ahead first. Read the details back to them in one short sentence — what ` +
-                  `you are about to do, and when — and ask whether to go ahead. Wait for their answer. ` +
-                  `If they say yes, call this again with the same details. Do not tell the caller ` +
-                  `anything went wrong and do not offer a callback.`;
+                // TWO REFUSALS, NOT ONE, because they need opposite things.
+                //
+                // On call CA6b662e the model asked "Is that correct?" and called
+                // book_appointment SIXTEEN MILLISECONDS later, in the same turn.
+                // The caller had not been given a chance to agree, so the gate
+                // refused — correctly — and this message then told it to read
+                // the details back and ask, which it did a second time. The
+                // caller confirmed the same booking twice and was told in
+                // between that the booking had not gone through.
+                //
+                // When the read-back HAS happened and only the yes is missing,
+                // asking for another read-back is the defect. Say what is
+                // actually missing instead: the caller's answer, which nobody
+                // has waited for.
+                const message = readBackMade
+                  ? `[not caller speech] NOT A FAILURE — nothing is wrong and nothing needs redoing. ` +
+                    `You have ALREADY read these details back to the caller; do not read them back ` +
+                    `again and do not ask them to confirm a second time. You called this before they ` +
+                    `had answered. WAIT for their reply, and when they agree, call this again with the ` +
+                    `same details. Do not tell the caller anything went wrong, do not say the booking ` +
+                    `failed, and do not offer a callback or a message.`
+                  : `[not caller speech] NOT A FAILURE — this is still going ahead, it just needs the ` +
+                    `caller's go-ahead first. Read the details back to them in one short sentence — what ` +
+                    `you are about to do, and when — and ask whether to go ahead. Wait for their answer. ` +
+                    `If they say yes, call this again with the same details. Do not tell the caller ` +
+                    `anything went wrong and do not offer a callback.`;
                 return {
                   functionResponse: {
                     id: fc.id,
@@ -816,6 +836,27 @@ export async function executeToolCall(fc, ctx) {
                         // The shared count, so the spelling gate's
                         // refusals and this one land in the same total.
                         ...writeAttemptPatch(attemptBudget),
+                        // THE WRITE ITSELF, so it can be re-issued in code the
+                        // moment the caller agrees — through retryPendingWrite
+                        // and back into handleToolCall, where this gate and
+                        // every other one still apply. A retry of a refused
+                        // call, not a bypass of the refusal.
+                        //
+                        // ONLY WHEN A READ-BACK HAPPENED. With nothing read
+                        // back, a later "yes" is agreement to something the
+                        // caller never heard, and re-issuing on it would write
+                        // exactly what this gate exists to stop. LVX77 is the
+                        // standing warning: a booking retry once wrote a name
+                        // the caller never said.
+                        // `reason` matters: a write stashed by the SPELLING
+                        // gate must never be re-issued on a caller's "yes",
+                        // because its args carry the UNSPELLED name and that
+                        // is the row's identity (LVX72, and LVX77's "Jane
+                        // Doe"). Agreement only releases a write that was
+                        // held for agreement.
+                        ...(readBackMade
+                          ? { pendingWrite: { name: fc.name, args: fc.args || {}, reason: "write_order" } }
+                          : {}),
                         ...(orderRefusalIsNew
                           ? {
                               writeOrderRefusals: orderRefusals + 1,

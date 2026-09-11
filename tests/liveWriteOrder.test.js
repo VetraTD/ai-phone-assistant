@@ -527,3 +527,94 @@ describe("a change tool with no appointment to change", () => {
     expect(counters().write_order_refused).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE MODEL ASKS AND ACTS IN THE SAME BREATH, AND THE CALLER PAYS FOR IT TWICE.
+//
+// Call CA6b662e, 2026-09-11:
+//
+//   00:29:18.254  "...so that's Nithin Dodla, spelled N I T H I N... Is that
+//                  correct?"
+//   00:29:18.270  book_appointment                            <- 16 ms later
+//
+// It never waited. So `callerAgreed` was false because the caller had not been
+// given a chance to agree, the gate refused — correctly — and the refusal then
+// told the model to "read the details back and ask whether to go ahead", which
+// it dutifully did A SECOND TIME. The caller confirmed the same booking twice
+// and was told in between that "the booking didn't go through".
+//
+// Two fixes, and the split between them is the point:
+//
+//   1. When the read-back HAS happened and only the yes is missing, say so.
+//      Telling it to read back again is what produces the second confirmation.
+//   2. Stash the write so it can be re-issued in code when the caller does
+//      agree, through retryPendingWrite -> handleToolCall, where every gate
+//      still applies.
+//
+// STASHED ONLY WHEN readBackMade IS TRUE. If nothing was ever read back, a
+// later "yes" is agreement to something the caller never heard — which is the
+// exact write this gate exists to stop. LVX77 is the standing warning here: a
+// booking retry once wrote a name the caller never said.
+// ---------------------------------------------------------------------------
+describe("a refusal that only lacks the yes", () => {
+  const attempt = (over = {}) =>
+    executeToolCall(
+      { id: "fc1", name: "book_appointment", args: { client_name: "Marcus Bell", scheduled_at: FUTURE_SLOT, notes: "consultation" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState: {},
+        config: {},
+        spellingSettled: true,
+        callerTurnCount: 4,
+        // Non-empty and non-affirmative: the whole write-order block is skipped
+        // when lastCallerText is empty (that is what keeps the cascade
+        // byte-identical), so an empty fixture tests nothing. This is what the
+        // caller had actually last said on CA6b662e — spelling their name.
+        lastCallerText: "N I T H I N D O D L A",
+        lastReplyText: READ_BACK,
+        ...over,
+      }
+    );
+
+  it("does not tell the model to read it back again", async () => {
+    const { functionResponse } = await attempt();
+    const message = String(functionResponse.response.message || "");
+
+    expect(functionResponse.response.success).toBe(false);
+    // The instruction that produced the second confirmation.
+    expect(message).not.toMatch(/read the details back/i);
+    // What it should say instead.
+    expect(message).toMatch(/already read/i);
+    expect(message).toMatch(/wait/i);
+    // Unchanged, and the model ignored it three calls running — but removing it
+    // would be conceding the point.
+    expect(message).toMatch(/do not tell the caller anything went wrong/i);
+  });
+
+  it("stashes the write so it can be re-issued once the caller agrees", async () => {
+    const { stateEffects } = await attempt();
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toEqual({
+      name: "book_appointment",
+      args: { client_name: "Marcus Bell", scheduled_at: FUTURE_SLOT, notes: "consultation" },
+      // WHICH gate held it. A spelling-gate stash carries the unspelled name
+      // and must not be released by a "yes"; this one was held for that yes.
+      reason: "write_order",
+    });
+  });
+
+  it("does NOT stash when nothing was read back", async () => {
+    // The dangerous half. With no read-back, a later "yes" is agreement to
+    // something the caller never heard, and re-issuing on it would write
+    // exactly what this gate exists to prevent.
+    const { functionResponse, stateEffects } = await attempt({
+      lastReplyText: "You have three appointments coming up.",
+    });
+    expect(functionResponse.response.success).toBe(false);
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toBeFalsy();
+    // And this one SHOULD still be told to read the details back.
+    expect(String(functionResponse.response.message)).toMatch(/read the details back/i);
+  });
+});
