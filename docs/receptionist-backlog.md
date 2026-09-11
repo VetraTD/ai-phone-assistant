@@ -126,6 +126,8 @@ Status means:
 | **LVX114** | a fabricated booking, three guards silent, and a cancelled appointment | **OPEN · P0** — `book_appointment` NEVER CALLED; `booked_rows=0`, caller told "we're all set for Monday" twice and lost the real Friday appointment he arrived with. Three guards silent for three different reasons: the narrow/wide split hides "we're all set" from CLAIM_NOTE; a CANCELLATION vouched for a BOOKING claim; and the post-call verdict has the same hole, which the file already names one paragraph above ("an unrelated success must not vouch"). All three code-driven re-issues need a prior tool call, because the stash IS the call's args — so none could reach a write that was never attempted. BUT both essential fields were recoverable: the slot from `verifiedSlots`, the name from `nameReadBackRe` on the fabricating turn itself. Argues for completing the claim in code rather than cutting the audio. Pronunciation: `speechConfig` accepts only a voice name and a language code, so no deterministic fix exists on this front-end. |
 | **LVX115** | the claim is completed in code, and three detectors stop vouching for the wrong thing | **BUILT 2026-09-11, UNVERIFIED LIVE · P0** — LVX114's direction, shipped. On a completion claim with no matching row the engine recovers the slot from `verifiedSlots` and the name from the turn, verifies each against something that did not come from the model, and performs the booking through `handleToolCall` so every gate still applies; only the consent question is skipped, because the caller has already been told. Per capability via the pack's `claimActions`, and only `booked` is completable — a cancel or a reschedule moves a row that already exists. Also: a cancellation no longer vouches for a booking claim, the narrow/wide predicate split is collapsed so `"we're all set"` reaches CLAIM_NOTE, and `send` is gated on the verdict and de-duplicated. **Kind-matching alone would not have caught LVX114** — the slot recovery is what classifies that sentence. Running the fixtures produced two defects reading had not: `"at 1 AM"` matched the 1 PM slot, and the month was never checked. Still open: a no-consent caller now gets no booking confirmation at all, and a messages claim can never be kind-matched. |
 | **LVX116** | the fix told the caller his real booking had not happened | **FIXED 2026-09-11, UNVERIFIED LIVE · P0** — LVX115's verification call. `book_appointment` succeeded and the row is right (`1324f9`, Tue 15 Sept 16:30, one scheduled row), then the claim guard fired on the TRUE sentence describing it, the new ladder asked the caller to confirm a time he already had, and the note made the assistant say "the appointment wasn't booked yet". Two causes: the guard looks back one turn and the booking was two back — LVX115 built kind-matching for the post-call verdict and never applied it live — and `"4 30pm"` parsed as `"at 4"`, making 16:00 and 16:30 both match and the slot ambiguous. Two more found in the database: the booked effect carried no row id, so the duplicate suppression silently did nothing; and fixing that alone would have left a no-consent caller with NO confirmation, since `sms_consents` is 0 rows and only the post-call sender was transactional. **Verified: `send` sent for the first time (`sent=1`), and the duplicate guard stopped a second booking.** Still unverified: the completion path itself, which was blocked at the slot step every time. |
+| **LVX117** | four refusals, zero writes, and the caller got nothing | **DIAGNOSED 2026-09-11 - P1** - 201s, no fabrication anywhere. The cancel was refused twice by the consent gate (the tester had been told not to say yes), so the old appointment survived and the existing-appointment invariant then blocked both bookings in 7ms and 16ms. Two pre-existing defects: a consent refusal reached the caller as "I'm having some trouble cancelling", and the model was handed the real reason verbatim and said "didn't go through for some reason" instead - `in_addition_to_existing` is declared and the policy is `confirm`, so the booking was always available to it. **Verified: `postcall_confirm_skipped_verdict` (no SMS for a booking that does not exist), zero false claims on 14 turns with the collapsed predicate, and two never-exercised paths ran.** |
+| **LVX118** | the guards are not tunable per business, and nothing measures whether they help | **SCOPED, NOT STARTED 2026-09-11 - P2** - the prompt/config split is honoured; the drift is in the gates. `LIVE_WRITE_ORDER_GATE` and `VOICE_SPELL_POLICY` are process-wide env switches, so every tenant gets identical friction, and `require.confirmBeforeWrite: false` does not disable the write-order gate because that gate never reads tenant config. `existingAppointment`'s default lives in a `?:` fallback. **And no counter records whether the caller got what they rang for** - so on 2026-09-11, where neither call failed from a fabrication and both failed from guards, nothing in the system says so. Fix order: one outcome measure, then move the friction policies to tenant config as VALUES of existing kinds. Not inside a detector round. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10863,6 +10865,131 @@ colon form.** The call did not. Both of the call's sentences are now fixtures.
 **The completion path never ran.** It was blocked at the slot step on every
 claim. `claim_completed_in_code` is still 0 on any real call, and LVX115's
 headline remains unverified live.
+
+---
+
+## LVX117 — four refusals, zero writes, and the caller got nothing
+
+`CA42fbb859ae83bb12470dc51dd0104e33`, 2026-09-11, on `voice:68f0585`. 201
+seconds. `booked_rows=0`, `changed_rows=0`, `claims=0`,
+`verdict=write_abandoned`, `abandoned=['cancel_appointment_db',
+'book_appointment']`.
+
+**No fabrication anywhere on this call.** Every failure was a guard or a policy
+firing correctly by its own rules.
+
+### The chain
+
+```
+04:21:47  "I see you already have one scheduled for Tuesday 15 Sept 4:30 PM"
+04:22:21  cancel_appointment_db   write_order_refused   (no yes heard)
+04:22:34  cancel_appointment_db   write_order_refused   (no yes heard)
+04:22:43  "I'm having some trouble cancelling that appointment right now."
+04:24:05  book_appointment        refused in 7ms
+04:24:27  book_appointment        refused in 16ms   (write-order ceiling released)
+04:24:36  "that booking didn't go through for some reason."
+```
+
+The caller had been told by the tester not to confirm, so the write-order gate
+correctly refused the cancel. The old appointment therefore survived, and the
+**existing-appointment invariant then blocked every booking** — `7ms` and `16ms`
+are the tell, far too fast to have reached the database.
+
+Established by elimination: `availability_allowed: 2` and `blocked: 0`, so the
+slot was verified; `openTimesForDay` returns EMPTY for a day already past
+(`dayEndMs < Date.now()`) and it returned 16 slots, so the time was not past; the
+name was present; no `db_error`. Only the existing-appointment branch refuses
+that fast.
+
+### Two defects, both pre-existing
+
+**A consent-gate refusal reached the caller as a system fault.** "I'm having some
+trouble cancelling that appointment right now" — nothing was wrong, it simply had
+not heard a yes. LVX113's open item, unchanged.
+
+**The model had the reason and did not use it.** The refusal handed it, verbatim:
+"This caller already has an upcoming appointment: … Tell them what they already
+have and ask whether they want this new time IN ADDITION to it." It had said
+exactly that at 04:21:47, then forgot and offered a callback instead.
+`in_addition_to_existing` IS a declared parameter and the policy is `confirm`,
+not `block`, so the booking was always available to it. **Not a capability limit
+and not a config problem — a compliance failure with an actionable instruction
+in front of it.**
+
+### What it DID verify
+
+- **`postcall_confirm_skipped_verdict` fired, `sent=0`.** Before this round,
+  `POSTCALL_VERIFY=send` would have texted the caller a confirmation for an
+  appointment that does not exist. LVX115's verdict gate, working on a real call.
+- **Zero false claims across 14 turns** on the collapsed predicate. "booking you
+  for…" and "I'm scheduling that for you now" are progressive, not completion
+  claims, and both were correctly ignored. That was the main risk of removing the
+  narrow/wide split, and it did not bite.
+- No ladder noise: none of LVX116's spurious questions or denials.
+- Two paths that had NEVER executed in production did: `write_order_gate_ceiling`
+  and the code-driven write retry (`live_write_retried`, `ok=false`, correctly).
+
+### Still not verified, third call running
+
+`claim_completed_in_code` is 0 on every real call. The completion path has never
+executed: call 1 was blocked at the slot step by the `4 30pm` defect, and this
+call never produced a claim to complete.
+
+### The tenant default that caused it
+
+`existingAppointment` is UNSET for this tenant (`config: {}`); the code default is
+`confirm`. Nobody chose it. A test number that always carries an upcoming
+appointment will block every future booking test until it is cancelled or the
+policy is set to `allow`.
+
+---
+
+## LVX118 — the guards are not tunable per business, and nothing measures whether they help
+
+Raised by the owner 2026-09-11, after LVX116 and LVX117. **Scoped, not started.**
+
+The engine/pack/tenant/adapter split in `capabilities/_contract.js` is sound, and
+the PROMPT side honours it — greeting, general info, custom instructions, hours,
+identity requirements and per-capability `notes` are all tenant-owned. The drift
+is not in what the receptionist may SAY.
+
+**It is in the gates.** Two of the most caller-visible behaviours are
+process-wide environment switches:
+
+```js
+const writeOrderGateOff = () => process.env.LIVE_WRITE_ORDER_GATE === "off";
+export function spellPolicy() { process.env.VOICE_SPELL_POLICY ... }
+```
+
+Every tenant gets identical friction whether it suits them or not, and a tenant
+setting `require.confirmBeforeWrite: false` **still gets the write-order gate**,
+because that gate never reads the tenant's config. `existingAppointment`'s
+default is a business decision living in a `?:` fallback.
+
+**And there is no call-level success metric.** Every counter in
+`lib/voice/metrics.js` is fault-shaped; nothing records whether the caller got
+what they rang for. So "are the guards net-positive?" is currently unanswerable —
+which matters, because on the two calls of 2026-09-11 NEITHER failure was a
+fabrication. Both were guards working as designed and leaving the caller worse
+off than doing nothing would have. `write_abandoned` describes tools, not
+outcomes.
+
+This file already names the shape of that mistake — "a fault-only counter reads
+zero for a clean run and for a run that never got there" — and it has been fixed
+for individual counters and never at the call level.
+
+### Order, if this is taken up
+
+1. **One outcome measure**: did the caller's stated intent produce a write?
+   Cheapest, and it turns the whole question from arguable into answerable.
+2. **Move the friction policies from env to tenant config** — write-order,
+   spelling, existing-appointment. No new rule KINDS required; these are VALUES
+   of kinds that already exist.
+3. **Make defaults explicit per tenant** rather than implicit in a fallback.
+
+Not to be started inside a detector round: it changes what every guard does on
+every call, and the guards are the only thing standing between a fabricated
+booking and a caller.
 
 ---
 
