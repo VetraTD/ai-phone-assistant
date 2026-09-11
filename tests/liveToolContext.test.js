@@ -187,38 +187,3 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
   });
 });
 
-// ---------------------------------------------------------------------------
-// The read-back WINDOW, 2026-09-11. services/tools.js now looks back over the
-// last few assistant turns rather than only the previous one, so that an
-// ordinary clarifying question cannot erase a read-back the caller already
-// heard. That consumer has its own tests; this asserts the WIRE, for the reason
-// this whole file exists -- a field the engine produces and the context does
-// not copy is a gate that silently stops gating, and the counter that would
-// report it reads the same either way.
-// ---------------------------------------------------------------------------
-describe("Live tool context — the read-back window", () => {
-  it("carries recentReplyTexts through to the tool", async () => {
-    const ctx = await ctxFor(() => ({
-      step: "gather_details",
-      callerTurnCount: 5,
-      lastCallerText: "Yeah, I'll do it.",
-      lastReplyText: "Yes, that's on the same day, Wednesday, September sixteenth.",
-      recentReplyTexts: [
-        "Just to confirm, I'm moving that to two PM. Is that all right?",
-        "Yes, that's on the same day, Wednesday, September sixteenth.",
-      ],
-    }));
-    expect(ctx.recentReplyTexts).toEqual([
-      "Just to confirm, I'm moving that to two PM. Is that all right?",
-      "Yes, that's on the same day, Wednesday, September sixteenth.",
-    ]);
-  });
-
-  it("normalises a missing window to an empty array, never undefined", async () => {
-    // Fails CLOSED, like lastReplyText above: an empty window makes the gate
-    // fall back to the single previous turn, which is the behaviour it had
-    // before the widening. It must never become a reason to skip the check.
-    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
-    expect(ctx.recentReplyTexts).toEqual([]);
-  });
-});

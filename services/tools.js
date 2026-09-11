@@ -70,25 +70,6 @@ const writeOrderGateOff = () => process.env.LIVE_WRITE_ORDER_GATE === "off";
 const WRITE_ORDER_MAX_REFUSALS = 2;
 
 /**
- * How many completed assistant turns back the write-order gate will look for a
- * read-back.
- *
- * THE GATE'S OWN BOUND, deliberately not LVX78's REPEAT_WINDOW_TURNS even
- * though the engine happens to fill the window from the same array. That
- * constant belongs to the repeat cutter; someone widening it for a cutter
- * reason must not quietly widen what counts as a caller's consent.
- *
- * Three, because the case this exists for is one clarifying exchange between
- * the read-back and the yes -- read-back, caller's question, assistant's answer
- * -- and that is three turns inclusive. Past that the caller has heard other
- * things in between and the details should be put to them again.
- *
- * Only the READ-BACK half looks back. Agreement is still read from the caller's
- * immediately preceding turn, so a stale yes can never release a new proposal.
- */
-const READ_BACK_WINDOW_TURNS = 3;
-
-/**
  * How many times ONE ATTEMPTED WRITE may be refused, counting every gate.
  *
  * ---------------------------------------------------------------------------
@@ -697,48 +678,34 @@ export async function executeToolCall(fc, ctx) {
             const lastReplyText = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
             const S = getStrings(ctx?.config);
             // -----------------------------------------------------------------
-            // A CLARIFYING QUESTION MUST NOT ERASE THE READ-BACK.
+            // ONE TURN, DELIBERATELY. A three-turn lookback was tried on
+            // 2026-09-11 and REVERTED the same day, on call CA7ecba06:
             //
-            // This read only `lastReplyText`, so the read-back had exactly one
-            // turn of memory. Call CAa2ce4e, 2026-09-11:
+            //   17:24:56  "Just to confirm, you'd like to cancel that
+            //              appointment on Wednesday September 16th at 10 00 AM?"
+            //   17:24:59  ...the cancellation commits. That consent is spent.
+            //   17:25:51  book_appointment, Thursday September 17th at 11 AM
+            //             -> ALLOWED, on the cancellation's read-back
             //
-            //   A: "Just to confirm, we're moving your appointment from one PM
-            //       to two PM on that same date. Is that all right?"
-            //   C: "Nah, and it's on the same day. Just making sure."
-            //   A: "Yes, that's on the same day, Wednesday the sixteenth."
-            //   C: "Yeah, I'll do it."   -> REFUSED, readBackMade=false
+            // A booking was authorised by agreement to a DIFFERENT action, for a
+            // different date, 55 seconds earlier, already consumed. Only the
+            // spelling gate stopped the row; with the name already on file it
+            // would have committed.
             //
-            // The caller heard the details, checked one of them, and agreed. The
-            // proposal was never withdrawn and never changed. The gate refused
-            // them for asking a question -- and because the model narrates these
-            // refusals, that call went 1 PM -> 3 PM -> 4 PM with the caller told
-            // each time that their chosen slot was unavailable. It was not.
+            // The mechanism it was meant to fix is real -- a clarifying question
+            // between the read-back and the yes -- but both live instances showed
+            // the model RE-ASKS on the turn that answers the question, so one
+            // turn was sufficient both times. Across four calls and fourteen
+            // decision points the lookback fired once and was wrong once.
             //
-            // ONLY THIS HALF WIDENS. Agreement is still read from the caller's
-            // IMMEDIATELY preceding turn, so what the gate now requires is: the
-            // details were put to the caller within the window, AND the caller
-            // has just said go ahead. Widening the consent half too would let an
-            // old yes release a new proposal, which is exactly LVX104.
-            //
-            // NEWEST FIRST: with two read-backs in the window the live proposal
-            // is the later one, and it is also what readBackKey must fingerprint
-            // or the escape-hatch budget stops tracking the proposal it is for.
-            //
-            // Absent or empty array falls back to the single turn, byte for
-            // byte: the cascade never sets these fields, and an engine revision
-            // that does not send the window must behave exactly as before.
+            // The fault is that confirmReadBackRe is ACTION-BLIND: it recognises
+            // that a confirmation was asked, never what it was about. Looking
+            // further back multiplies that blindness by the number of turns.
+            // Widening this is safe only once the check matches the write's own
+            // details -- date, time, name -- because then a read-back for another
+            // appointment cannot match. Do not reintroduce a window before that.
             // -----------------------------------------------------------------
-            const replyWindow =
-              Array.isArray(ctx?.recentReplyTexts) && ctx.recentReplyTexts.length
-                ? ctx.recentReplyTexts
-                    .filter((t) => typeof t === "string" && t)
-                    .slice(-READ_BACK_WINDOW_TURNS)
-                : lastReplyText
-                  ? [lastReplyText]
-                  : [];
-            const readBackText =
-              replyWindow.filter((t) => S.confirmReadBackRe?.test(t)).pop() || "";
-            const readBackMade = Boolean(readBackText);
+            const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
             const callerAgreed = isAffirmative(lastCallerText);
 
             // The measurement, always, whatever the gate then does. Read
@@ -791,11 +758,7 @@ export async function executeToolCall(fc, ctx) {
             // per-call memory rather than a log, but the read-back carries the
             // caller's name and appointment time and there is no reason to keep
             // it once a number will do.
-            // The turn that actually READ THE PROPOSAL BACK, not whatever was
-            // said most recently. With the window widened those are no longer
-            // the same string, and fingerprinting the wrong one would make the
-            // budget treat one proposal as two.
-            const readBackKey = readBackMade ? textFingerprint(readBackText) : "none";
+            const readBackKey = readBackMade ? textFingerprint(lastReplyText) : "none";
             const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey;
             const orderRefusals = sameProposal ? Number(orderScratch.writeOrderRefusals) || 0 : 0;
             // Per CALLER TURN, not per tool round, for the reason written on
