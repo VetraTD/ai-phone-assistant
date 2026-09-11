@@ -129,6 +129,7 @@ Status means:
 | **LVX117** | four refusals, zero writes, and the caller got nothing | **DIAGNOSED 2026-09-11 - P1** - 201s, no fabrication anywhere. The cancel was refused twice by the consent gate (the tester had been told not to say yes), so the old appointment survived and the existing-appointment invariant then blocked both bookings in 7ms and 16ms. Two pre-existing defects: a consent refusal reached the caller as "I'm having some trouble cancelling", and the model was handed the real reason verbatim and said "didn't go through for some reason" instead - `in_addition_to_existing` is declared and the policy is `confirm`, so the booking was always available to it. **Verified: `postcall_confirm_skipped_verdict` (no SMS for a booking that does not exist), zero false claims on 14 turns with the collapsed predicate, and two never-exercised paths ran.** |
 | **LVX118** | the guards are not tunable per business, and nothing measures whether they help | **SCOPED, NOT STARTED 2026-09-11 - P2** - the prompt/config split is honoured; the drift is in the gates. `LIVE_WRITE_ORDER_GATE` and `VOICE_SPELL_POLICY` are process-wide env switches, so every tenant gets identical friction, and `require.confirmBeforeWrite: false` does not disable the write-order gate because that gate never reads tenant config. `existingAppointment`'s default lives in a `?:` fallback. **And no counter records whether the caller got what they rang for** - so on 2026-09-11, where neither call failed from a fabrication and both failed from guards, nothing in the system says so. Fix order: one outcome measure, then move the friction policies to tenant config as VALUES of existing kinds. Not inside a detector round. |
 | **LVX119** | the completion path ran, and a cancellation had destroyed its evidence | **FIXED 2026-09-11, UNVERIFIED LIVE - P1** - the fourth verification call, and the first where the completion path EXECUTED. `verdict=ok booked_rows=1 changed_rows=1 sent=1 skipped=['already_confirmed']`. **The `4 30pm` fix works** - no `slot_unverified` on either attempt. It failed on the NAME: the caller SPELLED it (2,880 ms -> 4 transcript characters, so `nameSpokenIn` had nothing to match) and had just CANCELLED their only appointment, which rewrites the live caller snapshot through onEffect and took the name with it. Cancelling destroyed the record that proved the name was theirs. Fixed by freezing the names the caller ARRIVED with - a match, never a source, so LVX77's "Jane Doe" still fails. **Also verified: rung two asks about the field that actually failed, and the duplicate suppression fired.** Two defects exposed: a READ licensed a write's claim (LVX93's hole, first time seen live - a fabricated cancellation went unguarded because a lookup had run the turn before), and CLAIM_NOTE produced a false explanation ("that time isn't available" about a slot availability had just called open). Still open: `nameSpokenIn` is documented as counted-not-enforced and LVX115 made it a hard gate anyway. |
+| **LVX120** | the sweep: ask which time, not how it was phrased | **BUILT 2026-09-11, UNVERIFIED LIVE - P0** - `CA42fbb...` reproduced LVX114 exactly: a real cancel, then "Your new appointment is on Tuesday, September 15th at 4 30 PM" with `book_appointment` never called and 14 rows all cancelled. The predicate missed it - determiner not adjacent to the noun, and `is on` is locative - the FOURTH phrasing in two weeks to defeat it. So the booking stops depending on phrasing: an end-of-call sweep in `finish()` asks which of the verified times the call NAMED (bounded, sixteen candidates) rather than how it said it (unbounded). Five conditions, and **condition 2 is also the browsing guard** - three times on the table is ambiguous and writes nothing. Order is load-bearing: it runs before the session closes and before `verify()` reads the DB. `LIVE_BOOKING_SWEEP=off`. Also: a sentence naming an appointment the caller ARRIVED with is a report, not a claim - that false positive was producing the right verdict through the wrong sentence while the real fabrication went unseen. Found while building: `?.` hid a missing wire again (`callerSlotsAtStart` computed before `runner` exists), and two fixtures described impossible calls. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -11101,6 +11102,120 @@ earlier. LVX108's family, from a note rather than a refusal.
 
 `claim_completed_in_code` is STILL 0 on every real call. The write has never
 been originated in production.
+
+---
+
+## LVX120 — the sweep: ask which time, not how it was phrased
+
+Built 2026-09-11 after `CA42fbb...` (05:36-05:38), which reproduced LVX114
+exactly. **Verified offline only.**
+
+```
+05:36:57  cancel_appointment_db          SUCCESS   (a real appointment)
+05:37:21  check_appointment_availability SUCCESS   (16 slots)
+05:37:37  "That's Tuesday, September 15th at 4 30 PM. Could you tell me your
+           full name, please?"
+05:38:01  "Thanks, Nithin Dodla, and what's the best number to call you back on?"
+05:38:18  "Your new appointment is on Tuesday, September 15th at 4 30 PM."
+05:38:24  end_call
+```
+
+`book_appointment` NEVER CALLED. `booked_rows=0`. The caller cancelled a real
+appointment and left with nothing. Ground truth afterwards: **fourteen rows, all
+cancelled, none scheduled.**
+
+### Why the mid-call completion never even ran
+
+**The predicate did not match the sentence.** "Your **new** appointment **is on**
+Tuesday" fails twice over: `claimNounSubject` needs the determiner adjacent to
+the noun, and the verb must be a completion verb — `is on` is locative.
+
+That is the FOURTH phrasing in two weeks to defeat it: `we're all set` (LVX97),
+`I have you down for` (LVX94), `you have your strategy call scheduled` (LVX119),
+and now this. Each was added after a caller was harmed. **The predicate is a
+treadmill and the completion path was riding it.**
+
+### The change: a bounded question instead of an unbounded one
+
+Detecting a claim means matching how the model chose to phrase it — unlimited
+ways to say it, and the model keeps finding new ones. The sweep asks instead:
+**which of the times an availability call actually returned did this call
+name?** Sixteen candidates; the sentence identifies one or it does not. A
+phrasing nobody has ever seen still names Tuesday 4:30.
+
+Runs in `finish()`, beside the message sweep it is modelled on, under five
+conditions:
+
+| | condition | source |
+|---|---|---|
+| 1 | nothing booked this call | the write ledger — a fact |
+| 2 | EXACTLY ONE verified slot named | matchClaimSlot over the last turns |
+| 3 | a name, recovered and provenance-checked | the completion path's own check |
+| 4 | every `require.requiredFields` argument | enforced inside the tool |
+| 5 | the caller did not decline | `bookingDeclineRe`, a closed list |
+
+**CONDITION 2 IS ALSO THE BROWSING GUARD.** A caller offered "9 AM, 1 PM, or 4 30
+PM" who hangs up to think has THREE slots on the table; `matchClaimSlot` refuses
+on ambiguity and nothing is written. Browsing ends with options open; a promise
+ends with one time named. That distinction does the work a consent check cannot,
+because the sentence carrying consent is the one we stopped depending on.
+
+**CONDITION 4 IS INERT FOR A TENANT THAT CONFIGURES NOTHING**, and saying so
+matters more than implying a gate that is not there. `requiredFields` is
+per-tenant; Digile Media's capability config is `{}`, and `book_appointment`'s
+own schema requires only `scheduled_at` and `client_name` — which 2 and 3 already
+cover. It earns its place for a clinic that sets `["client_dob"]`.
+
+**ORDER IS LOAD-BEARING.** It runs before `session.close()` and before
+`verify()` reads the database. Reversed, the read finds nothing, reports
+`claim_without_row`, wakes a human — and then books it.
+
+Off without a deploy via `LIVE_BOOKING_SWEEP=off`. It is the only thing on this
+path that writes with neither the model nor the caller in the loop, so it has its
+own switch rather than riding on `LIVE_CLAIM_GUARD`.
+
+### A report is not a claim
+
+The same call opened with "I see you have an appointment scheduled for Monday,
+September 14th at 4 30 PM" — read straight off `get_caller_appointments_from_db`,
+entirely true. The predicate matched, it was classified `booked`, and the verdict
+then demanded a `book_appointment` write this call had no reason to make.
+
+`postcall_verify` returned `claim_without_row`, which was the RIGHT answer — but
+reached through the WRONG sentence, while the real fabrication three minutes
+later went unseen. **Two errors cancelling is not a working detector**, and
+fixing either alone would have made the call report clean.
+
+Fixed with the frozen arrival slots: a sentence naming a time the caller already
+had claims nothing. Demoted to `unspecified` rather than dropped — it is still a
+completion-shaped thing the model said, and the old any-write rule is the right
+amount of suspicion for it.
+
+### Three defects found while building, all by running rather than reading
+
+- **`?.` hid a missing wire, again.** `callerSlotsAtStart` was computed thirty
+  lines BEFORE `runner` exists, so `runner?.guards?.normaliseSlot?.()` returned
+  undefined for every row and the list came back empty in silence. The same
+  defect `peekPendingWrite` hit. Moved after the runner and the optional call
+  removed.
+- **Two fixtures described impossible calls.** One had the caller already holding
+  an appointment at the very hour being claimed (which is a report, not a
+  booking); another had the name and the promise in the same turn, where the real
+  call carried them a turn apart.
+- **A new env var undocumented.** `tests/envInventory.test.js` caught
+  `LIVE_BOOKING_SWEEP` missing from `.env.example`.
+
+### Still open
+
+- `claim_completed_in_code` and `sweep_booked_at_close` are both **0 on every
+  real call.** Nothing has been originated in production yet.
+- `nameSpokenIn` is documented as counted-not-enforced and both paths gate on it
+  (LVX119).
+- The predicate still misses `your new appointment is on <time>`. Deliberately
+  NOT widened: the sweep makes the booking phrasing-independent, and widening is
+  the treadmill this entry exists to get off. It still matters for the post-call
+  ledger, and the phrasing-independent replacement — escalate when a slot was
+  named and nothing was written — is the next step.
 
 ---
 

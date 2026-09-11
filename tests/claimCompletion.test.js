@@ -191,7 +191,7 @@ async function boot(opts = {}) {
       now: () => 0,
       connect: live.connect,
       database: fakeDb(opts.callerContext || null),
-      env: {},
+      env: opts.env || {},
       execute,
     }
   );
@@ -286,6 +286,21 @@ async function boot(opts = {}) {
       live.push({ serverContent: { outputTranscription: { text } } });
       await settle();
       live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /** One assistant turn, whatever the claim predicate makes of it. */
+    async say(text) {
+      live.push({ serverContent: { outputTranscription: { text } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /** The caller hangs up, which is what runs finish() and the sweep. */
+    async hangUp() {
+      ws.deliver({ event: "stop" });
+      await settle();
       await settle();
       await settle();
     },
@@ -430,7 +445,14 @@ describe("what it must refuse to complete", () => {
     // as zero characters -- so the caller's existing rows are the second
     // independent source, and on LVX114 the caller had one.
     const s = await boot({
-      callerContext: { upcomingAppointments: [{ client_name: "John", scheduled_at: SLOT }] },
+      // A DIFFERENT time from the one being claimed. The caller holding an
+      // appointment at the very hour the claim names would make that sentence a
+      // report of what they already had, not a claim this call booked anything
+      // -- which is LVX120, and is what this fixture used to describe by
+      // accident.
+      callerContext: {
+        upcomingAppointments: [{ client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
     });
     await s.offerTimes();
     await s.quietTurn("");
@@ -570,5 +592,183 @@ describe("the ladder", () => {
     expect(c().claim_completion_refused).toBe(1);
     expect(c().claim_completed_in_code).toBe(0);
     expect(s.spoken().join(" ")).toMatch(/Before I finish/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX120. THE END-OF-CALL SWEEP.
+//
+// The call of 2026-09-11 05:36-05:38, verbatim:
+//
+//   05:36:57  cancel_appointment_db          SUCCESS
+//   05:37:21  check_appointment_availability SUCCESS  (16 slots)
+//   05:37:37  "That's Tuesday, September 15th at 4 30 PM. Could you tell me
+//              your full name, please?"
+//   05:38:01  "Thanks, Nithin Dodla, and what's the best number to call you
+//              back on?"
+//   05:38:18  "Your new appointment is on Tuesday, September 15th at 4 30 PM."
+//   05:38:24  end_call
+//
+// book_appointment was NEVER CALLED. booked_rows=0. The caller cancelled a real
+// appointment and left with nothing.
+//
+// The claim predicate never matched that last sentence -- "your NEW appointment"
+// puts an adjective between the determiner and the noun, and "is on" is
+// locative rather than a completion verb -- so the mid-call completion was never
+// even consulted. That is the fourth phrasing in two weeks to defeat it.
+//
+// The sweep does not read the phrasing. It asks which verified slot the call
+// named, which is a bounded question with sixteen candidates.
+// ---------------------------------------------------------------------------
+describe("the end-of-call sweep", () => {
+  it("LVX120: books what the call promised and never wrote", async () => {
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.cancel("appt-old");
+    // The name arrives on its own turn, as it did on the call -- "Thanks,
+    // Nithin Dodla, and what's the best number to call you back on?"
+    await s.say("Thanks, John. And what's the best number to call you back on?");
+    // Then the phrasing that defeated the predicate. It names the slot, and
+    // nothing else about it is recognisable as a claim.
+    await s.say("Your new appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    const booked = s.bookCalls();
+    expect(booked).toHaveLength(1);
+    expect(booked[0].args.scheduled_at).toBe(SLOT_KEY);
+    expect(booked[0].args.client_name).toBe("John");
+    expect(c().sweep_booked_at_close).toBe(1);
+  });
+
+  it("does nothing when the call already booked", async () => {
+    const s = await boot();
+    await s.offerTimes();
+    await s.modelBooks();
+    await s.say("You're all set for Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    // The model's own booking, and no second one.
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+
+  it("THE BROWSING GUARD: three times on the table is not a promise", async () => {
+    // The condition that does the work a consent check cannot do here. A caller
+    // offered "9 AM, 1 PM, or 4 30 PM" who hangs up to think has options open,
+    // not an appointment. matchClaimSlot refuses on ambiguity.
+    const s = await boot();
+    await s.offerTimes();
+    await s.say("We have Monday, September 14th at 9 AM, 1 PM, or 4 30 PM. Which suits you?");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+
+  it("THE SAFETY RULE: will not book a time no availability call returned", async () => {
+    const s = await boot();
+    // No offerTimes(), so verifiedSlots is empty.
+    await s.say("Your new appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+
+  it("will not book under a name the caller cannot be shown to have given", async () => {
+    // LVX77. No caller records, and the transcript never carried the name.
+    const s = await boot();
+    await s.offerTimes();
+    await s.quietTurn("I'd like something Monday");
+    await s.say("Thanks, Jane. Your new appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_declined_no_name).toBe(1);
+  });
+
+  it("stops when the caller said no", async () => {
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.say("Thanks, John. And what's the best number to call you back on?");
+    await s.quietTurn("Actually, never mind — I'll call back.");
+    await s.say("Your new appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_declined_caller_said_no).toBe(1);
+  });
+
+  it("does not re-book a time the caller ALREADY had", async () => {
+    // Reporting an existing appointment on the way out is not a promise.
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT }],
+      },
+    });
+    await s.offerTimes();
+    await s.say("You still have your appointment on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+
+  it("LIVE_BOOKING_SWEEP=off disables it without a deploy", async () => {
+    const s = await boot({
+      env: { LIVE_BOOKING_SWEEP: "off" },
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.cancel("appt-old");
+    await s.say("Your new appointment is on Monday, September 14th at 1 PM.");
+    await s.hangUp();
+
+    expect(s.bookCalls()).toHaveLength(0);
+    expect(c().sweep_booked_at_close).toBe(0);
+  });
+});
+
+describe("a report of an existing appointment is not a claim", () => {
+  it("LVX120: naming the appointment the caller arrived with demands no write", async () => {
+    // Verbatim from the call: "I see you have an appointment scheduled for
+    // Monday, September 14th at 4 30 PM" -- read off a lookup, entirely true,
+    // and counted as an unsatisfied booking claim.
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT }],
+      },
+    });
+    await s.offerTimes();
+    await s.quietTurn();
+    await s.claim("I see you have an appointment scheduled for Monday, September 14th at 1 PM.");
+
+    expect(c().live_claim_reported_existing).toBe(1);
+    // Demoted, so it demands no booking write of its own.
+    expect(s.bookCalls()).toHaveLength(0);
+  });
+
+  it("but a NEW verified slot is still a claim about this call", async () => {
+    const s = await boot({
+      callerContext: {
+        upcomingAppointments: [{ id: "appt-old", client_name: "John", scheduled_at: SLOT_OTHER }],
+      },
+    });
+    await s.offerTimes();
+    await s.quietTurn();
+    await s.claim("We're all set for Monday, September 14th, at 1 PM");
+
+    expect(c().live_claim_reported_existing).toBe(0);
+    expect(c().live_claim_action_from_slot).toBe(1);
   });
 });
