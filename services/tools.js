@@ -841,7 +841,13 @@ export async function executeToolCall(fc, ctx) {
                   functionResponse: {
                     id: fc.id,
                     name: fc.name,
-                    response: { success: false, message },
+                    // HELD, NOT FAILED, as a boolean rather than as prose. The
+                    // message has opened "NOT A FAILURE" since LVX95 and that
+                    // did not help: retryPendingWrite branched on `success`
+                    // alone, so on CAa08fc3 a write this gate was holding for a
+                    // confirmation was announced to the caller as a booking
+                    // that "didn't go through", with a callback offered for it.
+                    response: { success: false, gated: true, message },
                   },
                   stateEffects: {
                     // silent, like the spelling gate's: nothing ran, so the
@@ -1050,7 +1056,10 @@ export async function executeToolCall(fc, ctx) {
               functionResponse: {
                 id: fc.id,
                 name: fc.name,
-                response: { success: false, message },
+                // Held for a spelling, not failed. Same reason as the
+                // write-order gate above: a caller must never be told a booking
+                // failed because we are waiting to hear a name letter by letter.
+                response: { success: false, gated: true, message },
               },
               stateEffects: {
                 // refused: nothing ran. The voice session uses this to stay

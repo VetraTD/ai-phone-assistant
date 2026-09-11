@@ -97,7 +97,7 @@ const BOOK = { scheduled_at: "2026-09-07T16:30:00", client_name: "Nitin Dodla", 
 // `reason` says WHICH gate held the write. A spelling-gate stash carries the
 // unspelled name and must never be re-issued on a caller's "yes"; a
 // write-order stash was held for that yes and nothing else.
-function gateExecutor({ stash = true, retryFails = false, reason = null } = {}) {
+function gateExecutor({ stash = true, retryFails = false, retryGated = false, reason = null } = {}) {
   const calls = [];
   let bookAttempts = 0;
   const execute = vi.fn(async (fc) => {
@@ -133,6 +133,23 @@ function gateExecutor({ stash = true, retryFails = false, reason = null } = {}) 
             ? { appointments: { pendingWrite: { name: fc.name, args: fc.args || {}, ...(reason ? { reason } : {}) } } }
             : { appointments: { spellingGateRefusals: 1 } },
         },
+      };
+    }
+    if (retryGated) {
+      // What a GATE returns, as opposed to a failure: the write did not happen
+      // and nothing is wrong. services/tools.js marks these `gated` precisely
+      // so this case stops being indistinguishable from "slot gone".
+      return {
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: {
+            success: false,
+            gated: true,
+            message: "[not caller speech] NOT A FAILURE - this is still going ahead, it just needs the caller's go-ahead first.",
+          },
+        },
+        stateEffects: { toolResult: { name: fc.name, success: false, message: "needs confirmation" } },
       };
     }
     if (retryFails) {
@@ -487,5 +504,100 @@ describe("the refused write is re-issued when the caller agrees", () => {
 
     expect(s.bookCalls()).toHaveLength(1);
     expect(c().write_retry_attempted).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "I'm sorry, it looks like the booking didn't go through on my end."
+//
+// Call CAa08fc3, 2026-09-11, and the model was OBEYING when it said that. The
+// spelling gate held a booking, the caller spelled their name, the engine
+// retried -- and the retry landed on a turn where the assistant had just said
+// "I'll get that scheduled" (a statement, not a question) and the caller had
+// just recited letters (not an agreement). The write-order gate refused it,
+// correctly, with a message that opens "NOT A FAILURE - this is still going
+// ahead". retryPendingWrite saw only `success !== true`, reached for
+// WRITE_RETRY_FAILED_NOTE, and told the model to announce a failure.
+//
+// Two parts of the system described one event in opposite terms and the wrong
+// one reached the caller, who was then offered a callback for a booking that
+// was one confirmation away from being saved.
+//
+// A GATE IS NOT A FAILURE. The distinction is marked on the tool response
+// rather than sniffed out of the message text, because a message is prose and
+// this is a branch.
+// ---------------------------------------------------------------------------
+describe("a gated retry is not a failed retry", () => {
+  it("does not tell the model the booking failed when a gate held it", async () => {
+    const s = await boot({ retryGated: true });
+    await s.book();
+    await s.spell();
+
+    expect(c().write_retry_attempted).toBe(1);
+    // Counted apart from a real failure: a fault counter that lumps these
+    // together cannot answer "is the gate working" or "is the diary broken".
+    expect(c().write_retry_gated).toBe(1);
+    expect(c().write_retry_refused).toBe(0);
+
+    const notes = s.notes();
+    expect(notes.find((t) => /could NOT be completed/.test(t))).toBeFalsy();
+    expect(notes.find((t) => /did not go through/i.test(t))).toBeFalsy();
+  });
+
+  it("tells the model to ask for the go-ahead instead, and to say nothing is wrong", async () => {
+    const s = await boot({ retryGated: true });
+    await s.book();
+    await s.spell();
+
+    const note = s.notes().find((t) => /NOT A FAILURE/.test(t));
+    expect(note).toBeTruthy();
+    expect(note).toMatch(/ask whether to go ahead/i);
+    expect(note).toMatch(/do not (say it failed|offer)/i);
+  });
+
+  it("still asks the model to speak, or the held write is lost in silence", async () => {
+    // retryPendingWrite never sends the retry's tool response to the model --
+    // it only calls handleToolCall and records the output. So the note is the
+    // model's ONLY channel here. A gated retry with no reply requested is a
+    // booking nobody ever mentions again.
+    const s = await boot({ retryGated: true });
+    await s.book();
+    await s.spell();
+
+    const frame = s.noteFrames().find((m) => /NOT A FAILURE/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// And the wording of the note that IS about a real failure. The owner's point,
+// 2026-09-11: whether to retry a booking is not the caller's decision, and
+// being asked makes the assistant sound like it is reading out its own
+// plumbing. Correct the false claim, do not hold an election about it.
+// ---------------------------------------------------------------------------
+describe("a real failure does not put the retry to the caller", () => {
+  it("never asks the caller to choose between trying again and leaving a message", async () => {
+    const s = await boot({ retryFails: true });
+    await s.book();
+    await s.spell();
+
+    const note = s.notes().find((t) => /could NOT be completed/.test(t));
+    expect(note).toBeTruthy();
+    // The old wording, verbatim, and what the caller heard back from it.
+    expect(note).not.toMatch(/whether they would like you to try again/i);
+    expect(note).not.toMatch(/try again or/i);
+    expect(note).toMatch(/do not ask the caller whether to try again/i);
+  });
+
+  it("still forbids claiming the booking exists", async () => {
+    // The half that must not regress: without it the model describes a booking
+    // that was never saved, which is the defect this whole path exists for.
+    const s = await boot({ retryFails: true });
+    await s.book();
+    await s.spell();
+
+    const note = s.notes().find((t) => /could NOT be completed/.test(t));
+    expect(note).toMatch(/Do NOT tell the caller it is booked/i);
   });
 });
