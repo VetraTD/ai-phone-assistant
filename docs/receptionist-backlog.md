@@ -123,6 +123,7 @@ Status means:
 | **LVX111** | three instruments that describe a call wrongly | **OPEN · P2** — `tool_duration` carries no `callSid`, so filtering a call by id returns every event EXCEPT its tools, on the file that says "read the tool trace, not the transcript"; `GIT_COMMIT_SHA` in the service env disagrees with the deployed image; and the revision that served a call is not the one `describe` reports today. |
 | **LVX112** | the verification call destroyed two appointments and created none | **ROOT CAUSES FIXED 2026-09-10, UNVERIFIED LIVE · P0** — `booked_rows=0`, `changed_rows=2`, caller told "that's all set". The spelling gate's escape hatch read the SAME degraded transcript as the gate (2,180 ms of spelling → 0 characters), so `spellAskMisses` could never advance: unsatisfiable and unexhaustible at once. And two gates alternated, each seeing two of four attempts, so neither reached its own ceiling — LVX104 one level up. Both fixed: the miss is now counted from AUDIO, and the two gates share one budget keyed to the proposal WITHOUT the name. Consent deliberately untouched. Cancellations were correct. Still open: a spoken `[System checks availability]` with a fabricated result, a date string reaching Postgres as a uuid, and the name re-segmented across turns. |
 | **LVX113** | the booking landed, and a fabricated claim chose the wrong tool | **FIXED 2026-09-10, PARTLY VERIFIED LIVE · P1** — `booked_rows=1`, and LVX112's fix is VERIFIED on the same defect: 2,480 ms of spelling transcribed to ZERO again, `spelling_voiced_answer` fired twice, and the spelling gate refused zero writes against two last call. The NEW defect is LVX27's descendant: the guard tells the model its sentence was wrong but cannot undo what the model now BELIEVES, so a claimed-but-unbooked appointment made it call `correct_appointment_name` on a row that did not exist — twice. Of the three refusals that followed, two were correct and one was a phrasing gap (`may I go ahead`). Both fixed: the modal is now a closed class, and a change tool with no target skips the consent question so the pack's own "nothing to change" reason reaches the model. Still open: the name on the row is wrong, and `write_abandoned` is reported on a call that booked correctly. |
+| **LVX114** | a fabricated booking, three guards silent, and a cancelled appointment | **OPEN · P0** — `book_appointment` NEVER CALLED; `booked_rows=0`, caller told "we're all set for Monday" twice and lost the real Friday appointment he arrived with. Three guards silent for three different reasons: the narrow/wide split hides "we're all set" from CLAIM_NOTE; a CANCELLATION vouched for a BOOKING claim; and the post-call verdict has the same hole, which the file already names one paragraph above ("an unrelated success must not vouch"). All three code-driven re-issues need a prior tool call, because the stash IS the call's args — so none could reach a write that was never attempted. BUT both essential fields were recoverable: the slot from `verifiedSlots`, the name from `nameReadBackRe` on the fabricating turn itself. Argues for completing the claim in code rather than cutting the audio. Pronunciation: `speechConfig` accepts only a voice name and a language code, so no deterministic fix exists on this front-end. |
 
 **The four P0s are the list that matters.** Two of them — LVX53 and LVX50 — were
 found on the last two calls of 2026-09-03 and are the reason this index exists:
@@ -10513,6 +10514,146 @@ sees what the sentence made the model DO.
 - **The model narrating a gate's refusal to the caller**, and offering a callback
   the refusal forbids. LVX108's family, now sourced from a refusal rather than a
   note.
+
+---
+
+## LVX114 — a fabricated booking, three guards silent, and a cancelled appointment
+
+`CAbdff67b2`, 2026-09-11, on `voice:f99ec5a`. The worst call of the round, and
+the one that should decide what gets built next.
+
+```
+01:10:47  offers Monday Sept 14 at 9 AM / 1 PM / 4:30 PM
+01:10:53  "What's the best number to reach you at?"
+01:11:03  "that's 469-933-8887? And what name should I book that under?"
+01:11:15  "Thanks, John. So, we're all set for Monday, September 14th, at 1 PM"
+01:12:45  cancel_appointment_db  success=TRUE
+01:12:55  "That appointment has been cancelled. You still have that strategy
+           call booked for Monday, September 14th, at 1 PM."
+```
+
+**`book_appointment` was never called. Not once.** `booked_rows=0`,
+`changed_rows=1`. The caller hung up believing he had a Monday appointment and
+having lost the real Friday one he arrived with. Second caller this week to end
+a call believing in an appointment that does not exist.
+
+### Three independent guards, all silent
+
+**1. The narrow/wide split.** `"we're all set"` fires `completionClaimWideRe` and
+misses `completionClaimRe` — and the NARROW one drives `CLAIM_NOTE`. LVX97 made
+that split deliberately so a counting round "stays comparable". That round ended
+days ago. The model was never told it had lied, and carried the false booking to
+the end of the call.
+
+**2. Tool-backing is not matched to the claim.** The second sentence DOES fire
+the narrow predicate, but `live_claim_without_action` requires no action tool
+this turn or last — and `cancel_appointment_db` had just succeeded. **A claim
+about a booking was vouched for by a cancellation.**
+
+**3. The post-call verdict has the same hole, and the file already names it.**
+
+```js
+const wroteAnything = bookedRows.length > 0 || changedRows.length > 0 || writes.length > 0;
+if (claimed && !wroteAnything) return "claim_without_row";
+```
+
+The cancel made `wroteAnything` true, so the verdict came back `ok` and
+`notifyUnconfirmedClaim` never fired. One paragraph above, the same file says:
+
+> *"An unrelated success must not vouch for an abandoned write."*
+
+That principle was applied to `abandoned` and never extended to `claimed`.
+
+Compounding it: `POSTCALL_VERIFY` is `count`, not `send`, so the confirmation
+built from the row is never sent either. `sent=0` on every call this week.
+
+### Why it fabricates at all
+
+Not a prompt problem, and there is about as clean a proof as exists: the tenant's
+own rules said, verbatim and live on this call, *"Do not say a booking, message
+or callback is done until the system confirms it."* The tool description says
+*"Call this only after confirmation"* and *"never use a placeholder such as 'Jane
+Doe'"*. It said it anyway.
+
+On this front-end the model IS the voice, and the Live API has no
+`toolConfig: {mode: "ANY"}` — so every declaration, refusal and note is a
+REQUEST. The codebase already reached this conclusion: *"the thing that must not
+depend on the model's cooperation is the write itself."*
+
+Mechanically, the last missing field was the name. The instant it had it, it
+narrated completion. **It treated having the information as having done the
+thing**, and nothing in the loop interrupts that.
+
+### Why the existing code-driven writes did not save it
+
+Three paths re-issue a write in code, and ALL THREE need a prior tool call,
+because the stash IS the call's own arguments:
+
+```js
+pendingWrite: { name: fc.name, args: fc.args || {} }
+```
+
+| path | needs |
+|---|---|
+| spelling-gate retry (LVX72) | the refused call's args |
+| write-order retry (2026-09-11) | the refused call's args |
+| end-of-call sweep | a pendingWrite, and it excludes bookings by design |
+
+The commitment was never "the engine can book". It was "the engine can finish
+what the model started". Here it never started.
+
+### What IS recoverable — and this is the finding that matters
+
+Both essential fields are reachable from the call itself:
+
+| field | source | present on this call? |
+|---|---|---|
+| WHEN | the claim sentence, cross-checked against `verifiedSlots` in guards.js | YES — Monday 1 PM was verified by a real availability call |
+| WHO | `nameReadBackRe` on the assistant's own turns | YES — matched `"Thanks, John"` on the fabricating turn itself |
+
+So the fabricated booking on this call was **completable in code, from evidence
+already in memory, within a second of being spoken.**
+
+### The direction this argues for
+
+Do not fight the claim — **make it true.** On a completed-action claim with no
+matching row: recover the essentials, verify each against something that did not
+come from the model, and perform the action. The caller hears nothing different
+and the sentence becomes true. No cut, no apology, and nothing for the model to
+narrate — which also removes the LVX76/96/98/105 leak surface for this path.
+
+Generalises per capability, because the pieces already exist: effects carry
+`{capability, type, data}`, and `require.requiredFields` already declares which
+arguments may not be missing. What is NOT general is the claim vocabulary, which
+today is one appointment-shaped regex in the shared strings table rather than
+owned by the pack — the same ownership move `hasWriteTarget` made on 2026-09-10.
+
+**The rule that keeps it safe:** auto-complete only when EVERY essential field is
+recovered AND independently verified. A booking's time must be a slot a real
+availability call confirmed, never one the model named unchecked. Otherwise ask
+the caller once, plainly — and if that fails, escalate.
+
+**Asymmetry that justifies it:** a wrongly-created appointment is visible in the
+diary and cancellable in seconds. A missing one is invisible until a customer
+does not arrive.
+
+**Cannot be completed after the fact**, and these must escalate: the caller hangs
+up; the promised slot was never checked and is taken; a transfer; anything about
+price.
+
+### Pronunciation: no deterministic fix exists here
+
+`speechConfig` on this API accepts exactly `voiceConfig.prebuiltVoiceConfig
+.voiceName` and `languageCode`. No SSML, no phoneme hints, no custom dictionary.
+The model generates the audio, so there is nothing to annotate. A prompt
+instruction ("pronounce Digile as DIJ-ILE") was tried on 2026-09-10 and failed
+twice.
+
+The remaining lever is to change the LETTERS it is told to say rather than give
+it a rule: the greeting is handed over as a literal string. `Digile` is a
+near-miss for `digital`, which is what it autocorrects to. The test number's
+greeting now reads **`Dijile Media`** (owner confirms the sound is DIJ-ile);
+`businesses.name` keeps the real spelling for records. Untested on a call.
 
 ---
 
