@@ -91,7 +91,10 @@
  *   --hangup-arm-after <label>  only START polling that counter after this
  *                               line. /api allows 60 requests a minute, so a
  *                               poll that runs all call gets 429ed
- *   --hangup-poll-ms <ms>       how often to read the counters (default 150)
+ *   --hangup-poll-ms <ms>       how often to read the counters (default 250)
+ *   --hangup-poll-window-ms <ms> how long to keep polling after the arming
+ *                               line before giving up (default 12000). The
+ *                               budget is 60 reads a minute, total
  *   --expect-counter <name[:n]> repeatable. Exit 1 unless the counter moved by
  *                               at least n (default 1). Needs --debug-token
  *
@@ -176,12 +179,14 @@ const HANGUP_AFTER = opt("hangup-after", "");
 const HANGUP_ARM_AFTER = opt("hangup-arm-after", "");
 const HANGUP_ON_COUNTER = opt("hangup-on-counter", "");
 const HANGUP_DELAY_MS = Number.parseInt(opt("hangup-delay-ms", "0"), 10);
-const HANGUP_POLL_MS = Number.parseInt(opt("hangup-poll-ms", "150"), 10);
+const HANGUP_POLL_MS = Number.parseInt(opt("hangup-poll-ms", "250"), 10);
+const HANGUP_POLL_WINDOW_MS = Number.parseInt(opt("hangup-poll-window-ms", "12000"), 10);
 const hangupPlan = makeHangupPlan({
   afterLabel: HANGUP_AFTER,
   onCounter: HANGUP_ON_COUNTER,
   delayMs: HANGUP_DELAY_MS,
   armAfterLabel: HANGUP_ARM_AFTER,
+  pollWindowMs: HANGUP_POLL_WINDOW_MS,
 });
 /** Repeatable. Each one turns a printed number into a pass/fail exit code. */
 let EXPECTATIONS = [];
@@ -653,7 +658,7 @@ async function main() {
         // allows 60 requests a minute and a 150 ms poll makes 400. The
         // budget went in nine seconds of a hundred-second call, and every
         // later read came back 429. See pollArmed.
-        if (!pollArmed(hangupPlan, hangupArmEndedAt)) return;
+        if (!pollArmed(hangupPlan, hangupArmEndedAt, Date.now())) return;
         const c = await readCounters();
         if (c) liveCounters = c;
       }, HANGUP_POLL_MS);

@@ -122,6 +122,30 @@ describe("pollArmed — the rate limit is the reason this exists", () => {
     const plan = makeHangupPlan({ onCounter: "x", armAfterLabel: "demo_accept" });
     expect(pollArmed(plan, 0)).toBe(true);
   });
+
+  it("DISARMS again once the window has passed", () => {
+    // Arming alone was not enough, measured on a third call: the poll started
+    // at the right moment and then ran for the ~30 seconds of call that
+    // followed -- another 120 requests at 250 ms, and another 429. The window
+    // being waited for is a few seconds wide, so past the bound the counter is
+    // not going to rise for the reason this run cares about, and spending the
+    // budget to find that out costs the NEXT run its counters too.
+    const plan = makeHangupPlan({
+      onCounter: "consent_agreement_recorded",
+      armAfterLabel: "demo_accept",
+      pollWindowMs: 12000,
+    });
+    expect(pollArmed(plan, 1000, 1000)).toBe(true);
+    expect(pollArmed(plan, 1000, 13000)).toBe(true);
+    expect(pollArmed(plan, 1000, 13001)).toBe(false);
+  });
+
+  it("stays armed forever when no clock is supplied", () => {
+    // The window is only checkable against a clock. Without one the old
+    // behaviour stands rather than the poll silently never running.
+    const plan = makeHangupPlan({ onCounter: "x", armAfterLabel: "demo_accept" });
+    expect(pollArmed(plan, 1000)).toBe(true);
+  });
 });
 
 describe("counterValue", () => {
