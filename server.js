@@ -19,6 +19,7 @@ import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
+import { judgeCall, judgeMode } from "./lib/postCallJudge.js";
 import { log } from "./lib/logger.js";
 import { assertBootConfig } from "./lib/bootChecks.js";
 import {
@@ -921,6 +922,37 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
           transcriptRows: transcript.length,
           callerTurns: callerTurns.length,
         });
+
+        // THE SHADOW JUDGE. Reads the same transcript already in hand and says
+        // what the call agreed to, beside the structural check in
+        // lib/postCallVerify.js which answered the same question from tool
+        // traffic. Both log against callSid so the disagreements are readable off
+        // real calls -- the only way either gets validated without hand-labelling.
+        //
+        // Acts on nothing. See lib/postCallJudge.js for why it is a detector and
+        // never an author: the transcript is written by the model being audited.
+        //
+        // Inside the existing tenant scope, and after the summary deliberately --
+        // a judge that delayed or broke the summary would be trading a working
+        // feature for an experiment.
+        const jMode = judgeMode();
+        if (jMode !== "off" && transcript.length > 0) {
+          const bookedForCall = await db.listAppointmentsByCallId(dbCallId, businessId);
+          if (bookedForCall == null) {
+            // null is a FAILED read, [] is a genuinely empty one, and
+            // listAppointmentsByCallId keeps them apart on purpose. Judging on a
+            // failed read would report a missing booking during an outage.
+            bumpCounter("postcall_judge_skipped");
+            log.error("postcall_judge_skipped", { callSid, reason: "row_read_failed", severity: "warn" });
+          } else {
+            await judgeCall({
+              transcript,
+              callSid,
+              bookedRowCount: bookedForCall.filter((r) => r?.status === "scheduled").length,
+              mode: jMode,
+            });
+          }
+        }
       }, { operation: "generateSummary", callSid });
     }
 
