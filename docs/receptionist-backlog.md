@@ -10874,11 +10874,19 @@ live with it rests on a number.
 
 ## LVX117 — a silent caller turn skips every consent check
 
-**Status: FIXED and the refusal HAS FIRED ON A REAL CALL (`CAfc89ebd3`,
-2026-09-12) — three times, held not failed, re-stash correct. But that same call
-falsified the rule's premise: see LVX120. The gate is right in shape and was
-resting on an input that lies, so this is NOT closed until LVX120 is verified
-live.**
+**Status: CLOSED 2026-09-12. Both branches of the rule verified on live calls —
+the refusal fired 3× on `CAfc89ebd3` (held not failed, re-stash correct), and the
+benign `allowed_token` branch wrote correctly on `CAf5628f63`. Those first three
+refusals were FALSE POSITIVES caused by LVX120, which is now fixed and verified;
+the same shape on `CAf5628f63` is allowed. Production `voice-uk-prod-00047-qcm`,
+`vetra/voice:7e2af27`.**
+
+**Read LVX120 before changing anything here.** The rule's premise — "no token
+anywhere means the caller agreed to nothing" — is only as good as the ledger's
+read-back pairing, and it has been broken once already. The half that holds
+unconditionally is the other one: refusing cannot authorise a wrong write, which
+is the only reason those three false positives cost a held write and a suppressed
+text rather than a wrong row.
 
 `services/tools.js` nests the hesitation gate, the unusable-transcript gate AND
 the write-order gate inside one condition:
@@ -11293,6 +11301,57 @@ specifically rather than on its own instrumentation.
 
 **Done when:** a live call shows `consent_agreement_recorded` non-zero on a call
 that fired a nudge, and `reply_held_over_spoken_line` non-zero beside it.
+
+### VERIFIED LIVE, `CAf5628f63`, 2026-09-12, revision `voice-uk-prod-00047-qcm`
+
+Two nudges fired unforced, and the read-back survived both:
+
+```
+07:05:57  live_silence_line {kind: nudge}
+07:05:59  ASST "I'm still here whenever you're ready."
+07:06:02  probe  readback_now=TRUE                       <- was FALSE every time before
+07:08:02  live_silence_line {kind: nudge}
+07:08:04  ASST "I'm still here whenever you're ready."
+07:08:07  probe  readback_now=TRUE  token_present=TRUE  turns_since=5
+```
+
+`token_present` went true with `caller_turns_since_agreement` 4, then 5, then 1.
+On `CAfc89ebd3` it was `false`/`null` across all 17 turns while the caller agreed
+three times. **Zero `refused_no_consent` on this call** — the false positives are
+gone.
+
+Note on the exit criterion as written: `reply_held_over_spoken_line` is a process
+counter and is not carried on `live_call_summary`, so it is not readable per call
+from the logs. `readback_now=TRUE` on the probe immediately after a nudge is the
+more direct observable anyway — it is the displaced value itself, not a count of
+holds.
+
+**LVX117's benign branch also fired for the first time**, at 07:08:34:
+`verdict=allowed_token, gate_ran=false, token_present=true` → `outcome: written`.
+A write on a silent turn, allowed because the caller had agreed one caller-turn
+earlier. Before this fix that same shape came out `refused_no_consent` and was
+held.
+
+Outcome, against the call this fix came from:
+
+| | `CAfc89ebd3` (before) | `CAf5628f63` (after) |
+|---|---|---|
+| `postcall_verify` verdict | `write_abandoned` | **`ok`** |
+| promised confirmation text | `sent: 0` | **`sent: 1`** (`skipped: ["already_confirmed"]`) |
+| abandoned writes | `["correct_appointment_name"]` | **`[]`** |
+| agreement recorded | never | 3× |
+
+Rows: `531551` (Sept 15, 2 PM — the previous call's booking) cancelled at
+07:06:02, and exactly one new row `5c337e` (Mon Sept 14, 4:30 PM) created at
+07:08:34.067, the timestamp of the `allowed_token` write. One cancel, one booking,
+no duplicates. Judge independently agreed: `agreed_action: book, confidence: high,
+booking_missing: false`.
+
+**The predicted collateral was observed rather than argued.** `live_repeat_cut
+{kind: "across_turns", cuts: 1}` fired at 07:08:36: holding the read-back over
+made a repeated READ-BACK catchable, which is the repetition actually complained
+about. The commit message claimed the collateral would run this way; this is the
+call that shows it.
 
 ---
 
