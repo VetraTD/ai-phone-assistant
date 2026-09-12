@@ -78,6 +78,16 @@ const FIELDS = [
   "custom_instructions",
   "timezone",
   "after_hours_policy",
+  // WHETHER THIS TENANT TEXTS CALLERS AT ALL. Off by default, and
+  // services/notifications.js returns on it with no log and no counter, so
+  // POSTCALL_VERIFY=send on a tenant with it false drops every caller message in
+  // silence. There was no write path to it from here: the dashboard has one, and
+  // this script is the only route from a workstation.
+  //
+  // A boolean through a text field works because the parameter reaches Postgres
+  // untyped and is cast to the column, and the read-back compares String() on both
+  // sides, so a stored `true` matches a written "true".
+  "sms_followup_enabled",
 ];
 
 const TO = argOf("to");
