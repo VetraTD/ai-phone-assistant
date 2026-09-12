@@ -26,6 +26,7 @@ import {
   isUnusableTranscript,
   isAffirmative,
   textFingerprint,
+  asksMoreThanOneThing,
 } from "../lib/transcriptUtils.js";
 
 /**
@@ -605,8 +606,32 @@ export async function executeToolCall(fc, ctx) {
             const probeReadBack = Boolean(probeReply && probeStrings.confirmReadBackRe?.test(probeReply));
             const probeToken = ctx?.lastAgreementReadBackKey ?? null;
             const gateRan = lastCallerText.trim() !== "";
+            // WAS THE TURN THE CALLER ANSWERED ASKING MORE THAN ONE THING?
+            //
+            // This is the reason stacked questions are not a cosmetic defect and
+            // cannot be scoped out of consent work. "Just to confirm, Monday at
+            // two? And can I take your email?" followed by "Yeah" is an
+            // agreement that cannot be attributed to either half -- and the gate
+            // attributes it to the write.
+            //
+            // lib/voice/live/index.js counts this per turn and deliberately says
+            // nothing to the model: seven prompt instructions already demand one
+            // question per turn, the tenant's own config demands it in those
+            // words, and it happens twice a call anyway. What that counter cannot
+            // say is how often it lands on the turn that CARRIES THE CONSENT,
+            // which is the only turn where it threatens a write. This can.
+            //
+            // Measurement only, like everything else in this block. Gating on it
+            // would refuse writes that succeed today, and the evidence for that
+            // is one call where the stacking fell on detail-gathering turns and
+            // left the read-back clean.
+            const probeAmbiguousAsk = asksMoreThanOneThing(probeReply);
             if (!gateRan) bumpCounter("write_consent_skipped_silent_turn");
             if (probeToken) bumpCounter("write_consent_token_present");
+            if (probeReadBack) {
+              bumpCounter("write_consent_readback_checked");
+              if (probeAmbiguousAsk) bumpCounter("write_consent_readback_ambiguous");
+            }
             log.info("write_consent_probe", {
               callSid: ctx?.callSid ?? null,
               callId: ctx?.callId ?? null,
@@ -623,6 +648,9 @@ export async function executeToolCall(fc, ctx) {
               token_matches_current_readback:
                 Boolean(probeToken && probeReadBack && probeToken === textFingerprint(probeReply)),
               caller_turns_since_agreement: ctx?.callerTurnsSinceAgreement ?? null,
+              // True means an affirmative on this turn cannot be attributed to
+              // the write alone. Shape only; the question itself is not logged.
+              readback_ambiguous_ask: probeAmbiguousAsk,
             });
           }
 

@@ -448,6 +448,48 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(c().availability_day_listed).toBeGreaterThan(1);
   });
 
+  // -------------------------------------------------------------------------
+  // A READ-BACK THAT ASKED TWO THINGS, AND THE "YES" THAT CANNOT BE ATTRIBUTED.
+  //
+  // Observed twice on one real call, 2026-09-12: "that's D I L L A N... is that
+  // right? And what main marketing challenge are you facing?" and "can I send you
+  // a text confirmation? Also, what day were you thinking of". Both fired
+  // live_stacked_questions. Neither happened to land on the turn carrying the
+  // booking consent -- which is luck, not design, and is exactly why the rate at
+  // the consent point needs measuring rather than assuming.
+  //
+  // THE WRITE STILL SUCCEEDS, and that is asserted deliberately. This is
+  // measurement, not a gate. Refusing here would reject bookings that work today
+  // on the strength of one call, and the evidence for that call says the
+  // stacking fell elsewhere.
+  // -------------------------------------------------------------------------
+  it("records that a read-back asked two things, and writes anyway", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(`${READ_BACK} And can I take your email address?`);
+    await s.callerSays("Yes.");
+    await s.book();
+
+    expect(c().write_consent_readback_checked).toBe(1);
+    expect(c().write_consent_readback_ambiguous).toBe(1);
+    // Measurement, not a gate.
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
+  it("records a clean read-back as unambiguous", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    await s.book();
+
+    expect(c().write_consent_readback_checked).toBe(1);
+    expect(c().write_consent_readback_ambiguous ?? 0).toBe(0);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
   it("refuses a time no availability call ever confirmed", async () => {
     const s = await boot();
 
