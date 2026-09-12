@@ -11064,6 +11064,21 @@ and **both new guards were confirmed able to fail** by sabotage: disabling the
 re-stash fails the end-to-end self-heal with 0 rows, and disabling the exemption
 fails the sweep test and nothing else.
 
+### DO NOT VALIDATE THIS GATE WITH `npm run chat` OR THE EVAL SUITE
+
+`lib/harness/liveTextSession.js` and `lib/harness/textSession.js` set **none** of
+`callerSaidThisCall`, `lastCallerText` or `lastAgreementReadBackKey`. So every
+write they drive reads as the CASCADE, and this gate — along with the hesitation
+gate, the unusable-transcript gate and the write-order gate, all of which nest on
+`lastCallerText` — can never fire in either harness. They will report clean
+whatever the gate does.
+
+Pre-existing, not introduced here, and not fixed here: the only instruments that
+can see this gate are `tests/liveWritePathEndToEnd.test.js` (real session, real
+tools layer), `tests/liveWriteConsent.test.js` (real tools layer, hand-built Live
+ctx) and a production call. Filed so the next session does not mistake a clean
+`chat` run for evidence.
+
 **Still owed:** a live call. Offline verification is exactly what the reverted
 attempt had when it originated a write zero times across nine production calls.
 
