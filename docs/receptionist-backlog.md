@@ -11577,6 +11577,98 @@ untested.
 
 ---
 
+## LVX123 — the model invents a surname, and the spelling gate settles for half a name
+
+**Status: OPEN · P0 for a customer demo. Observed twice on 2026-09-12, and one of
+them was WRITTEN TO A ROW.**
+
+```
+CA7a5667c0  CALR "Yeah, think it I'll have a bar poo."
+            ASST "Thanks, can you spell that FIRST NAME for me?"
+            CALR "b e n k a t"
+            ASST "Got it, thanks, Venkat."
+            ASST "...that's for Venkat BALAPURE on Wednesday, September 16th..."
+            -> booked. "Balapure" appears nowhere in anything the caller said.
+
+CAc5070c2d  CALR "Yeah, it's still an oh sorry, it's the Venkat Isle of Arful."
+            ASST "...booking a second free strategy call for Venkat ALAVARTHI..."
+            -> a different invention from comparable audio.
+```
+
+This is LVX77 recurring — "a booked name that the caller never said" — and LVX77
+was deliberately left as a COUNTER rather than a refusal because `nameSpokenIn`
+cannot separate a fabricated name from an ASR-mangled one, and refusing costs four
+in five. That reasoning still holds and this entry does not ask for it to be
+revisited.
+
+**What is new is the gate's SCOPE.** `services/tools.js` confirms the spelling of a
+hard name "BEFORE it becomes a record". On `CA7a5667c0` it asked for the **first
+name only**, the caller spelled four letters, `spelling_voiced_answer` fired, the
+gate settled — and the surname went into the row unspelled and unsaid. A gate that
+settles on half an identifier is not doing the job its comment claims.
+
+**Likely fix, not yet verified:** require the spelling to cover the whole name in
+`fc.args.client_name`, not whichever part the model chose to ask about. Check
+`lib/nameQuality.js` `shouldConfirmSpelling` and what `spellingSettled` actually
+settles on before writing anything — the model chose the wording "spell that first
+name" itself, so the constraint may be prompt-side, gate-side, or both.
+
+**Done when:** a call where the caller spells one name part does not write the other.
+
+---
+
+## LVX124 — the assistant offered a different DAY from the one asked about
+
+**Status: OPEN · P0 for a customer demo. Observed once, and the caller booked it.**
+
+`CAc5070c2d`, 2026-09-12. The caller had been offered Monday 14th at 9 AM / 12:30 /
+4 PM, then asked:
+
+```
+CALR  "All right, wait. What What other times do you have available on that day?"
+ASST  "Sure thing. On WEDNESDAY, SEPTEMBER 16TH, we have 9 AM, 1 PM, or 4 30 PM
+       available. Do any of those sound good?"
+```
+
+"That day" was Monday the 14th. The assistant silently moved to Wednesday the 16th
+and the caller booked Wednesday. For a real business this is a customer who arrives
+on the wrong day or not at all, and nothing in the system notices: the slot was
+genuinely open, the availability invariant passed, `write_target` recorded
+`outcome: written`, and `postcall_verify` said `ok`.
+
+**Note what this is NOT.** It is not a fabricated time — every time offered came
+from a real availability response. So no existing guard covers it, and no guard
+that checks a slot against `verifiedSlots` ever would: the wrong day was a verified
+open slot too.
+
+**Done when:** an availability answer stays on the day the caller asked about, or
+says plainly that it is changing day.
+
+---
+
+## Also observed 2026-09-12, lower priority
+
+- **An existing-appointment confusion loop.** `CA7a5667c0`: the caller said "book a
+  separate one" and the assistant then spent ~40 s asking three variants of "did you
+  want two appointments, or were you trying to move that one?" That loop is the only
+  reason LVX121's write window was 44 seconds on that call instead of the 2.7 s it
+  was on a clean one.
+- **`live_claim_unbacked_by_action`** fired on `CAc5070c2d` and `CAdb7c93df`.
+- **`cancel_appointment_db` called twice in one turn** — `CA6b773e2a`, 08:37:45,
+  before any confirmation had been given. Both were gated.
+- **The greeting said "Dijile Media"** — FIXED 2026-09-12, and it was stored tenant
+  config, not the model: `name`, `general_info` and `custom_instructions` all said
+  "Digile" correctly while `greeting` did not. Every caller heard it as the first
+  words of the call. Worth checking on every new tenant, because no prompt or code
+  work can find it — it took decoding the row.
+- **`scripts/set-business-config.js --set` takes BASE64**, and a raw value does not
+  error: `Buffer.from("false", "base64")` returns 3 bytes of junk and writes them.
+  The dry run shows it as `4 chars -> 3 chars`. Always dry-run and read the char
+  counts, and derive a text value by round-tripping the stored bytes rather than
+  retyping it.
+
+---
+
 ## Still open from this session, not filed as their own entries
 
 - **Stacked questions land on consent turns.** Two per call on each of the last
