@@ -12332,3 +12332,107 @@ fire on, and `postCallRecover`'s write path stays unexecuted.
 **Done when:** unchanged — a run produces `recover_booked` and a row appears in
 `db-inspect`. What is new is that the obstacle is now named: it needs a call on which
 the model asks rather than claims.
+
+---
+
+## LVX121 — the window cannot be opened by hanging up. Measured, not argued
+
+**Status: the design premise is WRONG, and this is the correction. Four local calls,
+2026-09-12.**
+
+Run 4 (`CA1a097314d6b02c003fa`) is the first call on this rig to complete a booking
+cleanly, and it is what settles the question:
+
+```
+19:57:52  ASST "Sure thing, Tuesday, September 15th at 10 am seems fine.
+                Should I book that for you now?"          <- read-back + ask
+19:57:57  write_consent_probe  readback_now=TRUE  agreed_now=TRUE  token=FALSE
+19:57:57  book_appointment     success=TRUE                <- THE ROW
+19:58:04  ASST "Perfect, that's booked in for you..."      <- a TRUE claim
+19:58:05  recover_declined  row_exists
+19:58:05  postcall_verify   verdict=ok  booked_rows=1  abandoned=[]
+```
+
+Row written: `Jane Fitzgerald, 2026-09-15 09:00:00+00, scheduled`, 10 am London,
+carrying its `call_id`. `consent_agreement_recorded` went 0 -> 1, the first time on
+this rig.
+
+### The premise that fails
+
+The plan, and LVX121 itself, assumed the window was *a recorded agreement with no row
+yet*, opened by the caller's yes and closed by the write — and that a harness hanging
+up inside it would trigger the recovery. **On a clean call that window does not
+exist.**
+
+Look at `token=FALSE` on the probe. At the moment `book_appointment` ran, NO agreement
+token existed. The write was authorised by `gate_ran` — the caller spoke on that turn —
+not by the ledger. `lastAgreement` is written in `applyTurn`, which runs at
+`turnComplete`, and `turnComplete` comes **after** the tool round. So the ordering on a
+successful call is:
+
+```
+caller says yes  ->  book_appointment runs  ->  row exists  ->  turnComplete
+                                                            ->  consent_agreement_recorded++
+```
+
+By the time the counter the trigger watches has moved, gate 1 already declines
+`row_exists`. `--hangup-on-counter consent_agreement_recorded` is **structurally
+incapable** of opening this window, and no delay tuning fixes it: hanging up earlier
+means `turnComplete` never arrives, the ledger is never written, and the recovery
+declines `never_agreed` instead. That is exactly what runs 1-3 did.
+
+The plan flagged this as a possibility — "there is a real possibility the counter
+trigger is inherently too late… if so that is a finding, not a failure". It is now
+measured rather than suspected.
+
+### What the window actually requires
+
+An agreement recorded AND no row. Those co-exist only when the write **fails or is
+refused** on the turn the caller affirms, and the agreement still lands at
+`turnComplete`. That is `CA41622e81`'s shape: every gate refusal individually correct,
+the model claiming instead of re-asking, nothing written.
+
+**So the trigger for LVX121 is a refused write, not a hangup.** A hangup cannot
+manufacture one. Forcing it needs a fixture built to make `book_appointment` fail while
+the read-back and the yes still happen — a taken slot, a capacity collision, or a
+spelling refusal that never clears — and that fixture does not exist.
+
+**Done when, REVISED:** a call on which `book_appointment` is refused after the caller
+affirms a read-back produces `recover_booked` and a row. The old "done when" asked for
+something the system cannot produce.
+
+### What four calls did establish
+
+- **The harness drives the real engine end to end and now produces a correct booking**,
+  guards and all: `verdict=ok`, `booked_rows=1`, `abandoned=[]`, the row at the time
+  that was read back.
+- **`recoverOwedBooking` has now been exercised at all three of its early gates on
+  demand** — `never_agreed` (runs 1-3) and `row_exists` (run 4). Previously only
+  observable by luck on production calls.
+- **`--expect-counter` decided every run**, exiting 1 four times: three times because
+  the counters were unreadable, once because `recover_booked` genuinely did not move on
+  a call where it correctly should not have. The instrument is honest in both
+  directions.
+
+### Three faults found by running it, each costing a call
+
+1. **`DEBUG_TOKEN` from a CRLF `.env` carries a trailing carriage return**, and the
+   endpoint 404s on a bad token by design — indistinguishable from "not enabled".
+2. **`/api` is rate limited to 60 requests a minute.** A 150 ms poll is 400. Reported,
+   wrongly, as a token problem — now reported as itself.
+3. **Arming the poll was not enough**: it never disarmed, so it ran for the rest of the
+   call and hit the limit anyway. Bounded to `--hangup-poll-window-ms`.
+
+### And the script was wrong in two different ways
+
+Both found by reading transcripts rather than by reasoning:
+
+- **Order.** The prompt asks name -> number -> spelling -> time, and the script answered
+  in a different order, so every reply landed on the previous question.
+- **A missing answer.** The model asks about the caller's company or industry on *every
+  single call*, in a different phrasing each time, and the script had nothing for it.
+  Each unanswered question shifted everything by one turn. On run 3 that left the
+  model's perfectly good read-back — *"Shall I go ahead and book that?"* — being
+  answered by *"No, that's everything."*
+
+`demo_company` absorbs it. Run 4 aligned on the first attempt afterwards.
