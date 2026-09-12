@@ -12436,3 +12436,151 @@ Both found by reading transcripts rather than by reasoning:
   answered by *"No, that's everything."*
 
 `demo_company` absorbs it. Run 4 aligned on the first attempt afterwards.
+
+---
+
+# PRODUCTION CALL, 2026-09-12 20:11Z — `voice-uk-prod-00054-7x5`, `vetra/voice:5f00fb5`
+
+`CAb4c8a9e63d1b94613c4b0a9786a36f26`, tenant `+18176011171` (Digile Media, America/Chicago).
+First real call on the claim-guard build. Scripted deliberately: book, change mind twice,
+then cancel — the shape that produced LVX125, LVX126 and LVX127.
+
+19 turns, `asks_max: 0`, `barges: 0`, `interrupted_count: 0`. No transcription loss.
+
+## LVX126 — VERIFIED ON A LIVE CALL. Its "done when" met exactly
+
+The ticket asked for: *"a live call where a write is held, a different write completes,
+and the caller's next yes does NOT re-issue the held one."* That is this call, in order:
+
+```
+20:13:18  reschedule_appointment_db   REFUSED  readBackMade=false   -> HELD (write_target outcome=held)
+20:13:38  caller changes mind, asks about Tuesday
+20:13:50  caller asks to cancel instead
+20:14:15  cancel_appointment_db       SUCCESS                       <- a DIFFERENT write completes
+          reschedule_appointment_db   NEVER RE-ISSUED
+```
+
+`reschedule_appointment_db` appears exactly once in the whole call's tool trace, refused.
+**Before the fix the caller's "yes" at 20:14:15 would have re-issued the held reschedule**,
+recreating the appointment they had just cancelled.
+
+Read from the database rather than from a counter, which is the only proof that counts:
+
+```
+appointments by status: cancelled n=31   (was 30 before the call)
+  fdb37c  2026-09-14T21:30:00Z  cancelled  created 2026-09-12T20:13:03Z
+```
+
+One row created, that same row cancelled, nothing else. No scheduled rows at all.
+
+## LVX125 — the ceiling held, and for the documented reason
+
+`cancel_appointment_db` was refused twice (20:13:53, 20:14:04), both `readBackMade=false`.
+The third attempt at 20:14:15 succeeded **because a real read-back happened**
+(`readback_now=TRUE`), not because a budget ran out. No `write_order_gate_ceiling` event
+fired at all. The attempt-fingerprint keying did what it was changed to do.
+
+## The claim guard stayed SILENT, correctly — the important negative result
+
+`live_claim_unbacked_by_action` did not fire. Both completion claims were genuinely backed:
+
+```
+20:13:03  book_appointment    SUCCESS  ->  20:13:10 "your appointment is booked"
+20:14:15  cancel_appointment_db SUCCESS ->  20:14:20 "Your appointment is now cancelled"
+```
+
+`postcall_judge` recorded `claims: 2, claims_tool_backed: 2`. **The widened condition did
+not become noisy on a clean call**, which is the risk the ladder existed to measure. It has
+now fired on a false claim (local, run 2) and stayed quiet on two true ones (here).
+
+## The judge ran in production with tool traffic, and got it right
+
+First production run of the moved judge:
+
+```
+traffic_recorded: true   booking_writes: 1   change_writes: 1
+claims: 2   claims_tool_backed: 2
+wrote_nothing: false   unbacked_claims: false   browsed_only: false
+agreed_action: cancel   confidence: high   booking_missing: false   agreed: true
+```
+
+Every derived field correct. `claims_tool_backed: 2 of 2` is precisely the signal that
+separates this call from `CA41622e81`, where it was 0 of 3 — so the field discriminates on
+real data rather than only in a fixture.
+
+---
+
+## NEW · `confirmReadBackRe` misses ordinary read-backs, and the caller pays in repetition
+
+**P2, and it is caller-audible.** Three near-identical sentences in 22 seconds, four
+`live_repeated_phrase` events:
+
+```
+20:13:50  "So you want to cancel your appointment for Monday, September fourteenth
+           at four thirty PM?"                                      readback_now=FALSE
+20:14:01  "Okay, I'm cancelling your appointment for Marcus Bell on Monday,
+           September fourteenth at four thirty PM. Should I proceed?"  readback_now=FALSE
+20:14:12  "Just to confirm, you're confirming you want to cancel your appointment
+           for Marcus Bell on Monday, September fourteenth at four thirty PM?"
+                                                                    readback_now=TRUE
+```
+
+The first two are perfectly good read-backs — they name the action, the person, the day and
+the time, and ask. The regex wanted "Just to confirm". So the gate refused twice, the model
+re-asked twice, and the caller heard the same thing three times before anything happened.
+
+This is the write-order gate working as designed on top of a detector that is too narrow,
+and the cost lands on the caller rather than on the data. Note the asymmetry: a read-back
+the regex MISSES is safe (it refuses), which is why this has never surfaced as a defect —
+it surfaces as the assistant sounding stuck.
+
+**Done when:** "So you want to X?" and "I'm doing X. Should I proceed?" are recognised, with
+the certification table in `tests/confirmReadBackRe.test.js` extended from these three real
+sentences.
+
+---
+
+## NEW · A caller who changes their mind suppresses their own confirmation
+
+**P2.** The caller abandoned the reschedule themselves — asked for it, was asked to confirm,
+and cancelled instead. The engine recorded that correctly:
+
+```
+postcall_verify  verdict=write_abandoned  abandoned=["reschedule_appointment_db"]
+                 booked_rows=1  changed_rows=1  claims=2  sent=0
+postcall_confirm_skipped_verdict  verdict=write_abandoned
+```
+
+`write_abandoned` is in `SUPPRESSES_CONFIRMATION`, so the confirmation for the cancellation
+that DID happen was suppressed. The rule is right in general — do not confirm a booking when
+a write went missing — but it cannot tell a write the SYSTEM dropped from one the CALLER
+walked away from, and on this call it withheld a true confirmation because of an unrelated
+change of mind.
+
+Moot on this tenant today (`sms_followup_enabled: false`, so `sent` would be 0 regardless),
+which is exactly why it needs writing down now rather than being discovered on a tenant
+where it is not moot.
+
+**Done when:** a write the caller themselves replaced does not suppress confirmation of the
+write that replaced it.
+
+---
+
+## Also observed
+
+- **Four consecutive qualifying questions**, ~40 seconds, before anything was offered:
+  *"And what company are you with?"* → *"Okay, and what industry are you in?"* → *"Got it.
+  And what do you sell?"* → *"And what's your main marketing challenge?"* The instruments
+  are BLIND to this: `stacked_questions: 0` and `stacked_asks_total: 0`, because each was
+  its own turn. The stacked-question counter measures questions crammed into one turn; an
+  interrogation spread across four turns is a different defect and nothing counts it.
+- **LVX115 recurs.** `write_target book_appointment outcome=written slot_point_verified=FALSE
+  slot_listed_only=TRUE`, against `availability_day_listed: 38`, `verified_slots: 32`,
+  `point_verified_slots: 1`. The booking landed on a slot that was listed, never
+  point-checked — still the dominant flow for this tenant, and still the shape that makes
+  `bookingOwedNoRow` blind.
+- **The date arithmetic was right and the script was wrong.** The caller asked for "Monday
+  the fifteenth"; the 15th is a Tuesday. The assistant offered Monday the 14th and, later,
+  "Tuesday, September fifteenth" — both correct.
+- `usage.text_in: 234912` across 19 turns, `cached_in: 0`. The prefix re-billing is
+  unchanged and no cache was in play on this tenant.
