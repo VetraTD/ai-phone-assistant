@@ -3,6 +3,7 @@ import {
   makeHangupPlan,
   hangupArmed,
   hangupDecision,
+  pollArmed,
   counterValue,
   parseExpectation,
   checkExpectations,
@@ -89,6 +90,37 @@ describe("hangupDecision — the counter trigger", () => {
     expect(hangupDecision({ plan, now: 0, counterBefore: null, counterNow: null }).hangUp).toBe(
       false
     );
+  });
+});
+
+describe("pollArmed — the rate limit is the reason this exists", () => {
+  // MEASURED 2026-09-12, and it cost two calls. /api allows 60 requests per 60
+  // seconds (server.js). A 150 ms poll is 400 a minute, so the budget was gone
+  // nine seconds into a hundred-second call and every later read came back 429.
+  // readCounters returned null for that exactly as it does for a bad token, and
+  // the report said "did not answer with that token" -- which was true of the
+  // FIRST run (a trailing CR off a CRLF .env) and false of the second.
+  it("does not poll at all when no counter trigger is armed", () => {
+    expect(pollArmed(makeHangupPlan({ afterLabel: "demo_accept" }), null)).toBe(false);
+  });
+
+  it("polls from the start when no arming line was named", () => {
+    expect(pollArmed(makeHangupPlan({ onCounter: "consent_agreement_recorded" }), null)).toBe(true);
+  });
+
+  it("waits for the arming line before spending any of the budget", () => {
+    const plan = makeHangupPlan({
+      onCounter: "consent_agreement_recorded",
+      armAfterLabel: "demo_accept",
+    });
+    expect(pollArmed(plan, null)).toBe(false);
+    expect(pollArmed(plan, 12345)).toBe(true);
+  });
+
+  it("treats a zero timestamp as armed, not as absent", () => {
+    // 0 is a legitimate ms value and `armEndedAt || null` would drop it.
+    const plan = makeHangupPlan({ onCounter: "x", armAfterLabel: "demo_accept" });
+    expect(pollArmed(plan, 0)).toBe(true);
   });
 });
 

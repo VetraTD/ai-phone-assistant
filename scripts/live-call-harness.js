@@ -88,6 +88,9 @@
  *   --hangup-delay-ms <ms>      wait this long after it first (default 0)
  *   --hangup-on-counter <name>  hang up the instant that counter rises above
  *                               its pre-call value. Needs --debug-token
+ *   --hangup-arm-after <label>  only START polling that counter after this
+ *                               line. /api allows 60 requests a minute, so a
+ *                               poll that runs all call gets 429ed
  *   --hangup-poll-ms <ms>       how often to read the counters (default 150)
  *   --expect-counter <name[:n]> repeatable. Exit 1 unless the counter moved by
  *                               at least n (default 1). Needs --debug-token
@@ -111,6 +114,7 @@ import {
   makeHangupPlan,
   hangupArmed,
   hangupDecision,
+  pollArmed,
   counterValue,
   parseExpectation,
   checkExpectations,
@@ -169,6 +173,7 @@ const DEBUG_TOKEN = opt("debug-token", "");
  * spending a call on it; everything here is the timers and the socket.
  */
 const HANGUP_AFTER = opt("hangup-after", "");
+const HANGUP_ARM_AFTER = opt("hangup-arm-after", "");
 const HANGUP_ON_COUNTER = opt("hangup-on-counter", "");
 const HANGUP_DELAY_MS = Number.parseInt(opt("hangup-delay-ms", "0"), 10);
 const HANGUP_POLL_MS = Number.parseInt(opt("hangup-poll-ms", "150"), 10);
@@ -176,6 +181,7 @@ const hangupPlan = makeHangupPlan({
   afterLabel: HANGUP_AFTER,
   onCounter: HANGUP_ON_COUNTER,
   delayMs: HANGUP_DELAY_MS,
+  armAfterLabel: HANGUP_ARM_AFTER,
 });
 /** Repeatable. Each one turns a printed number into a pass/fail exit code. */
 let EXPECTATIONS = [];
@@ -263,6 +269,16 @@ if (HANGUP_AFTER) {
     );
   }
 }
+if (HANGUP_ARM_AFTER) {
+  if (!SCRIPT_NAME) die("--hangup-arm-after names a scripted line, so it needs --script <name>.");
+  if (!script.some((l) => l.label === HANGUP_ARM_AFTER)) {
+    die(
+      `--hangup-arm-after "${HANGUP_ARM_AFTER}" is not a line in the "${SCRIPT_NAME}" script.\n` +
+        `Labels in this script: ${script.map((l) => l.label).join(", ")}`
+    );
+  }
+  if (!HANGUP_ON_COUNTER) die("--hangup-arm-after only arms the counter poll, so it needs --hangup-on-counter.");
+}
 if ((HANGUP_ON_COUNTER || EXPECTATIONS.length) && !DEBUG_TOKEN) {
   die(
     `--hangup-on-counter and --expect-counter both read /api/debug/latency, so they\n` +
@@ -280,14 +296,31 @@ const record = (obj) => {
 };
 
 /** Read the counters, or null if no token was given / the read failed. */
+let counterReadFailure = null;
 async function readCounters() {
   if (!DEBUG_TOKEN) return null;
   try {
     const res = await fetch(`${BASE}/api/debug/latency`, { headers: { "x-debug-token": DEBUG_TOKEN } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // WHY IT RECORDS WHY IT FAILED. This used to return null for every
+      // failure and the report guessed "did not answer with that token". On
+      // 2026-09-12 that guess was wrong twice, and each wrong guess cost a
+      // call: the first run really was a bad token (a trailing CR off a CRLF
+      // .env), the second was 429 because /api allows 60 requests a minute and
+      // the counter poll was making 400. Both printed the same sentence.
+      counterReadFailure =
+        res.status === 429
+          ? `HTTP 429 RATE LIMITED. /api allows 60 requests a minute (server.js) and the counter poll exceeded it. Raise --hangup-poll-ms, or arm the poll later with --hangup-arm-after.`
+          : res.status === 404
+            ? `HTTP 404. This endpoint 404s on a bad or missing token BY DESIGN, so it means DEBUG_ENDPOINTS is not "true", or the token is wrong -- check for a trailing carriage return if it came out of a CRLF .env.`
+            : `HTTP ${res.status}`;
+      return null;
+    }
     const j = await res.json();
+    counterReadFailure = null;
     return { bootId: j.bootId, counters: j.turnTaking || {} };
-  } catch {
+  } catch (err) {
+    counterReadFailure = `${err?.cause?.code || err?.message || "request failed"} -- is the server up on ${BASE}?`;
     return null;
   }
 }
@@ -485,6 +518,8 @@ async function main() {
    * a stand-down that looks exactly like a broken harness.
    */
   let hangupAfterEndedAt = null;
+  /** When the --hangup-arm-after line finished, or null. Gates the poll. */
+  let hangupArmEndedAt = null;
   /** The most recent counter read, for the --hangup-on-counter trigger. */
   let liveCounters = null;
 
@@ -524,6 +559,7 @@ async function main() {
       endedAt: now + (line.mulaw.length / FRAME_BYTES) * FRAME_MS,
     });
     if (HANGUP_AFTER && line.label === HANGUP_AFTER) hangupAfterEndedAt = turns.at(-1).endedAt;
+    if (HANGUP_ARM_AFTER && line.label === HANGUP_ARM_AFTER) hangupArmEndedAt = turns.at(-1).endedAt;
     console.log(
       `speak      ${line.label}  (heard ${((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)} s back${gaveUp ? ", NO REPLY" : ""})`
     );
@@ -613,6 +649,11 @@ async function main() {
     if (hangupPlan.onCounter) {
       every(async () => {
         if (finished) return;
+        // Armed by a scripted line, not running for the whole call: /api
+        // allows 60 requests a minute and a 150 ms poll makes 400. The
+        // budget went in nine seconds of a hundred-second call, and every
+        // later read came back 429. See pollArmed.
+        if (!pollArmed(hangupPlan, hangupArmEndedAt)) return;
         const c = await readCounters();
         if (c) liveCounters = c;
       }, HANGUP_POLL_MS);
@@ -765,7 +806,7 @@ async function main() {
       for (const k of moved) console.log(`  ${k}  ${before.counters[k] || 0} -> ${after.counters[k] || 0}`);
     }
   } else if (DEBUG_TOKEN) {
-    console.log(`\ncounter delta unavailable: /api/debug/latency did not answer with that token.`);
+    console.log(`\ncounter delta unavailable: ${counterReadFailure || "/api/debug/latency did not answer."}`);
   }
 
   // THE PART THAT MAKES THIS RUN ABLE TO FAIL.
