@@ -162,6 +162,40 @@ describe("LVX50 — a caller turn that did not transcribe as speech", () => {
     expect(notes(s.live)).toHaveLength(0);
   });
 
+  it("counts a caller turn that came back in the wrong language, and says nothing to the model", async () => {
+    // THE WIRE, not the judgement -- that is tests/transcriptUtils.test.js. A
+    // counter that nothing bumps is indistinguishable from a fault that never
+    // happens, which is the mistake this repository has already paid for.
+    //
+    // VERBATIM from call CA434934, 2026-09-12: the caller asked to book a
+    // strategy call and this is what arrived. Full Latin script, so the script
+    // check passes it.
+    const s = await boot();
+    s.hear("Je pense que c'est une stratégie pas");
+    s.say("Of course. Are you looking to confirm the date and time?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stats().live_caller_turn_language_checked).toBe(1);
+    expect(stats().live_caller_turn_non_english).toBe(1);
+    // The script check must NOT fire -- that is the whole point of the pair.
+    expect(stats().live_unusable_transcript).toBe(0);
+    // COUNT ONLY. No note, because there is nothing the model can do about its
+    // own recognition and an eighth instruction is not a fix.
+    expect(notes(s.live)).toHaveLength(0);
+  });
+
+  it("counts the positive case for the language check too", async () => {
+    const s = await boot();
+    s.hear("I would like to book an appointment for Tuesday please");
+    s.say("Of course. What time on Tuesday suits you?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stats().live_caller_turn_language_checked).toBe(1);
+    expect(stats().live_caller_turn_non_english).toBe(0);
+  });
+
   it("leaves a Spanish turn alone", async () => {
     const s = await boot();
     s.hear("Sí, quiero una cita para el martes por la mañana");

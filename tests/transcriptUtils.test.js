@@ -8,6 +8,8 @@ import {
   classifyHold,
   countAsks,
   asksMoreThanOneThing,
+  looksNonEnglish,
+  isUnusableTranscript,
 } from "../lib/transcriptUtils.js";
 
 describe("stripFillers()", () => {
@@ -268,4 +270,72 @@ describe("asksMoreThanOneThing() — unchanged for every fixture that already pi
       expect(asksMoreThanOneThing(text)).toBe(expected);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// A CALLER TURN IN THE WRONG LANGUAGE. Count only; nothing is gated on it.
+//
+// THE FIXTURES THAT MATTER HERE ARE THE PRODUCTION ONES, and they are marked.
+// A table I wrote to match my own word lists proves nothing -- a detail matcher
+// in this repository scored 13/13 on thirteen self-chosen fixtures and failed in
+// both directions on the first unseen call. The four lines taken verbatim from
+// real calls are the evidence; the rest only pin the edges I reasoned about.
+// ---------------------------------------------------------------------------
+describe("looksNonEnglish — the half isUnusableTranscript cannot see", () => {
+  it("flags the real turn that cost two calls", () => {
+    // VERBATIM from call CA434934, 2026-09-12. The caller asked to book a
+    // strategy call; this is what arrived. Full Latin script, so
+    // isUnusableTranscript passes it, which is exactly the gap.
+    const real = "Je pense que c'est une stratégie pas";
+    expect(isUnusableTranscript(real)).toBe(false);
+    expect(looksNonEnglish(real)).toBe(true);
+  });
+
+  it("leaves the real English turns from the same calls alone", () => {
+    // All VERBATIM from production, 2026-09-12.
+    expect(looksNonEnglish("I want to book a call.")).toBe(false);
+    expect(looksNonEnglish("Can I cancel it?")).toBe(false);
+    expect(looksNonEnglish("I'm facing a lack of customers.")).toBe(false);
+    expect(looksNonEnglish("No, 1:00 p.m.")).toBe(false);
+  });
+
+  it("does not flag a spelled name", () => {
+    // VERBATIM. Loose letters match no word list, and a spelled name is the one
+    // turn shape this system most needs to survive intact.
+    expect(looksNonEnglish("d i l l a n b h a k t a")).toBe(false);
+  });
+
+  it("needs positive evidence of another language, not merely absent English", () => {
+    // Five words, no function words, entirely English. Without the marker
+    // requirement every list of proper nouns would be flagged, and callers give
+    // lists of proper nouns constantly.
+    expect(looksNonEnglish("Best Electrical Dallas Texas Plumbing")).toBe(false);
+  });
+
+  it("ignores turns too short to judge", () => {
+    // Short real answers carry no function words and are the commonest turns on
+    // a phone call.
+    expect(looksNonEnglish("Yes.")).toBe(false);
+    expect(looksNonEnglish("Monday")).toBe(false);
+    expect(looksNonEnglish("Oui")).toBe(false);
+  });
+
+  it("leaves Spanish alone, because Spanish callers are real callers", () => {
+    // This is the fixture that caught a bug in the word list before it shipped:
+    // "una" and "para" are Portuguese AND Spanish, and including them flagged a
+    // legitimate Spanish caller as a transcription fault. Spanish is a supported
+    // locale. A counter inflated by ordinary traffic is worse than no counter.
+    expect(looksNonEnglish("Sí, quiero una cita para el martes por la mañana")).toBe(false);
+    expect(looksNonEnglish("Hola, necesito cancelar mi cita del lunes")).toBe(false);
+  });
+
+  it("flags other Latin-script languages it was given markers for", () => {
+    expect(looksNonEnglish("Ich möchte einen Termin nicht haben")).toBe(true);
+  });
+
+  it("is safe on rubbish input", () => {
+    expect(looksNonEnglish(null)).toBe(false);
+    expect(looksNonEnglish("")).toBe(false);
+    expect(looksNonEnglish(42)).toBe(false);
+  });
 });

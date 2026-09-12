@@ -136,10 +136,10 @@ describe("language pinning", () => {
     // must be RECORDED either way, because "accepted" is the claim the vendor
     // docs got wrong and "honoured" is still unproven.
     const s = createCallSummary({ arm: "vendor" });
-    expect(s.build().language_pinned).toBeNull();
+    expect(s.build().output_language_pinned).toBeNull();
 
     s.recordLanguagePinned(false);
-    expect(s.build().language_pinned).toBe(false);
+    expect(s.build().output_language_pinned).toBe(false);
   });
 });
 
