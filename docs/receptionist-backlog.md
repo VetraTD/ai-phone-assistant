@@ -11516,43 +11516,64 @@ chained after it and had fired).
 
 ---
 
-## LVX122 — SMS consent is recorded before the caller answers
+## LVX122 — `postcall_verify`'s `sent` counts ATTEMPTS, not deliveries
 
-**Status: OBSERVED on a live call, NOT INVESTIGATED. Filed with its evidence, not
-diagnosed — read the code before acting on this.**
+**Status: OPEN · P2. Filed 2026-09-12 after this entry's first version was wrong;
+the retraction is below and is the more useful half.**
 
-`CA6b773e2a`, 2026-09-12:
+On `CA6b773e2a` the caller was asked "can I send you a text confirmation?",
+declined, and `postcall_verify` reported:
 
 ```
-08:39:11.401  ASST  "Can I send you a text confirmation? It may include your
-                     name and appointment details..."
-08:39:14.622  record_sms_consent   success=true      <- 9 SECONDS BEFORE THE ANSWER
-08:39:23.266  CALR  "No, okay."
-08:39:23.266  ASST  "Got it, no text."
-...
-08:39:29.030  postcall_verify  sent: 2
+postcall_verify  verdict=ok  booked_rows=1  changed_rows=2  sent=2
+                 skipped=["already_confirmed"]
 ```
 
-The tool fired nine seconds before the caller answered, the caller then DECLINED,
-and two messages went out on that call. This is the LVX117 pattern — a write
-committed against a question the caller has not yet answered — on a different
-tool, and this one is a consent record.
+**No text was sent.** The consent gate blocked all three, from its own log lines:
 
-**What is not established:** what `record_sms_consent` was called WITH (the log
-line carries no granted flag), whether the two sends were the cancellation
-notifications rather than the confirmation, and whether either respects the
-consent row. `sent: 2` sits beside `skipped: ["already_confirmed"]` on a call that
-cancelled two appointments and booked one, so the arithmetic needs checking before
-any claim is made.
+```
+08:39:28.989  sms_followup_blocked_no_consent  appointment_confirmation  reason=declined
+08:39:29.023  sms_followup_blocked_no_consent  appointment_cancelled     reason=declined
+08:39:29.030  sms_followup_blocked_no_consent  appointment_cancelled     reason=declined
+```
 
-Two reasons this matters more than an ordinary write-ordering bug: the SMS consent
-pack has `actionTools: []` (`capabilities/smsConsent.js:95`), so **it passes
-through none of the write-consent gates at all** — not the hesitation gate, not
-the write-order gate, not LVX117's — and a consent record is the artefact that is
-supposed to prove permission was given.
+`lib/postCallVerify.js:451` pushes onto `sent` immediately after awaiting
+`sendCallerSms`, and `sendCallerSms` returns `undefined` whether it delivered or
+returned early — the consent block at `services/notifications.js` is one of four
+early returns, alongside `smsFollowupEnabled` off, a non-E.164 number, and an
+unknown template kind. So `sent` is the number of sends ATTEMPTED.
 
-**Done when:** the granted value is logged, and a caller who says no receives
-nothing.
+Anyone reading `sent: 2` concludes the caller received two messages. On this call
+they received none, and the honest reading of that line was only available by
+correlating three separate log events. The same field is what "a caller-facing SMS
+sent, first time in the system's history" was read off earlier in this session.
+
+**Done when:** `sent` counts what left the building, or is renamed to say what it
+counts and a delivered count sits beside it.
+
+### THE RETRACTION, and it is the third time this trap has been sprung
+
+The first version of this entry claimed `record_sms_consent` fired nine seconds
+before the caller answered, that the decline was never recorded, and that two texts
+went to someone who had declined. **All three were wrong**, and they were wrong for
+one reason: `live_debug_assistant_turn` emits at TURN COMPLETION, not when the
+caller spoke. The caller's "No" came BEFORE the 08:39:14 tool call; the 08:39:23
+debug line is merely when that turn closed. The model heard the decline, recorded
+`granted=false`, and the gate then blocked everything. Correct behaviour end to end.
+
+This file already warned about it in LVX117, in these words: *"Read the timestamps
+carefully, or reach the wrong conclusion twice."* It has now caught three readers,
+including one who had quoted the warning earlier in the same session. The rule is
+not "be careful" — it is that **the consent probe and the gate's own log lines are
+the authority, and a debug transcript's ordering is not evidence about when
+anything happened.**
+
+Worth keeping for whoever looks next: the SMS consent pack declares
+`actionTools: []` (`capabilities/smsConsent.js:95`), deliberately, so that
+recording permission cannot unlock a same-turn `end_call`. A consequence is that it
+passes through none of the write-consent gates — not the hesitation gate, not the
+write-order gate, not LVX117's. That was not a problem on this call and remains
+untested.
 
 ---
 
