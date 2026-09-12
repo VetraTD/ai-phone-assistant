@@ -17,6 +17,11 @@ front of wins already paid for. Update the item's `Done when` line to `DONE
 <date>` rather than deleting it; the history is what stops the same thing being
 re-litigated in three months.
 
+> **Newer than this index:** LVX115-LVX119 and the 2026-09-11/12 session section
+> are at the BOTTOM of this file, with their own status lines. The table below is
+> a snapshot taken on 2026-09-03 and is not extended in place, because a dated
+> snapshot that quietly grows is no longer a snapshot.
+
 ## Index — every open item, 2026-09-03
 
 **Added because "is it all written down?" could not be answered by looking.**
@@ -10716,3 +10721,303 @@ A transcript tells you what was said; only the trace tells you what was done.
 - `transcript_turns_written` vs `turns` — should be equal
 - `end_call_abandoned_write_outstanding` — fired on the cancellation call
 - `live_repeated_phrase` — fired five times on that same call
+
+---
+
+# SESSION 2026-09-11/12 — the write guarantee, and what four calls measured
+
+Branch `fix/write-order-readback`, merged to `main` @ `592e77e`, continued to
+`64b6bb9`. Production `voice-uk-prod-00045-mrx`, `POSTCALL_VERIFY=send`,
+`POSTCALL_JUDGE=shadow`, tenant `sms_followup_enabled=true`.
+
+**What this session was asked for:** guarantee that the write a call implies
+actually happens, or that the caller is told the truth.
+
+**What it mostly did instead, and why that was right:** built the instruments that
+could tell whether any such guarantee was working. The previous attempt at this
+(reverted `e27411a`) shipped 894 lines of passing tests and originated a write
+**zero times across nine production calls**. Nothing in the tree could have told
+the difference between that and success, because nothing recorded what a write
+targeted, nothing recorded whether an availability check had said yes, and
+`tool_duration` carried no `callSid` so no per-call log filter returned it at all.
+
+Four calls were taken. Two were destroyed by vendor transcription (LVX116), one
+booked correctly, one cancelled correctly.
+
+## VERIFIED on a real call this session
+
+- **The write-order gate holds a premature write and commits it after the
+  read-back.** Three times across two calls, unforced — `cancel_appointment_db`
+  on CA434934 and `book_appointment` on CAff202f. Each time the model recovered
+  without fabricating a failure, which is why LVX-tier-2 (hold-don't-refuse) was
+  NOT built: its motivating defect did not reproduce.
+- **Duplicate SMS suppression** — `skipped: ["already_confirmed"]` on CAff202f.
+  Without it the caller gets two confirmations for one appointment. See LVX119.
+- **The post-call judge and the structural check agreed, and both were right**, on
+  three calls (book / cancel / nothing-agreed). No false positives from either.
+- **A caller-facing SMS sent**, for the first time in this system's history.
+- **The row is correct** — `2026-09-14T18:00:00Z`, exactly the time read back.
+
+## The instruments added, and what each one closed
+
+| instrument | what was unanswerable before it |
+|---|---|
+| `write_target` | what time a write aimed at, and on what evidence |
+| `availability_point_open` / `_point_taken` / `_day_listed` | whether an availability check ever said yes — see LVX117 |
+| `point_verified_slots` vs `verified_slots` | whether a call confirmed ONE time or showed a LIST |
+| `callSid` on `tool_duration` / `tool_timeout` / `tool_threw` | which call a tool event belonged to |
+| `write_consent_probe` | where structural consent would disagree with the live gate |
+| `postcall_booking_owed` / `_no_row` | whether a booking was owed at all |
+| `live_caller_turn_non_english` | the rate of LVX116 |
+| `write_consent_readback_ambiguous` | whether a stacked question landed on the consent turn |
+| `tests/liveWritePathEndToEnd.test.js` | whether the real write path reaches a row at all |
+
+The last one is the one that matters. `extras` omitted `capabilityDeps`, so no test
+could drive `handleLiveSessionConnection` and reach a fake appointments store at
+the same time — the gap the reverted attempt died in. One key closed it.
+
+---
+
+## LVX115 — the booked slot is not the slot the call verified
+
+**Status: MEASURED. No fix needed; it is a reason NOT to build something.**
+
+Call `CAff202f08058f505354e943b3c721db4a`, 2026-09-12:
+
+```
+availability_point_open: 1      point_verified_slots: 1
+availability_day_listed: 19     verified_slots: 16
+
+write_target  outcome=written  slot_point_verified=FALSE  slot_listed_only=TRUE
+```
+
+The model ran a whole-day query, offered "9:00 AM, 1:00 PM, or 4:30 PM", the
+caller picked 1:00 PM, and it booked off the list. **The one slot a point check
+confirmed is a different time from the one that got booked.**
+
+**Why this matters more than it looks.** The design this session started from
+proposed an engine-originated write using "the slot this call verified" as the
+time. On this call that rule would have written **the wrong time**, confidently,
+with the availability invariant, the name floor, `validateBookingTime` and the
+capacity check all passing. An adversarial review predicted exactly this shape
+before the call; the call confirmed it.
+
+This is also why `verified_slots` alone could never answer the question: it is ONE
+unordered `Set` fed from two different places — the response's list fields, and the
+requested argument when a point check returns open (`lib/voice/live/guards.js`).
+A day query can put sixteen entries in it. Sixteen bookable times, one of them
+asked about.
+
+**Consequence taken:** engine-authored writes are out of scope until a rule exists
+that cannot pick a time the caller was never asked about. The rule sketched and
+not built: the time always comes from structured tool arguments, and a read-back
+is a **veto, never a selector** — a selector can write a wrong time, a veto can
+only fail to write.
+
+**Done when:** any design that acts on "the time this call verified" is checked
+against `write_target` on a real call first.
+
+---
+
+## LVX116 — caller turns arrive in the wrong language, and the pin never covered it
+
+**Status: OPEN, NOT FIXABLE HERE. Rate now counted.**
+
+Two calls lost on 2026-09-12 inside one 80-second window.
+
+`CA434934febd25ce900746c9810f995eb0` — an English caller asking to book a strategy
+call arrived as:
+
+```
+"Je pense que c'est une strat?gie pas"      ← fluent French
+"?? ?????? ??? ???????????"                 ← non-Latin script
+```
+
+The assistant, reading that, offered to confirm or annotate an existing
+appointment. The caller then said "Can I cancel it?" — clean English — and the
+engine cancelled the real Monday booking, correctly, because that is what it was
+asked to do.
+
+`CAcd89f4e2bab9d8d3144354a88a5bf9a2` — the same failure complete:
+`callerTurns: 0` across 52 seconds, three silence nudges, caller hung up.
+`first_audio_ms_p50: 5435` against **631** on the healthy call an hour earlier.
+
+**THERE IS NO INPUT-LANGUAGE CONTROL IN THIS API.** Checked in the SDK types,
+2026-09-12: `AudioTranscriptionConfig` is an **empty interface**, so
+`inputAudioTranscription: {}` is the only form it can take; `RealtimeInputConfig`
+carries only `automaticActivityDetection`, `activityHandling`, `turnCoverage`; and
+`LiveConnectConfig` has no top-level language field. `lib/transcriptUtils.js` had
+already recorded the read half — no confidence, stability or language field is
+exposed on `inputTranscription`.
+
+**`language_pinned` NEVER MEANT THIS.** It is
+`Boolean(config.speechConfig.languageCode)`, and `speechConfig` governs speech
+GENERATION — the voice the assistant speaks with. The brief for this session read
+it as "transcription is pinned", and so did the session's own first analysis; both
+went looking for a bug in our code. Now logged as `output_language_pinned` with
+the SDK evidence at the computation site.
+
+**What the write guarantees did here, which is the one piece of good news:** they
+held. `isUnusableTranscript` caught the non-Latin turn and gated the write. The
+French turn is not affirmative, so it could never have authorised anything. **The
+drift destroyed two conversations and caused no wrong write.** This is a
+conversation-quality and ASR problem, not a write-integrity one.
+
+**Rejected:** adding "the caller speaks English" to the prompt. An eighth
+instruction in the one channel that costs a round trip, unmeasurable either way.
+
+**Done when:** `live_caller_turn_non_english / live_caller_turn_language_checked`
+has a rate across twenty calls, so the decision to escalate to the vendor or to
+live with it rests on a number.
+
+---
+
+## LVX117 — a silent caller turn skips every consent check
+
+**Status: MEASURED, NOT FIXED. The obvious fix breaks working calls.**
+
+`services/tools.js` nests the hesitation gate, the unusable-transcript gate AND
+the write-order gate inside one condition:
+
+```js
+if (lastCallerText.trim() !== "") { ... }
+```
+
+The reason is good and should not be removed: the cascade never sets
+`lastCallerText`, and the nesting is what keeps that path byte-identical. But on
+Live an empty caller turn does not mean "this is the cascade" — it means **the
+caller has not spoken**, and the write goes through with nothing checked.
+
+It does not need a silent caller. This front-end's transcripts are lossy because
+the model IS the recogniser, `live_zero_text_turn` exists to count exactly this,
+and 1,500 ms of speech has been logged as zero characters. **A caller who said
+"no" and transcribed empty is indistinguishable from consent.**
+
+**AND IT CANNOT BE CLOSED BY REQUIRING CALLER TEXT.** A booking one turn after the
+caller's yes succeeds today and should: they agreed, they are simply not speaking
+at the instant the tool runs. Both shapes are pinned in
+`tests/liveWritePathEndToEnd.test.js`. Conflating "has not spoken this turn" with
+"has not agreed" is a regression, not a fix.
+
+So closing it needs a durable, action-scoped record of the agreement — and the
+three-turn window reverted on 2026-09-11 is what happens when such a record is not
+scoped to the action it authorised: a booking allowed on a cancellation's consent,
+55 seconds stale and already spent.
+
+An agreement ledger now records the facts and **gates nothing**. It already
+falsified the obvious rule: `token_matches_current_readback` is FALSE in the benign
+case, because by then the model has said something else, so "matches the read-back
+still standing" is wrong by construction one turn later.
+
+**Done when:** `write_consent_skipped_silent_turn` and
+`write_consent_token_present` have a rate, and the pair shows how often the skip
+happens with no agreement anywhere on the call — which is the only dangerous shape.
+
+---
+
+## LVX118 — a cancellation vouches for a booking claim, so the call reports `ok`
+
+**Status: FIXED, VERIFIED OFFLINE. Not yet seen firing on a live call.**
+
+Call `CA422f58d96c4df5b951340011ae18f51b`, from its own production log line:
+
+```
+postcall_verify  verdict=ok  booked_rows=0  changed_rows=1  claims=2  mode=count
+```
+
+The caller was read back a strategy call, said "Yes.", and `book_appointment` was
+**never called once**. The assistant then invented a technical glitch. No row
+exists — and the safety net reported the call **clean**, because `claims` was 2 and
+`wroteAnything` was true thanks to the CANCELLATION that also happened, so
+`claimed && !wroteAnything` was false and every branch fell through.
+
+`a4a0dc0` names this exact bug and fixed it by kind-matching claims against
+writes. That fix was reverted by `e27411a` and the bug was live again.
+
+**Not fixed by restoring kind-matching.** That needs per-capability claim
+vocabulary — prose classification, and the phrasing treadmill this work exists to
+escape (four phrasings got through the last one in two weeks, each added after a
+caller was harmed). The claim ledger records ONE generic kind, `kind: "claim"`,
+with no notion of what was claimed.
+
+**Fixed structurally instead.** Two facts that are tool traffic and caller audio
+rather than sentences: a point availability check came back OPEN, and the caller
+affirmed a read-back. Both were only measurable as of this session.
+`bookingOwedNoRow` is computed **beside** the verdict, never folded into it —
+`259de15` is the record of what one ordered verdict costs — and the escalation
+reads the fact. The verdict on that call's shape stays `ok`, deliberately: that is
+what `reconcile` honestly concludes. What changes is that a human hears about it
+anyway.
+
+**Known false positive, stated rather than discovered later:** the agreement token
+is action-blind, so a caller who point-checked a time, declined to book and
+cancelled something instead can satisfy both halves. Firing anyway is the right
+asymmetry — a spurious task costs ten seconds, a missed one costs a lead nobody
+learns about. `postcall_booking_owed` is the denominator.
+
+**Done when:** a real call loses a booking and the `customer_requests` row and the
+owner notification both appear. Cannot be forced; it needs the model to fail.
+
+---
+
+## LVX119 — the booked effect carried no row id, so the SMS suppression did nothing
+
+**Status: FIXED, VERIFIED on a real call.**
+
+`POSTCALL_VERIFY=send` was unsafe to enable: `capabilities/appointments.js` already
+texts a confirmation at booking time, so the mode lined every booking up for a
+second message about the same row, to two possibly different numbers — that sender
+uses the Twilio caller ID, the post-call one uses the row.
+
+`68f0585` fixed this and `e27411a` reverted it. **But the suppression could never
+have worked alone**: it matches on the booked write's `appointmentId`, and the
+booked effect's `data` is the tool ARGUMENTS, not the row, so the ledger recorded
+nothing to match and the set was always empty. A suppression that silently does
+nothing is indistinguishable from a working one.
+
+So the row id went back on the effect and into the ledger first, and a test asserts
+the **null** case still sends both messages — a test covering only the working case
+would have called this fixed while it was broken.
+
+**Verified live**: `skipped: ["already_confirmed"]` on `CAff202f`, 2026-09-12.
+
+Also restored: the verdict deny-list. `write_abandoned` and `row_mismatch` withhold
+a confirmation, because a confirmation promises the row is RIGHT and LVX72's shape
+is a booking carrying a name the caller never gave.
+
+---
+
+## Still open from this session, not filed as their own entries
+
+- **Stacked questions land on consent turns.** Two per call on each of the last
+  two calls, and the tenant's own config forbids it in those words. Now counted at
+  the consent point (`write_consent_readback_ambiguous`) because "Monday at two?
+  And can I take your email?" answered "Yeah" is attributable to neither half. Not
+  gated: on the one call measured, both stacked turns were detail-gathering and
+  the read-back was clean — luck, not design. The only lever left on the tic
+  itself is cutting the audio mid-sentence, which the repeat cutter proves works
+  in production but which transcription lag can make land late.
+- **`record_sms_consent` called twice in one turn.** Observed `CAff202f`.
+- **A doubled sign-off** — "Do you need help with anything else?Thanks for calling
+  Digile Media, have a great day!" concatenated into one turn. Observed CA434934.
+- **A capability recitation wedged mid-booking** — "Before I book that for you, I
+  just need to let you know that I'm Digile Media's AI receptionist, and I can book
+  appointments, take messages…". Observed `CAff202f`.
+- **The migrate job ran a pre-revert image** (`voice:dea0551`) until updated this
+  session. Worth checking after any revert.
+- **`sendCallerSms` returns silently when a tenant has SMS disabled** — no log, no
+  counter, and the switch is off by default. `POSTCALL_VERIFY=send` was inert for
+  this tenant and nothing said so. `scripts/db-inspect.js` now reports the column.
+- **Tier 2, hold-don't-refuse, NOT BUILT.** The plan had it next. Its motivating
+  defect — the model narrating or fabricating a failure when a gate refuses —
+  failed to reproduce across four calls in which the gate held three times and the
+  model recovered cleanly each time. The incumbent keeps the benefit of the doubt.
+
+## A correction to this session's own earlier analysis
+
+The first analysis of `CA11eb4e9d` claimed the model fabricated a spelling from
+20 ms of audio **and got the name wrong** — "DILLAN" against "Dylan". On
+`CAff202f` the caller spelled `d i l l a n b h a k t a` themselves. **DILLAN is
+correct; that analysis was wrong.** What survives is narrower and still worth
+having: on that call the model asserted a spelling the caller had not just given,
+carrying it from earlier in the conversation.
