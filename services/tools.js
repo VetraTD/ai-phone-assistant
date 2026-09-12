@@ -25,6 +25,7 @@ import {
   isHesitationOnly,
   isUnusableTranscript,
   isAffirmative,
+  textFingerprint,
 } from "../lib/transcriptUtils.js";
 
 /**
@@ -560,6 +561,71 @@ export async function executeToolCall(fc, ctx) {
           // neither branch can fire there -- the same construction that keeps
           // this file byte-identical for tier 3 today.
           const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
+
+          // -------------------------------------------------------------------
+          // THE CONSENT PROBE. Measurement only. Nothing below reads any of it,
+          // and no outcome moves because of it.
+          //
+          // Two facts about this gate are now established on real calls rather
+          // than argued, and they pull in opposite directions:
+          //
+          //   The gate is skipped ENTIRELY when the caller's turn carried no
+          //   text, because everything consent-related is nested inside the
+          //   condition on the next line. That nesting is what keeps the cascade
+          //   byte-identical and it is correct for the cascade; on Live it means
+          //   a write goes through with nothing checked whenever the caller's
+          //   turn transcribed as nothing, which this front-end does, because the
+          //   model is also the recogniser.
+          //
+          //   And requiring caller text would REFUSE LEGITIMATE WRITES. A
+          //   booking one turn after the caller's yes succeeds today and should:
+          //   they agreed, they are simply not talking at the instant the tool
+          //   runs. Both cases are pinned in
+          //   tests/liveWritePathEndToEnd.test.js.
+          //
+          // Closing the hole therefore needs a DURABLE record of the agreement,
+          // and the reverted three-turn window above is what happens when such a
+          // record is not scoped to the action it authorised -- a booking
+          // allowed on a cancellation's consent, 55 seconds stale.
+          //
+          // So the candidate rule is computed and logged beside the decision the
+          // gate already makes, and the question it answers is the one the last
+          // attempt never asked: on real calls, where would this DISAGREE with
+          // the incumbent, and which of the two was right? A rule that has never
+          // been compared against a call it did not author is not evidence.
+          //
+          // The token is keyed by a fingerprint of the read-back THE CALLER
+          // HEARD, which is the only reason it can discriminate at all: scoping
+          // a write to values the write is itself built from compares a value to
+          // itself and cannot fail.
+          // -------------------------------------------------------------------
+          {
+            const probeReply = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
+            const probeStrings = getStrings(ctx?.config);
+            const probeReadBack = Boolean(probeReply && probeStrings.confirmReadBackRe?.test(probeReply));
+            const probeToken = ctx?.lastAgreementReadBackKey ?? null;
+            const gateRan = lastCallerText.trim() !== "";
+            if (!gateRan) bumpCounter("write_consent_skipped_silent_turn");
+            if (probeToken) bumpCounter("write_consent_token_present");
+            log.info("write_consent_probe", {
+              callSid: ctx?.callSid ?? null,
+              callId: ctx?.callId ?? null,
+              tool: fc.name,
+              // Whether the consent machinery ran at all on this attempt.
+              gate_ran: gateRan,
+              readback_now: probeReadBack,
+              agreed_now: isAffirmative(lastCallerText),
+              token_present: Boolean(probeToken),
+              // Does the durable token refer to the read-back still standing? If
+              // this is true on attempts where gate_ran is false, the token would
+              // have authorised a write the gate currently waves through
+              // unchecked -- which is the whole question.
+              token_matches_current_readback:
+                Boolean(probeToken && probeReadBack && probeToken === textFingerprint(probeReply)),
+              caller_turns_since_agreement: ctx?.callerTurnsSinceAgreement ?? null,
+            });
+          }
+
           if (lastCallerText.trim() !== "") {
             const consentRefusal =
               isHesitationOnly(lastCallerText)
@@ -1227,13 +1293,6 @@ function writeAttemptPatch(budget) {
       ? { writeAttemptRefusals: budget.refusals + 1, writeAttemptRefusedTurn: budget.callerTurn }
       : {}),
   };
-}
-
-function textFingerprint(text) {
-  let h = 5381;
-  const s = String(text || "");
-  for (let i = 0; i < s.length; i += 1) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return `k${h}`;
 }
 
 function callerNameFromArgs(args) {

@@ -336,6 +336,55 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(s.store.scheduled()).toHaveLength(1);
     expect(c().write_consent_checked ?? 0).toBe(0);
     expect(c().write_order_would_refuse ?? 0).toBe(0);
+
+    // THE PROBE SEES IT, which is what makes the hole measurable in production
+    // before anything is changed on the strength of it.
+    expect(c().write_consent_skipped_silent_turn).toBe(1);
+    // And no agreement was ever given on this call, so no durable token exists.
+    // This is the DANGEROUS shape: gate skipped and nothing ever consented.
+    expect(c().consent_agreement_recorded ?? 0).toBe(0);
+    expect(c().write_consent_token_present ?? 0).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // CONSENT OUTLIVES THE TURN IT WAS GIVEN ON, and this is why the silent-turn
+  // hole above cannot simply be closed by requiring caller text.
+  //
+  // The caller agrees on turn N. The model says something, the turn ends, and it
+  // calls book_appointment on turn N+1 with no new caller speech. Today that
+  // write succeeds -- because the gate block is skipped when lastCallerText is
+  // empty, which is the same hole. But the write is also CORRECT: the caller did
+  // agree, one turn earlier, to this exact booking.
+  //
+  // So "the caller has not spoken this turn" is not "the caller has not agreed",
+  // and a fix that conflates them refuses legitimate bookings. Closing the hole
+  // needs a durable record of the agreement, which is the open design question --
+  // and the reverted three-turn window (services/tools.js) is what happens when
+  // that record is not scoped to the action it authorised.
+  //
+  // Pinned so that any future change here has to confront both cases at once.
+  // -------------------------------------------------------------------------
+  it("allows a write one turn after the agreement, with no caller speech on that turn", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    // The turn ends with the model speaking again, so the agreement is now two
+    // turns back and this turn carries no caller text at all.
+    await s.assistantTurn("Lovely, one moment while I get that in for you.");
+    await s.book();
+
+    expect(s.store.scheduled()).toHaveLength(1);
+
+    // THE BENIGN SHAPE, and the whole reason the hole cannot just be closed.
+    // The gate was skipped exactly as in the test above -- but here the caller
+    // DID agree, one turn earlier, and the engine holds a token proving it. The
+    // two cases are indistinguishable to the gate and distinguishable to the
+    // probe, which is what a rule would need in order to be safe.
+    expect(c().write_consent_skipped_silent_turn).toBe(1);
+    expect(c().consent_agreement_recorded).toBe(1);
+    expect(c().write_consent_token_present).toBe(1);
   });
 
   it("writes nothing when there was no read-back to agree to", async () => {
