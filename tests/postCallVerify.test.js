@@ -650,3 +650,109 @@ describe("the post-call confirmation does not duplicate the booking-time one", (
     expect(out.skipped.map((x) => x.reason)).not.toContain("already_confirmed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE NEUTRAL MESSAGE, and the rule it is an exception to.
+//
+// This module records an owner decision that callerNumber is "never used as a
+// fallback destination: a booking with no number on the row is reported to the
+// business, not texted to whoever happened to ring." A booking the call OWED has
+// no row at all, so it cannot satisfy that rule, and the owner took a narrow
+// exception for this one case. These tests are the fence around "narrow".
+// ---------------------------------------------------------------------------
+describe("a booking that was owed and never written", () => {
+  beforeEach(() => clearStats());
+
+  const CALLER = "+447700900123";
+  const owed = (over = {}) =>
+    input({
+      callerNumber: CALLER,
+      writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+      claims: [{ turn: 1, kind: "claim" }],
+      bookingOwed: { agreed: true, pointVerified: 1 },
+      mode: "send",
+      ...over,
+    });
+
+  it("texts the caller that it is NOT confirmed", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.bookingOwedNoRow).toBe(true);
+
+    // TWO messages here, and both are true: the cancellation on this call really
+    // happened and the caller should be told, and the booking they then agreed to
+    // does not exist. This is CA422f58's exact shape. Asserting a count of one
+    // would have been asserting that one of those two is wrong.
+    const pending = d.notifications.sendCallerSms.mock.calls.find(
+      (cll) => cll[2] === "appointment_request_pending"
+    );
+    expect(pending).toBeDefined();
+    const [, to, kind, vars] = pending;
+    expect(to).toBe(CALLER);
+    expect(kind).toBe("appointment_request_pending");
+    expect(out.sent.map((x) => x.kind)).toContain("appointment_request_pending");
+    expect(getLatencyStats().turnTaking.postcall_pending_sent).toBe(1);
+
+    // {business} AND NOTHING ELSE. No time, because there is no confirmed row and
+    // a time here would assert the booking this message exists to deny. No name,
+    // because a name is the field most likely to be the thing that went wrong --
+    // 20 ms of caller audio produced a confident misspelled read-back on a real
+    // call.
+    expect(Object.keys(vars)).toEqual(["business"]);
+  });
+
+  it("sends nothing when the booking actually exists", async () => {
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).not.toContain("appointment_request_pending");
+  });
+
+  it("sends nothing on count mode", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    await verifyCall(owed({ mode: "count" }), d);
+
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+  });
+
+  it("reports when there is no number to text, rather than guessing at one", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed({ callerNumber: null }), d);
+
+    // The cancellation confirmation still goes out -- it reads its number off the
+    // ROW, which is the rule this case is an exception to, and it is unaffected.
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).not.toContain("appointment_request_pending");
+    expect(out.skipped.map((x) => x.reason)).toContain("pending_no_number");
+    expect(getLatencyStats().turnTaking.postcall_pending_skipped_no_number).toBe(1);
+  });
+
+  it("still sends when a verdict impugns the row", async () => {
+    // SUPPRESSES_CONFIRMATION withholds a message that PROMISES A ROW IS RIGHT.
+    // This one promises the opposite, and write_abandoned is a call that owed a
+    // write and abandoned it -- exactly when the caller most needs telling.
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed({ abandoned: ["book_appointment"] }), d);
+
+    expect(out.verdict).toBe("write_abandoned");
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).toContain("appointment_request_pending");
+  });
+
+  it("survives the send failing", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    // Only the pending send fails. mockRejectedValueOnce would have hit the
+    // cancellation confirmation instead, and the test would have passed on
+    // `send_failed` from an entirely different message.
+    d.notifications.sendCallerSms.mockImplementation(async (_cfg, _to, k) => {
+      if (k === "appointment_request_pending") throw new Error("twilio down");
+    });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.skipped.map((x) => x.reason)).toContain("pending_send_failed");
+    expect(getLatencyStats().turnTaking.postcall_pending_failed).toBe(1);
+  });
+});

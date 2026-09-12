@@ -358,6 +358,17 @@ export const DEFAULT_SMS_TEMPLATES = {
     "Hi{name_part}, we got your message at {business} — someone will get back to you {sla}. Thanks for calling!",
   missed_call:
     "Sorry we missed your call at {business}! Call us back anytime and we'll help you right away.",
+  // A booking the call owed and never wrote. Sent from lib/postCallVerify.js when
+  // the structural check says an appointment was agreed and no row exists.
+  //
+  // IT SAYS NOT CONFIRMED, in those words. The whole failure being corrected is a
+  // caller who believes they have an appointment they do not have -- or, on the
+  // call that prompted this, one told a technical glitch had occurred and left
+  // believing the opposite. Either way the honest message is the same, and
+  // anything softer recreates the ambiguity.
+  appointment_request_pending:
+    "Thanks for calling {business}. We have your appointment request but it is not confirmed yet — " +
+    "we'll be in touch shortly to finish booking it.",
 };
 
 /** Replace {key} placeholders in a template with vars[key] (blank if missing). */

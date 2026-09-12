@@ -80,6 +80,7 @@ const SMS_TEMPLATE_KINDS = [
   "appointment_cancelled",
   "message_received",
   "missed_call",
+  "appointment_request_pending",
 ];
 
 // A single SMS segment is 160 GSM-7 characters; 320 keeps an override to at
@@ -104,6 +105,12 @@ const SMS_TEMPLATE_PLACEHOLDERS = {
   appointment_confirmation: ["name", "business", "datetime"],
   appointment_cancelled: ["name", "business", "datetime"],
   message_received: ["name_part", "business", "sla"],
+  // A booking the call owed and never wrote. {business} AND NOTHING ELSE: no
+  // {datetime}, because there is no confirmed row and a time here would assert the
+  // booking this message exists to deny; no {name}, because a name is the field
+  // most likely to be the thing that went wrong. Kept identical to
+  // lib/smsConsent.js -- tests/smsTemplateParity.test.js fails on drift.
+  appointment_request_pending: ["business"],
   missed_call: ["business"],
 };
 
