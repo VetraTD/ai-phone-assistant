@@ -89,6 +89,13 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const verify = vi.fn(async () => ({ verdict: "ok" }));
+  // Order matters and is asserted below: recovery runs BEFORE verify, so that a
+  // booking it manages to make is a row verify then reads as clean.
+  const order = [];
+  const recover = vi.fn(async () => {
+    order.push("recover");
+    return { ran: false, booked: false };
+  });
 
   const execute = vi.fn(async (fc) => {
     if (refuse.includes(fc.name)) {
@@ -142,7 +149,11 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
     database: fakeDb(),
     env,
     execute,
-    verify,
+    verify: vi.fn(async (...a) => {
+      order.push("verify");
+      return verify(...a);
+    }),
+    recover,
   });
   ws.deliver({
     event: "start",
@@ -159,6 +170,8 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
   return {
     live,
     verify,
+    recover,
+    order,
     settle,
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
@@ -405,5 +418,74 @@ describe("abandoned writes reach the post-call read", () => {
     await s.hangUp();
 
     expect(s.verify.mock.calls[0][0].abandoned).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE RECOVERY WIRE. lib/postCallRecover.js can only choose among the times this
+// call confirmed open, and that set lives in the engine's guards closure -- it is
+// the one thing the status webhook cannot get hold of later, which is why the
+// acting rung runs at teardown instead.
+//
+// So this asserts the wire, not the decision. A slot list produced here and never
+// copied would leave the recovery with nothing to choose from on every call, it
+// would decline every time, and the counter would read zero exactly as it does on
+// a call that owed nothing. That is the shape of bug this repository has shipped
+// twice -- lastCallerText and the hang-up gate, both for the life of a deployment.
+// ---------------------------------------------------------------------------
+describe("the recovery gets the times this call confirmed open", () => {
+  it("passes the verified slot list, not a count", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    await s.book();
+    await s.hangUp();
+
+    expect(s.recover).toHaveBeenCalledTimes(1);
+    const passed = s.recover.mock.calls[0][0];
+    // The availability response put this exact key on the record, minute
+    // precision, naive local -- guards.slotKey's contract.
+    expect(passed.slots).toContain("2026-09-07T10:00");
+    expect(passed.mode).toBe("act");
+    expect(passed.businessId).toBe("biz-1");
+    expect(passed.callId).toBe("call-row-1");
+  });
+
+  it("stays off unless POSTCALL_JUDGE says act", async () => {
+    // The gate is the judge's own mode, so turning the post-call READ on cannot
+    // start authoring a booking.
+    const s = await boot({ POSTCALL_VERIFY: "count" });
+    await s.book();
+    await s.hangUp();
+    expect(s.recover.mock.calls[0][0].mode).toBe("off");
+  });
+
+  it("runs BEFORE verify, so a recovered booking is a row verify can see", async () => {
+    // The ordering is the whole design: recovery first means verifyCall reads a
+    // call that HAS a row and sends the caller its confirmation off that row,
+    // and the escalation it would otherwise raise becomes the fallback for a
+    // recovery that could not fire -- with no branch anywhere saying so.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    await s.book();
+    await s.hangUp();
+    expect(s.order).toEqual(["recover", "verify"]);
+  });
+
+  it("still verifies when the recovery rejects", async () => {
+    // A recovery that failed is exactly when the escalation matters most, so it
+    // must not be able to take verify down with it.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    s.recover.mockRejectedValueOnce(new Error("model unreachable"));
+    await s.book();
+    await s.hangUp();
+    expect(s.verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes an empty list when no availability check ever ran", async () => {
+    // Nothing to choose from is a legitimate outcome and the case a human still
+    // has to own. It must arrive as [] rather than undefined, or the recovery's
+    // own guard reads a missing wire as a missing check.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    await s.callTool("record_customer_request", { request_type: "message" });
+    await s.hangUp();
+    expect(s.recover.mock.calls[0][0].slots).toEqual([]);
   });
 });

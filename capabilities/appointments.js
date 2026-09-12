@@ -430,7 +430,7 @@ const APPOINTMENT_MODULE_TASKS = ["book_appointment", "check_appointment", "canc
  * @param {object} cfg - appointments capability config
  * @returns {{length: number, capacity: number}}
  */
-function availabilitySettings(cfg) {
+export function availabilitySettings(cfg) {
   const a = cfg?.availability || {};
   return {
     length: Number.isInteger(a.length) ? a.length : 30,

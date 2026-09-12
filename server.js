@@ -936,7 +936,13 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
         // a judge that delayed or broke the summary would be trading a working
         // feature for an experiment.
         const jMode = judgeMode();
-        if (jMode !== "off" && transcript.length > 0) {
+        // `act` runs the SAME reader at call teardown, inside the Live session,
+        // because the acting rung needs this call's verified-slot set and that
+        // lives in the engine's closure. Running the shadow copy here as well
+        // would bill a second model call per call to log a verdict the acting
+        // path has already logged, so act deliberately replaces shadow rather
+        // than extending it. See judgeMode in lib/postCallJudge.js.
+        if (jMode === "shadow" && transcript.length > 0) {
           const bookedForCall = await db.listAppointmentsByCallId(dbCallId, businessId);
           if (bookedForCall == null) {
             // null is a FAILED read, [] is a genuinely empty one, and
