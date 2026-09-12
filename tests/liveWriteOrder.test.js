@@ -67,7 +67,7 @@ const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slic
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
 const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
-const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4 } = {}) => ({
+const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4, callerContext = null } = {}) => ({
   businessId: "biz-1",
   callerPhone: "+15551234567",
   callId: "call-1",
@@ -81,6 +81,7 @@ const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config =
   callerTurnCount: turn,
   lastCallerText: said,
   lastReplyText: replied,
+  callerContext,
 });
 
 const book = (c) =>
@@ -222,6 +223,92 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     // Still counted as a situation. The ceiling changes what we DO, never what
     // we know.
     expect(counters().write_order_would_refuse).toBe(1);
+  });
+
+  it("does not let ONE tool's refusals release a DIFFERENT tool's write", async () => {
+    // LVX125, and the reason it is here rather than in a unit test: this is the
+    // bug that deleted a caller's appointment on two consecutive production
+    // calls, 2026-09-12.
+    //
+    //   15:01:18  write_order_refused       reschedule  readBackMade=false
+    //   15:01:27  write_order_refused       reschedule  readBackMade=false
+    //   15:04:04  write_order_gate_ceiling  CANCEL      refusals=2
+    //
+    // The key for a write with no read-back was the literal string "none", so
+    // every unasked write in a pack shared one budget. Two refused RESCHEDULES
+    // released a CANCELLATION three minutes later, and the caller said "No. Why
+    // would you cancel that?".
+    //
+    // Driven through real refusals, not seeded state, for the same reason the
+    // test above says: a hand-written key would be testing the fixture.
+    // callerContext matters and its absence is why the first version of this
+    // test passed against the BUG. hasWriteTarget reads the call-start caller
+    // snapshot: with no upcoming appointment it returns false, the write-order
+    // gate opts out entirely, and the refusals below come from the pack instead
+    // -- spending no budget and reproducing nothing. Production had one.
+    const noReadBack = {
+      said: "8000",
+      replied: "Is that what you were looking for?",
+      callerContext: { callCount: 1, upcomingAppointments: [{ scheduled_at: FUTURE_SLOT_ISO }] },
+    };
+
+    const one = await executeToolCall(
+      { id: "r1", name: "reschedule_appointment_db", args: { new_scheduled_at: FUTURE_SLOT } },
+      ctx(noReadBack)
+    );
+    expect(one.functionResponse.response.success).toBe(false);
+
+    const two = await executeToolCall(
+      { id: "r2", name: "reschedule_appointment_db", args: { new_scheduled_at: FUTURE_SLOT } },
+      ctx({ ...noReadBack, capabilityState: one.stateEffects.capabilityState, turn: 5 })
+    );
+    expect(two.functionResponse.response.success).toBe(false);
+
+    // The budget for THAT proposal is now spent. A cancellation is a different
+    // proposal and must still be refused.
+    mockGetAppointmentById.mockResolvedValue({
+      id: "a1",
+      client_phone: "+15551234567",
+      scheduled_at: FUTURE_SLOT,
+      status: "scheduled",
+    });
+    clearStats();
+    const cancel = await executeToolCall(
+      { id: "c1", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+      ctx({ ...noReadBack, capabilityState: two.stateEffects.capabilityState, turn: 6 })
+    );
+
+    expect(cancel.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("still releases the SAME unasked proposal, so an unrecognised read-back cannot livelock", async () => {
+    // The other half, and the reason the fix is a narrower key rather than
+    // "never release when nothing was read back". If confirmReadBackRe stops
+    // recognising however the model phrases itself, the model re-reads the SAME
+    // proposal, the args do not move, and the escape must still work -- or that
+    // tenant cannot book at all.
+    const unchanged = {
+      said: "Yeah go ahead",
+      replied: "So I have you down for Tuesday at ten. Sound good?",
+    };
+
+    const first = await book(ctx(unchanged));
+    expect(first.functionResponse.response.success).toBe(false);
+    const second = await book(
+      ctx({ ...unchanged, capabilityState: first.stateEffects.capabilityState, turn: 5 })
+    );
+    expect(second.functionResponse.response.success).toBe(false);
+
+    clearStats();
+    const third = await book(
+      ctx({ ...unchanged, capabilityState: second.stateEffects.capabilityState, turn: 6 })
+    );
+
+    expect(third.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_gate_ceiling).toBe(1);
   });
 
   it("gives a CHANGED proposal a fresh budget", async () => {

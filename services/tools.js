@@ -1028,7 +1028,48 @@ export async function executeToolCall(fc, ctx) {
             // per-call memory rather than a log, but the read-back carries the
             // caller's name and appointment time and there is no reason to keep
             // it once a number will do.
-            const readBackKey = readBackMade ? textFingerprint(lastReplyText) : "none";
+            // ---------------------------------------------------------------
+            // WHEN NOTHING WAS READ BACK, THE KEY IS THE ATTEMPT. LVX125.
+            //
+            // This was the literal string "none", and that pooled EVERY
+            // read-back-less write in a pack into one shared "proposal". Two
+            // refusals of any of them spent the ceiling, and from then on every
+            // subsequent read-back-less write in that pack was released
+            // ungated -- which is precisely the set of writes the caller was
+            // never told about.
+            //
+            // Measured on two consecutive production calls, 2026-09-12:
+            //
+            //   15:01:18  write_order_refused       reschedule  readBackMade=false
+            //   15:01:27  write_order_refused       reschedule  readBackMade=false
+            //   15:04:04  write_order_gate_ceiling  CANCEL      refusals=2
+            //   15:04:36  write_order_gate_ceiling  book        refusals=2
+            //
+            // Two refusals of a RESCHEDULE released a CANCELLATION three
+            // minutes later. The caller's appointment was deleted and they
+            // said "No. Why would you cancel that?". CAa5c9b8 did the same
+            // thing eleven minutes earlier from a reschedule and a note.
+            //
+            // Keying on the attempt restores what the comment above already
+            // claims, and all three documented cases still hold:
+            //
+            //   read-back not recognised -> the model re-reads the SAME
+            //     proposal, so the args are the same, the key is the same, the
+            //     budget depletes and the escape still works. This is the
+            //     livelock the ceiling exists for and it is UNCHANGED.
+            //   consent not recognised -> same as above.
+            //   caller changing their mind -> different args, different key,
+            //     budget resets, gate keeps its teeth.
+            //
+            // What no longer happens is one tool's refusals releasing another
+            // tool's write. Note the deliberate asymmetry with the branch
+            // above: a real read-back is keyed by WHAT WAS SAID, because the
+            // same words are the same proposal however the model phrased the
+            // call; with nothing said, the arguments are all that is left.
+            // ---------------------------------------------------------------
+            const readBackKey = readBackMade
+              ? textFingerprint(lastReplyText)
+              : `none:${writeAttemptFingerprint(fc)}`;
             const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey;
             const orderRefusals = sameProposal ? Number(orderScratch.writeOrderRefusals) || 0 : 0;
             // Per CALLER TURN, not per tool round, for the reason written on
@@ -1047,6 +1088,13 @@ export async function executeToolCall(fc, ctx) {
                 // vocabulary; LVX21 is what a hair trigger on this path costs.
                 bumpCounter("write_order_gate_ceiling");
                 log.error("write_order_gate_ceiling", {
+                  // callSid as well as callId. These three lines carried only
+                  // callId, so filtering a call by its SID returned every event
+                  // EXCEPT the gate's own decisions -- and on 2026-09-12 that
+                  // led to "the gate never engaged" being stated as fact about a
+                  // call where it had refused four times. LVX111 filed the same
+                  // shape for tool_duration.
+                  callSid: ctx?.callSid ?? null,
                   callId: ctx?.callId ?? null,
                   tool: fc.name,
                   refusals: orderRefusals,
@@ -1058,6 +1106,7 @@ export async function executeToolCall(fc, ctx) {
                 // happened to be looking. See writeAttemptMaxRefusals.
                 bumpCounter("write_attempt_budget_released");
                 log.error("write_attempt_budget_released", {
+                  callSid: ctx?.callSid ?? null,
                   callId: ctx?.callId || null,
                   tool: fc.name,
                   gate: "write_order",
@@ -1070,6 +1119,7 @@ export async function executeToolCall(fc, ctx) {
                 // the two booleans say whether a read-back was recognised and
                 // whether the answer parsed as agreement, never what was said.
                 log.error("write_order_refused", {
+                  callSid: ctx?.callSid ?? null,
                   callId: ctx?.callId ?? null,
                   tool: fc.name,
                   readBackMade,

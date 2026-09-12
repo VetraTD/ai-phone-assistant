@@ -11577,6 +11577,84 @@ untested.
 
 ---
 
+## LVX125 — one tool's refusals released another tool's write, and it deleted appointments
+
+**Status: FIXED, VERIFIED OFFLINE. Caused an unwanted cancellation on two
+consecutive production calls, 2026-09-12.**
+
+The write-order gate's ceiling exists to escape a livelock: if the model keeps
+proposing the same thing and consent is never recognised, the third attempt is
+released rather than refusing a caller forever. It is keyed to the PROPOSAL, and
+that keying was corrected once already (2026-09-09) after two correct refusals
+burned a budget on a caller who was still changing their mind.
+
+**The key for a write with NO read-back was the literal string `"none"`.** So
+every unasked write in a pack shared one budget. Two refusals of any of them
+spent the ceiling, and from then on every subsequent read-back-less write in that
+pack was released ungated — precisely the set of writes the caller was never told
+about.
+
+```
+CAd3695bf0, 15:01-15:04
+  15:01:18  write_order_refused       reschedule_appointment_db  readBackMade=false
+  15:01:27  write_order_refused       reschedule_appointment_db  readBackMade=false
+  15:04:04  write_order_gate_ceiling  cancel_appointment_db      refusals=2   <- DELETED A ROW
+  15:04:36  write_order_gate_ceiling  book_appointment           refusals=2
+
+CAa5c9b891, eleven minutes earlier
+  14:50:21  write_order_refused       reschedule_appointment_db  readBackMade=false
+  14:51:06  write_order_refused       add_appointment_note       readBackMade=false
+  14:51:40  write_order_gate_ceiling  cancel_appointment_db      refusals=2   <- DELETED A ROW
+  14:52:56  write_order_refused       book_appointment           readBackMade=TRUE  <- teeth again
+```
+
+That last line is the proof of mechanism: once a real read-back happened the key
+became a real fingerprint, `sameProposal` went false, the counter reset, and the
+gate refused again.
+
+On `CAd3695bf0` the caller then said **"No. Why would you cancel that?"** and the
+assistant answered "I'm sorry, I thought I heard you ask to cancel it." The
+transcription had collapsed on that call — five loud utterances, 5.8 s of speech,
+transcribed as zero characters — so the model was acting on garbage. That is the
+usual lossy-transcript problem and it is survivable; what made it destructive was
+the gate being off.
+
+### The fix, and why it is NOT "never release without a read-back"
+
+`readBackKey` is now `none:<writeAttemptFingerprint(fc)>` when nothing was read
+back, so the budget identifies the ATTEMPT. All three documented cases still hold:
+an unrecognised read-back re-reads the SAME proposal with the SAME args, so the
+key is stable, the budget depletes and the escape works unchanged; a caller
+changing their mind still resets it. What no longer happens is one tool's
+refusals releasing another tool's write.
+
+The stricter option — refuse to release whenever `readBackMade` is false — was
+considered and REJECTED. `confirmReadBackRe` is a regex over the model's own
+phrasing; if it stops matching, that tenant could not book at all. The comment
+above the ceiling already names that case, and the escape exists for it.
+
+### Why this was invisible for an hour
+
+`write_order_refused`, `write_order_gate_ceiling` and `write_attempt_budget_released`
+logged **`callId` and not `callSid`**, unlike essentially every other event on the
+path. Filtering the call by its SID returned every event EXCEPT the gate's own
+decisions — which led to "the gate never engaged" being stated as established
+fact about a call where it had refused four times, and to a four-case offline
+reproduction built on that false premise which refused in every variant and taught
+nothing. `callSid` is now on all three. LVX111 filed the same shape for
+`tool_duration`.
+
+**And the first version of the regression test passed against the bug.** Its ctx
+had no `callerContext`, so `hasWriteTarget` returned false, the gate opted out
+entirely, and the refusals came from the pack instead — spending no budget and
+reproducing nothing. Only the sabotage check caught it. A test for a gate that
+opts out silently must pin the thing that makes it opt out.
+
+**Done when:** a live call refuses a cancellation that was never read back, after
+some other write on the same call was refused twice.
+
+---
+
 ## LVX123 — the model invents a surname, and the spelling gate settles for half a name
 
 **Status: OPEN · P0 for a customer demo. Observed twice on 2026-09-12, and one of
