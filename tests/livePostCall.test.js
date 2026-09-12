@@ -489,3 +489,33 @@ describe("the recovery gets the times this call confirmed open", () => {
     expect(s.recover.mock.calls[0][0].slots).toEqual([]);
   });
 });
+
+describe("the recovery is told whether the caller ever agreed", () => {
+  it("passes agreed=false on a call with no read-back and no yes", async () => {
+    // The fail-closed direction, and the one that matters: this flag is the only
+    // structural consent signal the recovery has, so a wire that goes missing must
+    // disable the feature rather than disable the gate.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    await s.book();
+    await s.hangUp();
+    expect(s.recover.mock.calls[0][0].agreed).toBe(false);
+  });
+
+  it("passes agreed=true once the caller affirms a read-back", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    // A read-back, completed, so it becomes lastReplyText.
+    s.say("Just to confirm, Monday the seventh at ten in the morning. Shall I book that?");
+    s.endTurn();
+    await s.settle();
+    // The caller answers it, and the turn closes.
+    s.live.push({ serverContent: { inputTranscription: { text: "Yes." } } });
+    await s.settle();
+    s.say("Lovely, one moment.");
+    s.endTurn();
+    await s.settle();
+
+    await s.book();
+    await s.hangUp();
+    expect(s.recover.mock.calls[0][0].agreed).toBe(true);
+  });
+});

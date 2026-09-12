@@ -51,6 +51,7 @@ const base = (over = {}) => ({
   callerNumber: "+14699338887",
   config: { capabilities: { appointments: { availability: { length: 45, capacity: 2 } } } },
   slots: SLOTS,
+  agreed: true,
   mode: "act",
   ...over,
 });
@@ -293,6 +294,69 @@ describe("recoverOwedBooking — reads cannot escape the tenant scope", () => {
     const db = makeDb({ fetchCallTranscript: vi.fn(async () => []) });
     const out = await recoverOwedBooking(base(), deps(db));
     expect(out.reason).toBe("no_transcript");
+    expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ONLY STRUCTURAL CONSENT GATE ON THIS PATH.
+//
+// Everything else here is a reader's judgement about prose. This one is not: the
+// engine records an agreement token only when the caller's turn was affirmative
+// AND the assistant's previous turn was a read-back. So a caller who got most of
+// the way through a booking and never approved it produces no token, and no
+// verdict from the reader can put an appointment in a calendar.
+//
+// Used ONLY to refuse, exactly as the LVX117 gate uses it. The token is
+// action-blind -- it carried a cancellation's consent to a booking write ten
+// turns later on a real call -- so it is never evidence that a booking was
+// agreed. Its ABSENCE is evidence that nothing was.
+// ---------------------------------------------------------------------------
+describe("recoverOwedBooking — the caller must have agreed to something", () => {
+  beforeEach(() => {
+    clearStats();
+    vi.clearAllMocks();
+  });
+
+  it("refuses, and calls no model, when the call recorded no agreement at all", async () => {
+    const db = makeDb();
+    const d = deps(db);
+    const out = await recoverOwedBooking(base({ agreed: false }), d);
+
+    expect(out.booked).toBe(false);
+    expect(out.reason).toBe("never_agreed");
+    expect(d.judge).not.toHaveBeenCalled();
+    expect(d.select).not.toHaveBeenCalled();
+    expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
+    expect(c().recover_skipped_never_agreed).toBe(1);
+  });
+
+  it("cannot be talked past by a reader that is sure a booking was agreed", async () => {
+    // The gate is ABOVE the reader on purpose. A confident "book" plus a
+    // confident slot choice must still lose to "the caller never said yes",
+    // because the token is the only non-prose signal on this path.
+    const db = makeDb();
+    const d = deps(db, {
+      judge: vi.fn(async () => ({ ran: true, agreedAction: "book", confidence: "high" })),
+      select: vi.fn(async () => ({ ran: true, slot: SLOTS[0], slotIndex: 0, confidence: "high" })),
+    });
+    const out = await recoverOwedBooking(base({ agreed: false }), d);
+
+    expect(out.reason).toBe("never_agreed");
+    expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing agreed flag as no agreement, not as permission", async () => {
+    // A field produced by the engine and never copied into the input would read
+    // as undefined here. It must fail CLOSED -- the opposite of the wire bugs this
+    // repository has shipped twice, where an uncopied value silently disabled a
+    // gate instead of a feature.
+    const db = makeDb();
+    const input = base();
+    delete input.agreed;
+    const out = await recoverOwedBooking(input, deps(db));
+
+    expect(out.reason).toBe("never_agreed");
     expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
   });
 });
