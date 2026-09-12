@@ -10909,9 +10909,65 @@ falsified the obvious rule: `token_matches_current_readback` is FALSE in the ben
 case, because by then the model has said something else, so "matches the read-back
 still standing" is wrong by construction one turn later.
 
-**Done when:** `write_consent_skipped_silent_turn` and
-`write_consent_token_present` have a rate, and the pair shows how often the skip
-happens with no agreement anywhere on the call — which is the only dangerous shape.
+### CONFIRMED, 2026-09-12: this is what cancelled an appointment without consent
+
+Filed above as a hole found by a test. It is not theoretical. From CA422f58's own
+debug transcript, which is the call that opened this whole effort:
+
+```
+20:51:42.228  CALR: None          <- the caller said NOTHING on this turn
+20:51:42.228  ASST: "Just to confirm, you'd like to cancel your appointment on
+                     Tuesday, September 15th at 9:00 AM, is that right?"
+20:51:42.245  live_write_retried  ok=true      <- THE CANCEL COMMITTED
+20:51:49.109  CALR: "Yes."                     <- seven seconds later
+```
+
+The model asked, the caller had not answered, `retryPendingWrite` fired on that
+turn's completion, and the write went through. `lastCallerText` was empty, so the
+whole consent block was skipped and nothing checked anything.
+
+The original brief described this as the gate "seeing a read-back and allowing a
+write". The gate never ran at all. Same defect, different mechanism, and the
+mechanism is the one that decides the fix.
+
+**Read the timestamps carefully, or reach the wrong conclusion twice.**
+`live_debug_assistant_turn` emits at TURN COMPLETION, not when the caller spoke.
+On call CA8c019c a cancel ran 4.4 s before the "Yes." was logged and was
+perfectly consented -- the probe showed `agreed_now: true` at gate time. The
+authoritative signal is the probe, not the transcript timestamp. Both this
+session and the brief before it nearly mis-read this the other way.
+
+### THE FIX, and why the token can be used for it
+
+The obvious fix -- require caller text -- refuses writes that work today
+(see above). What separates the two cases is whether the caller has agreed to
+ANYTHING on the call:
+
+| | caller text this turn | agreement token on the call |
+|---|---|---|
+| benign: a write one turn after a real yes | absent | **present** |
+| CA422f58: a write the caller never agreed to | absent | **absent** |
+
+And 2026-09-12 measured the token's limit as well: on CA8c019c it carried a
+CANCELLATION's consent to a BOOKING write ten caller turns later
+(`token_present: true, caller_turns_since_agreement: 10`). That is the reverted
+three-turn window's exact failure, reproduced live -- so the token is **useless as
+permission**.
+
+It is sound as ABSENCE of permission. No token anywhere on the call means the
+caller has agreed to nothing, and refusing on that can never authorise a wrong
+write. That asymmetry is the whole design:
+
+> **Refuse when there is no caller text on the turn AND no agreement token
+> anywhere on the call. Never use the token to allow anything.**
+
+**Rate so far: 0 of 7 write attempts** across three calls since the probe shipped
+(`gate_ran: false` count). That is NOT evidence the hole is closed -- CA422f58
+reached it through `retryPendingWrite`, and no retry has fired at all in those
+three calls, so the probe has never had the chance to see it.
+
+**Done when:** the refusal is in, and a call shows `write_consent_skipped_silent_turn`
+with `write_consent_token_present: 0` being refused rather than written.
 
 ---
 
@@ -10954,6 +11010,32 @@ is action-blind, so a caller who point-checked a time, declined to book and
 cancelled something instead can satisfy both halves. Firing anyway is the right
 asymmetry — a spurious task costs ten seconds, a missed one costs a lead nobody
 learns about. `postcall_booking_owed` is the denominator.
+
+### THE BLIND SPOT, measured 2026-09-12: it cannot see how this tenant books
+
+`bookingOwedNoRow` requires a POINT-checked slot. Callers here do not produce one.
+Two consecutive booking calls:
+
+| call | verified slots | point-checked | written slot | `booking_owed` |
+|---|---|---|---|---|
+| CAff202f | 16 | 1 | a LISTED one | true (by luck -- a different slot was point-checked) |
+| CA8c019c | 16 | **0** | a LISTED one | **false** |
+
+On CA8c019c the caller picked 9:00 AM off a whole-day list and no point check ever
+ran. **Had that booking silently failed, the escalation would not have fired.**
+That is the dominant booking flow for this tenant, and the safety net is blind to
+it.
+
+Loosening the precondition is not the fix -- "the caller agreed to something" with
+no slot evidence fires on most calls. The complement already exists and already
+works: the **post-call judge** (`lib/postCallJudge.js`) returned
+`agreed_action: book, confidence: high` on this call with no dependence on point
+checks, and has been correct on 4 of 4 calls in shadow.
+
+The disagreement to watch for is a LOST list-picked booking: the judge says
+`booking_missing: true`, the structural check says nothing was owed. That is the
+case that decides whether the judge should be promoted from shadow to triggering
+the escalation.
 
 **Done when:** a real call loses a booking and the `customer_requests` row and the
 owner notification both appear. Cannot be forced; it needs the model to fail.
