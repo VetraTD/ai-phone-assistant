@@ -174,6 +174,13 @@ try {
     const row = await pool.query(
       `SELECT id, phone_number, name, timezone, after_hours_policy, business_hours,
               allowed_tasks,
+              -- DOES THIS TENANT SEND SMS AT ALL. Off by default, and
+              -- services/notifications.js returns on it with no log and no
+              -- counter -- so POSTCALL_VERIFY=send on a tenant with this false
+              -- drops every caller message in silence, and "nothing was sent"
+              -- and "sending is switched off" look identical from outside the
+              -- VPC. Exactly the blind spot this file exists to close.
+              sms_followup_enabled,
               (general_info IS NOT NULL AND general_info <> '') AS has_general_info,
               coalesce(length(general_info), 0) AS general_info_chars,
               -- IS THERE A PRICE IN THE PROMPT? LVX66, and the $3,000 question.
