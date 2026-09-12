@@ -436,3 +436,131 @@ describe("verifyCall - never throws into a teardown", () => {
     expect(deps.db.listAppointmentsByCallId).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// CALL CA422f58, REPRODUCED. The call this whole effort exists to catch.
+//
+// From its own production log line:
+//
+//   postcall_verify  verdict=ok  booked_rows=0  changed_rows=1  claims=2  mode=count
+//
+// The caller was read back "I'm booking a 30 minute strategy call for you on
+// Monday, September 14th at 4 00 PM. Does that sound right?", said "Yes.", and
+// book_appointment was never called once. The assistant then invented a
+// technical glitch. No row exists, and the safety net reported the call CLEAN --
+// because `claims` was 2 and `wroteAnything` was true thanks to the CANCELLATION
+// that also happened, so `claimed && !wroteAnything` was false and every branch
+// fell through to ok.
+//
+// Nobody was told. That is the defect: not the fabrication, which cannot be
+// prevented on this front-end, but the silence afterwards.
+//
+// reconcile() cannot be made to see it without per-capability claim vocabulary,
+// because the claim ledger records one generic kind. These tests assert the
+// structural route instead, and the first one is the regression test for the
+// verdict staying `ok` -- it must, because that is what reconcile honestly
+// reports; what must change is that a human now hears about it anyway.
+// ---------------------------------------------------------------------------
+describe("a booking owed with no row reaches a human, whatever the verdict says", () => {
+  beforeEach(() => clearStats());
+
+  const ca422f58 = {
+    businessId: BUSINESS_ID,
+    callId: CALL_ID,
+    config: CONFIG,
+    callerNumber: "+447700900123",
+    // The cancellation that actually happened on that call.
+    writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+    claims: [
+      { turn: 3, kind: "claim", step: "gather_details" },
+      { turn: 7, kind: "claim", step: "confirm" },
+    ],
+    abandoned: [],
+    // A point availability check came back OPEN, and the caller affirmed a
+    // read-back. Both are tool traffic and caller audio; neither is prose.
+    bookingOwed: { agreed: true, pointVerified: 1 },
+    mode: "count",
+    callSid: "CA422f58",
+  };
+
+  it("still reports verdict ok, and escalates anyway", async () => {
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall(ca422f58, d);
+
+    // Unchanged, and deliberately so: this is what reconcile honestly concludes
+    // from a claim ledger that cannot tell a booking claim from a cancellation.
+    expect(out.verdict).toBe("ok");
+
+    // The fact, computed beside the verdict rather than competing with it.
+    expect(out.bookingOwedNoRow).toBe(true);
+    expect(getLatencyStats().turnTaking.postcall_booking_owed_no_row).toBe(1);
+
+    // THE ASSERTION THIS FILE EXISTS FOR. Before this, zero of these fired on
+    // that call.
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    // And the human is told what actually happened, not the fabrication story.
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toMatch(/caller agreed to an appointment/i);
+  });
+
+  it("says nothing when the booking it owed actually exists", async () => {
+    // The same call with the row present. This is the test that separates the
+    // check from one that simply escalates whenever a caller agreed to anything.
+    const d = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(ca422f58, d);
+
+    expect(out.bookingOwed).toBe(true);
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when no time the caller was asked about was ever confirmed", async () => {
+    // Browsing. A caller shown a list of times and agreeing to something, with no
+    // point check behind it, is not a booking that was owed -- it is a
+    // conversation. pointVerified is the discriminator, and it is why the
+    // availability verdict had to be recorded before this could be written.
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: { agreed: true, pointVerified: 0 } }, d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the caller never agreed to anything", async () => {
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: { agreed: false, pointVerified: 2 } }, d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("accuses nobody when the database read failed", async () => {
+    // A read that failed and a read that found nothing are opposite conclusions:
+    // an outage versus a missing booking. listAppointmentsByCallId returns null
+    // rather than [] for exactly this, and an outage must not wake a human with
+    // an accusation.
+    const d = fakeDeps({ readFails: true });
+    const out = await verifyCall(ca422f58, d);
+
+    expect(out.verdict).toBe("error");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("is inert for every caller that passes no structural facts", async () => {
+    // The cascade will never pass bookingOwed. Absent means absent, not false
+    // positives for every existing call site.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: undefined }, d);
+
+    expect(out.bookingOwed).toBe(false);
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+});
