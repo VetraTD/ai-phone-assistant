@@ -11355,6 +11355,120 @@ call that shows it.
 
 ---
 
+## LVX121 — the booking a call agreed to and never made, made
+
+**Status: BUILT on `feat/recover-owed-booking`, VERIFIED OFFLINE, deployed INERT.
+Activates on `POSTCALL_JUDGE=act` and has never run in production.**
+
+Every other net in this system ends by telling a human. That is the right
+fallback and the wrong default: the caller was told they were booked, so the
+truthful outcome is that they ARE booked, not that somebody rings them tomorrow
+to ask what they wanted.
+
+The owner asked the obvious question — if the call has the time and the name, why
+notify instead of just doing it — and the answer turned out to favour the
+question. **The reason `claimSlot.js` was reverted on 2026-09-11 was never that it
+read prose. It was that it had to pick one slot out of `verifiedSlots` with no
+information about which, and a whole-day query puts sixteen in there.** LVX115
+measured it: 16 verified, 1 point-checked, the booking landed on neither. The
+missing information was the caller's CHOICE among the times, and that is exactly
+what a reader can supply.
+
+### The shape, and why each half is safe
+
+```
+candidate set  <- availability tool RESPONSES (guards.verifiedSlotList)
+choice         <- a reader returning an INDEX into that set
+time written   <- slots[index], never a parsed timestamp
+```
+
+A reader that invents a time **cannot express one**: the only thing it can return
+is a position in a list it was handed. The worst it can do is name the wrong
+member of a set of real openings, and an out-of-range or non-integer index
+resolves to no selection rather than to `slots[0]`.
+
+The time itself is read off the ASSISTANT's own words, which is the reliable half
+of this transcript. The caller's lines are a degraded copy made by the same model
+acting as recogniser — 1,500 ms of speech logged as zero characters, and one
+caller's choice of 4:30 arriving as "Alice to 4:30". So the caller's line
+establishes THAT they agreed; the assistant's read-back establishes WHICH time.
+
+### Six gates, and the first three are code rather than judgement
+
+| # | gate | kind |
+|---|---|---|
+| 1 | the call recorded **no appointment row at all** | code |
+| 2 | the engine recorded the caller **affirming a read-back** | code |
+| 3 | the calendar confirmed at least one open time on the call | code |
+| 4 | the reader says a booking was agreed | reader |
+| 5 | the reader picks one of those times, in range, unambiguously | reader |
+| 6 | the slot is still free at write time (atomic) | code |
+
+Gate 1 is deliberately "any row", not "any scheduled row". On `scheduled > 0` a
+call that books and then **cancels** would have proceeded — cancelled row, nothing
+scheduled — the reader would have seen a transcript in which a booking WAS agreed,
+and the recovery would have reinstated what the caller just asked to kill. That is
+what `CA25e323` did on 2026-09-12. The scope is therefore stated honestly: this
+recovers calls that recorded NOTHING.
+
+Gate 2 is the only structural consent signal on the path, and it exists because
+gates 4 and 5 are a model reading prose with a record of 6 of 6 — a streak, not a
+rate. It is the LVX117 agreement ledger, read ONLY to refuse: the token is
+action-blind, so it is never evidence that a booking was agreed, but its absence is
+evidence that nothing was. A confident "book" plus a confident slot choice still
+loses to it, and that is asserted.
+
+### The name is never invented
+
+LVX77 wrote "Jane Doe" into an appointment, which is why the end-of-call sweep
+re-issues messages and refuses bookings. The lesson is not "never book" — it is
+never to invent an identifier. `client_name` is nullable, the caller's phone number
+comes from the phone network rather than from the model, and a name is taken only
+from a booking this caller previously completed. Nothing reads a name out of this
+call's prose, because the provenance check cannot tell a fabricated name from an
+ASR-mangled one.
+
+### The caller is told, by the path that already does it
+
+Recovery runs **before** `verifyCall`, and the ordering is the design. verify reads
+`bookedRows` from the database by `call_id`, so it sees the recovered row, reports
+the call clean, and sends the caller its confirmation built from that row (LVX29) —
+the one path that already dedupes against a confirmation the call itself sent. The
+escalation verify would otherwise raise becomes the fallback for a recovery that
+could not fire, with **no branch anywhere saying so**, because the row's presence is
+the branch.
+
+### Two things found while building it
+
+**Both reads were outside `withTenantSafe`.** The service runs as `vetra_app`
+`NOBYPASSRLS`, so an unscoped `listAppointmentsByCallId` returns zero rows — making
+"nothing was booked" and "I was not allowed to look" the same answer, and the
+recovery would have booked over appointments that already existed. Scoped, with
+tests.
+
+**`act` replaces `shadow` rather than extending it.** The acting rung runs the
+reader at teardown because it needs this call's verified-slot set, which lives in
+the engine closure. Leaving `server.js`'s shadow copy enabled would bill a second
+model call per call to log a verdict the acting path already logged.
+
+### What is NOT covered, stated rather than discovered later
+
+A caller who agrees and **then says "never mind"**. The ledger is a monotonic latch,
+so the earlier agreement survives the withdrawal, and only the reader's rule 4
+stands between that and a recovered booking. Making it structural needs prose
+heuristics over the caller's last turns, which is the treadmill this work exists to
+escape. What bounds it is the confirmation text: a wrong recovery is visible to the
+caller in minutes rather than at the appointment.
+
+And a call where **no availability check ever ran** has no candidate set, so nothing
+can be selected and a human still owns it.
+
+**Done when:** a live call agrees a booking, records no row, and a row appears with
+`recover_booked` — plus, separately, a call where the caller never agreed shows
+`recover_skipped_never_agreed` and no write.
+
+---
+
 ## Still open from this session, not filed as their own entries
 
 - **Stacked questions land on consent turns.** Two per call on each of the last
