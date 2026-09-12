@@ -105,11 +105,31 @@ describe("recoverOwedBooking — what reaches the database", () => {
     const out = await recoverOwedBooking(base(), d);
 
     expect(out.booked).toBe(false);
-    expect(out.reason).toBe("already_booked");
+    expect(out.reason).toBe("row_exists");
     // The cost argument, asserted: the common case must not reach a model.
     expect(d.judge).not.toHaveBeenCalled();
     expect(d.select).not.toHaveBeenCalled();
     expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
+  });
+
+  it("will not re-book an appointment the caller CANCELLED on the same call", async () => {
+    // The hazard a `scheduled > 0` test would have had. A call that books and then
+    // cancels leaves a cancelled row and nothing scheduled; the reader sees a
+    // transcript in which a booking WAS agreed and would hand back "book", and the
+    // recovery would reinstate exactly what the caller asked to kill. Not
+    // hypothetical -- CA25e323 did this on 2026-09-12.
+    //
+    // So the scope is "this call recorded NOTHING", and any row at all is enough
+    // to stand down.
+    const db = makeDb({ listAppointmentsByCallId: vi.fn(async () => [{ status: "cancelled" }]) });
+    const d = deps(db);
+    const out = await recoverOwedBooking(base(), d);
+
+    expect(out.booked).toBe(false);
+    expect(out.reason).toBe("row_exists");
+    expect(d.judge).not.toHaveBeenCalled();
+    expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
+    expect(c().recover_skipped_row_exists).toBe(1);
   });
 
   it("refuses to book on a FAILED row read, which is not an empty one", async () => {
