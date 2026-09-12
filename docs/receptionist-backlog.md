@@ -11357,8 +11357,11 @@ call that shows it.
 
 ## LVX121 — the booking a call agreed to and never made, made
 
-**Status: BUILT on `feat/recover-owed-booking`, VERIFIED OFFLINE, deployed INERT.
-Activates on `POSTCALL_JUDGE=act` and has never run in production.**
+**Status: BUILT on `feat/recover-owed-booking`. EVERY GATE PROVEN ON LIVE CALLS;
+THE WRITE PATH HAS NEVER EXECUTED. Deployed (`vetra/voice:0257d31`) and parked at
+`POSTCALL_JUDGE=shadow`, which is inert. Do not turn `act` on again until the
+write path has run once somewhere it can be watched — see "Why five calls could
+not trigger it" below.**
 
 Every other net in this system ends by telling a human. That is the right
 fallback and the wrong default: the caller was told they were booked, so the
@@ -11466,6 +11469,90 @@ can be selected and a human still owns it.
 **Done when:** a live call agrees a booking, records no row, and a row appears with
 `recover_booked` — plus, separately, a call where the caller never agreed shows
 `recover_skipped_never_agreed` and no write.
+
+### WHAT FIVE LIVE CALLS ESTABLISHED, 2026-09-12
+
+Three stand-downs, for three different reasons, each the correct one:
+
+| call | outcome | why it was right |
+|---|---|---|
+| `CAdb7c93df` | nothing at all (flag at `shadow`) | the inert check: code live, zero `recover_*` events |
+| `CAc5070c2d` | `never_agreed` | caller picked a time, gave a name, was read it back, and **hung up without approving**. The structural consent gate refused. This is the owner's own worry, tested: *"we wouldn't want it to fire if someone almost went through the entire thing but never approved it"* |
+| `CA7a5667c0` | `row_exists` rows=1 | the booking succeeded normally; gate 1 stood the recovery down |
+| `CA6b773e2a` | `row_exists` rows=1 | cancelled two appointments and booked a new one; again stood down |
+
+So the gates are not theory. **The write path still has not run.**
+
+### WHY FIVE CALLS COULD NOT TRIGGER IT, and what to use instead
+
+The window needed is *a recorded agreement with no row yet*, and it is opened by
+the caller's yes and closed by the write. Measured on two calls:
+
+```
+CA7a5667c0   yes 08:33:02  ->  row 08:33:46   = 44 SECONDS
+CA6b773e2a   yes 08:39:23  ->  row 08:39:25.9 =  2.7 SECONDS
+```
+
+The 44 seconds existed only because the assistant became confused about the
+caller's existing appointments. **On a clean call the write lands under three
+seconds after the yes, and no human can reliably hang up inside that.** Two
+recipes were tried and neither was sound: "hang up when it asks you to spell"
+fails because the model asks for the spelling EARLY on some calls (`CA7a5667c0`,
+08:32:10, before the time was even settled), and "say yes then hang up" is the
+2.7-second race above.
+
+**`scripts/live-call-harness.js` is the right instrument and was overlooked.** It
+drives the real engine over a real socket — so unlike `liveTextSession` it does
+set `callerSaidThisCall` and does exercise these gates — and being scripted it can
+drop the connection on an exact turn boundary, repeatably and for the price of the
+model tokens. It also leaves a standing regression test, which five phone calls do
+not. What it lacks today is a script step meaning "hang up here"; that is the next
+piece of work on this ticket.
+
+**Also verified live:** `recover_declined` (added after `CAc5070c2d` showed that a
+correct stand-down was invisible — counters are not readable per call, and the only
+way to tell "ran and declined" from "never ran" was noticing that `verifyCall` is
+chained after it and had fired).
+
+---
+
+## LVX122 — SMS consent is recorded before the caller answers
+
+**Status: OBSERVED on a live call, NOT INVESTIGATED. Filed with its evidence, not
+diagnosed — read the code before acting on this.**
+
+`CA6b773e2a`, 2026-09-12:
+
+```
+08:39:11.401  ASST  "Can I send you a text confirmation? It may include your
+                     name and appointment details..."
+08:39:14.622  record_sms_consent   success=true      <- 9 SECONDS BEFORE THE ANSWER
+08:39:23.266  CALR  "No, okay."
+08:39:23.266  ASST  "Got it, no text."
+...
+08:39:29.030  postcall_verify  sent: 2
+```
+
+The tool fired nine seconds before the caller answered, the caller then DECLINED,
+and two messages went out on that call. This is the LVX117 pattern — a write
+committed against a question the caller has not yet answered — on a different
+tool, and this one is a consent record.
+
+**What is not established:** what `record_sms_consent` was called WITH (the log
+line carries no granted flag), whether the two sends were the cancellation
+notifications rather than the confirmation, and whether either respects the
+consent row. `sent: 2` sits beside `skipped: ["already_confirmed"]` on a call that
+cancelled two appointments and booked one, so the arithmetic needs checking before
+any claim is made.
+
+Two reasons this matters more than an ordinary write-ordering bug: the SMS consent
+pack has `actionTools: []` (`capabilities/smsConsent.js:95`), so **it passes
+through none of the write-consent gates at all** — not the hesitation gate, not
+the write-order gate, not LVX117's — and a consent record is the artefact that is
+supposed to prove permission was given.
+
+**Done when:** the granted value is logged, and a caller who says no receives
+nothing.
 
 ---
 
