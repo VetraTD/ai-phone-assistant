@@ -82,12 +82,43 @@
  *   --debug-token <t> read /api/debug/latency before and after, print the delta
  *   --out <file>      write every received event to a JSONL file
  *   --confirm         required for a non-loopback --base
+ *
+ *   --hangup-after <label>      hang up once that scripted line's audio has
+ *                               finished sending
+ *   --hangup-delay-ms <ms>      wait this long after it first (default 0)
+ *   --hangup-on-counter <name>  hang up the instant that counter rises above
+ *                               its pre-call value. Needs --debug-token
+ *   --hangup-arm-after <label>  only START polling that counter after this
+ *                               line. /api allows 60 requests a minute, so a
+ *                               poll that runs all call gets 429ed
+ *   --hangup-poll-ms <ms>       how often to read the counters (default 150)
+ *   --expect-counter <name[:n]> repeatable. Exit 1 unless the counter moved by
+ *                               at least n (default 1). Needs --debug-token
+ *
+ * The hangup flags exist because the windows that matter are three seconds wide
+ * and a human cannot hit them -- LVX121's write path has never executed, and
+ * eleven real calls on 2026-09-12 could not tell old code from new on LVX125 or
+ * LVX126. Example, the LVX121 recipe:
+ *
+ *   node scripts/live-call-harness.js --script demo_booking --to +44... \
+ *     --debug-token "$DEBUG_TOKEN" \
+ *     --hangup-on-counter consent_agreement_recorded \
+ *     --expect-counter recover_booked
  */
 import "dotenv/config";
 import { WebSocket } from "ws";
 import twilio from "twilio";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio } from "../lib/probe/script.js";
+import {
+  makeHangupPlan,
+  hangupArmed,
+  hangupDecision,
+  pollArmed,
+  counterValue,
+  parseExpectation,
+  checkExpectations,
+} from "../lib/probe/hangup.js";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -95,6 +126,8 @@ const opt = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
+/** Every occurrence of a repeatable flag, in order. `opt` returns only the first. */
+const opts = (name) => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] ? [args[i + 1]] : []));
 const die = (msg) => {
   console.error(msg);
   process.exit(2);
@@ -127,6 +160,37 @@ const HOLD_MS = Number.parseInt(opt("hold", "20000"), 10);
 const MAX_CALL_MS = Number.parseInt(opt("max-call-ms", "180000"), 10);
 const OUT = opt("out", "");
 const DEBUG_TOKEN = opt("debug-token", "");
+
+/**
+ * HANGING UP ON PURPOSE, on a boundary a human cannot hit.
+ *
+ * LVX121's write path has never executed because the window it needs -- a
+ * recorded agreement with no row yet -- was measured at 2.7 seconds on a clean
+ * call. Eleven real calls on 2026-09-12 also failed to discriminate old code
+ * from new on LVX125 and LVX126, for the same reason.
+ *
+ * The decision itself lives in lib/probe/hangup.js so it can be tested without
+ * spending a call on it; everything here is the timers and the socket.
+ */
+const HANGUP_AFTER = opt("hangup-after", "");
+const HANGUP_ARM_AFTER = opt("hangup-arm-after", "");
+const HANGUP_ON_COUNTER = opt("hangup-on-counter", "");
+const HANGUP_DELAY_MS = Number.parseInt(opt("hangup-delay-ms", "0"), 10);
+const HANGUP_POLL_MS = Number.parseInt(opt("hangup-poll-ms", "150"), 10);
+const hangupPlan = makeHangupPlan({
+  afterLabel: HANGUP_AFTER,
+  onCounter: HANGUP_ON_COUNTER,
+  delayMs: HANGUP_DELAY_MS,
+  armAfterLabel: HANGUP_ARM_AFTER,
+});
+/** Repeatable. Each one turns a printed number into a pass/fail exit code. */
+let EXPECTATIONS = [];
+try {
+  EXPECTATIONS = opts("expect-counter").map(parseExpectation);
+} catch (err) {
+  console.error(err.message);
+  process.exit(2);
+}
 const AUTH_TOKEN = opt("auth-token", process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH_TOKEN_ALT || "");
 
 /** 160 bytes of 0xFF is exactly one 20 ms Twilio frame of mu-law SILENCE. */
@@ -192,6 +256,37 @@ if (!AUTH_TOKEN) {
 /** The script, as frames. Empty in silent mode. */
 const script = SCRIPT_NAME ? buildProbeScript(resolveScriptLines(SCRIPT_NAME)) : [];
 
+// Validated HERE and not discovered mid-call, for the reason resolveScriptLines
+// throws on an unknown script name rather than quietly running the default: a
+// run that cost model tokens and answered nothing is worse than one that never
+// started.
+if (HANGUP_AFTER) {
+  if (!SCRIPT_NAME) die("--hangup-after names a scripted line, so it needs --script <name>.");
+  if (!script.some((l) => l.label === HANGUP_AFTER)) {
+    die(
+      `--hangup-after "${HANGUP_AFTER}" is not a line in the "${SCRIPT_NAME}" script.\n` +
+        `Labels in this script: ${script.map((l) => l.label).join(", ")}`
+    );
+  }
+}
+if (HANGUP_ARM_AFTER) {
+  if (!SCRIPT_NAME) die("--hangup-arm-after names a scripted line, so it needs --script <name>.");
+  if (!script.some((l) => l.label === HANGUP_ARM_AFTER)) {
+    die(
+      `--hangup-arm-after "${HANGUP_ARM_AFTER}" is not a line in the "${SCRIPT_NAME}" script.\n` +
+        `Labels in this script: ${script.map((l) => l.label).join(", ")}`
+    );
+  }
+  if (!HANGUP_ON_COUNTER) die("--hangup-arm-after only arms the counter poll, so it needs --hangup-on-counter.");
+}
+if ((HANGUP_ON_COUNTER || EXPECTATIONS.length) && !DEBUG_TOKEN) {
+  die(
+    `--hangup-on-counter and --expect-counter both read /api/debug/latency, so they\n` +
+      `need --debug-token. Without it the counters are the one thing this harness\n` +
+      `cannot see, and it would hang up on a signal it never received.`
+  );
+}
+
 const callSid = `CA${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
 const streamSid = `MZ${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
 
@@ -201,14 +296,31 @@ const record = (obj) => {
 };
 
 /** Read the counters, or null if no token was given / the read failed. */
+let counterReadFailure = null;
 async function readCounters() {
   if (!DEBUG_TOKEN) return null;
   try {
     const res = await fetch(`${BASE}/api/debug/latency`, { headers: { "x-debug-token": DEBUG_TOKEN } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // WHY IT RECORDS WHY IT FAILED. This used to return null for every
+      // failure and the report guessed "did not answer with that token". On
+      // 2026-09-12 that guess was wrong twice, and each wrong guess cost a
+      // call: the first run really was a bad token (a trailing CR off a CRLF
+      // .env), the second was 429 because /api allows 60 requests a minute and
+      // the counter poll was making 400. Both printed the same sentence.
+      counterReadFailure =
+        res.status === 429
+          ? `HTTP 429 RATE LIMITED. /api allows 60 requests a minute (server.js) and the counter poll exceeded it. Raise --hangup-poll-ms, or arm the poll later with --hangup-arm-after.`
+          : res.status === 404
+            ? `HTTP 404. This endpoint 404s on a bad or missing token BY DESIGN, so it means DEBUG_ENDPOINTS is not "true", or the token is wrong -- check for a trailing carriage return if it came out of a CRLF .env.`
+            : `HTTP ${res.status}`;
+      return null;
+    }
     const j = await res.json();
+    counterReadFailure = null;
     return { bootId: j.bootId, counters: j.turnTaking || {} };
-  } catch {
+  } catch (err) {
+    counterReadFailure = `${err?.cause?.code || err?.message || "request failed"} -- is the server up on ${BASE}?`;
     return null;
   }
 }
@@ -328,6 +440,11 @@ async function main() {
     wrongStreamSid: 0,
     closeCode: null,
     closeReason: "",
+    // Which side ended the call, and when. Without this a deliberate hangup is
+    // indistinguishable in the report from the ceiling cutting the run short,
+    // and those two mean opposite things about every counter below.
+    hangupReason: null,
+    hangupAtMs: null,
   };
   /** @type {{line: string, spokeAtMs: number, replyMs: number|null, replySeconds: number}[]} */
   const turns = [];
@@ -392,6 +509,20 @@ async function main() {
    */
   let hitCeiling = false;
 
+  /**
+   * When the --hangup-after line's audio will have finished sending, or null.
+   *
+   * The END of the line and not the start: hanging up while the caller's own
+   * audio is still streaming means the model never heard the turn, so the
+   * agreement ledger records nothing and the recovery declines never_agreed --
+   * a stand-down that looks exactly like a broken harness.
+   */
+  let hangupAfterEndedAt = null;
+  /** When the --hangup-arm-after line finished, or null. Gates the poll. */
+  let hangupArmEndedAt = null;
+  /** The most recent counter read, for the --hangup-on-counter trigger. */
+  let liveCounters = null;
+
   /** Caller audio still to send, as 160-byte frames. */
   let outQueue = [];
   let cursor = 0; // next line index
@@ -427,6 +558,8 @@ async function main() {
       replySeconds: Number(((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)),
       endedAt: now + (line.mulaw.length / FRAME_BYTES) * FRAME_MS,
     });
+    if (HANGUP_AFTER && line.label === HANGUP_AFTER) hangupAfterEndedAt = turns.at(-1).endedAt;
+    if (HANGUP_ARM_AFTER && line.label === HANGUP_ARM_AFTER) hangupArmEndedAt = turns.at(-1).endedAt;
     console.log(
       `speak      ${line.label}  (heard ${((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)} s back${gaveUp ? ", NO REPLY" : ""})`
     );
@@ -434,10 +567,19 @@ async function main() {
     assistantFramesThisTurn = 0;
   }
 
-  /** Say goodbye once, stop every timer, and let the socket close. */
-  function hangUp() {
+  /**
+   * Say goodbye once, stop every timer, and let the socket close.
+   *
+   * The `stop` event is what a real caller hanging up produces, and the server
+   * handles it as finish("twilio_stop") -- the same teardown, running the same
+   * post-call chain. That is what makes a deliberate hangup evidence about
+   * production rather than about this script.
+   */
+  function hangUp(reason = "script_finished") {
     if (finished) return;
     finished = true;
+    stats.hangupReason = reason;
+    stats.hangupAtMs = Date.now() - openedAt;
     stopAllTimers();
     if (ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ event: "stop", streamSid, stop: { callSid } }));
@@ -498,16 +640,52 @@ async function main() {
     // the ceiling rather than the plan.
     later(() => {
       hitCeiling = true;
-      hangUp();
+      hangUp("ceiling");
     }, SCRIPT_NAME ? MAX_CALL_MS : HOLD_MS);
+
+    // Poll the counters only when something is waiting on them. Each read is a
+    // round trip to the server under test, and on a 150 ms tick that is a lot
+    // of them -- worth it only for the one trigger that needs them.
+    if (hangupPlan.onCounter) {
+      every(async () => {
+        if (finished) return;
+        // Armed by a scripted line, not running for the whole call: /api
+        // allows 60 requests a minute and a 150 ms poll makes 400. The
+        // budget went in nine seconds of a hundred-second call, and every
+        // later read came back 429. See pollArmed.
+        if (!pollArmed(hangupPlan, hangupArmEndedAt)) return;
+        const c = await readCounters();
+        if (c) liveCounters = c;
+      }, HANGUP_POLL_MS);
+    }
 
     // A script that finishes early should hang up rather than burn budget: the
     // cost of this path is quadratic in call length.
     every(() => {
+      // BEFORE the SCRIPT_NAME guard below, deliberately: a silent-mode run can
+      // still use the counter trigger, and that is the cheapest way to ask what
+      // the teardown does when the caller never spoke at all.
+      if (hangupArmed(hangupPlan) && !finished) {
+        const d = hangupDecision({
+          plan: hangupPlan,
+          now: Date.now(),
+          spokenEndedAt: hangupAfterEndedAt,
+          counterBefore: before ? counterValue(before.counters, hangupPlan.onCounter) : null,
+          counterNow: liveCounters ? counterValue(liveCounters.counters, hangupPlan.onCounter) : null,
+          bootIdStable: Boolean(before && liveCounters && before.bootId === liveCounters.bootId),
+        });
+        if (d.hangUp) {
+          console.log(`hangup     ${d.reason} at ${Date.now() - openedAt} ms`);
+          hangUp(d.reason);
+          return;
+        }
+      }
       if (!SCRIPT_NAME || finished) return;
       const spokeEverything = cursor >= script.length && outQueue.length === 0;
       const quietFor = Date.now() - lastAssistantMediaAt;
-      if (spokeEverything && assistantFramesThisTurn > 0 && quietFor >= GAP_MS * 2) hangUp();
+      if (spokeEverything && assistantFramesThisTurn > 0 && quietFor >= GAP_MS * 2) {
+        hangUp("script_finished");
+      }
     }, 200);
   });
 
@@ -590,16 +768,23 @@ async function main() {
   console.log(`first audio ${stats.firstMediaMs === null ? "NEVER" : `${stats.firstMediaMs} ms`}`);
   console.log(`audio out  ${stats.mediaFrames} frames, ${stats.mediaBytes} bytes, ~${(outMs / 1000).toFixed(1)} s`);
   console.log(`frames in  ${stats.framesSent} (${stats.speechFramesSent} speech, ${stats.framesSent - stats.speechFramesSent} silence)`);
+  const deliberate =
+    stats.hangupReason && stats.hangupReason !== "ceiling" && stats.hangupReason !== "script_finished";
   if (SCRIPT_NAME) {
     const unfinished = stats.linesSpoken < script.length;
     const note = !unfinished
       ? ""
-      : hitCeiling
-        ? `   <- CUT SHORT BY THE CEILING: raise --max-call-ms, and treat every counter below as inconclusive`
-        : `   <- the ASSISTANT ended the call first; the counters stand`;
+      : deliberate
+        ? `   <- HUNG UP DELIBERATELY (${stats.hangupReason}): the remaining lines were never meant to be spoken`
+        : hitCeiling
+          ? `   <- CUT SHORT BY THE CEILING: raise --max-call-ms, and treat every counter below as inconclusive`
+          : `   <- the ASSISTANT ended the call first; the counters stand`;
     console.log(
       `lines      ${stats.linesSpoken}/${script.length} spoken, ${stats.turnsWithNoReply} sent with no reply heard${note}`
     );
+  }
+  if (stats.hangupReason) {
+    console.log(`hangup     ${stats.hangupReason} at ${stats.hangupAtMs} ms`);
   }
   console.log(`marks      ${stats.marksReceived} received, ${stats.marksEchoed} echoed`);
   console.log(`clears     ${stats.clears}`);
@@ -621,7 +806,29 @@ async function main() {
       for (const k of moved) console.log(`  ${k}  ${before.counters[k] || 0} -> ${after.counters[k] || 0}`);
     }
   } else if (DEBUG_TOKEN) {
-    console.log(`\ncounter delta unavailable: /api/debug/latency did not answer with that token.`);
+    console.log(`\ncounter delta unavailable: ${counterReadFailure || "/api/debug/latency did not answer."}`);
+  }
+
+  // THE PART THAT MAKES THIS RUN ABLE TO FAIL.
+  //
+  // Without it the harness prints a report and exits 0 whatever happened, which
+  // is a sim that cannot fail -- and a green run that means nothing is worse
+  // than no run, because somebody acts on it.
+  if (EXPECTATIONS.length) {
+    console.log("");
+    if (!before || !after || before.bootId !== after.bootId) {
+      console.log(`EXPECTATIONS UNCHECKABLE: the counters could not be read, or the server`);
+      console.log(`restarted mid-run and every counter reset underneath it.`);
+      console.log(`An unverified expectation is not a met one.`);
+      process.exitCode = 1;
+    } else {
+      const r = checkExpectations(EXPECTATIONS, before.counters, after.counters);
+      for (const f of r.failures) {
+        console.log(`  EXPECTED ${f.name} to move by ${f.min}, moved ${f.moved}`);
+      }
+      if (r.ok) console.log(`expectations  all ${EXPECTATIONS.length} met`);
+      process.exitCode = r.ok ? 0 : 1;
+    }
   }
 
   console.log("");

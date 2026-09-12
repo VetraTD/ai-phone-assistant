@@ -19,7 +19,6 @@ import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
-import { judgeCall, judgeMode } from "./lib/postCallJudge.js";
 import { log } from "./lib/logger.js";
 import { assertBootConfig } from "./lib/bootChecks.js";
 import {
@@ -923,42 +922,32 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
           callerTurns: callerTurns.length,
         });
 
-        // THE SHADOW JUDGE. Reads the same transcript already in hand and says
-        // what the call agreed to, beside the structural check in
-        // lib/postCallVerify.js which answered the same question from tool
-        // traffic. Both log against callSid so the disagreements are readable off
-        // real calls -- the only way either gets validated without hand-labelling.
+        // THE SHADOW JUDGE USED TO RUN HERE, and it now runs at the Live
+        // session's own teardown (lib/voice/live/index.js finish()). Moved
+        // 2026-09-12, and this comment is left in its place because the next
+        // person to want a post-call reader will look here first.
         //
-        // Acts on nothing. See lib/postCallJudge.js for why it is a detector and
-        // never an author: the transcript is written by the model being audited.
+        // The reason is evidence, not tidiness. The judge reads a transcript
+        // that the audited model WROTE -- on the Live front-end the model is
+        // also the speech recogniser -- so a model that lies about its own
+        // actions corrupts the only thing the judge can see. Measured on
+        // 2026-09-12: CA41622e81 claimed three completions on a call that wrote
+        // nothing, and the judge believed the transcript and got it wrong.
+        // Levelling that means handing it the tool traffic, and the tool
+        // traffic lives in the engine's closure: writesThisCall, the abandoned
+        // set, guards.counts(). It cannot reach this handler without a
+        // migration.
         //
-        // Inside the existing tenant scope, and after the summary deliberately --
-        // a judge that delayed or broke the summary would be trading a working
-        // feature for an experiment.
-        const jMode = judgeMode();
-        // `act` runs the SAME reader at call teardown, inside the Live session,
-        // because the acting rung needs this call's verified-slot set and that
-        // lives in the engine's closure. Running the shadow copy here as well
-        // would bill a second model call per call to log a verdict the acting
-        // path has already logged, so act deliberately replaces shadow rather
-        // than extending it. See judgeMode in lib/postCallJudge.js.
-        if (jMode === "shadow" && transcript.length > 0) {
-          const bookedForCall = await db.listAppointmentsByCallId(dbCallId, businessId);
-          if (bookedForCall == null) {
-            // null is a FAILED read, [] is a genuinely empty one, and
-            // listAppointmentsByCallId keeps them apart on purpose. Judging on a
-            // failed read would report a missing booking during an outage.
-            bumpCounter("postcall_judge_skipped");
-            log.error("postcall_judge_skipped", { callSid, reason: "row_read_failed", severity: "warn" });
-          } else {
-            await judgeCall({
-              transcript,
-              callSid,
-              bookedRowCount: bookedForCall.filter((r) => r?.status === "scheduled").length,
-              mode: jMode,
-            });
-          }
-        }
+        // This handler also could not tell WHICH calls to judge. There is no
+        // front-end column on `calls`, `call_state` refuses a fourth shared
+        // field in SQL, and /twilio/live-voice falls back to the cascade on any
+        // throw -- so an inference would be wrong on exactly the fallback calls
+        // and would silently skip their judge.
+        //
+        // And the loss is nothing: verifyCall and recoverOwedBooking are
+        // invoked only from the Live path, so postcall_verify is never emitted
+        // for a cascade call, and a judge verdict with no structural verdict
+        // beside it is the one thing this reader cannot be validated against.
       }, { operation: "generateSummary", callSid });
     }
 

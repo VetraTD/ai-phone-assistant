@@ -305,10 +305,17 @@ describe("LVX93 — a read does not license a write's claim", () => {
     expect(unbacked()).toBe(1);
   });
 
-  it("stays a COUNTER — the model is told nothing new", async () => {
-    // The whole point of splitting it. If this ever fails, the change stopped
-    // being a measurement and became a second guard, before anyone decided it
-    // should.
+  it("NOW SPEAKS — a read cannot license a write's claim (LVX127)", async () => {
+    // This assertion used to be `.not.toContain(...)`, deliberately: the wider
+    // condition was split off as a MEASUREMENT so the number could be corrected
+    // without altering what any caller hears. The number has now been read.
+    //
+    // CA41622e81, 2026-09-12: three completions claimed on a call that wrote
+    // nothing (booked_rows 0, changed_rows 0), and the guard said nothing on
+    // two of them because a read had run. LVX93's deferral condition -- "the
+    // shared note budget might silence it anyway" -- was measured on that same
+    // call: MAX_NOTES_PER_CALL is 8, the call spent 3, and both false claims
+    // fell on turns where noteSentThisTurn was clear.
     const s = await boot();
     await s.callTool("check_appointment_availability");
     s.endTurn();
@@ -321,12 +328,58 @@ describe("LVX93 — a read does not license a write's claim", () => {
     s.endTurn();
     await s.settle();
 
+    expect(unbacked()).toBe(1);
+    // The narrow counter still measures the OLD condition, so its series stays
+    // comparable with every call taken before this change and the DIFFERENCE
+    // between the two counters is still exactly LVX93's population.
     expect(claims()).toBe(0);
-    // Not "no notes at all" -- the offer guard legitimately fires on a
+    // Not "some note at all" -- the offer guard legitimately fires on a
     // sentence naming a time nothing verified, and that is a different guard
-    // doing its own job. What must be absent is the CLAIM note.
+    // doing its own job. What must be PRESENT is the CLAIM note.
     const sent = JSON.stringify(notes(s.live));
-    expect(sent).not.toContain("no tool has run to make it so");
+    expect(sent).toContain("no tool has run to make it so");
+  });
+
+  it("set_call_intent is bookkeeping and cannot vouch for a cancellation", async () => {
+    // CA41622e81, 17:50:44, and the sharper of that call's two cases.
+    // cancel_appointment_db was REFUSED; set_call_intent succeeded on the same
+    // turn; the net tool count stayed above zero, so the guard read the turn as
+    // backed. set_call_intent cannot change anything at all -- it is pure
+    // bookkeeping, and it vouched for a cancellation that never happened.
+    const s = await boot();
+    await s.callTool("set_call_intent");
+    s.endTurn();
+    await s.settle();
+
+    s.say("I've gone ahead and cancelled your strategy call.");
+    s.endTurn();
+    await s.settle();
+
+    expect(unbacked()).toBe(1);
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+
+  it("an interrupted turn does not carry its action count into the next one", async () => {
+    // applyTurn clears actionToolCallsThisTurn; the interruption path did not,
+    // and an interrupted turn never reaches applyTurn. So the action count
+    // survived into the next turn and actionToolsRanThisTurn() read high.
+    //
+    // Harmless while that condition was only a counter. Now that the claim
+    // guard ACTS on it, it is the guard going quiet on barged turns
+    // specifically -- which is a large share of real calls.
+    const s = await boot();
+    await s.callTool("record_customer_request");
+    // The vendor decided the caller interrupted. applyTurn never runs for this
+    // turn, so nothing else clears the accumulators.
+    s.live.push({ serverContent: { interrupted: true } });
+    await s.settle();
+
+    s.say("I've booked your appointment for Monday.");
+    s.endTurn();
+    await s.settle();
+
+    expect(unbacked()).toBe(1);
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
   });
 
   it("says nothing when a real ACTION tool ran the turn before", async () => {

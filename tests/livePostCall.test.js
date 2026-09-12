@@ -70,6 +70,13 @@ function fakeDb() {
     }),
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-row-1",
+    // The teardown judge reads both of these. A transcript with two usable
+    // lines, because judgeCall refuses anything shorter.
+    listAppointmentsByCallId: vi.fn(async () => []),
+    fetchCallTranscript: vi.fn(async () => [
+      { speaker: "ai", message: "Thanks for calling, how can I help you today?", sequence: 1 },
+      { speaker: "caller", message: "I would like to book an appointment please", sequence: 2 },
+    ]),
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
@@ -85,7 +92,7 @@ const SLOT = "2026-09-07T10:00:00";
 
 // `refuse` names tools this run should answer with success:false, for the
 // abandoned-write case (LVX72). Everything else behaves as before.
-async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
+async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = fakeDb()) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const verify = vi.fn(async () => ({ verdict: "ok" }));
@@ -96,6 +103,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
     order.push("recover");
     return { ran: false, booked: false };
   });
+  const judge = vi.fn(async () => ({ ran: true, agreedAction: "none" }));
 
   const execute = vi.fn(async (fc) => {
     if (refuse.includes(fc.name)) {
@@ -146,7 +154,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
   await handleLiveSessionConnection(ws, {}, {
     now: () => 0,
     connect: live.connect,
-    database: fakeDb(),
+    database,
     env,
     execute,
     verify: vi.fn(async (...a) => {
@@ -154,6 +162,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
       return verify(...a);
     }),
     recover,
+    judge,
   });
   ws.deliver({
     event: "start",
@@ -171,6 +180,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
     live,
     verify,
     recover,
+    judge,
     order,
     settle,
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
@@ -479,6 +489,31 @@ describe("the recovery gets the times this call confirmed open", () => {
     expect(s.verify).toHaveBeenCalledTimes(1);
   });
 
+  it("waits for the last transcript row to settle before reading it", async () => {
+    // persistTranscriptRows is fire-and-forget by design -- a turn must not
+    // block on a database round trip. But finish() runs while the LAST turn's
+    // rows are still in flight, and THE LAST TURN IS WHERE THE AGREEMENT AND
+    // THE CLAIM LIVE. A recovery that reads then sees a transcript missing
+    // exactly the turns it needs, and declines `no_transcript` for a reason
+    // that is not true. server.js already records this race for the status
+    // callback; at teardown it is strictly worse, because nothing else is
+    // keeping the call alive.
+    let release;
+    const db = fakeDb();
+    db.addTranscriptEntry = vi.fn(() => new Promise((r) => { release = r; }));
+
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" }, [], db);
+    s.say("I've booked that for you.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+
+    expect(db.addTranscriptEntry).toHaveBeenCalled();
+    expect(s.recover).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(s.recover).toHaveBeenCalled());
+  });
+
   it("passes an empty list when no availability check ever ran", async () => {
     // Nothing to choose from is a legitimate outcome and the case a human still
     // has to own. It must arrive as [] rather than undefined, or the recovery's
@@ -487,6 +522,137 @@ describe("the recovery gets the times this call confirmed open", () => {
     await s.callTool("record_customer_request", { request_type: "message" });
     await s.hangUp();
     expect(s.recover.mock.calls[0][0].slots).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SHADOW JUDGE GETS THE TOOL TRAFFIC.
+//
+// The judge reads a transcript the audited model WROTE -- on this front-end the
+// model is also the speech recogniser -- so a model that lies about its own
+// actions corrupts the only evidence it has. Measured on 2026-09-12: on
+// CA41622e81 the structural check was right and the judge was wrong; eleven
+// minutes earlier on CA73bf7dc5 it ran the other way. Same two answers, a
+// different one correct each time.
+//
+// These assert the WIRE, never the judgement. A value computed where the object
+// it reads from does not exist yet is how the reverted claim-completion work
+// passed 894 lines of unit tests and fired zero times in production.
+// ---------------------------------------------------------------------------
+describe("the shadow judge gets the tool traffic", () => {
+  beforeEach(() => clearStats());
+
+  it("hands the judge the same write ledger it hands verify", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    await s.book();
+    await s.hangUp();
+
+    expect(s.judge).toHaveBeenCalledTimes(1);
+    const t = s.judge.mock.calls[0][0].toolTraffic;
+    expect(t.bookingWrites).toBe(1);
+    // And it agrees with what verify was told, from the same ledger.
+    expect(arg(s.verify).writes.filter((w) => w.type === "booked")).toHaveLength(1);
+  });
+
+  it("CA41622e81: zero writes behind a completion claim", async () => {
+    // The call this whole change is about. The assistant claimed completions on
+    // a call whose final state was booked_rows 0, changed_rows 0 -- and the
+    // judge, reading only the transcript, believed it.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    s.say("I've gone ahead and cancelled your strategy call.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+
+    const t = s.judge.mock.calls[0][0].toolTraffic;
+    expect(t.bookingWrites).toBe(0);
+    expect(t.changeWrites).toBe(0);
+    expect(t.completionClaims).toBeGreaterThan(0);
+    expect(t.completionClaimsToolBacked).toBe(0);
+  });
+
+  it("reports a refused tool that was never retried, by NAME", async () => {
+    // A count cannot carry this: the difference between an abandoned
+    // cancellation and an abandoned name change is the whole story.
+    const s = await boot(
+      { POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" },
+      ["cancel_appointment_db"]
+    );
+    await s.callTool("cancel_appointment_db");
+    await s.hangUp();
+
+    expect(s.judge.mock.calls[0][0].toolTraffic.abandoned).toContain("cancel_appointment_db");
+  });
+
+  it("carries the availability shape, so a LIST is distinguishable from a point check", async () => {
+    // day_listed > 0 with point_open 0 is a caller who was read a list, which is
+    // the judge's rule 3 and the structural check's measured blind spot.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    await s.book();
+    await s.hangUp();
+
+    const t = s.judge.mock.calls[0][0].toolTraffic;
+    expect(t).toHaveProperty("availabilityPointOpen");
+    expect(t).toHaveProperty("availabilityDayListed");
+    expect(t).toHaveProperty("availabilityPointTaken");
+  });
+
+  it("tells the judge whether the caller ever affirmed a read-back", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    await s.book();
+    await s.hangUp();
+    expect(s.judge.mock.calls[0][0].toolTraffic.callerAffirmedReadBack).toBe(false);
+  });
+
+  it("does not judge at teardown when POSTCALL_JUDGE is act", async () => {
+    // NOT OPTIONAL. In act the recovery calls the judge itself, with the same
+    // traffic; running both would bill twice for one answer and quietly break
+    // the property that makes act a REPLACEMENT for shadow rather than an
+    // addition to it.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" });
+    await s.book();
+    await s.hangUp();
+
+    expect(s.judge).not.toHaveBeenCalled();
+    expect(s.recover).toHaveBeenCalledTimes(1);
+    expect(s.recover.mock.calls[0][0].toolTraffic.bookingWrites).toBe(1);
+  });
+
+  it("does not judge at all when POSTCALL_JUDGE is unset", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count" });
+    await s.book();
+    await s.hangUp();
+    expect(s.judge).not.toHaveBeenCalled();
+  });
+
+  it("does not judge on a FAILED row read", async () => {
+    // null is an outage and [] is a genuinely empty call. Judging the first as
+    // zero rows reports a missing booking every time the database is
+    // unreachable.
+    const db = fakeDb();
+    db.listAppointmentsByCallId = vi.fn(async () => null);
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" }, [], db);
+    await s.book();
+    await s.hangUp();
+
+    expect(db.listAppointmentsByCallId).toHaveBeenCalled();
+    expect(s.judge).not.toHaveBeenCalled();
+  });
+
+  it("judges the transcript only after the last row has settled", async () => {
+    let release;
+    const db = fakeDb();
+    db.addTranscriptEntry = vi.fn(() => new Promise((r) => { release = r; }));
+
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" }, [], db);
+    s.say("I've booked that for you.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+
+    expect(s.judge).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(s.judge).toHaveBeenCalled());
   });
 });
 
