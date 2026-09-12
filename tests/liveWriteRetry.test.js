@@ -123,6 +123,15 @@ function gateExecutor({ stash = true, retryFails = false, retryGated = false, re
       };
     }
 
+    // LVX126: a DIFFERENT write completing for the caller while a booking is
+    // stashed. Succeeds, like a real cancellation the caller asked for.
+    if (fc.name === "cancel_appointment_db") {
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+        stateEffects: { toolResult: { name: fc.name, success: true, message: "cancelled" } },
+      };
+    }
+
     bookAttempts += 1;
     if (bookAttempts === 1) {
       return {
@@ -237,6 +246,12 @@ async function boot(opts = {}) {
         await settle();
       }
       live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /** A different write succeeds -- the caller asked for something else. */
+    async cancel() {
+      live.push({ toolCall: { functionCalls: [{ id: "x", name: "cancel_appointment_db", args: {} }] } });
       await settle();
       await settle();
     },
@@ -492,6 +507,29 @@ describe("the refused write is re-issued when the caller agrees", () => {
     expect(s.bookCalls()).toHaveLength(2);
     expect(s.bookCalls()[1].args).toEqual(BOOK);
     expect(c().write_retry_attempted).toBe(1);
+  });
+
+  it("does not re-issue a stashed write after a DIFFERENT write completed", async () => {
+    // LVX126, and this is the production call it comes from.
+    //
+    // CA73bf7dc5, 2026-09-12. A reschedule to Wednesday was held at 16:55:21.
+    // The caller changed their mind twice and asked to cancel instead; the
+    // cancellation was read back and committed at 16:56:00; and the caller's
+    // "Yes." five seconds later -- agreement to the CANCELLATION -- re-issued
+    // the stale reschedule. One word ran two different writes.
+    //
+    // A caller who has just had a different write completed for them has moved
+    // on. Losing a re-issue is the safe direction: the model can still call the
+    // tool itself, and the post-call net still sees a booking that was owed.
+    const s = await boot({ reason: "write_order" });
+    await s.book();
+    expect(s.bookCalls()).toHaveLength(1);
+
+    await s.cancel();
+    await s.spell("yes, that's right");
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().write_retry_attempted).toBeFalsy();
   });
 
   it("does not re-issue on a turn that is not agreement", async () => {

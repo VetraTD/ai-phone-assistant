@@ -11577,6 +11577,68 @@ untested.
 
 ---
 
+## LVX126 — a "yes" to one action executed a different action that was waiting
+
+**Status: FIXED, VERIFIED OFFLINE. Observed on `CA73bf7dc5`, 2026-09-12 — the call
+taken to verify LVX125.**
+
+When a write is held for want of agreement it goes into `pendingWrite`, and
+`heldForAgreement` re-issues it on the caller's next affirmative. That trigger
+checked two things: that something was stashed with `reason: "write_order"`, and
+that the caller said yes. It never asked WHICH question the yes answered.
+
+```
+16:55:21  reschedule to Wednesday 4 PM   HELD, stashed
+   ...    caller changes their mind twice, asks about Friday, then to cancel
+16:55:56  ASST "Just to confirm, you'd like to CANCEL your appointment on
+                Thursday, September 17th at 1 PM?"
+16:56:00  cancel_appointment_db          SUCCESS
+16:56:05  CALR "Yes."                    <- agreement to the CANCELLATION
+16:56:05  reschedule_appointment_db      SUCCESS  <- the stale stash, re-issued
+```
+
+One word ran two different writes. Same action-blindness as the consent token in
+LVX117 — fixed there in the gate, still present in the retry trigger, which had
+been strengthened earlier the same day without anyone checking this.
+
+### The fix, and the approach that was tried first and abandoned
+
+`lib/voice/live/tools.js` cleared the stash only when the tool that just
+succeeded was the SAME tool. It now clears when **any** write in that pack
+succeeds: a caller who has just had a different write completed for them has
+moved on, and whatever was held before it is not what they are answering.
+
+Losing a re-issue is the safe direction — the model can still call the tool
+itself, and the post-call net still sees a booking that was owed — where firing
+the wrong write is not recoverable by the caller at all.
+
+**Tried first and abandoned: comparing read-back fingerprints.** Stash the
+fingerprint of the sentence the write was held against, and release only if the
+caller's yes answers that same sentence. It is wrong, and
+`tests/liveWriteRetry.test.js` caught it within a minute: **the gate RE-ASKS when
+it refuses** ("Just to confirm before I do that — shall I go ahead?"), so the
+sentence the caller finally answers is not the sentence the write was stashed
+against, and the legitimate re-issue breaks. Recorded because it is the obvious
+idea and the next person will have it too.
+
+### Also on that call
+
+- **The structural escalation false-positived, and the judge was right.**
+  `booking_owed_no_row: true` raised an `unconfirmed_claim` task and an owner
+  notification; the shadow judge said `agreed_action: cancel, booking_missing:
+  false`. The caller had indeed ended by cancelling. This is the FIRST measured
+  instance of the false positive LVX118 predicted in writing — "a caller who
+  point-checked a time, declined to book and cancelled something instead can
+  satisfy both halves" — and the first measured disagreement in the judge's
+  favour. Directly relevant to whether it gets promoted.
+- `asks_max: 0`, `barges: 0`, and the transcription held up. The conversation
+  itself was the best of the day.
+
+**Done when:** a live call where a write is held, a different write completes, and
+the caller's next yes does NOT re-issue the held one.
+
+---
+
 ## LVX125 — one tool's refusals released another tool's write, and it deleted appointments
 
 **Status: FIXED, VERIFIED OFFLINE. Caused an unwanted cancellation on two
