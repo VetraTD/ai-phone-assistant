@@ -360,3 +360,61 @@ describe("recoverOwedBooking — the caller must have agreed to something", () =
     expect(db.createAppointmentIfAvailable).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// EVERY DECLINE LEAVES A RECORD, and this exists because production taught it.
+//
+// On CAc5070c2d the caller went most of the way through a booking and hung up
+// without approving it. The consent gate refused correctly and the recovery wrote
+// nothing -- and there was NO WAY TO SEE THAT in the logs. The early returns bumped
+// counters, counters are not readable per call, so "ran and stood down" and "never
+// ran at all" were the same observation. The only way to tell them apart was
+// noticing that verifyCall is chained after this and had fired.
+//
+// Same trap silent_turn_verdict closed for LVX117. An instrument that reads the
+// same on a clean run and on a run that never happened is not an instrument.
+// ---------------------------------------------------------------------------
+describe("recoverOwedBooking — a decline is visible", () => {
+  beforeEach(() => {
+    clearStats();
+    vi.clearAllMocks();
+  });
+
+  const declineReason = () =>
+    log.info.mock.calls.filter((call) => call[0] === "recover_declined").map((call) => call[1].reason);
+
+  it("logs why it stood down when the caller never agreed", async () => {
+    // CAc5070c2d's exact shape.
+    await recoverOwedBooking(base({ agreed: false }), deps(makeDb()));
+    expect(declineReason()).toEqual(["never_agreed"]);
+  });
+
+  it("logs why it stood down when a row already exists", async () => {
+    const db = makeDb({ listAppointmentsByCallId: vi.fn(async () => [{ status: "cancelled" }]) });
+    await recoverOwedBooking(base(), deps(db));
+    expect(declineReason()).toEqual(["row_exists"]);
+  });
+
+  it("logs why it stood down when there were no confirmed times", async () => {
+    await recoverOwedBooking(base({ slots: [] }), deps(makeDb()));
+    expect(declineReason()).toEqual(["no_candidate_slots"]);
+  });
+
+  it("logs why it stood down when the reader says nothing was owed", async () => {
+    const d = deps(makeDb(), { judge: vi.fn(async () => ({ ran: true, agreedAction: "none" })) });
+    await recoverOwedBooking(base(), d);
+    expect(declineReason()).toEqual(["nothing_owed"]);
+  });
+
+  it("says NOTHING at all when the feature is off", async () => {
+    // The one silence that is correct: a deployment with this disabled must not
+    // emit a line per call.
+    await recoverOwedBooking(base({ mode: "shadow" }), deps(makeDb()));
+    expect(declineReason()).toEqual([]);
+  });
+
+  it("logs nothing about a decline when it actually books", async () => {
+    await recoverOwedBooking(base(), deps(makeDb()));
+    expect(declineReason()).toEqual([]);
+  });
+});
