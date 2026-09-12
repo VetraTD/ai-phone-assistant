@@ -2125,7 +2125,20 @@ async function bookAppointment(fc, ctx) {
   // short-circuit must not re-fire any of them — that is the entire point of
   // the anchor.
   const booked =
-    bookSuccess && !alreadyBooked ? { ...args, scheduled_at: anchoredScheduledAt } : null;
+    bookSuccess && !alreadyBooked
+      ? { ...args, id: bookedRowId, scheduled_at: anchoredScheduledAt }
+      : null;
+  // THE ROW ID, and it was missing. Restored from 68f0585, which found it on a
+  // real call and was reverted with everything else the next day.
+  //
+  // This effect's `data` is the tool ARGUMENTS, not the row -- right for
+  // everything that reads it, since the confirmation text wants the name and the
+  // time, and wrong for anything that needs to know WHICH ROW was written.
+  // lib/voice/live/index.js records this id into the write ledger so the post-call
+  // sender can tell which appointments were already confirmed at booking time.
+  // With it undefined that suppression silently did nothing and the caller was
+  // lined up for two messages about one appointment -- a ledger field that is
+  // always null reads exactly like "nothing to report".
 
   // Caller facts for the dynamic tail (plan step 2.2): the model re-reads these
   // every turn, so it confirms this booking from memory instead of re-asking or

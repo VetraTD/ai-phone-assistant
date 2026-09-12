@@ -564,3 +564,89 @@ describe("a booking owed with no row reaches a human, whatever the verdict says"
     expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TWO MESSAGES ABOUT ONE APPOINTMENT. Restored from 68f0585, reverted the next
+// day, and the thing that made POSTCALL_VERIFY=send unsafe to turn on:
+// capabilities/appointments.js already texts a confirmation at booking time, so
+// without this every successful booking is lined up for a second one.
+//
+// The negatives are the load-bearing half. A suppression that fired on everything
+// would pass the first test here and silence the messages the other three protect.
+// ---------------------------------------------------------------------------
+describe("the post-call confirmation does not duplicate the booking-time one", () => {
+  beforeEach(() => clearStats());
+
+  const CALLER = "+447700900123";
+
+  it("says nothing when the caller was already told at booking time", async () => {
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "row-1" }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(0);
+    expect(out.skipped.map((x) => x.reason)).toContain("already_confirmed");
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_already_confirmed).toBe(1);
+  });
+
+  it("still texts the client when the caller booked for somebody else", async () => {
+    // The booking-time sender uses the number that RANG US; this one uses the
+    // number on the row. When they differ, the caller has been told and the client
+    // has not -- so suppressing here would silence the only message that was ever
+    // going to reach them.
+    const d = fakeDeps({ booked: [row({ client_phone: "+447700900999" })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "row-1" }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(1);
+    expect(d.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+  });
+
+  it("texts nothing at all when a verdict impugns the row", async () => {
+    // write_abandoned is LVX72's shape: the booking exists, the name-correction
+    // tool was refused and never retried, so the row carries a name the caller did
+    // not give. A confirmation is a promise that the row is RIGHT.
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({ callerNumber: CALLER, writes: [], abandoned: ["correct_appointment_name"] }),
+      d
+    );
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(out.sent).toHaveLength(0);
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_verdict).toBe(1);
+  });
+
+  it("cannot suppress anything when the booked write carries no row id", async () => {
+    // Documents the dependency rather than hiding it. This is exactly the state
+    // the code was in before the id was restored: the set is empty, nothing
+    // matches, and the caller gets both messages. A test that only covered the
+    // working case would have called that fixed.
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: null }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(1);
+    expect(out.skipped.map((x) => x.reason)).not.toContain("already_confirmed");
+  });
+});

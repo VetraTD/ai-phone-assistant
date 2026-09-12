@@ -204,7 +204,12 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       {
         capability: "appointments",
         type: "booked",
-        data: { ...args, scheduled_at: FUTURE_SLOT_ANCHORED },
+        // `id` is the ROW, and it is what the post-call duplicate suppression
+        // reads to tell an appointment already confirmed at booking time from one
+        // never confirmed at all. It was absent until restored, so that
+        // suppression matched nothing and every booking was lined up for two
+        // messages once the mode allowed sending.
+        data: { ...args, id: expect.any(String), scheduled_at: FUTURE_SLOT_ANCHORED },
       },
     ]);
   });

@@ -113,7 +113,18 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
         toolResult: { name: fc.name, success: true, message: "ok" },
         capabilityEffects:
           fc.name === "book_appointment"
-            ? [{ capability: "appointments", type: "booked", data: { client_name: "Marcus Bell" } }]
+            ? [
+                {
+                  capability: "appointments",
+                  type: "booked",
+                  // `id` matters: the post-call sender uses it to tell an
+                  // appointment already confirmed at booking time from one never
+                  // confirmed at all. A stub without it cannot distinguish a
+                  // working wire from the null that made that suppression silently
+                  // do nothing.
+                  data: { id: "appt-booked-1", client_name: "Marcus Bell" },
+                },
+              ]
             : [
                 {
                   capability: "appointments",
@@ -256,7 +267,10 @@ describe("the post-call read gets what the call knew", () => {
     await s.hangUp();
 
     expect(arg(s.verify).writes).toEqual([
-      { type: "booked", tool: "book_appointment" },
+      // appointmentId is the field the post-call duplicate suppression reads. It
+      // was absent, so that suppression matched nothing and every booking was
+      // lined up for two confirmations once the mode allowed sending.
+      { type: "booked", tool: "book_appointment", appointmentId: "appt-booked-1" },
       { type: "changed", tool: "cancel_appointment_db", appointmentId: "appt-9" },
     ]);
   });
