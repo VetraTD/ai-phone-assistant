@@ -219,6 +219,14 @@ describe("confirmReadBackRe — the verb is a closed class too", () => {
     "Shall I try to make that change now?",
     "Should I update that for you?",
     "Do you want me to put that through?",
+    // proceed / confirm, added 2026-09-12. The first is verbatim from
+    // CAb4c8a9e6, where the gate refused a complete read-back and the caller
+    // heard three near-identical sentences in 22 seconds.
+    "Okay, I'm cancelling your appointment for Marcus Bell on Monday, September fourteenth at four thirty PM. Should I proceed?",
+    "Should I proceed?",
+    "Would you like me to proceed with that?",
+    "Shall I confirm that for you?",
+    "Should I confirm that appointment?",
   ];
   for (const said of READ_BACKS) {
     it(`recognises: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(true));
@@ -233,9 +241,45 @@ describe("confirmReadBackRe — the verb is a closed class too", () => {
     "Can I help with anything else today?",
     "Would you like me to check what else is open?",
     "Shall I see if there is anything earlier?",
+    // THE ONE THAT BLOCKS THE OBVIOUS FIX. Measured in the corpus: this is the
+    // same grammatical shape as "Would you like to cancel the appointment on
+    // Wednesday at 10 00 AM?", which IS a read-back and is missed. Making `me`
+    // optional to catch that one admits this one -- an offer with no time
+    // settled -- and the model could then satisfy the write gate by asking
+    // whether the caller wants an appointment at all.
+    "Would you like to book a strategy call as well?",
   ];
   for (const said of NOT_READ_BACKS) {
     it(`ignores: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(false));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// KNOWN MISSES, held as failing tests rather than as a backlog line nobody
+// greps. Both are verbatim from production calls, both are complete read-backs
+// -- a settled action, a specific time, and a request to authorise it -- and
+// both are refused by the gate today.
+//
+// They are `it.fails` because the CORRECT behaviour is asserted: they pass while
+// the assertion throws, and they go RED the moment the detector starts
+// recognising these, which is the signal to delete this block.
+//
+// They are NOT fixable by extending the verb list. See the comment on
+// READ_BACK_ACTION_VERB: the phrasing that would catch them also catches
+// offers, and only a check on the TIME can separate the two. This block is the
+// standing evidence for that rewrite.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — read-backs it still misses, and cannot fix by vocabulary", () => {
+  const STILL_MISSED = [
+    // CAb4c8a9e6, 20:13:50. Names the action, the day and the time, and asks.
+    "So you want to cancel your appointment for Monday, September fourteenth at four thirty PM?",
+    // CA87af1c10, 15:01:14 -- misses only for want of the word "me".
+    "Would you like to reschedule your appointment for one p m on September seventeenth instead?",
+    // CAa76cea16, 17:24:46 -- the same shape, a different call.
+    "Would you like to cancel the appointment on Wednesday, September 16th at 10 00 AM?",
+  ];
+  for (const said of STILL_MISSED) {
+    it.fails(`SHOULD recognise: ${said.slice(0, 44)}`, () => expect(en.test(said)).toBe(true));
   }
 });
 
