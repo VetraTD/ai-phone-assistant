@@ -12584,3 +12584,115 @@ write that replaced it.
   "Tuesday, September fifteenth" — both correct.
 - `usage.text_in: 234912` across 19 turns, `cached_in: 0`. The prefix re-billing is
   unchanged and no cache was in play on this tenant.
+
+---
+
+## `confirmReadBackRe` measured against 824 real assistant turns — and the result argues for replacing it, not extending it
+
+**Measured 2026-09-12.** Corpus: every `live_debug_assistant_turn` on `voice-uk-prod`,
+2026-09-09 to 2026-09-12 — **824 assistant turns across 65 calls**. Assistant output only;
+no caller speech was read. Nobody had ever run this detector over its own production
+output before.
+
+### What the numbers are, and what they are NOT
+
+```
+824  assistant turns, 65 calls
+128  turns naming an appointment action AND a time AND asking a question
+ 79  recognised by confirmReadBackRe
+ 49  not recognised
+```
+
+**The 49 is not a miss rate and must not be quoted as one.** Most of them are turns that
+SHOULD NOT match — offers ("Would you like to book a strategy call as well?"), requests
+("Can I have your full name to book that?"), and disambiguation ("did you want to add
+something to that, or book a separate one?"). Counting those as misses measures a sloppy
+filter, not the regex. A first pass of this analysis did exactly that and produced "47%",
+which was wrong and is recorded here so nobody repeats it.
+
+Deduped to 18 distinct shapes and read individually, **four are genuine read-backs** — a
+settled action, a specific time, and a request to authorise that action. They fall into
+three families.
+
+### Family 1 — "would you like to X" without the word "me". THE BIG ONE.
+
+```
+MISS   Would you like to cancel the appointment on Wednesday, September 16th at 10 00 AM?
+MATCH  Would you like ME TO cancel the appointment on Wednesday, September 16th at 10 00 AM?
+MISS   Would you like to reschedule your appointment for one p m on September seventeenth?
+MATCH  Would you like ME TO reschedule your appointment for one p m?
+```
+
+The pattern is `(?:would|do) you (?:like|want) me to VERB`. **One word — "me" — is the
+whole difference**, and the phrasing without it is at least as natural. Seen twice in four
+days, on two different calls.
+
+### Family 2 — the verb is not on the closed list
+
+`Should I proceed?` misses; `Should I go ahead?` matches. `READ_BACK_ACTION_VERB` holds ten
+verbs and `proceed` is not among them. This is the fourth instance of this exact failure:
+the docblock above that list already records `go ahead`, `make` and `try` being added on
+2026-09-11 after three refusals across two calls.
+
+### Family 3 — no modal frame at all
+
+`So you want to cancel your appointment for Monday at four thirty PM?` — names the action,
+the day and the time, and asks. No entry on the list covers a bare "so you want to X?".
+
+---
+
+### THE FINDING THAT MATTERS: widening the list cannot work
+
+The obvious fix for family 1 is to make `me to` optional. **The corpus shows that breaks
+the gate.** These two are the same grammatical shape:
+
+```
+Would you like to cancel the appointment on Wednesday, September 16th at 10 00 AM?   <- READ-BACK
+Would you like to book a strategy call as well?                                      <- OFFER
+```
+
+Make `me` optional and the second one matches too. That is an offer with no time settled,
+and matching it would let the model satisfy the write gate by asking whether the caller
+wants an appointment at all — which is precisely the hole the closed list exists to keep
+shut, stated in its own comment: *"a modal followed by any verb at all would stop the gate
+gating."*
+
+**The two sentences are not separable by phrasing.** They are separable by one thing: the
+first names a specific time and the second does not.
+
+So the list is not merely incomplete, it is the wrong axis. Every widening either misses
+real read-backs or admits offers, and there is no version of the list that does neither.
+Four rounds of adding words is the evidence.
+
+### What to build instead
+
+Gate on CONTENT, not on vocabulary: **the assistant's last turn must contain a time that
+resolves to the time the pending write is targeting.** Phrasing becomes irrelevant, and all
+three families above pass on their merits.
+
+Two independent reasons it is better rather than merely different:
+
+1. **It closes a class rather than an instance.** The check would be tied to the specific
+   action being authorised. Action-blind consent is the shared root of LVX117, LVX120 and
+   LVX126 — three separate incidents, one of which deleted appointments.
+2. **It fails safe in the same direction.** No time spoken, no write. Identical posture to
+   today, without the vocabulary problem.
+
+The honest cost: it trades a verb list for a spoken-time matcher — "four thirty PM" against
+`2026-09-14T21:30Z`, with 12-hour forms, spelled-out numbers and "half past" all real. That
+has its own miss class.
+
+**And that is exactly what this corpus is for.** A candidate rule can be scored against all
+824 turns before a line of production code changes and before a single call is spent. The
+comparison that decides it is: *how many of the 128 does each rule recognise, and how many
+offers does each wrongly admit.*
+
+### Interim, if the rewrite is not being taken now
+
+Add `proceed` and `confirm` to `READ_BACK_ACTION_VERB`, and family 3's bare frame, but do
+NOT make `me` optional — that one cannot be done safely without the time check. Certify
+against the three real sentences above in `tests/confirmReadBackRe.test.js`, and keep
+"Would you like to book a strategy call as well?" in the negative table.
+
+**Done when:** a candidate read-back rule is scored against this corpus and beats the
+incumbent on both halves — more real read-backs recognised, no more offers admitted.
