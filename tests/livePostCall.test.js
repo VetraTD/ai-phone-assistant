@@ -85,7 +85,7 @@ const SLOT = "2026-09-07T10:00:00";
 
 // `refuse` names tools this run should answer with success:false, for the
 // abandoned-write case (LVX72). Everything else behaves as before.
-async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
+async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = fakeDb()) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const verify = vi.fn(async () => ({ verdict: "ok" }));
@@ -146,7 +146,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = []) {
   await handleLiveSessionConnection(ws, {}, {
     now: () => 0,
     connect: live.connect,
-    database: fakeDb(),
+    database,
     env,
     execute,
     verify: vi.fn(async (...a) => {
@@ -477,6 +477,31 @@ describe("the recovery gets the times this call confirmed open", () => {
     await s.book();
     await s.hangUp();
     expect(s.verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the last transcript row to settle before reading it", async () => {
+    // persistTranscriptRows is fire-and-forget by design -- a turn must not
+    // block on a database round trip. But finish() runs while the LAST turn's
+    // rows are still in flight, and THE LAST TURN IS WHERE THE AGREEMENT AND
+    // THE CLAIM LIVE. A recovery that reads then sees a transcript missing
+    // exactly the turns it needs, and declines `no_transcript` for a reason
+    // that is not true. server.js already records this race for the status
+    // callback; at teardown it is strictly worse, because nothing else is
+    // keeping the call alive.
+    let release;
+    const db = fakeDb();
+    db.addTranscriptEntry = vi.fn(() => new Promise((r) => { release = r; }));
+
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "act" }, [], db);
+    s.say("I've booked that for you.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+
+    expect(db.addTranscriptEntry).toHaveBeenCalled();
+    expect(s.recover).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(s.recover).toHaveBeenCalled());
   });
 
   it("passes an empty list when no availability check ever ran", async () => {
