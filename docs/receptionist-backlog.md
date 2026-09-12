@@ -17,8 +17,9 @@ front of wins already paid for. Update the item's `Done when` line to `DONE
 <date>` rather than deleting it; the history is what stops the same thing being
 re-litigated in three months.
 
-> **Newer than this index:** LVX115-LVX119 and the 2026-09-11/12 session section
-> are at the BOTTOM of this file, with their own status lines. The table below is
+> **Newer than this index:** LVX115-LVX127 and the 2026-09-11/12 and
+> 2026-09-12 (evening) session sections are at the BOTTOM of this file, with
+> their own status lines. The table below is
 > a snapshot taken on 2026-09-03 and is not extended in place, because a dated
 > snapshot that quietly grows is no longer a snapshot.
 
@@ -107,7 +108,7 @@ Status means:
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
 | **LVX92** | the bundle sent a live dashboard token to a released Railway subdomain | **FIXED, UNVERIFIED LIVE · P1** — `numberAPI.js` attaches an Identity Platform bearer token to every request and defaulted its base URL to `ai-phone-assistant-production-3e90.up.railway.app`, which now answers "Application not found". A released subdomain that anyone may claim collects authenticated requests from our own bundle — the A9 hazard, in a second place. Fallback removed; unset now means a relative URL. |
-| **LVX93** | a read-only availability check licenses a write's claim | **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
+| **LVX93** | a read-only availability check licenses a write's claim | **CLOSED 2026-09-12 · the guard now acts on the action-only condition; see the 2026-09-12 evening section. Below is what the entry said while it was open.** — **COUNTER ADDED · P2** — the claim gate's look-back is `toolRanPrevTurn = toolsRanThisTurn()`, ANY tool, so a `check_appointment_availability` excuses a booking claim. Real but **NOT what happened on the 2026-09-09 call** — see LVX94; the claim was never detected, so nothing reached the look-back. `live_claim_unbacked_by_action` now measures it. No behaviour change. |
 | **LVX94** | the claim detector missed passive voice and "I have YOU booked" | **FIXED 2026-09-09, UNVERIFIED LIVE · P1** — widened for both gaps; 14 cases added to `tests/completionClaimRe.test.js`, 7 of them negatives. "all" was tried as a determiner and reverted the same hour: "All appointments are confirmed by text" is policy, not a claim. Deployed as `67cc5c1`. Needs a call where a claim is made with no tool behind it. |
 | **LVX95** | the confirmation is spoken AFTER the write, and nothing requires it to come first | **VERIFIED ON TWO CALLS 2026-09-09 · P1** — CA7e12d0: `cancel_appointment_db` refused (`readBackMade=false callerAgreed=false`), the model read the appointment back and asked, the caller agreed, and the write went through 4s later. Confirmation now PRECEDES the write instead of trailing it by fourteen seconds. `write_confirm_after_write` 0, `write_order_gate_ceiling` 0. The model complied with a refusal, which is the first counter-example this file holds — n=1. See LVX100. |
 | **LVX96** | a refused `end_call` is reversed by the goodbye detector, and by a latch with no reset | **ROUTE B VERIFIED, ROUTE A UNVERIFIED 2026-09-09 · P0** — CA7e12d0: `end_call` succeeded, `armExit` was refused inside the barge window, `live_end_call_latch_cleared` fired and the call continued into "Sure, what is it?". Without it the retry re-arms on the next clear window, on a caller who was just asked a question. Route A never fired: `end_call_refusals={generic:0, hesitation:0}`, readable for the first time. **The clear exposed that `end_call` was being duplicate-suppressed** — see LVX100. |
@@ -11955,3 +11956,267 @@ The first analysis of `CA11eb4e9d` claimed the model fabricated a spelling from
 correct; that analysis was wrong.** What survives is narrower and still worth
 having: on that call the model asserted a spelling the caller had not just given,
 carrying it from earlier in the conversation.
+
+---
+
+# SESSION 2026-09-12 (evening) — the claim guard acts, and the instrument that can hit a 3-second window
+
+Branch `fix/claim-guard-and-hangup-harness` off `main` @ `b377b0b`. Suite 201 files /
+3662 tests. **Nothing here has been deployed, and no call has been taken on any of it.**
+
+What was asked for: stop the receptionist telling callers things that did not happen.
+Three of the four changes below are instruments rather than fixes, and that is deliberate
+— the previous attempt at this guarantee shipped 894 lines of passing tests and originated
+a write zero times across nine production calls, because nothing in the tree could have
+told the difference between that and success.
+
+## LVX127 / LVX93 — CLOSED. The guard now acts on the honest condition
+
+`lib/voice/live/index.js`. The guard that ACTS and the counter that MEASURES differed by
+one word, 23 lines apart:
+
+```js
+if (claimedCompletion && !toolsRanThisTurn()       && !toolRanPrevTurn)        // acted
+if (claimedCompletion && !actionToolsRanThisTurn() && !actionToolRanPrevTurn)  // counted
+```
+
+`toolsRanThisTurn()` counts every successful tool and `realToolCallsThisTurn` is
+incremented by the raw length of the function-call list, so a READ licensed a claim about
+a WRITE. The note now hangs off the action-only condition.
+
+**Both counters are kept.** `live_claim_without_action` stays on the any-tool condition, so
+its series remains comparable with every call taken before this change and the difference
+between the two is still exactly LVX93's population. Only the note moved.
+
+**LVX93's deferral condition is discharged.** It asked for one measurement first — would
+`sendTurnNote`'s shared budget silence the note anyway? `MAX_NOTES_PER_CALL` is 8,
+`CA41622e81` sent 3, all before 17:49:39, and both false claims fell on later turns where
+`noteSentThisTurn` was clear. The note gets through.
+
+### And the interruption path would have muted it
+
+Found by writing the test before the fix, which is the only reason it was found.
+
+`applyTurn` clears `actionToolCallsThisTurn`. The barge-in reset at the `sc.interrupted`
+site cleared `realToolCallsThisTurn`, `refusedActionCallsThisTurn` and
+`refusedCallsThisTurn` — and not that one. An interrupted turn never reaches `applyTurn`,
+so its action count survived into the next turn and `actionToolsRanThisTurn()` read high.
+
+Harmless while the condition was a counter. The moment the guard acts on it, it is **the
+guard going quiet on barged turns specifically**, which is a large share of real calls.
+Now cleared at the interrupt site, matching what the any-tool side already does —
+`toolRanPrevTurn` is only ever written by `applyTurn`, so an interrupted turn's tools
+leave no look-back behind them either.
+
+Rejected: also writing `actionToolRanPrevTurn` at the interrupt site so a barged turn's
+real action tool still backs a trailing claim. Arguably more correct, changes the any-tool
+behaviour too, and a note asks rather than acts — so the loose direction is the safe one.
+
+**What this does NOT do, stated so nobody expects more.** The caller still hears the false
+sentence. The note arrives after it and asks for a correction, which is a request and not
+a guarantee, and it does not make the write happen. Its value is the circularity on
+`CA41622e81`: the model CLAIMED instead of re-asking, so `readBackMade` stayed false, so
+the write-order gate refused, so the booking never happened. A model that corrects itself
+by RE-ASKING gives that gate the read-back it wanted, so the write can then land. Worth
+watching for rather than assuming.
+
+**Done when:** a live call claims a completion with no action behind it, logs
+`live_claim_unbacked_by_action`, and the model corrects itself to the caller.
+
+---
+
+## LVX121 — the harness can now hang up on a chosen turn. The write path STILL has not run
+
+`scripts/live-call-harness.js`, `lib/probe/hangup.js`, `tests/harnessHangup.test.js`.
+
+The window is *a recorded agreement with no row yet*, opened by the caller's yes and
+closed by the write: **2.7 seconds on a clean call**. The 44-second case that made it look
+reachable existed only because the assistant got confused about the caller's existing
+appointments. Two recipes were tried on real calls and neither was sound.
+
+Two triggers, answering different questions:
+
+| flag | fires | answers |
+|---|---|---|
+| `--hangup-after <label>` | when that scripted line's audio has finished sending | what happens if the caller vanishes mid-turn — the LVX125 / LVX126 shapes |
+| `--hangup-on-counter <name>` | the instant that counter rises above its pre-call value | what happens INSIDE the write window, and it is the deterministic one |
+
+`readCounters()` already existed and `turnTaking` exposes every registered counter, so the
+counter trigger needed no new plumbing on the server side.
+
+**And the harness can now FAIL.** `--expect-counter <name[:n]>` sets a non-zero exit when
+the counter did not move. Before this it printed a report and exited 0 whatever happened.
+A run whose counters are unreadable, or whose `bootId` changed mid-run, also exits 1 —
+an unverified expectation is not a met one.
+
+### The sabotage found a bad test, which is the whole reason for doing them
+
+The restart case first used `before 5 / now 1` — false under the guard AND false without
+it, because `1 > 5` is false on its own. Deleting the `bootIdStable` term left the suite
+green. It now uses `before 0 / now 1`, a pair that genuinely looks like a rise, and
+asserts both directions so the refusal is pinned on the bootId rather than on the
+arithmetic.
+
+**Done when:** a run with `--hangup-on-counter consent_agreement_recorded` produces
+`recover_booked` and a row appears in `db-inspect`. NOT YET RUN — it needs a local
+Postgres, and there is a real possibility the counter trigger is inherently too late,
+because `lastAgreement` is written in `applyTurn` at `turnComplete`, by which point the
+tool round may already have committed. **If so that is a finding, not a failure**, and
+`--hangup-after demo_accept` is the fallback that fires a turn earlier.
+
+---
+
+## The transcript race, found while wiring the above
+
+`persistTranscriptRows` is fire-and-forget by design and **the promise was dropped on the
+floor**. `finish()` runs while the last turn's rows are still in flight, and the last turn
+is where the agreement and the claim live. `recoverOwedBooking` reads the transcript at
+gate 4; on a call that had everything it needed it can decline `no_transcript`, or judge a
+truncated one, purely on timing. `server.js` already documented this race for the status
+callback — at teardown it is strictly worse, because nothing else is keeping the call
+alive.
+
+`transcriptSettled` is the chained tail of every write and the post-call chain starts from
+it. Chained rather than raced: the rows carry a sequence so ordering was never the
+problem, but a later turn resolving first would let `finish()` proceed with an earlier
+write still open.
+
+**This is a prerequisite for proving LVX121 with the harness, not a tidy-up.** Without it
+a stand-down caused by an unwritten transcript is indistinguishable from a harness that
+hung up at the wrong moment.
+
+Also: `tests/livePostCall.test.js`'s `fakeDb` has no `addTranscriptEntry` at all, so every
+transcript write in that file has been throwing inside `withTenantSafe` and being
+swallowed. Visible in the run output as `live_transcript_write_failed`, and noticed by
+nobody.
+
+---
+
+## LVX127's second half — the shadow judge gets tool traffic, and moves to the teardown
+
+`lib/postCallJudge.js`, `lib/voice/live/index.js`, `server.js`.
+
+The judge reads a transcript the audited model wrote — on this front-end the model IS the
+speech recogniser — so a model that lies about its own actions corrupts the only evidence
+it has. Two calls eleven minutes apart on 2026-09-12 gave the same two answers with a
+different one correct each time. **Until now the two readers differed in INTELLIGENCE and
+in EVIDENCE, and nobody could say which mattered.**
+
+It gains no authority: still shadow, still a detector, still acts on nothing.
+
+**What it is given** — all integers, booleans, and names from a closed list:
+`booking_writes`, `change_writes`, the three `availability_*` counters,
+`tools_refused_never_retried` BY NAME, `completion_claims` /
+`completion_claims_tool_backed`, `caller_affirmed_read_back`.
+
+`booking_writes` is not redundant with `bookedRowCount`: that is rows NOW, this is what
+the call DID. A book-then-cancel call is finally distinguishable from one that never
+wrote, which the transcript cannot tell you.
+
+**What it is not given, and why.** The verified slot list and every time — this reader
+answers WHETHER, never WHICH; times are `selectAgreedSlot`'s input and nothing else's, and
+a reader reconciling a spoken time against a list is the reverted `claimSlot.js`. No
+appointment id. No tool arguments, which do not exist anywhere and are the caller's name
+and number. Tool names are **filtered against `ACTION_TOOL_NAMES`** rather than trusted
+from the caller, so "no caller data reaches the prompt" is structural rather than a
+convention someone can break from a distance.
+
+**ABSENT IS NOT ZERO.** `toolTraffic` is optional and renders `not recorded` when missing.
+A zeroed block would tell the judge "no booking was written" about a call where nobody
+looked, which is the fail-open direction. Same rule on the verdict: `wroteNothing` /
+`unbackedClaims` / `browsedOnly` are null, not false, with no traffic.
+
+**The output schema stays at six fields.** Everything the traffic newly enables is
+arithmetic, and anything code can compute must not be asked of a reader that can be wrong
+in ways nobody can audit.
+
+### Why it had to leave /twilio/status, and why that costs nothing
+
+The traffic lives in the Live session's closure. The status handler could only have it via
+a migration — `calls` has no front-end column and `database/038_call_state.sql` refuses a
+fourth shared field in SQL. It also could not tell WHICH calls to judge: `/twilio/live-voice`
+falls back to the cascade on any throw, so a per-tenant inference would be wrong on
+exactly the fallback calls and would silently skip their judge.
+
+Deleting the status copy costs nothing real, and that is the argument rather than an
+apology for it. **`verifyCall` and `recoverOwedBooking` are invoked from
+`lib/voice/live/index.js` and nowhere else**, so `postcall_verify` is never emitted for a
+cascade call — and this judge exists to log its verdict BESIDE the structural check's. A
+cascade verdict had no other half. It was one `gemini-3.6-flash` call per cascade call
+producing an unpairable line. Spend goes DOWN.
+
+**Read a dashboard with this in mind:** `postcall_judge_ran`'s denominator moves from
+"every completed call with a transcript" to "every Live call at teardown". It is the
+denominator everything else here is read against, and the series steps.
+
+### What the suite cannot prove, said rather than implied by a green tick
+
+Whether the MODEL uses the block. `generate` is injected, so there is no model. A prompt
+assertion goes red if the block is dropped and stays green if it is ignored. The only
+offline instrument for "ignored" is a paired eval fixture: the `CA41622e81` transcript with
+`bookingWrites: 0` must not return `cancel`, and the same transcript with `bookingWrites: 1`
+may. **Not built. Not run.**
+
+---
+
+## LVX123 — the counter LVX77 relies on is NOT READABLE PER CALL
+
+**Status: OPEN. The measurement that was asked for cannot be taken by the route that was
+assumed, and that is the finding.**
+
+The instruction was to read LVX77's existing counter across the day's calls rather than
+building anything. It cannot be done.
+
+`lib/nameQuality.js:195-199` bumps `write_name_provenance_ok` and
+`write_refused_name_provenance` **and logs nothing**. Confirmed against production, all
+calls in the last 30 hours:
+
+```
+jsonPayload.event=~"provenance"   ->  ZERO ROWS
+live_call_summary keys            ->  no provenance field of any kind
+```
+
+So the numbers exist only as process-global counters behind `/api/debug/latency`,
+cumulative over the revision's whole lifetime, attributable to no call. **A rate across
+eleven calls is not recoverable from them.**
+
+This is the same shape already recorded twice in this ledger — a counter that reads the
+same on a clean run and on a run that never happened — and it is exactly why
+`recover_declined` was added for LVX121. The difference here is that nobody had noticed
+LVX77's "it is a counter, not a refusal" decision rests on a counter nothing can read.
+
+What the population actually looks like, from `live_call_summary`:
+
+```
+Live calls on 2026-09-12 (00:00-17:50Z)          18
+of those, fired spelling_voiced_answer            9
+```
+
+`spelling_voiced_answer` is the gate settling, which is LVX123's second half — "the gate
+settles for half a name". It is a proxy, not the measurement: it says the gate was
+answered, not whether the name written matched what the caller said.
+
+**NOT FIXED HERE, deliberately.** LVX77's reasoning stands — `nameSpokenIn` cannot
+separate a fabricated name from an ASR-mangled one, and refusing costs four in five. What
+changes is that the counting decision needs an instrument before it means anything.
+
+**Done when:** the provenance decision emits a per-call log line carrying `callSid` and
+the verdict, and a rate exists across twenty calls. One log line; not taken in this
+session because the brief was explicit about not building.
+
+---
+
+## Still true, and still not done
+
+- **Nothing here is deployed.** Production remains `voice-uk-prod-00053-q25` on
+  `vetra/voice:87e9c71`. The claim-guard fix reaches no caller until someone builds and
+  deploys.
+- **`postCallRecover`'s write path has still never executed.** The instrument now exists;
+  the run does not.
+- **LVX125 and LVX126 are still verified offline only.** The harness can now produce the
+  shapes that would discriminate them; nobody has run it.
+- **LVX124** (offered a different day from the one asked about) — n=1, and the caller's
+  turn was garbled, so it may be ASR rather than the model. No detector built.
+- **Stacked questions** — the most visible defect, and the prompt lever is exhausted. The
+  only one left is cutting audio mid-sentence.
+- **Transcription loss** — 5.8 s of speech as zero characters. Vendor.
