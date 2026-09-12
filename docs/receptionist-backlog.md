@@ -10874,7 +10874,8 @@ live with it rests on a number.
 
 ## LVX117 — a silent caller turn skips every consent check
 
-**Status: MEASURED, NOT FIXED. The obvious fix breaks working calls.**
+**Status: FIXED on `fix/lvx117-silent-turn-consent`, VERIFIED OFFLINE ONLY.
+Never taken a call. See "What shipped" at the end of this entry.**
 
 `services/tools.js` nests the hesitation gate, the unusable-transcript gate AND
 the write-order gate inside one condition:
@@ -10968,6 +10969,72 @@ three calls, so the probe has never had the chance to see it.
 
 **Done when:** the refusal is in, and a call shows `write_consent_skipped_silent_turn`
 with `write_consent_token_present: 0` being refused rather than written.
+
+### WHAT SHIPPED, 2026-09-12 — and the half the design brief did not have
+
+The rule as stated: refuse when there is no caller text on the turn AND no
+agreement token anywhere on the call; never use the token to allow anything.
+`services/tools.js`, immediately above the `lastCallerText` nesting, so the
+cascade below is untouched.
+
+**No plumbing was needed.** `lastAgreement` is a monotonic latch -- written once
+at `lib/voice/live/index.js:1892`, and there is no `lastAgreement = null` anywhere
+in the repo. So "a token anywhere on the call" already equals
+`ctx.lastAgreementReadBackKey`, which the probe has been reading since `a4307e5`.
+
+**Scoped to Live by `ctx.callerSaidThisCall != null`**, which is the
+discriminator `tests/liveWritePathEndToEnd.test.js` named a session earlier:
+`services/gemini.js` never mentions the field, Live initialises it to `""` on
+connect. `tests/liveWriteConsent.test.js:141` and `:148` pass unmodified, which is
+the proof the cascade is byte-identical.
+
+**THE REFUSAL RE-STASHES THE WRITE, and that is the half that was missing.**
+`retryPendingWrite` TAKES the stash (`index.js:3194`; `takePendingWrite` clears as
+it reads, because a re-delivered transcript must not book twice) and only the
+write-order gate ever re-stashed. So a refusal that merely returned would have
+converted CA422f58's wrong cancel into a **lost** cancel -- and `bookingOwedNoRow`
+only ever covers a missing BOOKING, so a dropped cancellation reaches nobody at
+all. Re-stashed with `reason: "write_order"`, so `heldForAgreement`
+(`index.js:3589`) re-issues it the moment the caller actually agrees, back through
+the whole gate stack. The write is delayed one turn, not cancelled: CA422f58 would
+have committed at 20:51:49 on the real "Yes." instead of at 20:51:42 on nothing.
+Only when a read-back happened, copied from the write-order gate rather than
+reasoned out again. **Proved by sabotage:** disabling the re-stash makes the new
+end-to-end test fail with 0 rows, so the test is not passing by accident.
+
+**No release hatch and no env flag**, unlike the write-order gate's two. There is
+no legitimate write in a state where the caller has agreed to nothing all call, so
+a hatch could only let a wrong one through; and a flag defaulting on in code while
+unset in the deployed env is how `VOICE_INTENT_MARKER` silenced every real call
+while fourteen laptop calls read clean. Deliberately NOT wired into
+`writeAttemptBudget` either -- refusals from here would raise the SHARED count and
+could push the write-order gate to its ceiling, releasing a write that never had a
+read-back.
+
+**`silent_turn_verdict` on every probe emit**, one of `cascade` / `gate_ran` /
+`allowed_token` / `refused_no_consent`. The counter
+`write_refused_no_consent_silent_turn` only ever bumps on a fault, and 0 of 7
+attempts have ever reached this path, so on an ordinary call the counter alone
+cannot separate "refused nothing" from "this build never served the call". The
+verdict field can.
+
+**Blast radius, all of it.** The bug-pinning test at
+`tests/liveWritePathEndToEnd.test.js` flipped from "row written, should be 0" to 0
+rows. The benign case one turn after a real agreement still writes its row,
+untouched -- if that ever goes red the rule has been implemented as "require
+caller text" and is wrong. New: the CA422f58 end-to-end self-heal, and the
+`lastAgreementReadBackKey` wire in `tests/liveToolContext.test.js`, which had zero
+coverage of a field that is read only to refuse -- an uncopied wire there refuses
+every silent-turn write instead of failing closed.
+`tests/bookingNameProvenance.test.js` needed one fixture line: it sets
+`callerSaidThisCall` (so it reads as Live) with no caller text and no token, so the
+new gate refused before provenance was computed. Given a token, exactly as that
+file already gives itself `spellingSettled: true` and
+`tests/liveWriteConsent.test.js` gives itself a read-back. Suite: 199 files /
+3,572 tests green.
+
+**Still owed:** a live call. Offline verification is what the reverted attempt had
+when it originated a write zero times across nine production calls.
 
 ---
 

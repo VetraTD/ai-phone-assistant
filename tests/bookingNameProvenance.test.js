@@ -69,6 +69,20 @@ const ctxWith = (heard) => ({
   // test is about what gets WRITTEN, not about whether spelling was asked.
   spellingSettled: true,
   callerSaidThisCall: heard,
+  // ...and an agreement already on the record, so a refusal here is never the
+  // LVX117 silent-turn gate either. Added 2026-09-12 when that gate shipped and
+  // all four tests in this file went red: callerSaidThisCall is non-null, which
+  // is what marks this ctx as Live, and with no caller text and no token the new
+  // gate refuses the write before provenance is ever computed.
+  //
+  // The token rather than caller text on purpose. Setting lastCallerText would
+  // make the whole consent cascade run and this fixture would then have to
+  // satisfy the write-order gate as well; the token leaves the cascade skipped
+  // exactly as it was before the gate existed, so this file's subject is
+  // unchanged. It is also the honest shape: LVX77 was a booking the caller HAD
+  // agreed to, carrying a name they never said.
+  lastAgreementReadBackKey: "k_agreed_earlier",
+  callerTurnsSinceAgreement: 1,
 });
 
 const book = (client_name) => ({

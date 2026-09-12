@@ -316,15 +316,16 @@ describe("the Live write path, end to end, asserted on the row", () => {
   // 1,500 ms of speech has been logged as zero characters. A caller who really
   // did say "no" and transcribed empty is indistinguishable here from consent.
   //
-  // ASSERTED AS IT BEHAVES TODAY, deliberately. This step ships instruments and
-  // no behaviour change, and a test that documents the bug is what makes the
-  // fix visible as a diff. The discriminator the fix should use already exists
-  // and is already documented as Live-only: `ctx.callerSaidThisCall` is null on
-  // the cascade and non-null on Live (the LVX53 note in services/tools.js says
-  // so), so the gates can run on "Live with no caller text" while the cascade
-  // stays untouched. Flip this expectation then.
+  // CLOSED 2026-09-12, and the discriminator is the one this comment predicted:
+  // `ctx.callerSaidThisCall` is null on the cascade and non-null on Live, so the
+  // refusal runs on "Live with no caller text" while the cascade stays
+  // byte-identical (tests/liveWriteConsent.test.js proves the second half).
+  //
+  // The rule is NOT "require caller text" -- that refuses the legitimate write
+  // in the test below. It is "no caller text on this turn AND no agreement token
+  // anywhere on the call", and the token is read ONLY to refuse, never to allow.
   // -------------------------------------------------------------------------
-  it("TODAY'S BEHAVIOUR, AND A DEFECT: a silent caller turn bypasses the consent gate", async () => {
+  it("refuses a write on a silent turn when the caller has agreed to nothing at all", async () => {
     const s = await boot();
 
     await s.checkAvailability();
@@ -332,18 +333,30 @@ describe("the Live write path, end to end, asserted on the row", () => {
     // No caller turn at all: the read-back was spoken into silence.
     await s.book();
 
-    // Should be 0. Is 1, because the gate never ran.
-    expect(s.store.scheduled()).toHaveLength(1);
+    // WAS 1 until the refusal shipped, asserted as the defect with the comment
+    // "Should be 0". This is the row CA422f58 wrote against a question its
+    // caller had not answered.
+    expect(s.store.scheduled()).toHaveLength(0);
+    // Still zero: the refusal returns ABOVE the cascade, so none of it ran.
     expect(c().write_consent_checked ?? 0).toBe(0);
     expect(c().write_order_would_refuse ?? 0).toBe(0);
 
-    // THE PROBE SEES IT, which is what makes the hole measurable in production
-    // before anything is changed on the strength of it.
+    // THE PROBE STILL SEES THE SHAPE. This counter is the denominator the new
+    // one is a subset of, so both have to be present to tell "refused" from
+    // "allowed because they had agreed earlier".
     expect(c().write_consent_skipped_silent_turn).toBe(1);
-    // And no agreement was ever given on this call, so no durable token exists.
-    // This is the DANGEROUS shape: gate skipped and nothing ever consented.
+    expect(c().write_refused_no_consent_silent_turn).toBe(1);
+    // No agreement anywhere on the call, which is the whole reason refusing is
+    // safe here: there is no action this could be withdrawing consent from.
     expect(c().consent_agreement_recorded ?? 0).toBe(0);
     expect(c().write_consent_token_present ?? 0).toBe(0);
+
+    // HELD, NOT FAILED, as a boolean. lib/voice/live/index.js reads exactly this
+    // to decide whether to tell the caller the booking did not go through --
+    // prose saying "NOT A FAILURE" is not a branch.
+    const r = s.bookResponses().at(-1)?.response;
+    expect(r?.success).toBe(false);
+    expect(r?.gated).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -385,6 +398,52 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(c().write_consent_skipped_silent_turn).toBe(1);
     expect(c().consent_agreement_recorded).toBe(1);
     expect(c().write_consent_token_present).toBe(1);
+
+    // AND IT WAS NEVER REFUSED. The token is why: same silent turn as the test
+    // above, opposite outcome. If this counter is ever non-zero here, the rule
+    // has been implemented as "require caller text" and refuses real bookings.
+    expect(c().write_refused_no_consent_silent_turn ?? 0).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // CA422f58, END TO END: THE REFUSED WRITE MUST NOT BE A LOST WRITE.
+  //
+  // This is the half of the fix that is not about refusing. retryPendingWrite
+  // TAKES the stash rather than reading it -- takePendingWrite clears as it
+  // reads, because a re-delivered transcript must not book twice -- so a gate
+  // that simply returns a refusal DESTROYS the write it refused. On a
+  // cancellation that is worse than the defect being fixed: bookingOwedNoRow
+  // only ever covers a missing BOOKING, so a dropped cancel reaches nobody.
+  //
+  // So the refusal re-stashes with reason "write_order", and heldForAgreement
+  // re-issues it the moment the caller actually agrees, back through the whole
+  // gate stack. The write is DELAYED BY ONE TURN, not cancelled -- which is what
+  // CA422f58 should have done: commit at 20:51:49 on the real "Yes." rather than
+  // at 20:51:42 on nothing.
+  // -------------------------------------------------------------------------
+  it("re-issues the refused write when the caller finally agrees, and writes it once", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    // The caller says nothing. The write is refused, not dropped.
+    await s.book();
+    expect(s.store.scheduled()).toHaveLength(0);
+    expect(c().write_refused_no_consent_silent_turn).toBe(1);
+
+    // NOW they answer the question that was actually put to them. The turn has
+    // to close for the engine to see it, which is what assistantTurn does.
+    await s.callerSays("Yes.");
+    await s.assistantTurn("Lovely, that's booked in for you.");
+    await s.settle();
+    await s.settle();
+
+    // THE ROW EXISTS, exactly once, at the time that was read back.
+    expect(s.store.scheduled()).toHaveLength(1);
+    expect(s.store.scheduled()[0].scheduled_at).toContain("2026-09-07");
+    // And the agreement that released it was a real one, recorded by the ledger
+    // rather than inferred from the write having happened.
+    expect(c().consent_agreement_recorded).toBe(1);
   });
 
   it("writes nothing when there was no read-back to agree to", async () => {

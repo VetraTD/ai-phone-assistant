@@ -110,6 +110,35 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.spellingSettled).toBe(true);
   });
 
+  it("carries the agreement token through to the tool (the LVX117 wire)", async () => {
+    // The value the silent-turn refusal reads, and it is read to REFUSE. So an
+    // uncopied field here does not fail closed like lastReplyText does -- it
+    // makes the gate refuse EVERY write on a silent turn, including the benign
+    // one a turn after a real agreement. Exactly the LVX45 shape again, with the
+    // damage pointing the other way.
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 6,
+      lastCallerText: "",
+      lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
+      lastAgreementReadBackKey: "k12345",
+      callerTurnsSinceAgreement: 2,
+    }));
+    expect(ctx.lastAgreementReadBackKey).toBe("k12345");
+    expect(ctx.callerTurnsSinceAgreement).toBe(2);
+  });
+
+  it("normalises a missing agreement token to null, never undefined", async () => {
+    // null is "no agreement anywhere on this call", which is what the refusal
+    // fires on. It has to be reachable by a call that genuinely never had one,
+    // and indistinguishable from a wire that was never connected is exactly what
+    // it must NOT be -- hence the probe's silent_turn_verdict, which is emitted
+    // on every attempt whatever this holds.
+    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
+    expect(ctx.lastAgreementReadBackKey).toBe(null);
+    expect(ctx.callerTurnsSinceAgreement).toBe(null);
+  });
+
   it("carries abandonedWrites through to the tool (the LVX72 wire)", async () => {
     // Same shape as the LVX45 wire above, and asserted for the same reason:
     // turnState() produces this and the ctx object copies it by hand, so the

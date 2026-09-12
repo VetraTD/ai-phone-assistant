@@ -564,8 +564,11 @@ export async function executeToolCall(fc, ctx) {
           const lastCallerText = typeof ctx?.lastCallerText === "string" ? ctx.lastCallerText : "";
 
           // -------------------------------------------------------------------
-          // THE CONSENT PROBE. Measurement only. Nothing below reads any of it,
-          // and no outcome moves because of it.
+          // THE CONSENT PROBE, and the ONE rule that now acts on it: LVX117.
+          //
+          // Everything in this block was measurement only until 2026-09-12.
+          // Exactly one thing now moves on it -- the refusal immediately below
+          // the block -- and every other value here still gates nothing.
           //
           // Two facts about this gate are now established on real calls rather
           // than argued, and they pull in opposite directions:
@@ -600,12 +603,35 @@ export async function executeToolCall(fc, ctx) {
           // a write to values the write is itself built from compares a value to
           // itself and cannot fail.
           // -------------------------------------------------------------------
+          // Hoisted out of the probe block, because the refusal below reads the
+          // same values. Deriving them twice is how two gates end up disagreeing
+          // about the same turn.
+          const probeReply = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
+          const probeStrings = getStrings(ctx?.config);
+          const probeReadBack = Boolean(probeReply && probeStrings.confirmReadBackRe?.test(probeReply));
+          const probeToken = ctx?.lastAgreementReadBackKey ?? null;
+          const gateRan = lastCallerText.trim() !== "";
+          // WHICH FRONT-END IS THIS, and the answer has to be structural.
+          //
+          // services/gemini.js never mentions callerSaidThisCall; Live
+          // initialises it to "" on connect and only ever appends. So non-null
+          // means Live. This is the discriminator
+          // tests/liveWritePathEndToEnd.test.js named for exactly this job: it
+          // lets the refusal run on "Live with no caller text" while the cascade
+          // stays byte-identical, which is what the nesting below protects.
+          const onLive = ctx?.callerSaidThisCall != null;
+          // Set on EVERY write attempt, including the ones where nothing
+          // happens. A field that appears only on a fault reads identically for
+          // a clean call and for a build that never served the call -- which is
+          // how a fix sits in the tree looking shipped.
+          const silentTurnVerdict = !onLive
+            ? "cascade"
+            : gateRan
+              ? "gate_ran"
+              : probeToken
+                ? "allowed_token"
+                : "refused_no_consent";
           {
-            const probeReply = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
-            const probeStrings = getStrings(ctx?.config);
-            const probeReadBack = Boolean(probeReply && probeStrings.confirmReadBackRe?.test(probeReply));
-            const probeToken = ctx?.lastAgreementReadBackKey ?? null;
-            const gateRan = lastCallerText.trim() !== "";
             // WAS THE TURN THE CALLER ANSWERED ASKING MORE THAN ONE THING?
             //
             // This is the reason stacked questions are not a cosmetic defect and
@@ -651,7 +677,135 @@ export async function executeToolCall(fc, ctx) {
               // True means an affirmative on this turn cannot be attributed to
               // the write alone. Shape only; the question itself is not logged.
               readback_ambiguous_ask: probeAmbiguousAsk,
+              // WHAT THE LVX117 REFUSAL DID, on every attempt and not only the
+              // refused ones. "cascade" means the rule does not apply to this
+              // front-end at all; "gate_ran" means the caller spoke and the
+              // cascade below handled it; "allowed_token" is the benign shape --
+              // no caller text this turn, but they agreed to something earlier;
+              // "refused_no_consent" is CA422f58.
+              silent_turn_verdict: silentTurnVerdict,
             });
+          }
+
+          // -------------------------------------------------------------------
+          // LVX117. A WRITE THE CALLER HAS AGREED TO NOTHING ABOUT.
+          //
+          // Confirmed in production on CA422f58, the call that opened this work.
+          // The model asked "Just to confirm, you'd like to cancel your
+          // appointment on Tuesday, September 15th at 9:00 AM, is that right?",
+          // the caller's turn transcribed as nothing, retryPendingWrite fired on
+          // that turn's completion, and the cancel COMMITTED. The "Yes." arrived
+          // seven seconds later. Everything consent-related is nested inside the
+          // condition on the next line, so nothing checked anything.
+          //
+          // AND IT CANNOT BE CLOSED BY REQUIRING CALLER TEXT. A write one turn
+          // after a genuine agreement succeeds today and should: they agreed,
+          // they are simply not talking at the instant the tool runs. Both
+          // shapes are pinned in tests/liveWritePathEndToEnd.test.js, and on
+          // caller text alone they are indistinguishable:
+          //
+          //                                    caller text | token on call
+          //   benign: write after a real yes      absent    |   PRESENT
+          //   CA422f58: never agreed at all       absent    |   ABSENT
+          //
+          // The token is ACTION-BLIND -- measured on CA8c019c, where it carried a
+          // cancellation's consent to a BOOKING write ten caller turns later
+          // (token_present: true, caller_turns_since_agreement: 10). That is the
+          // reverted three-turn window's exact failure, reproduced live. So it is
+          // USELESS AS PERMISSION, and sound as ABSENCE of permission: no token
+          // anywhere on the call means the caller has agreed to nothing at all,
+          // and refusing on that can never authorise a wrong write.
+          //
+          // That asymmetry is the whole design -- the token is read ONLY to
+          // refuse. A false-negative token (the ledger skips a barged turn, and
+          // a turn where the model stayed silent) therefore costs a refusal the
+          // caller clears by speaking, never a wrong row.
+          //
+          // NO RELEASE HATCH, unlike the write-order gate's two, and no env
+          // switch. There is no legitimate write in a state where the caller has
+          // agreed to nothing all call, so a hatch could only let a wrong one
+          // through -- and a flag defaulting on in code while unset in the
+          // deployed environment is how VOICE_INTENT_MARKER silenced every real
+          // call while fourteen laptop calls read clean.
+          //
+          // Deliberately NOT wired into writeAttemptBudget either: refusals from
+          // here would raise the SHARED count, and could push the write-order
+          // gate to its ceiling so that IT releases a write that never had a
+          // read-back.
+          // -------------------------------------------------------------------
+          if (silentTurnVerdict === "refused_no_consent") {
+            bumpCounter("write_refused_no_consent_silent_turn");
+            log.error("write_refused_no_consent", {
+              callSid: ctx?.callSid ?? null,
+              tool: fc.name,
+              readback_now: probeReadBack,
+              // Whether the write survives this refusal or is dropped here.
+              restashed: probeReadBack,
+              severity: "warn",
+            });
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                // HELD, NOT FAILED, as a boolean rather than as prose.
+                // retryPendingWrite branches on this: without it a write this
+                // gate is holding gets announced to the caller as one that
+                // "didn't go through", with a callback offered for it (CAa08fc3).
+                response: {
+                  success: false,
+                  gated: true,
+                  message:
+                    `[not caller speech] NOT A FAILURE — nothing has gone wrong and this is still ` +
+                    `going ahead. The caller has not answered you: their last turn carried no speech ` +
+                    `at all, and they have not agreed to anything on this call. Do not write ` +
+                    `anything. Ask them once, plainly, whether to go ahead, and WAIT for their ` +
+                    `answer. Do not tell the caller anything failed, do not say there was a problem ` +
+                    `or a glitch, and do not offer a callback or a message.`,
+                },
+              },
+              stateEffects: {
+                // silent, like every other gate's: nothing ran, so the session
+                // must not narrate work that was declined.
+                toolResult: {
+                  name: fc.name,
+                  success: false,
+                  message: "Sorry — did you want me to go ahead with that?",
+                  callerSafe: true,
+                },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+                capabilityState: {
+                  [pack.id]: {
+                    // THE WRITE SURVIVES THE REFUSAL, and this is the
+                    // load-bearing half of the fix.
+                    //
+                    // retryPendingWrite TAKES the stash -- takePendingWrite
+                    // clears as it reads, so a re-delivered transcript cannot
+                    // book twice -- and on CA422f58 the write that reached this
+                    // gate arrived through exactly that path. So returning a
+                    // refusal without re-stashing would convert a wrong cancel
+                    // into a LOST cancel, and bookingOwedNoRow only ever covers a
+                    // missing BOOKING, so a dropped cancellation would reach
+                    // nobody at all.
+                    //
+                    // Stashed with reason "write_order" so heldForAgreement in
+                    // lib/voice/live/index.js re-issues it the moment the caller
+                    // actually agrees -- back through handleToolCall, with this
+                    // gate and the spelling gate both still in front of it.
+                    // CA422f58 then ends with the cancel committing at 20:51:49
+                    // on the real "Yes." instead of at 20:51:42 on nothing.
+                    //
+                    // ONLY WHEN A READ-BACK HAPPENED, copied from the write-order
+                    // gate rather than reasoned out again: with nothing read
+                    // back, a later "yes" is agreement to something the caller
+                    // never heard, and re-issuing on it writes exactly what this
+                    // gate exists to stop.
+                    ...(probeReadBack
+                      ? { pendingWrite: { name: fc.name, args: fc.args || {}, reason: "write_order" } }
+                      : {}),
+                  },
+                },
+              },
+            };
           }
 
           if (lastCallerText.trim() !== "") {
