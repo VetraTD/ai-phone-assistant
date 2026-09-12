@@ -153,6 +153,65 @@ describe("LVX56 — a hesitation cannot be the agreement that triggers a write",
   });
 });
 
+// ---------------------------------------------------------------------------
+// LVX117 — the silent-turn refusal, at the layer that decides it.
+//
+// tests/liveWritePathEndToEnd.test.js drives this through a real session and
+// asserts the row. What it cannot produce is the END-OF-CALL SWEEP, which
+// re-issues a promised message after the line is down. tests/
+// messageLastChance.test.js covers that sweep with a STUBBED executor, so
+// services/tools.js is not in its path and neither file can see this gate meet
+// that write. Both suites were green while the gate silently refused it.
+// ---------------------------------------------------------------------------
+describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => {
+  // Live, unlike ctxWith: callerSaidThisCall is what separates the two
+  // front-ends, and it is non-null on Live from the first turn.
+  const liveCtx = (over = {}) => ({ ...ctxWith(""), callerSaidThisCall: "I'd like to cancel", ...over });
+
+  it("refuses when the caller's turn was empty and no agreement exists", async () => {
+    const { functionResponse } = await book(liveCtx());
+    expect(functionResponse.response.success).toBe(false);
+    // Held, not failed, so the session does not tell the caller it went wrong.
+    expect(functionResponse.response.gated).toBe(true);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("allows it when the caller agreed earlier on the call", async () => {
+    // The benign shape. The token is read ONLY to permit the gate to stand
+    // down -- never to authorise anything -- which is why an action-blind token
+    // is safe here and would not be as permission.
+    mockCreateAppointment.mockResolvedValue("appt-token");
+    const { functionResponse } = await book(liveCtx({ lastAgreementReadBackKey: "k1" }));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("leaves the cascade alone — no callerSaidThisCall, no refusal", async () => {
+    mockCreateAppointment.mockResolvedValue("appt-cascade");
+    const { functionResponse } = await book(ctxWith(""));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("EXEMPTS the end-of-call message sweep, or the promised message is lost", async () => {
+    // saveOutstandingMessage re-issues this after the line is down: no caller
+    // turn is possible, and a call that only took a message never produced an
+    // agreement token either. Refusing here bumps message_lost_at_close and
+    // undoes the whole point of the sweep. Messages only, and the callback
+    // number rather than a caller's decision is what identifies the row.
+    const fc = { id: "lc", name: "record_customer_request", args: { request_type: "message" } };
+    const { functionResponse } = await executeToolCall(fc, liveCtx({ lastChance: true }));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("still refuses that same message write when it is NOT the sweep", async () => {
+    // The exemption is the flag, not the tool. Without it this is an ordinary
+    // write on a turn the caller never spoke on.
+    const fc = { id: "m1", name: "record_customer_request", args: { request_type: "message" } };
+    const { functionResponse } = await executeToolCall(fc, liveCtx());
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.gated).toBe(true);
+  });
+});
+
 describe("LVX50 — an unusable transcript cannot authorise a write either", () => {
   it("refuses the booking that a Korean-character transcript produced", async () => {
     const { functionResponse, stateEffects } = await book(ctxWith("에레는"));

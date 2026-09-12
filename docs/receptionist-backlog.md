@@ -11033,8 +11033,39 @@ file already gives itself `spellingSettled: true` and
 `tests/liveWriteConsent.test.js` gives itself a read-back. Suite: 199 files /
 3,572 tests green.
 
-**Still owed:** a live call. Offline verification is what the reverted attempt had
-when it originated a write zero times across nine production calls.
+### THE REGRESSION THIS NEARLY SHIPPED, and why 3,572 green tests missed it
+
+The gate refused the END-OF-CALL MESSAGE SWEEP. `saveOutstandingMessage`
+(`index.js:4233`) re-issues a `record_customer_request` the caller was promised,
+*after* the line is down: no caller turn is possible by construction, and a call
+that only ever took a message never produced an agreement token either. So the
+gate saw "silent turn, nothing agreed" and refused — bumping
+`message_lost_at_close` and undoing the entire point of the sweep, which exists so
+that "a message the caller was promised outlives the call, or it does not exist at
+all".
+
+**Both suites that touch this path were green while it was broken.**
+`tests/messageLastChance.test.js` drives the sweep with a **stubbed** `execute`
+(`:110`), so `services/tools.js` is not in its path at all;
+`tests/liveWritePathEndToEnd.test.js` drives the real tools layer but cannot
+produce a sweep, because the sweep only runs at `finish()`. Each file covers one
+half and neither can see the two halves meet. The suite total is not the coverage.
+
+Fixed with `ctx.lastChance`, which already crosses the boundary
+(`lib/voice/live/tools.js:202`) and which `services/tools.js:1181` already uses to
+exempt the same write from the spelling name check, on the same reasoning: the
+sweep is messages-only, and a message is identified by the callback number the
+call supplies rather than by a decision the caller authorised, so there is no
+wrong action to commit. Ordered above `gate_ran` in the verdict so the probe
+reports the exemption instead of hiding it.
+
+New tests live in `tests/liveWriteConsent.test.js`, at the layer that decides it,
+and **both new guards were confirmed able to fail** by sabotage: disabling the
+re-stash fails the end-to-end self-heal with 0 rows, and disabling the exemption
+fails the sweep test and nothing else.
+
+**Still owed:** a live call. Offline verification is exactly what the reverted
+attempt had when it originated a write zero times across nine production calls.
 
 ---
 

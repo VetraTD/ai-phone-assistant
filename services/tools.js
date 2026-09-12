@@ -624,13 +624,34 @@ export async function executeToolCall(fc, ctx) {
           // happens. A field that appears only on a fault reads identically for
           // a clean call and for a build that never served the call -- which is
           // how a fix sits in the tree looking shipped.
+          //
+          // "last_chance" is an EXEMPTION, and it is not a nicety. The
+          // end-of-call sweep (saveOutstandingMessage) re-issues a message the
+          // caller was promised, after the line is down: there is no caller turn
+          // left by construction, and on a call that only ever took a message
+          // there is no agreement token either, so this gate would refuse it and
+          // bump message_lost_at_close. That is the exact defect the sweep exists
+          // to prevent -- "a message the caller was promised outlives the call,
+          // or it does not exist at all".
+          //
+          // Safe because the sweep is messages-only (index.js checks
+          // pending.name === "record_customer_request" before it sets the flag):
+          // a message is identified by the callback number the call supplies, not
+          // by a decision the caller authorised, so there is no wrong action to
+          // commit. services/tools.js:1181 already exempts the same write from
+          // the spelling name check on the same reasoning.
+          //
+          // Ordered ABOVE gateRan on purpose, so the probe reports the exemption
+          // rather than hiding it behind whatever turnUserText happened to hold.
           const silentTurnVerdict = !onLive
             ? "cascade"
-            : gateRan
-              ? "gate_ran"
-              : probeToken
-                ? "allowed_token"
-                : "refused_no_consent";
+            : ctx?.lastChance === true
+              ? "last_chance"
+              : gateRan
+                ? "gate_ran"
+                : probeToken
+                  ? "allowed_token"
+                  : "refused_no_consent";
           {
             // WAS THE TURN THE CALLER ANSWERED ASKING MORE THAN ONE THING?
             //
@@ -679,9 +700,10 @@ export async function executeToolCall(fc, ctx) {
               readback_ambiguous_ask: probeAmbiguousAsk,
               // WHAT THE LVX117 REFUSAL DID, on every attempt and not only the
               // refused ones. "cascade" means the rule does not apply to this
-              // front-end at all; "gate_ran" means the caller spoke and the
-              // cascade below handled it; "allowed_token" is the benign shape --
-              // no caller text this turn, but they agreed to something earlier;
+              // front-end at all; "last_chance" is the end-of-call message sweep,
+              // exempt; "gate_ran" means the caller spoke and the cascade below
+              // handled it; "allowed_token" is the benign shape -- no caller text
+              // this turn, but they agreed to something earlier;
               // "refused_no_consent" is CA422f58.
               silent_turn_verdict: silentTurnVerdict,
             });
