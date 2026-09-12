@@ -98,7 +98,18 @@ async function boot(env = {}) {
   const live = fakeLive();
   const execute = vi.fn(async (fc) => ({
     functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
-    stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" } },
+    stateEffects: {
+      toolResult: { name: fc.name, success: true, message: "ok" },
+      // end_call ARMS THE EXIT, and it does so through stateEffects rather than
+      // through the tool name -- services/tools.js returns `endCallArgs: fc.args
+      // ?? {}` on the success branch, and lib/voice/live/tools.js only sets it
+      // when the key is present. A fake that returns a bare success for end_call
+      // leaves endCallArmed false, so the session never looks like it is signing
+      // off. Modelled here because the sign-off suppressor reads that flag, and a
+      // mock missing a side effect makes the test fail for a reason that has
+      // nothing to do with the code under test.
+      ...(fc.name === "end_call" ? { endCallArgs: fc.args ?? {} } : {}),
+    },
   }));
   await handleLiveSessionConnection(ws, {}, {
     now: () => 0,
@@ -406,6 +417,113 @@ describe("LVX93 — a read does not license a write's claim", () => {
 
     expect(claims()).toBe(1);
     expect(unbacked()).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SIGN-OFF RESTATEMENT, and it is a regression this guard caused.
+//
+// CAbef3df47, production, 2026-09-12 22:42:37. The assistant booked an
+// appointment for real at 22:42:06, confirmed it, and then said goodbye with
+// "We have Nithin Dodla booked for a strategy call on Monday, September 14th at
+// 1 00 PM Central Time." Every word of that was TRUE -- postcall_verify returned
+// ok with booked_rows 1, and the judge recorded claims 2, claims_tool_backed 2.
+//
+// The guard fired anyway and told the model to retract it. The look-back is one
+// turn deep, the write was two turns back, and the only tool on the sign-off
+// turn was end_call -- which is not an action tool.
+//
+// live_claim_without_action stayed 0 on that call, so the OLD any-tool condition
+// would have been silent: it counted end_call and was right by accident. Moving
+// the note to the action-only condition is what exposed this.
+//
+// MEASURED EXPOSURE: 9 of 64 production calls end on a claim-shaped turn --
+// "Perfect. Your appointment is rescheduled for September sixteenth at four PM",
+// "All done, your consultation is booked". One call in seven.
+//
+// The rule: at the exit, a restatement is not a new claim, PROVIDED this call
+// actually completed an action. One of those nine is CA41622e81 itself, whose
+// sign-off "I've gone ahead and cancelled your strategy call" was a genuine lie
+// -- and on that call every write was refused, so nothing ever completed. That
+// is the case the second half of the condition keeps catching.
+// ---------------------------------------------------------------------------
+describe("a restatement at sign-off is not a new claim", () => {
+  beforeEach(() => clearStats());
+
+  it("stays silent when the call actually completed an action", async () => {
+    const s = await boot();
+
+    // The write lands, and is confirmed on its own turn -- backed, no note.
+    await s.callTool("record_customer_request");
+    s.say("I've booked your appointment for Monday at one PM.");
+    s.endTurn();
+    await s.settle();
+
+    // A turn in between, so the one-turn look-back can no longer see the write.
+    s.say("Is there anything else I can help you with?");
+    s.endTurn();
+    await s.settle();
+
+    // The goodbye RESTATES it, in the shape CAbef3df47 used. end_call is the
+    // only tool on this turn, and end_call is not an action tool.
+    await s.callTool("end_call");
+    s.say("So I have you booked for Monday at one PM. Thanks for calling, have a great day.");
+    s.endTurn();
+    await s.settle();
+
+    expect(JSON.stringify(notes(s.live))).not.toContain("no tool has run to make it so");
+    // The suppression has to be COUNTABLE. A guard that quietly declines to
+    // speak reads identically to one that never ran -- the trap recover_declined
+    // was added to close -- so the wider condition still counts and the
+    // suppression counts beside it. The difference between the two is what the
+    // model was actually told about.
+    expect(unbacked()).toBe(1);
+    expect(getLatencyStats().turnTaking.live_claim_signoff_restatement).toBe(1);
+  });
+
+  it("STILL fires at sign-off when nothing was ever completed — CA41622e81", async () => {
+    // The same shape with the second half of the condition removed by the call
+    // itself: no action tool ever ran, so the restatement is a fabrication.
+    const s = await boot();
+
+    // set_call_intent SUCCEEDS here, exactly as it did on CA41622e81, and
+    // end_call succeeds below. Neither is in ACTION_TOOL_NAMES, so neither
+    // reaches completedToolsThisCall -- which is the whole reason the
+    // suppressor cannot be talked round by bookkeeping. This is the same
+    // distinction that let a set_call_intent vouch for a cancellation before
+    // the guard moved to the action-only condition.
+    await s.callTool("set_call_intent");
+    s.say("Let me take a look at that for you.");
+    s.endTurn();
+    await s.settle();
+
+    await s.callTool("end_call");
+    s.say("I've gone ahead and cancelled your strategy call for Monday.");
+    s.endTurn();
+    await s.settle();
+
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+
+  it("still fires MID-CALL after a completed action, which is the narrower hole", async () => {
+    // The suppression is scoped to the exit deliberately. A call that completes
+    // one action and then fabricates a different one MID-CALL is still caught,
+    // which "any completed action suppresses" would have given away.
+    const s = await boot();
+
+    await s.callTool("record_customer_request");
+    s.endTurn();
+    await s.settle();
+
+    s.say("One moment.");
+    s.endTurn();
+    await s.settle();
+
+    s.say("I've cancelled that appointment for you.");
+    s.endTurn();
+    await s.settle();
+
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
   });
 });
 
