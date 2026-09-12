@@ -10874,8 +10874,11 @@ live with it rests on a number.
 
 ## LVX117 — a silent caller turn skips every consent check
 
-**Status: FIXED on `fix/lvx117-silent-turn-consent`, VERIFIED OFFLINE ONLY.
-Never taken a call. See "What shipped" at the end of this entry.**
+**Status: FIXED and the refusal HAS FIRED ON A REAL CALL (`CAfc89ebd3`,
+2026-09-12) — three times, held not failed, re-stash correct. But that same call
+falsified the rule's premise: see LVX120. The gate is right in shape and was
+resting on an input that lies, so this is NOT closed until LVX120 is verified
+live.**
 
 `services/tools.js` nests the hesitation gate, the unusable-transcript gate AND
 the write-order gate inside one condition:
@@ -11079,8 +11082,38 @@ tools layer), `tests/liveWriteConsent.test.js` (real tools layer, hand-built Liv
 ctx) and a production call. Filed so the next session does not mistake a clean
 `chat` run for evidence.
 
-**Still owed:** a live call. Offline verification is exactly what the reverted
-attempt had when it originated a write zero times across nine production calls.
+### THE LIVE CALL, `CAfc89ebd3`, 2026-09-12 — it fired, and it was a false positive
+
+Two calls were needed. The first (`CA25e323`) could not reach the path at all:
+`get_caller_appointments_from_db` returned the appointment **with the name on it**,
+so the assistant never asked who was calling, nothing was spelled, no write was
+refused, no `pendingWrite` was stashed and `retryPendingWrite` never ran. The
+probe read `verdict: gate_ran` — which is itself the useful result, because the
+field's presence proved the new build served the call while the refusal counter
+sat at 0.
+
+The second forced a booking from a caller with nothing on file. The refusal fired
+**three times** on `correct_appointment_name`:
+
+```
+06:46:15  refused_no_consent  gate_ran=false token=false readback=true   restashed=TRUE
+06:46:18  refused_no_consent  gate_ran=false token=false readback=true   restashed=TRUE
+06:46:19  refused_no_consent  gate_ran=false token=false readback=false  restashed=FALSE
+```
+
+Everything about the implementation behaved as specified: the re-stash asymmetry
+held (stashed where a read-back existed, not where none did), and the retries came
+back `ok=false gated=true`, so nothing told the caller a write had failed.
+
+**And all three were false positives.** The caller had agreed three times; the
+ledger recorded nothing, because silence nudges had displaced every read-back.
+That is LVX120, and it is the reason this entry is not closed. The honest reading
+is that the gate did exactly what it was built to do on an input that was lying to
+it — and that the asymmetry saved it: the worst case was a held write and a
+suppressed confirmation, never a wrong row.
+
+**Still owed:** a call on the LVX120 fix showing the ledger record an agreement,
+and the refusal NOT firing where the caller has agreed.
 
 ---
 
@@ -11179,6 +11212,87 @@ would have called this fixed while it was broken.
 Also restored: the verdict deny-list. `write_abandoned` and `row_mismatch` withhold
 a confirmation, because a confirmation promises the row is RIGHT and LVX72's shape
 is a booking carrying a name the caller never gave.
+
+---
+
+## LVX120 — a silence nudge became the thing the caller was answering
+
+**Status: FIXED, VERIFIED OFFLINE, awaiting a live call. Root cause of six
+separate symptoms on `CAfc89ebd3`, including two that were blamed on other code.**
+
+`speakLine()` (`lib/voice/live/index.js:938`) has no TTS leg, so a line the CALL
+wants said can only be spoken by asking the model to say it — a `role: "user"`
+instruction, "say this to them, word for word". The model complies, and the nudge
+comes back as **an ordinary assistant turn with nothing marking it**. It then
+became `lastReplyText`.
+
+Every consumer of `lastReplyText` is asking one question — *what was the caller
+answering?* — and for a nudge they all got "I'm still here whenever you're ready."
+
+### What that cost on one call, 2026-09-12, `CA742724f13f85944ce0e98284fc89ebd3`
+
+The caller said "Yes." at 06:45:14, "Yes." at 06:45:43 and "Yes. Yes." at
+06:46:37. `consent_agreement_recorded` **stayed 0 all call**, and
+`caller_turns_since_agreement` was `null` in every probe. The pairing:
+
+```
+06:45:14  ASST read-back "...Shall I go ahead and book that for you?"
+06:45:24  live_silence_line {kind: nudge}
+06:45:27  ASST "I'm still here whenever you're ready."   <- becomes lastReplyText
+06:45:43  CALR "Yes."                                    <- paired with the NUDGE
+```
+
+| symptom | what it was blamed on | actually |
+|---|---|---|
+| write-order gate refused the same booking 3× | the model not reading back | `readback_now=false` because a nudge was `lastReplyText` |
+| booking committed with `agreed_now=false` | — | the refusal ceiling released it, having been driven there by the above |
+| no agreement token all call | "the caller never affirmed a read-back" | they affirmed three times |
+| LVX117 refused `correct_appointment_name` 3× | the new gate being wrong | the gate was right; its INPUT was wrong |
+| `correct_appointment_name` abandoned | — | consequence of the above |
+| **the promised confirmation text was never sent** | — | `verdict: write_abandoned` → `postcall_confirm_skipped_verdict`, `sent: 0`, after the assistant said "a text confirmation is on its way" |
+
+**This is the one that matters for how LVX117 should be read.** Its safety
+argument was "no token anywhere on the call means the caller has agreed to
+nothing". The refusing-cannot-authorise half still holds — the gate can never
+cause a wrong write. But the premise is **false in practice** whenever a nudge
+lands between a read-back and the yes, and the result is a false-positive refusal
+with a caller-visible cost. LVX117 is correct in shape and was resting on an input
+that lies.
+
+### The fix
+
+A latch set inside `speakLine` (so a third canned line cannot be added without
+it) and cleared in `applyTurn`. A turn the call asked for does not update
+`lastReplyText`; the read-back underneath it survives.
+
+Cleared in `applyTurn`, not where it is read, for the reason every other latch
+there is: the model does not always say the line. A declined nudge produces no
+`replyText`, `auditTurn`'s reply branch never runs, and a latch cleared only in
+there would hold over the NEXT real reply — a one-turn hold becoming permanent.
+
+**Collateral, and it runs the right way.** The repeat cutter reads
+`lastReplyText` too, but only fires while the caller has NOT spoken. Holding the
+read-back over makes a repeated READ-BACK catchable — the shape the owner actually
+complained about — and only stops a repeated canned nudge from counting as the
+model restating itself, which it is not.
+
+Counter `reply_held_over_spoken_line` is the positive half: read it against
+`consent_agreement_recorded`, because a call with nudges and still no agreement
+recorded is the bug not fixed.
+
+### Why nothing caught it
+
+`tests/liveWritePathEndToEnd.test.js` drives real turns through the real tools
+layer but **cannot produce a nudge** — that needs the silence ladder and a clock.
+`tests/liveSilence.test.js` can drive the ladder but **never looked at
+`lastReplyText`**. Two suites, one covering each half. The regression test now
+lives in `liveSilence.test.js`, which owns the ladder, and it was **confirmed able
+to fail**: with the hold removed but its counter left bumping,
+`consent_agreement_recorded` reads 0 and the test fails on the consent assertion
+specifically rather than on its own instrumentation.
+
+**Done when:** a live call shows `consent_agreement_recorded` non-zero on a call
+that fired a nudge, and `reply_held_over_spoken_line` non-zero beside it.
 
 ---
 

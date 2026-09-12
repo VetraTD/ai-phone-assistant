@@ -267,3 +267,71 @@ describe("LVX19 silence ladder", () => {
     release?.();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX120 — a nudge must not become the thing the caller was answering.
+//
+// Measured on CAfc89ebd3, 2026-09-12. speakLine() makes the model say a fixed
+// line by sending it a user-role instruction, so the nudge comes back as an
+// ordinary assistant turn with nothing marking it, and it overwrote
+// lastReplyText. Every consumer that asks "what was the caller answering?" then
+// got "I'm still here whenever you're ready."
+//
+// On that call the caller said "Yes." to a read-back three times and
+// consent_agreement_recorded stayed 0. The write-order gate refused the same
+// booking three times for the same reason, hit its ceiling and released the
+// write unconsented; the LVX117 gate then refused a name correction on a call
+// where the caller had plainly agreed; and the text the assistant had promised
+// was suppressed as write_abandoned. One displaced variable, six consequences.
+//
+// This is the regression test neither liveWritePathEndToEnd (cannot produce a
+// nudge) nor the old liveSilence cases (never looked at lastReplyText) could
+// have caught.
+// ---------------------------------------------------------------------------
+describe("LVX120 — a silence nudge does not displace the read-back", () => {
+  beforeEach(() => clearStats());
+
+  const READ_BACK = "Just to confirm, I'm booking you in for Monday at 2 PM. Shall I go ahead?";
+
+  /** Drive one completed assistant turn of TEXT, which is what sets lastReplyText. */
+  async function assistantSays(s, text) {
+    s.live.push({ serverContent: { outputTranscription: { text } } });
+    await s.settle();
+    s.endTurn();
+    await s.settle();
+    await s.settle();
+  }
+
+  it("records the agreement when a nudge came between the read-back and the yes", async () => {
+    const s = await boot();
+    s.greet();
+    await assistantSays(s, READ_BACK);
+
+    // Long enough to trip the first rung. The nudge is sent as a user-role
+    // instruction; the model complying is what produces the turn that used to
+    // clobber lastReplyText, so it has to be simulated too.
+    s.quiet(9_000);
+    await s.settle();
+    expect(getLatencyStats().turnTaking.nudges_fired).toBeGreaterThan(0);
+    await assistantSays(s, "I'm still here whenever you're ready.");
+
+    // The caller now answers the READ-BACK, two turns back.
+    s.live.push({ serverContent: { inputTranscription: { text: "Yes." } } });
+    await s.settle();
+    await assistantSays(s, "Lovely, one moment.");
+
+    // WAS 0 before the fix, because the yes was paired with the nudge.
+    expect(getLatencyStats().turnTaking.consent_agreement_recorded).toBe(1);
+    // The positive half: the hold actually happened, so a future change that
+    // stops holding cannot read as "no nudge occurred".
+    expect(getLatencyStats().turnTaking.reply_held_over_spoken_line).toBeGreaterThan(0);
+  });
+
+  // The other half of the rule -- that an ORDINARY assistant turn still
+  // displaces the read-back -- is not restated here, because it is already
+  // load-bearing in tests/liveWritePathEndToEnd.test.js: "writes nothing when
+  // there was no read-back to agree to" passes only while a plain reply moves
+  // lastReplyText. Holding it over for every turn would resurrect the reverted
+  // three-turn window, where a yes authorised something read several turns
+  // earlier. A vacuous `expect(true)` here would assert none of that.
+});
