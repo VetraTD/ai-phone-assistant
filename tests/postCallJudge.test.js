@@ -204,13 +204,224 @@ describe("judgeCall", () => {
     expect(logged).not.toMatch(/Dylan/i);
   });
 
+  // -------------------------------------------------------------------------
+  // THE TOOL TRAFFIC.
+  //
+  // A prompt-string assertion goes red if the block is DROPPED and stays green
+  // if it is IGNORED, so these test presence and provenance -- never judgement.
+  // Whether the model USES the block cannot be reached from here at all:
+  // `generate` is injected, so there is no model. The only offline instrument
+  // for "ignored" is a paired eval fixture, and that is said in the commit
+  // rather than implied by a green suite.
+  // -------------------------------------------------------------------------
+  const TRAFFIC = {
+    bookingWrites: 0,
+    changeWrites: 0,
+    availabilityPointOpen: 1,
+    availabilityPointTaken: 0,
+    availabilityDayListed: 6,
+    abandoned: ["cancel_appointment_db"],
+    completionClaims: 3,
+    completionClaimsToolBacked: 0,
+    callerAffirmedReadBack: true,
+  };
+
+  it("puts the tool traffic in the prompt, AHEAD of the transcript", async () => {
+    // Ahead, not appended: after the assistant's last claim the block reads as
+    // a footnote; first, it is the frame the transcript is read inside.
+    const h = harness(reply());
+    await judgeCall(
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: TRAFFIC,
+      },
+      h.deps
+    );
+
+    const prompt = h.generate.mock.calls[0][0];
+    expect(prompt.indexOf("Tool traffic")).toBeGreaterThan(-1);
+    expect(prompt.indexOf("Tool traffic")).toBeLessThan(
+      prompt.indexOf("Transcript, one line per turn")
+    );
+    expect(prompt).toContain("booking_writes: 0");
+    expect(prompt).toContain("availability_day_listed: 6");
+    expect(prompt).toContain("completion_claims: 3");
+    expect(prompt).toContain("completion_claims_tool_backed: 0");
+    expect(prompt).toContain("tools_refused_never_retried: cancel_appointment_db");
+    expect(prompt).toContain("caller_affirmed_read_back: true");
+  });
+
+  it("says the traffic was NOT RECORDED rather than reporting zeros", async () => {
+    // Absent is not zero. A zeroed block tells the judge "no booking was
+    // written" about a call where nobody looked, which is the fail-open
+    // direction and the one that loses a caller.
+    const h = harness(reply());
+    await judgeCall(
+      { transcript: TRANSCRIPT, callSid: "CA1", bookedRowCount: 0, mode: "shadow" },
+      h.deps
+    );
+
+    const prompt = h.generate.mock.calls[0][0];
+    expect(prompt).toContain("not recorded");
+    expect(prompt).not.toContain("booking_writes: 0");
+  });
+
+  it("puts no time, no appointment id and no arbitrary tool name in the block", async () => {
+    // Fed a traffic object carrying everything that must NOT travel: a slot
+    // list passed in by mistake, an appointment id, and a "tool name" that is
+    // really a caller's words. Tool names are filtered against
+    // ACTION_TOOL_NAMES rather than trusted, so this is structural.
+    const h = harness(reply());
+    await judgeCall(
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: {
+          ...TRAFFIC,
+          abandoned: ["book_appointment", "Marcus Bell wants 2pm Tuesday"],
+          slots: ["2026-09-14T09:00"],
+          appointmentId: "appt-booked-1",
+        },
+      },
+      h.deps
+    );
+
+    const prompt = h.generate.mock.calls[0][0];
+    expect(prompt).toContain("book_appointment");
+    expect(prompt).not.toContain("Marcus Bell");
+    expect(prompt).not.toContain("2026-09-14T09:00");
+    expect(prompt).not.toContain("appt-booked-1");
+  });
+
+  it("derives wroteNothing from the TRAFFIC, not from the row count", async () => {
+    // The two answer different questions, and a book-then-cancel call separates
+    // them: no row now, but the call did write. The judge can finally tell
+    // "never wrote" from "wrote then undid", which the transcript cannot.
+    const h = harness(reply());
+    const out = await judgeCall(
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: { ...TRAFFIC, bookingWrites: 1 },
+      },
+      h.deps
+    );
+
+    expect(out.bookingMissing).toBe(true);
+    expect(out.wroteNothing).toBe(false);
+  });
+
+  it("derives unbackedClaims and browsedOnly, and leaves them NULL with no traffic", async () => {
+    const h = harness(reply());
+    const withTraffic = await judgeCall(
+      { transcript: TRANSCRIPT, callSid: "CA1", mode: "shadow", toolTraffic: TRAFFIC },
+      h.deps
+    );
+    expect(withTraffic.unbackedClaims).toBe(true);
+    expect(withTraffic.browsedOnly).toBe(false);
+    expect(withTraffic.wroteNothing).toBe(true);
+
+    const h2 = harness(reply());
+    const without = await judgeCall(
+      { transcript: TRANSCRIPT, callSid: "CA1", mode: "shadow" },
+      h2.deps
+    );
+    // null and not false: a call where nobody looked and a call where nothing
+    // happened are different answers.
+    expect(without.unbackedClaims).toBeNull();
+    expect(without.browsedOnly).toBeNull();
+    expect(without.wroteNothing).toBeNull();
+  });
+
+  it("keeps the output schema at six fields", async () => {
+    // Anything the code can compute must not be asked of a reader that can be
+    // wrong in ways nobody can audit. A traffic_conflict the model returned
+    // would be derivable from fields it already returns: a new way to be wrong
+    // for no new information.
+    const h = harness(reply({ traffic_conflict: true }));
+    const out = await judgeCall(
+      { transcript: TRANSCRIPT, callSid: "CA1", mode: "shadow", toolTraffic: TRAFFIC },
+      h.deps
+    );
+    expect(out.trafficConflict).toBeUndefined();
+    expect(out.traffic_conflict).toBeUndefined();
+  });
+
+  it("SABOTAGE: the traffic actually reaches the prompt string", async () => {
+    // THE ONE THAT CATCHES THE REAL FAILURE MODE: traffic wired in, block
+    // built, variable never concatenated into the prompt. Every other test in
+    // this block passes in that world.
+    //
+    // Byte-identical inputs except the traffic. The prompts must differ.
+    const a = harness(reply());
+    await judgeCall(
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: { ...TRAFFIC, bookingWrites: 1 },
+      },
+      a.deps
+    );
+    const b = harness(reply());
+    await judgeCall(
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: { ...TRAFFIC, bookingWrites: 0 },
+      },
+      b.deps
+    );
+
+    expect(a.generate.mock.calls[0][0]).not.toBe(b.generate.mock.calls[0][0]);
+  });
+
+  it("still short-circuits before rendering the block when off", async () => {
+    const h = harness(reply());
+    const out = await judgeCall(
+      { transcript: TRANSCRIPT, mode: "off", toolTraffic: TRAFFIC },
+      h.deps
+    );
+    expect(out.ran).toBe(false);
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
+  it("still skips a transcript too short, traffic or not", async () => {
+    const h = harness(reply());
+    const out = await judgeCall(
+      { transcript: [{ speaker: "ai", message: "Hi" }], mode: "shadow", toolTraffic: TRAFFIC },
+      h.deps
+    );
+    expect(out.ran).toBe(false);
+    expect(out.reason).toBe("transcript_too_short");
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
   it("puts no caller speech in the log line at all", async () => {
     // The verdict is enums, booleans and a transcript ROW INDEX. A human who
     // needs the sentence pulls the row; the index is not caller data and the
     // sentence is.
+    // Run WITH traffic present, so the new log keys fall inside this assertion
+    // rather than beside it.
     const h = harness(reply());
     await judgeCall(
-      { transcript: TRANSCRIPT, callSid: "CA1", bookedRowCount: 0, mode: "shadow" },
+      {
+        transcript: TRANSCRIPT,
+        callSid: "CA1",
+        bookedRowCount: 0,
+        mode: "shadow",
+        toolTraffic: TRAFFIC,
+      },
       h.deps
     );
 

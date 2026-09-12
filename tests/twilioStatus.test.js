@@ -356,25 +356,27 @@ describe("POST /twilio/status", () => {
   });
 
   // -------------------------------------------------------------------------
-  // THE SHADOW JUDGE'S WIRE. Not its judgement -- that is
-  // tests/postCallJudge.test.js. What is asserted here is the thing no unit test
-  // can see: that server.js actually calls it, with this call's transcript and a
-  // row count it genuinely read from the database.
+  // THE SHADOW JUDGE NO LONGER LIVES HERE, and this block asserts the absence
+  // rather than deleting itself.
   //
-  // The reverted claim-completion work passed 894 lines of unit tests and fired
-  // zero times in production because a value was computed where the object it
-  // read from did not exist yet. A mocked dependency that is never invoked looks
-  // identical to a working one from the inside.
+  // It moved to the Live session's own teardown on 2026-09-12 so it could be
+  // handed TOOL TRAFFIC -- writesThisCall, the abandoned set, guards.counts()
+  // -- which live in the engine closure and cannot reach this handler without a
+  // migration. The judge reads a transcript the audited model wrote, so on a
+  // call where the model lied about its own actions it was reading corrupted
+  // evidence; CA41622e81 is the measured case.
+  //
+  // Asserting the inverse matters because a wire that quietly comes back is
+  // exactly how a call gets billed twice for one verdict. If someone
+  // reintroduces a judge call here, these go red.
   // -------------------------------------------------------------------------
-  describe("the shadow judge wire", () => {
+  describe("the shadow judge does NOT run in the status handler", () => {
     const TRANSCRIPT = [
       { speaker: "ai", message: "Thanks for calling, how can I help?", sequence: 1 },
       { speaker: "caller", message: "I would like to book something", sequence: 2 },
     ];
 
-    it("is not called at all when the judge is off", async () => {
-      // The default, and the reason the rest of this suite was green before the
-      // judge existed: off short-circuits before any database read.
+    it("is not called when the judge is off", async () => {
       mockJudgeMode.mockReturnValue("off");
       mockFetchCallTranscript.mockResolvedValue(TRANSCRIPT);
       callState.writeShared("CA_judge_off", { dbCallId: "call-db-joff" });
@@ -386,18 +388,17 @@ describe("POST /twilio/status", () => {
 
       await new Promise((r) => setImmediate(r));
       expect(mockJudgeCall).not.toHaveBeenCalled();
-      expect(mockListAppointmentsByCallId).not.toHaveBeenCalled();
     });
 
-    it("passes the transcript and a row count it read from the database", async () => {
+    it("is not called when the judge is in SHADOW either — the teardown owns it", async () => {
+      // The one that would have caught the move being reverted by accident.
+      // Before 2026-09-12 this handler judged every completed call with a
+      // transcript, cascade calls included -- one model call each, producing a
+      // verdict with no structural check beside it to compare against, because
+      // verifyCall only ever runs on the Live path.
       mockJudgeMode.mockReturnValue("shadow");
       mockFetchCallTranscript.mockResolvedValue(TRANSCRIPT);
-      // One scheduled row and one cancelled: only the scheduled one counts, or a
-      // call that cancelled something would look like it had booked.
-      mockListAppointmentsByCallId.mockResolvedValue([
-        { id: "r1", status: "scheduled" },
-        { id: "r2", status: "cancelled" },
-      ]);
+      mockListAppointmentsByCallId.mockResolvedValue([{ id: "r1", status: "scheduled" }]);
       callState.writeShared("CA_judge_on", { dbCallId: "call-db-jon" });
 
       await request(app)
@@ -406,45 +407,24 @@ describe("POST /twilio/status", () => {
         .send({ CallSid: "CA_judge_on", CallStatus: "completed", CallDuration: "44" });
 
       await new Promise((r) => setImmediate(r));
-      expect(mockJudgeCall).toHaveBeenCalledTimes(1);
-      const arg = mockJudgeCall.mock.calls[0][0];
-      expect(arg.callSid).toBe("CA_judge_on");
-      expect(arg.mode).toBe("shadow");
-      expect(arg.transcript).toEqual(TRANSCRIPT);
-      expect(arg.bookedRowCount).toBe(1);
+      expect(mockJudgeCall).not.toHaveBeenCalled();
     });
 
-    it("does not judge when the row read failed", async () => {
-      // null is an outage, [] is a genuinely empty read, and judging on the first
-      // would report a missing booking every time the database was unreachable.
-      // services/db.js keeps them apart specifically so this distinction survives.
+    it("still writes the call summary, which was never the judge's job", async () => {
+      // The summary is the thing this block genuinely owns, and a judge that
+      // broke or delayed it would have been trading a working feature for an
+      // experiment. Pinned here so removing the judge cannot have taken it too.
       mockJudgeMode.mockReturnValue("shadow");
       mockFetchCallTranscript.mockResolvedValue(TRANSCRIPT);
-      mockListAppointmentsByCallId.mockResolvedValue(null);
-      callState.writeShared("CA_judge_readfail", { dbCallId: "call-db-jfail" });
+      callState.writeShared("CA_summary_lives", { dbCallId: "call-db-sum" });
 
       await request(app)
         .post("/twilio/status")
         .type("form")
-        .send({ CallSid: "CA_judge_readfail", CallStatus: "completed", CallDuration: "44" });
+        .send({ CallSid: "CA_summary_lives", CallStatus: "completed", CallDuration: "44" });
 
       await new Promise((r) => setImmediate(r));
-      expect(mockListAppointmentsByCallId).toHaveBeenCalled();
-      expect(mockJudgeCall).not.toHaveBeenCalled();
-    });
-
-    it("does not judge a call with no transcript to read", async () => {
-      mockJudgeMode.mockReturnValue("shadow");
-      mockFetchCallTranscript.mockResolvedValue([]);
-      callState.writeShared("CA_judge_empty", { dbCallId: "call-db-jempty" });
-
-      await request(app)
-        .post("/twilio/status")
-        .type("form")
-        .send({ CallSid: "CA_judge_empty", CallStatus: "completed", CallDuration: "44" });
-
-      await new Promise((r) => setImmediate(r));
-      expect(mockJudgeCall).not.toHaveBeenCalled();
+      expect(mockUpdateCallSummary).toHaveBeenCalled();
     });
   });
 });
