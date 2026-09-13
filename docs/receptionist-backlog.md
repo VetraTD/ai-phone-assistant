@@ -12696,3 +12696,147 @@ against the three real sentences above in `tests/confirmReadBackRe.test.js`, and
 
 **Done when:** a candidate read-back rule is scored against this corpus and beats the
 incumbent on both halves — more real read-backs recognised, no more offers admitted.
+
+---
+
+# SESSION CLOSE 2026-09-12/13 — deployed state, and two findings measured but not yet acted on
+
+Production: **`voice-uk-prod-00056-bqq`**, `vetra/voice:77fde32`, 100% traffic, clean boot.
+`POSTCALL_VERIFY=send`, `POSTCALL_JUDGE=shadow`, `LIVE_DEBUG_TRANSCRIPT=1`,
+`LIVE_CLAIM_GUARD` unset (guard ON). `main` = `77fde32`, CI green, 201 files / 3701 tests.
+
+Four production calls on this evening's builds, all of which completed their task
+correctly and whose rows were verified from the database:
+
+| call | build | outcome |
+|---|---|---|
+| `CAb4c8a9e6` 20:11 | `5f00fb5` | booked, then cancelled. **LVX126 verified** |
+| `CAbef3df47` 22:39 | `155c539` | booked. Exposed the sign-off false positive |
+| `CAa27dc5a1` 00:35 | `77fde32` | rescheduled on the FIRST read-back |
+
+---
+
+## LVX128 — a successful reschedule raises a false "lost booking" escalation
+
+**Status: OPEN, MEASURED, not fixed. P2 — owner-facing today, caller-facing on any
+tenant with SMS enabled.**
+
+`CAa27dc5a1`, 2026-09-13 00:35. The caller rescheduled an existing appointment. The
+write succeeded on the first read-back. And:
+
+```
+postcall_verify  booking_owed=true  booking_owed_no_row=TRUE
+                 booked_rows=0  changed_rows=1  verdict=ok  sent=2
+postcall_claim_reconciled  -> customer_requests row + owner notification
+```
+
+The mechanism, and it is arithmetic rather than a bug in anyone's reasoning:
+
+```js
+bookingWasOwed   = Boolean(bookingOwed?.agreed) && Number(bookingOwed?.pointVerified) > 0;
+bookingOwedNoRow = bookingWasOwed && bookedRows.length === 0;
+```
+
+The caller agreed to a read-back, a point availability check said yes, and a RESCHEDULE
+produces a **changed** row rather than a **booked** one. So `bookedRows` is 0 and the
+check concludes a booking was lost, on a call where the write landed perfectly.
+
+**Consequence:** a task, an owner notification, and **two** caller messages attempted --
+the reschedule confirmation AND the "appointment not confirmed" message from the
+`bookingOwedNoRow` branch. Contradictory. They went nowhere only because this tenant has
+`sms_followup_enabled=false`, which is itself a silent no-op (LVX122).
+
+**MEASURED across 30 days, 51 postcall_verify runs:**
+
+```
+booking_owed_no_row = true                                3
+  ...of those, the call DID change a row                  2   <- nothing was lost
+```
+
+Two thirds false. This is exactly the false positive LVX118 predicted in writing --
+"a caller who point-checked a time, declined to book and cancelled something instead can
+satisfy both halves" -- now measured on a clean call, and with a caller-facing message
+attached that the prediction did not anticipate.
+
+**NOT a one-line fix.** Suppressing whenever `changedRows > 0` reopens LVX118's real
+case, where a booking genuinely was lost on a call that also cancelled something. The
+discriminator is what the caller agreed TO, and the agreement token is action-blind by
+construction.
+
+What is new since LVX118 wrote that: **the judge now knows.** On this call it returned
+`agreed_action: reschedule, change_writes: 1, booking_writes: 0, booking_missing: false`
+-- correct, and correct because of a field added the same day. Letting it gate this
+escalation would be a promotion, and LVX127 deliberately confined the judge to ADDING an
+escalation rather than removing one. That reasoning was written before the judge could
+see tool traffic, so it is worth re-deriving rather than citing.
+
+**Done when:** a reschedule-only call raises no booking-owed escalation, and LVX118's
+lost-booking case still does.
+
+---
+
+## The claim guard's problem is the DETECTOR, not the look-back
+
+**Measured, and it reframes three entries above.**
+
+Moving the note to the action-only condition (this morning) took production from **16
+notes across 11 calls to 35 across 25** -- it more than doubled. Of 34 firings
+attributable to a sentence, roughly four to six were genuine false claims.
+
+The rest were the model being told it lied for:
+
+```
+9   reading a proposal back and asking the caller to approve it
+6   reporting an appointment the caller already had
+10  restating at the sign-off something the call genuinely did
+```
+
+Three suppressors shipped for those, each counted separately
+(`live_claim_readback_not_claim`, `live_claim_existing_report`,
+`live_claim_signoff_restatement`). Verified against the production sentences verbatim:
+`CA41622e81`'s two real lies are silenced by none of them.
+
+**The lesson worth keeping.** The look-back was never the main problem. The claim
+detector cannot separate
+
+```
+"I have you booked for Monday at 2"                      <- a claim
+"I have you booked for Monday at 2 -- does that sound right?"   <- a read-back
+```
+
+because they are the same words plus a question. LVX94 added those phrasings after real
+fabrications; a read-back simply wears them too. Same shape as `confirmReadBackRe`'s own
+problem: a phrasing test on a surface that does not separate the cases.
+
+**What would actually raise recall, and its measured ceiling.** Matching the claimed
+action against what was written needs the claim ledger to record WHICH action was
+claimed, instead of one generic `kind: "claim"`. LVX118 called that "per-capability claim
+vocabulary -- prose classification, and the phrasing treadmill". That is now only
+two-thirds true: measured over 103 claim-matched turns, **67% carry a verb that names the
+action** (book / cancel / change) and could be captured rather than classified. The
+remaining 33% say "all set" or "all done" and genuinely never name what was done.
+
+So it is a strict improvement with a known ceiling, not a treadmill step -- and for the
+specific hole (a false CANCELLATION claim on a call that booked), "cancelled" is
+unambiguous.
+
+---
+
+## Instruments left behind
+
+- `scripts/probes/readback-corpus.mjs` -- scores a candidate read-back rule against real
+  production turns. 824 assistant turns over 65 calls were pulled from
+  `live_debug_assistant_turn` for this session's measurements; the same query rebuilds it.
+  **Assistant output only -- no caller speech is read.**
+- `lib/probe/hangup.js` + `--hangup-after` / `--hangup-on-counter` / `--hangup-arm-after`
+  / `--expect-counter` on the live-call harness.
+
+## Standing warnings earned tonight
+
+- **`/api` is rate limited to 60 requests a minute.** Any polling instrument must bound
+  itself or it 429s, and `readCounters` used to report that as a bad token.
+- **`DEBUG_TOKEN` out of a CRLF `.env` carries a trailing carriage return**, and the debug
+  endpoint 404s on a bad token by design -- indistinguishable from "not enabled".
+- **A scripted caller desyncs against the prompt in more than one way.** Wrong order, and
+  a missing answer to a question the model asks on every single call (the caller's
+  company). Each unanswered question shifts the whole script by one turn.
