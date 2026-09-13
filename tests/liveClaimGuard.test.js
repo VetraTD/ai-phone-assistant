@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 // ---------------------------------------------------------------------------
 // LVX27's detector: the assistant told the caller something was done, and
@@ -524,6 +525,191 @@ describe("a restatement at sign-off is not a new claim", () => {
     await s.settle();
 
     expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A SENTENCE THAT ASKS IS NOT A SENTENCE THAT ASSERTS.
+//
+// Measured over 30 days of production: the action-only condition fired 35 times
+// across 25 calls, against 16 times across 11 calls for the any-tool condition
+// it replaced. Of 34 firings attributable to a sentence, NINE were turns that
+// also match confirmReadBackRe -- the assistant reading a proposal back and
+// asking the caller to approve it.
+//
+// "I have you down for one p m on September seventeenth" and "I have you booked
+// for Monday at 4 30" are the phrasings LVX94 added to the claim detector, for
+// good reason: they were real fabrications. The trouble is that a READ-BACK says
+// exactly the same words and then asks a question, and the detector cannot see
+// the difference.
+//
+// The rule is not a vocabulary patch: a turn that asks the caller to confirm
+// something cannot simultaneously be asserting it is already done.
+//
+// Every sentence below is verbatim from a production call that fired the guard.
+// ---------------------------------------------------------------------------
+describe("a read-back is not a claim", () => {
+  beforeEach(() => clearStats());
+
+  // The suppressor reuses confirmReadBackRe rather than inventing a second
+  // "is this a question" list. That means it inherits that detector's gaps: the
+  // real turn "Great, so I have you down for one p m on September seventeenth.
+  // Is it okay to reschedule that?" is a read-back this does NOT silence,
+  // because "is it okay to X" is not on the list either. It is held as a known
+  // miss in tests/confirmReadBackRe.test.js instead of being special-cased
+  // here, so both symptoms point at the same fix.
+  const READ_BACKS = [
+    "Sure thing, it's scheduled for Tuesday, September 15th at 4 30pm. Does that sound right?",
+    "So I have you booked for that strategy call on Monday, September 14th at 4 30 PM. Would you like me to go ahead and book that for you?",
+    "Just to confirm, I have you booked for Monday, September 14th at 4 30 PM?",
+  ];
+
+  for (const said of READ_BACKS) {
+    it(`stays silent on: ${said.slice(0, 42)}`, async () => {
+      const s = await boot();
+      s.say(said);
+      s.endTurn();
+      await s.settle();
+      expect(JSON.stringify(notes(s.live))).not.toContain("no tool has run to make it so");
+    });
+  }
+
+  it("counts the suppression, so it cannot read as a guard that never ran", async () => {
+    const s = await boot();
+    s.say("Sure thing, it's scheduled for Tuesday, September 15th at 4 30pm. Does that sound right?");
+    s.endTurn();
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_claim_readback_not_claim).toBe(1);
+  });
+
+  it("STILL fires on a bare claim with no question attached", async () => {
+    // The guard rail. Removing the question is what turns a read-back into an
+    // assertion, and the assertion is the whole point of the guard.
+    const s = await boot();
+    s.say("I've booked your appointment for Monday at four thirty.");
+    s.endTurn();
+    await s.settle();
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// READING SOMEONE THEIR EXISTING BOOKING IS A REPORT.
+//
+// Not a new idea -- it is rule 2 of the post-call judge's own prompt, in those
+// words. The live guard never got the same rule, so seven of the 34 production
+// firings were the assistant answering "what appointments do I have?" by reading
+// the row back.
+//
+// These turns follow get_caller_appointments_from_db, which is a READ, so no
+// action tool is in the look-back and the guard fires every time. On a call
+// where the caller only ever asks what they have booked, the model is told it
+// lied for correctly answering the question.
+//
+// Verbatim from production.
+// ---------------------------------------------------------------------------
+describe("a report of an existing appointment is not a claim", () => {
+  beforeEach(() => clearStats());
+
+  const REPORTS = [
+    "Of course. I see you have an appointment scheduled for Thursday, September 17th at 11 AM. Is there anything else I can help you with today?",
+    "Certainly. I can see you have a strategy call scheduled for Monday, September 14th at 3 00 PM. Is there anything else?",
+    "Perfect. I see you have an appointment scheduled for Monday, September 14th at 4 30 PM. Is there anything else I can help you with?",
+  ];
+
+  for (const said of REPORTS) {
+    it(`stays silent on: ${said.slice(0, 42)}`, async () => {
+      const s = await boot();
+      await s.callTool("get_caller_appointments_from_db");
+      s.say(said);
+      s.endTurn();
+      await s.settle();
+      expect(JSON.stringify(notes(s.live))).not.toContain("no tool has run to make it so");
+    });
+  }
+
+  it("counts the suppression", async () => {
+    const s = await boot();
+    await s.callTool("get_caller_appointments_from_db");
+    s.say("I see you have an appointment scheduled for Monday, September 14th at 4 30 PM.");
+    s.endTurn();
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_claim_existing_report).toBe(1);
+  });
+
+  it("STILL fires when 'I see' is a bare acknowledgement before a real claim", async () => {
+    // The sentence boundary in the regex is what makes this work: "I see." is
+    // an acknowledgement, and the claim behind the full stop is a different
+    // sentence. Without the [^.?!] run the perception frame reaches straight
+    // across the period and launders the assertion into a report.
+    //
+    // Added because sabotaging that character class left the whole suite green,
+    // which meant the comment claiming it mattered was unverified.
+    const s = await boot();
+    await s.callTool("get_caller_appointments_from_db");
+    s.say("I see. You're booked in for Monday at four thirty.");
+    s.endTurn();
+    await s.settle();
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+
+  it("STILL fires when the assistant claims to have DONE something, not seen it", async () => {
+    // "I see you have X" reports. "I've cancelled X" asserts. The difference is
+    // the whole rule, and a report phrasing must not launder an assertion.
+    const s = await boot();
+    await s.callTool("get_caller_appointments_from_db");
+    s.say("I've cancelled your appointment for Monday, September 14th at 4 30 PM.");
+    s.endTurn();
+    await s.settle();
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The report detector itself, both languages, in both directions.
+//
+// Pinned here because tests/strings.test.js only checks that every locale has
+// the same KEYS. A Spanish entry that is present and matches nothing passes that
+// check and protects nobody -- which is the shape of "a locale silently missing
+// a key" that the parity test exists to stop, wearing a disguise.
+//
+// The negatives matter more than the positives: this regex SUPPRESSES the claim
+// guard, so a pattern that over-matches silences a real fabrication.
+// ---------------------------------------------------------------------------
+describe("existingAppointmentReportRe — report vs assertion", () => {
+  const en = getStrings({ languagesSpoken: ["en"] }).existingAppointmentReportRe;
+  const es = getStrings({ languagesSpoken: ["es"] }).existingAppointmentReportRe;
+
+  const REPORTS_EN = [
+    "I see you have an appointment scheduled for Thursday, September 17th at 11 AM.",
+    "I can see you have a strategy call scheduled for Monday, September 14th at 3 00 PM.",
+    "It looks like you're scheduled for a consultation.",
+    "Yes, you have an appointment scheduled for Friday, September 11th at one in the afternoon.",
+  ];
+  for (const said of REPORTS_EN) {
+    it(`EN reports: ${said.slice(0, 42)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  const ASSERTIONS_EN = [
+    "I've cancelled your appointment for Monday, September 14th at 4 30 PM.",
+    "I've booked your free strategy call for 10 AM on Monday.",
+    "Your appointment is now rescheduled for 11 30 AM on Friday.",
+    // The sentence boundary: an acknowledgement must not reach across the stop.
+    "I see. You're booked in for Monday at four thirty.",
+  ];
+  for (const said of ASSERTIONS_EN) {
+    it(`EN does NOT report: ${said.slice(0, 40)}`, () => expect(en.test(said)).toBe(false));
+  }
+
+  it("ES reports an existing appointment", () => {
+    expect(es.test("Veo que tiene una cita programada para el jueves a las once.")).toBe(true);
+    expect(es.test("Puedo ver que tiene una llamada agendada para el lunes a las tres.")).toBe(true);
+    expect(es.test("Parece que tiene una cita reservada para mañana.")).toBe(true);
+  });
+
+  it("ES does NOT treat an assertion as a report", () => {
+    expect(es.test("He cancelado su cita para el lunes.")).toBe(false);
+    expect(es.test("Ya he reservado su cita para el martes a las dos.")).toBe(false);
   });
 });
 
