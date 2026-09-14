@@ -1904,6 +1904,20 @@ async function bookAppointment(fc, ctx) {
   let bookSuccess = false;
   let bookMessage =
     "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+  // ------------------------------------------------------------------------
+  // THE ONE STRING THAT MAY REACH THE CALLER, kept apart from bookMessage.
+  //
+  // bookMessage instructs the MODEL. Handing it to the caller unchanged is how
+  // "That time is fully booked. Offer the caller a different time — call
+  // check_appointment_availability to find open slots." ends up as the basis
+  // for whatever the assistant improvises next.
+  //
+  // Left null until an outcome is known, and that is the guarantee: a sentence
+  // that confirms a booking is written at the same moment the row is, from the
+  // row's own values. It cannot exist for a booking that did not happen, which
+  // is what four of six real calls announced anyway.
+  // ------------------------------------------------------------------------
+  let bookCallerLine = null;
   let anchoredScheduledAt = null;
   let alreadyBooked = false;
   // The row id the adapter hands back. It was being discarded: `booked` is
@@ -2077,9 +2091,16 @@ async function bookAppointment(fc, ctx) {
           ? "That time is fully booked. Offer the caller a different time — call " +
             "check_appointment_availability to find open slots."
           : "That time slot is no longer available. Please ask the caller to pick a different time.";
+        // NOT A DEAD END. A taken slot is the most recoverable failure there is,
+        // and telling the caller "the team will confirm with you" throws away a
+        // booking that was still winnable. Says what happened and asks the one
+        // question that moves it forward.
+        const fullCallerLine =
+          "Sorry — that time has just been taken. Would another time work for you?";
 
         if (slotFull) {
           bookMessage = fullMessage;
+          bookCallerLine = fullCallerLine;
         } else {
           try {
             const { id: dbId, full } = await adapter.book(ctx, {
@@ -2092,10 +2113,40 @@ async function bookAppointment(fc, ctx) {
             });
             if (full) {
               bookMessage = fullMessage;
+              bookCallerLine = fullCallerLine;
             } else if (dbId) {
               bookedRowId = dbId;
               bookSuccess = true;
-              bookMessage = "Appointment booked successfully.";
+              // THE FACTS, NOT JUST THE VERDICT.
+              //
+              // `toolResult.callerSafe` is read by services/gemini.js and ONLY
+              // when the model produced no text of its own. On the Live path
+              // lib/voice/live/index.js never reads toolResults at all, so a
+              // caller-safe line there is collected and dropped. The model's
+              // own audio is what the caller hears, and THIS string is the only
+              // thing that reaches the model.
+              //
+              // So the time and name go here as well. It does not force the
+              // wording -- nothing on this path can -- but it means the sentence
+              // the model improvises is built from the row that was written
+              // rather than from what it remembers asking for. On CA163f2fe4 it
+              // announced "all set" seven seconds before the write; it cannot
+              // have these values before there is a row to take them from.
+              bookMessage =
+                "Booked. Tell the caller, in one short sentence, that it is booked for " +
+                speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config)) +
+                (args.client_name ? " under " + args.client_name : "") +
+                ". Do not add anything you were not told here.";
+              // BUILT HERE, one line below the insert, from the value that was
+              // written. Not from what the model asked for and not from what it
+              // believes happened -- `anchoredScheduledAt` is what went into the
+              // adapter, and this line does not exist unless that call returned
+              // a row id.
+              bookCallerLine =
+                "That's booked — " +
+                speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config)) +
+                (args.client_name ? ", under " + args.client_name : "") +
+                ".";
               // `allow` never blocks, but the model should still know — a
               // receptionist who has just booked a second appointment for
               // someone would mention the first if it were relevant. Costs
@@ -2190,7 +2241,15 @@ async function bookAppointment(fc, ctx) {
       response: { success: bookSuccess, message: bookMessage },
     },
     stateEffects: {
-      toolResult: { name: fc.name, success: bookSuccess, message: bookMessage },
+      // callerSafe ONLY when a line was built for the caller. Without the flag
+      // the session falls through to whatever the model decides to say, which
+      // is the behaviour this replaces.
+      toolResult: {
+        name: fc.name,
+        success: bookSuccess,
+        message: bookCallerLine ?? bookMessage,
+        ...(bookCallerLine ? { callerSafe: true } : {}),
+      },
       toolCallEvent: { name: fc.name, args },
       ...(booked
         ? {
@@ -2379,23 +2438,56 @@ async function cancelAppointment(fc, ctx) {
   );
   if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
 
+  // WHICH appointment, read BEFORE the cancel while the row is still findable.
+  //
+  // CA327945c3 is why the confirmation has to name a time at all: the assistant
+  // said "I've gone ahead and cancelled your appointment on Tuesday, September
+  // 15th at 4 30 PM" and cancel_appointment_db was never called. The row was
+  // still there on the next call. A caller told "Cancelled." has no way to tell
+  // which of their appointments went, and no way to catch it when none did.
+  //
+  // Falls back to the unqualified line when the snapshot has no time for this
+  // id -- honest and still caller-safe, rather than inventing one.
+  const cancelledWhen =
+    upcomingForCaller(ctx).find((a) => String(a?.id) === String(appointmentId))?.scheduled_at ?? null;
+
   const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
     appointmentId,
   });
+
+  // Built only on `ok`, from the row's own time. No cancel, no sentence.
+  const cancelCallerLine = !ok
+    ? "I couldn't cancel that one just now — the team will sort it out and confirm with you."
+    : cancelledWhen
+      ? "That's cancelled — your appointment on " +
+        speakableDateTime(cancelledWhen, ctx.config?.timezone, resolveProfile(ctx.config)) +
+        "."
+      : "That's cancelled.";
 
   return {
     functionResponse: {
       id: fc.id,
       name: fc.name,
       response: ok
-        ? { success: true, message: "That appointment has been cancelled." }
+        ? {
+            success: true,
+            // Names the row that was actually changed, for the same reason the
+            // booking message does: on CA327945c3 the assistant announced a
+            // cancellation for a specific time and the tool was never called.
+            message: cancelledWhen
+              ? "Cancelled. Tell the caller, in one short sentence, that their appointment on " +
+                speakableDateTime(cancelledWhen, ctx.config?.timezone, resolveProfile(ctx.config)) +
+                " is cancelled."
+              : "That appointment has been cancelled.",
+          }
         : { success: false, message: "I couldn't cancel that appointment." },
     },
     stateEffects: {
       toolResult: {
         name: fc.name,
         success: ok,
-        message: ok ? "Cancelled." : "Couldn't cancel.",
+        message: cancelCallerLine,
+        callerSafe: true,
         appointmentId,
       },
       toolCallEvent: { name: fc.name, args: fc.args },
