@@ -20,6 +20,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import {
   stripFillers,
   isHesitationOnly,
@@ -53,6 +54,37 @@ const CONFIRM_HARD_NAMES = process.env.VOICE_CONFIRM_HARD_NAMES !== "false";
  * and LIVE_REPEAT_CUT are read the way they are.
  */
 const writeOrderGateOff = () => process.env.LIVE_WRITE_ORDER_GATE === "off";
+
+/**
+ * The consent latch, ON unless explicitly disabled.
+ *
+ * Default-on because the behaviour it replaces is a live defect, not a working
+ * baseline: CAf1d6447d34 agreed to a booking, was told it was done, and wrote
+ * no row. A flag that ships off leaves that in place until someone remembers to
+ * set a variable in the deployed environment -- which is how VOICE_INTENT_MARKER
+ * came to be set on a laptop and nowhere else for the life of a deployment.
+ */
+const consentLatchOff = () => (process.env.VOICE_CONSENT_LATCH || "").trim() === "0";
+
+/**
+ * Has the model read something DIFFERENT back since the caller's agreement?
+ *
+ * The agreement token is a fingerprint of the read-back the caller answered, so
+ * comparing it with the read-back still standing is the one action-aware
+ * question that can be asked of it. Equal means the proposal has not moved.
+ * Different means the caller agreed to something the model has since replaced,
+ * and the token must not be spent on the new one -- which is CA8c019c's failure
+ * ("the token is ACTION-BLIND") answered at last.
+ *
+ * @param {object|null|undefined} ctx
+ * @returns {boolean}
+ */
+const agreementSuperseded = (ctx) => {
+  if (consentLatchOff()) return false;
+  const agreed = ctx?.lastAgreementReadBackKey ?? null;
+  const standing = ctx?.lastReadBackKey ?? null;
+  return Boolean(agreed && standing && agreed !== standing);
+};
 
 /**
  * How many times the write-order gate may refuse the same pack in one call.
@@ -609,7 +641,18 @@ export async function executeToolCall(fc, ctx) {
           const probeReply = typeof ctx?.lastReplyText === "string" ? ctx.lastReplyText : "";
           const probeStrings = getStrings(ctx?.config);
           const probeReadBack = Boolean(probeReply && probeStrings.confirmReadBackRe?.test(probeReply));
-          const probeToken = ctx?.lastAgreementReadBackKey ?? null;
+          // THE TOKEN, MINUS THE ONE CASE IT WAS NEVER SAFE TO ALLOW.
+          //
+          // `allowed_token` below is the only place the token PERMITS anything,
+          // and the consent-token note is explicit that a bare token must never
+          // do that: on CA8c019c one recorded for a cancellation was still
+          // present, looking valid, at a booking write ten caller turns later.
+          // The reason it could was that nothing compared it to what was on the
+          // table. Now something does -- so the token keeps its refusing job and
+          // loses exactly the writes it should never have released.
+          const tokenSuperseded = agreementSuperseded(ctx);
+          if (tokenSuperseded) bumpCounter("write_consent_agreement_superseded");
+          const probeToken = tokenSuperseded ? null : (ctx?.lastAgreementReadBackKey ?? null);
           const gateRan = lastCallerText.trim() !== "";
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
@@ -978,6 +1021,73 @@ export async function executeToolCall(fc, ctx) {
             const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
             const callerAgreed = isAffirmative(lastCallerText);
 
+            // -----------------------------------------------------------------
+            // THE CONSENT LATCH. CAf1d6447d34, 2026-09-13.
+            //
+            // The two booleans above both describe THIS TURN, and a guard that
+            // asks the caller a question destroys both of them. On that call the
+            // caller agreed at 17:59:25, the spelling gate held the write and
+            // asked them to spell their name, they spelled it at 17:59:50, and
+            // the retry arrived with readBackMade false and callerAgreed false.
+            // The booking was refused, the model had already said "is now
+            // booked", and the call ended with no row. Each gate was individually
+            // right; between them the write was unreachable.
+            //
+            // So an agreement outlives the turn it was given on -- but only for
+            // the proposal it was given for. The latch holds when the read-back
+            // the caller agreed to is STILL the most recent read-back on the
+            // call. Say anything else and the agreement stays reachable; read
+            // something DIFFERENT back and the key changes and this goes false.
+            //
+            // WHY THIS IS NOT THE WINDOW THE COMMENT ABOVE FORBIDS. That warning
+            // is about looking back N turns, which is blind to which read-back it
+            // finds and would let consent for one appointment authorise another.
+            // This compares fingerprints of the read-back text itself, so a
+            // different proposal cannot match by construction. Pinned by "refuses
+            // after a second, different read-back the caller has not answered" in
+            // tests/liveConsentLatch.test.js.
+            //
+            // WHAT IT STILL DOES NOT CLOSE, stated because the gap is real and
+            // shipping quietly over it is how CA8c019c happened: under a MATCHING
+            // read-back the arguments are not checked, so consent given for one
+            // time can still be spent on another. That needs the read-back text
+            // compared against `scheduled_at`, which is a detector over model
+            // phrasings and wants a measurement pass before it is trusted. It is
+            // skipped-with-reason in the same test file, and this latch leaves
+            // that hole exactly the size it already was rather than widening it.
+            // -----------------------------------------------------------------
+            const consentLatchOn = !consentLatchOff();
+            const agreementKey = ctx?.lastAgreementReadBackKey ?? null;
+            const standingReadBackKey = ctx?.lastReadBackKey ?? null;
+            // The caller agreed to a read-back that is no longer the one on the
+            // table: the model has proposed something else since and they have
+            // not answered it. Their "yes" can still be the most recent thing
+            // they said, so `callerAgreed` is true and the gate would wave this
+            // through -- consent for one appointment spent on another, which is
+            // CA8c019c's shape without the ten turns. Counted at the probe
+            // above, not here, so one write cannot report itself twice.
+            const supersededHere = agreementSuperseded(ctx);
+            // Does the read-back they DID agree to name the time being written?
+            // False when it cannot be told, so an unknown phrasing costs a
+            // refusal rather than a row. See lib/voice/slotMention.js.
+            const latchSlot = fc.args?.scheduled_at ?? fc.args?.requested_at ?? null;
+            const latchSlotAgreed = Boolean(
+              latchSlot && readBackMentionsSlot(ctx?.lastReadBackText, latchSlot)
+            );
+            const consentLatched = Boolean(
+              consentLatchOn &&
+                agreementKey &&
+                standingReadBackKey &&
+                agreementKey === standingReadBackKey &&
+                latchSlotAgreed
+            );
+            if (consentLatched && !(readBackMade && callerAgreed)) {
+              // Counted only when it CHANGES the outcome, so the number answers
+              // "how many bookings would have been lost" rather than "how often
+              // did the caller agree".
+              bumpCounter("write_consent_latch_held");
+            }
+
             // The measurement, always, whatever the gate then does. Read
             // against write_consent_checked: this is how often a write arrives
             // with a read-back behind it and how often it does not, and it
@@ -1080,7 +1190,7 @@ export async function executeToolCall(fc, ctx) {
             const orderCallerTurn = Number(ctx?.callerTurnCount) || 0;
             const orderRefusalIsNew = orderScratch.writeOrderRefusedTurn !== orderCallerTurn;
 
-            if (hasTarget && (!readBackMade || !callerAgreed)) {
+            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed || supersededHere)) {
               bumpCounter("write_order_would_refuse");
               if (orderRefusals >= WRITE_ORDER_MAX_REFUSALS) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can
