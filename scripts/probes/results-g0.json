@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-15T05:16:37.751Z",
+  "checks": {
+    "tools_match_production": {
+      "pass": true,
+      "detail": "11 tools, matching production exactly"
+    },
+    "tool_schemas": {
+      "pass": true,
+      "detail": "11 declarations well-formed for delegation.responses.tools"
+    },
+    "real_prompt": {
+      "pass": true,
+      "detail": "backend prompt 15932 chars (~3983 tokens)"
+    },
+    "prompt_is_split": {
+      "pass": true,
+      "detail": "frontend 563 chars, backend 15932 chars"
+    },
+    "fixtures_real": {
+      "pass": true,
+      "detail": "clean_open 15365B 1.92s, trailing_lead_in 17285B 2.16s, no_terminal_punct 16645B 2.08s, name_spelling 40805B 5.10s, rep_time_q 17090B 2.14s, rep_confirm 16347B 2.04s, rep_digits 21920B 2.74s, rep_close 7059B 0.88s, barge_in 19845B 2.48s, partial_digits 35525B 4.44s"
+    },
+    "delegation_shape": {
+      "pass": true,
+      "detail": "arm R: gpt-5.6-luna, 11 tools, parallel_tool_calls=false"
+    },
+    "budget_headroom": {
+      "pass": true,
+      "detail": "$5.00 of $5.00 available"
+    }
+  },
+  "sabotage": {
+    "tools_match_production": {
+      "tripped": true,
+      "message": "probe tool list has drifted from production's buildAllDeclarations: 5 missing (get_caller_appointments_from_db,cancel_appointment_db,reschedule_appointment_db,correct_appointment_name,add_appointment_note), 0 extra (-). Rounds 1-2 ran with 6 of production's tools and the verdict had to be retracted."
+    },
+    "tool_schemas": {
+      "tripped": true,
+      "message": "tool x: no parameters schema"
+    },
+    "real_prompt": {
+      "tripped": true,
+      "message": "backend prompt is 35 chars; the real production prefix is ~12k. A short prompt is the spike's ten-line prompt, which is what made LVX4 look like a model refusal."
+    },
+    "prompt_is_split": {
+      "tripped": true,
+      "message": "frontend and backend prompts are identical -- the migration guide says split, not copy"
+    },
+    "fixtures_real": {
+      "tripped": true,
+      "message": "fixture missing: C:\\Users\\nithi\\VetraTD\\ai-phone-assistant\\test-audio\\caller\\clean_open_DOES_NOT_EXIST.ulaw"
+    },
+    "delegation_shape": {
+      "tripped": true,
+      "message": "arm R declares 0 tools to the backend, production has 11"
+    },
+    "budget_headroom": {
+      "tripped": true,
+      "message": "only $0.10 left of $5; the round's worst case is $3.76"
+    }
+  },
+  "ok": true
+}

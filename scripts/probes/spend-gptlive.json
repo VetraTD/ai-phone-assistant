@@ -1,0 +1,899 @@
+{
+  "cap_usd": 5,
+  "spent_usd": 0.818464,
+  "entries": [
+    {
+      "at": "2026-09-15T05:17:06.776Z",
+      "probe": "G1b",
+      "arm": "smoke",
+      "model": "gpt-live-1",
+      "usd": 0.007575833333333333,
+      "seconds": 9.091,
+      "estimated": true,
+      "note": "first socket; protocol validation"
+    },
+    {
+      "at": "2026-09-15T05:17:53.657Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-clean_open",
+      "model": "gpt-live-1",
+      "usd": 0.00628,
+      "seconds": 7.536,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:01.323Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-trailing_lead_in",
+      "model": "gpt-live-1",
+      "usd": 0.006380833333333334,
+      "seconds": 7.657,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:08.542Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-no_terminal_punct",
+      "model": "gpt-live-1",
+      "usd": 0.006010833333333334,
+      "seconds": 7.213,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:29.730Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-name_spelling",
+      "model": "gpt-live-1",
+      "usd": 0.017654166666666665,
+      "seconds": 21.185,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:36.910Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_time_q",
+      "model": "gpt-live-1",
+      "usd": 0.005980833333333334,
+      "seconds": 7.177,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:44.021Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_confirm",
+      "model": "gpt-live-1",
+      "usd": 0.005923333333333333,
+      "seconds": 7.108,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:51.769Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_digits",
+      "model": "gpt-live-1",
+      "usd": 0.006454166666666667,
+      "seconds": 7.745,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:57.676Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_close",
+      "model": "gpt-live-1",
+      "usd": 0.004919166666666666,
+      "seconds": 5.903,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:05.274Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-barge_in",
+      "model": "gpt-live-1",
+      "usd": 0.006329166666666667,
+      "seconds": 7.595,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:14.749Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-partial_digits",
+      "model": "gpt-live-1",
+      "usd": 0.007893333333333334,
+      "seconds": 9.472,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:58.277Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-1",
+      "model": "gpt-live-1",
+      "usd": 0.008738333333333334,
+      "seconds": 10.486,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:05.314Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-1",
+      "model": "gpt-live-1",
+      "usd": 0.005854166666666667,
+      "seconds": 7.025,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:17.213Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-2",
+      "model": "gpt-live-1",
+      "usd": 0.0099125,
+      "seconds": 11.895,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:24.292Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-2",
+      "model": "gpt-live-1",
+      "usd": 0.005895833333333334,
+      "seconds": 7.075,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:34.428Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-3",
+      "model": "gpt-live-1",
+      "usd": 0.008444166666666666,
+      "seconds": 10.133,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:41.451Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-3",
+      "model": "gpt-live-1",
+      "usd": 0.0058491666666666674,
+      "seconds": 7.019,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:08.869Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.006879166666666668,
+      "seconds": 8.255,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:17.070Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.006823333333333334,
+      "seconds": 8.188,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:25.236Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.006799166666666668,
+      "seconds": 8.159,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:33.385Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.006788333333333335,
+      "seconds": 8.146,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:41.568Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.006816666666666667,
+      "seconds": 8.18,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:49.791Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.006848333333333334,
+      "seconds": 8.218,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:58.059Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.006886666666666667,
+      "seconds": 8.264,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:06.234Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.006807500000000001,
+      "seconds": 8.169,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:14.513Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.006895,
+      "seconds": 8.274,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:22.740Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.006852500000000001,
+      "seconds": 8.223,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:23:40.444Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:04.075Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:27.671Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:51.250Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:25:14.775Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:25:38.396Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:02.161Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:25.856Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:49.510Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:27:13.171Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:28:25.551Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:28:49.310Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:29:12.875Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:29:36.527Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:00.063Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:23.662Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:47.328Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:10.934Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:34.615Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:58.226Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:32:59.832Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:33:20.231Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.010434800000000001,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:33:46.686Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:05.825Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.011065333333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:24.313Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-2",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:46.665Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-2",
+      "model": "gpt-live-1",
+      "usd": 0.0102708,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:04.831Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-3",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:25.817Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-3",
+      "model": "gpt-live-1",
+      "usd": 0.009710666666666668,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:43.971Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-4",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:05.167Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-4",
+      "model": "gpt-live-1",
+      "usd": 0.011868466666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:23.379Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-5",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:45.879Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-5",
+      "model": "gpt-live-1",
+      "usd": 0.010287600000000001,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:04.018Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-6",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:25.505Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-6",
+      "model": "gpt-live-1",
+      "usd": 0.011060733333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:43.858Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-7",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:03.492Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-7",
+      "model": "gpt-live-1",
+      "usd": 0.011247933333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:21.610Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-8",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:40.956Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-8",
+      "model": "gpt-live-1",
+      "usd": 0.011161333333333334,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:59.118Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-9",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:39:20.524Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-9",
+      "model": "gpt-live-1",
+      "usd": 0.010987933333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:39:38.753Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-10",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:40:01.247Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-10",
+      "model": "gpt-live-1",
+      "usd": 0.0102582,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:41:08.116Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.008504466666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:41:34.536Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-2",
+      "model": "gpt-live-1",
+      "usd": 0.008425266666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:00.800Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-3",
+      "model": "gpt-live-1",
+      "usd": 0.0069772666666666665,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:27.306Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-4",
+      "model": "gpt-live-1",
+      "usd": 0.008316466666666668,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:54.076Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-5",
+      "model": "gpt-live-1",
+      "usd": 0.008356866666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:43:20.257Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-6",
+      "model": "gpt-live-1",
+      "usd": 0.008397466666666666,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:43:46.624Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-7",
+      "model": "gpt-live-1",
+      "usd": 0.008452466666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:44:12.912Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-8",
+      "model": "gpt-live-1",
+      "usd": 0.007016866666666666,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:44:39.393Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-9",
+      "model": "gpt-live-1",
+      "usd": 0.008547266666666668,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:45:05.681Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-10",
+      "model": "gpt-live-1",
+      "usd": 0.006789866666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:45:52.097Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-1",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:46:13.877Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-2",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:46:44.977Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:06.656Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-4",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:28.501Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-5",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:59.603Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:48:30.653Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:48:52.672Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-3",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:49:23.640Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:49:54.732Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    }
+  ],
+  "started_at": "2026-09-15T05:17:06.776Z",
+  "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
+  "updated_at": "2026-09-15T05:49:54.732Z"
+}

@@ -1,0 +1,193 @@
+{
+  "at": "2026-09-15T05:49:54.735Z",
+  "prediction": "disclosure paraphrased in >=3 of 5; appointment time intact in >=4 of 5",
+  "fails_if": "the time is altered even once",
+  "byCase": {
+    "disclosure": {
+      "of": 5,
+      "verbatim": 0,
+      "paraphrased": 5,
+      "facts_intact": 1,
+      "facts_lost": 4,
+      "critical": false
+    },
+    "readback": {
+      "of": 5,
+      "verbatim": 0,
+      "paraphrased": 5,
+      "facts_intact": 3,
+      "facts_lost": 2,
+      "critical": true
+    }
+  },
+  "rows": [
+    {
+      "case": "disclosure",
+      "take": 1,
+      "pushed": "This call is being recorded for quality and training purposes.",
+      "spoken": "Sure, I can help with that. What days generally work for you?",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "recorded",
+        "quality",
+        "training"
+      ],
+      "critical": false,
+      "usd": 0.00667,
+      "error": null
+    },
+    {
+      "case": "disclosure",
+      "take": 2,
+      "pushed": "This call is being recorded for quality and training purposes.",
+      "spoken": "Sure thing, let me check and see what we can do. Are you looking for a checkup or for a specific treatment?",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "recorded",
+        "quality",
+        "training"
+      ],
+      "critical": false,
+      "usd": 0.00667,
+      "error": null
+    },
+    {
+      "case": "disclosure",
+      "take": 3,
+      "pushed": "This call is being recorded for quality and training purposes.",
+      "spoken": "Just so you know, this call is recorded for quality and training purposes.",
+      "verbatim": false,
+      "facts_intact": true,
+      "missing_tokens": [],
+      "critical": false,
+      "usd": 0.01167,
+      "error": null
+    },
+    {
+      "case": "disclosure",
+      "take": 4,
+      "pushed": "This call is being recorded for quality and training purposes.",
+      "spoken": "Sure! I can help with that.",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "recorded",
+        "quality",
+        "training"
+      ],
+      "critical": false,
+      "usd": 0.00667,
+      "error": null
+    },
+    {
+      "case": "disclosure",
+      "take": 5,
+      "pushed": "This call is being recorded for quality and training purposes.",
+      "spoken": "Sure thing. Let me just check what we've got.",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "recorded",
+        "quality",
+        "training"
+      ],
+      "critical": false,
+      "usd": 0.00667,
+      "error": null
+    },
+    {
+      "case": "readback",
+      "take": 1,
+      "pushed": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoken": "A cleaning or something else?",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "critical": true,
+      "usd": 0.01167,
+      "error": null
+    },
+    {
+      "case": "readback",
+      "take": 2,
+      "pushed": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoken": "or something else?",
+      "verbatim": false,
+      "facts_intact": false,
+      "missing_tokens": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "critical": true,
+      "usd": 0.01167,
+      "error": null
+    },
+    {
+      "case": "readback",
+      "take": 3,
+      "pushed": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoken": "Sure. I'll see what we've got. Okay, you're booked for Thursday the 18th of September at 2:15 in the afternoon.",
+      "verbatim": false,
+      "facts_intact": true,
+      "missing_tokens": [],
+      "critical": true,
+      "usd": 0.00667,
+      "error": null
+    },
+    {
+      "case": "readback",
+      "take": 4,
+      "pushed": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoken": "Okay, I've got you down for Thursday, the 18th of September, at 2:15 in the afternoon. Do you have any other questions about it?",
+      "verbatim": false,
+      "facts_intact": true,
+      "missing_tokens": [],
+      "critical": true,
+      "usd": 0.01167,
+      "error": null
+    },
+    {
+      "case": "readback",
+      "take": 5,
+      "pushed": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoken": "I've got you at 2:15 on Thursday, September 18th. Can I get your name",
+      "verbatim": false,
+      "facts_intact": true,
+      "missing_tokens": [],
+      "critical": true,
+      "usd": 0.01167,
+      "error": null
+    }
+  ],
+  "pass": false,
+  "prediction_held": {
+    "disclosure": true,
+    "readback": false
+  },
+  "note": "Every take is saved to scripts/probes/audio/g5-*.wav so a paraphrase can be judged by ear.",
+  "spend": {
+    "cap": 5,
+    "spent": 0.818464,
+    "remaining": 4.181536,
+    "sessions": 89,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825,
+      "G2r": 0.044693,
+      "G3": 0.301736,
+      "G4": 0.298973,
+      "G5": 0.09167
+    }
+  }
+}

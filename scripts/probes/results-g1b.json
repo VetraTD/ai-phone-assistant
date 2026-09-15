@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-15T05:17:06.777Z",
+  "pass": true,
+  "session_started": true,
+  "pcmu_accepted": true,
+  "got_output_audio": true,
+  "got_input_transcript": true,
+  "got_output_transcript": true,
+  "event_types": [
+    "session.started",
+    "session.output_audio.delta",
+    "session.input_transcript.delta",
+    "session.output_transcript.delta",
+    "session.closed"
+  ],
+  "errors": [],
+  "wall_seconds": 9.091,
+  "usage_seconds": null,
+  "usd": 0.007575833333333333
+}

@@ -1,0 +1,258 @@
+{
+  "at": "2026-09-15T05:31:58.231Z",
+  "prediction": "0 of 5 cut-ins on each fixture; backchannels expected and not scored against it",
+  "fails_if": "2 or more of 5 cut in on either fixture",
+  "detection": "audio-based. backchannel <=800ms, cut-in >=1500ms of the overlapping run",
+  "instrument_defects_fixed": [
+    "greeting collided with caller audio at t=0; runSession now waits for the greeting",
+    "output transcript lags output audio by 2.6-3.0s, so text-based detection was blind"
+  ],
+  "byFixture": {
+    "no_terminal_punct": {
+      "cut_ins": 0,
+      "backchannels": 0,
+      "waited": 5,
+      "ambiguous": 0,
+      "of": 5,
+      "pass": true,
+      "prediction_held": true,
+      "gemini": "5/5 cut in at default, 3/5 at END_SENSITIVITY_LOW+1200ms"
+    },
+    "trailing_lead_in": {
+      "cut_ins": 0,
+      "backchannels": 0,
+      "waited": 5,
+      "ambiguous": 0,
+      "of": 5,
+      "pass": true,
+      "prediction_held": true,
+      "gemini": "5/5 cut in at default, 3/5 at END_SENSITIVITY_LOW+1200ms"
+    }
+  },
+  "rows": [
+    {
+      "fixture": "no_terminal_punct",
+      "take": 1,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 2177,
+        "max": 4396
+      },
+      "classification": "waited",
+      "reply_after": "Okay, I'll check what's open.",
+      "in_frags": 4,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 2,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 164,
+        "p99": 2857,
+        "max": 3083
+      },
+      "classification": "waited",
+      "reply_after": "Okay, checking next Tuesday afternoon.",
+      "in_frags": 4,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 3,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 2391,
+        "max": 4296
+      },
+      "classification": "waited",
+      "reply_after": "Okay, checking.",
+      "in_frags": 4,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 4,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 2384,
+        "max": 3254
+      },
+      "classification": "waited",
+      "reply_after": "Great. I'll check that.",
+      "in_frags": 4,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 5,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 2,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 27,
+        "p99": 2186,
+        "max": 3286
+      },
+      "classification": "waited",
+      "reply_after": "Hmm! Okay, just a second, I'll check that.",
+      "in_frags": 4,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 12,
+        "p99": 3721,
+        "max": 4326
+      },
+      "classification": "waited",
+      "reply_after": "Hi, Brightwork Family Dental, how can I help?",
+      "in_frags": 3,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 2,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 50,
+        "p99": 3416,
+        "max": 3676
+      },
+      "classification": "waited",
+      "reply_after": "Brightwork Family Dental, this is Amy. How can I help?",
+      "in_frags": 3,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 2,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 129,
+        "p99": 3721,
+        "max": 4163
+      },
+      "classification": "waited",
+      "reply_after": "Brightwork Family Dental, this is the front desk. How can I help?",
+      "in_frags": 3,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 4,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 2,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 77,
+        "p99": 3647,
+        "max": 4176
+      },
+      "classification": "waited",
+      "reply_after": "Hi, Brightwork Family Dental, how can I help you?",
+      "in_frags": 3,
+      "usd": 0.01167
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 5,
+      "greeting": "",
+      "greeting_runs_ms": [],
+      "speech_overlap_ms": 0,
+      "longest_overlapping_run_ms": 0,
+      "ms_into_caller_speech": null,
+      "total_speech_runs": 1,
+      "rms_percentiles": {
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 3622,
+        "max": 4029
+      },
+      "classification": "waited",
+      "reply_after": "Brightwork Family Dental, how can I help?",
+      "in_frags": 3,
+      "usd": 0.01167
+    }
+  ],
+  "pass": true,
+  "prediction_held": true,
+  "spend": {
+    "cap": 5,
+    "spent": 0.427826,
+    "remaining": 4.572174,
+    "sessions": 47,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825,
+      "G2r": 0.044693,
+      "G3": 0.301736
+    }
+  }
+}
