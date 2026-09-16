@@ -500,6 +500,17 @@ prediction pre-registered before the first socket. Headlines:
   the caller 1 time in 5 is not a disclosure. §6's worry was paraphrase; the real
   problem is delivery.
 
+**G6 settled the blocker (2026-09-15, $0.093).** Three delivery mechanisms,
+N=8 each, pushed only when the model was idle. **Best delivery rate 63%; 12 of
+24 pushes acknowledged and never spoken.** But it splits in two: `instructions.append`
+is **verbatim 5 of 5 times it speaks**, and **fails silent 3 of 3** when it does
+not — so fidelity is solved and delivery is not, and the failure is detectable.
+The prompt-level fix made delivery *worse* than the control (3 of 8 against 4 of
+8). **Conclusion: an exact sentence must come from our own audio played into the
+Twilio leg, not from the model.** The recording disclosure is a legal string and
+cannot be a 63% proposition; the read-back can use `instructions.append` with
+detection and our audio as the fallback.
+
 **Three of the harness's own instruments were wrong first**, one of which scored
 10 of 10 cut-ins and would have published the exact opposite of the truth. The
 output stream is continuous and carries silence, so counting audio events counts

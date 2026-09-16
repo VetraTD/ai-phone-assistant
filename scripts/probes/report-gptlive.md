@@ -21,6 +21,7 @@ every session the model spoke in: `audio/*.wav`.
 | **G4c** | does OUR brain leak a slot? | 0 of 10 | **0 of 10** | **PASS**, prediction held |
 | **G4r** | does THEIR brain leak a slot? | ≥3 of 10 | **0 of 10** | **prediction WRONG** |
 | **G5** | will it say an exact sentence? | time intact ≥4 of 5 | **3 of 5; 0 of 10 verbatim** | **FAIL** |
+| **G6** | can any mechanism deliver one? | — (follow-up) | **best 5 of 8; verbatim solved, delivery not** | **use our own audio** |
 
 **Three of my own instruments were wrong before any of these numbers meant
 anything.** They are documented in full below, because the round found more
@@ -251,6 +252,73 @@ pushed as general context with a null `delegation_id`. Across all ten takes ther
 is no such relationship: **with a delegation outstanding it spoke 1 of 5; without
 one, 3 of 5.** The mechanism is not established by this data. What is established
 is that acknowledgement is not delivery.
+
+---
+
+## G6 — can we make it say an exact sentence? · $0.093 · **NO VENDOR MECHANISM CLEARS THE BAR**
+
+G5 left one blocker, so this settles it. Three mechanisms, N=8 each, alternating.
+The G5 confound is removed: every push happens **after the model has gone
+quiet**, so a miss is the mechanism failing rather than a collision. This is the
+best case for all three.
+
+| arm | mechanism | acked | **delivered** | verbatim | verbatim *when delivered* | misses that said nothing |
+|---|---|---|---|---|---|---|
+| A | `commentary.append`, stock prompt | 8/8 | **4/8** | 0 | 0 of 4 | 1 of 4 |
+| B | `commentary.append` + prompt "relay word for word" | 8/8 | **3/8** | 2 | 2 of 3 | 0 of 5 |
+| C | `instructions.append` carrying the sentence | 8/8 | **5/8** | **5** | **5 of 5** | **3 of 3** |
+
+**Best delivery rate is 63%. 12 of 24 pushes were acknowledged and never
+spoken.** A disclosure that reaches the caller two times in three is not a
+disclosure.
+
+### But it splits the problem cleanly in two, and one half is solved
+
+**Fidelity: solved.** `instructions.append` is verbatim **5 of 5** times it
+speaks — character for character, including the "2:15 pm" that every other
+mechanism converted to "2:15 in the afternoon":
+
+> "Your appointment is Thursday the 18th of September at 2:15 pm."
+
+**Delivery: not solved, by any of them.** And note the failure *shapes* differ:
+
+- Arm A never says it verbatim — 0 of 4 deliveries. It always rewrites, and in
+  one take emitted a literal `[sigh]` token.
+- **Arm B, the prompt-level fix, made delivery WORSE** — 3 of 8, below the
+  do-nothing control. Telling the model to relay word for word did not help it
+  relay word for word. Another instance of a prompt instruction failing to hold.
+- **Arm C fails silent: 3 of 3 misses produced no speech at all.** Never garbled,
+  never a wrong time — either the exact sentence or nothing.
+
+That last property is the useful one. A failure that is total and silent is
+**detectable**: our code can watch for the sentence in the output transcript and
+fall back when it does not appear. A failure that paraphrases into a wrong hour
+would not be.
+
+### The answer, and it was the option this probe deliberately did not test
+
+**An exact sentence must come from our own audio, not from the model.** We
+already own the socket to Twilio; a pre-rendered clip played into the caller leg
+makes delivery a property of our code rather than a model's decision. The only
+vendor-side question it raises — whether the model talks over us — we settle by
+not forwarding its audio while ours plays.
+
+The fallback ladder that follows from the numbers above:
+
+1. **Recording disclosure** — our own audio, always. It is a legal string, it is
+   the same every call, and it must never be a 63% proposition.
+2. **Appointment read-back** — `instructions.append`, which is verbatim when it
+   lands, with detection on the output transcript and our own audio as the
+   fallback. Worth doing because the model's own phrasing sounds better than a
+   clip when it works.
+3. **Everything else** — `commentary.append` is fine. Facts survived every
+   paraphrase across G5 and G6; it is only the *exact* strings it cannot be
+   trusted with.
+
+**What this does not establish.** N=8 cannot demonstrate 95% reliability even at
+8 of 8 — but 5 of 8 is far enough below the bar that no plausible N rescues it.
+And all three arms were measured with the model idle; delivery under load, or
+mid-sentence, can only be worse.
 
 ---
 
