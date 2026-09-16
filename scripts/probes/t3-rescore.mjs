@@ -94,7 +94,7 @@ function bookedTimeFabricated(args) {
 }
 
 function main() {
-  const r = JSON.parse(fs.readFileSync("scripts/probes/results-t3.json", "utf8"));
+  const r = JSON.parse(fs.readFileSync(`scripts/probes/results-t3${process.env.SUFFIX||""}.json`, "utf8"));
   const out = { at: new Date().toISOString(), source_run: r.at, n: r.n, buckets: {}, tally: {} };
 
   for (const row of r.rows) row._bucket = classify(row);
@@ -186,7 +186,7 @@ function main() {
     total: r.rows.length,
   };
 
-  fs.writeFileSync("scripts/probes/results-t3-scored.json", JSON.stringify(out, null, 2) + "\n");
+  fs.writeFileSync(`scripts/probes/results-t3${process.env.SUFFIX||""}-scored.json`, JSON.stringify(out, null, 2) + "\n");
 
   console.log("T3 re-scored (no new sessions)\n");
   console.log(`  buckets: ${JSON.stringify(out.buckets)}`);

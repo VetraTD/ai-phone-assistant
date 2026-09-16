@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 12.422719,
+  "spent_usd": 17.935388,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -2901,11 +2901,326 @@
       "model": "gemini-3.8-live-extended-thinking",
       "usd": 0.2357,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:25:39.029Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.11721499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:28:57.827Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.1730985,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:32:23.943Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.21256750000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:35:24.006Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.1404705,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:38:31.973Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.15216849999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:41:27.369Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2155125,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:46:05.680Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.5548775,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:49:00.235Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.258054,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:53:06.727Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.32760149999999993,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:57:05.521Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.27348300000000003,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:59:35.178Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.085522,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:02:58.356Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.250935,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:06:29.479Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.333413,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:10:05.883Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.178414,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:12:51.323Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.1948985,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:15:35.524Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.17982049999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:18:10.992Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.1927395,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:21:38.882Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2842,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:23:42.614Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.133431,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:26:10.026Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.21854949999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:29:07.107Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.22604950000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:32:14.408Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.184785,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:34:29.540Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.131579,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:37:35.385Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.17876699999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:10.032Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.25094550000000004,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:20.712Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063565,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:28.729Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0061525,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:36.924Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0059965,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:44.564Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0061645,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:55.364Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0069085,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:03.709Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063195000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:14.002Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.006583500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:23.101Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0064995,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:31.151Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0062475000000000004,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:39.065Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063435,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T13:21:48.287Z",
+  "updated_at": "2026-09-16T14:41:39.066Z",
   "cap_history": [
     {
       "cap": 5,

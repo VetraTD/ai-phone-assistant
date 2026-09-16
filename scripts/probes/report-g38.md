@@ -403,3 +403,11 @@ The reasoning, not the precedent:
 
 T3 is 78% of the round's cost and two thirds of that was run 1, which produced
 no verdict. The estimate was $8.65; the outturn was $8.79.
+
+---
+
+**ADDENDUM, 2026-09-16: see `report-g38-et.md`.** Extended thinking was tested
+after the owner asked; it loses on every axis. Two corrections to this document
+land there: the Artificial Analysis score quoted above belongs to the extended
+thinking variant, not the model tested, and T4's verdict on plain 3.8 moves from
+2 of 5 to 2 of 10 pooled once the cancel-flow absorbers are added.
