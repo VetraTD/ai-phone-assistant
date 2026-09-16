@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 18.109908,
+  "spent_usd": 18.382166,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -3819,11 +3819,578 @@
       "model": "gemini-3.8-live",
       "usd": 0,
       "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:13:37.584Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.011964666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:16:10.485Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0127415,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:18:42.816Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012694,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:21:08.122Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012108583333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:23:51.334Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013600583333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:25:51.941Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.010050333333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:28:30.770Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013235416666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:31:10.611Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.01331975,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:33:44.369Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012812916666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:36:31.497Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013927083333333335,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:38:51.170Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.011639083333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:41:32.122Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013412333333333335,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:44:13.816Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013474166666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:56:55.634Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0013949062499999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:01.943Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00222290625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:08.962Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0022947312499999994,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:15.850Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00287090625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:23.852Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00397773125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:30.969Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-6",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0030417312499999996,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:37.902Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-7",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0027417312499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:44.098Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-8",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014157312499999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:50.307Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-9",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00138309375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:59.457Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-10",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0038787312499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:05.728Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010925729166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:12.015Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0017613979166666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:18.313Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011913979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:24.573Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015273979166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:30.805Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011015729166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:37.102Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-6",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015543979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:43.368Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-7",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014073979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:49.613Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-8",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014943979166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:56.012Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-9",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0016685729166666663,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:02.262Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-10",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015213979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:10.747Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:16.956Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.00177571875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:24.212Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0073950000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:30.409Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.00129571875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:36.611Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0013647187499999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:45.546Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.0073950000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:51.734Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0045815,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:57.937Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.0045214999999999995,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:04.184Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:11.508Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:17.830Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016473854166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:24.142Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017073854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:30.436Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015873854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:36.724Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017943854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:43.001Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017163854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:49.286Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018903854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:55.583Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017733854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:01.897Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017583854166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:08.192Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016773979166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:14.493Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017433854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:18.152Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011540125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:24.694Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011329291666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:31.320Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011519291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:37.817Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010751791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:44.351Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010602625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:51.316Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011142708333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:58.126Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010623458333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:04.626Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010034291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:11.546Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011584291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:18.607Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011161791666666667,
+      "estimated": true
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T17:11:15.525Z",
+  "updated_at": "2026-09-16T18:03:18.607Z",
   "cap_history": [
     {
       "cap": 5,

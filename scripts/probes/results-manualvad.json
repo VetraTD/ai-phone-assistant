@@ -1,0 +1,144 @@
+{
+  "at": "2026-09-16T18:02:11.501Z",
+  "fixture": "trailing_lead_in",
+  "hold_ms": 3000,
+  "n": 5,
+  "rows": [
+    {
+      "model": "gemini-3.8-live",
+      "take": 1,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 779,
+      "heard": "It's for a",
+      "usd": 0.00115
+    },
+    {
+      "model": "gemini-3.8-live",
+      "take": 2,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 740,
+      "heard": "It's for a",
+      "usd": 0.00113
+    },
+    {
+      "model": "gemini-3.8-live",
+      "take": 3,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 799,
+      "heard": "It's for a",
+      "usd": 0.00115
+    },
+    {
+      "model": "gemini-3.8-live",
+      "take": 4,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 693,
+      "heard": "It's for a",
+      "usd": 0.00108
+    },
+    {
+      "model": "gemini-3.8-live",
+      "take": 5,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 699,
+      "heard": "It's for a",
+      "usd": 0.00106
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "take": 1,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1178,
+      "heard": "It's for a",
+      "usd": 0.00111
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "take": 2,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1042,
+      "heard": "It's for a",
+      "usd": 0.00106
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "take": 3,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 739,
+      "heard": "It's for a",
+      "usd": 0.001
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "take": 4,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1138,
+      "heard": "It's for a",
+      "usd": 0.00116
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "take": 5,
+      "fixture": "trailing_lead_in",
+      "hold_ms": 3000,
+      "spoke_during_hold": false,
+      "spoke_at_ms": null,
+      "answered_after_activity_end": true,
+      "reply_ms": 1275,
+      "heard": "It's for a",
+      "usd": 0.00112
+    }
+  ],
+  "tally": {
+    "gemini-3.8-live": {
+      "of": 5,
+      "held_silent": 5,
+      "cut_in": 0,
+      "answered_after_end": 5,
+      "median_reply_after_end_ms": 740
+    },
+    "gemini-3.1-flash-live-preview": {
+      "of": 5,
+      "held_silent": 5,
+      "cut_in": 0,
+      "answered_after_end": 5,
+      "median_reply_after_end_ms": 1138
+    }
+  }
+}
