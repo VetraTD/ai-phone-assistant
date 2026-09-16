@@ -26,8 +26,17 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SPEND_FILE = path.join(HERE, "..", "spend-gptlive.json");
 
-/** Authorised by the owner 2026-09-15 for this round only. Not raisable by me. */
-export const CAP_USD = 5.0;
+/**
+ * Authorised by the owner for this round only. Not raisable by me.
+ *
+ * 2026-09-15: $5.00, for the GPT-Live gate round.
+ * 2026-09-15 (later, in session): raised to $25.00 by the owner, in writing, to
+ *   cover the gemini-3.8-live comparison round -- the T-gates, the repaired
+ *   booking harness, and the agentic multi-step arms on BOTH vendors. $3.40 of
+ *   the original $5.00 was already spent when it was raised, so the headroom
+ *   this round actually has is ~$21.60, not $25.00.
+ */
+export const CAP_USD = 25.0;
 
 /** Voice layer: USD per SECOND of session wall clock. */
 export const LIVE_USD_PER_SECOND = 0.05 / 60;
@@ -43,6 +52,26 @@ export const RATES = {
     audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
     source: "analysis doc 4.1",
   },
+  // gemini-3.8-live, GA 2026-09-15. Google's launch post quotes $0.005/min of
+  // audio in and $0.018/min out, and states those are derived from $3/1M input
+  // and $12/1M output -- i.e. the SAME per-token audio rates as 2.5. The
+  // per-minute figure is the derived one, so pricing stays per-token here and
+  // the two Gemini arms remain comparable line for line.
+  //
+  // The 2026-09-15 pilot (probe M38) priced this model on the 2.5 card with
+  // HARDCODED token counts rather than usageMetadata, so its $0.093 is a guess,
+  // not a measurement. Anything quoting it must say so.
+  "gemini-3.8-live": {
+    audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
+    source: "Google launch post 2026-09-15 ($0.005/min in, $0.018/min out, from $3/$12 per 1M)",
+    assumed: ["text_in", "text_out", "cached_in"],
+  },
+  "gemini-3.8-live-extended-thinking": {
+    audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
+    source: "same card as gemini-3.8-live; thinking tokens NOT separately priced here",
+    assumed: ["text_in", "text_out", "cached_in"],
+  },
+
   // Present only for the owner-authorised fallback if the Live transport is dead.
   "gpt-realtime-2.1": {
     audio_in: 32.0, audio_out: 64.0, cached_audio_in: 0.4,
