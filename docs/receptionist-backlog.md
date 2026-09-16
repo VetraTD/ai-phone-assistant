@@ -12840,3 +12840,76 @@ unambiguous.
 - **A scripted caller desyncs against the prompt in more than one way.** Wrong order, and
   a missing answer to a question the model asks on every single call (the caller's
   company). Each unanswered question shifts the whole script by one turn.
+
+---
+
+# 2026-09-16 — the turn-end hold round
+
+Opened while executing `docs/superpowers/plans/2026-09-16-turnend-hold-and-gemini-38.md`.
+Both items below were found by reading code and transcripts, not by a call.
+
+| id | item | status |
+|---|---|---|
+| **LVX129** | the hold arm's backstop can reintroduce the exact defect the arm exists to fix | **OPEN · P1 — WATCH ON THE FIRST CALL** |
+| **LVX130** | the model can be silent about a refused action, and every guard reads that as clean | **OPEN · P1** |
+
+## LVX129 — the backstop undercuts the hold it protects
+
+`LIVE_TURN_END=hold` selects arm C (`lib/voice/live/turnEnd/classifyHold.js`),
+which hands endpointing to `classifyHold` and closes the turn at
+`max(DEFAULT_MIN_SILENCE_MS = 300, holdMs)`. For a caller who trails off,
+`classifyHold` charges **2,000 ms**.
+
+But arm C is the **only** arm whose turn end depends on a message arriving from
+the vendor, and `DEFAULT_BACKSTOP_MS = 1_200` exists for the case where no
+transcript comes. **1,200 ms is UNDER the 2,000 ms the trail-off is charged.**
+So on a turn where the transcript is late or missing, the backstop fires first,
+ends the turn at 1,200 ms, and the assistant cuts into exactly the caller the
+arm was switched on to protect. The fix would look like it had failed
+intermittently, which is the hardest kind of failure to attribute.
+
+How likely: `inputAudioTranscription` was measured at 113–360 ms on nine calls
+and `gemini-3.8-live` produced 0 blank transcripts in 98 sessions, so it should
+be rare. "Rare" is not "cannot".
+
+**Watch on the first hold-arm call:** the close rule is reported per turn.
+`hold_backstop` appearing on a turn where the caller trailed off is this defect.
+If it fires at all, the candidate fix is to floor the backstop above the largest
+hold `classifyHold` can charge, rather than below it.
+
+**Done when:** a real call shows the trail-off held, with no `hold_backstop` on
+that turn.
+
+## LVX130 — silence about a refused action reads as success
+
+Found in `scripts/probes/results-t4-38n10.json` take 5, `gemini-3.8-live`, on a
+flow where the third of three cancels returns `{ok:false}`:
+
+> "I have cancelled your cleaning on September 17th."
+> "I have successfully cancelled your cleaning and filling appointments."
+
+It names only the two that succeeded. It never claims the refused checkup was
+cancelled — so **no claim guard fires, and nothing in the stack is wrong** — and
+it never tells the caller that the third failed. The caller leaves believing a
+checkup is cancelled that nobody said anything about, and the call scores clean
+on every instrument we have.
+
+This is a different defect from the misreport the T4 gate measures, and the gate
+correctly scores it `unclear` rather than counting it either way. It matters
+because **every guard we own is a detector for something SAID.** A guard cannot
+fire on an omission, so this whole class is invisible to the machinery that
+LVX27, LVX107, LVX113 and LVX114 built up — the same blind spot
+`negative-counters-cannot-confirm` records one level down.
+
+Frequency on the only data we have: 1 of 10 takes that reached a refusal on
+`gemini-3.8-live`. Not measured on 3.1.
+
+**Candidate fix, not yet costed:** the refusal is already a tool result we hold,
+so this is answerable in code rather than in the prompt — compare the set of ids
+the model was told failed against the set it mentioned in the turn, and re-issue
+if a failure went unspoken. Three refusal texts have already failed to make a
+model retry (`refusal-message-is-a-request`), so a prompt-side fix should not be
+the first attempt.
+
+**Done when:** a take where a cancel is refused and the model says nothing about
+it is detectable from the call record alone.
