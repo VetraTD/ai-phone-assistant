@@ -10,6 +10,57 @@
 
 **Spec:** `docs/gemini-38-live-analysis.md`, `docs/gptlive-vs-gemini38-architecture.md`, `scripts/probes/report-g38.md` + `report-g38-et.md`. The corrected trail-off evidence is commit `10803fb`.
 
+## STATUS — Task 1b RAN. THE GATE SAYS DO NOT MIGRATE.
+
+**Tasks 4, 5 and 6 are cancelled. Tasks 2 and 3 proceed on `gemini-3.1-flash-live-preview`.**
+
+N=10 per model, same harness commit, same day, `CX_ABSORBERS` on both:
+
+| | reached a refusal | **misreported it** | told the truth | unclear |
+|---|---|---|---|---|
+| `gemini-3.8-live` | 10/10 | **2** | 7 | 1 |
+| `gemini-3.1-flash-live-preview` | 10/10 | **0** | **10** | 0 |
+
+Pooled with the other absorbers-era run for each model — `results-t4.json` is
+**excluded**, it predates `CX_ABSORBERS` (06:52Z vs 13:22Z) and is a different
+harness:
+
+| | like-for-like |
+|---|---|
+| `gemini-3.8-live` | **3 misreports of 15** (20%) |
+| `gemini-3.1-flash-live-preview` | **0 of 14** (0%) |
+
+**How strong is that?** Fisher one-sided p = **0.12**. Suggestive, not
+conclusive, and it should not be reported as conclusive. But the decision is not
+a significance test. 3.1 is the incumbent, it is deployed, it is 34% cheaper,
+and the burden was on 3.8 to justify a migration. It did not clear it: it lies
+about a failed action roughly one call in five, and the model it would replace
+did not lie once in fourteen.
+
+The residual case for 3.8 is real and unchanged — `turnComplete` at 17 ms
+against 6,750 ms, zero fabricated fields against 3.1's two invented DOBs,
+~400 ms faster replies. It is not worth migrating onto a model that misreports
+refusals when the caller-facing win this week (`LIVE_TURN_END=hold`) works
+identically on both.
+
+**Cost:** $3.29 for Task 1b ($2.03 for 3.8, $1.26 for 3.1). Meter at
+$21.67 of $25. Cap not raised.
+
+**Four scorer defects were found and fixed while doing this**, each by reading
+transcripts rather than tallies, and each one changed a number:
+an undercount that hid 3.8's cleanest lie; an overcount that scored 3.8's
+truthful itemisation as a lie; an overcount that would have scored 3.1 as lying
+*for telling the truth* (`"cancelled those two"`); and a truth-side gap that
+scored the single most honest answer in the corpus as `unclear`.
+Detector now agrees with a hand read on 24 of 24. Commits `e495eab`, `9f12dda`,
+`62f49b3`.
+
+**New, and not a blocker:** LVX130. On 1 of 10 takes 3.8 said nothing at all
+about the refused cancel — no lie, no acknowledgement. No guard fires, because
+every guard we own detects something *said*. 3.1 had zero such takes.
+
+---
+
 ## STATUS — updated 2026-09-16 after Task 1 ran
 
 **Task 1 is DONE. It did what it was built to do: it stopped the plan.**
