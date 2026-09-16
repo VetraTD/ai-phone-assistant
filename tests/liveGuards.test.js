@@ -335,3 +335,90 @@ describe("idempotent tool execution", () => {
     expect(g.before({ ...fc, id: "11" }).allow).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// READS, WITHIN ONE TURN.
+//
+// Writes are deduplicated; reads never were. Measured on real calls
+// 2026-09-16, both models, with the tool returning in 4-101 ms every time:
+//
+//   gemini-3.8-live  check_appointment_availability x3 in one call, 38 slots
+//                    listed, no booking, caller hung up
+//   gemini-3.1       check_appointment_availability x5 in one call, 73 slots
+//                    listed
+//
+// So this is NOT a 3.8 defect that 3.1 lacks, which is how it was first
+// written up. Both re-fire. Each repeat costs a model round trip on a phone
+// call, and two day-queries inside one turn can return two DIFFERENT slot
+// lists, so the model can offer a time its own later lookup no longer shows.
+//
+// Scoped to a TURN, deliberately. Availability genuinely changes across a
+// call -- somebody else books -- so caching for the whole call would answer a
+// later question with a stale diary. Within one turn it cannot meaningfully
+// change, and that is the window where the repeats happen.
+// ---------------------------------------------------------------------------
+describe("idempotent reads inside a single turn", () => {
+  it("answers an identical repeat from the memo instead of re-running the tool", () => {
+    const g = guards();
+    const { fc, result } = dayCheck({ open_times: ["2026-09-15T14:00:00"] });
+    expect(g.before(fc).allow).toBe(true);
+    g.after(fc, result);
+
+    const verdict = g.before({ ...fc, id: "99" });
+    expect(verdict.allow).toBe(false);
+    expect(verdict.reason).toBe("read_memo");
+    // It must hand back the SAME answer, carrying the new call's id, so the
+    // model is not left waiting on a response it never receives.
+    expect(verdict.functionResponse.response.open_times).toEqual(["2026-09-15T14:00:00"]);
+    expect(verdict.functionResponse.id).toBe("99");
+  });
+
+  it("does not memo a read with different arguments", () => {
+    const g = guards();
+    const a = pointCheckAvailable("2026-09-15T14:00:00");
+    g.before(a.fc);
+    g.after(a.fc, a.result);
+    const b = pointCheckAvailable("2026-09-15T16:30:00");
+    expect(g.before({ ...b.fc, id: "3" }).allow).toBe(true);
+  });
+
+  it("forgets the memo when the turn ends", () => {
+    const g = guards();
+    const { fc, result } = dayCheck({ open_times: ["2026-09-15T14:00:00"] });
+    g.before(fc);
+    g.after(fc, result);
+    expect(g.before({ ...fc, id: "99" }).allow).toBe(false);
+
+    g.resetTurn();
+    // A new turn is a new question. The diary may genuinely have changed.
+    expect(g.before({ ...fc, id: "100" }).allow).toBe(true);
+  });
+
+  it("never memos a FAILED read, so a transient error stays retryable", () => {
+    const g = guards();
+    const fc = { id: "1", name: "check_appointment_availability", args: { requested_at: "2026-09-15" } };
+    g.before(fc);
+    g.after(fc, { functionResponse: { id: "1", response: { success: false, message: "Backend timed out." } } });
+    expect(g.before({ ...fc, id: "2" }).allow).toBe(true);
+  });
+
+  it("does not memo WRITES -- they have their own rule and it is not this one", () => {
+    // book_appointment is deduplicated by completedWrites, which only freezes a
+    // SUCCESS. Memoing writes here would be a second, different cache over the
+    // same calls and the two would eventually disagree.
+    const g = guards();
+    const fc = book("2026-09-15T14:00:00");
+    g.after(fc, { functionResponse: { id: "9", response: { success: false, message: "nope" } } });
+    expect(g.before({ ...fc, id: "10" }).allow).toBe(true);
+  });
+
+  it("counts the hits, because a fix nobody can see did not happen", () => {
+    const g = guards();
+    const { fc, result } = dayCheck({ open_times: ["2026-09-15T14:00:00"] });
+    g.before(fc);
+    g.after(fc, result);
+    g.before({ ...fc, id: "99" });
+    g.before({ ...fc, id: "100" });
+    expect(g.counts().read_memo_hit).toBe(2);
+  });
+});
