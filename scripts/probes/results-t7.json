@@ -1,0 +1,132 @@
+{
+  "at": "2026-09-16T06:24:06.487Z",
+  "model": "gemini-3.8-live",
+  "n_per_case": 4,
+  "rows": [
+    {
+      "case": "disclosure",
+      "take": 1,
+      "line": "Just so you know, this call is recorded for quality and training purposes.",
+      "spoke_ms": 597,
+      "spoken": "Just so you know, this call is recorded for quality and training purposes. Are you a new or existing patient?",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00504
+    },
+    {
+      "case": "disclosure",
+      "take": 2,
+      "line": "Just so you know, this call is recorded for quality and training purposes.",
+      "spoke_ms": 689,
+      "spoken": "Just so you know, this call is recorded for quality and training purposes.",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00473
+    },
+    {
+      "case": "disclosure",
+      "take": 3,
+      "line": "Just so you know, this call is recorded for quality and training purposes.",
+      "spoke_ms": 786,
+      "spoken": "Just so you know, this call is recorded for quality and training purposes.",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00504
+    },
+    {
+      "case": "disclosure",
+      "take": 4,
+      "line": "Just so you know, this call is recorded for quality and training purposes.",
+      "spoke_ms": 538,
+      "spoken": "Just so you know, this call is recorded for quality and training purposes.",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00484
+    },
+    {
+      "case": "readback",
+      "take": 1,
+      "line": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoke_ms": 692,
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00468
+    },
+    {
+      "case": "readback",
+      "take": 2,
+      "line": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoke_ms": 1435,
+      "spoken": "Are you a new or existing patient?",
+      "delivered": true,
+      "verbatim": false,
+      "facts_intact": false,
+      "silent_miss": false,
+      "usd": 0.00966
+    },
+    {
+      "case": "readback",
+      "take": 3,
+      "line": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoke_ms": 477,
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "delivered": true,
+      "verbatim": true,
+      "facts_intact": true,
+      "silent_miss": false,
+      "usd": 0.00467
+    },
+    {
+      "case": "readback",
+      "take": 4,
+      "line": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "spoke_ms": 1375,
+      "spoken": "Are you a new or existing patient?",
+      "delivered": true,
+      "verbatim": false,
+      "facts_intact": false,
+      "silent_miss": false,
+      "usd": 0.00987
+    }
+  ],
+  "tally": {
+    "disclosure": {
+      "of": 4,
+      "delivered": 4,
+      "verbatim": 4,
+      "facts_intact": 4,
+      "silent_misses": 0,
+      "verbatim_when_delivered": "4 of 4",
+      "rate": 1
+    },
+    "readback": {
+      "of": 4,
+      "delivered": 4,
+      "verbatim": 2,
+      "facts_intact": 2,
+      "silent_misses": 0,
+      "verbatim_when_delivered": "2 of 4",
+      "rate": 1
+    }
+  },
+  "verdict": {
+    "predicted": "6 or more of 8 delivered, at least 4 verbatim -- better than GPT-Live's 5 of 8",
+    "measured": "8 of 8 delivered, 6 verbatim",
+    "prediction_held": true,
+    "rate": 1,
+    "usable_for_a_disclosure": true,
+    "gptlive_best": "instructions.append: 5 of 8 delivered, 5 verbatim when delivered, 3 of 3 misses SILENT",
+    "design_consequence": "Under 0.95 the recording disclosure comes from our own pre-rendered audio played into the Twilio leg, where delivery is our code's property rather than a model's decision. That holds for whichever vendor wins."
+  }
+}

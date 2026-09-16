@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 8.556397,
+  "spent_usd": 8.992682,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -2316,11 +2316,290 @@
       "model": "gpt-live-1+gpt-5.6-terra",
       "usd": 0.088466,
       "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:20:55.170Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.005026,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:09.668Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0987335,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:12.922Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.005074,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:30.750Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005026,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:48.487Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.005074,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:57.628Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0089635,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:06.219Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.007396,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:14.367Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036940000000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:32.138Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.008476000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:49.973Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.004666,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:56.895Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11123133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:07.770Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0110005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:23:13.744Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-clean_open",
+      "model": "gemini-3.8-live",
+      "usd": 0.0013162625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:18.627Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-trailing_lead_in",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011746666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:23.731Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-no_terminal_punct",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016011666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:31.698Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-name_spelling",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018546791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:36.624Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_time_q",
+      "model": "gemini-3.8-live",
+      "usd": 0.0014483333333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:43.411Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_confirm",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036904999999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:23:48.762Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_digits",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015076791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:52.262Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_close",
+      "model": "gemini-3.8-live",
+      "usd": 0.0012844166666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:58.021Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-barge_in",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017936666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:24:05.169Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-partial_digits",
+      "model": "gemini-3.8-live",
+      "usd": 0.001756429166666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:24:16.141Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.005043,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:25.543Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.004731,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:35.117Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005043,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:44.523Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0048389999999999996,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:53.952Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.004683,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:03.593Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.009665,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:12.831Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.004671,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:19.317Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.09595300000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:22.541Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.009868499999999999,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T06:18:50.524Z",
+  "updated_at": "2026-09-16T06:25:22.541Z",
   "cap_history": [
     {
       "cap": 5,

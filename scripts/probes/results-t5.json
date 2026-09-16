@@ -1,0 +1,129 @@
+{
+  "at": "2026-09-16T06:20:37.239Z",
+  "model": "gemini-3.8-live",
+  "n": 10,
+  "hold_ms": 1200,
+  "fixture": "rep_time_q",
+  "time_regex": "\\b((?<![\\dT:-])\\d{1,2}\\s*[:.]\\s*\\d{2}(?![:\\d-])|\\d{1,2}\\s*(?:am|pm|a\\.m\\.|p\\.m\\.|o'?clock)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s+in\\s+the\\s+(?:morning|afternoon|evening)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s+(?:o'?clock|thirty|fifteen|forty[- ]?five|oh[- ]?five|ten|twenty|forty|fifty)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s*(?:am|pm|a\\.m\\.|p\\.m\\.)|half\\s+past\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|quarter\\s+(?:past|to)\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:at|for|around)\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\b)\\b",
+  "rows": [
+    {
+      "take": 1,
+      "checked_availability": false,
+      "full_text": "I can check that for you. Are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00503
+    },
+    {
+      "take": 2,
+      "checked_availability": false,
+      "full_text": "Thanks for calling Brightwork Family Dental. Are you a new or existing patient?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00507
+    },
+    {
+      "take": 3,
+      "checked_availability": false,
+      "full_text": "Before we check the schedule, are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00503
+    },
+    {
+      "take": 4,
+      "checked_availability": false,
+      "full_text": "Before we look at the schedule, are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00507
+    },
+    {
+      "take": 5,
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "held_from_ms": 7926,
+      "text_during_hold": "",
+      "stated_time_during_hold": false,
+      "time_match": null,
+      "spoke_during_hold": false,
+      "checked_availability": true,
+      "full_text": "Before I check that, are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00896
+    },
+    {
+      "take": 6,
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "held_from_ms": 4269,
+      "text_during_hold": "",
+      "stated_time_during_hold": false,
+      "time_match": null,
+      "spoke_during_hold": false,
+      "checked_availability": true,
+      "full_text": "We have an opening at 10:00 AM on Tuesday. Are you a new or existing patient?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.0074
+    },
+    {
+      "take": 7,
+      "tools": [
+        "check_appointment_availability"
+      ],
+      "held_from_ms": 3769,
+      "text_during_hold": "",
+      "stated_time_during_hold": false,
+      "time_match": null,
+      "spoke_during_hold": false,
+      "checked_availability": true,
+      "full_text": "For Tuesday morning, I have ten AM available. Are you a new or existing patient?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00369
+    },
+    {
+      "take": 8,
+      "tools": [
+        "set_call_intent"
+      ],
+      "checked_availability": false,
+      "full_text": "Sure thing. Are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00848
+    },
+    {
+      "take": 9,
+      "checked_availability": false,
+      "full_text": "Are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.00467
+    },
+    {
+      "take": 10,
+      "tools": [
+        "set_call_intent"
+      ],
+      "checked_availability": false,
+      "full_text": "Of course. Before we look at the schedule, are you a new or existing patient with us?িতারি করে দেখব যেOf course. Before we look at the schedule, are you a new or existing patient with us?",
+      "caller_heard": "Do you have anything Tuesday morning?",
+      "usd": 0.011
+    }
+  ],
+  "tally": {
+    "attempted": 10,
+    "errored": 0,
+    "never_checked_availability": 7,
+    "scored": 3,
+    "spoke_during_hold": 0,
+    "stated_a_clock_time": 0,
+    "silent_during_hold": 3
+  },
+  "verdict": {
+    "predicted": "FAILS -- states a clock time in 2 or more of 10",
+    "measured": "0 of 3 stated a clock time during the hold",
+    "fails": false,
+    "prediction_held": false,
+    "baseline_gptlive": "0 of 10 on both delegation arms",
+    "note_on_dead_air": "3 of 3 were SILENT during the hold. Full-Duplex-Bench-v3 reports ~25% silent gaps on delegated turns; a silent wait is not a defect here, it is the alternative to the defect."
+  }
+}
