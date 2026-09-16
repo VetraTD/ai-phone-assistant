@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 17.935388,
+  "spent_usd": 17.941679,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -3216,11 +3216,83 @@
       "model": "gemini-3.8-live-extended-thinking",
       "usd": 0.0063435,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T15:30:12.751Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Kore",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007800124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:14.783Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Aoede",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007829999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:16.812Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Puck",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008160124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:18.842Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Charon",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007980124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:21.063Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Leda",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008579999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:23.274Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Fenrir",
+      "model": "gemini-3.8-live",
+      "usd": 0.0006899999999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:25.493Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Zephyr",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007500124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:27.515Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Orus",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008160124999999998,
+      "estimated": true
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T14:41:39.066Z",
+  "updated_at": "2026-09-16T15:30:27.515Z",
   "cap_history": [
     {
       "cap": 5,
