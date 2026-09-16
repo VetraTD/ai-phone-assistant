@@ -308,6 +308,12 @@ describe("idempotent tool execution", () => {
     g.before(fc);
     g.after(fc, result);
 
+    // ACROSS TURNS, which is what this test has always been about -- "while the
+    // caller is on the line" is a whole call, not one turn. The per-turn memo
+    // added below answers an identical repeat INSIDE a turn; the moment the
+    // turn ends the diary may genuinely have changed and the tool runs again.
+    g.resetTurn();
+
     expect(g.before({ ...fc, id: "5" }).allow).toBe(true);
     expect(g.counts().duplicate_suppressed).toBe(0);
   });
@@ -407,6 +413,12 @@ describe("idempotent reads inside a single turn", () => {
     // SUCCESS. Memoing writes here would be a second, different cache over the
     // same calls and the two would eventually disagree.
     const g = guards();
+    // Verify the slot first, mirroring the sibling test above. Without this the
+    // AVAILABILITY invariant blocks the write and the assertion is red for a
+    // reason that has nothing to do with the read memo -- which is what it was
+    // when this test was written, so it could not have passed under any
+    // implementation.
+    g.after(...Object.values(pointCheckAvailable("2026-09-15T14:00:00")));
     const fc = book("2026-09-15T14:00:00");
     g.after(fc, { functionResponse: { id: "9", response: { success: false, message: "nope" } } });
     expect(g.before({ ...fc, id: "10" }).allow).toBe(true);

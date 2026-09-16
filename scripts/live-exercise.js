@@ -181,7 +181,12 @@ async function main() {
         const sc = msg.serverContent;
         if (!sc) return;
         if (sc.outputTranscription?.text) replyText += sc.outputTranscription.text;
-        if (sc.turnComplete) turnDone?.();
+        if (sc.turnComplete) {
+          // Per-TURN read memo, same as production. This script owns its own
+          // createToolRunner, so without this it exercises a whole-call cache.
+          runner?.guards?.resetTurn?.();
+          turnDone?.();
+        }
       },
       onerror: (e) => console.error("  session error:", e?.message || e),
       onclose: (e) => summary.recordClose(e?.reason || null),

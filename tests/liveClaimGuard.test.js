@@ -750,3 +750,59 @@ describe("LVX94 — phrasings the claim detector once missed", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// THE CHANNEL, 2026-09-16. The note was right and the way it was delivered was
+// the defect.
+//
+// sendTurnNote passes `requestReply` straight through as `turnComplete` on a
+// synthetic user turn, so the default asked the model to SPEAK AGAIN
+// IMMEDIATELY. The claim note fires because the model has just spoken, so by
+// construction that is a second consecutive spoken turn with no caller word
+// between them. Measured on a real call: live_claim_unbacked_by_action ->
+// live_turn_note kind="claim" -> live_repeated_phrase, three times in one call.
+// LVX98 is the same channel from the other end -- the right outcome, and six
+// escalating apologies delivered to the caller across a third of the call.
+//
+// Nothing pinned this before, which is why it could drift: liveClaimGuard
+// asserted the note's TEXT and never how it was sent.
+// ---------------------------------------------------------------------------
+describe("a correction is appended, not demanded", () => {
+  beforeEach(() => clearStats());
+
+  it("sends the claim note without asking the model to speak", async () => {
+    const s = await boot();
+    s.say("I've booked your free strategy call for 10 AM on Monday.");
+    s.endTurn();
+    await s.settle();
+
+    const frame = notes(s.live).find((m) => /no tool has run to make it so/.test(m.turns[0].parts[0].text));
+    expect(frame).toBeTruthy();
+    expect(frame.turnComplete).toBe(false);
+  });
+
+  it("an appended note does not spend the turn's one SPOKEN note", async () => {
+    // The latch exists because "a note provokes a model turn, and a model turn
+    // can provoke a note". An appended note provokes neither -- and the claim
+    // note runs FIRST in auditTurn's priority order, so a silent one holding
+    // the latch would have quietly disarmed the promise, deferral,
+    // unusable-transcript and zero-text notes on the same turn.
+    //
+    // One reply, both conditions: a completion claim AND a promise to go and
+    // look, with no tool called at all.
+    const s = await boot();
+    s.say("I've booked your appointment for Monday. Let me check on that for you.");
+    s.endTurn();
+    await s.settle();
+
+    const sent = notes(s.live);
+    const claim = sent.find((m) => /no tool has run to make it so/.test(m.turns[0].parts[0].text));
+    const promise = sent.find((m) => /The caller is waiting on a result/.test(m.turns[0].parts[0].text));
+
+    expect(claim).toBeTruthy();
+    expect(claim.turnComplete).toBe(false);
+    // The one that DOES need saying out loud still gets through.
+    expect(promise).toBeTruthy();
+    expect(promise.turnComplete).toBe(true);
+  });
+});
