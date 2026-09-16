@@ -109,17 +109,17 @@ export const ABSORBERS = [
     // the turn the whole consent chain hangs on, and the old script could only
     // answer it if it happened to be the sixth question.
     fixture: "demo_accept",
-    re: /\b(shall i (go ahead and )?book|should i book|is that (right|correct)|does that (work|sound)|sound (right|good)|(just )?to confirm|confirm that|all correct|correct\?|go ahead and (book|schedule))\b/i,
-    max: 3,
-  },
-  {
-    fixture: "demo_newpatient",
-    re: /\b(new (patient|customer)|existing patient|new or (an )?existing|been (in|here) before|first time (with|here)|patient with us|seen us before)\b/i,
+    re: /\b(shall i (go ahead and )?book|should i book|is that (right|correct)|does that (work|sound)|sound (right|good)|(just )?to confirm|confirm that|all correct|everything correct|correct with that|does that look right|correct\?|go ahead and (book|schedule))\b/i,
     max: 3,
   },
   {
     fixture: "demo_kind",
-    re: /\b(what (kind|type|sort) of (dental )?appointment|kind of appointment|type of appointment|what (are you|were you) looking (for|to)|reason for (your|the) visit|what brings you|coming in for|cleaning or (something|a))\b/i,
+    re: /\b(what (kind|type|sort) of (dental )?appointment|kind of appointment|type of appointment|what (are you|were you) looking (for|to)|reason for (your|the) visit|what brings you|coming in for|what can we help you with|how can we help|cleaning or (something|a))\b/i,
+    max: 3,
+  },
+  {
+    fixture: "demo_newpatient",
+    re: /\b(new (patient|customer)|existing patient|new or (an )?existing|been (in|here) before|first (time|visit)( with| here)?|patient with us|seen us before)\b/i,
     max: 3,
   },
   {
