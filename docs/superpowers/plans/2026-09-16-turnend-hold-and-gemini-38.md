@@ -10,6 +10,81 @@
 
 **Spec:** `docs/gemini-38-live-analysis.md`, `docs/gptlive-vs-gemini38-architecture.md`, `scripts/probes/report-g38.md` + `report-g38-et.md`. The corrected trail-off evidence is commit `10803fb`.
 
+## STATUS — updated 2026-09-16 after Task 1 ran
+
+**Task 1 is DONE. It did what it was built to do: it stopped the plan.**
+Result committed at `b9a9c7b`, data in `scripts/probes/results-guard-replay.json`.
+
+| | misreports caught | **also fires on honest takes** |
+|---|---|---|
+| 3.8 plain | **3 of 3** | **7 of 7** |
+| 3.8 extended thinking | 2 of 3 | 1 of 1 |
+| 3.1 baseline | **0 misreports — told the truth 4/4** | 4 of 4 |
+
+Two findings, both load-bearing:
+
+1. **The claim guard fires on 12 of 12 honest takes.** "Our guards catch it" is
+   technically true and practically empty — it cannot tell an operator which
+   call to look at. Production already measured this: of 34 firings, ~4–6 were
+   genuine. LVX108 also records that internal notes end up audible, so a note on
+   every call is not a neutral cost.
+2. **3.1 told the truth on 4 of 4 refusals where 3.8 misreported 3 of 7.** The
+   failure the guard was meant to compensate for is one 3.1 does not have here.
+
+**Consequence: Task 1b below is now the gate, and it must run before Tasks 4–6.**
+Tasks 2 and 3 (`LIVE_TURN_END=hold`) are **unaffected** — that fix is justified
+independently of which model wins and works on both.
+
+---
+
+### Task 1b: Settle the model on refusal honesty — DO THIS FIRST
+
+3-of-7 against 0-of-4 is too few takes to migrate on. N=10 each settles it.
+
+**Files:** none created. Reuse `scripts/probes/t4-g38.mjs` and `t4-rescore.mjs`.
+
+- [ ] **Step 1: Run 3.8 at N=10**
+
+```bash
+SUFFIX=-38n10 T4_N=10 T4_VENDOR=gemini38 node scripts/probes/t4-g38.mjs
+```
+
+- [ ] **Step 2: Run 3.1 at N=10**
+
+```bash
+M38=gemini-3.1-flash-live-preview SUFFIX=-31n10 T4_N=10 T4_VENDOR=gemini38 node scripts/probes/t4-g38.mjs
+```
+
+- [ ] **Step 3: Score both**
+
+```bash
+SUFFIX=-38n10 node scripts/probes/t4-rescore.mjs
+SUFFIX=-31n10 node scripts/probes/t4-rescore.mjs
+```
+
+- [ ] **Step 4: Decide, and write the decision down before proceeding**
+
+Compare `misreported_refusal` and `told_truth` over the takes that **reached a
+refusal**. Budget ~$1.50; the meter is at $18.38 of $25.
+
+- If **3.8 is equal or better** → continue to Tasks 2–6 as written.
+- If **3.1 is clearly better on refusal honesty** → ship Tasks 2 and 3 only
+  (`LIVE_TURN_END=hold` on 3.1), and STOP. The remaining case for 3.8 is
+  `turnComplete` 17 ms vs 6,750 ms, zero fabricated fields vs 3.1's two invented
+  DOBs, and ~400 ms — real, but not worth migrating onto a model that lies about
+  failed actions more often. Say so plainly and let the owner choose.
+- If **it is a coin flip at N=10** → 3.1 is 34% cheaper and already deployed.
+  Staying is the cheaper default and there is no shame in it.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/probes/results-t4-*n10*.json scripts/probes/spend-gptlive.json
+git commit -m "probe: settle 3.8 vs 3.1 on refusal honesty at N=10"
+```
+
+---
+
 ## Global Constraints
 
 - **`LIVE_MODEL` and `LIVE_TURN_END` already exist** (`lib/voice/live/client.js:144`, `lib/voice/live/turnEnd/index.js:49`). Prefer a variable over a code change everywhere it is possible.
