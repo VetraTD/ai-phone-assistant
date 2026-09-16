@@ -61,6 +61,33 @@ describe("arm A - the vendor's own activity detection", () => {
     expect(cfg?.realtimeInputConfig?.automaticActivityDetection?.disabled).toBeUndefined();
   });
 
+  it("sends no realtimeInputConfig at all when no silence duration is chosen", () => {
+    // Every call before 2026-09-16 ran Google's default VAD because this
+    // returned {} unconditionally. An unconfigured deploy must keep doing
+    // exactly that, so adding the knob cannot move a live call on its own.
+    expect(createVendorAd().connectConfig()).toEqual({});
+    expect(createVendorAd({ bookkeepingHangoverMs: 1200 }).connectConfig()).toEqual({});
+  });
+
+  it("passes silenceDurationMs through to the vendor's detector when chosen", () => {
+    // Measured ENFORCED on 60 sessions: 1,600 ms moves time-to-speak from
+    // 1,686 to 2,480 ms on a trail-off. If this stops being passed the fix
+    // disappears silently, because the session still connects and still works
+    // -- it just goes back to the default patience.
+    const cfg = createVendorAd({ silenceDurationMs: 1600 }).connectConfig();
+    expect(cfg.realtimeInputConfig.automaticActivityDetection.silenceDurationMs).toBe(1600);
+    // And it must NOT disable the detector -- that is arm C, and it suppresses
+    // inputAudioTranscription, which the echo guard and spelling gate need.
+    expect(cfg.realtimeInputConfig.automaticActivityDetection.disabled).toBeUndefined();
+  });
+
+  it("treats a zero or negative silence duration as unset, not as 'answer instantly'", () => {
+    // A variable cleared to "0" in a deploy must not be read as an instruction
+    // to end the caller's turn the moment they pause.
+    expect(createVendorAd({ silenceDurationMs: 0 }).connectConfig()).toEqual({});
+    expect(createVendorAd({ silenceDurationMs: -1 }).connectConfig()).toEqual({});
+  });
+
   it("is not manual, so the session sends no activityStart/activityEnd", () => {
     // The whole point of arm A: we do not signal, the vendor decides. If this
     // flips, arm A silently becomes arm B with the vendor's detector also on.
@@ -208,6 +235,26 @@ describe("selectStrategy", () => {
 
   it("maps each arm name", () => {
     expect(selectStrategy({ LIVE_TURN_END: "vendor" }).name).toBe("vendor");
+  });
+
+  it("reads LIVE_VAD_SILENCE_MS onto the vendor arm, and ignores it elsewhere", () => {
+    const tuned = selectStrategy({ LIVE_VAD_SILENCE_MS: "1600" });
+    expect(tuned.name).toBe("vendor");
+    expect(tuned.connectConfig().realtimeInputConfig.automaticActivityDetection.silenceDurationMs).toBe(1600);
+
+    // Unset stays the vendor default -- the behaviour of every call to date.
+    expect(selectStrategy({}).connectConfig()).toEqual({});
+    // Junk must not silently become a number, and must not throw either.
+    expect(selectStrategy({ LIVE_VAD_SILENCE_MS: "soon" }).connectConfig()).toEqual({});
+
+    // The hold arm does its own thing and must not pick this up: it disables
+    // the vendor detector outright, so a silence duration is meaningless there.
+    const hold = selectStrategy({ LIVE_TURN_END: "hold", LIVE_VAD_SILENCE_MS: "1600" });
+    expect(hold.name).toBe("hold");
+    expect(hold.connectConfig().realtimeInputConfig.automaticActivityDetection.disabled).toBe(true);
+    expect(
+      hold.connectConfig().realtimeInputConfig.automaticActivityDetection.silenceDurationMs
+    ).toBeUndefined();
     expect(selectStrategy({ LIVE_TURN_END: "hangover" }).name).toBe("hangover");
     expect(selectStrategy({ LIVE_TURN_END: "hold" }).name).toBe("hold");
   });
