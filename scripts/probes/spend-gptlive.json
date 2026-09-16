@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 8.992682,
+  "spent_usd": 12.093306,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -2595,11 +2595,218 @@
       "model": "gemini-3.8-live",
       "usd": 0.009868499999999999,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:27:10.751Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:28:32.627Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.141517,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:29:20.509Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.114147,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:30:41.276Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14399666666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:31:15.556Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14329599999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:33:22.112Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0686135,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:34:20.332Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.2214305,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:35:06.279Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.08943200000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:36:37.096Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.143864,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:37:38.646Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.1187125,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:39:39.698Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.1460415,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:40:04.728Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.179262,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:41:36.732Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:42:00.475Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0845345,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:43:56.996Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:45:06.423Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.19262600000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:46:27.659Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.10363449999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:47:20.415Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.177728,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:48:13.136Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07763266666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:50:27.489Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.16387800000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:50:35.873Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.09252849999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:52:20.363Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.154262,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:52:42.167Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14149666666666666,
+      "estimated": true
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T06:25:22.541Z",
+  "updated_at": "2026-09-16T06:52:42.167Z",
   "cap_history": [
     {
       "cap": 5,
