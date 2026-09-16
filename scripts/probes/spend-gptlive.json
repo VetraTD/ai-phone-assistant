@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 18.382166,
+  "spent_usd": 20.411112,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -4386,11 +4386,101 @@
       "model": "gemini-3.1-flash-live-preview",
       "usd": 0.0011161791666666667,
       "estimated": true
+    },
+    {
+      "at": "2026-09-16T19:17:42.582Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.126624,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:20:53.953Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.159377,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:23:51.726Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.142019,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:27:09.376Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.22819649999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:30:19.796Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.2454015,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:33:01.079Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.274317,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:36:24.289Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.23256300000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:39:47.416Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.2020225,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:42:29.133Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.31893,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:45:09.486Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.099496,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T18:03:18.607Z",
+  "updated_at": "2026-09-16T19:45:09.486Z",
   "cap_history": [
     {
       "cap": 5,
