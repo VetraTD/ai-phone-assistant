@@ -12853,7 +12853,57 @@ Both items below were found by reading code and transcripts, not by a call.
 | **LVX129** | the hold arm's backstop can reintroduce the exact defect the arm exists to fix | **OPEN · P1 — WATCH ON THE FIRST CALL** |
 | **LVX130** | the model can be silent about a refused action, and every guard reads that as clean | **OPEN · P1** |
 
-## LVX129 — the backstop undercuts the hold it protects
+## LVX129 — MEASURED 2026-09-16: arm C is a flat 1,200 ms timer, and cannot be anything else
+
+**Status changed from OPEN/predicted to MEASURED.** `scripts/probes/results-holdlatency.json`,
+20 sessions, $0.02. The prediction below was right about the symptom and wrong
+about the cause, and the real cause is worse.
+
+**`hold_backstop` fired on 20 of 20 takes. `classifyHold` never decided a single
+turn. `pending` was null every time, because a transcript arrived before the
+close on ZERO of 20 takes.**
+
+`classifyHold` classifies TEXT. In manual-VAD mode Gemini does not emit
+`inputAudioTranscription` until it is told the activity ended — and
+`automaticActivityDetection: {disabled: true}` is precisely the setting arm C
+requires. **The arm depends on a signal that its own configuration suppresses.**
+The transcript does arrive; `manualvad-38.mjs` reads it back as "It's for a"
+5/5, but only AFTER `activityEnd`, which is after the decision it was needed for.
+
+So the whole of `classifyHold`'s claimed advantage — "pay only the callers who
+are actually mid-thought", 0 ms for terminal punctuation, 2,000 ms for a
+conjunction — is unreachable on this transport. Arm C, at its defaults, is
+**behaviourally identical to arm B** (`flatHangover` at `DEFAULT_HANGOVER_MS`
+= 1,200), with `DEFAULT_BACKSTOP_MS` playing the hangover's part.
+
+`classifyHold.js:22-33` anticipated a weaker version of this ("Gemini may not
+punctuate, and then the arm's advantage over a flat hangover disappears"). The
+measured failure is one level up: there is no text to punctuate or not.
+
+**Measured cost, felt gap p50 (caller stops speaking → assistant starts), N=5:**
+
+| | vendor VAD | hold arm | delta |
+|---|---|---|---|
+| 3.1 complete phrase | 1,726 ms | 2,441 ms | **+715 ms** |
+| 3.1 trail-off | 1,721 ms | 2,291 ms | +570 ms |
+| 3.8 complete phrase | 2,347 ms | 3,453 ms | **+1,106 ms** |
+| 3.8 trail-off | 1,179 ms | 1,972 ms | +793 ms |
+
+The plan's bar was ~500 ms on a complete phrase. **Both models exceed it.** Hold
+does work — 0 cut-ins in 20 — but it buys that with a flat timer charged to
+every turn, not with the selectivity it was designed around.
+
+**The decision this leaves:** arm C is not implementable as designed on this
+transport, so the real question is what a single flat hold should be. That is
+arm B's question, and `turnEnd/constants.js` already says the 1,200 ms value
+"was never tuned" and "needs choosing deliberately rather than inheriting the
+spike's placeholder". Raising the backstop buys trail-off patience and charges
+it to every complete turn; lowering it does the reverse. There is no setting
+that is good at both without the transcript.
+
+**Superseded prediction, kept because it was wrong in an instructive way:**
+
+## LVX129 (original) — the backstop undercuts the hold it protects
 
 `LIVE_TURN_END=hold` selects arm C (`lib/voice/live/turnEnd/classifyHold.js`),
 which hands endpointing to `classifyHold` and closes the turn at
