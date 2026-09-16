@@ -1,6 +1,6 @@
 {
   "cap_usd": 5,
-  "spent_usd": 0.911797,
+  "spent_usd": 1.19634,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -1161,9 +1161,153 @@
       "usd": 0.004166666666666667,
       "seconds": 5,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T01:04:14.294Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.013457499999999999
+    },
+    {
+      "at": "2026-09-16T01:04:22.810Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0057155
+    },
+    {
+      "at": "2026-09-16T01:04:45.872Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.023157999999999998
+    },
+    {
+      "at": "2026-09-16T01:05:02.702Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0108295
+    },
+    {
+      "at": "2026-09-16T01:05:09.776Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0049145
+    },
+    {
+      "at": "2026-09-16T01:05:19.147Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0118355
+    },
+    {
+      "at": "2026-09-16T01:05:28.348Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.011524499999999998
+    },
+    {
+      "at": "2026-09-16T01:05:38.201Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.011991
+    },
+    {
+      "at": "2026-09-16T01:05:46.132Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0052175
+    },
+    {
+      "at": "2026-09-16T01:05:54.020Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0051355
+    },
+    {
+      "at": "2026-09-16T01:06:02.038Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0052455
+    },
+    {
+      "at": "2026-09-16T01:06:09.154Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0046115
+    },
+    {
+      "at": "2026-09-16T01:06:16.281Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0045755
+    },
+    {
+      "at": "2026-09-16T01:06:52.045Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0828535
+    },
+    {
+      "at": "2026-09-16T01:07:13.357Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0199905
+    },
+    {
+      "at": "2026-09-16T01:07:36.172Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.022637499999999998
+    },
+    {
+      "at": "2026-09-16T01:07:57.589Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.020609
+    },
+    {
+      "at": "2026-09-16T01:08:18.989Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0202405
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T00:35:21.257Z"
+  "updated_at": "2026-09-16T01:08:18.989Z"
 }

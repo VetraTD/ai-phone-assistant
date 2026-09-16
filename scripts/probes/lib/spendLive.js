@@ -36,6 +36,13 @@ export const LIVE_USD_PER_SECOND = 0.05 / 60;
 export const RATES = {
   "gpt-5.6-luna": { input: 0.2, output: 1.2, source: "OpenAI pricing, 2026-07-30 cut" },
   "gpt-5.6-terra": { input: 2.0, output: 12.0, source: "OpenAI pricing, 2026-07-30 cut" },
+  // Gemini 2.5 native audio, for the residency-path comparison. Token-billed,
+  // not wall-clock billed -- the two vendors meter differently and the report
+  // must not pretend otherwise.
+  "gemini-live-2.5-flash-native-audio": {
+    audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
+    source: "analysis doc 4.1",
+  },
   // Present only for the owner-authorised fallback if the Live transport is dead.
   "gpt-realtime-2.1": {
     audio_in: 32.0, audio_out: 64.0, cached_audio_in: 0.4,
@@ -175,4 +182,25 @@ export function summary() {
       return acc;
     }, {}),
   };
+}
+
+/**
+ * Price a TOKEN-billed session (Gemini). Kept separate from priceLive() because
+ * conflating a per-second bill with a per-token one is how a cost comparison
+ * quietly becomes wrong.
+ */
+export function priceTokens(model, usage = {}) {
+  const rates = RATES[model];
+  if (!rates) return { usd: 0, unpriced_tokens: 0, error: `no rate card for ${model}` };
+  let usd = 0, unpriced = 0;
+  const breakdown = {};
+  for (const [k, tokens] of Object.entries(usage)) {
+    if (!tokens || typeof tokens !== "number") continue;
+    const rate = rates[k];
+    if (typeof rate !== "number") { unpriced += tokens; continue; }
+    const line = (tokens / 1e6) * rate;
+    breakdown[k] = { tokens, rate, usd: line };
+    usd += line;
+  }
+  return { usd, breakdown, unpriced_tokens: unpriced };
 }

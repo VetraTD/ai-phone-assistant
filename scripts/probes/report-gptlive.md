@@ -372,3 +372,112 @@ Stated before the results, and still true after them.
 3. **Do not touch production.** Nothing here changes the recommendation in
    `docs/gpt-live-analysis.md` §8: phase 1 closes with a business ringing the
    current number, and no business has ever rung it.
+
+
+---
+
+# H1/H2/H3 — Gemini 2.5 on Vertex europe-west1 · $0.285 · **PASSED EVERYTHING**
+
+Run 2026-09-15 on `gemini-live-2.5-flash-native-audio`, project `vetra-uk-edc8ca`,
+location `europe-west1`, with the corrected **11-tool** set and the real prompt.
+Pre-registered in `verdicts-gemini25.json`. 15 sessions.
+
+This is the test `report-r3.md` called "the highest-value outstanding test" two
+weeks ago and nobody had run.
+
+| gate | question | predicted | measured | verdict |
+|---|---|---|---|---|
+| **H1** | does 2.5 cut into a trail-off? | holds 5/5 both fixtures | **10 of 10 held, 0 cut-ins** | **PASS**, prediction held |
+| **H2** | does it break on turn 2 in the EU? | the report does not reproduce | **5 of 5 sessions answered all 4 turns** | **PASS**, prediction held |
+| **H3** | does it check the diary, 11 tools? | ≥4 of 5 | **5 of 5** | **PASS**, prediction held |
+
+**The instrument was validated before the numbers were trusted.** GPT-Live's
+output stream is continuous and carries silence, which is why G3 needed RMS
+energy. Gemini's is turn-based, so arrival of audio *is* speech — but that was
+**proved, not assumed**: 8 real gaps over 400 ms across 241 inter-chunk
+intervals. Had the stream been continuous these numbers would have been void.
+
+The multi-turn transcripts are a working receptionist, not a loop:
+
+```
+turn 1  "Hi, I'd like to book an appointment."  -> "Are you a new or existing patient?"   [set_call_intent]
+turn 2  "Do you have anything Tuesday morning?" -> "We have openings at 10:00 AM or 2:30 PM"
+                                                                     [check_appointment_availability]
+turn 3  "Tuesday at ten works for me."          -> "What is your full name for the appointment?"
+turn 4  "Thanks, bye."                          -> "Thank you for calling Brightwork Family Dental."  [end_call]
+```
+
+**"Breaks on turn 2 in the EU" did not reproduce.** 20 of 20 turns answered.
+
+---
+
+# CORRECTION — GPT-Live's latency advantage was an instrument artifact
+
+**I reported GPT-Live turn latency as "p50 0 ms, p90 800 ms". That number came
+from transcript TIMELINE stamps, and it is not a delivery time.** Those stamps
+annotate where the model places its speech on the session timeline, not when
+audio actually arrives. Gemini was measured by wall clock. Comparing them was
+apples to oranges, and it flattered GPT-Live by well over a second.
+
+Recomputed from the saved WAVs — energy-detected speech start, wall clock, with
+`session.started` as the timeline origin — **the same measure used for Gemini**:
+
+| | turn latency p50 | p90 |
+|---|---|---|
+| **GPT-Live-1** | **1,171 ms** | 1,931 ms |
+| **Gemini 2.5** | 1,441 ms | 2,580 ms |
+| *Gemini 3.1 (Artificial Analysis)* | *2,990 ms* | — |
+
+GPT-Live is still faster — by about **270 ms at p50 and 650 ms at p90**. That is
+real and probably audible. It is not the order-of-magnitude gap I reported.
+
+*Residual caveat, stated rather than buried:* the two figures use slightly
+different marks for "the caller finished" — transcript end for GPT-Live, last
+sent frame for Gemini. Transcript end precedes the last frame, so GPT-Live's
+figure is if anything overstated by roughly 80 ms. Both are also inflated by this
+machine's TLS interception, equally.
+
+---
+
+# THE FOUR-WAY, ON MEASURED EVIDENCE
+
+| | gpt-realtime-2.1 | GPT-Live-1 | Gemini 3.1 *(running today)* | **Gemini 2.5** |
+|---|---|---|---|---|
+| trail-off | 5/5 held | **0 cut-ins /10** | **2/5 — fails, unfixable** | **0 cut-ins /10** |
+| checks the diary | 11/20 | 7/10 | 20/20 | **5/5** |
+| turn latency p50 | 1.21 s *(AA)* | **1,171 ms** | 2,990 ms *(AA)* | 1,441 ms |
+| connect p50 | — | **470 ms** | ~2,200 ms | 987 ms |
+| caller transcript | — | WER 0.000, 1 blank/57 | lossy, no language control | 10/10 returned |
+| exact sentences | — | 63%, needs our audio | partly | untested |
+| residency | EU project | EU project | **none — preview, global** | **native Vertex EU** |
+| cost, ~10 turns | $0.131 mini | $0.158 | $0.096–0.136 | **~$0.05–0.10** |
+| our code | rewrite | new front-end, 60–110 h | — | **keeps what we built** |
+| maturity | superseded | **5 days old** | preview | stable |
+
+## The verdict this round actually produces
+
+**Gemini 2.5 wins, and the reason is that the case for switching vendors was
+never really about OpenAI.**
+
+The single strongest argument for GPT-Live was that it fixes the trail-off
+cut-off. It does — and so does Gemini 2.5, **0 cut-ins out of 10 for both**. The
+defect is a *3.1* defect. We have been living with a problem that the model we
+already had did not have.
+
+What GPT-Live retains: ~270 ms at p50, ~500 ms faster to connect, and a better
+caller transcript. What it costs: roughly 2–3× the per-call bill, 60–110 hours of
+new front-end, an exact-sentence mechanism we have to build ourselves, a backend
+that skips the diary 3 of 10, and a five-day-old dependency.
+
+What Gemini 2.5 gives: the trail-off fixed, the diary checked 5 of 5, native EU
+residency on Vertex, a non-preview model, and **the code we already wrote**.
+
+**Recommendation: move the Live front-end from `gemini-3.1-flash-live-preview` to
+`gemini-live-2.5-flash-native-audio` on Vertex `europe-west1`.** It is a
+configuration change against a front-end that already exists, it satisfies the
+residency requirement the owner made hard, and it fixes the defect this entire
+investigation started from.
+
+**Keep GPT-Live on the shelf, not in the bin.** It is genuinely the better voice
+layer and it is five days old. Revisit when a business has actually used the
+product and the complaint is latency.

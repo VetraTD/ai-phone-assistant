@@ -1,0 +1,62 @@
+{
+  "_": "PRE-REGISTERED. Written 2026-09-15 before any Gemini 2.5 session was opened. Never edited afterwards. The report prints prediction beside result.",
+  "written_at": "2026-09-15T08:40:00Z",
+  "model": "gemini-live-2.5-flash-native-audio",
+  "surface": "vertex",
+  "project": "vetra-uk-edc8ca",
+  "location": "europe-west1",
+  "meter": "spend-gptlive.json (same $5.00 round cap; the comparison is one decision, so it shares one budget)",
+
+  "why_this_runs": "Round 3 dropped 2.5 because 'it lost its only advantage when BAA became unaffordable', and its quality finding came from the SIX-tool harness that report-r3.md calls 'not trustworthy'. The owner made UK/EU residency hard on 2026-09-14, which restores the exact advantage that was written off. report-r3.md already names re-testing 2.5 on the corrected tool set as 'the highest-value outstanding test'. It has never been run.",
+
+  "instrument_note": "DETECTION DIFFERS BY VENDOR ON PURPOSE. GPT-Live streams output audio continuously and pads with silence, so arrival of audio does not mean speech and G3 had to use RMS energy. Gemini Live is turn-based and sends audio only while speaking, so arrival IS speech. This run records inter-chunk gaps to PROVE the stream is discontinuous rather than assuming it; if gaps show a continuous stream, the arrival-based numbers are void and must be re-scored by energy.",
+
+  "comparison_baselines": {
+    "gemini_3_1_trailing_lead_in": "2 of 5 held at END_SENSITIVITY_LOW+1200ms; 0 of 5 at default. The only one of four that fails, and no setting fixes it.",
+    "gemini_2_5_round_2": "5 of 5 held, but measured on the six-tool harness",
+    "gpt_live_1_this_round": "0 cut-ins of 10, energy-detected",
+    "gemini_3_1_availability": "called check_appointment_availability 20 of 20",
+    "gpt_live_1_availability": "7 of 10 with responses delegation"
+  },
+
+  "verdicts": [
+    {
+      "id": "H1",
+      "arm": "trail-off",
+      "scenario": "no_terminal_punct and trailing_lead_in, N=5 each, default VAD, real 11-tool set, real prompt. Same fixtures as G3 and as round 2.",
+      "prediction": "2.5 holds 5 of 5 on BOTH fixtures, reproducing round 2 and beating 3.1's 2 of 5.",
+      "fails_if": "2 or more of 5 cut in on either fixture. Then 2.5 carries the same defect as 3.1, the residency argument is all it has left, and GPT-Live wins on behaviour.",
+      "est_usd": 0.25
+    },
+    {
+      "id": "H2",
+      "arm": "turn-2 survival in the EU",
+      "scenario": "N=5 sessions, 4 caller turns each, on europe-west1. Public reports say the only EU-reachable native-audio model 'breaks on turn 2'. Record whether audio comes back for every turn.",
+      "prediction": "Turn 2 works. The public report does not reproduce for us. Stated deliberately against the rumour, because an unreproduced report is not a measurement.",
+      "fails_if": "2 or more of 5 sessions produce NO audio for turn 2 or later. That disqualifies 2.5 outright -- a receptionist that dies after one exchange is not a candidate, and residency cannot rescue it.",
+      "est_usd": 0.25
+    },
+    {
+      "id": "H3",
+      "arm": "the retracted verdict",
+      "scenario": "Within H2's multi-turn sessions, one turn is rep_time_q ('Do you have anything Tuesday morning?'). Does it call check_appointment_availability on the CORRECTED 11-tool harness? This is the test report-r3.md called the highest-value outstanding one.",
+      "prediction": "Calls it in 4 of 5 or better, in line with 3.1's 20 of 20 and unlike gpt-realtime-2.1's 11 of 20.",
+      "fails_if": "Fewer than 3 of 5. Then the six-tool harness was not the whole story and the original quality concern about 2.5 had something real in it.",
+      "est_usd": 0.0
+    }
+  ],
+
+  "always_measured": [
+    "connect time to setupComplete, against GPT-Live's p50 470ms -- BOTH tainted by this machine's Norton TLS interception (~2.2s per cold handshake), so connect times measured here are an upper bound for both vendors and are comparable to each other, not to production.",
+    "turn latency, caller speech end to first model audio",
+    "inter-chunk gaps, to prove the stream is turn-based rather than continuous",
+    "whether inputTranscription returns caller text at all, since the guard stack depends on it",
+    "real token cost per session"
+  ],
+
+  "cannot_answer": [
+    "How it sounds on a handset.",
+    "Whether europe-west1 latency from a UK caller resembles latency from this machine.",
+    "General conversation quality across a long call -- this is two narrow arms, not a quality bake-off."
+  ]
+}

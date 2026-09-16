@@ -50,6 +50,7 @@ export async function openSession(opts) {
     firstAudioAt: null, lastAudioAt: null, audioChunks: 0, audioBytes: 0,
     interruptedAt: null, turnCompleteAt: null, generationCompleteAt: null,
     inputTranscript: "", outputTranscript: "",
+    audioChunkLog: [],   // {at, bytes} -- proves whether the stream is turn-based or continuous
     turnToolCalls: [], usage: emptyUsage(), session: null, error: null,
   };
 
@@ -84,7 +85,9 @@ export async function openSession(opts) {
         if (sc.modelTurn?.parts?.some((p) => p.inlineData?.data)) {
           const b = sc.modelTurn.parts.find((p) => p.inlineData?.data);
           state.audioChunks++;
-          state.audioBytes += Buffer.from(b.inlineData.data, "base64").length;
+          const chunkBytes = Buffer.from(b.inlineData.data, "base64").length;
+          state.audioBytes += chunkBytes;
+          state.audioChunkLog.push({ at, bytes: chunkBytes });
           state.lastAudioAt = at;
           if (state.firstAudioAt === null) { state.firstAudioAt = at; state.events.push({ at, t: "firstAudio" }); }
         }
