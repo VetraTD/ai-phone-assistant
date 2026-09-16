@@ -66,6 +66,23 @@ export const RATES = {
     source: "Google launch post 2026-09-15 ($0.005/min in, $0.018/min out, from $3/$12 per 1M)",
     assumed: ["text_in", "text_out", "cached_in"],
   },
+  // The INCUMBENT, and the arm gemini-3.8-live is being measured against. It had
+  // no card until 2026-09-16, which meant priceTokens() returned $0 for it and
+  // every 3.1 session silently fell through to priceGeminiByMinutes() -- i.e.
+  // was priced on 3.8's per-minute card using WALL CLOCK as audio-in seconds.
+  // Spend was still metered, so the cap held, but the per-session dollar figure
+  // was not a measurement and the two arms were not comparable line for line.
+  //
+  // Rates carried from the shared Gemini native-audio card ($3/1M in, $12/1M
+  // out), which 2.5 and 3.8 both quote. Google does not publish a separate card
+  // for the 3.1 preview; if it is cheaper than this, the 3.1 arm is being
+  // OVER-charged here, which is the safe direction for a comparison whose
+  // conclusion would favour 3.1 on cost.
+  "gemini-3.1-flash-live-preview": {
+    audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
+    source: "shared Gemini native-audio card ($3/$12 per 1M); no published 3.1-preview card",
+    assumed: ["audio_in", "audio_out", "text_in", "text_out", "cached_in"],
+  },
   "gemini-3.8-live-extended-thinking": {
     audio_in: 3.0, audio_out: 12.0, text_in: 0.5, text_out: 2.0, cached_in: 0.05,
     source: "same card as gemini-3.8-live; thinking tokens NOT separately priced here",
