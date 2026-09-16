@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 3.870667,
+  "spent_usd": 6.966067,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -1920,11 +1920,281 @@
       "model": "gpt-live-1+gpt-5.6-terra",
       "usd": 0.07916666666666668,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:50:05.021Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.088451,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:52:08.890Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12373133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:54:09.275Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0657615,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:56:17.947Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.15662933333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:58:16.747Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.097472,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:59:50.370Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.09026533333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:02:01.879Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.08176249999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:03:27.171Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07859866666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:05:48.211Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.1105605,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:07:31.884Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.155228,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:09:34.881Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.07697799999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:11:17.764Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11219733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:13:34.699Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0859525,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:15:26.513Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12303066666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:17:38.996Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.08085600000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:19:33.405Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11123133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:21:43.449Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.08427950000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:23:17.270Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.08943200000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:25:26.790Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0869555,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:27:09.103Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11219733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:29:11.654Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.1009305,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:30:40.632Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07609866666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:32:54.891Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.079595,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:35:08.032Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13469733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:37:27.070Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0972185,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:39:20.286Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14329599999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:41:17.886Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.094418,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:43:10.414Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:45:16.900Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.07015,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:47:03.654Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.15342866666666666,
+      "estimated": true
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T04:47:13.864Z",
+  "updated_at": "2026-09-16T05:47:03.654Z",
   "cap_history": [
     {
       "cap": 5,

@@ -65,9 +65,28 @@ export const ABSORBERS = [
   // scored as a clean take with no booking. Matching on content makes the
   // caller answer what was actually asked, and makes an unmatched question
   // visible instead of silently mis-answered.
+  // ORDER MATTERS -- first match wins. The narrow patterns must sit above the
+  // broad ones they would otherwise be swallowed by: the alternative-slot offer
+  // above the generic read-back, and "spell your FIRST name" above "spell".
+  {
+    // THE FIX THAT MAKES S2_refusal SCOREABLE. On a refused write the model
+    // does the right thing and offers the other slot -- "that time slot was
+    // just taken. Would you like to try booking for two thirty in the afternoon
+    // instead?" -- and the old caller had no way to say yes. S2 scored 0 of 5
+    // on BOTH vendors and none of it was a vendor result; the scenario could
+    // never reach the behaviour it exists to measure.
+    fixture: "demo_alt_slot",
+    re: /\b(would you like to (try|book|go with|take)|shall (i|we) (try|book|put you)|try booking for|instead\?|two[- ]thirty|2:?30|other (slot|time)|another time|different time)\b/i,
+    max: 2,
+  },
+  {
+    fixture: "demo_spell_first",
+    re: /\bspell(ing)?\b[^.?!]*\bfirst name\b/i,
+    max: 2,
+  },
   {
     fixture: "demo_when",
-    re: /\b(what day|which day|what time|what date|when would you|when were you (thinking|hoping)|day works|day or time|time were you|come in for|looking to (come|schedule|book)|hoping to come)\b/i,
+    re: /\b(what day|which day|what time|what date|when would you|when were you (thinking|hoping)|day works|day or time|time were you|looking to (come|schedule|book)|hoping to come)\b/i,
     max: 3,
   },
   {
@@ -90,7 +109,7 @@ export const ABSORBERS = [
     // the turn the whole consent chain hangs on, and the old script could only
     // answer it if it happened to be the sixth question.
     fixture: "demo_accept",
-    re: /\b(shall i (go ahead and )?book|should i book|is that (right|correct)|does that (work|sound)|sound (right|good)|just to confirm|confirm that|all correct|go ahead and (book|schedule))\b/i,
+    re: /\b(shall i (go ahead and )?book|should i book|is that (right|correct)|does that (work|sound)|sound (right|good)|(just )?to confirm|confirm that|all correct|correct\?|go ahead and (book|schedule))\b/i,
     max: 3,
   },
   {
@@ -100,7 +119,7 @@ export const ABSORBERS = [
   },
   {
     fixture: "demo_kind",
-    re: /\b(what (kind|type|sort) of (dental )?appointment|kind of appointment|type of appointment|what (are you|were you) looking (for|to)|reason for (your|the) visit|what brings you|cleaning or (something|a))\b/i,
+    re: /\b(what (kind|type|sort) of (dental )?appointment|kind of appointment|type of appointment|what (are you|were you) looking (for|to)|reason for (your|the) visit|what brings you|coming in for|cleaning or (something|a))\b/i,
     max: 3,
   },
   {
@@ -110,7 +129,7 @@ export const ABSORBERS = [
     // could never get past it, which is a second, independent reason the
     // previous round's called_book counts were zero.
     fixture: "demo_dob",
-    re: /\b(date of birth|d\.?o\.?b\.?|birth ?date|when were you born|your birthday)\b/i,
+    re: /\b(date of birth|d\.?o\.?b\.?|birth ?date|(when|what year) were you born|year of birth|your birthday)\b/i,
     max: 3,
   },
 ];
@@ -374,7 +393,11 @@ export async function runConversation({
         try { adapter.answer(handle, call, resultFor(call.name, call)); }
         catch (e) { desync.reasons.push(`tool_answer_failed:${e.message}`); }
       }
-      quiet = await adapter.waitQuiet(handle, { quietMs: 700, maxMs: 1200 });
+      // 700ms ended turns MID-SENTENCE -- the full T3 run produced fragments
+      // like "for?" (the tail of "what are you coming in for?") that no pattern
+      // can match and that score as unmatched questions. Production uses
+      // 900-1200ms for the same reason.
+      quiet = await adapter.waitQuiet(handle, { quietMs: 1100, maxMs: 1600 });
       if (quiet && !adapter.pending(handle).length) break;
       await sleep(80);
     }

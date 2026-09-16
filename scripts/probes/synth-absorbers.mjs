@@ -48,6 +48,17 @@ const LINES = [
   // so a mismatched DOB is still fabrication, and a DOB appearing when none was
   // ever asked for still counts on presence.
   { label: "demo_dob", text: "It's the fourteenth of March, nineteen eighty-eight." },
+  // "Could you please spell your FIRST name as well?" -- found in the full T3
+  // run, 50 unmatched questions of which this was one of the commonest. The
+  // script only ever had a surname spelling (demo_spell, "F, I, T, Z, ...").
+  { label: "demo_spell_first", text: "J, A, N, E." },
+  // S2_refusal scored 0 of 5 on BOTH vendors and it was not a vendor result.
+  // When the write is refused the model does the RIGHT thing -- it offers the
+  // other slot: "I am sorry, but that time slot was just taken. Would you like
+  // to try booking for two thirty in the afternoon instead?" -- and the caller
+  // had no way to say yes. The scenario could never reach the behaviour it
+  // exists to measure.
+  { label: "demo_alt_slot", text: "Yes, two thirty that afternoon works, thank you." },
 ];
 
 async function main() {
