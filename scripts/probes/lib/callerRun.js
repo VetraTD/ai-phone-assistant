@@ -55,7 +55,7 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * not invented: three different phrasings of the new/existing question and
  * three of the appointment-kind question appear there.
  */
-export const ABSORBERS = [
+export const DEMO_ABSORBERS = [
   // --- the booking script's own lines, now matched to the QUESTION rather than
   // played in a fixed order. This is the part the first two repairs missed.
   //
@@ -134,6 +134,47 @@ export const ABSORBERS = [
   },
 ];
 
+
+/**
+ * The CANCEL flow's answer bank (T4). Kept SEPARATE from DEMO_ABSORBERS on
+ * purpose: "Yes, cancel all three" is a sensible reply in a cancellation call
+ * and nonsense in a booking one, and a shared list would let it fire in T3.
+ *
+ * T4's first run had no absorbers at all -- it ran on queue order alone, which
+ * is why its commonest unmatched question was the one cx_confirm exists to
+ * answer: "Would you like me to go ahead and cancel all three of those?"
+ */
+export const CX_ABSORBERS = [
+  {
+    fixture: "cx_confirm",
+    re: /\b(cancel all (three|3)|all (three|3)( of (them|those))?\?|go ahead and cancel|shall i cancel|would you like me to cancel|which (one|of these|of your)|confirm .{0,20}cancel|proceed with (the )?cancell)/i,
+    max: 3,
+  },
+  {
+    fixture: "cx_name",
+    re: /\b(what name|name are the appointments|your (full )?name|name (they|these) are (under|booked))\b/i,
+    max: 2,
+  },
+  {
+    fixture: "cx_slot",
+    re: /\b(which (slot|time) would you (like|prefer)|first one|other (slot|time)|these (times|slots)|any of (these|those))\b/i,
+    max: 2,
+  },
+  {
+    fixture: "cx_number",
+    re: /\b(phone number|contact number|best number|number to reach|your number)\b/i,
+    max: 2,
+  },
+  {
+    fixture: "cx_accept",
+    re: /\b(is that (right|correct)|does that (work|sound)|(just )?to confirm|all correct|shall i (go ahead and )?book|should i book)\b/i,
+    max: 3,
+  },
+];
+
+/** Default for the booking gates. T4 passes CX_ABSORBERS explicitly. */
+export const ABSORBERS = DEMO_ABSORBERS;
+
 /**
  * What the caller actually said, for fabrication scoring. A value in tool
  * arguments that is not traceable to one of these was invented by the model.
@@ -177,8 +218,8 @@ function pcmFramesFor(label) {
 
 export const GEMINI_ADAPTER = {
   name: "gemini",
-  async open({ model }) {
-    const ctx = await openGemini({ surface: "aistudio", model, answerTools: false, capturePcm: false });
+  async open({ model, thinkingLevel }) {
+    const ctx = await openGemini({ surface: "aistudio", model, thinkingLevel, answerTools: false, capturePcm: false });
     if (!(await setupOk(ctx.state))) throw new Error("no setupComplete");
     return { ctx, st: ctx.state, answered: new Set() };
   },
@@ -294,6 +335,7 @@ export async function runConversation({
   maxTurns = 16,
   settleMs = 2200,
   maxHolds = 3,
+  absorbers = DEMO_ABSORBERS,
 }) {
   const remaining = [...queue];
   const spent = new Map();          // absorber fixture -> times used
@@ -310,7 +352,7 @@ export async function runConversation({
     let via = "queue";
 
     // Does the model's last turn ask something an absorber answers?
-    for (const a of ABSORBERS) {
+    for (const a of absorbers) {
       if (!a.re.test(lastTurnText)) continue;
       // Never fire the same absorber on CONSECUTIVE turns. The model's reply to
       // an absorber usually repeats its subject -- answering "are you a new

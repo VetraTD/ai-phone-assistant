@@ -65,6 +65,14 @@ export async function openSession(opts) {
   if (opts.automaticActivityDetection) {
     config.realtimeInputConfig = { automaticActivityDetection: opts.automaticActivityDetection };
   }
+  // gemini-3.8-live-extended-thinking REFUSES TO START without a thinking
+  // level ("Thinking level must be specified for this model"), and plain
+  // gemini-3.8-live refuses WITH one ("Thinking level is not supported for
+  // this model"). They are not interchangeable by model id, so a probe that
+  // only swaps M38= silently fails on one of the two.
+  if (opts.thinkingLevel) {
+    config.thinkingConfig = { thinkingLevel: opts.thinkingLevel };
+  }
 
   const session = await ai.live.connect({
     model, config,

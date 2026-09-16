@@ -36,6 +36,9 @@ const GEMINI_MODEL = process.env.M38 || "gemini-3.8-live";
 const BACKEND_MODEL = process.env.T3_BACKEND || "gpt-5.6-terra";
 const N = Number(process.env.T3_N || 5);
 const SLOW_MS = 2500;
+const THINK = process.env.THINK || null;   // "high"/"low" for gemini-3.8-live-extended-thinking
+const SUFFIX = process.env.SUFFIX || "";   // keeps the extended-thinking run from overwriting the plain one
+
 
 // Stops after demo_accept: the booking happens on the read-back, and the two
 // closing lines cost session seconds without changing what is measured.
@@ -132,7 +135,7 @@ async function take(vendorKey, scenario, i) {
   let handle = null;
 
   try {
-    handle = await adapter.open({ model: GEMINI_MODEL, label, backendModel: BACKEND_MODEL });
+    handle = await adapter.open({ model: GEMINI_MODEL, label, backendModel: BACKEND_MODEL, thinkingLevel: isLive ? null : THINK });
 
     const run = await runConversation({
       adapter, handle,
@@ -214,7 +217,7 @@ async function take(vendorKey, scenario, i) {
   row.usd = Number(priced.usd.toFixed(5));
   row.wall_seconds = Number(wall.toFixed(1));
   commit({
-    probe: "T3", arm: `${vendorKey}-${scenario}`, label,
+    probe: `T3${SUFFIX}`, arm: `${vendorKey}-${scenario}`, label,
     model: isLive ? `gpt-live-1+${BACKEND_MODEL}` : GEMINI_MODEL,
     usd: priced.usd, estimated: !!row.usd_estimated, note: row.error,
   });
@@ -320,7 +323,7 @@ async function main() {
     supersedes: "b1-booking.mjs / results-booking.json, whose called_book counts are void (scripted-caller desync)",
     tally, rows, spend: summary(),
   };
-  fs.writeFileSync("scripts/probes/results-t3.json", JSON.stringify(out, null, 2) + "\n");
+  fs.writeFileSync(`scripts/probes/results-t3${SUFFIX}.json`, JSON.stringify(out, null, 2) + "\n");
 
   console.log("\n--- T3 tally ---");
   console.log(JSON.stringify(tally, null, 2));

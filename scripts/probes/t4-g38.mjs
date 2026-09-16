@@ -38,6 +38,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import {
   runConversation, GEMINI_ADAPTER, GPTLIVE_ADAPTER, questionsIn,
+  CX_ABSORBERS, DEMO_ABSORBERS,
 } from "./lib/callerRun.js";
 import {
   commit, priceTokens, priceGeminiByMinutes, priceLive, summary, reserve,
@@ -46,6 +47,9 @@ import {
 const GEMINI_MODEL = process.env.M38 || "gemini-3.8-live";
 const BACKEND_MODEL = process.env.T4_BACKEND || "gpt-5.6-terra";
 const N = Number(process.env.T4_N || 5);
+const THINK = process.env.THINK || null;   // "high"/"low" for gemini-3.8-live-extended-thinking
+const SUFFIX = process.env.SUFFIX || "";   // keeps the extended-thinking run from overwriting the plain one
+
 
 const QUEUE = ["cx_open", "cx_name", "cx_batch", "cx_confirm", "cx_rebook", "cx_slot", "cx_number", "cx_accept"];
 
@@ -112,7 +116,7 @@ async function take(vendorKey, i) {
   let handle = null;
 
   try {
-    handle = await adapter.open({ model: GEMINI_MODEL, label, backendModel: BACKEND_MODEL });
+    handle = await adapter.open({ model: GEMINI_MODEL, label, backendModel: BACKEND_MODEL, thinkingLevel: isLive ? null : THINK });
     const run = await runConversation({
       adapter, handle,
       queue: QUEUE,
@@ -120,6 +124,9 @@ async function take(vendorKey, i) {
       onToolCall: (call) => row.tools.push(call.name),
       maxTurns: 20,
       maxHolds: 4,
+      // Cancel-flow answers FIRST; the booking bank behind them picks up the
+      // shared questions (date of birth, new patient) the rebook still asks.
+      absorbers: [...CX_ABSORBERS, ...DEMO_ABSORBERS],
     });
     row.turns = run.turns;
     row.fullText = run.fullText;
@@ -164,7 +171,7 @@ async function take(vendorKey, i) {
   row.usd = Number(priced.usd.toFixed(5));
   row.wall_seconds = Number(wall.toFixed(1));
   commit({
-    probe: "T4", arm: vendorKey, label,
+    probe: `T4${SUFFIX}`, arm: vendorKey, label,
     model: isLive ? `gpt-live-1+${BACKEND_MODEL}` : GEMINI_MODEL,
     usd: priced.usd, estimated: !!row.usd_estimated, note: row.error,
   });
@@ -264,7 +271,7 @@ async function main() {
     predicted: "both cancel the batch; the REBOOK breaks in 2+ of 5 for both. Held loosely -- no prior data on any model.",
     tally, rows, spend: summary(),
   };
-  fs.writeFileSync("scripts/probes/results-t4.json", JSON.stringify(out, null, 2) + "\n");
+  fs.writeFileSync(`scripts/probes/results-t4${SUFFIX}.json`, JSON.stringify(out, null, 2) + "\n");
 
   console.log("\n--- T4 tally ---");
   console.log(JSON.stringify(tally, null, 2));

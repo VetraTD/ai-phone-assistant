@@ -40,6 +40,9 @@ const MODEL = process.env.M38 || "gemini-3.8-live";
 const SURFACE = "aistudio";           // the only surface that serves 3.8 -- proved by the M38 pilot
 const FIXTURES = ["no_terminal_punct", "trailing_lead_in"];
 const N = Number(process.env.T1_N || 5);
+const THINK = process.env.THINK || null;   // "high"/"low" for gemini-3.8-live-extended-thinking
+const SUFFIX = process.env.SUFFIX || "";   // keeps the extended-thinking run from overwriting the plain one
+
 
 /** Pre-registered discrimination rule, carried over from the GPT-Live round. */
 const BACKCHANNEL_MAX_MS = 800;       // a short run returning to silence is a backchannel, not a cut-in
@@ -119,7 +122,7 @@ async function take(fixture, i) {
     // capturePcm: raw audio is kept alongside the arrival log so the RMS-energy
     // fallback is available WITHOUT a second paid run if step A invalidates
     // arrival-based detection.
-    ctx = await openSession({ surface: SURFACE, model: MODEL, answerTools: true, capturePcm: true });
+    ctx = await openSession({ surface: SURFACE, model: MODEL, thinkingLevel: THINK, answerTools: true, capturePcm: true });
     if (!(await setupOk(ctx.state))) { row.error = "no setupComplete"; return row; }
     const st = ctx.state;
     row.connect_ms = Date.now() - startedAt;
@@ -195,7 +198,7 @@ async function take(fixture, i) {
   row.usd = Number(priced.usd.toFixed(5));
   row.unpriced_tokens = priced.unpriced_tokens || 0;
   commit({
-    probe: "T1", arm: MODEL, label: `t1-${fixture}-${i}`, model: MODEL,
+    probe: `T1${SUFFIX}`, arm: MODEL, label: `t1-${fixture}-${i}`, model: MODEL,
     usd: priced.usd, estimated: !!row.usd_estimated, note: row.error,
   });
 
@@ -300,7 +303,7 @@ async function main() {
     },
   };
 
-  fs.writeFileSync("scripts/probes/results-t1.json", JSON.stringify(out, null, 2) + "\n");
+  fs.writeFileSync(`scripts/probes/results-t1${SUFFIX}.json`, JSON.stringify(out, null, 2) + "\n");
 
   console.log(`\n--- instrument check ---`);
   console.log(`  gaps over 400ms: ${over400} of ${totalGaps}   p50 ${p50}ms   p90 ${p90}ms`);

@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 12.187019,
+  "spent_usd": 12.422719,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -2892,11 +2892,20 @@
       "model": "gemini-3.8-live",
       "usd": 0.013547,
       "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:21:48.287Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2357,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T06:55:58.017Z",
+  "updated_at": "2026-09-16T13:21:48.287Z",
   "cap_history": [
     {
       "cap": 5,
