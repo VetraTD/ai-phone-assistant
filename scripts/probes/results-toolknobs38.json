@@ -1,0 +1,192 @@
+{
+  "at": "2026-09-16T17:10:33.389Z",
+  "model": "gemini-3.8-live",
+  "n": 5,
+  "neutral_turn": "Do you have anything Tuesday morning? I want to book.",
+  "tool_count": 11,
+  "rows": [
+    {
+      "id": "baseline",
+      "buys": "control group",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 3,
+      "take": 1
+    },
+    {
+      "id": "baseline",
+      "buys": "control group",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": false,
+      "seconds": 2.9,
+      "take": 2
+    },
+    {
+      "id": "baseline",
+      "buys": "control group",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "check_appointment_availability"
+      ],
+      "spoke": false,
+      "seconds": 2.7,
+      "take": 3
+    },
+    {
+      "id": "baseline",
+      "buys": "control group",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": false,
+      "seconds": 2.5,
+      "take": 4
+    },
+    {
+      "id": "baseline",
+      "buys": "control group",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": false,
+      "seconds": 2.5,
+      "take": 5
+    },
+    {
+      "id": "mode_NONE",
+      "buys": "tool_choice:none -- forbid calls",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 2.9,
+      "take": 1
+    },
+    {
+      "id": "mode_NONE",
+      "buys": "tool_choice:none -- forbid calls",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": true,
+      "seconds": 2.7,
+      "take": 2
+    },
+    {
+      "id": "mode_NONE",
+      "buys": "tool_choice:none -- forbid calls",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 2.9,
+      "take": 3
+    },
+    {
+      "id": "mode_NONE",
+      "buys": "tool_choice:none -- forbid calls",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 2.9,
+      "take": 4
+    },
+    {
+      "id": "mode_NONE",
+      "buys": "tool_choice:none -- forbid calls",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "check_appointment_availability"
+      ],
+      "spoke": false,
+      "seconds": 2.9,
+      "take": 5
+    },
+    {
+      "id": "allowedFunctionNames",
+      "buys": "tool_choice:{name} -- force ONE named tool",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "check_appointment_availability"
+      ],
+      "spoke": false,
+      "seconds": 2.9,
+      "take": 1
+    },
+    {
+      "id": "allowedFunctionNames",
+      "buys": "tool_choice:{name} -- force ONE named tool",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 2.9,
+      "take": 2
+    },
+    {
+      "id": "allowedFunctionNames",
+      "buys": "tool_choice:{name} -- force ONE named tool",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": true,
+      "seconds": 2.5,
+      "take": 3
+    },
+    {
+      "id": "allowedFunctionNames",
+      "buys": "tool_choice:{name} -- force ONE named tool",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": false,
+      "tools": [],
+      "spoke": true,
+      "seconds": 3.1,
+      "take": 4
+    },
+    {
+      "id": "allowedFunctionNames",
+      "buys": "tool_choice:{name} -- force ONE named tool",
+      "accepted": true,
+      "error": null,
+      "forced_a_tool": true,
+      "tools": [
+        "set_call_intent"
+      ],
+      "spoke": false,
+      "seconds": 2.5,
+      "take": 5
+    }
+  ]
+}
