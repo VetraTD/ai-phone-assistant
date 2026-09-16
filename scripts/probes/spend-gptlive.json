@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 3.524664,
+  "spent_usd": 3.870667,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -1866,11 +1866,65 @@
       "model": "gemini-3.8-live",
       "usd": 0.0018933854166666665,
       "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:38:26.717Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.046266,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:40:07.473Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.073904,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:41:11.259Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.035,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:43:03.975Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.055,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:44:52.912Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.05666666666666667,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:47:13.864Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07916666666666668,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T04:36:30.804Z",
+  "updated_at": "2026-09-16T04:47:13.864Z",
   "cap_history": [
     {
       "cap": 5,

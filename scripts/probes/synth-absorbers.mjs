@@ -36,6 +36,18 @@ const LINES = [
   // "What kind of appointment are you looking for?" -- asked in 2 of 3 takes,
   // in three different phrasings.
   { label: "demo_kind", text: "Just a regular check-up and cleaning, please." },
+  // "Could you please provide your date of birth?" -- found on the first
+  // adaptive-caller smoke run, asked in FIVE consecutive turns and refusing to
+  // book without it ("I still need your date of birth to complete the
+  // booking"). It is almost certainly why Gemini 2.5 wrote three different
+  // invented identity_dob values across the previous round: the prompt makes it
+  // ask, the caller could not answer, and it filled the field in itself.
+  //
+  // Giving the caller a DOB does not lose the fabrication signal, it sharpens
+  // it: the scorer now checks the VALUE against what the caller actually said,
+  // so a mismatched DOB is still fabrication, and a DOB appearing when none was
+  // ever asked for still counts on presence.
+  { label: "demo_dob", text: "It's the fourteenth of March, nineteen eighty-eight." },
 ];
 
 async function main() {

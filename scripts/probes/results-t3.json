@@ -1,0 +1,257 @@
+{
+  "at": "2026-09-16T04:47:13.867Z",
+  "n": 1,
+  "queue": [
+    "demo_open",
+    "demo_name",
+    "demo_number",
+    "demo_spell",
+    "demo_when",
+    "demo_accept"
+  ],
+  "slots": [
+    "2026-09-22T10:00:00-05:00",
+    "2026-09-22T14:30:00-05:00"
+  ],
+  "slow_ms": 2500,
+  "gemini_model": "gemini-3.8-live",
+  "backend_model": "gpt-5.6-terra",
+  "claim_regex": "\\b(you'?re (all )?(set|booked|confirmed)|(i'?ve|i have) (got|booked|put) you (down|in)|that'?s (booked|confirmed|all set)|(is|you'?re) confirmed|see you (then|on)|all set for)\\b",
+  "supersedes": "b1-booking.mjs / results-booking.json, whose called_book counts are void (scripted-caller desync)",
+  "tally": {
+    "gptlive": {
+      "S1_happy": {
+        "attempted": 1,
+        "scoreable": 1,
+        "unscoreable": 0,
+        "called_availability": 1,
+        "called_book": 1,
+        "mean_availability_calls": 1,
+        "fabricated_time": 0,
+        "fabricated_fields": 0,
+        "looped_3plus": 0,
+        "max_repeat": 1
+      }
+    }
+  },
+  "rows": [
+    {
+      "vendor": "gptlive",
+      "scenario": "S1_happy",
+      "take": 1,
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability",
+        "book_appointment"
+      ],
+      "bookArgs": "{\"client_name\":\"Jane Fitzgerald\",\"scheduled_at\":\"2026-09-22T10:00:00\",\"service_type\":\"Regular checkup and cleaning\",\"notes\":\"New patient; caller mentioned Fitzgerald Design. Callback number: 469-933-8890.\",\"in_addition_to_existing\":false,\"identity_dob\":\"1988-03-14\"}",
+      "bookTurn": 13,
+      "textBeforeWrite": " Great, just a second.",
+      "turns": [
+        {
+          "i": 0,
+          "fixture": "demo_open",
+          "via": "queue",
+          "text": " Sure, let me check the diary. Of course. Are you a new patient",
+          "tools": [
+            {
+              "name": "set_call_intent",
+              "args": "{\"intent\":\"book_appointment\"}",
+              "at": 4670
+            }
+          ],
+          "ends_on_question": false,
+          "turn_ms": 7268
+        },
+        {
+          "i": 1,
+          "fixture": "demo_newpatient",
+          "via": "absorber",
+          "text": " or Alright, I'll see what we can do. Great. What day were you hoping to come in?",
+          "tools": [],
+          "ends_on_question": true,
+          "turn_ms": 5896
+        },
+        {
+          "i": 2,
+          "fixture": "demo_when",
+          "via": "absorber",
+          "text": " Okay, I'll pass that on. Ten in the morning next Tuesday is available.",
+          "tools": [
+            {
+              "name": "check_appointment_availability",
+              "args": "{\"requested_at\":\"2026-09-22T10:00:00\"}",
+              "at": 4249
+            }
+          ],
+          "ends_on_question": false,
+          "turn_ms": 5897
+        },
+        {
+          "i": 3,
+          "fixture": "demo_name",
+          "via": "queue",
+          "text": " Oh, okay. Thanks. What type of appointment do you need?",
+          "tools": [],
+          "ends_on_question": true,
+          "turn_ms": 5901
+        },
+        {
+          "i": 4,
+          "fixture": "demo_kind",
+          "via": "absorber",
+          "text": " Sure, let me check that. Of course. What's your date of birth?",
+          "tools": [],
+          "ends_on_question": true,
+          "turn_ms": 5895
+        },
+        {
+          "i": 5,
+          "fixture": "demo_dob",
+          "via": "absorber",
+          "text": " Okay, thanks, just a sec. Thanks. I have your full",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 5899
+        },
+        {
+          "i": 6,
+          "fixture": "demo_number",
+          "via": "queue",
+          "text": " name, Alright, thanks. I'll add that to your file. Thank you. I have your callback",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 5884
+        },
+        {
+          "i": 7,
+          "fixture": "demo_spell",
+          "via": "queue",
+          "text": " number. Thanks. I'm checking.",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 5902
+        },
+        {
+          "i": 8,
+          "fixture": "demo_accept",
+          "via": "queue",
+          "text": " Thank you. I have Fitzgerald as your surname, and your full name, callback number,",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 5895
+        },
+        {
+          "i": 9,
+          "fixture": "demo_name",
+          "via": "absorber",
+          "text": " regular checkup. Sorry about that. Jane Fitzgerald. I've got it, thanks. So",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 5894
+        },
+        {
+          "i": 10,
+          "fixture": "(silent hold)",
+          "via": "hold",
+          "text": " I have Jane Fitzgerald from Fitzgerald Design, with a callback number as four six nine, nine three",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 6699
+        },
+        {
+          "i": 11,
+          "fixture": "(silent hold)",
+          "via": "hold",
+          "text": " three, eight eight nine zero. A regular checkup and cleaning next Tuesday at ten in the morning,",
+          "tools": [],
+          "ends_on_question": false,
+          "turn_ms": 6700
+        },
+        {
+          "i": 12,
+          "fixture": "(silent hold)",
+          "via": "hold",
+          "text": " and your birth year as nineteen eighty-eight. Is that all correct?",
+          "tools": [],
+          "ends_on_question": true,
+          "turn_ms": 6694
+        },
+        {
+          "i": 13,
+          "fixture": "demo_accept",
+          "via": "absorber",
+          "text": " Great, just a second.",
+          "tools": [
+            {
+              "name": "book_appointment",
+              "args": "{\"client_name\":\"Jane Fitzgerald\",\"scheduled_at\":\"2026-09-22T10:00:00\",\"service_type\":\"Regular checkup and cleaning\",\"notes\":\"New patient; caller mentioned Fitzgerald Design. Callback number: 469-933-8890.\",\"in_addition_to_existing\":false,\"identity_dob\":\"1988-03-14\"}",
+              "at": 7261,
+              "late": true
+            }
+          ],
+          "ends_on_question": false,
+          "turn_ms": 5894
+        }
+      ],
+      "fullText": " Sure, let me check the diary. Of course. Are you a new patient  or Alright, I'll see what we can do. Great. What day were you hoping to come in?  Okay, I'll pass that on. Ten in the morning next Tuesday is available.  Oh, okay. Thanks. What type of appointment do you need?  Sure, let me check that. Of course. What's your date of birth?  Okay, thanks, just a sec. Thanks. I have your full  name, Alright, thanks. I'll add that to your file. Thank you. I have your callback  number. Thanks. I'm checking.  Thank you. I have Fitzgerald as your surname, and your full name, callback number,  regular checkup. Sorry about that. Jane Fitzgerald. I've got it, thanks. So  I have Jane Fitzgerald from Fitzgerald Design, with a callback number as four six nine, nine three  three, eight eight nine zero. A regular checkup and cleaning next Tuesday at ten in the morning,  and your birth year as nineteen eighty-eight. Is that all correct?  Great, just a second.",
+      "caller_heard": " Hi. I'd like to book an appointment I'm a new patient Next Tuesday at 10 in the morning, please It's Jane Fitzgerald, from Fitzgerald Design Just a regular checkup and cleaning, please It's the fourteenth of March, nineteen eighty-eight My number is four six nine, nine, three, three, eight eight, nine zero That's F I T Z G E R A L D Yes, that's right It's Jane Fitzgerald, from Fitzgerald Design Y",
+      "desync": {
+        "reasons": [],
+        "absorbers_used": [
+          "demo_newpatient",
+          "demo_when",
+          "demo_kind",
+          "demo_dob",
+          "demo_name",
+          "demo_accept"
+        ],
+        "unmatched_questions": [],
+        "absorber_cap_hit": false,
+        "script_remaining": 0,
+        "scoreable": true
+      },
+      "scoreable": true,
+      "backend_tokens_unreported": true,
+      "usd": 0.07917,
+      "wall_seconds": 120.5,
+      "n_availability": 1,
+      "n_book": 1,
+      "called_availability": true,
+      "called_book": true,
+      "fabricated_time": false,
+      "fabricated_fields": [],
+      "repetition": {
+        "total_questions": 4,
+        "most_repeated": "what day were you hoping to come in",
+        "repeat_count": 1
+      },
+      "claimed": false,
+      "claim_match": null
+    }
+  ],
+  "spend": {
+    "cap": 25,
+    "spent": 3.870667,
+    "remaining": 21.129333,
+    "sessions": 207,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825,
+      "G2r": 0.044693,
+      "G3": 0.301736,
+      "G4": 0.298973,
+      "G5": 0.09167,
+      "G6": 0.093327,
+      "H1": 0.095052,
+      "H2": 0.189489,
+      "B": 2.063922,
+      "VOICE": 0.0185,
+      "TURNEND": 0.0285,
+      "M38": 0.093,
+      "T1": 0.059603,
+      "T2": 0.064794,
+      "T3": 0.346004
+    }
+  }
+}
