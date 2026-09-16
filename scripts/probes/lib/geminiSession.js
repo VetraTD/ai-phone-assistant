@@ -51,7 +51,8 @@ export async function openSession(opts) {
     interruptedAt: null, turnCompleteAt: null, generationCompleteAt: null,
     inputTranscript: "", outputTranscript: "",
     audioChunkLog: [],   // {at, bytes} -- proves whether the stream is turn-based or continuous
-    turnToolCalls: [], usage: emptyUsage(), session: null, error: null,
+    pcmChunks: [],       // {at, pcm} -- only when opts.capturePcm; the RMS-energy fallback
+    turnToolCalls: [], turnToolCallObjects: [], usage: emptyUsage(), session: null, error: null,
   };
 
   const config = {
@@ -75,6 +76,9 @@ export async function openSession(opts) {
         if (msg.toolCall) {
           const calls = msg.toolCall.functionCalls || [];
           state.turnToolCalls.push(...calls.map((c) => c.name));
+          // Full call objects, so a probe can answer selectively -- delay one
+          // tool, refuse another -- rather than only auto-answering everything.
+          state.turnToolCallObjects.push(...calls.map((c) => ({ id: c.id, name: c.name, args: c.args, at: Date.now() })));
           state.events.push({ at, t: "toolCall", names: calls.map((c) => c.name) });
           if (opts.answerTools !== false) {
             try { state.session?.sendToolResponse({ functionResponses: geminiToolResponses(calls) }); } catch {}
@@ -85,9 +89,18 @@ export async function openSession(opts) {
         if (sc.modelTurn?.parts?.some((p) => p.inlineData?.data)) {
           const b = sc.modelTurn.parts.find((p) => p.inlineData?.data);
           state.audioChunks++;
-          const chunkBytes = Buffer.from(b.inlineData.data, "base64").length;
+          const decoded = Buffer.from(b.inlineData.data, "base64");
+          const chunkBytes = decoded.length;
           state.audioBytes += chunkBytes;
           state.audioChunkLog.push({ at, bytes: chunkBytes });
+          // Opt-in raw PCM16 24kHz capture. Off by default so no existing probe
+          // pays the memory. It exists because arrival-based cut-in detection is
+          // only valid on a TURN-BASED stream, and 3.8 is documented full
+          // duplex; if the gap distribution says the stream is continuous, the
+          // arrival counts are void and the ONLY honest fallback is RMS energy.
+          // Without this the fallback needs a second paid run, which is how an
+          // instrument defect turns into a re-run instead of a re-score.
+          if (opts.capturePcm) state.pcmChunks.push({ at, pcm: decoded });
           state.lastAudioAt = at;
           if (state.firstAudioAt === null) { state.firstAudioAt = at; state.events.push({ at, t: "firstAudio" }); }
         }
@@ -112,7 +125,7 @@ export function armTurn(state) {
   state.firstAudioAt = null; state.lastAudioAt = null;
   state.interruptedAt = null; state.turnCompleteAt = null; state.generationCompleteAt = null;
   state.audioChunks = 0; state.audioBytes = 0;
-  state.outputTranscript = ""; state.turnToolCalls = [];
+  state.outputTranscript = ""; state.turnToolCalls = []; state.turnToolCallObjects = [];
 }
 
 export async function waitFor(pred, timeoutMs) {

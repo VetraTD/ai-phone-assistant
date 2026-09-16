@@ -214,6 +214,39 @@ export function summary() {
 }
 
 /**
+ * Fallback pricing for a Gemini Live session whose usageMetadata never arrived.
+ *
+ * WHY THIS EXISTS. The first T1 smoke run priced one of two sessions at exactly
+ * $0.0000 because usageMetadata had not arrived before the socket closed. A
+ * session that billed and reported nothing still cost money, and recording zero
+ * understates the round -- which is harness defect #7 from the 2026-09-01 round
+ * ("usage overwritten instead of accumulated, under-reporting a multi-turn call
+ * 3-4x") wearing a different hat.
+ *
+ * Google publishes gemini-3.8-live at $0.005 per minute of audio IN and $0.018
+ * per minute of audio OUT, so measured audio duration prices the session
+ * directly without guessing a tokens-per-second ratio. Every caller MUST mark
+ * the result estimated, because it is.
+ *
+ * @param {object} args
+ * @param {number} [args.inSeconds]  - caller audio actually sent
+ * @param {number} [args.outSeconds] - model audio actually received
+ */
+export const GEMINI_LIVE_USD_PER_MIN = { audio_in: 0.005, audio_out: 0.018 };
+
+export function priceGeminiByMinutes({ inSeconds = 0, outSeconds = 0 }) {
+  const usd =
+    (inSeconds / 60) * GEMINI_LIVE_USD_PER_MIN.audio_in +
+    (outSeconds / 60) * GEMINI_LIVE_USD_PER_MIN.audio_out;
+  return {
+    usd,
+    estimated: true,
+    breakdown: { inSeconds, outSeconds, ...GEMINI_LIVE_USD_PER_MIN },
+    source: "Google launch post 2026-09-15, per-minute audio rates",
+  };
+}
+
+/**
  * Price a TOKEN-billed session (Gemini). Kept separate from priceLive() because
  * conflating a per-second bill with a per-token one is how a cost comparison
  * quietly becomes wrong.
