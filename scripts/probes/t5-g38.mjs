@@ -62,6 +62,18 @@ async function take(i) {
     if (!(await setupOk(ctx.state))) { row.error = "no setupComplete"; return row; }
     const st = ctx.state;
 
+    // PREAMBLE. The first T5 run went straight to rep_time_q with no greeting
+    // and only 3 of 10 takes called the diary at all -- where T2, which sent
+    // clean_open first, got tool calls 5 of 5, and T3 saw availability checked
+    // before every single write. A model asked for a time by a stranger who has
+    // not said hello reasonably asks who is calling instead of hitting the
+    // diary. The 3 of 10 measured the harness, not the vendor, and a race gate
+    // is only meaningful on takes that actually race.
+    armTurn(st);
+    await paceFrames(pcmFrames("clean_open"), (f) => sendAudio(ctx.session, f));
+    await paceFrames(silenceFrames("pcm16k", 2200), (f) => sendAudio(ctx.session, f));
+    await waitForQuiet(st, { quietMs: 900, maxMs: 10000 });
+
     armTurn(st);
     await paceFrames(pcmFrames(FIXTURE), (f) => sendAudio(ctx.session, f));
     await paceFrames(silenceFrames("pcm16k", 1500), (f) => sendAudio(ctx.session, f));
