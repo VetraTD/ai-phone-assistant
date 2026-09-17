@@ -67,7 +67,7 @@ const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slic
 const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
 const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
 
-const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4, callerContext = null, agreementText = null } = {}) => ({
+const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4, callerContext = null } = {}) => ({
   businessId: "biz-1",
   callerPhone: "+15551234567",
   callId: "call-1",
@@ -81,21 +81,6 @@ const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config =
   callerTurnCount: turn,
   lastCallerText: said,
   lastReplyText: replied,
-  // The supersession pair. Only set when a test asks for one, so every existing
-  // case keeps `lastAgreementReadBackKey: null` and agreementSuperseded stays
-  // false for it exactly as before.
-  //
-  // The keys are opaque fingerprints to the code under test -- it only ever
-  // compares them for equality -- so distinct literals reproduce "the caller
-  // agreed to one read-back and a different one is standing" precisely.
-  ...(agreementText
-    ? {
-        lastAgreementReadBackKey: "fp-agreed",
-        lastAgreementReadBackText: agreementText,
-        lastReadBackKey: "fp-standing",
-        lastReadBackText: replied,
-      }
-    : {}),
   callerContext,
 });
 
@@ -774,84 +759,5 @@ describe("the read-back that lost a booking", () => {
     expect(functionResponse.response.success).toBe(true);
     expect(mockCreateAppointment).toHaveBeenCalled();
     expect(counters().write_order_refused).toBeFalsy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// CA919b69, 2026-09-17 -- SIX booking attempts, five refused, and it landed
-// only because the attempt budget ran out.
-//
-// Three of those refusals came back from the consent probe with BOTH halves
-// present: readback_now=True, agreed_now=True. The gate refused anyway, on its
-// third disjunct.
-//
-// agreementSuperseded compares a TEXT FINGERPRINT of the read-back the caller
-// answered against the read-back currently standing. The model re-read the same
-// booking in new words every turn --
-//
-//   02:44:13  "...on Friday, September eighteenth at three o'clock, if you
-//              confirm these details. Shall we go ahead?"
-//   02:44:44  "...I have you booked for a strategy call on Friday, September
-//              eighteenth at three o'clock. Shall we confirm that booking?"
-//
-// -- so every re-ask changed the standing fingerprint and invalidated the
-// agreement it had just been given. The model raced itself, and the caller was
-// told twice that a booking existed while the gate kept refusing it.
-//
-// The supersession rule is RIGHT and must stay: CA8c019c spent consent for one
-// appointment on another, and that is what it exists to stop. What it cannot
-// currently tell is a DIFFERENT PROPOSAL from THE SAME PROPOSAL REWORDED. The
-// gate's own comment names the fix -- match the write's own details -- and
-// lib/voice/slotMention.js already does exactly that for the consent latch.
-// ---------------------------------------------------------------------------
-describe("a re-worded read-back is not a new proposal", () => {
-  const ASKED = "I can book a thirty-minute strategy call for Marcus Bell on that day at ten o'clock, if you confirm these details. Shall we go ahead?";
-  const REWORDED = "Thank you, Marcus Bell. I have you down for a strategy call on that day at ten o'clock. Shall we confirm that booking?";
-  const DIFFERENT = "I have you down for a strategy call on that day at four thirty PM instead. Shall we confirm that booking?";
-
-  // The live sentences named a date; FUTURE_SLOT is what `book` writes, so the
-  // times here are written to match it rather than the calendar of the day the
-  // call happened.
-  const at = (text) => text.replace("at ten o'clock", "at 10 00 AM");
-
-  it("writes when the model re-worded the SAME time the caller agreed to", async () => {
-    const { functionResponse } = await book(
-      ctx({
-        said: "Yes",
-        replied: at(REWORDED),
-        capabilityState: {},
-        agreementText: at(ASKED),
-      })
-    );
-
-    expect(functionResponse.response.success).toBe(true);
-    expect(mockCreateAppointment).toHaveBeenCalled();
-  });
-
-  it("still refuses when the standing read-back names a DIFFERENT time", async () => {
-    // CA8c019c's shape, and the whole reason supersession exists. The caller
-    // agreed to ten o'clock; the model has since proposed four thirty and they
-    // have not answered it.
-    const { functionResponse } = await book(
-      ctx({
-        said: "Yes",
-        replied: DIFFERENT,
-        capabilityState: {},
-        agreementText: at(ASKED),
-      })
-    );
-
-    expect(functionResponse.response.success).toBe(false);
-    expect(mockCreateAppointment).not.toHaveBeenCalled();
-  });
-
-  it("refuses when the agreed read-back cannot be read at all", async () => {
-    // Fail-closed, matching latchSlotAgreed: an unknown phrasing costs a
-    // refusal, never a row.
-    const { functionResponse } = await book(
-      ctx({ said: "Yes", replied: at(REWORDED), agreementText: "Sure thing, let me get that sorted." })
-    );
-
-    expect(functionResponse.response.success).toBe(false);
   });
 });

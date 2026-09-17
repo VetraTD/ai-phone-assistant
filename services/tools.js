@@ -79,48 +79,11 @@ const consentLatchOff = () => (process.env.VOICE_CONSENT_LATCH || "").trim() ===
  * @param {object|null|undefined} ctx
  * @returns {boolean}
  */
-const agreementSuperseded = (ctx, slot = null) => {
+const agreementSuperseded = (ctx) => {
   if (consentLatchOff()) return false;
   const agreed = ctx?.lastAgreementReadBackKey ?? null;
   const standing = ctx?.lastReadBackKey ?? null;
-  if (!(agreed && standing && agreed !== standing)) return false;
-
-  // ---------------------------------------------------------------------
-  // DIFFERENT WORDS, OR A DIFFERENT PROPOSAL? The fingerprint cannot tell.
-  //
-  // CA919b69, 2026-09-17: SIX booking attempts, five refused, the row landing
-  // only when the attempt budget ran out. Three of the refusals reported both
-  // halves present -- readback_now=True, agreed_now=True -- and were refused
-  // here, because the model re-read the SAME booking in new words on every
-  // turn:
-  //
-  //   "...on Friday, September eighteenth at three o'clock, if you confirm
-  //    these details. Shall we go ahead?"
-  //   "...I have you booked for a strategy call on Friday, September
-  //    eighteenth at three o'clock. Shall we confirm that booking?"
-  //
-  // Each re-ask moved the standing fingerprint and invalidated the agreement
-  // it had just been given. The model raced itself, and the caller was twice
-  // told a booking existed while this gate kept refusing it.
-  //
-  // The rule itself stays: CA8c019c spent consent for one appointment on
-  // another and that is what supersession is for. What it could not do is
-  // distinguish a new proposal from the same one rephrased -- and the gate's
-  // own comment says the safe way to widen is to match the write's own
-  // DETAILS, which lib/voice/slotMention.js already does for the consent latch.
-  //
-  // So: if both read-backs name the time being written, the proposal has not
-  // moved and only the wording has.
-  //
-  // FAILS CLOSED, exactly like latchSlotAgreed. No slot, or either text
-  // unreadable, means we cannot tell -- and cannot tell costs a refusal, never
-  // a row. The caller can always say yes again; a wrong write they cannot undo.
-  // ---------------------------------------------------------------------
-  if (!slot) return true;
-  const agreedText = ctx?.lastAgreementReadBackText ?? null;
-  const standingText = ctx?.lastReadBackText ?? null;
-  if (!agreedText || !standingText) return true;
-  return !(readBackMentionsSlot(agreedText, slot) && readBackMentionsSlot(standingText, slot));
+  return Boolean(agreed && standing && agreed !== standing);
 };
 
 /**
@@ -1103,14 +1066,11 @@ export async function executeToolCall(fc, ctx) {
             // through -- consent for one appointment spent on another, which is
             // CA8c019c's shape without the ten turns. Counted at the probe
             // above, not here, so one write cannot report itself twice.
-            // The time this write targets, needed by BOTH checks below: the
-            // latch asks whether the standing read-back named it, and
-            // supersession asks whether a re-wording moved away from it.
-            const latchSlot = fc.args?.scheduled_at ?? fc.args?.requested_at ?? null;
-            const supersededHere = agreementSuperseded(ctx, latchSlot);
+            const supersededHere = agreementSuperseded(ctx);
             // Does the read-back they DID agree to name the time being written?
             // False when it cannot be told, so an unknown phrasing costs a
             // refusal rather than a row. See lib/voice/slotMention.js.
+            const latchSlot = fc.args?.scheduled_at ?? fc.args?.requested_at ?? null;
             const latchSlotAgreed = Boolean(
               latchSlot && readBackMentionsSlot(ctx?.lastReadBackText, latchSlot)
             );
