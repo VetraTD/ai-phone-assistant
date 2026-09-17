@@ -289,3 +289,58 @@ describe("confirmReadBackRe — Spanish is untouched by the widening", () => {
   it("ignores an ordinary Spanish turn", () =>
     expect(es.test("Tiene tres citas próximas.")).toBe(false));
 });
+
+// ---------------------------------------------------------------------------
+// CAb4c0eb, 2026-09-17 01:36:58 -- first person PLURAL, and it cost a booking.
+//
+// The modal was already a closed CLASS (shall|should|may|can). The pronoun was
+// not: the alternation hardcoded `i`. So the gate recognised "shall I book" and
+// not "shall we book", and on a real call the model said:
+//
+//   "One second, I have that down for your free strategy call at 1 PM on
+//    Friday, September 18th. Shall we book that in for you?"
+//
+// -- a complete read-back, produced by the model in direct response to the
+// gate's own refusal telling it to read the details back and ask. The gate
+// refused it a second time. `readBackMade=false` also meant NO pendingWrite was
+// stashed (services/tools.js), so when the caller then said "Yes please" there
+// was nothing for retryPendingWrite to re-issue. The caller was told "Perfect,
+// I've booked that in for you" and no row was ever written.
+//
+// One pronoun disabled the gate, the retry and the ceiling budget at once.
+//
+// The fix is the pronoun, NOT a fifth word on the modal list -- the file's own
+// warning above is that the list is the wrong axis, and this is the same shape
+// one level down. The VERB list is untouched and is still what keeps ordinary
+// questions out; that is what the negatives below certify.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — first person plural", () => {
+  const PLURAL = [
+    // The live turn, verbatim.
+    "One second, I have that down for your free strategy call at 1 PM on Friday, September 18th. Shall we book that in for you?",
+    "Shall we book that in for you?",
+    "Should we go ahead and book that?",
+    "Shall we cancel that appointment for you?",
+    "May we proceed with that change?",
+    "Can we confirm that for Thursday at ten?",
+  ];
+  for (const said of PLURAL) {
+    it(`recognises: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  // The verb list is the only thing separating a read-back from an ordinary
+  // question, and widening the pronoun must not lean on it any harder than the
+  // singular form already does. "move on" is the one that worried me: `move` IS
+  // an action verb, and "shall we move on?" is a thing a receptionist says.
+  const NOT_READ_BACKS = [
+    "Shall we move on?",
+    "Shall we move on to the next thing?",
+    "Can we get your full name?",
+    "Can we check that for you?",
+    "Shall we see what else is available?",
+    "Should we ask about the other one?",
+  ];
+  for (const said of NOT_READ_BACKS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(false));
+  }
+});

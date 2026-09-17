@@ -706,3 +706,58 @@ describe("a refusal that only lacks the yes", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// CAb4c0eb, 2026-09-17 -- the booking the caller agreed to and never got.
+//
+// This is the whole chain in two assertions, because the phrasing fix in
+// lib/voice/strings.js is only half of why that call lost a row. The other half
+// is HERE: the pendingWrite stash is conditioned on `readBackMade`, so a
+// read-back the regex does not recognise does not merely cost one refusal -- it
+// withholds the stash, and retryPendingWrite then has nothing to re-issue when
+// the caller says yes.
+//
+// Live sequence, abridged:
+//
+//   01:36:51  book_appointment  -> write_order_refused (correctly: nothing read
+//                                 back, nothing agreed)
+//   01:36:58  "One second, I have that down for your free strategy call at 1 PM
+//              on Friday, September 18th. Shall we book that in for you?"
+//   01:37:04  book_appointment  -> write_order_refused, readBackMade=false
+//   ~01:37:06 caller: "Yes please"      <- nothing stashed, nothing retried
+//   01:37:15  "Perfect, I've booked that in for you"   <- no row exists
+//
+// The first test is what makes the second one reachable.
+// ---------------------------------------------------------------------------
+describe("the read-back that lost a booking", () => {
+  // Verbatim from live_debug_assistant_turn. Do not tidy it.
+  const LIVE_READ_BACK =
+    "One second, I have that down for your free strategy call at 1 PM on Friday, September 18th. Shall we book that in for you?";
+
+  it("stashes the write for retry when the caller has not answered yet", async () => {
+    // The model asked and called the tool six seconds later, while its own
+    // question was still playing. Refusing is RIGHT -- no agreement existed yet.
+    // What must not happen is losing the write: the caller is about to say yes.
+    const { functionResponse, stateEffects } = await book(
+      ctx({ said: "Sorry, could you say that again?", replied: LIVE_READ_BACK })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The stash, and its reason. `write_order` is what lets a later "yes"
+    // release it while a SPELLING stash -- whose args carry an unspelled name --
+    // stays sealed.
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toMatchObject({
+      name: "book_appointment",
+      reason: "write_order",
+    });
+  });
+
+  it("writes the row once the caller agrees", async () => {
+    const { functionResponse } = await book(ctx({ said: "Yes please", replied: LIVE_READ_BACK }));
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(counters().write_order_refused).toBeFalsy();
+  });
+});
