@@ -148,6 +148,8 @@ async function boot() {
     settle,
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
+    /** Twilio's `stop`, which is what makes the call summary be emitted. */
+    hangUp: () => ws.deliver({ event: "stop" }),
     async callTool(...names) {
       live.push({
         toolCall: {
@@ -201,5 +203,77 @@ describe("a false claim made on the way out of the call", () => {
     const frame = notes(s.live).find((m) => /no tool has run to make it so/.test(m.turns[0].parts[0].text));
     expect(frame).toBeTruthy();
     expect(frame.turnComplete).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ledger that would have answered the question in one line.
+//
+// Every live_claim_* counter is process-global -- shared by every call the
+// instance handled, zeroed by the next deploy. So when CAb76b13 produced a
+// false claim and no note, "did auditTurn evaluate that turn, and what did it
+// decide" had no answer, and four hypotheses had to be ruled out one at a time
+// against code instead of against the call.
+//
+// turns_audited is the field that matters and it is a DENOMINATOR. Without it,
+// a call the guard cleared and a call the guard never saw both report zero
+// faults, which is the trap this repository keeps rediscovering.
+// ---------------------------------------------------------------------------
+describe("the per-call claim ledger", () => {
+  beforeEach(() => clearStats());
+
+  /** The summary is a log line; this is the only way to read it from here. */
+  async function summaryOf(drive) {
+    const s = await boot();
+    await drive(s);
+    const lines = [];
+    // process.stdout.write, NOT console.log. lib/logger.js writes there
+    // directly, and the console.log version of this capture in
+    // tests/liveSession.test.js collects nothing -- it goes unnoticed because
+    // that test asserts `length <= 1`, which a permanently empty array passes.
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((line) => {
+      if (typeof line === "string" && line.includes("live_call_summary")) lines.push(line);
+      return true;
+    });
+    s.live.push({ serverContent: { turnComplete: true } });
+    await s.settle();
+    // Close the call so the summary is emitted.
+    s.hangUp();
+    await s.settle();
+    spy.mockRestore();
+    const line = lines.find(Boolean);
+    return line ? JSON.parse(line).claim_audit : null;
+  }
+
+  it("records that the guard ran, what it saw, and that it spoke", async () => {
+    const audit = await summaryOf(async (s) => {
+      await s.callTool("cancel_appointment_db", "end_call");
+      s.say(FALSE_CLAIM);
+      s.endTurn();
+      await s.settle();
+    });
+
+    expect(audit).toBeTruthy();
+    // The denominator. A call where this is 0 and the model spoke is a call
+    // where the guard never got the chance -- a different fault entirely from
+    // one where it looked and cleared.
+    expect(audit.turns_audited).toBeGreaterThan(0);
+    expect(audit.claimed).toBe(1);
+    expect(audit.unbacked_action).toBe(1);
+    expect(audit.note_sent).toBe(1);
+    expect(audit.suppressed_signoff).toBe(0);
+  });
+
+  it("counts an ordinary turn as audited and clears it", async () => {
+    const audit = await summaryOf(async (s) => {
+      s.say("Sure, what day were you thinking?");
+      s.endTurn();
+      await s.settle();
+    });
+
+    expect(audit.turns_audited).toBeGreaterThan(0);
+    expect(audit.claimed).toBe(0);
+    expect(audit.unbacked_action).toBe(0);
+    expect(audit.note_sent).toBe(0);
   });
 });

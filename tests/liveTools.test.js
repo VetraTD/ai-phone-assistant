@@ -285,3 +285,57 @@ describe("the tool runner", () => {
     expect(out.functionResponses[0].response.success).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// gemini-3.8-live made NON_BLOCKING the tool default; 3.1 had no such concept.
+//
+// Every guard here, the reducer, and the tool loop in lib/voice/live/tools.js
+// were written when waiting was the only behaviour. On 3.8's first two real
+// calls (2026-09-17) that showed up as 4 zero-text turns, 2 promise-only turns,
+// and a cancel_appointment_db fired six seconds after asking the caller a
+// question -- refused, then announced as done.
+//
+// Pinning BLOCKING restores the semantics the code already assumes. Asserted on
+// the DECLARATIONS rather than trusted, because the wire is the part that can
+// silently not exist -- and because 3.8 is known to ACCEPT a control it does
+// not ENFORCE (toolConfig, probe 6470081), so the live behaviour still has to
+// be checked on a call.
+// ---------------------------------------------------------------------------
+describe("tool call behaviour on the Live surface", () => {
+  it("pins every declaration BLOCKING by default", () => {
+    const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS, {})[0].functionDeclarations;
+
+    expect(declared.length).toBeGreaterThan(0);
+    // Every one of them, not "some": a single unpinned tool is a tool the model
+    // may answer over.
+    expect(declared.every((d) => d.behavior === "BLOCKING")).toBe(true);
+  });
+
+  it("leaves the field off entirely when asked for the vendor default", () => {
+    // What every call before 2026-09-17 sent, and the escape hatch for finding
+    // out that the control does nothing without a rebuild.
+    const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS, {
+      LIVE_TOOL_BEHAVIOR: "default",
+    })[0].functionDeclarations;
+
+    expect(declared.some((d) => "behavior" in d)).toBe(false);
+  });
+
+  it("can be set to NON_BLOCKING explicitly, so the async arm is reachable", () => {
+    const declared = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS, {
+      LIVE_TOOL_BEHAVIOR: "non_blocking",
+    })[0].functionDeclarations;
+
+    expect(declared.every((d) => d.behavior === "NON_BLOCKING")).toBe(true);
+  });
+
+  it("does not change the tool NAMES or their order", () => {
+    // The declaration list is built from production's own union and a count
+    // assertion above guards it. Adding a field must not perturb either.
+    const plain = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS, { LIVE_TOOL_BEHAVIOR: "default" })[0]
+      .functionDeclarations;
+    const pinned = buildLiveTools(APPOINTMENTS_CONFIG, EXTRAS, {})[0].functionDeclarations;
+
+    expect(pinned.map((d) => d.name)).toEqual(plain.map((d) => d.name));
+  });
+});
