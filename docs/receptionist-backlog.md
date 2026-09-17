@@ -13797,3 +13797,103 @@ turned down in one breath is two wrong answers. The row is red now.
 **Done when:** `availability_denied_verified_open` has a rate across a handful of
 calls, read against `availability_denial_spoken`. Only then is there a decision
 to make.
+
+---
+
+## CALL, 2026-09-17 22:18 — `CAfcd28789` on `voice-uk-prod-00076-5tq` (`8d3123b`)
+
+A deliberate LVX137 probe: the caller refused all three offered times and asked
+for two specific ones instead. **The owner confirms they were testing times and
+ended the call themselves — no booking was intended.** That matters, because
+`booked_rows: 0` on this call is the correct outcome and not a defect. It was
+nearly filed as one.
+
+### LVX137 did NOT reproduce, and the reason is the finding
+
+```
+22:19:42  check_appointment_availability
+22:20:03  A: "Yes, I can schedule that for ten thirty AM tomorrow, Friday..."
+22:20:27  check_appointment_availability
+22:20:35  check_appointment_availability
+22:20:47  check_appointment_availability
+22:20:53  A: "Three thirty PM tomorrow is available."
+```
+
+Both specific times were answered **correctly**, and nothing was denied, so
+`availability_denied_verified_open` read zero honestly.
+
+**The discriminator is in the guard counters, and it is exactly the proposed
+mechanism:**
+
+| | `CA6df19e98` (wrong) | `CAfcd28789` (right) |
+|---|---|---|
+| availability calls | **1** | **4** |
+| `point_verified_slots` | **0** | **2** |
+| `availability_point_open` | 0 | 2 |
+| `read_memo_hit` | 0 | 0 |
+| outcome | denied a free 2:00 PM | both times correct |
+
+The call that answered from a single day listing got a time wrong. The call that
+point-checked got both right. That is one instance each way — **not a rate** —
+but the hypothesis now has evidence in both directions rather than one anecdote,
+and it is the same hypothesis the gate shape would be built on.
+
+### What else this call confirms
+
+- **LVX132 stayed silent, correctly.** The model asked "Is there anything else I
+  can help you with today?" at 22:21:05 unprompted, so `end_call` was allowed
+  first time and `end_call_refusals.no_ask` read 0. The gate fires only when the
+  question was actually missing.
+- **No doubled goodbye.** One farewell, at 22:21:13. This confirms LVX136 is
+  specific to the refusal path rather than a general habit — the pre-written
+  sign-off only gets spoken twice when a refusal makes the model speak again.
+- **LVX131, second headroom reading:** `media_gap_max_ms` **236** on a 147 s
+  call, after 290 on a 180 s call. Two healthy calls, both roughly sixty times
+  under the 15,000 threshold. Still not enough to move the default, and now
+  pointing clearly at how much room there is.
+
+### Two real defects, recorded and not fixed
+
+**A mid-turn stutter**, 22:19:22, verbatim:
+
+```
+"Sure thing. What day and time were you thinking of for this additional
+ appointment?"Thinking of for this additional appointment?
+```
+
+The tail of the sentence is repeated after a stray quotation mark, inside one
+turn. `live_repeated_phrase` did NOT fire on it — it fired twice later, on
+different turns — so the existing repeat instrument does not see this shape.
+LVX78's family.
+
+**A question re-asked after it had been answered:**
+
+```
+22:19:12  "Are you looking to book an additional appointment, or did you need
+           help with the existing one?"
+22:20:44  "You are already booked ... at three PM. Did you want to move that
+           appointment, or arrange a separate one?"
+```
+
+The caller answered the first one at 22:19:22. Some of the repetition on this
+call is legitimate — the caller was deliberately not giving a name, so re-asking
+for it is correct behaviour — but this pair is the same disambiguation twice.
+
+**A third, smaller:** `live_caller_turn_non_english` fired once, at 22:21:05, on
+a 55-character caller turn of an entirely English call. A false positive from
+`looksNonEnglish`, worth knowing given LVX133's entry names that counter as the
+instrument for a language recurrence. It is count-only and injects nothing, so
+it costs nothing today.
+
+### A limitation of the counter shipped this evening, found by using it
+
+`availability_denial_spoken` and `availability_denied_verified_open` are
+**process-global**, and neither is carried in `live_call_summary`. So this call's
+record cannot answer "did the detector evaluate this call" on its own — only
+`reply_turns_checked` and `verified_slots`, both in the summary, say the inputs
+were there.
+
+That is the same gap `end_call_refusals` was added to `live_call_summary` to
+close, and the same one LVX96 was found by hand-reading a call because of. The
+fix is two fields beside it. Not done here: it is a change to the record's shape
+and belongs with the next code round rather than in a docs commit.
