@@ -40,6 +40,11 @@ const VERIFY = "tests/postCallVerify.test.js";
 const SMS = "tests/notifications.sms.test.js";
 const GOODBYE = "tests/liveGoodbyeExit.test.js";
 const EXITCLOSE = "tests/liveExitClose.test.js";
+const WATCHDOG = "tests/liveMediaWatchdog.test.js";
+const ASK = "tests/liveEndCallAsk.test.js";
+// The gate's own suite, which calls executeToolCall directly and is therefore
+// the only place the CASCADE's side of a shared gate is visible at all.
+const TOOLSGATE = "tests/tools.test.js";
 
 const SABOTAGES = [
   {
@@ -171,6 +176,69 @@ const SABOTAGES = [
     find: "      if (endCallArmed || pendingExit || exitAfterTurn) {\n        bumpCounter(\"live_zero_text_note_suppressed_exiting\");",
     replace: "      if (false) { // SABOTAGE\n        bumpCounter(\"live_zero_text_note_suppressed_exiting\");",
     red: [EXITCLOSE],
+  },
+  {
+    name: "media-watchdog",
+    why:
+      "LVX131: the wall-clock check stops noticing a dead stream. CAdfeb9d's socket died mid-sentence with no stop, no close and no error, and because every other timer in the engine is driven by incoming media frames the session froze instead of tearing down -- no summary, no postcall_verify, no escalation, on a call with a refused booking attempt on it.",
+    file: "lib/voice/live/index.js",
+    find: "    return atMs - lastMediaAt >= MEDIA_TIMEOUT_MS;",
+    replace: "    return false; // SABOTAGE",
+    red: [WATCHDOG],
+  },
+  {
+    name: "hangup-without-asking",
+    why:
+      "LVX132: the end_call gate stops refusing a hang-up on a caller who was never asked whether they needed anything else. 0 of 3 calls that called end_call before reaching the confirm step ever asked, and CA2556d4 ended a cancellation without offering to rebook.",
+    file: "services/tools.js",
+    find: "      if (allowedByExistingGates && !askedAnythingElse && !noAskRefusalSpent) {",
+    replace: "      if (false) { // SABOTAGE",
+    red: [ASK],
+  },
+  {
+    name: "ask-gate-hits-the-cascade",
+    why:
+      "drops the wire check, so LVX132's gate runs on a driver that keeps no latch. The cascade passes neither half, so the refusal can never read as spent: it would refuse the first hang-up, and the next, and every one after it. A guard that can refuse twice can hold a caller on the line indefinitely, and that is what LVX21 cost.",
+    file: "services/tools.js",
+    find: "        askWireLive && !heardOnlyHesitation && (wrappingUp || didSomething || hadConversation);",
+    replace: "        !heardOnlyHesitation && (wrappingUp || didSomething || hadConversation); // SABOTAGE",
+    red: [TOOLSGATE],
+  },
+  {
+    name: "ask-latch-missing",
+    why:
+      "LVX132's hair trigger. The one-shot latch never reads as spent, so the gate refuses every hang-up on a call where the model never finds the wording -- which is a caller held on the line with no way off it. LVX21 is what that costs, and a latch that is never set looks identical from services/tools.js's own tests.",
+    file: "lib/voice/live/tools.js",
+    find: "        anythingElseRefusalSpent: anythingElseRefused,",
+    replace: "        anythingElseRefusalSpent: false, // SABOTAGE",
+    red: [ASK],
+  },
+  {
+    // TWO ROWS FOR ONE EXPRESSION, and that is the rule rather than belt and
+    // braces. `farewell-adjective` stayed GREEN on its first run because it
+    // narrowed one branch of an alternation while every corpus case matched the
+    // other. askedAnythingElse is an alternation of two DIFFERENT turns -- the
+    // latch answers for earlier ones, the text test answers for this one -- so
+    // each half needs its own row or half the fix has no test.
+    name: "ask-branch-latch",
+    why:
+      "drops the call-scoped half of askedAnythingElse, so a question asked on an EARLIER turn is forgotten by the time the model tries to hang up. This is the ordinary shape: ask, caller answers, hang up.",
+    file: "lib/voice/live/index.js",
+    find:
+      '      askedAnythingElseThisCall ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
+    replace:
+      '      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")), // SABOTAGE',
+    red: [ASK],
+  },
+  {
+    name: "ask-branch-in-turn",
+    why:
+      "drops the half that reads THIS turn's reply at tool time, so a model that asks and calls end_call in one breath is refused although it did exactly the right thing. The latch cannot cover that turn: it is written in auditTurn, at turnComplete, after the tool round.",
+    file: "lib/voice/live/index.js",
+    find:
+      '      askedAnythingElseThisCall ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
+    replace: "      askedAnythingElseThisCall, // SABOTAGE",
+    red: [ASK],
   },
   {
     name: "call-summary",

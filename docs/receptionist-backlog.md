@@ -13033,7 +13033,8 @@ still carries the cases.
 
 ## LVX131 — a dropped socket skips the whole post-call net
 
-**Status: OPEN · P0. Observed once in four calls on `d57c31f`, `CAdfeb9d`.**
+**Status: FIXED, UNVERIFIED — 2026-09-17. Offline only; no severed socket has
+met it yet.** Observed once in four calls on `d57c31f`, `CAdfeb9d`.
 
 The media-stream websocket died mid-sentence. No `stop` event, no `close`, no
 `error` — so `finish()` never ran, and with it: no `live_call_summary`, no
@@ -13068,7 +13069,8 @@ simply stop delivering frames.
 
 ## LVX132 — `end_call` fires before the model is ever told to ask "anything else"
 
-**Status: OPEN · P1. Raised by the owner from the calls, and measured across ten.**
+**Status: FIXED, UNVERIFIED — 2026-09-17.** Raised by the owner from the calls,
+and measured across ten.
 
 The owner's observation: after an action completes, it goes straight to "thanks
 for calling, have a great day" and hangs up, without asking whether anything else
@@ -13121,7 +13123,10 @@ booking attributable to this alone.
 
 ## LVX133 — the assistant answered an English caller in Spanish
 
-**Status: OPEN · P1. `CAd48d7b`, 2026-09-17.**
+**Status: DIAGNOSED, ONE FACT OUTSTANDING · P1. `CAd48d7b`, 2026-09-17.**
+See the diagnosis under "ROUND, 2026-09-17 (evening)" at the bottom of this
+file: the apology is the model's own words, `looksNonEnglish` could not have
+fired, and what remains is a single column read.
 
 ```
 caller (transcribed):  "Ahm, ?sabes ingl?s?"
@@ -13148,7 +13153,12 @@ its own. Do not reach for a fix first.
 
 ## LVX134 — ninety seconds of qualification before a caller can book
 
-**Status: OPEN · P1, and it is the most customer-visible thing in this list.**
+**Status: DIAGNOSED, AWAITING AN OWNER DECISION · P1, and it is the most
+customer-visible thing in this list.** Four of the seven questions are the
+tenant's own configuration and can be cut for this tenant alone with no code
+change and no deploy; three are ours and global. Evidence under "ROUND,
+2026-09-17 (evening)" at the bottom of this file. **No production write was
+made** — the owner chose diagnose-only on 2026-09-17.
 
 Both booking calls ran the same script before offering a time:
 
@@ -13210,3 +13220,258 @@ close faster. LVX131's watchdog covers the remaining gap.
   slots and 0 point-checked. Counted as `postcall_booking_owed_listed_only`
   rather than acted on, because the rule's own reason — browsing looks identical
   — is not overturned by one call.
+
+---
+
+# ROUND, 2026-09-17 (evening) — the closing sequence
+
+**Branch `fix/closing-sequence-2026-09-17` off `5d81f71`. Two code items shipped
+(LVX131, LVX132), two diagnosed without a fix (LVX134, LVX133).
+Full suite 212 files / 3,915 passed / 2 skipped. Sabotage matrix 20 of 20 red.**
+
+The three defects of the previous round had one shape: the evidence or the
+instruction arrived AFTER the decision it should have informed. LVX132 is that
+shape exactly, so every new read below states when its value is written relative
+to when it is read.
+
+## LVX131 — the media watchdog. SHIPPED
+
+One wall-clock timer, and it is the only thing in the engine that watches one.
+
+`lib/voice/live/index.js` now keeps `lastMediaAt`, updated on the first line of
+`onMediaFrame` before anything can throw or return, and a `setInterval` armed
+from the START frame — before the tenant lookup and before the vendor connect,
+both of which are awaited and either of which can hang. When `now() -
+lastMediaAt` reaches `LIVE_MEDIA_TIMEOUT_MS` it calls `finish("media_timeout")`,
+whose own `closed` latch makes a racing tick a no-op rather than a second
+summary. Cleared in `finish()`, in the one place every teardown route passes
+through.
+
+**Default 15,000 ms, clamped 3,000..120,000.** The reasoning, because the number
+is a judgement and should be readable as one:
+
+- Twilio streams a frame every 20 ms including silence, so a gap of seconds is
+  not a quiet caller, it is a dead stream;
+- the silence ladder's own hang-up rung is 24 s, so a caller who says nothing is
+  handled there and never reaches this;
+- the failure modes are not symmetric. A miss costs a frozen session and a lost
+  post-call net; a false positive hangs up on someone.
+
+**`media_gap_max_ms` is now in `live_call_summary` on EVERY call**, with
+`media_timeout_ms` beside it. That is the point of the item as much as the
+teardown is: a fault-only counter can never say how much headroom a threshold
+has, and the gap distribution on healthy calls is what turns 15,000 from a
+judgement into a measurement. Read it after the next few calls before touching
+the default.
+
+Counters: `live_media_watchdog_armed` (positive twin) and `live_media_timeout`.
+
+**One gap left open deliberately, and named rather than left to be discovered:**
+the watchdog arms on the START frame, so a socket that opens and never sends one
+is still not covered. That is a different freeze from the one measured — no
+vendor session, no audio, no billing — and Twilio sends `connected` then `start`
+immediately, so reaching it would take a Twilio fault. Arming at connect instead
+would mean `finish()` running with no callSid and no businessId, which is a
+summary that cannot be read. Left until something is actually seen in that
+state.
+
+**What this needed that did not exist.** `tests/helpers/liveBoot.js` injected a
+frozen `now: () => 0` and delivered no media frames at all, so no test built on
+it could stop delivering them. It now carries a mutable clock, `feed(ms)` and
+`starve(ms)` — and `starve` is the whole case: time passes, no frame arrives,
+nothing else happens. The clock still starts at 0 and moves only when a test
+asks, so the five suites already built on this helper are untouched.
+
+`tests/liveMediaWatchdog.test.js` asserts the teardown, the summary and its
+`close_reason`, that frames still flowing past the threshold change nothing,
+that a short gap recovers, that it fires exactly once however long the silence
+runs, and that the env var is honoured.
+
+## LVX132 — do not hang up without asking. SHIPPED
+
+The detector already existed and was throwing its answer away: `closingTicRe`
+(`lib/voice/strings.js`) was tested once per turn to bump `live_closing_tic` and
+nothing else. It is now also latched for the call.
+
+**The read is an alternation of two different turns, and that is the whole
+item:**
+
+- `askedAnythingElseThisCall` is set in `auditTurn`, which runs at
+  `turnComplete`, AFTER the tool round. It answers for every turn BEFORE this
+  one — which is the measured defect, asked earlier or never asked at all.
+- it cannot answer for the turn on which the question is actually asked, so
+  `turnState()` also tests `turnReplyText` as it stands at tool time. That is the
+  one moment the text exists: `applyTurn()` clears it a few lines later, and a
+  guard in this file was written to read it after that clear once already —
+  present, plausible, and silently never firing.
+
+Each half has its own sabotage row. Narrowing one branch of an alternation
+proves nothing if the other still carries the cases, which is how
+`farewell-adjective` stayed green on its first run.
+
+**The refusal is one-shot and latched**, in `lib/voice/live/tools.js` beside
+LVX72's, for the reason written there: `services/tools.js` is stateless and
+shared with the cascade, and a guard that can refuse twice can hold a caller on
+the line. One refusal is a question the caller can answer; two is a trap.
+
+**It is additive.** It only ever converts an otherwise-ALLOWED hang-up into a
+refusal, so `end_call_refused_hesitation` and `_generic` keep exactly the
+meaning their counters have carried since 2026-09-09.
+
+**And it is INERT FOR THE CASCADE, which is a safety property rather than a
+scoping preference.** Because the latch lives in the Live runner, a driver that
+supplies neither field could never spend the refusal — it would refuse the first
+hang-up, and the next, and every one after. So the gate runs only where both
+halves of the wire arrive as booleans. The cascade passes neither and is
+untouched. This is the same shape as `abandonedWrites` above it, and it is the
+inverse of every other wire on this path: elsewhere a missing field silently
+disables a gate, here a missing field is the only thing keeping a gate off a
+driver that cannot survive it. Asserted from both sides in
+`tests/liveToolContext.test.js` and `tests/tools.test.js`, and sabotaged by
+`ask-gate-hits-the-cascade`.
+
+Counters: `end_call_ask_check_ran` (positive twin, on every hang-up the four
+existing gates would have allowed), `end_call_would_refuse_no_ask` (the
+SITUATION, counted whether or not the refusal is still available — the two
+diverging is the only way a second attempt on a never-asked call is visible),
+and `end_call_refused_no_ask`, which can never exceed 1 per call. `no_ask` also
+joins `end_call_refusals` in `live_call_summary`, because a process-global
+counter cannot say which call refused.
+
+### Four tests changed, and why that is not papering over a regression
+
+`tests/liveExitClose.test.js` went red on four cases. All four booked something
+and called `end_call` on a call where nobody had ever been asked anything — so
+under LVX132 the hang-up is now refused and the exit machinery is never reached.
+
+Those cases are about what happens once `end_call` has been ALLOWED, so their
+setup now includes the question and the caller's answer, with the reasoning
+written at the fixture rather than in a commit message. Left alone they would
+have quietly stopped testing the exit and become a second test of the ask gate —
+a fixture describing a call that can no longer happen.
+
+The precedence itself is now asserted directly rather than left as an
+implication: **`CA2556d4` is caught by the ask gate, not by the held-question
+guard.** Two guards, one call, and a later change to either could silently hand
+the case to the other while both suites stayed green.
+
+### What a caller actually hears
+
+Worth stating because it is not obvious from the code: on the Live path
+`stateEffects.toolResult` is never spoken — `recordToolOutput` ignores it. The
+caller hears this refusal only because the model composes a reply after the tool
+response. That is true of every refusal on this path today; the caller-safe line
+is carried anyway so the cascade keeps its behaviour.
+
+## LVX134 — the qualification interrogation. DIAGNOSED, NO WRITE MADE
+
+The seven questions have **two different sources**, and the split is what makes
+the item actionable.
+
+**The tenant's, and cuttable alone:** company, industry, what you sell, main
+marketing challenge. None of those phrases exists anywhere in the codebase. They
+are `businesses.custom_instructions`, pasted verbatim into the prompt by
+`services/gemini.js:1210-1219` under `=== CUSTOM BUSINESS RULES ===` and
+introduced to the model as "binding policy on every call". Already recorded
+twice in this file — the entry at line 4501 says the intake questions are Digile
+Media's own configuration, and `lib/voice/strings.js:653-655` quotes the column
+opening with "Find out why they are calling before you ask anything else".
+
+**Ours, and global:** name, spell it, phone number.
+`capabilities/messages.js:68-76` (`MESSAGE_PROTOCOL_SECTION`, and that pack is
+`core: true`, so it renders on booking calls too),
+`capabilities/appointments.js:1068`, and the `=== SPELLING NOT YET CONFIRMED ===`
+block at `services/gemini.js:1674-1681`.
+
+There is no third possibility: `businesses` has no `questions`, `intake`,
+`qualification` or `capture_fields` column at all — all 42 files in `database/`
+were checked. The only structured per-tenant alternative is
+`business_capabilities.config.require.identity.custom`, and its rendered wording
+("Before making any change, you MUST ask for the caller's X. Ask it as: ...")
+matches no transcript.
+
+**So: yes, the four worst questions can be cut for this tenant without touching
+anyone else, with no code change and no deploy.** It is one text column, capped
+at 2,000 characters. Ours are gates with their own tests (LVX72, LVX123) and
+cutting them changes every tenant's behaviour.
+
+To read the current text — `db-inspect` deliberately prints only
+`custom_instructions_chars`, never the copy:
+
+```
+node scripts/set-business-config.js --to <the Digile number> --show
+```
+
+run inside the VPC via the migrate job. Dry-run by default; nothing is written
+without `--confirm`.
+
+**Why nobody caught this from the instruments.** `live_stacked_questions` read 0
+on both interrogation calls, and so did `stacked_asks_total`. Each question was
+its own turn, so the one counter pointed at over-questioning is blind to this by
+construction.
+
+## LVX133 — the Spanish flip. DIAGNOSED; one column still unread
+
+Three of the four questions are answered, and none of them by reasoning.
+
+1. **The apology is the model's own words.** "we must continue in English"
+   appears in this repository only inside call transcripts —
+   `tests/fixtures/liveCalls/CAd48d7b.json` and this file. Zero hits in any
+   prompt-building file. On that call the only note injected all call was
+   `kind="spelling"`.
+2. **`looksNonEnglish` did nothing, and could not have.** It is count only —
+   the block header at `lib/voice/live/index.js` reads "COUNT ONLY, NO NOTE, NO
+   GATE" — and it excludes Spanish from its markers by design
+   (`lib/transcriptUtils.js:930-949`). `live_caller_turn_language_checked` is a
+   process-global integer carrying no fields and is not in `live_call_summary`,
+   so it cannot answer per call either.
+3. **`output_language_pinned: true` on that call pinned the VOICE, not the
+   input.** `lib/voice/live/client.js:119` states there is no input-language
+   control in this API.
+
+**What is left decides everything.** The only language instruction we ever emit
+is in `services/gemini.js:941-946`, and it is emitted only when
+`businesses.languages_spoken` has more than one entry — in which case the prompt
+literally reads "ALWAYS reply in the language of the caller's most recent
+message — if they speak Spanish, reply in Spanish." If the column is the schema
+default `["en"]`, no language sentence is emitted at all and the flip is
+entirely the model's.
+
+That column was unreadable from a workstation: absent from `db-inspect`'s
+business SELECT and from `set-business-config.js`'s field whitelist. **It has
+been added to `scripts/db-inspect.js`** — read-only, no deploy, tenant
+configuration carrying nothing a caller said:
+
+```
+gcloud run jobs execute vetra-migrate-us-staging \
+  --args=scripts/db-inspect.js,--business,<the Digile number>
+```
+
+Confirm which row first. Two Digile numbers are in the record: `+441372656055`
+(UK) and `+18176011171` (US, America/Chicago), and the US one resolves to a
+local "Brightwork Family Dental" on the throwaway Postgres.
+
+**No fix proposed until the value is in hand.**
+
+## LVX135 — left alone on purpose
+
+Downgraded on the evidence last round and not patched here. The silence ladder
+already closes those calls and does not care what words the model chose; a miss
+costs dead air, not a hung line. LVX131's watchdog now covers the remaining gap.
+
+## What a call can and cannot exercise
+
+- **The ask gate (LVX132)** is exercised by booking something and then saying
+  NOTHING after the confirmation. It must not hang up; it must ask.
+- **The farewell detector**, widened in `d57c31f` and never yet run on a call, is
+  exercised by a call that ends without `end_call` — ask something that runs no
+  tools, then say that is all.
+- **The watchdog (LVX131) cannot be provoked from a handset.** It needs a socket
+  that dies without a close frame; hanging up, going out of range and airplane
+  mode all produce a normal Twilio `stop`. It is proven offline, and a live
+  proof arrives the next time a socket dies on its own. What every normal call
+  contributes is `media_gap_max_ms`.
+- **The zero-text suppression** needs a tool round, no speech, and a call
+  already closing. Not reachable deliberately.
+- **`live_exit_held_question`** will fire LESS often now, not more: the ask gate
+  catches its motivating call one step earlier. Expected, and not a regression.

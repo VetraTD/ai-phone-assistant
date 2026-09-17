@@ -2064,6 +2064,64 @@ describe("end_call refuses while the caller is still thinking", () => {
     expect(functionResponse.response.success).toBe(true);
   });
 
+  // -------------------------------------------------------------------------
+  // LVX132 IS INERT HERE, AND THAT IS A SAFETY PROPERTY.
+  //
+  // The ask gate refuses a hang-up on a call where the caller was never asked
+  // whether they need anything else. Its one-shot latch lives in
+  // lib/voice/live/tools.js, because this module is stateless and shared with
+  // the cascade -- so a driver that supplies no latch could never spend the
+  // refusal. It would refuse the first hang-up, and the next, and every one
+  // after it: a caller held on the line with no way off, which is what LVX21
+  // cost and what the count-first ladder above this exists to avoid.
+  //
+  // So the gate runs only where both halves of the wire arrive as booleans.
+  // Two tests, because "off for the cascade" and "on for Live" are one typeof
+  // apart and nothing else in this file would notice which side it was on.
+  // -------------------------------------------------------------------------
+  it("leaves the cascade alone: no ask wire, no refusal", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "e3", name: "end_call", args: {} },
+      { ...baseCtx, step: "confirm", callerTurnCount: 4, lastCallerText: "no thanks" }
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("refuses once the wire is present and says the caller was never asked", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      { id: "e4", name: "end_call", args: {} },
+      {
+        ...baseCtx,
+        step: "confirm",
+        callerTurnCount: 4,
+        lastCallerText: "no thanks",
+        askedAnythingElse: false,
+        anythingElseRefusalSpent: false,
+      }
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/not yet asked/i);
+    expect(functionResponse.response.message).toMatch(/do NOT say goodbye again/i);
+    expect(stateEffects.endCallRefusal).toBe("no_ask");
+    expect(stateEffects.endCallNoAskRefusal).toBe(true);
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+  });
+
+  it("allows the hang-up once the latch reports the refusal already spent", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "e5", name: "end_call", args: {} },
+      {
+        ...baseCtx,
+        step: "confirm",
+        callerTurnCount: 4,
+        lastCallerText: "no thanks",
+        askedAnythingElse: false,
+        anythingElseRefusalSpent: true,
+      }
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
   it("says nothing about hesitation when the refusal is the ordinary one", async () => {
     const { functionResponse } = await executeToolCall(
       { id: "e2", name: "end_call", args: {} },

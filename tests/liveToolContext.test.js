@@ -194,6 +194,63 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(seen).toEqual([false, true]);
   });
 
+  // -------------------------------------------------------------------------
+  // LVX132's wire, and it fails in the OPPOSITE direction to every other field
+  // on this page, which is why it gets its own pair.
+  //
+  // Everywhere else here, a field produced by turnState and not copied into ctx
+  // reads as undefined downstream and a gate silently never fires. This one is
+  // worse than that if it is copied wrongly and better than that if it is
+  // missing: services/tools.js refuses a hang-up only when BOTH halves arrive
+  // as booleans, because the one-shot latch lives here and a driver without it
+  // could never spend the refusal -- it would refuse the first hang-up, and the
+  // next, and every one after. The cascade passes neither and is inert.
+  //
+  // So "the gate is off" and "the gate is on" are one `typeof` apart, and
+  // nothing else in the suite would notice the difference.
+  // -------------------------------------------------------------------------
+  it("carries both halves of the ask gate as booleans (the LVX132 wire)", async () => {
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 4,
+      lastCallerText: "no",
+      askedAnythingElse: true,
+    }));
+    expect(ctx.askedAnythingElse).toBe(true);
+    expect(ctx.anythingElseRefusalSpent).toBe(false);
+  });
+
+  it("normalises a missing askedAnythingElse to false, never undefined", async () => {
+    const ctx = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, lastCallerText: "no" }));
+    // A boolean either way: undefined here would switch the gate off entirely
+    // on the Live path, which is the one reading that must not be reachable by
+    // accident.
+    expect(ctx.askedAnythingElse).toBe(false);
+    expect(typeof ctx.anythingElseRefusalSpent).toBe("boolean");
+  });
+
+  it("spends the ask-gate latch when the tool reports it (the LVX132 wire)", async () => {
+    const seen = [];
+    const execute = vi.fn(async (fc, ctx) => {
+      seen.push(ctx.anythingElseRefusalSpent);
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false } },
+        stateEffects: { endCallNoAskRefusal: true },
+      };
+    });
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ step: "confirm", callerTurnCount: 4, lastCallerText: "no" }),
+    });
+
+    await runner.handleToolCall({ functionCalls: [{ id: "1", name: "end_call", args: {} }] });
+    await runner.handleToolCall({ functionCalls: [{ id: "2", name: "end_call", args: {} }] });
+
+    expect(seen).toEqual([false, true]);
+  });
+
   it("rebuilds the context per call so a later tool sees the same turn", async () => {
     const execute = vi.fn(async (fc) => ({
       functionResponse: { id: fc.id, name: fc.name, response: { success: true } },

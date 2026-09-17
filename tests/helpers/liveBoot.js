@@ -73,6 +73,12 @@ export function fakeDb(config, businessId) {
 /** Counters, by the same names the production logs carry. */
 export const counters = () => getLatencyStats().turnTaking;
 
+/** 20 ms of mu-law silence, the same payloads tests/liveSilence.test.js feeds. */
+const SILENCE_FRAME = Buffer.alloc(160, 0xff).toString("base64");
+/** Full-scale mu-law, well above inboundVad's floor. */
+const VOICED_FRAME = Buffer.alloc(160, 0x00).toString("base64");
+const FRAME_MS = 20;
+
 /**
  * @param {object} opts
  * @param {object} opts.config - the business config the session loads
@@ -98,8 +104,17 @@ export async function bootLive({
   const live = fakeLive();
   const { deps, store } = makeFakeDeps({ seedAppointments, slotCapacity });
 
+  // A MUTABLE CLOCK, not the frozen `() => 0` this helper used to inject.
+  //
+  // It starts at 0 and moves only when a test asks, so every suite written
+  // against the frozen clock behaves identically. What it adds is the one thing
+  // LVX131 needs and no bootLive test could do: stop delivering frames and let
+  // wall time pass. The engine's watchdog compares `now()` against the last
+  // frame's own `atMs`, and both come from here.
+  let clock = 0;
+
   await handleLiveSessionConnection(ws, {}, {
-    now: () => 0,
+    now: () => clock,
     connect: live.connect,
     database: fakeDb(config, businessId),
     env,
@@ -178,6 +193,38 @@ export async function bootLive({
     toolResponses: () => live.sent.toolResponses.flatMap((m) => m.functionResponses || []),
     responsesFor: (name) =>
       live.sent.toolResponses.flatMap((m) => (m.functionResponses || []).filter((r) => r.name === name)),
+
+    /** Where the injected clock is now, in ms. */
+    clock: () => clock,
+
+    /**
+     * Twilio delivers `ms` of media, 20 ms at a time, advancing the clock with
+     * it. This is what a live call looks like to the engine: frames arrive
+     * whether or not anyone is speaking.
+     */
+    async feed(ms, { voiced = false } = {}) {
+      const frames = Math.round(ms / FRAME_MS);
+      for (let i = 0; i < frames; i++) {
+        clock += FRAME_MS;
+        ws.deliver({ event: "media", media: { payload: voiced ? VOICED_FRAME : SILENCE_FRAME } });
+      }
+      await settle();
+    },
+
+    /**
+     * The LVX131 case: time passes and NO frame arrives. The socket is not
+     * closed and Twilio sends no `stop` -- from the engine's side nothing
+     * happens at all, which is precisely the state CAdfeb9d was left in.
+     *
+     * Real timers are advanced alongside the injected clock, because the
+     * watchdog is a setInterval and the value it compares is `now()`. Advancing
+     * one without the other tests neither.
+     */
+    async starve(ms) {
+      clock += ms;
+      if (vi.isFakeTimers?.()) await vi.advanceTimersByTimeAsync(ms);
+      await settle();
+    },
 
     /** Close the socket the way Twilio does, so finish() runs. */
     async hangUp() {

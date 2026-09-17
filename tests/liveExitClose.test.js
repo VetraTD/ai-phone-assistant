@@ -76,6 +76,23 @@ async function bookedCall() {
   await s.callerSays("Yes, that works.");
   await s.callTool("book_appointment", { client_name: CLIENT, scheduled_at: SLOT });
   expect(s.store.scheduled()).toHaveLength(1);
+  // -------------------------------------------------------------------------
+  // THE CALLER IS ASKED HERE, and this exchange was added on 2026-09-17 when
+  // LVX132 landed rather than to make a failing test pass.
+  //
+  // The three tests below are about what happens once end_call has been
+  // ALLOWED. LVX132 puts a condition in front of that: the first hang-up on a
+  // call where nobody was ever asked "is there anything else?" is refused, and
+  // a refused end_call never reaches the exit machinery at all. So without
+  // this exchange these cases stop being about the exit and quietly become a
+  // second test of the ask gate -- which is a fixture describing a call that
+  // can no longer happen, the trap this repository has already written down.
+  //
+  // The precedence itself is asserted directly in the block at the bottom of
+  // this file, not left as an implication of these setups.
+  // -------------------------------------------------------------------------
+  await s.assistantTurn("You're all set. Is there anything else I can help you with today?");
+  await s.callerSays("Actually, could you just confirm the time again?");
   return s;
 }
 
@@ -194,5 +211,45 @@ describe("the zero-text nudge and the exit do not fight over one turn", () => {
 
     expect(counters().live_zero_text_turns).toBe(1);
     expect(counters().live_zero_text_note_suppressed_exiting).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WHICH GUARD CATCHES CA2556d4 NOW, asserted rather than assumed.
+//
+// That call cancelled an appointment, was allowed to hang up mid-turn, ended
+// its reply with "Is there anything else I can help you with today?" and
+// dropped the line 1.6 seconds later. It is the call the held-question guard
+// above was built from -- and it is also a call on which the caller had never
+// been asked anything, so LVX132 now catches it one step earlier, at the gate,
+// before an exit is ever armed.
+//
+// Two guards, one call, and the order between them is a fact worth pinning: a
+// later change to either could silently hand the case to the other, and both
+// look green from their own suite.
+// ---------------------------------------------------------------------------
+describe("the ask gate runs before the held-question guard", () => {
+  it("refuses the hang-up outright when the caller was never asked", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_exit_precedence" });
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.callerSays("I'd like Friday afternoon.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes, that works.");
+    await s.callTool("book_appointment", { client_name: CLIENT, scheduled_at: SLOT });
+
+    // No "anything else?" anywhere on this call -- CA2556d4's actual shape.
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_no_ask).toBe(1);
+
+    await s.assistantTurn(
+      "Your appointment is booked. Is there anything else I can help you with today?"
+    );
+
+    // The exit machinery was never reached: nothing armed, so there was nothing
+    // for the held-question guard to hold.
+    expect(counters().live_exit_held_question).toBeFalsy();
+    expect(counters().live_exit_arm_checked).toBeFalsy();
+    expect(s.ws.readyState).not.toBe(3);
   });
 });

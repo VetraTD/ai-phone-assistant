@@ -236,7 +236,8 @@ const CAPABILITY_DEPS = {
  *   stateEffects: {
  *     intentArgs?: object|null,
  *     endCallArgs?: object|null,
- *     endCallRefusal?: "hesitation"|"generic"|null,
+ *     endCallRefusal?: "hesitation"|"generic"|"no_ask"|null,
+ *     endCallNoAskRefusal?: boolean,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
  *     toolCallEvent?: {name: string, args: object, silent?: boolean}|null,
@@ -409,6 +410,111 @@ export async function executeToolCall(fc, ctx) {
           // directions, and they are what will show whether the retry works.
           // -----------------------------------------------------------------
         }
+      }
+
+      // -----------------------------------------------------------------
+      // LVX132. DO NOT HANG UP WITHOUT ASKING.
+      //
+      // The owner's observation from the calls of 2026-09-17: after an action
+      // completes it goes straight to "thanks for calling, have a great day"
+      // and hangs up, without ever asking whether anything else is needed.
+      //
+      // THE PROMPT IS NOT THE PROBLEM. The `confirm` step guidance already says
+      // "explicitly ask if there's anything else they need help with ... only
+      // when they clearly say they don't need anything else should you call
+      // end_call". The problem is WHEN the model is told. The step advances in
+      // applyReplyState, at the END of the turn -- so on CAb08e4e:
+      //
+      //   06:18:22  cancel_appointment_db   success
+      //   06:18:25  end_call                success       <- 3 s later, SAME turn
+      //   06:18:30  live_step_transition    toStep=confirm <- the instruction
+      //
+      // The model is told to ask five seconds after it has already hung up.
+      //
+      // Measured over ten calls that reached end_call: 0 of 3 asked when
+      // end_call came first, 4 of 6 when confirm did. Reaching confirm is
+      // NECESSARY and NOT SUFFICIENT -- it skipped the question twice in six
+      // while holding the instruction -- so an eighth prompt sentence will not
+      // hold this, and this file has said so twice.
+      //
+      // ONE-SHOT AND LATCHED, in lib/voice/live/tools.js. A guard that can
+      // refuse twice can hold a caller on the line, and LVX21 is what a hair
+      // trigger on this path costs. One refusal is a question the caller can
+      // answer; two is a trap.
+      //
+      // ADDITIVE. It only ever converts an otherwise-ALLOWED hang-up into a
+      // refusal, so the hesitation and generic branches below keep exactly the
+      // meaning their counters have carried since 2026-09-09.
+      //
+      // NOT MANNERS. On CA2556d4 the call cancelled an appointment and ended
+      // without offering to rebook, and the owner rebooked three calls later.
+      // That is a lost booking attributable to this alone.
+      //
+      // INERT FOR THE CASCADE, and this is a safety property rather than a
+      // scoping preference. The one-shot latch lives in
+      // lib/voice/live/tools.js, because this module is stateless and shared.
+      // A driver that supplies neither field would therefore refuse the FIRST
+      // hang-up, and then the next, and then every one after it -- the latch
+      // can never read as spent if nobody is keeping it. That is a caller held
+      // on the line with no way off, which is precisely what LVX21 cost and
+      // what the count-first ladder in the block above exists to avoid.
+      //
+      // So the gate runs only where the latch does. The cascade passes neither
+      // field, the check no-ops, and end_call_ask_check_ran stays 0 -- the
+      // honest reading rather than a silent pass. Same shape as
+      // abandonedWrites above, for the same reason.
+      // -----------------------------------------------------------------
+      const askWireLive =
+        typeof ctx?.askedAnythingElse === "boolean" &&
+        typeof ctx?.anythingElseRefusalSpent === "boolean";
+      const askedAnythingElse = ctx?.askedAnythingElse === true;
+      const noAskRefusalSpent = ctx?.anythingElseRefusalSpent === true;
+      const allowedByExistingGates =
+        askWireLive && !heardOnlyHesitation && (wrappingUp || didSomething || hadConversation);
+      if (allowedByExistingGates) {
+        // The positive twin, bumped on every hang-up that got this far: a
+        // refusal counter reading zero cannot distinguish "the model always
+        // asked" from "this never ran".
+        bumpCounter("end_call_ask_check_ran");
+        // THE SITUATION, counted whether or not the refusal is still available.
+        // The two diverging is how a second hang-up attempt on a call that was
+        // never asked becomes visible at all.
+        if (!askedAnythingElse) bumpCounter("end_call_would_refuse_no_ask");
+      }
+      if (allowedByExistingGates && !askedAnythingElse && !noAskRefusalSpent) {
+        bumpCounter("end_call_refused_no_ask");
+        return {
+          functionResponse: {
+            id: fc.id,
+            name: fc.name,
+            response: {
+              success: false,
+              message:
+                "[not caller speech] NOT A FAILURE — whatever you just did went through and the " +
+                "call is still open. You have not yet asked this caller whether there is anything " +
+                "else they need. Do NOT say goodbye again and do NOT repeat what you just did. Say " +
+                "ONE short sentence asking whether there is anything else you can help with, then " +
+                "stop and wait for their answer. Once they answer, call end_call again and it will " +
+                "go through.",
+            },
+          },
+          stateEffects: {
+            // "no_ask" reaches the Live front-end two ways: the per-call
+            // summary, because a process-global counter cannot say which call
+            // refused, and endCallRefusedThisTurn -- which is what stops the
+            // sign-off detector arming an exit on the farewell this refusal
+            // itself caused the model to speak. Without that, LVX96 route A
+            // reverses this guard inside the same turn.
+            endCallRefusal: "no_ask",
+            endCallNoAskRefusal: true,
+            toolResult: {
+              name: fc.name,
+              success: false,
+              message: "Is there anything else I can help you with?",
+              callerSafe: true,
+            },
+          },
+        };
       }
 
       if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation)) {

@@ -181,6 +181,30 @@ try {
               -- and "sending is switched off" look identical from outside the
               -- VPC. Exactly the blind spot this file exists to close.
               sms_followup_enabled,
+              -- LVX133. WHICH LANGUAGES IS THIS TENANT CONFIGURED FOR.
+              --
+              -- On CAd48d7b the assistant answered an English caller in Spanish
+              -- and then argued about it for forty seconds of a 3m39s call. The
+              -- apology it kept repeating -- "I apologize, but we must continue
+              -- in English" -- is the model's own words: that sentence does not
+              -- exist in any prompt in this repository, looksNonEnglish is
+              -- count-only with no note and no gate, and it excludes Spanish
+              -- from its markers by design.
+              --
+              -- The ONE thing we do say about language is in
+              -- services/gemini.js's identity section, and it is emitted only
+              -- when this array has more than one entry -- in which case the
+              -- prompt reads "ALWAYS reply in the language of the caller's most
+              -- recent message -- if they speak Spanish, reply in Spanish."
+              -- Whether that sentence was in front of the model on that call is
+              -- the entire diagnosis, and until now no tool outside the VPC
+              -- could answer it: this column is in neither this query nor
+              -- scripts/set-business-config.js's field whitelist.
+              --
+              -- Printed verbatim rather than as a fact, because it is a short
+              -- list of language codes. It is tenant configuration and carries
+              -- nothing a caller said.
+              languages_spoken,
               (general_info IS NOT NULL AND general_info <> '') AS has_general_info,
               coalesce(length(general_info), 0) AS general_info_chars,
               -- IS THERE A PRICE IN THE PROMPT? LVX66, and the $3,000 question.
