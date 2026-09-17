@@ -128,6 +128,31 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.callerTurnsSinceAgreement).toBe(2);
   });
 
+  it("carries the agreed read-back's TEXT, not just its fingerprint", async () => {
+    // agreementSuperseded needs the words, because a fingerprint can say the
+    // wording moved and cannot say whether the PROPOSAL did. Uncopied, it falls
+    // back to fail-closed and refuses every re-worded read-back -- which on
+    // CA919b69 was six booking attempts, five refusals, and a row that landed
+    // only when the attempt budget ran out.
+    //
+    // Asserted HERE rather than trusted, because every gate test constructs ctx
+    // directly and would pass with this wire cut.
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 6,
+      lastCallerText: "Yes",
+      lastReplyText: "I have you down for ten o'clock. Shall we confirm that booking?",
+      lastAgreementReadBackKey: "k12345",
+      lastAgreementReadBackText: "Shall we go ahead and book ten o'clock?",
+    }));
+    expect(ctx.lastAgreementReadBackText).toBe("Shall we go ahead and book ten o'clock?");
+  });
+
+  it("normalises a missing agreed read-back text to null, never undefined", async () => {
+    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
+    expect(ctx.lastAgreementReadBackText).toBe(null);
+  });
+
   it("normalises a missing agreement token to null, never undefined", async () => {
     // null is "no agreement anywhere on this call", which is what the refusal
     // fires on. It has to be reachable by a call that genuinely never had one,
