@@ -13588,7 +13588,8 @@ act or not is made on that rather than on this one.
 
 ## LVX137 — a time the caller asked for was refused without being checked
 
-**Status: OPEN · P1. `CA6df19e98`, 2026-09-17. Strongly indicated, not proven.**
+**Status: OPEN · P1. `CA6df19e98`, 2026-09-17. PROVEN from the diary — see the
+confirmation at the end of this entry.**
 
 ```
 14:46:51  check_appointment_availability  success=true    <- the ONLY one all call
@@ -13653,3 +13654,48 @@ The diagnosis stands: four of those seven are the tenant's own
 `custom_instructions` and can be cut for this tenant alone with no code change
 and no deploy. This entry is the measurement on the current build, not a new
 finding.
+
+### CONFIRMED FROM THE DIARY, 2026-09-17, and the inference above was right
+
+The owner asked the one question a log cannot answer: did the appointment
+actually book? Read through `vetra-migrate-uk-prod` running
+`scripts/db-inspect.js --business +18176011171 --appointments`:
+
+```
+id_tail 5f12d2  scheduled_at 2026-09-18T20:00:00Z  status scheduled
+                created_at 2026-09-17T14:47:41.183Z  from_call true  has_notes true
+```
+
+`created_at` matches `book_appointment success=true` at 14:47:41.203 to the
+millisecond, and 20:00Z is 15:00 America/Chicago — the 3:00 PM the caller was
+told. **The booking is real.**
+
+The same read settles LVX137 from the opposite direction to the one that was
+unavailable. On Friday 18 September the tenant had **zero `scheduled`
+appointments** before this booking. Every other row for that day is `cancelled`,
+and a cancelled row consumes no capacity. The assistant offered 1:00 PM and
+4:30 PM on that same day as free.
+
+**So 2:00 PM was free, and the caller was told it was not.** That is no longer an
+inference from the size of a slot set; it is the diary. The tool's returned set
+still is not logged and still should carry its count and span, but this entry no
+longer depends on that.
+
+Two incidental findings from the same read, recorded because the owner believed
+otherwise:
+
+- **The diary is not empty.** Two rows are `scheduled`, not one. The second is
+  `2026-09-14T21:00Z` — three days past and never closed out. It sits below
+  `--appointments`' 25-row display limit, so only the status breakdown shows it.
+  A stale `scheduled` row in the past is the kind of thing availability
+  arithmetic reads, and nothing sweeps it.
+- **41 rows are `cancelled`** on this tenant, against 2 scheduled. Test debris
+  from the round, harmless to availability, and worth knowing before anyone
+  reads a booking rate off this table.
+
+**Business hours, for the record, since they were guessed at in a test fixture:**
+Mon-Fri `09:00`-`17:00`, Sat/Sun closed, `America/Chicago`,
+`after_hours_policy: book_later`, `sms_followup_enabled: FALSE`.
+`tests/liveCorpusReplay.test.js` deliberately uses an 18:00 close so 16:30 times
+are legal; the real tenant closes at 17:00, which is worth remembering before
+any fixture is called realistic.
