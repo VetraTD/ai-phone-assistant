@@ -1,0 +1,186 @@
+{
+  "callSid": "CA7d4f2d",
+  "model": "gemini-3.8-live",
+  "note": "3.8. A clean booking: one attempt, written first time, zero refusals, clean close.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 16,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 16,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 1,
+    "availability_blocked": 0,
+    "availability_day_listed": 19,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 16
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T05:51:50.547Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T05:52:03.273Z",
+      "step": "identify_intent",
+      "caller": "I have a doctor appointment for Friday afternoon.",
+      "assistant": "Of course. Are you looking to make any changes to your appointment with us?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T05:52:14.777Z",
+      "step": "gather_details",
+      "caller": "Mondays my appointment.",
+      "assistant": "I'm sorry, but I can't find any upcoming appointments under this number. Would you like me to look into anything else?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T05:52:24.627Z",
+      "step": "gather_details",
+      "caller": "No spoken point.",
+      "assistant": "Understood. Would you like to schedule a free strategy call with our team?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T05:52:31.192Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Sure thing. To get started, what is your full name?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-17T05:52:38.059Z",
+      "step": "gather_details",
+      "caller": "Marquis Bell",
+      "assistant": "Thanks ? could you please spell your full name for me?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-17T05:52:48.990Z",
+      "step": "gather_details",
+      "caller": "m a r c u s b e r",
+      "assistant": "Thanks, Marcus ? I have that down. What is the best contact number to reach you on?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-17T05:53:00.563Z",
+      "step": "gather_details",
+      "caller": "Do you want to come in from",
+      "assistant": "Thank you. I have your number down as four six nine, nine three three, eight eight eight seven. What is the name of your company?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-17T05:53:07.083Z",
+      "step": "gather_details",
+      "caller": "Dell Consulting",
+      "assistant": "Thanks ? what industry is your company in?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-17T05:53:14.771Z",
+      "step": "gather_details",
+      "caller": "consulting technology consulting",
+      "assistant": "Got it. And what does your company sell?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-17T05:53:22.280Z",
+      "step": "gather_details",
+      "caller": "tech consultancy services",
+      "assistant": "And what is your main marketing challenge?"
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-17T05:53:38.770Z",
+      "step": "gather_details",
+      "caller": "Google Ads converting in app when I gain app coins",
+      "assistant": "Thank you for sharing that. I'd like to schedule a free strategy call for you with our team to discuss this further. When would you like to book that call?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-17T05:53:56.526Z",
+      "step": "gather_details",
+      "caller": "um What do you have available?",
+      "assistant": "For Friday, September eighteenth, we have openings at nine AM, one PM, and four thirty PM. Which one works best for you?"
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-17T05:54:06.907Z",
+      "step": "gather_details",
+      "caller": "4:30",
+      "assistant": "Perfect. I'll book your strategy call for Friday, September eighteenth at four thirty PM. Shall we go ahead with that?"
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-17T05:54:18.792Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "I have you booked for your strategy call on Friday, September eighteenth at four thirty PM. Is there anything else I can assist you with today?"
+    },
+    {
+      "i": 15,
+      "ts": "2026-09-17T05:54:26.936Z",
+      "step": "confirm",
+      "caller": "No.",
+      "assistant": "Thanks for calling Digile Media, and I hope you have a great rest of your day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T05:54:10.582Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "read-back naming four thirty PM in words, agreed on the turn, written.",
+      "standing_turn": 13,
+      "agreed_turn": 13,
+      "standing_read_back": "Perfect. I'll book your strategy call for Friday, September eighteenth at four thirty PM. Shall we go ahead with that?",
+      "agreed_read_back": "Perfect. I'll book your strategy call for Friday, September eighteenth at four thirty PM. Shall we go ahead with that?",
+      "target": "2026-09-18T16:30:00",
+      "target_candidates": [
+        "2026-09-18T16:30:00"
+      ],
+      "target_from": "Perfect. I'll book your strategy call for Friday, September eighteenth at four thirty PM. Shall we go ahead with that?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

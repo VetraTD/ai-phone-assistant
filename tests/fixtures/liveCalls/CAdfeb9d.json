@@ -1,0 +1,129 @@
+{
+  "callSid": "CAdfeb9d",
+  "model": null,
+  "note": "3.8. The call whose websocket died mid-sentence: no stop, no close, so finish() never ran and neither did postcall_verify. The one real defect of the round, and nothing to do with the gate.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 11,
+    "probes": 1,
+    "write_order_refused": 1,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": null,
+  "guards": null,
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T05:47:03.166Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T05:47:15.652Z",
+      "step": "identify_intent",
+      "caller": "I'd like to book an appointment for Friday afternoon.",
+      "assistant": "We have openings on Friday at one PM and four thirty PM. Which time works best for you?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T05:47:30.050Z",
+      "step": "gather_details",
+      "caller": "Aha, they don't work. Do you have anything else?",
+      "assistant": "We also have openings at nine AM, ten AM, or two PM on Friday. Do any of those work?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T05:47:36.704Z",
+      "step": "gather_details",
+      "caller": "2 p.m. works.",
+      "assistant": "That time works. May I have your name, please?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T05:47:43.829Z",
+      "step": "gather_details",
+      "caller": "Marcus Bell",
+      "assistant": "Thanks, Marcus. What's the best number to reach you on?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-17T05:47:56.243Z",
+      "step": "gather_details",
+      "caller": "the one I'm calling from",
+      "assistant": "Thanks. To confirm, I'll use number four six nine, nine three three, eight eight eight seven. Could you please spell your full name for me?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-17T05:48:07.661Z",
+      "step": "gather_details",
+      "caller": "der m a r c u s b e e r",
+      "assistant": "Thanks, Marcus. What company are you with?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-17T05:48:13.844Z",
+      "step": "gather_details",
+      "caller": "Dahl Consulting",
+      "assistant": "Thanks, Marcus. What industry are you in?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-17T05:48:21.940Z",
+      "step": "gather_details",
+      "caller": "consulten",
+      "assistant": "Thanks, Marcus. What services or products does Dahl Consulting sell?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-17T05:48:38.269Z",
+      "step": "gather_details",
+      "caller": "A consulting services and technology",
+      "assistant": "Thanks, Marcus. We can now offer the free strategy call and book it for Friday, September eighteenth, at two PM Central time."
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-17T05:48:52.907Z",
+      "step": "gather_details",
+      "caller": "fant?stico",
+      "assistant": "To confirm, I'll book your free strategy call for Friday, September eighteenth, at two PM Central time. Shall I go ahead and book that for you?"
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T05:48:44.224Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "'We can now offer the free strategy call and book it for Friday' is a statement, not a read-back, and the caller had not agreed to anything. The model produced a proper read-back on the next turn and the line died before it could be answered.",
+      "standing_turn": 9,
+      "agreed_turn": 9,
+      "standing_read_back": "Thanks, Marcus. We can now offer the free strategy call and book it for Friday, September eighteenth, at two PM Central time.",
+      "agreed_read_back": "Thanks, Marcus. We can now offer the free strategy call and book it for Friday, September eighteenth, at two PM Central time.",
+      "target": "2026-09-18T14:00:00",
+      "target_candidates": [
+        "2026-09-18T14:00:00"
+      ],
+      "target_from": "Thanks, Marcus. We can now offer the free strategy call and book it for Friday, September eighteenth, at two PM Central time.",
+      "target_derived": true,
+      "caller_text": "fant?stico",
+      "caller_text_source": "logged"
+    }
+  ]
+}

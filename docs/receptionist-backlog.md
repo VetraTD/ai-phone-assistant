@@ -12963,3 +12963,250 @@ the first attempt.
 
 **Done when:** a take where a cancel is refused and the model says nothing about
 it is detectable from the call record alone.
+
+---
+
+# ROUND CLOSE, 2026-09-17 — the consent gate, and seven live calls
+
+**Branch `fix/held-write-recovery-2026-09-16`, five commits, `aab2f12` → `d57c31f`.
+Deployed `voice-uk-prod-00074-w87`. Full suite 210 files / 3,895 passed.
+Sabotage matrix 14 of 14 red.**
+
+The round opened with a gate that had made six booking attempts on `CA03558d`,
+written zero rows, and told the caller "Yes, I have confirmed that your
+appointment is booked." It closed with the gate going **4 for 4 on live calls**,
+in both directions: four legitimate writes through with no argument, four
+refused for want of a read-back or an agreement.
+
+## What shipped, and what each one is owed to
+
+| commit | what |
+|---|---|
+| `aab2f12` | `slotMention` could not read a single one of 3.8's read-backs — digit forms only, and the model speaks the clock in words |
+| `59bbe83` | the corpus replay suite, plus the four defects replaying it found |
+| `f3eeda7` | the hammering brake — an identical refused write answered from the refusal it already has |
+| `3407ac0` | the post-call net: an abandoned write with no row now reaches a human, and `sent` counts deliveries |
+| `d57c31f` | the two ways a call ended wrong, and the nudge that cut a sentence off |
+
+The load-bearing one is the supersession removal in `59bbe83`, and it was proved
+on air. On `CAaef5bd` the probe reads `readback_now=true, agreed_now=true,
+token_present=FALSE` — the exact state the old disjunct refused on, five times,
+on the call that started this. Here it wrote first time.
+
+## The instrument, which is the part worth keeping
+
+`tests/liveCorpusReplay.test.js` replays **30 write attempts from 14 real calls**
+through `handleLiveSessionConnection` with no `execute` override, so both gate
+stacks run and `callerSaidThisCall` is set by production code.
+
+`scripts/corpus/sabotage.mjs` breaks one thing at a time and requires the named
+suites to go red. It asserts each patch landed before trusting a red run, and
+restores from memory rather than from git.
+
+It caught three of its own authors' mistakes, which is the argument for it:
+
+- the question guard read `turnReplyText` **after `applyTurn()` had cleared it** —
+  present, plausible, silently never firing;
+- `sent-counts-attempts` stayed GREEN because `postCallVerify.test.js` stubs
+  `notifications` wholesale, so the real `sendCallerSms` was never in its path;
+- `farewell-adjective` stayed GREEN because it narrowed only one branch of an
+  alternation while every corpus farewell matched the other — which also
+  revealed that half that fix had no test at all.
+
+**How to apply:** when a fix widens an alternation, sabotage the WHOLE expression
+back to its prior text. Narrowing one branch tests nothing if another branch
+still carries the cases.
+
+## The calls, 2026-09-17
+
+| call | revision | outcome |
+|---|---|---|
+| `CAaef5bd` | `3407ac0` | **BOOKED** 12:45. Said goodbye without calling `end_call`; line stayed open 14 s |
+| `CA2556d4` | `3407ac0` | cancelled correctly, then hung up 1.6 s after asking "anything else?" |
+| `CAdfeb9d` | `d57c31f` | **socket died mid-sentence.** No teardown at all. See LVX131 |
+| `CA7d4f2d` | `d57c31f` | **BOOKED** 16:30, first attempt, zero refusals, clean close |
+| `CAa88309` | `d57c31f` | premature cancel refused, re-asked, cancelled. Correct |
+| `CAd48d7b` | `d57c31f` | **BOOKED** 16:30 — while switching to Spanish mid-call. See LVX133 |
+| `CAb08e4e` | `d57c31f` | 47 s cancellation, correct. Never asked "anything else". See LVX132 |
+
+---
+
+## LVX131 — a dropped socket skips the whole post-call net
+
+**Status: OPEN · P0. Observed once in four calls on `d57c31f`, `CAdfeb9d`.**
+
+The media-stream websocket died mid-sentence. No `stop` event, no `close`, no
+`error` — so `finish()` never ran, and with it: no `live_call_summary`, no
+`postcall_verify`, no escalation. That call had a **refused booking attempt** and
+a caller who was told nothing, which is the exact case the net built earlier the
+same evening exists for.
+
+Ruled out by evidence rather than by reasoning:
+
+- **not a crash** — one instance served the whole call and was still alive
+  afterwards, serving the Twilio status webhook and an uptime check;
+- **not swallowed** — `closed` is written in exactly one place, inside `finish()`
+  itself, so nothing short-circuited it;
+- **not late** — still absent four minutes later;
+- **not the deploy** — three later calls on the same revision tore down cleanly.
+
+**The root cause is that there is no liveness check anywhere.** No ping/pong, no
+`isAlive`, no keepalive interval, in `server.js` or the live engine. And every
+timer in the engine — the silence ladder, the exit fallback — is driven by
+*incoming media frames*. When the frames stop, the session freezes in place
+rather than tearing down.
+
+**Fix:** a wall-clock watchdog. If no media frame has arrived for N seconds while
+a call is live, call `finish("media_timeout")`. One timer, no cooperation needed
+from Twilio or the vendor, and it makes teardown unconditional.
+
+**Done when:** a call whose socket is severed without a close still produces
+`live_call_summary` and `postcall_verify`. Testable offline — `bootLive` can
+simply stop delivering frames.
+
+---
+
+## LVX132 — `end_call` fires before the model is ever told to ask "anything else"
+
+**Status: OPEN · P1. Raised by the owner from the calls, and measured across ten.**
+
+The owner's observation: after an action completes, it goes straight to "thanks
+for calling, have a great day" and hangs up, without asking whether anything else
+is needed.
+
+Correct, and the prompt is not the problem. The `confirm` step guidance
+(`services/gemini.js`) already says:
+
+> "Then explicitly ask if there's anything else they need help with. … Only when
+> they clearly say they don't need anything else should you call `end_call`."
+
+**The step only advances to `confirm` at the END of the turn.** `CAb08e4e`:
+
+```
+06:18:22  cancel_appointment_db  success
+06:18:25  end_call               success          <- 3 s later, SAME turn
+06:18:30  live_step_transition   toStep=confirm   <- the instruction arrives HERE
+```
+
+The model is told to ask, five seconds after it has already hung up.
+
+Measured over ten calls that reached `end_call`:
+
+| | asked before hanging up |
+|---|---|
+| `end_call` called **before** reaching `confirm` | **0 of 3** |
+| reached `confirm` **first** | 4 of 6 |
+
+Two conclusions, and the second is why this is a gate change:
+
+1. Reaching `confirm` first is **necessary** — without it, never. All three are
+   cancellations, because a cancellation needs no long read-back, so the model
+   does the action and the goodbye in one breath. A booking makes it speak a
+   date, a time and a name, which uses up the turn.
+2. It is **not sufficient** — it skipped the question 2 times in 6 while holding
+   the instruction. An eighth prompt sentence will not hold; this file has said
+   so twice.
+
+**Fix:** the `end_call` gate refuses the FIRST hang-up on a call where the caller
+was never asked whether they need anything else. One-shot, latched, so it cannot
+loop — LVX21 is what a hair trigger on this path costs. It is the exact mirror of
+`live_exit_held_question` shipped in `d57c31f`: *do not hang up while asking* now
+gets its twin, *do not hang up without asking*.
+
+**It is not manners.** On `CA2556d4` the call cancelled an appointment and ended
+without offering to rebook; the owner rebooked three calls later. That is a lost
+booking attributable to this alone.
+
+---
+
+## LVX133 — the assistant answered an English caller in Spanish
+
+**Status: OPEN · P1. `CAd48d7b`, 2026-09-17.**
+
+```
+caller (transcribed):  "Ahm, ?sabes ingl?s?"
+assistant:             "S?, hablo ingl?s; puedo cambiar de idioma si lo
+                        prefieres, o continuar en espa?ol. ?Qu? d?a y hora te
+                        gustar?a agendar tu llamada?"
+caller:                "Why do you speak Spanish? I'm speaking in English."
+```
+
+It then said "I apologize, but we must continue in English" **three times**, each
+triggered by a mangled English turn. About forty seconds of a 3 m 39 s call spent
+on a language argument that never should have started.
+
+Structural, and already written down: on this API the model IS the transcriber,
+there is no input-language control, and `output_language_pinned` pins only the
+voice. Related: the `live-api-no-input-language` note.
+
+**Not yet diagnosed.** Before proposing anything, find out whether the engine is
+injecting a language note (`looksNonEnglish` /
+`live_caller_turn_language_checked`) and whether the model's apologies are ours or
+its own. Do not reach for a fix first.
+
+---
+
+## LVX134 — ninety seconds of qualification before a caller can book
+
+**Status: OPEN · P1, and it is the most customer-visible thing in this list.**
+
+Both booking calls ran the same script before offering a time:
+
+> name → spell it → phone number → company → industry → what you sell →
+> main marketing challenge
+
+`CAaef5bd`: the caller picked a time 47 s in, and the booking attempt came at
+109 s. `CAd48d7b`: about 80 s of questions, total call 3 m 39 s. A caller who
+rang to book an appointment is answering a lead-qualification script.
+
+It also lengthens every call, which is more exposure to LVX131 and — on the Live
+path, where cost is quadratic in call length — more money.
+
+**Almost certainly Digile Media's tenant configuration rather than receptionist
+logic.** First job is to find where it comes from and whether it can be cut for
+this tenant without touching anyone else's. Not yet looked at.
+
+---
+
+## LVX135 — the goodbye phrasing list keeps losing
+
+**Status: OPEN · P3, DOWNGRADED on the evidence.**
+
+A call ends either because the model calls `end_call` or because it just *says*
+goodbye, and the second route is detected by matching `signOffRe` against exact
+phrasings. The model keeps inventing new ones:
+
+```
+"have a great day"                          on the list
+"have a wonderful day"        x4            was not; fixed in d57c31f
+"I hope you have a great rest of your day"   still is not
+```
+
+Third distinct phrasing in ten calls.
+
+**But the severity is lower than it looks, and `CAaef5bd` is why.** When the
+goodbye was missed, the silence ladder noticed and spoke at eight seconds — "I'm
+still here whenever you're ready" — and would have closed the call itself. The
+cost of a miss is dead air, not a line that hangs open.
+
+**Recommendation: stop patching the list.** Let the silence ladder be the thing
+that actually closes calls — it works and it does not care what words the model
+chose — and treat the goodbye detector as an optimisation that makes a clean
+close faster. LVX131's watchdog covers the remaining gap.
+
+---
+
+## Still open from earlier rounds, unchanged
+
+- **`POSTCALL_JUDGE` is still `shadow`.** `recoverOwedBooking` has never written
+  a row anywhere. Its judge read `CA03558d` as `agreed_action: "cancel"` for a
+  call that cancelled AND tried to book, so the trigger wants rethinking before
+  the flag moves. Own round, own evidence.
+- **One caller turn can still authorise two DIFFERENT action tools** if the model
+  fires both without speaking between. LVX126's family. Pinned as an `it.skip` in
+  `tests/liveConsentLatch.test.js` with its reasoning — delete the `.skip`, not
+  the test.
+- **`bookingWasOwed` still requires a point check.** `CA03558d` had 15 listed
+  slots and 0 point-checked. Counted as `postcall_booking_owed_listed_only`
+  rather than acted on, because the rule's own reason — browsing looks identical
+  — is not overturned by one call.

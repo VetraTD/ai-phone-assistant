@@ -175,6 +175,81 @@ const EXPECTATIONS = {
       },
     ],
   },
+  // -------------------------------------------------------------------------
+  // THE 2026-09-17 CALLS, taken AFTER the gate fixes shipped. Every attempt in
+  // this block did the right thing on the day, so they are regression
+  // fixtures: they lock in behaviour that had to be fought for rather than
+  // describing behaviour that has to be fixed.
+  //
+  // The gate went 4 for 4 across them, in both directions -- it let four
+  // legitimate writes through with no argument, and it refused four that had no
+  // read-back or no agreement behind them.
+  // -------------------------------------------------------------------------
+  CAaef5bd: {
+    note: "3.8 on the gate fixes. The first successful booking of the round, and the call that proves the supersession removal on real audio.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the model fired book_appointment straight after 'I'd like to offer you a free strategy call' -- no time named, nothing to agree to. A token from five caller turns earlier (confirming a phone number) was present and did NOT authorise it.",
+      },
+      {
+        expect: "write",
+        why:
+          "THE COUNTERFACTUAL, visible in the probe: readback_now=true, agreed_now=true, token_present=FALSE. The token was nulled because the agreement on the ledger was for an earlier read-back, which is precisely the state the old supersession disjunct refused on. Five attempts died on CA03558d in exactly this shape. Here it wrote first time.",
+      },
+    ],
+  },
+  CA2556d4: {
+    note: "3.8. A cancellation, and the call whose closing turn asked a question and then hung up 1.6 s later.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the model proposed the cancellation and called the tool before the caller answered. Their reply was 'It's a 12:45' -- a correction, not consent.",
+      },
+      { expect: "write", why: "re-asked properly, agreed on the turn, cancelled." },
+    ],
+  },
+  CAdfeb9d: {
+    note: "3.8. The call whose websocket died mid-sentence: no stop, no close, so finish() never ran and neither did postcall_verify. The one real defect of the round, and nothing to do with the gate.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "'We can now offer the free strategy call and book it for Friday' is a statement, not a read-back, and the caller had not agreed to anything. The model produced a proper read-back on the next turn and the line died before it could be answered.",
+      },
+    ],
+  },
+  CA7d4f2d: {
+    note: "3.8. A clean booking: one attempt, written first time, zero refusals, clean close.",
+    attempts: [
+      { expect: "write", why: "read-back naming four thirty PM in words, agreed on the turn, written." },
+    ],
+  },
+  CAa88309: {
+    note: "3.8. A cancellation the caller asked for, preceded by the model firing the write before reading anything back.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "fired immediately after REPORTING the appointment ('Yes, you have a strategy call scheduled for...'), which is a report and not a proposal. This is the guard that matters most: an unrequested destructive write must never reach the row.",
+      },
+      { expect: "write", why: "read back as a cancellation, agreed on the turn, cancelled." },
+    ],
+  },
+  CAd48d7b: {
+    note: "3.8. Booked despite the model switching to Spanish mid-call and apologising for it three times. The gate was unaffected by any of that.",
+    attempts: [
+      {
+        expect: "write",
+        why: "the read-back names the slot and the caller agreed on the turn. Worth keeping because the surrounding turns are a mess -- a gate that reads the conversation's mood rather than its structure would have got this wrong.",
+      },
+    ],
+  },
+  CAb08e4e: {
+    note: "3.8. A 47-second cancellation, and the clearest example of end_call being called in the same turn as the action -- before the step machine reaches `confirm` and tells the model to ask whether anything else is needed.",
+    attempts: [
+      { expect: "write", why: "read back as a cancellation, agreed on the turn, cancelled." },
+    ],
+  },
   CA03558d: {
     note: "3.8 with the supersession fix that was reverted. The worst call: one cancel, six booking attempts, ZERO booked rows, three live_tool_rounds_capped, five writes in 2.3 seconds, and 'Yes, I have confirmed that your appointment is booked.'",
     attempts: [

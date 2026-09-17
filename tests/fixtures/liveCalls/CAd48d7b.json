@@ -1,0 +1,207 @@
+{
+  "callSid": "CAd48d7b",
+  "model": "gemini-3.8-live",
+  "note": "3.8. Booked despite the model switching to Spanish mid-call and apologising for it three times. The gate was unaffected by any of that.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 19,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 19,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 1,
+    "availability_blocked": 0,
+    "availability_day_listed": 19,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 16
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T06:09:42.122Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T06:10:01.458Z",
+      "step": "identify_intent",
+      "caller": "I just want to learn more about what you guys do and how you can help my business.",
+      "assistant": "We're a digital marketing agency that builds custom strategies and infrastructure to help businesses attract and retain high value clients. To get us started, may I please have your name?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T06:10:10.850Z",
+      "step": "gather_details",
+      "caller": "euer Markus",
+      "assistant": "Thanks ? and what's the best number to reach you on?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T06:10:20.866Z",
+      "step": "gather_details",
+      "caller": "Oh, toh naam kaun sa hai?",
+      "assistant": "I can certainly use the number you're calling from. May I please have your name?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T06:10:28.493Z",
+      "step": "gather_details",
+      "caller": "marques",
+      "assistant": "Thanks, Marques ? and what is the name of your company?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-17T06:10:38.741Z",
+      "step": "gather_details",
+      "caller": "Bau Consulting",
+      "assistant": "Thanks, Bau Consulting ? and to make sure I have it correctly written do you mind spelling your full name for me?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-17T06:10:50.080Z",
+      "step": "gather_details",
+      "caller": "amarelo c u s b e l l",
+      "assistant": "Thank you, Marcus Busbell ? and what industry is your company in?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-17T06:11:00.211Z",
+      "step": "gather_details",
+      "caller": "No, no bus bus bell. No. Bell. My last name is Bell.",
+      "assistant": "Thank you, Marcus Bell ? and what industry is your company in?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-17T06:11:06.856Z",
+      "step": "gather_details",
+      "caller": "consulting",
+      "assistant": "Thanks, consulting ? and what does your company sell?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-17T06:11:22.235Z",
+      "step": "gather_details",
+      "caller": "consulting services",
+      "assistant": "Thanks ? the team at Digile Media can set up a free strategy call to discuss your business further. These calls are thirty minutes long and available Monday through Friday from nine AM to five PM Central time."
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-17T06:11:33.159Z",
+      "step": "gather_details",
+      "caller": "Okay.",
+      "assistant": "What day and time works best for you to schedule your thirty minute strategy call?"
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-17T06:11:48.962Z",
+      "step": "gather_details",
+      "caller": "Ahm, ?sabes ingl?s?",
+      "assistant": "S?, hablo ingl?s; puedo cambiar de idioma si lo prefieres, o continuar en espa?ol. ?Qu? d?a y hora te gustar?a agendar tu llamada?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-17T06:12:00.184Z",
+      "step": "gather_details",
+      "caller": "Why do you speak Spanish? I'm speaking in English.",
+      "assistant": "I apologize for that switch. We will continue in English. What day and time would you prefer to schedule your strategy call?"
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-17T06:12:12.324Z",
+      "step": "gather_details",
+      "caller": "Say it again.",
+      "assistant": "Of course. What day and time would you prefer to schedule your thirty minute strategy call?"
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-17T06:12:24.088Z",
+      "step": "gather_details",
+      "caller": "tua nipote",
+      "assistant": "I apologize, but we must continue in English. What day and time would you prefer to schedule your strategy call?"
+    },
+    {
+      "i": 15,
+      "ts": "2026-09-17T06:12:36.670Z",
+      "step": "gather_details",
+      "caller": "ND",
+      "assistant": "We have openings tomorrow, Friday, September 18th, at 9:00 AM, 1:00 PM, or 4:30 PM Central time. Which of those works for you?"
+    },
+    {
+      "i": 16,
+      "ts": "2026-09-17T06:12:52.306Z",
+      "step": "gather_details",
+      "caller": "su foto",
+      "assistant": "I apologize, but we must continue in English. Just to confirm, you would like to schedule your thirty minute strategy call for Friday, September 18th, at 4:30 PM Central time?"
+    },
+    {
+      "i": 17,
+      "ts": "2026-09-17T06:13:04.755Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "I have you booked for a strategy call on Friday, September 18th, at 4:30 PM Central time. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 18,
+      "ts": "2026-09-17T06:13:11.961Z",
+      "step": "confirm",
+      "caller": "No.",
+      "assistant": "Thanks for calling Digile Media, and have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T06:12:56.268Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the read-back names the slot and the caller agreed on the turn. Worth keeping because the surrounding turns are a mess -- a gate that reads the conversation's mood rather than its structure would have got this wrong.",
+      "standing_turn": 16,
+      "agreed_turn": 16,
+      "standing_read_back": "I apologize, but we must continue in English. Just to confirm, you would like to schedule your thirty minute strategy call for Friday, September 18th, at 4:30 PM Central time?",
+      "agreed_read_back": "I apologize, but we must continue in English. Just to confirm, you would like to schedule your thirty minute strategy call for Friday, September 18th, at 4:30 PM Central time?",
+      "target": "2026-09-18T16:30:00",
+      "target_candidates": [
+        "2026-09-18T16:30:00"
+      ],
+      "target_from": "I apologize, but we must continue in English. Just to confirm, you would like to schedule your thirty minute strategy call for Friday, September 18th, at 4:30 PM Central time?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

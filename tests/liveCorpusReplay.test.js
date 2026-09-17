@@ -1,20 +1,22 @@
 // ---------------------------------------------------------------------------
-// THE SEVEN REAL CALLS, REPLAYED THROUGH THE REAL GATE.
+// FOURTEEN REAL CALLS, REPLAYED THROUGH THE REAL GATE.
 //
 // Three fixes to the Live write-consent gate shipped on 2026-09-16, each on a
 // single phone call, each with a consequence nobody predicted, and the full
 // suite was green every time. It could not have been otherwise: not one test in
 // this repository had ever seen a sentence a model actually said on a call.
 //
-// So the seven calls of 2026-09-16/17 are fixtures, built by
+// So the calls of 2026-09-16/17 are fixtures, built by
 // scripts/corpus/build-fixtures.mjs from raw Cloud Logging pulls, and every
 // write attempt in them is replayed against the real gate before anything
 // deploys.
 //
 // WHAT AN ATTEMPT'S `expect` MEANS. It is what SHOULD happen, not what did.
-// Twelve of the twenty attempts in this corpus were refused; seven of those
-// refusals were wrong and cost a booking. A green run here means the gate now
-// does the right thing on all twenty, not that it reproduces the log.
+// Of the twenty attempts recorded BEFORE the fixes, twelve were refused and
+// seven of those refusals were wrong and cost a booking. The ten recorded AFTER
+// them all did the right thing on the day, so they are regression fixtures
+// rather than a to-do list. A green run means the gate does the right thing on
+// all thirty, not that it reproduces the log.
 //
 // WHAT THIS CANNOT WITNESS, stated so a green run is not read as more than it
 // is:
@@ -178,10 +180,14 @@ async function replay(fixture) {
   return { s, results };
 }
 
-describe("the seven real calls, replayed through the real gate", () => {
+describe("the real calls, replayed through the real gate", () => {
+  // A CANARY, not a formality. These numbers only move when someone adds a
+  // call to the corpus and regenerates, and a silent drop -- a fixture that
+  // stopped being written because its expectations went missing -- would
+  // otherwise shrink the suite without failing it.
   it("has a fixture for every call in the corpus", () => {
-    expect(FIXTURES).toHaveLength(7);
-    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(20);
+    expect(FIXTURES).toHaveLength(14);
+    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(30);
   });
 
   for (const fixture of FIXTURES) {
