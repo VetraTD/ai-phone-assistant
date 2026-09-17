@@ -13128,7 +13128,18 @@ booking attributable to this alone.
 
 ## LVX133 — the assistant answered an English caller in Spanish
 
-**Status: DIAGNOSED, ONE FACT OUTSTANDING · P1. `CAd48d7b`, 2026-09-17.**
+**Status: DIAGNOSED, CLOSED — 2026-09-17. Nothing of ours caused it.**
+`languages_spoken` for this tenant reads `["en"]`, read from the database via
+`vetra-migrate-uk-prod` once its image was current. `services/gemini.js:941-946`
+emits its language sentence only when the array has MORE than one entry, and its
+`else if` only when the single entry is NOT English — so with `["en"]` **neither
+branch fires and no language instruction reaches the model at all.** Combined
+with the three findings below, every mechanism we own is excluded: the flip was
+the model. No fix is proposed, and the item needs no further diagnosis.
+One occurrence in sixteen calls. Note the instrument that would count a
+recurrence is blind to it: `looksNonEnglish` excludes Spanish from its markers
+deliberately, so `live_caller_turn_non_english` would have read 0 on that call.
+`CAd48d7b`, 2026-09-17.
 See the diagnosis under "ROUND, 2026-09-17 (evening)" at the bottom of this
 file: the apology is the model's own words, `looksNonEnglish` could not have
 fired, and what remains is a single column read.
