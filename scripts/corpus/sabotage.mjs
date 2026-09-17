@@ -45,6 +45,7 @@ const ASK = "tests/liveEndCallAsk.test.js";
 // The gate's own suite, which calls executeToolCall directly and is therefore
 // the only place the CASCADE's side of a shared gate is visible at all.
 const TOOLSGATE = "tests/tools.test.js";
+const DENIAL = "tests/liveAvailabilityDenial.test.js";
 
 const SABOTAGES = [
   {
@@ -54,7 +55,10 @@ const SABOTAGES = [
     file: "lib/voice/slotMention.js",
     find: "  const hourWord = HOUR_WORD[hour12 % 12];",
     replace: "  return [...forms]; // SABOTAGE\n  const hourWord = HOUR_WORD[hour12 % 12];",
-    red: [SLOTS, REPLAY],
+    // DENIAL too, since 2026-09-17: LVX137's detector reuses this matcher to
+    // read a time out of a denial, so a matcher that cannot hear "two o'clock"
+    // makes that counter read zero and report it as good news.
+    red: [SLOTS, REPLAY, DENIAL],
   },
   {
     name: "supersession-veto",
@@ -239,6 +243,24 @@ const SABOTAGES = [
       '      askedAnythingElseThisCall ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
     replace: "      askedAnythingElseThisCall, // SABOTAGE",
     red: [ASK],
+  },
+  {
+    name: "denial-detector-off",
+    why:
+      "LVX137: the assistant can tell a caller a slot is taken when the system's own availability response listed it as open, and nothing counts it. On CA6df19e98 that was 2:00 PM on a Friday with zero scheduled appointments, and it cost the caller their first-choice time with no row, no refusal and no counter anywhere.",
+    file: "lib/voice/live/index.js",
+    find: "            if (!S.deniedAvailabilityRe.test(sentence)) continue;",
+    replace: "            if (true) continue; // SABOTAGE",
+    red: [DENIAL],
+  },
+  {
+    name: "denial-reply-level",
+    why:
+      "scores the denial over the WHOLE reply instead of sentence by sentence. The real reply turns one time down and offers two others in the same breath -- 'I'm sorry, 2:00 PM is not available. We do have 1:00 PM or 4:30 PM open' -- so a reply-level test counts three denials where there was one, and the number stops meaning anything.",
+    file: "lib/voice/live/index.js",
+    find: "          for (const sentence of replyText.split(/(?<=[.!?])\\s+/)) {",
+    replace: "          for (const sentence of [replyText]) { // SABOTAGE",
+    red: [DENIAL],
   },
   {
     name: "call-summary",

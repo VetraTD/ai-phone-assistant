@@ -13699,3 +13699,90 @@ Mon-Fri `09:00`-`17:00`, Sat/Sun closed, `America/Chicago`,
 `tests/liveCorpusReplay.test.js` deliberately uses an 18:00 close so 16:30 times
 are legal; the real tenant closes at 17:00, which is worth remembering before
 any fixture is called realistic.
+
+### LVX137 — the mechanism, reproduced exactly, and a counter shipped
+
+**2026-09-17, same evening.** The call state was reproduced offline byte for
+byte. `check_appointment_availability` given a date ONLY (day mode) returns:
+
+```
+open_times      2026-09-18T09:00, 13:00, 16:30      <- "9:00 AM, 1:00 PM, or 4:30 PM"
+all_open_times  sixteen slots, 09:00 through 16:30, INCLUDING 14:00
+total_open      16
+```
+
+`open_times` is exactly the three times the assistant offered on the call, and
+`availability_day_listed` reads **19** in the reproduction and **19** in
+production. This is not a similar state; it is the same one.
+
+**So 2:00 PM was in `all_open_times`, in context, when the assistant said it was
+not available.** The diary confirms the other half: zero `scheduled` rows that
+Friday.
+
+### The instruction to not do this was already there
+
+`capabilities/appointments.js:1082-1084`, in the tool's own declaration:
+
+> "Given just a date it returns the times open that day: offer `open_times`
+> first, and if the caller wants something else that day, offer from
+> `all_open_times`. **Never tell a caller nothing else is available while
+> `all_open_times` still has times in it.** Let them choose — never choose for
+> them."
+
+The model held the list, held the instruction, and did it anyway. That is the
+fourth documented instance in this file of a prompt sentence failing to hold,
+and it settles the design question before it is asked: **an eighth sentence is
+not the fix.**
+
+`read_memo_hit: 0` says what actually happened — several turns after the one
+availability call, it answered a specific-time question from a degraded memory
+of a long tool response instead of re-reading the response it already had.
+
+### What shipped: a counter, and nothing else
+
+- `availability_denial_spoken` — the denominator and the positive twin: how
+  often the assistant turns ANY time down.
+- `availability_denied_verified_open` — the subset where the time it turned down
+  is one an availability response ITSELF put on the record as open. **Counted
+  per slot**, not per sentence.
+
+Structural, not lexical. `deniedAvailabilityRe` only finds sentences worth
+asking about; the meaning comes from `verifiedSlotList()` membership, so a hit
+means the system contradicted its own record.
+
+**Scored against every assistant turn there is.** 153 turns from fifteen real
+calls: the phrase fires **once**, on the known sentence, and the slot check
+confirms it names a verified-open slot. No other turn in the corpus fires at
+all.
+
+**It will under-report, by construction and on purpose.** The phrasing half is
+fitted to one observed sentence and English only — there is a Spanish bundle and
+no Spanish evidence, and closed lists built on a guess have cost this file three
+rounds already. A counter that misses reads slightly low; one that over-matches
+puts a false accusation in a log a human reads as fact.
+
+### Why a counter and not a gate
+
+One call proves the class exists and says nothing about the rate. LVX72 is the
+precedent in both directions: it counted first, and the one time a refusal
+shipped on three calls' evidence, call four overturned it.
+
+The gate shape, when the rate justifies one, is already visible: a specific-time
+answer should require a point check the way a write requires a read-back. The
+machinery exists — `check_appointment_availability` takes a `requested_at`, and
+the guards already separate `slot_listed_only` from `slot_point_verified`
+(`point_verified_slots` read 0 on this call). **Do not build it yet.**
+
+### What the sabotage matrix caught, again
+
+`denial-reply-level` — scoring the whole reply instead of sentence by sentence —
+**stayed GREEN on its first run.** The counter was bumped once per sentence, so
+reply-level scoring produced the same 1 and the sentence boundary had no test at
+all. That is `farewell-adjective`'s failure exactly, one round later.
+
+Fixed by counting per SLOT, which is also the more honest unit: two open times
+turned down in one breath is two wrong answers. The row is red now.
+
+**Done when:** `availability_denied_verified_open` has a rate across a handful of
+calls, read against `availability_denial_spoken`. Only then is there a decision
+to make.
