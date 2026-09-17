@@ -73,3 +73,10 @@ voice-drift/
 .s*.log
 .call*.log
 .t*.log
+
+# Raw Cloud Logging pulls for specific calls, kept on disk because Cloud Logging
+# retention expires and these are the corpus the write-order gate's tests are
+# built from. Same contents as the scratch logs above -- assistant speech,
+# caller names, appointment times -- so the same rule applies: NEVER COMMITTED.
+# Fixtures derived from these get pseudonymised names before they go in tests.
+call-corpus/
