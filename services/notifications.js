@@ -138,7 +138,14 @@ async function sendEmail({ to, subject, text, html }) {
 
 /**
  * Send an SMS. Logs errors; never throws.
+ *
+ * Returns whether the message was HANDED TO TWILIO, not whether it arrived --
+ * delivery is a status callback this system does not consume. That is still a
+ * different fact from "we tried", which is all the caller used to be able to
+ * observe. See LVX122 and the note on sendCallerSms.
+ *
  * @param {{ to: string, body: string }} opts
+ * @returns {Promise<boolean>}
  */
 async function sendSms({ to, body }) {
   if (!twilioClient || !TWILIO_SMS_FROM) {
@@ -146,7 +153,7 @@ async function sendSms({ to, body }) {
       channel: "sms",
       reason: !twilioClient ? "twilio_sms_not_configured" : "twilio_sms_from_missing",
     });
-    return;
+    return false;
   }
   try {
     await twilioClient.messages.create({
@@ -154,9 +161,11 @@ async function sendSms({ to, body }) {
       from: TWILIO_SMS_FROM,
       body,
     });
+    return true;
   } catch (err) {
     log.error("notification_sms", { message: err?.message });
     captureException(err, { context: "notifications.sendSms" });
+    return false;
   }
 }
 
@@ -520,12 +529,31 @@ export async function sendCallerSms(
   vars = {},
   { transactional = false } = {}
 ) {
-  if (!businessConfig?.smsFollowupEnabled) return;
-  if (!isValidE164(toNumber)) return;
+  // -------------------------------------------------------------------------
+  // LVX122. THIS RETURNS WHETHER ANYTHING LEFT THE BUILDING.
+  //
+  // It used to return undefined on every path -- four early returns and the
+  // successful send alike -- and lib/postCallVerify.js pushed onto its `sent`
+  // array immediately after awaiting it. So `sent: 2` on a postcall_verify line
+  // meant two sends were ATTEMPTED, and on CA6b773e2a the caller had declined,
+  // the consent gate blocked all three, and the line still said sent=2. Reading
+  // it honestly required correlating three separate log events.
+  //
+  // That matters more now than when it was filed: the escalation this file
+  // feeds is the only thing standing behind a caller who was told about a
+  // booking that does not exist, and a net whose own evidence overstates itself
+  // is not a net.
+  //
+  // `false` covers all five ways nothing is sent: the tenant has SMS off, the
+  // number is not E.164, the template kind is unknown, consent blocked it, or
+  // Twilio refused it.
+  // -------------------------------------------------------------------------
+  if (!businessConfig?.smsFollowupEnabled) return false;
+  if (!isValidE164(toNumber)) return false;
   const template = DEFAULT_SMS_TEMPLATES[kind];
   if (!template) {
     log.error("sms_followup_unknown_kind", { message: `sendCallerSms: unknown kind "${kind}"` });
-    return;
+    return false;
   }
   try {
     // The override is re-validated HERE and not only in the dashboard, because
@@ -581,14 +609,15 @@ export async function sendCallerSms(
           kind,
           reason: consent ? "declined" : "no_record",
         });
-        return;
+        return false;
       }
     }
 
-    await sendSms({ to: toNumber, body });
+    return await sendSms({ to: toNumber, body });
   } catch (err) {
     log.error("sms_followup_failed", { message: err?.message, kind });
     captureException(err, { context: "notifications.sendCallerSms", kind });
+    return false;
   }
 }
 

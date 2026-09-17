@@ -36,6 +36,8 @@ const SLOTS = "tests/slotMention.test.js";
 const TOOLS = "tests/liveTools.test.js";
 const SESSION = "tests/liveSession.test.js";
 const HAMMER = "tests/liveWriteHammering.test.js";
+const VERIFY = "tests/postCallVerify.test.js";
+const SMS = "tests/notifications.sms.test.js";
 
 const SABOTAGES = [
   {
@@ -79,8 +81,8 @@ const SABOTAGES = [
     why:
       "removes the refusal echo, so an identical refused write is re-gated as many times as the model asks. CA03558d did it five times in 2.3 seconds.",
     file: "lib/voice/live/tools.js",
-    find: "      const echo = isAction ? refusalEcho.get(echoKey(fc, state)) : null;",
-    replace: "      const echo = null; // SABOTAGE",
+    find: "      isAction && state?.lastChance !== true ? refusalEcho.get(echoKey(fc, state)) : null;",
+    replace: "      null; // SABOTAGE",
     red: [HAMMER],
   },
   {
@@ -100,6 +102,29 @@ const SABOTAGES = [
     find: '  const raw = String(env.LIVE_TOOL_BEHAVIOR ?? "BLOCKING").trim().toUpperCase();',
     replace: '  const raw = String(env.LIVE_TOOL_BEHAVIOR ?? "DEFAULT").trim().toUpperCase(); // SABOTAGE',
     red: [TOOLS],
+  },
+  {
+    name: "abandoned-escalation",
+    why:
+      "puts the escalation back behind reconcile()'s single ordered verdict. write_abandoned is tested before claim_without_row, so CA03558d -- six refused attempts, zero rows, a caller told it was confirmed -- told nobody anything.",
+    file: "lib/postCallVerify.js",
+    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) {',
+    replace: '  if (verdict === "claim_without_row" || bookingOwedNoRow) { // SABOTAGE',
+    red: [VERIFY],
+  },
+  {
+    name: "sent-counts-attempts",
+    why:
+      "LVX122: makes `sent` count attempts again. sendCallerSms returns undefined on every path, so a blocked send reads as a delivered one and the net's own evidence overstates itself.",
+    file: "services/notifications.js",
+    find: "    return await sendSms({ to: toNumber, body });",
+    replace: "    await sendSms({ to: toNumber, body });\n    return undefined; // SABOTAGE",
+    // NOT tests/postCallVerify.test.js: it stubs `notifications` wholesale, so
+    // the real sendCallerSms is never in its path and it stayed GREEN with this
+    // reverted. That is the stubbed-execute trap this repository has already
+    // written down twice, and it was caught here by the script's own rule
+    // rather than by anyone noticing.
+    red: [SMS],
   },
   {
     name: "call-summary",

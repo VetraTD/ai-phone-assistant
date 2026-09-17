@@ -43,7 +43,11 @@ function fakeDeps({
   requestId = "req-1",
 } = {}) {
   const notifications = {
-    sendCallerSms: vi.fn(async () => {}),
+    // Returns TRUE: since LVX122 this reports whether the message was handed
+    // to Twilio, and lib/postCallVerify.js counts `sent` off that return rather
+    // than off the attempt. A double returning undefined means "nothing was
+    // sent", which is a valid outcome and not the one these tests are about.
+    sendCallerSms: vi.fn(async () => true),
     notifyUnconfirmedClaim: vi.fn(async () => {}),
   };
   const db = {
@@ -754,5 +758,129 @@ describe("a booking that was owed and never written", () => {
 
     expect(out.skipped.map((x) => x.reason)).toContain("pending_send_failed");
     expect(getLatencyStats().turnTaking.postcall_pending_failed).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CA03558d, 2026-09-17. The worst call the corpus holds, and nobody was told.
+//
+//   six book_appointment attempts, every one refused
+//   zero booked rows
+//   "Yes, I have confirmed that your appointment is booked."
+//
+//   postcall_verify  verdict=write_abandoned  booked_rows=0
+//                    booking_owed=false  claims=2  sent=0  skipped=[]
+//
+// Two separate reasons it escalated nothing. reconcile() returns ONE ordered
+// verdict and tests `write_abandoned` BEFORE `claim_without_row`, so the
+// fabrication branch never ran; and `bookingWasOwed` requires a POINT check,
+// and that call had fifteen listed slots and no point check.
+//
+// The comment on bookingWasOwed already records this trap once, in 259de15's
+// words: "whether something was owed is a FACT about the call rather than a
+// headline competing for one slot". This is the same fix applied to the other
+// half.
+// ---------------------------------------------------------------------------
+describe("a call that tried to write and could not", () => {
+  beforeEach(() => clearStats());
+
+  const ca03558d = {
+    businessId: BUSINESS_ID,
+    callId: CALL_ID,
+    config: CONFIG,
+    callerNumber: "+447700900123",
+    // The cancellation succeeded; every booking attempt was refused.
+    writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+    claims: [{ turn: 11, kind: "claim", step: "confirm" }],
+    abandoned: ["book_appointment"],
+    // Fifteen LISTED slots, none point-checked. This is what made
+    // booking_owed read false on the real call.
+    bookingOwed: { agreed: true, pointVerified: 0, verified: 15 },
+    mode: "send",
+    callSid: "CA03558d",
+  };
+
+  it("escalates an abandoned write with no row, whatever the verdict says", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(ca03558d, d);
+
+    // The verdict is unchanged. It was never the problem -- what it was is the
+    // only thing anything downstream looked at.
+    expect(out.verdict).toBe("write_abandoned");
+    expect(out.bookingOwedNoRow).toBe(false);
+
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_abandoned_no_row).toBe(1);
+
+    // The note has to say WHICH of the three shapes this is, because a person
+    // triaging it needs to know the caller is expecting an appointment.
+    const [{ requestType, notes }] = d.db.createCustomerRequest.mock.calls[0];
+    expect(requestType).toBe("unconfirmed_claim");
+    expect(notes).toMatch(/every attempt was refused/);
+  });
+
+  it("counts the listed-only shape without acting on it", async () => {
+    // A candidate, not a decision. The rule that excludes it says browsing
+    // looks identical, and one call does not overturn that -- so the rate gets
+    // measured and the gate does not move.
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    await verifyCall(ca03558d, d);
+
+    expect(getLatencyStats().turnTaking.postcall_booking_owed_listed_only).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_booking_owed).toBeFalsy();
+  });
+
+  it("does not escalate an abandoned write when a row exists after all", async () => {
+    // A call that abandoned one attempt and then succeeded has nothing
+    // outstanding, and a net that fires on it teaches people to ignore it.
+    const d = fakeDeps({ booked: [row()] });
+    const out = await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_abandoned_no_row).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX122. `sent` counted ATTEMPTS.
+//
+// On CA6b773e2a the caller was asked "can I send you a text confirmation?",
+// declined, and the line still read sent=2. sendCallerSms returned undefined
+// whether it delivered or took one of its five early returns, and this module
+// pushed onto `sent` immediately after awaiting it. Reading it honestly needed
+// three separate log events correlated by hand.
+// ---------------------------------------------------------------------------
+describe("what `sent` counts", () => {
+  beforeEach(() => clearStats());
+
+  // A RESCHEDULE, not a booking. A booked write carrying an appointment id is
+  // suppressed here on purpose -- capabilities/appointments.js already texted
+  // at booking time -- so it would prove nothing about counting.
+  const moved = () => row({ id: "row-old", scheduled_at: "2026-09-08T09:00:00.000Z" });
+  const movedInput = () =>
+    input({ writes: [{ type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-old" }] });
+
+  it("does not count a send the consent gate blocked", async () => {
+    const d = fakeDeps({ booked: [], byId: { "row-old": moved() } });
+    // What a blocked send looks like from here: no throw, and false.
+    d.notifications.sendCallerSms = vi.fn(async () => false);
+
+    const out = await verifyCall(movedInput(), d);
+
+    expect(d.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(out.sent).toHaveLength(0);
+    expect(out.skipped.map((x) => x.reason)).toContain("not_sent");
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBeFalsy();
+    expect(getLatencyStats().turnTaking.postcall_confirm_not_sent).toBe(1);
+  });
+
+  it("still counts one that left the building", async () => {
+    const d = fakeDeps({ booked: [], byId: { "row-old": moved() } });
+    const out = await verifyCall(movedInput(), d);
+
+    expect(out.sent).toHaveLength(1);
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBe(1);
   });
 });

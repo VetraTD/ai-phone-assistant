@@ -342,9 +342,13 @@ describe("sendCallerSms — gating matrix", () => {
   it("never throws even if Twilio rejects", async () => {
     mockMessagesCreate.mockRejectedValueOnce(new Error("twilio down"));
     const { sendCallerSms } = await loadNotifications();
+    // Resolves FALSE rather than throwing. Since LVX122 the return value says
+    // whether the message was handed to Twilio, and Twilio rejecting it is one
+    // of the ways nothing leaves the building -- which is exactly the fact
+    // lib/postCallVerify.js's `sent` count used to overstate.
     await expect(
       sendCallerSms(ENABLED_CONFIG, "+15551234567", "missed_call", { business: "Test Biz" })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     // The send was attempted — this is not a case of the gate silently
     // swallowing the call before Twilio was ever reached.
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
