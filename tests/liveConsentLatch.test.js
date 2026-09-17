@@ -131,10 +131,10 @@ const READ_BACK = `Just to confirm, I'm booking you in for Monday, September 7th
 // cost the production call its booking.
 const SPELL_ASK = `Before I book that for you, could you spell out your full name?`;
 
-async function boot() {
+async function boot({ seedAppointments = [] } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
-  const { deps, store } = makeFakeDeps({ seedAppointments: [], slotCapacity: 1 });
+  const { deps, store } = makeFakeDeps({ seedAppointments, slotCapacity: 1 });
 
   await handleLiveSessionConnection(
     ws,
@@ -188,6 +188,11 @@ async function boot() {
     },
     async book(args = { scheduled_at: SLOT, client_name: CLIENT }) {
       live.push({ toolCall: { functionCalls: [{ id: `b${Math.random()}`, name: "book_appointment", args }] } });
+      await settle();
+      await settle();
+    },
+    async callTool(name, args = {}) {
+      live.push({ toolCall: { functionCalls: [{ id: `t${Math.random()}`, name, args }] } });
       await settle();
       await settle();
     },
@@ -347,9 +352,150 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     );
     await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
 
-    // The counter says WHY it was refused, so a green here cannot be the old
-    // gate refusing for the old reason.
+    // The counter records that the token no longer matches the standing
+    // read-back. Since 2026-09-17 that is MEASUREMENT and not the decision --
+    // what refuses this write is that the caller has not agreed on this turn,
+    // which is the gate's second disjunct. Both are asserted, because a green
+    // here must not be able to come from the counter alone.
     expect(c().write_consent_agreement_superseded).toBe(1);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // The two rules that replaced supersession-as-a-veto, 2026-09-17. Both were
+  // found by replaying the corpus (tests/liveCorpusReplay.test.js); neither
+  // had a test before, and the behaviour the first one removes had none either.
+  // -------------------------------------------------------------------------
+  it("writes when the caller agrees on THIS turn, even with a stale token standing", async () => {
+    // CA919b69 and CA03558d. A token recorded for an earlier read-back used to
+    // veto a turn on which the assistant read the details back and the caller
+    // said yes to them. It cost six booking attempts and two false claims.
+    //
+    // The ledger cannot be fresher than the turn: `lastAgreement` is written at
+    // turnComplete, AFTER the tool round, so on the very turn the caller agrees
+    // the token still points at whatever came before. A rule that vetoes the
+    // present on the strength of that is wrong exactly when it matters.
+    const s = await boot();
+
+    await s.checkAvailability(SLOT);
+    await s.checkAvailability(OTHER_SLOT);
+
+    // An earlier proposal, agreed to. This is what records the token.
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    await s.assistantTurn("Lovely. And could I take a contact number for you?");
+
+    // A DIFFERENT proposal, read back, and agreed to on this turn.
+    await s.assistantTurn(
+      `Just to confirm, I'm booking you in for Monday, September 7th at 3 00 PM instead. Does that sound right?`
+    );
+    await s.callerSays("Yes, that's right.");
+    await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
+
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    // The store normalises to an instant; OTHER_SLOT is naive local (Chicago).
+    expect(Date.parse(rows[0].scheduled_at)).toBe(Date.parse(`${OTHER_SLOT}-05:00`));
+  });
+
+  it("does not let a cancellation's agreement authorise a booking", async () => {
+    // CA8c019c's shape, and it became REACHABLE on 2026-09-17: once
+    // lib/voice/slotMention.js could read word-clocks, the latch started
+    // holding on 3.8 for the first time -- and on a cancel-then-book call the
+    // cancellation's read-back is still the standing one, still the agreed one,
+    // and still names the time. Both corpus calls would have re-booked the slot
+    // the caller had just asked to be rid of.
+    //
+    // An agreement is spent by the action it authorises, so the booking needs a
+    // fresh yes. Here it never gets one.
+    const s = await boot({
+      seedAppointments: [
+        {
+          id: "appt-existing",
+          business_id: "biz-1",
+          client_name: CLIENT,
+          client_phone: "+15551234567",
+          scheduled_at: SLOT,
+          status: "scheduled",
+        },
+      ],
+    });
+
+    await s.checkAvailability(SLOT);
+    await s.assistantTurn(
+      `I have your appointment for ${CLIENT} on Monday, September 7th at 2 00 PM ready to be cancelled. Is that correct?`
+    );
+    await s.callerSays("Yes.");
+    await s.callTool("cancel_appointment_db", { appointment_id: "appt-existing" });
+
+    // The cancellation is authorised and must happen.
+    expect(s.store.scheduled()).toHaveLength(0);
+
+    // The model reports the cancellation, which is what both corpus calls do
+    // and what ends the turn. `lastReadBackKey` is NOT advanced by this,
+    // because it is not a read-back -- so the cancellation's read-back is still
+    // the standing one and still names two o'clock.
+    await s.assistantTurn(
+      "Your appointment on Monday, September 7th at 2 00 PM has been cancelled. Is there anything else I can help with?"
+    );
+
+    // The model now books the time it just cancelled, with no fresh agreement.
+    await s.book({ scheduled_at: SLOT, client_name: CLIENT });
+
+    expect(s.store.scheduled()).toHaveLength(0);
+    // WHICH rule refused it, because there are two and they sit at different
+    // depths. The caller is silent at this instant, and on a silent turn the
+    // whole gate stack -- write-order, latch, spelling, provenance -- is nested
+    // inside "the caller said something". So the refusal has to come from the
+    // silent-turn verdict, where a spent token stops reading as permission. If
+    // this ever moves to write_consent_latch_spent, the nesting changed and
+    // that is worth knowing rather than papering over.
+    expect(c().write_consent_token_spent).toBeGreaterThanOrEqual(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // RECORDED, NOT FIXED, 2026-09-17. Found while writing the test above.
+  //
+  // The spent rule closes the LATCH path. It does not close the turn-local one:
+  // if the model fires cancel_appointment_db and then book_appointment inside a
+  // single caller turn, without speaking in between, the cancellation's
+  // read-back is still `lastReplyText` and the caller's "Yes" is still
+  // `lastCallerText`, so `readBackMade && callerAgreed` are both true and the
+  // booking is authorised by a yes that was given to a cancellation.
+  //
+  // It is LVX126's family -- a yes to one action executing another -- and the
+  // structural fix is small: one caller turn must not authorise two DIFFERENT
+  // action tools, which is a comparison of tool names and needs no prose.
+  //
+  // It is not fixed here because nothing in the corpus does it. Both calls that
+  // cancel then book speak in between, which is the shape asserted above, and
+  // the BLOCKING tool pin makes a silent double-write less likely still. This
+  // test exists so the hole is pinned rather than remembered, and it will pass
+  // the day the rule lands -- delete the `.skip`, not the test.
+  // -------------------------------------------------------------------------
+  it.skip("does not let one caller turn authorise two different action tools", async () => {
+    const s = await boot({
+      seedAppointments: [
+        {
+          id: "appt-existing",
+          business_id: "biz-1",
+          client_name: CLIENT,
+          client_phone: "+15551234567",
+          scheduled_at: SLOT,
+          status: "scheduled",
+        },
+      ],
+    });
+
+    await s.checkAvailability(SLOT);
+    await s.assistantTurn(
+      `I have your appointment for ${CLIENT} on Monday, September 7th at 2 00 PM ready to be cancelled. Is that correct?`
+    );
+    await s.callerSays("Yes.");
+    await s.callTool("cancel_appointment_db", { appointment_id: "appt-existing" });
+    // No speech, same caller turn.
+    await s.book({ scheduled_at: SLOT, client_name: CLIENT });
+
     expect(s.store.scheduled()).toHaveLength(0);
   });
 });

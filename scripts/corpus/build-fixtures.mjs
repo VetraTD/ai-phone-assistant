@@ -1,0 +1,465 @@
+#!/usr/bin/env node
+// ---------------------------------------------------------------------------
+// call-corpus/*.json  ->  tests/fixtures/liveCalls/*.json
+//
+// WHY THIS EXISTS. Three fixes to the Live write-consent gate shipped on
+// 2026-09-16, each on a single phone call, each with a consequence nobody
+// predicted, and the full suite was green every time. The suite could not model
+// what the next call would do because nothing in it had ever seen a real call.
+//
+// So the seven calls of 2026-09-16/17 become fixtures, and the gate is replayed
+// against all seven before anything deploys.
+//
+// THE CORPUS IS NOT COMMITTED and must not be: assistant speech carries caller
+// names and appointment times (LVX24). The FIXTURES are committed, with names
+// pseudonymised here, so tests/liveCorpusReplay.test.js runs on a machine that
+// has never seen call-corpus/.
+//
+// WHAT IS RECORDED AND WHAT IS DERIVED, because the difference is the whole
+// trustworthiness of the output:
+//
+//   RECORDED, verbatim from Cloud Logging:
+//     - every assistant turn's text and the caller text logged beside it
+//     - every write_consent_probe's fields
+//     - the outcome the gate actually produced (write_target.outcome)
+//
+//   DERIVED HERE, and labelled as such in the fixture:
+//     - `target`, the slot a write was aiming at. Tool args are never logged
+//       (correctly -- they are PHI), so the time is recovered by asking which
+//       half-hour of the business day the standing read-back names. That uses
+//       readBackMentionsSlot, the function under test. The circularity is
+//       broken by COMMITTING the answer: the fixture freezes the derivation, so
+//       sabotaging the matcher later changes the test's result and not its
+//       expectations. Every derived time carries the sentence it came from, so
+//       a human can check it.
+//     - `caller_text`, when the logged text cannot be the text the gate saw.
+//       live_debug_assistant_turn emits at TURN COMPLETION, so on a turn where
+//       the model fired tools and kept talking, the caller text logged beside
+//       the eventual reply is from later in the turn than the write. The probe
+//       is the authority (LVX122 records three readers getting this wrong), so
+//       where the logged text disagrees with `agreed_now` / `gate_ran`, a
+//       canonical stand-in is substituted and marked `substituted`.
+//
+// `expect` is what SHOULD have happened, not what did. Four of these attempts
+// were refused and should not have been. That is the point.
+//
+// Usage:  node scripts/corpus/build-fixtures.mjs [--check]
+//         --check  rebuilds into memory and fails if the committed fixtures
+//                  differ, so a fixture edited by hand is caught.
+// ---------------------------------------------------------------------------
+
+import fs from "node:fs";
+import path from "node:path";
+import { readBackMentionsSlot } from "../../lib/voice/slotMention.js";
+import { isAffirmative } from "../../lib/transcriptUtils.js";
+
+const CORPUS_DIR = "call-corpus";
+const OUT_DIR = path.join("tests", "fixtures", "liveCalls");
+
+// ---------------------------------------------------------------------------
+// Pseudonyms. Applied to every string that leaves this script.
+// ---------------------------------------------------------------------------
+// Order matters: the spelled-out forms and the all-caps forms go first, so the
+// case-insensitive sweep at the end has nothing left to flatten.
+const PSEUDONYMS = [
+  [/W-H-I-T-E?-F-I-E-L-D/gi, "B-E-L-L"],
+  [/W H I T E? ?F I E L D/gi, "B E L L"],
+  [/M-A-R-C-U-S/gi, "M-A-R-C-U-S"],
+  [/WHITE?FIELDS?/g, "BELL"],
+  [/Whit[ef]field/g, "Bell"],
+  [/Whitfields/g, "Bells"],
+  [/Whitfield/g, "Bell"],
+  [/Whitefield/g, "Bell"],
+  [/whit[ef]fields?/gi, "Bell"],
+  [/BHAKTA/g, "FARROW"],
+  [/DILLAN/g, "ELENA"],
+  [/Dillan Bhakta/gi, "Elena Farrow"],
+  [/Bhakta/gi, "Farrow"],
+  [/Dillan/gi, "Elena"],
+];
+
+/** Anything still matching this after pseudonymisation is a leak and aborts. */
+const LEAK_RE = /whit[ef]|bhakta|dillan/i;
+
+function pseudonymise(s) {
+  let out = String(s || "");
+  for (const [re, to] of PSEUDONYMS) out = out.replace(re, to);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// What each call is for, and what the gate SHOULD do on each of its writes.
+//
+// Keyed by the call's first eight characters and the index of the write attempt
+// within the call, oldest first. Written out by hand, from the transcripts,
+// because "what should have happened" is a judgement and cannot be derived from
+// a log that records what did.
+// ---------------------------------------------------------------------------
+const EXPECTATIONS = {
+  CAb4c0eb: {
+    note: "3.1. The original lost booking. Two refused writes, then 'Perfect, I've booked that in for you', and zero rows.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "fired before any read-back and before the caller agreed to anything. Correct then and correct now.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "THE PRONOUN FIX, PROVEN ON REAL TEXT FOR THE FIRST TIME. The probe recorded readback_now=false for 'Shall we book that in for you?'; today's confirmReadBackRe matches it, so the read-back half is now satisfied on the very sentence that lost this booking. The write still refuses, and correctly: the caller's answer transcribed as 'Ja.', which isAffirmative cannot read. A caller whose yes does not survive transcription is owed the post-call net, not a guessed write.",
+      },
+    ],
+  },
+  CA5b982c: {
+    note: "3.1. A cancellation, correctly authorised and correctly written. No booking attempted.",
+    attempts: [
+      {
+        expect: "write",
+        why: "the caller heard the appointment read back in full and said yes on that turn. The row must move. This is the control: a fix that breaks this has broken the gate's whole purpose.",
+      },
+    ],
+  },
+  CA239046: {
+    note: "3.1. Booked, via the consent latch rather than a recognised read-back. Also the call where an appended claim note made the model retract a false claim out loud.",
+    attempts: [
+      {
+        expect: "write",
+        why:
+          "both halves of consent were present -- readback_now and agreed_now -- so the WRITE-ORDER gate should pass it, and that is what this replay asserts. In production it was held anyway, by the SPELLING gate: the caller's name had not been spelled yet, which is LVX77's lesson. The replay runs with VOICE_SPELL_POLICY=off so that gate's decisions do not masquerade as this one's, and tests/liveWritePathEndToEnd.test.js owns the spelling half.",
+      },
+      {
+        expect: "write",
+        why: "the latch carried the agreement across the spelling turn and the row landed. This is the one call in the corpus where the latch worked, and it worked because 3.1 said '4 30 p m' in digits.",
+      },
+    ],
+  },
+  CAb76b13: {
+    note: "3.8. An unrequested cancel_appointment_db, refused by the silent-turn gate, then announced to the caller as done.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "the model fired a destructive write six seconds after ASKING whether to, without waiting. The caller had said nothing at all -- no read-back standing, no agreement, no caller text. This must never become a write, and it is the case that proves a widening went too far.",
+      },
+    ],
+  },
+  CAb9ca76: {
+    note: "3.8. No writes at all. The model recited its own capabilities mid-call and the caller hung up.",
+    attempts: [],
+  },
+  CA919b69: {
+    note: "3.8 with the BLOCKING tool pin. One cancel and six booking attempts; the row landed only when the shared attempt budget ran out.",
+    attempts: [
+      {
+        expect: "write",
+        why: "the cancellation, read back in full and agreed to on that turn. Correctly written.",
+      },
+      {
+        expect: "refuse",
+        why: "no read-back standing and no agreement on the turn. The model was still offering times.",
+      },
+      {
+        expect: "write",
+        why:
+          "THE ONE THAT SHOULD HAVE BOOKED. The standing read-back is 'I can book a thirty-minute strategy call ... at three o'clock ... Shall we go ahead?' and the caller said yes to it on that turn. It was refused because a STALE token -- the agreement from the cancellation three caller turns earlier -- differed from the standing read-back, and supersession treated that as reason to veto a turn the caller had just authorised.",
+      },
+      {
+        expect: "write",
+        why: "by this point the row exists, and an identical write is duplicate-suppressed by the guards and returns the original success. Asserting 'written' here asserts the dedupe, which is what stops five attempts becoming five rows.",
+      },
+      { expect: "write", why: "duplicate of the write that already landed." },
+      { expect: "write", why: "duplicate of the write that already landed." },
+      {
+        expect: "write",
+        why: "in production this was the attempt that finally wrote, and only because write_attempt_budget_released gave up. It should have been a duplicate of a row that already existed.",
+      },
+    ],
+  },
+  CA03558d: {
+    note: "3.8 with the supersession fix that was reverted. The worst call: one cancel, six booking attempts, ZERO booked rows, three live_tool_rounds_capped, five writes in 2.3 seconds, and 'Yes, I have confirmed that your appointment is booked.'",
+    attempts: [
+      {
+        expect: "write",
+        why: "the cancellation, read back in full and agreed to on that turn. Correctly written -- and it is why the owner has no Friday appointment.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "no read-back was standing: the previous turn was 'Your appointment ... has been cancelled. Is there anything else?'. A token from the CANCELLATION was present, and this is exactly the write it must not authorise -- a booking at the time that was just cancelled. CA8c019c's shape.",
+      },
+      {
+        expect: "write",
+        why:
+          "THE LOST BOOKING. The caller agreed to 'I have you down for a strategy call on Friday, September eighteenth at three thirty PM. Shall we go ahead and book that?' The standing read-back was the spelling check 'M-A-R-C-U-S ... Is that correct?' -- which the caller also answered yes to -- so both halves of the turn-local rule were satisfied and the write was refused anyway, on supersession.",
+      },
+      { expect: "write", why: "duplicate of the write that should already have landed." },
+      { expect: "write", why: "duplicate of the write that should already have landed." },
+      { expect: "write", why: "duplicate of the write that should already have landed." },
+      { expect: "write", why: "duplicate of the write that should already have landed." },
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Slot derivation. Every corpus call is about Friday 18 September 2026; the
+// grid is that business day at half-hour steps.
+// ---------------------------------------------------------------------------
+const CORPUS_DATE = "2026-09-18";
+const GRID = (() => {
+  const out = [];
+  for (let h = 8; h <= 19; h += 1) {
+    for (const m of ["00", "30"]) out.push(`${String(h).padStart(2, "0")}:${m}`);
+  }
+  return out;
+})();
+
+/** Which grid times does this sentence name? */
+function timesNamedIn(text) {
+  return GRID.filter((hhmm) => readBackMentionsSlot(text, `${CORPUS_DATE}T${hhmm}`));
+}
+
+const EVENTS_KEPT = new Set([
+  "live_debug_assistant_turn",
+  "write_consent_probe",
+  "write_order_refused",
+  "write_target",
+  "write_refused_no_consent",
+  "write_attempt_budget_released",
+  "live_tool_rounds_capped",
+  "live_write_retried",
+  "tool_duration",
+  "live_call_summary",
+  "live_claim_unbacked_by_action",
+  "live_claim_without_action",
+]);
+
+function loadCall(file) {
+  const raw = JSON.parse(fs.readFileSync(path.join(CORPUS_DIR, file), "utf8"));
+  return raw
+    .map((r) => r.jsonPayload)
+    .filter((p) => p && EVENTS_KEPT.has(p.event))
+    .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+}
+
+function build(file) {
+  const events = loadCall(file);
+  const sid = events[0]?.callSid || file.replace(/\.json$/, "");
+  const short = sid.slice(0, 8);
+  const expectations = EXPECTATIONS[short];
+  if (!expectations) throw new Error(`no EXPECTATIONS entry for ${short}`);
+
+  const summary = events.find((e) => e.event === "live_call_summary") || {};
+
+  // ---- the turns -----------------------------------------------------------
+  const turns = events
+    .filter((e) => e.event === "live_debug_assistant_turn")
+    .map((e, i) => ({
+      i,
+      ts: e.ts,
+      step: e.step,
+      caller: pseudonymise(e.user_text || ""),
+      assistant: pseudonymise(e.text || ""),
+    }));
+
+  // ---- the write attempts --------------------------------------------------
+  // One attempt per write_consent_probe. The target/refusal events share its
+  // millisecond, so they are matched by tool and nearest timestamp.
+  const probes = events.filter((e) => e.event === "write_consent_probe");
+  const targets = events.filter((e) => e.event === "write_target");
+  const durations = events.filter((e) => e.event === "tool_duration");
+  const orderRefusals = events.filter((e) => e.event === "write_order_refused");
+  const consentRefusals = events.filter((e) => e.event === "write_refused_no_consent");
+  const budgetReleases = events.filter((e) => e.event === "write_attempt_budget_released");
+  const nearest = (list, ts, tool) => {
+    let best = null;
+    let bestGap = Infinity;
+    for (const e of list) {
+      if (e.tool !== tool) continue;
+      const gap = Math.abs(Date.parse(e.ts) - Date.parse(ts));
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = e;
+      }
+    }
+    return bestGap <= 50 ? best : null;
+  };
+
+  const attempts = probes.map((p, i) => {
+    const target = nearest(targets, p.ts, p.tool);
+    const exp = expectations.attempts[i] || {};
+
+    // THE OUTCOME COMES FROM tool_duration, NOT write_target. write_target is
+    // emitted by the booking-target branch of the guards, so cancellations
+    // produce none at all and read as "unknown" -- which is how the first
+    // version of this file scored a successful cancel as a mystery.
+    // tool_duration fires for every tool, and its two flags separate the three
+    // outcomes that matter: success is a row, gated is a gate holding it, and
+    // neither is a failure on the way to the database.
+    const dur = nearest(durations, p.ts, p.tool);
+    const observed = dur
+      ? dur.success === true
+        ? "written"
+        : dur.gated === true
+          ? "held"
+          : "failed"
+      : (target?.outcome ?? "unknown");
+
+    // WHICH gate held it. "held" alone cannot tell the write-order gate from
+    // the spelling gate, and on CA239046 the difference is the whole story:
+    // both halves of consent were present and the write was held anyway,
+    // because the caller's name had not been spelled yet.
+    const refusedBy = nearest(orderRefusals, p.ts, p.tool)
+      ? "write_order"
+      : nearest(consentRefusals, p.ts, p.tool)
+        ? "no_consent"
+        : observed === "held"
+          ? "other_gate"
+          : null;
+    const budgetReleased = Boolean(nearest(budgetReleases, p.ts, p.tool));
+
+    // The read-back standing when this write ran: the last assistant turn
+    // before it. That is what lastReplyText held.
+    const prior = turns.filter((t) => t.ts < p.ts);
+    const standing = prior.length ? prior[prior.length - 1] : null;
+    // The read-back the caller AGREED to, if the probe says one exists: walk
+    // back `caller_turns_since_agreement` caller turns from the standing one.
+    const back = Number(p.caller_turns_since_agreement);
+    const agreedTurn =
+      Number.isFinite(back) && prior.length > back ? prior[prior.length - 1 - back] : null;
+
+    // Derive the slot from the STANDING read-back first, because that is the
+    // proposal the write is following. Preferring the agreed one put
+    // CA919b69's third attempt at four-thirty -- the time of the cancellation
+    // the token happened to be recorded on -- when the sentence the caller was
+    // actually answering said three o'clock. Fall back to the agreed read-back
+    // only when the standing one names no time at all, which is CA03558d's
+    // spelling check.
+    const source = standing?.assistant && timesNamedIn(standing.assistant).length
+      ? standing
+      : agreedTurn;
+    const named = source ? timesNamedIn(source.assistant) : [];
+
+    // The caller text the gate saw. The probe is the authority.
+    const logged = standing ? (turns[standing.i + 1]?.caller ?? "") : "";
+    const loggedAgrees = isAffirmative(logged) === Boolean(p.agreed_now);
+    const loggedRan = logged.trim() !== "" === Boolean(p.gate_ran);
+    const useLogged = Boolean(logged) && loggedAgrees && loggedRan;
+    const substitute = !p.gate_ran ? "" : p.agreed_now ? "Yes." : "Let me think about that.";
+
+    return {
+      at: p.ts,
+      tool: p.tool,
+      probe: {
+        gate_ran: p.gate_ran,
+        readback_now: p.readback_now,
+        agreed_now: p.agreed_now,
+        token_present: p.token_present,
+        token_matches_current_readback: p.token_matches_current_readback,
+        caller_turns_since_agreement: p.caller_turns_since_agreement ?? null,
+        readback_ambiguous_ask: p.readback_ambiguous_ask,
+        silent_turn_verdict: p.silent_turn_verdict,
+      },
+      observed,
+      refused_by: refusedBy,
+      budget_released: budgetReleased,
+      expect: exp.expect || "UNREVIEWED",
+      why: exp.why || "",
+      // Indices, not text. Two turns on CAb76b13 are byte-identical ("On Friday
+      // afternoon, we have openings at three thirty and four o'clock."), so
+      // matching a replayed turn to its attempts by text would put both
+      // attempts on the first one.
+      standing_turn: standing ? standing.i : null,
+      agreed_turn: agreedTurn ? agreedTurn.i : null,
+      standing_read_back: standing ? standing.assistant : null,
+      agreed_read_back: agreedTurn ? agreedTurn.assistant : null,
+      target: named.length === 1 ? `${CORPUS_DATE}T${named[0]}:00` : null,
+      target_candidates: named.map((t) => `${CORPUS_DATE}T${t}:00`),
+      target_from: source ? source.assistant : null,
+      target_derived: true,
+      caller_text: useLogged ? logged : substitute,
+      caller_text_source: useLogged ? "logged" : "substituted",
+    };
+  });
+
+  return {
+    callSid: short,
+    model: summary.model || null,
+    note: expectations.note,
+    date: CORPUS_DATE,
+    counts: {
+      turns: turns.length,
+      probes: probes.length,
+      write_order_refused: events.filter((e) => e.event === "write_order_refused").length,
+      write_refused_no_consent: events.filter((e) => e.event === "write_refused_no_consent").length,
+      tool_rounds_capped: events.filter((e) => e.event === "live_tool_rounds_capped").length,
+      attempt_budget_released: events.filter((e) => e.event === "write_attempt_budget_released").length,
+      claim_unbacked_by_action: events.filter((e) => e.event === "live_claim_unbacked_by_action").length,
+    },
+    claim_audit: summary.claim_audit || null,
+    guards: summary.guards || null,
+    turns,
+    attempts,
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+const check = process.argv.includes("--check");
+
+if (!fs.existsSync(CORPUS_DIR)) {
+  console.error(
+    `${CORPUS_DIR}/ is not on this machine. It is gitignored on purpose; see its README for the re-pull command.`
+  );
+  process.exit(check ? 0 : 1);
+}
+
+fs.mkdirSync(OUT_DIR, { recursive: true });
+const files = fs.readdirSync(CORPUS_DIR).filter((f) => f.endsWith(".json")).sort();
+let differed = 0;
+
+for (const file of files) {
+  const fixture = build(file);
+  const json = `${JSON.stringify(fixture, null, 2)}\n`;
+
+  // A missing EXPECTATIONS entry must be LOUD. The first version defaulted an
+  // unreviewed attempt to "refuse", which is the answer that makes a broken
+  // gate look correct -- exactly the direction a fixture must never guess in.
+  const unreviewed = fixture.attempts.filter((a) => a.expect === "UNREVIEWED");
+  if (unreviewed.length) {
+    console.error(
+      `REFUSING TO WRITE ${fixture.callSid}: ${unreviewed.length} of ${fixture.attempts.length} ` +
+        `write attempts have no EXPECTATIONS entry. Add them by hand, from the transcript.`
+    );
+    for (const a of unreviewed) console.error(`   ${a.at}  ${a.tool}  observed=${a.observed}`);
+    process.exit(1);
+  }
+
+  const leak = json.match(LEAK_RE);
+  if (leak) {
+    console.error(`REFUSING TO WRITE ${fixture.callSid}: a real name survived pseudonymisation (${leak[0]})`);
+    process.exit(1);
+  }
+
+  const out = path.join(OUT_DIR, `${fixture.callSid}.json`);
+  const existing = fs.existsSync(out) ? fs.readFileSync(out, "utf8") : null;
+  if (check) {
+    if (existing !== json) {
+      differed += 1;
+      console.error(`DIFFERS: ${out}`);
+    }
+    continue;
+  }
+  fs.writeFileSync(out, json);
+  console.log(
+    `${fixture.callSid.padEnd(9)} turns=${String(fixture.counts.turns).padStart(2)} ` +
+      `attempts=${String(fixture.attempts.length).padStart(2)} ` +
+      `should-write=${fixture.attempts.filter((a) => a.expect === "write").length} ` +
+      `derived-slot=${fixture.attempts.filter((a) => a.target).length}/${fixture.attempts.length}` +
+      `${existing === json ? "" : "  (changed)"}`
+  );
+}
+
+if (check && differed) {
+  console.error(`\n${differed} fixture(s) differ from a fresh build. Re-run without --check.`);
+  process.exit(1);
+}

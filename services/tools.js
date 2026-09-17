@@ -652,7 +652,36 @@ export async function executeToolCall(fc, ctx) {
           // loses exactly the writes it should never have released.
           const tokenSuperseded = agreementSuperseded(ctx);
           if (tokenSuperseded) bumpCounter("write_consent_agreement_superseded");
-          const probeToken = tokenSuperseded ? null : (ctx?.lastAgreementReadBackKey ?? null);
+          // AND MINUS THE SECOND CASE, 2026-09-17.
+          //
+          // `allowed_token` does not merely permit the write -- the entire gate
+          // stack below is nested inside `if (lastCallerText.trim() !== "")`, so
+          // on a silent turn a surviving token skips the write-order gate, the
+          // consent latch, the spelling gate and the name-provenance check
+          // together. That nesting is deliberate and LVX117's note argues for it:
+          // a write one turn after a genuine agreement should succeed, because
+          // the caller agreed and is simply not talking at the instant the tool
+          // runs.
+          //
+          // What it does not survive is a SECOND action. Demonstrated on a
+          // cancel-then-book rig: the caller says yes to "...ready to be
+          // cancelled. Is that correct?", the cancellation commits, the model
+          // reports it, and a silent book_appointment at the very time just
+          // cancelled is then written with no gate consulted at all. That is
+          // CA8c019c's shape -- the shape the paragraph above says the token
+          // must never be allowed to produce.
+          //
+          // So the token is spent by the action it authorised, here as well as
+          // at the latch. The benign case LVX121 measured is untouched: on a
+          // first write there is no completed action yet, so nothing changes for
+          // it. What changes is that the SECOND silent write on a call has to be
+          // agreed to again.
+          const tokenSpent = Boolean(ctx?.completedActionThisCall);
+          if (tokenSpent && !tokenSuperseded && ctx?.lastAgreementReadBackKey) {
+            bumpCounter("write_consent_token_spent");
+          }
+          const probeToken =
+            tokenSuperseded || tokenSpent ? null : (ctx?.lastAgreementReadBackKey ?? null);
           const gateRan = lastCallerText.trim() !== "";
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
@@ -1066,20 +1095,68 @@ export async function executeToolCall(fc, ctx) {
             // through -- consent for one appointment spent on another, which is
             // CA8c019c's shape without the ten turns. Counted at the probe
             // above, not here, so one write cannot report itself twice.
-            const supersededHere = agreementSuperseded(ctx);
+            //
+            // NO LOCAL BINDING ANY MORE. It used to be a disjunct of the
+            // refusal below; the block there sets out why that could only ever
+            // veto a turn the caller had just authorised. The measurement lives
+            // at the probe and is unaffected.
             // Does the read-back they DID agree to name the time being written?
             // False when it cannot be told, so an unknown phrasing costs a
             // refusal rather than a row. See lib/voice/slotMention.js.
-            const latchSlot = fc.args?.scheduled_at ?? fc.args?.requested_at ?? null;
+            //
+            // `new_scheduled_at` is read here as well as `scheduled_at` because
+            // reschedule_appointment_db writes that argument and nothing was
+            // reading it -- so `latchSlot` was null on every reschedule, which
+            // made `latchSlotAgreed` false, which made the latch structurally
+            // unreachable for the one tool that moves an existing appointment.
+            const latchSlot =
+              fc.args?.scheduled_at ?? fc.args?.new_scheduled_at ?? fc.args?.requested_at ?? null;
             const latchSlotAgreed = Boolean(
               latchSlot && readBackMentionsSlot(ctx?.lastReadBackText, latchSlot)
             );
+            // -----------------------------------------------------------------
+            // AN AGREEMENT DOES NOT SURVIVE THE ACTION IT AUTHORISED.
+            //
+            // Found by replaying CA03558d and CA919b69 through this gate, and
+            // it was created by the fix immediately before it. Both calls run
+            // cancel-then-book. On both, the caller heard the cancellation read
+            // back -- "I have your appointment for NAME on Friday, September
+            // eighteenth at three o'clock ready to be cancelled. Is that
+            // correct?" -- and said yes. `lastReadBackKey` is only advanced by a
+            // turn that IS a read-back, so after the cancellation completed that
+            // sentence was still the standing read-back AND still the agreed
+            // one, and it names three o'clock.
+            //
+            // So a book_appointment at three o'clock -- the slot the caller had
+            // just asked to be rid of -- matched on every clause of the latch
+            // and was written. Once lib/voice/slotMention.js learned to read
+            // word-clocks, this became reachable for the first time: the latch
+            // had never held on 3.8 before, so the hole had never been open.
+            //
+            // That is CA8c019c exactly: consent for one appointment spent on
+            // another, and the widening that made the gate work is what opened
+            // it. The structural answer is that consent is spent by the write it
+            // authorises. `completedActionThisCall` is already in ctx and is set
+            // only when an action tool's own effect reported success
+            // (lib/voice/live/tools.js), so there is no new wire to get wrong.
+            //
+            // The cost is narrow and stated: after any successful action, a
+            // later write on the same call needs the caller's agreement ON THAT
+            // TURN rather than a carried one. Both corpus calls supply exactly
+            // that, and it is the same lesson as LVX126 -- a yes to one action
+            // must not execute a different one that happens to be waiting.
+            // -----------------------------------------------------------------
+            const agreementSpent = Boolean(ctx?.completedActionThisCall);
+            if (agreementSpent && agreementKey && agreementKey === standingReadBackKey) {
+              bumpCounter("write_consent_latch_spent");
+            }
             const consentLatched = Boolean(
               consentLatchOn &&
                 agreementKey &&
                 standingReadBackKey &&
                 agreementKey === standingReadBackKey &&
-                latchSlotAgreed
+                latchSlotAgreed &&
+                !agreementSpent
             );
             if (consentLatched && !(readBackMade && callerAgreed)) {
               // Counted only when it CHANGES the outcome, so the number answers
@@ -1190,7 +1267,57 @@ export async function executeToolCall(fc, ctx) {
             const orderCallerTurn = Number(ctx?.callerTurnCount) || 0;
             const orderRefusalIsNew = orderScratch.writeOrderRefusedTurn !== orderCallerTurn;
 
-            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed || supersededHere)) {
+            // -----------------------------------------------------------------
+            // `supersededHere` IS NOT A DISJUNCT HERE, AND THE REASON IS
+            // ARITHMETIC RATHER THAN JUDGEMENT.
+            //
+            // agreementSuperseded is `agreed && standing && agreed !== standing`.
+            // consentLatched requires `agreed === standing`. They are exact
+            // complements, so `!consentLatched` is already implied whenever
+            // supersession is true, and adding it to this disjunction changes
+            // the outcome in exactly one situation:
+            //
+            //     !consentLatched && readBackMade && callerAgreed && superseded
+            //
+            // -- that is, a turn on which the assistant DID read the details
+            // back and the caller DID say yes to it. It can never add a refusal
+            // on the latch path, because the latch's own key equality is a
+            // stronger form of the same test. Its only reachable effect is to
+            // veto a write the current turn has just authorised, on the
+            // strength of a token recorded for some earlier read-back.
+            //
+            // Measured, on the two calls it cost:
+            //
+            //   CA919b69  the caller heard "I can book a thirty-minute strategy
+            //             call ... at three o'clock ... Shall we go ahead?" and
+            //             said yes. Refused, because a token from the
+            //             CANCELLATION three caller turns earlier was still the
+            //             most recent one recorded.
+            //   CA03558d  the caller agreed to a three-thirty booking, then
+            //             answered a spelling check. Five attempts, all
+            //             refused, zero rows, and "Yes, I have confirmed that
+            //             your appointment is booked."
+            //
+            // The ledger cannot be fresher than the turn in any case: LVX121
+            // measured that `lastAgreement` is written in applyTurn, at
+            // turnComplete, which is AFTER the tool round -- so on the very turn
+            // the caller says yes, the token still points at whatever came
+            // before. A rule that vetoes the present on the strength of that is
+            // guaranteed to be wrong on exactly the turns that matter.
+            //
+            // WHAT STILL STOPS CA8c019c, which is what supersession was for:
+            // consent for one appointment spent on another needs the caller NOT
+            // to have agreed on this turn -- otherwise they have just agreed to
+            // the thing being written. With `callerAgreed` false the gate
+            // refuses on its own second disjunct, and the only way past it is
+            // the latch, which requires the standing read-back to name the slot
+            // and, since this round, to be unspent.
+            //
+            // agreementSuperseded itself stays, and still feeds `probeToken` and
+            // `write_consent_agreement_superseded` at the probe above, so the
+            // rate is still measured after it stops deciding.
+            // -----------------------------------------------------------------
+            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed)) {
               bumpCounter("write_order_would_refuse");
               if (orderRefusals >= WRITE_ORDER_MAX_REFUSALS) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can

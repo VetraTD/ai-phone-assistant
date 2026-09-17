@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+// ---------------------------------------------------------------------------
+// AN INSTRUMENT THAT CANNOT FAIL IS NOT EVIDENCE.
+//
+// tests/liveCorpusReplay.test.js asserts that twenty real write attempts get
+// the outcome they should. A green run is worth nothing unless a broken gate
+// turns it red, and this repository has shipped at least three suites that
+// could not: tests/liveSession.test.js spied the wrong stream and passed on an
+// empty array for a deployment; lib/harness/liveTextSession.js sets none of the
+// fields a consent gate reads, so every gate is dead in the eval driver; and
+// the reverted 5232277's tests passed by rewriting the sentence they were
+// supposed to be testing.
+//
+// So each row below breaks ONE thing and requires the named suites to go red.
+//
+// TWO RULES THIS OBEYS, both of which have cost a round here before:
+//
+//   1. IT ASSERTS THE SABOTAGE LANDED. A `find` string that no longer matches
+//      would leave the source untouched, the suite green, and this script
+//      reporting "green when sabotaged" -- which reads as a broken test and is
+//      actually a broken saboteur. Every patch must match exactly once.
+//   2. IT NEVER USES GIT TO RESTORE. The original text is held in memory and
+//      written back in a finally block, so uncommitted work in the tree is not
+//      at risk. A restore that does not verify is not a restore, so the bytes
+//      are compared afterwards and a mismatch is a hard failure.
+//
+// Usage:  node scripts/corpus/sabotage.mjs [--only <name>]
+// ---------------------------------------------------------------------------
+
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+
+const REPLAY = "tests/liveCorpusReplay.test.js";
+const LATCH = "tests/liveConsentLatch.test.js";
+const SLOTS = "tests/slotMention.test.js";
+const TOOLS = "tests/liveTools.test.js";
+const SESSION = "tests/liveSession.test.js";
+
+const SABOTAGES = [
+  {
+    name: "word-clock",
+    why:
+      "lib/voice/slotMention.js stops generating the word forms 3.8 speaks, which is the state the estate was deployed in. The latch can then never hold on a 3.8 read-back.",
+    file: "lib/voice/slotMention.js",
+    find: "  const hourWord = HOUR_WORD[hour12 % 12];",
+    replace: "  return [...forms]; // SABOTAGE\n  const hourWord = HOUR_WORD[hour12 % 12];",
+    red: [SLOTS, REPLAY],
+  },
+  {
+    name: "supersession-veto",
+    why:
+      "puts `supersededHere` back into the write-order gate's refusal disjunction. This is the exact state that refused five booking attempts on CA03558d and four on CA919b69.",
+    file: "services/tools.js",
+    find: "if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed)) {",
+    replace:
+      "if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed || agreementSuperseded(ctx))) { // SABOTAGE",
+    red: [REPLAY],
+  },
+  {
+    name: "spent-token",
+    why:
+      "lets a token that has already authorised one action authorise the next. On a silent turn that skips the whole gate stack, so a cancellation's consent books the slot it just cancelled.",
+    file: "services/tools.js",
+    find: "          const tokenSpent = Boolean(ctx?.completedActionThisCall);",
+    replace: "          const tokenSpent = false; // SABOTAGE",
+    red: [LATCH],
+  },
+  {
+    name: "spent-latch",
+    why: "the same rule at the consent latch rather than at the silent-turn verdict.",
+    file: "services/tools.js",
+    find: "            const agreementSpent = Boolean(ctx?.completedActionThisCall);",
+    replace: "            const agreementSpent = false; // SABOTAGE",
+    red: [REPLAY],
+  },
+  {
+    name: "blocking-pin",
+    why:
+      "undoes fdd3035's BLOCKING tool pin, which is the one change on this branch with clean before/after evidence from production: zero-text turns 3 -> 0, dead-air p50 4,178 -> 2,529 ms.",
+    file: "lib/voice/live/tools.js",
+    find: '  const raw = String(env.LIVE_TOOL_BEHAVIOR ?? "BLOCKING").trim().toUpperCase();',
+    replace: '  const raw = String(env.LIVE_TOOL_BEHAVIOR ?? "DEFAULT").trim().toUpperCase(); // SABOTAGE',
+    red: [TOOLS],
+  },
+  {
+    name: "call-summary",
+    why:
+      "drops the per-call claim ledger from live_call_summary, the other half of fdd3035. Without it, 'did the claim guard evaluate this turn' has no per-call answer -- which is the question CAb76b13 is still waiting on.",
+    file: "lib/voice/live/index.js",
+    find: "      claim_audit: { ...claimAudit },",
+    replace: "      // SABOTAGE",
+    red: [SESSION],
+  },
+];
+
+const only = process.argv.includes("--only")
+  ? process.argv[process.argv.indexOf("--only") + 1]
+  : null;
+
+function runSuites(files) {
+  const res = spawnSync("npx", ["vitest", "run", ...files], {
+    encoding: "utf8",
+    shell: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // Strip ANSI before matching. vitest colours the numbers, so a pattern
+  // written against the visible text silently misses and reports "?" -- a tally
+  // that cannot be read is the thing this whole script exists to object to.
+  const out = `${res.stdout || ""}${res.stderr || ""}`.replace(/\[[\d;]*m/g, "");
+  const m = out.match(/Tests\s+(\d+)\s+failed/);
+  return { ok: res.status === 0, failed: m ? Number(m[1]) : res.status === 0 ? 0 : null };
+}
+
+console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
+const targets = [...new Set(SABOTAGES.flatMap((s) => s.red))];
+const baseline = runSuites(targets);
+if (!baseline.ok) {
+  console.error("Baseline is RED. Fix the suite before asking whether it can fail.");
+  process.exit(1);
+}
+console.log(`  green: ${targets.join(" ")}\n`);
+
+let bad = 0;
+for (const s of SABOTAGES) {
+  if (only && s.name !== only) continue;
+
+  const original = fs.readFileSync(s.file, "utf8");
+  const hits = original.split(s.find).length - 1;
+  if (hits !== 1) {
+    console.error(`x ${s.name}: its anchor matches ${hits} times in ${s.file}, not once.`);
+    console.error("  The code moved. Fix the anchor -- a sabotage that does not land reports as a broken test.");
+    bad += 1;
+    continue;
+  }
+
+  let result;
+  try {
+    const patched = original.replace(s.find, s.replace);
+    fs.writeFileSync(s.file, patched);
+    // THE ASSERTION THE RULE IS ABOUT: the bytes on disk actually changed.
+    if (fs.readFileSync(s.file, "utf8") === original) {
+      throw new Error("the patch did not change the file");
+    }
+    result = runSuites(s.red);
+  } finally {
+    fs.writeFileSync(s.file, original);
+    if (fs.readFileSync(s.file, "utf8") !== original) {
+      console.error(`FATAL: ${s.file} was not restored. Check it before doing anything else.`);
+      process.exit(2);
+    }
+  }
+
+  if (result.ok) {
+    console.log(`x ${s.name}: STILL GREEN with the fix removed. The suite is not watching this.`);
+    console.log(`    ${s.why}`);
+    bad += 1;
+  } else {
+    console.log(`v ${s.name}: red, ${result.failed ?? "?"} test(s) failed. ${s.red.join(" ")}`);
+  }
+}
+
+console.log("");
+if (bad) {
+  console.error(`${bad} sabotage(s) did not produce a failure. The suite cannot see them.`);
+  process.exit(1);
+}
+console.log("Every sabotage produced a failure, and every file was restored.");

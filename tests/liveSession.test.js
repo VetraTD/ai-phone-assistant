@@ -393,26 +393,74 @@ describe("tool calls", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// THIS BLOCK COLLECTED NOTHING AND PASSED ANYWAY, until 2026-09-17.
+//
+// It spied on `console.log`. lib/logger.js:76 writes to `process.stdout`
+// directly, so the spy never fired, `summaries` stayed empty for the life of
+// the file, and the assertion was `toBeLessThanOrEqual(1)` -- which an
+// permanently empty array satisfies. The test was green whether the session
+// emitted one summary, two, or none at all.
+//
+// Its sibling was no better: the title said "emits one call summary" and the
+// body only checked that the socket had closed.
+//
+// Both now parse the real stdout lines and assert an exact count, which is the
+// difference between an instrument and a decoration. `live_call_summary` is
+// what carries claim_audit, guards and usage, so anything reading those off a
+// green run was reading off this.
+// ---------------------------------------------------------------------------
 describe("teardown", () => {
-  it("emits one call summary and closes the socket", async () => {
-    const { ws } = await boot();
-    ws.deliver({ event: "stop" });
+  /** Capture the structured log lines the session writes while `run` happens. */
+  async function summaryLines(run) {
+    const lines = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      if (typeof chunk === "string" && chunk.includes('"event":"live_call_summary"')) {
+        lines.push(chunk);
+      }
+      return true;
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return lines.flatMap((chunk) =>
+      chunk
+        .split("\n")
+        .filter((l) => l.includes('"event":"live_call_summary"'))
+        .map((l) => JSON.parse(l))
+    );
+  }
 
+  it("emits exactly one call summary, and it carries the ledgers", async () => {
+    const { ws } = await boot();
+    const summaries = await summaryLines(async () => {
+      ws.deliver({ event: "stop" });
+      await new Promise((r) => setTimeout(r, 25));
+    });
+
+    expect(summaries).toHaveLength(1);
     expect(ws.readyState).not.toBe(1);
+    // The three blocks anything downstream reads off a summary. A summary that
+    // lost one of them would still have satisfied the old assertion.
+    expect(summaries[0]).toHaveProperty("claim_audit");
+    expect(summaries[0]).toHaveProperty("guards");
+    expect(summaries[0]).toHaveProperty("turns");
   });
 
   it("does not emit twice when stop is followed by close", async () => {
     // Twilio sends `stop` and the socket then closes. Two summaries for one
     // call would double every number anyone aggregates.
     const { ws } = await boot();
-    const summaries = [];
-    const spy = vi.spyOn(console, "log").mockImplementation((line) => {
-      if (typeof line === "string" && line.includes("live_call_summary")) summaries.push(line);
+    const summaries = await summaryLines(async () => {
+      ws.deliver({ event: "stop" });
+      ws.emit("close");
+      await new Promise((r) => setTimeout(r, 25));
     });
-    ws.deliver({ event: "stop" });
-    ws.emit("close");
-    spy.mockRestore();
 
-    expect(summaries.length).toBeLessThanOrEqual(1);
+    // Exactly one, not "at most one": zero would mean the teardown never ran
+    // and is not the property being asserted.
+    expect(summaries).toHaveLength(1);
   });
 });
