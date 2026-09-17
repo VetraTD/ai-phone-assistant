@@ -13035,6 +13035,9 @@ still carries the cases.
 
 **Status: FIXED, UNVERIFIED — 2026-09-17. Offline only; no severed socket has
 met it yet.** Observed once in four calls on `d57c31f`, `CAdfeb9d`.
+**First headroom reading, CA6df19e98 on 00075-jqc: `media_gap_max_ms` 290 on a
+healthy 180 s call against a 15,000 threshold — 51x margin.** One call is not a
+distribution; the default does not move until several agree.
 
 The media-stream websocket died mid-sentence. No `stop` event, no `close`, no
 `error` — so `finish()` never ran, and with it: no `live_call_summary`, no
@@ -13069,8 +13072,10 @@ simply stop delivering frames.
 
 ## LVX132 — `end_call` fires before the model is ever told to ask "anything else"
 
-**Status: FIXED, UNVERIFIED — 2026-09-17.** Raised by the owner from the calls,
-and measured across ten.
+**Status: VERIFIED — 2026-09-17, call CA6df19e98 on voice-uk-prod-00075-jqc.**
+The first hang-up was refused, the model asked, the caller answered, the second
+was allowed. end_call_refusals.no_ask read 1. Raised by the owner from the
+calls, and measured across ten. Its cost is LVX136.
 
 The owner's observation: after an action completes, it goes straight to "thanks
 for calling, have a great day" and hangs up, without asking whether anything else
@@ -13475,3 +13480,176 @@ costs dead air, not a hung line. LVX131's watchdog now covers the remaining gap.
   already closing. Not reachable deliberately.
 - **`live_exit_held_question`** will fire LESS often now, not more: the ask gate
   catches its motivating call one step earlier. Expected, and not a regression.
+
+---
+
+## CALL, 2026-09-17 14:45 — `CA6df19e98` on `voice-uk-prod-00075-jqc` (`47094fc`)
+
+The first call on the closing-sequence build. **LVX132 did exactly what it was
+built to do**, and the call also produced the first real number for LVX131's
+threshold, a live measurement for LVX134, and two new defects.
+
+### LVX132 — VERIFIED ON A LIVE CALL. Its "done when" is met
+
+```
+14:47:46.663  A: "That is booked for Friday, September 18 at 3:00 PM under Marcus Bell."
+14:47:46.664  live_step_transition             toStep=confirm
+14:47:55.268  end_call            success=FALSE      <- refused, nobody had been asked
+14:48:01.366  A: "You're very welcome. Thank you for calling Digile Media, and I hope
+                  you have a wonderful day.Is there anything else I can assist you
+                  with today?"
+14:48:01.366  live_goodbye_suppressed_by_refusal     <- LVX96 held the line open
+14:48:04.989  caller answers (659 ms of speech)
+14:48:06.848  end_call            success=TRUE       <- latch spent, allowed
+14:48:11.351  live_exit_armed
+14:48:12.946  live_exit_run
+```
+
+`live_call_summary` carries `end_call_refusals: {generic: 0, hesitation: 0,
+no_ask: 1}` — exactly one, which is the latch working. `postcall_verify` read
+`row_without_claim`, `booked_rows: 1`, `sent: 0`, `skipped: ["already_confirmed"]`.
+
+**It needed LVX96 to work, and that is worth keeping.** The refusal itself
+cannot stop the model saying goodbye — the sign-off is pre-written in the same
+response as the tool call — so without `live_goodbye_suppressed_by_refusal` the
+farewell would have armed an exit and hung up anyway, and this fix would have
+been invisible. Two guards from two different rounds, and the second is load
+bearing for the first.
+
+### LVX131 — the threshold's first evidence
+
+`media_gap_max_ms: 290` on a healthy call of 180,187 ms, against
+`media_timeout_ms: 15000`. **Fifty-one times the headroom.**
+
+One call is not a distribution, and the number stays where it is until several
+more calls agree. But it already says the default is nowhere near a live call's
+worst frame gap, which is the direction that matters: the risk being guarded
+against was hanging up on someone.
+
+The watchdog did not fire, correctly. **LVX131 is still FIXED, UNVERIFIED** —
+only a socket that dies without a close frame can verify it, and that cannot be
+provoked from a handset.
+
+### The consent gate, 2 for 2, unchanged by any of this
+
+```
+14:47:29  readback_now=false agreed_now=false  -> REFUSED   (write_order_refused)
+14:47:41  readback_now=true  agreed_now=true
+          token_present=FALSE                 -> WRITTEN first time
+```
+
+The second is the `CAaef5bd` state again: a read-back made and agreed to on the
+turn, with no standing token, which is what the removed supersession disjunct
+used to refuse five times in a row.
+
+---
+
+## LVX136 — the caller now hears the goodbye twice
+
+**Status: OPEN · P2. Caused by LVX132, measured on the first call that used it.**
+
+```
+14:48:01  A: "...Thank you for calling Digile Media, and I hope you have a
+              wonderful day.Is there anything else I can assist you with today?"
+14:48:11  A: "Thank you for calling Digile Media, and I wish you a wonderful day."
+```
+
+`live_repeated_phrase` fired at both 14:47:25 (7 words) and 14:48:11 (8 words),
+`prompted: true` — the repeat cutter noticed and only sent a note.
+
+**The refusal text cannot fix this, and it was never going to.** It says "Do NOT
+say goodbye again", and the model complied in the only sense available to it: it
+did not add a THIRD one. `end_call`'s declaration requires the sign-off to be
+written in the same response as the call, so the farewell is composed before any
+gate runs — the same mechanism LVX76 recorded as unfixable by refusal text, and
+visible here as the missing space in "wonderful day.Is there anything else",
+exactly the splice LVX96 documented on `e0a9f6`.
+
+Three refusal texts have already failed to change model behaviour in this file.
+A fourth is not the answer.
+
+**The trade is still right.** Before LVX132 this call hangs up at 14:47:55
+without ever asking, which is a lost rebooking opportunity; after it the caller
+is asked and answers. Hearing a goodbye twice is a smaller cost than being hung
+up on. But it IS a cost, it is caller-perceptible, and it should be recorded as
+one rather than discovered later as a complaint.
+
+**Do not reach for the audio cutter.** The machinery exists — `inspectRepeat`
+runs per fragment before words reach `turnReplyText`, and `clearAudio` tapers —
+but LVX21 is what happened the last time something cut a caller's audio on a
+heuristic, and the thing it would be cutting here is a farewell the model was
+told to write. Count it first: `live_repeated_phrase` already fires on it, so
+the rate across the next several calls is readable without building anything.
+
+**Done when:** the rate is known across a handful of calls, and the decision to
+act or not is made on that rather than on this one.
+
+---
+
+## LVX137 — a time the caller asked for was refused without being checked
+
+**Status: OPEN · P1. `CA6df19e98`, 2026-09-17. Strongly indicated, not proven.**
+
+```
+14:46:51  check_appointment_availability  success=true    <- the ONLY one all call
+14:47:03  A: "We have several times available tomorrow ... such as 9:00 AM,
+              1:00 PM, or 4:30 PM. Which of those works best for you?"
+14:47:14  A: "Friday, September 18th at 1:00 PM is available. May I confirm your
+              details ...?"
+14:47:25  A: "I'm sorry, 2:00 PM is not available. We do have 1:00 PM or 4:30 PM
+              open tomorrow ..."
+14:47:37  A: "Yes, 3:00 PM is available. Shall I go ahead and book ...?"
+14:47:41  book_appointment  success=true   slot_listed_only=true
+```
+
+Guard counters for the call: `verified_slots: 16`, `availability_day_listed: 19`,
+`point_verified_slots: 0`, `availability_point_open: 0`, `read_memo_hit: 0`,
+`availability_allowed: 2`, `availability_blocked: 0`.
+
+**One availability call, sixteen verified slots, and every later answer about a
+specific time came out of the model's own context.** `read_memo_hit: 0` says it
+did not even re-read the memo it already had. The write guard allowed 3:00 PM,
+so 3:00 PM was in the verified set — and a sixteen-slot set across a 09:00-18:00
+day almost certainly contained 2:00 PM as well.
+
+**Why this is not provable from the record, and what would make it so.** The set
+the tool returned is not logged — deliberately, it is diary content. So "2:00 PM
+was in the set and the assistant said otherwise" is an inference from the shape
+of the set, not a reading. What would settle it is the availability tool logging
+the COUNT and the SPAN of what it returned (not the times themselves), which is
+config-shaped rather than caller-shaped and carries nothing a caller said.
+
+**Why it matters more than a listing quibble.** This is the mirror of the
+fabrication the write gates were built to stop. Those gates stop the assistant
+claiming a booking that does not exist; nothing stops it claiming a slot is
+TAKEN when it is free. The caller is pushed off their first choice and there is
+no row, no refusal and no counter anywhere to show it happened. Every instrument
+in this file watches writes.
+
+Related: the `bookingWasOwed` note and LVX's standing listed-vs-point-checked
+gap. This is that gap pointed the other way, and it is the direction nobody has
+been watching.
+
+---
+
+## LVX134 — measured on this build
+
+The interrogation, timed end to end on `CA6df19e98`:
+
+```
+14:45:21  greeting
+14:45:34  "may I please have your name?"        <- qualification starts
+14:46:47  "What day and time work best for you?" <- first mention of a time
+14:47:41  booked
+14:48:12  call ends
+```
+
+**Seventy-three seconds of questions before a time was offered, on a call of
+180 seconds. Forty per cent of the call.** Name, spell it, phone number,
+company, industry, what you sell, main marketing challenge — the exact list, in
+that order, unchanged.
+
+The diagnosis stands: four of those seven are the tenant's own
+`custom_instructions` and can be cut for this tenant alone with no code change
+and no deploy. This entry is the measurement on the current build, not a new
+finding.
