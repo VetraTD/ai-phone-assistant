@@ -13128,7 +13128,12 @@ booking attributable to this alone.
 
 ## LVX133 — the assistant answered an English caller in Spanish
 
-**Status: DIAGNOSED, CLOSED — 2026-09-17. Nothing of ours caused it.**
+**Status: DIAGNOSED, CLOSED on its own terms — but SEEN AGAIN. 2026-09-17.**
+A second language incident followed on `CAfcd28789` the same evening (French,
+reported by the owner, undiagnosable — see LVX138 at the end of this file). The
+closure below still holds: no prompt of ours emits a language instruction for
+this tenant. What has changed is that this is recurring rather than a one-off,
+and nothing we own can see it happen.
 `languages_spoken` for this tenant reads `["en"]`, read from the database via
 `vetra-migrate-uk-prod` once its image was current. `services/gemini.js:941-946`
 emits its language sentence only when the array has MORE than one entry, and its
@@ -13897,3 +13902,119 @@ That is the same gap `end_call_refusals` was added to `live_call_summary` to
 close, and the same one LVX96 was found by hand-reading a call because of. The
 fix is two fields beside it. Not done here: it is a change to the record's shape
 and belongs with the next code round rather than in a docs commit.
+
+---
+
+## LVX138 — every caller is told the call is recorded, and no call is recorded
+
+**Status: OPEN · P2, owner decision taken 2026-09-17: note it, change nothing.**
+
+The greeting on every call says:
+
+> "Thanks for calling Digile Media. You're through to our AI receptionist —
+> **calls are recorded for quality.** How can I help you today?"
+
+Queried directly against the Twilio API for `CAfcd28789`:
+
+```
+GET /Calls/CAfcd28789.../Recordings.json   ->  200, recordings: 0
+GET /Calls/CAfcd28789....json              ->  200, status completed, duration 146
+```
+
+**Zero recordings.** The Live path hands off with `<Connect><Stream>` and never
+issues a `<Record>` verb, so no audio is ever stored. The statement is made to
+every caller on every call and is not true.
+
+Two separate costs, and the second is the one that bit today:
+
+1. A false statement to callers. Claiming a recording exists when it does not is
+   the less harmful direction of that error, but it is still untrue, and it is
+   said to everyone.
+2. **It makes an entire class of complaint undiagnosable.** The owner reported
+   the assistant speaking French on `CAfcd28789`. The one artefact that could
+   confirm or refute that is the recording the greeting promises.
+
+**Owner's decision, 2026-09-17: leave it.** Recording caller audio is a larger
+data-protection step than logging is, it interacts with the deliberately clean
+HIPAA posture, and a clinic tenant would put PHI in the audio. Recorded here so
+the discrepancy is a known position rather than an oversight.
+
+---
+
+## The French report on `CAfcd28789`, and why it stays open
+
+**Status: OPEN, UNDIAGNOSABLE with current instrumentation.**
+
+The owner reports the assistant began speaking French. What the record can and
+cannot say:
+
+**What is solid:**
+
+- `live_caller_turn_non_english` fired once, at 22:21:05, on a **55-character**
+  caller turn. That check reads `turnUserText` in `auditTurn` and does not
+  depend on the utterance bookkeeping, so it is trustworthy. The model
+  transcribed the caller as non-English — and `looksNonEnglish` covers French,
+  German, Portuguese and Italian while deliberately **excluding Spanish**, so a
+  French-looking transcription is exactly what would trip it.
+- **Two barge-ins** on this call (`interrupted_count: 2`, `barges: 2`) against
+  **zero** on `CA6df19e98` earlier the same day. Consistent with a caller
+  reacting to something unexpected.
+
+**What contradicts it:** every one of the eleven `live_debug_assistant_turn`
+lines is ordinary English, and there is no non-ASCII byte anywhere in the call's
+payloads. On `CAd48d7b` — the Spanish call — the output transcription **did**
+capture the foreign speech verbatim ("Sí, hablo inglés; puedo cambiar de
+idioma..."), so the instrument is demonstrably capable of recording it.
+
+So either the model spoke French and its own output transcription failed to
+reflect it — which would be new, and would mean
+`live_debug_assistant_turn` cannot be trusted as a record of what a caller
+heard — or something else happened. **Nothing available can distinguish those,
+and LVX138 is why.**
+
+This is the **second language incident in seventeen calls**. LVX133 remains
+correctly closed on its own terms: `languages_spoken` is `["en"]`, so no prompt
+of ours emits any language instruction. But "the model does this occasionally
+and we cannot see it when it does" is a different and worse position than a
+one-off.
+
+---
+
+## A correction, and the comment that prevented a wrong finding
+
+While investigating the above I read the per-utterance `transcript_ms` values
+and found them climbing across both calls — 1593, 1536, 1994, 1557, 1559, 1612,
+4316, 11276, 9574, 13797, **16412** on `CAfcd28789`, and up to **27275** on
+`CA6df19e98`. Read naively that is a transcription pipeline falling sixteen to
+twenty-seven seconds behind, which would have explained the repeated questions,
+the lost thread and the language flip in one stroke.
+
+**It is not real, and this file had already written down why.** The comment on
+`noteUtteranceTranscript` in `lib/voice/live/index.js` records the identical
+pattern from 2026-09-04 — "`transcript_ms` then read 14550, 27748, 43776 and
+29624 against a measured `input_transcript_lag_ms_p50` of 412" — and names it as
+transcripts shifting onto the wrong utterance after one utterance never received
+its own.
+
+The authoritative metric settles it:
+
+```
+CA6df19e98   input_transcript_lag_ms_p50  716
+CAfcd28789   input_transcript_lag_ms_p50  713
+```
+
+Normal, and matching the long-known ~702 ms figure on this path. **There is no
+lag problem.** No `live_utterance_late_transcript` fired on either call.
+
+**The residual defect is in the instrument, and it is narrow.** The 2026-09-04
+fix excludes an utterance that forwarded nothing from absorbing a transcript,
+which is correct and insufficient: an utterance that forwarded audio and still
+receives no transcript shifts every later attribution by one, and the error
+accumulates monotonically for the rest of the call. That is precisely the shape
+of the numbers above — flat around 1.5 s for six utterances, then climbing from
+utterance 7 onward.
+
+**How to apply:** `transcript_ms` on a single utterance is not evidence of lag.
+Read `input_transcript_lag_ms_p50` from `live_call_summary`, which is computed
+independently, and treat a monotonically climbing `transcript_ms` as a
+bookkeeping shift until that p50 says otherwise.
