@@ -35,6 +35,7 @@ const LATCH = "tests/liveConsentLatch.test.js";
 const SLOTS = "tests/slotMention.test.js";
 const TOOLS = "tests/liveTools.test.js";
 const SESSION = "tests/liveSession.test.js";
+const HAMMER = "tests/liveWriteHammering.test.js";
 
 const SABOTAGES = [
   {
@@ -72,6 +73,24 @@ const SABOTAGES = [
     find: "            const agreementSpent = Boolean(ctx?.completedActionThisCall);",
     replace: "            const agreementSpent = false; // SABOTAGE",
     red: [REPLAY],
+  },
+  {
+    name: "hammer-brake",
+    why:
+      "removes the refusal echo, so an identical refused write is re-gated as many times as the model asks. CA03558d did it five times in 2.3 seconds.",
+    file: "lib/voice/live/tools.js",
+    find: "      const echo = isAction ? refusalEcho.get(echoKey(fc, state)) : null;",
+    replace: "      const echo = null; // SABOTAGE",
+    red: [HAMMER],
+  },
+  {
+    name: "hammer-brake-too-wide",
+    why:
+      "keys the echo on the tool and its arguments ALONE -- the obvious brake, and the one that loses bookings. A model that is refused, reads the details back and retries would get the stale refusal instead of the write it has now earned.",
+    file: "lib/voice/live/tools.js",
+    find: "      Number(state?.callerTurnCount) || 0,\n      textFingerprint(state?.lastCallerText ?? \"\"),\n      textFingerprint(state?.lastReplyText ?? \"\"),",
+    replace: "      // SABOTAGE",
+    red: [HAMMER],
   },
   {
     name: "blocking-pin",
