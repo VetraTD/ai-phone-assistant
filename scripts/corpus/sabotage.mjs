@@ -38,6 +38,8 @@ const SESSION = "tests/liveSession.test.js";
 const HAMMER = "tests/liveWriteHammering.test.js";
 const VERIFY = "tests/postCallVerify.test.js";
 const SMS = "tests/notifications.sms.test.js";
+const GOODBYE = "tests/liveGoodbyeExit.test.js";
+const EXITCLOSE = "tests/liveExitClose.test.js";
 
 const SABOTAGES = [
   {
@@ -125,6 +127,50 @@ const SABOTAGES = [
     // written down twice, and it was caught here by the script's own rule
     // rather than by anyone noticing.
     red: [SMS],
+  },
+  {
+    name: "farewell-adjective",
+    why:
+      "narrows signOffRe back to (great|good|lovely), the state that left CAaef5bd82 on an open line for fourteen seconds. Four of the six farewells in the corpus say 'wonderful'.",
+    file: "lib/voice/strings.js",
+    // THE WHOLE REGEX, restored to its pre-2026-09-17 text. The first version
+    // of this row narrowed only the second alternative and the suite stayed
+    // GREEN -- correctly, because every farewell in the corpus says "thanks for
+    // calling" and so matches the FIRST alternative, which the fix also
+    // widened. A sabotage that does not reproduce the broken state proves
+    // nothing, and the script's own rule is what surfaced it.
+    find:
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
+    replace:
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|great\\s+day|good\\s+day|great\\s+weekend|lovely\\s+day|take\\s+care)\\b|\\bhave\\s+a\\s+(?:great|good|lovely)\\s+(?:day|weekend|evening)\\b/i, // SABOTAGE",
+    red: [GOODBYE],
+  },
+  {
+    name: "question-before-hangup",
+    why:
+      "arms the exit whatever the closing turn said. CA2556d43d asked 'Is there anything else I can help you with today?' and dropped the line 1.6 seconds later.",
+    file: "lib/voice/live/index.js",
+    find: "        const askedTheCaller = endCallArmed && !exitAfterTurn && /\\?['\")\\]\\s]*$/.test(replyAtTurnEnd);",
+    replace: "        const askedTheCaller = false; // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "question-guard-reads-cleared-text",
+    why:
+      "reads turnReplyText AFTER applyTurn() has cleared it, which is how the guard was written the first time: present, plausible, and silently never firing. The most-repeated defect in this file.",
+    file: "lib/voice/live/index.js",
+    find: "      const replyAtTurnEnd = String(turnReplyText || \"\").trim();\n      applyTurn();",
+    replace: "      applyTurn();\n      const replyAtTurnEnd = String(turnReplyText || \"\").trim(); // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "zero-text-nudge-while-exiting",
+    why:
+      "lets the zero-text nudge ask the model to speak on a turn that is already closing. On CAaef5bd82 the nudge and the exit landed 1 ms apart and the caller heard a sentence start and get cut off.",
+    file: "lib/voice/live/index.js",
+    find: "      if (endCallArmed || pendingExit || exitAfterTurn) {\n        bumpCounter(\"live_zero_text_note_suppressed_exiting\");",
+    replace: "      if (false) { // SABOTAGE\n        bumpCounter(\"live_zero_text_note_suppressed_exiting\");",
+    red: [EXITCLOSE],
   },
   {
     name: "call-summary",

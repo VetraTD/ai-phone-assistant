@@ -144,6 +144,63 @@ describe("a spoken goodbye arms the hang-up", () => {
     expect(c().live_goodbye_armed_exit).toBe(1);
   });
 
+  // -------------------------------------------------------------------------
+  // CAaef5bd82, 2026-09-17. VERBATIM, and it is why this test exists.
+  //
+  // The model booked the appointment, said its goodbye, and did NOT call
+  // end_call -- so this detector was the only thing that could have closed the
+  // line, and it did not fire. The caller sat on an open line for eight seconds
+  // until the silence ladder nudged, heard "I'm still here whenever you're
+  // ready", and waited another six.
+  //
+  // The whole cause is one word. signOffRe's bare-farewell alternative reads
+  // `have a (great|good|lovely) (day|weekend|evening)`, and the model said
+  // "have a WONDERFUL day".
+  //
+  // Scored across every farewell in call-corpus/, which is the reason this is a
+  // fix rather than a guess: FOUR of the six say "wonderful" and were missed;
+  // the two that match say "great". The earlier calls hid it because the model
+  // also called end_call on those, so something else closed the line.
+  // -------------------------------------------------------------------------
+  const REAL_FAREWELLS = [
+    "That's all set — I've booked your free strategy call for Friday, September 18th at 12:45 PM. Thanks for calling Digile Media, and have a wonderful day.",
+    "I have cancelled your existing appointment on Friday, September eighteenth at four thirty PM. Thanks for calling Digile Media, and have a wonderful day.",
+    "Thanks for calling Digile Media, and have a wonderful day.",
+    "Thanks again for calling Digile Media, Marcus. Have a great day.",
+  ];
+
+  it.each(REAL_FAREWELLS)("arms on a farewell the model actually said: %s", async (text) => {
+    const s = await boot();
+    await s.say(text);
+
+    expect(c().live_goodbye_armed_exit).toBe(1);
+  });
+
+  // Every farewell in the corpus says "thanks for calling", so all four above
+  // match on the FIRST alternative and the second one is untested by real data.
+  // These cover it. Found by the sabotage matrix: narrowing only the second
+  // alternative left the suite green, which meant half the fix had no test.
+  it.each([
+    "Perfect. Have a wonderful afternoon.",
+    "All sorted — have a fantastic day!",
+    "Have a lovely weekend.",
+  ])("arms on a bare farewell with no 'thanks for calling': %s", async (text) => {
+    const s = await boot();
+    await s.say(text);
+
+    expect(c().live_goodbye_armed_exit).toBe(1);
+  });
+
+  it("does not arm on a farewell-shaped phrase in the middle of a sentence", async () => {
+    // The anchor earning its keep. An open adjective with no end-anchor would
+    // read this as a sign-off and hang up on someone mid-booking.
+    const s = await boot();
+    await s.say("I'll have a full day free on Tuesday if that suits you better?");
+
+    expect(c().live_goodbye_armed_exit).toBe(0);
+    expect(c().live_goodbye_checked).toBeGreaterThan(0);
+  });
+
   it("does not arm on an ordinary turn", async () => {
     const s = await boot();
     await s.say("Monday the 7th at 4:30 PM works. What's your full name?");
