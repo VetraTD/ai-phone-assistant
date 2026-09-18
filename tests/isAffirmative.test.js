@@ -126,3 +126,46 @@ describe("isAffirmative — turns that must never read as consent", () => {
     expect(isAffirmative(42)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// "YEAH, NO WORRIES." CAb4427e, 2026-09-18, VERBATIM.
+//
+//   00:42:47  A: "Shall I reschedule your appointment to Monday, September
+//                 twenty-first at eleven-thirty AM?"
+//   00:42:51  caller: "Yeah, no worries."
+//             probe: readback_now=true  agreed_now=FALSE  -> REFUSED
+//
+// The sentence opens with "Yeah" and the withdrawal check vetoed it on the
+// bare word "no", which is sitting inside the agreement idiom "no worries".
+// "no problem" is the same shape and appears in the same position.
+//
+// This is a DEFECT, not the detector being cautious: there is no reading of
+// "Yeah, no worries" in which the caller has withdrawn anything. It is the one
+// case in the corpus where a caller said yes in plain English and the gate
+// refused the write anyway.
+//
+// The withdrawal words themselves are NOT relaxed. "Yeah, but actually can we
+// do Friday" still reads false, which is the case NEGATION_RE exists for.
+// ---------------------------------------------------------------------------
+describe("an agreement idiom that happens to contain 'no'", () => {
+  it.each([
+    ["Yeah, no worries."],
+    ["Yeah, no worries"],
+    ["No worries, go ahead."],
+    ["Yes, no problem."],
+    ["Sure, no problem at all."],
+    ["Yep, no probs."],
+  ])("reads %j as agreement", (text) => {
+    expect(isAffirmative(text)).toBe(true);
+  });
+
+  it.each([
+    ["Yeah, but actually can we do Friday instead?"],
+    ["Yes, no — sorry, I meant Tuesday."],
+    ["No."],
+    ["Yeah, hold on."],
+    ["Yes, but change it to two."],
+  ])("still withdraws on %j", (text) => {
+    expect(isAffirmative(text)).toBe(false);
+  });
+});

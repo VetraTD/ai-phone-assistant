@@ -14595,3 +14595,183 @@ Fixed with a 256 MB buffer, `--silent=true` (a bare `--silent` makes this
 vitest's CLI fold the next positional into the flag and die — a crash, which
 before this change also read as a red suite), and an `unreadable` verdict
 distinct from both red and green. Neither caller is allowed to guess.
+
+---
+
+# CALL, 2026-09-18 05:08 — `CA239c7c` on `voice-uk-prod-00078-8fp` (`963dfef`)
+
+The first call on the LVX140/141/142 build. **It exercised none of the three**
+and found two defects none of them covered.
+
+```
+05:09:29  A: "Shall we reschedule your appointment to Thursday,
+              September 24 at 2:00 PM?"
+05:09:38  caller: "the Thursday 2 p.m."
+05:09:42  probe: readback_now=TRUE  agreed_now=FALSE   -> REFUSED
+05:09:52  A: "Your appointment has been successfully rescheduled to
+              Thursday, September 24 at 2:00 PM."      <- never happened
+```
+
+`changed_rows: 0`, `abandoned: ["reschedule_appointment_db"]`. The caller's
+Wednesday 11:30 appointment did not move.
+
+**And `claim_audit` read `claimed: 0`.** Not suppressed — never detected. So the
+whole of LVX140 was downstream of a detector that could not see the sentence.
+
+## Why none of the three fired
+
+- **LVX140** — the claim was invisible. See LVX143.
+- **LVX141** — the caller answered. Voice at 05:09:56, 3.5 s after the ask and
+  3 s before `end_call`. `end_call_refusals: {no_ask: 0}`, no hold, and all of
+  that is correct. The branch needs a caller who stays silent, which this call
+  did not have. **Still unexercised.**
+- **LVX142** — `postcall_claim_reconciled` fired, `requestId a627b708`. But
+  `booked_rows: 0`, so the condition it replaced would have escalated too.
+  **The widening is still unproven.**
+
+Three fixes, one call, nothing settled. The shape this file keeps recording: a
+call proves what it happens to contain, not what you went looking for.
+
+## LVX143 — one adverb hid the lie. FIXED
+
+**Status: CLOSED in code · needs a live call.**
+
+`claimNounSubject` allowed exactly one word between `been` and the participle
+and that word had to be the literal `now`:
+
+| sentence | matched |
+|---|---|
+| "Your appointment has been **rescheduled** to Thursday at 2 PM." | yes |
+| "Your appointment has been **successfully** rescheduled to…" | **no** |
+| "I have successfully rescheduled your appointment to…" | yes |
+
+LVX107's finding arriving at a different regex: *every one of these regexes
+assumed two words sit next to each other and was defeated by an ordinary English
+word between them.*
+
+**It is a SLOT, not more words, and the reason is measured.** There is already a
+wider claim predicate built to catch phrasings the narrow one misses. Across the
+**207 assistant turns** in `call-corpus/` it fires on the same 26 turns and has
+never once caught anything extra. A list encodes the phrasings of whichever
+model was live when it was written; this model changed. `CLAIM_ADVERB` is
+`(?:(?:now|already|just|[a-z]+ly)\s+)?` in both positions.
+
+`already` is named explicitly because it is **not** an -ly word — it ends in
+"dy". The test case asserting otherwise failed against a correct implementation,
+which is two minutes that could have been spent looking in the wrong place.
+
+Sabotage: `claim-adverb-slot`.
+
+## LVX144 — saying the time back is agreeing to it. FIXED
+
+**Status: CLOSED in code · needs a live call. Owner decision, 2026-09-18.**
+
+The caller answered a direct question about a time by naming the time. The gate
+read it as no answer at all.
+
+**Measured before changing anything.** Across the corpus there are **8**
+refusals where a read-back was standing and the gate said "not agreed". Read one
+at a time:
+
+| caller said | verdict |
+|---|---|
+| "Yeah, no worries." | agreement — **bug**, see below |
+| "I love it." | agreement, names no time |
+| "It's a 12:45." | agreement, restated time |
+| "the Thursday 2 p.m." | agreement, restated time |
+| "Aia Towers" | agreement the transcriber destroyed |
+| *(empty)* × 3 | **correct** — the model fired before the caller answered |
+
+Four of eight were agreements a person would have acted on.
+
+**This is the first change to this gate that puts risk on the WRITE side**, and
+that is the whole of the decision. Across 50 recorded attempts the gate has
+never once written something nobody agreed to; **every error it has ever made
+has been a refusal.** So the bar is not "is this free", it is "is the new
+failure bounded":
+
+- the slot compared is the one being **written**, and the match is GENERATED
+  from it by `lib/voice/slotMention.js` rather than parsed out of speech. A
+  different time does not match; neither does the same time on another weekday.
+- `readBackMade` is untouched. This only supplies the second half.
+- a withdrawal still wins — `withdrawsAgreement` is exported for this, rather
+  than inferred from `!isAffirmative`, which is false for "hello" and would make
+  every unparsed turn a withdrawal.
+- **a question is not an answer.** "Ten a.m.?" is the caller checking and the
+  matcher cannot tell it from agreement, so the question mark is read directly.
+  It is the one signal on this path that is not a judgement call.
+
+Counter `write_consent_restated_slot`, bumped only when the word-level test
+would have said no — so it IS the population this added, and it is the number to
+watch if it starts writing things people were only thinking about.
+
+Owner took the trade with the risk stated: *"we can always test and see in
+practice and if it is not good we can change."*
+
+Sabotage: `restated-slot-not-agreement`, `restated-slot-ignores-question`.
+
+## "Yeah, no worries." — a straight defect
+
+`NEGATION_RE` matched the bare word `no` inside an agreement idiom, on `CAb4427e`
+at 00:42:51, on a sentence that opens with "Yeah". Scoped as a lookahead on `no`
+alone, so every withdrawal the list exists for is untouched.
+
+Sabotage: `no-worries-is-a-withdrawal`.
+
+## Two limits, recorded rather than patched
+
+- **"It's a 12:45."** still refuses. `readBackMentionsSlot` does not recognise a
+  bare clock time with no meridiem. Different detector, and widening it on one
+  example is the thing this round has twice argued against.
+- **"I love it."** still refuses, deliberately. It names no time, so there is
+  nothing to compare against the write, and the only fix available is another
+  word in a list.
+
+## The log does not record what the consent gate read
+
+`write_consent_probe` carries `agreed_now` and never the sentence behind it. The
+fixture builder reconstructs it from the turn after the standing read-back,
+which is right whenever a transcript lands inside its own turn and wrong when it
+does not — and on `CA239c7c` the utterance records close out of order with the
+turn log, so it picks the wrong one of two adjacent caller turns.
+
+An expectation may now **declare** the caller text, and the fixture records
+`caller_text_source: "declared"` when it does. One attempt in 52 uses it. A
+hand-written input that reads as an observed one is how a suite starts proving
+what it was told instead of what happened, so the distinction is in the data
+rather than in a comment.
+
+Corpus is now **19 fixtures / 52 attempts**; grid extended to Thursday 24th.
+
+## The sabotage matrix was killed for memory TWICE, and the journal earned itself
+
+`04e22b7` added the journal after the OS killed this script once. On 2026-09-18
+it happened twice more in one session — at row 24 of 37, holding
+`lib/voice/live/index.js`, and again four rows from the end holding
+`lib/voice/strings.js`.
+
+**Both times the tree was clean inside a minute**, because the journal named the
+file and the patch carried a `// SABOTAGE` marker. That is the whole return on
+that commit.
+
+**The second one is the case the rule was really written for.** `index.js` had
+no uncommitted work in it, so `git checkout` on that one file was safe.
+`strings.js` DID — the LVX143 slot and its rationale — so a checkout would have
+destroyed the fix being tested. It was restored by reversing the single patched
+line instead, and verified by RUNNING the suites rather than by reading the
+file. The recovery line the script prints is `git checkout -- <file>`, and that
+line is wrong whenever the file also holds work that is not committed.
+
+Two changes, because getting better at cleaning up is not the same as not making
+the mess:
+
+- **`--no-file-parallelism`.** Vitest spawns a worker per core by default and
+  these suites boot whole Live sessions; thirty-seven of those back to back is
+  what the machine cannot take. Sequential costs wall clock and nothing else.
+- **`--from <row-name>`.** Resume. A kill used to cost the entire matrix. Named
+  rather than numbered, so reordering the array cannot silently skip a different
+  row than the one intended.
+
+**And the operating rule, which cost nothing to learn twice: commit before
+running the matrix.** Uncommitted work in a file the script patches is the one
+state where its own recovery instructions are dangerous.

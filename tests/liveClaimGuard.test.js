@@ -752,6 +752,78 @@ describe("LVX94 — phrasings the claim detector once missed", () => {
 });
 
 // ---------------------------------------------------------------------------
+// LVX143. ONE ADVERB IS ENOUGH TO HIDE A LIE.
+//
+// CA239c7cd2, production, 2026-09-18, on the build that shipped LVX140:
+//
+//   05:09:42  reschedule_appointment_db -> REFUSED
+//   05:09:52  A: "Your appointment has been successfully rescheduled to
+//                 Thursday, September 24 at 2:00 PM."
+//
+// changed_rows: 0. The caller was told their appointment had moved and it had
+// not. claim_audit read `claimed: 0` -- the sentence was never DETECTED, so
+// none of LVX140's work could reach it.
+//
+// claimNounSubject allowed exactly one word between "been" and the participle
+// and that word had to be the literal "now". "has been rescheduled" matched;
+// "has been SUCCESSFULLY rescheduled" did not. That is LVX107's finding
+// arriving at a different regex: "every one of these regexes assumed two words
+// sit next to each other and was defeated by an ordinary English word between
+// them."
+//
+// WHY THIS IS NOT A LONGER WORD LIST. There is already a second, wider claim
+// predicate built for exactly this purpose, and measured across the 207
+// assistant turns in call-corpus/ it fires on the same 26 turns as the narrow
+// one -- it has never once caught anything extra. A list aimed at last month's
+// phrasings does not catch this month's. An adverb SLOT does, whichever adverb
+// the model reaches for.
+//
+// The slot is deliberately restricted to -ly adverbs. The participle list is
+// what makes this a claim at all, so the gap cannot let an unrelated sentence
+// through; and "your appointment has been carefully rescheduled" is still a
+// claim that an appointment was rescheduled.
+// ---------------------------------------------------------------------------
+describe("LVX143 — an adverb between 'been' and the verb", () => {
+  const CLAIMS = [
+    "Your appointment has been successfully rescheduled to Thursday, September 24 at 2:00 PM.",
+    "Your appointment has been successfully booked for Thursday at two.",
+    "That appointment has already been cancelled for you.",
+    "Your booking has now been successfully confirmed.",
+    "Your appointment is successfully booked for Thursday.",
+  ];
+
+  for (const line of CLAIMS) {
+    it(`counts: ${line.slice(0, 52)}`, async () => {
+      clearStats();
+      const s = await boot();
+      s.say(line);
+      s.endTurn();
+      await s.settle();
+      expect(claims()).toBe(1);
+    });
+  }
+
+  // THE SLOT DOES NOT OPEN THE PREDICATE UP. These name no completed action,
+  // and an adverb does not make them one.
+  const NOT_CLAIMS = [
+    "Your appointment can usually be rescheduled up to a day before.",
+    "Your appointment has not been rescheduled yet.",
+    "Would you like your appointment to be rescheduled to Thursday?",
+  ];
+
+  for (const line of NOT_CLAIMS) {
+    it(`stays silent on: ${line.slice(0, 48)}`, async () => {
+      clearStats();
+      const s = await boot();
+      s.say(line);
+      s.endTurn();
+      await s.settle();
+      expect(claims()).toBe(0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // THE CHANNEL, 2026-09-16. The note was right and the way it was delivered was
 // the defect.
 //

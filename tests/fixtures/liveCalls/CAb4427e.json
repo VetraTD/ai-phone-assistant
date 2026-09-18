@@ -184,8 +184,8 @@
       ],
       "target_from": "Shall I reschedule your appointment to Monday, September twenty-first at eleven-thirty AM?",
       "target_derived": true,
-      "caller_text": "Yeah, no worries.",
-      "caller_text_source": "logged"
+      "caller_text": "Let me think about that.",
+      "caller_text_source": "substituted"
     },
     {
       "at": "2026-09-18T00:43:06.216Z",

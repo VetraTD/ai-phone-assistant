@@ -26,6 +26,7 @@ import {
   isHesitationOnly,
   isUnusableTranscript,
   isAffirmative,
+  withdrawsAgreement,
   textFingerprint,
   asksMoreThanOneThing,
 } from "../lib/transcriptUtils.js";
@@ -1154,7 +1155,62 @@ export async function executeToolCall(fc, ctx) {
             // appointment cannot match. Do not reintroduce a window before that.
             // -----------------------------------------------------------------
             const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
-            const callerAgreed = isAffirmative(lastCallerText);
+
+            // -----------------------------------------------------------------
+            // LVX144. SAYING THE TIME BACK IS AGREEING TO IT.
+            //
+            // CA239c7cd2, 2026-09-18:
+            //
+            //   05:09:29  A: "Shall we reschedule your appointment to Thursday,
+            //                 September 24 at 2:00 PM?"
+            //   05:09:38  caller: "the Thursday 2 p.m."
+            //   05:09:42  readback_now=TRUE  agreed_now=FALSE  -> REFUSED
+            //
+            // changed_rows: 0. The caller answered a direct question the way
+            // people answer questions about times -- by naming the time -- and
+            // the gate read it as no answer at all. Four of the eight refusals
+            // in the corpus that had a read-back standing were agreements a
+            // person would have acted on.
+            //
+            // THIS IS THE FIRST CHANGE TO THIS GATE THAT PUTS RISK ON THE WRITE
+            // SIDE, and that is why each clause is here rather than implied.
+            // Across 50 recorded attempts the gate has never once written
+            // something nobody agreed to; every error has been a refusal. So the
+            // question is not whether this is free, it is whether the new
+            // failure is bounded:
+            //
+            //   - the slot compared is the one being WRITTEN, and the match is
+            //     GENERATED from it by lib/voice/slotMention.js rather than
+            //     parsed out of speech. A different time does not match, and
+            //     neither does the same time on a different weekday.
+            //   - `readBackMade` is untouched. This only ever supplies the
+            //     second half of the conjunction below.
+            //   - a withdrawal still wins, which is why withdrawsAgreement is
+            //     exported rather than inferred from !isAffirmative: "no, ten
+            //     a.m. is no good" names the slot and is not consent.
+            //   - A QUESTION IS NOT AN ANSWER. "Ten a.m.?" is the caller
+            //     checking, and the slot matcher cannot tell it from agreement.
+            //     The question mark is read directly because it is the one
+            //     signal on this path that is not a judgement call.
+            //
+            // The trade was put to the owner with the risk stated and taken on
+            // 2026-09-18: "we can always test and see in practice and if it is
+            // not good we can change". If it turns out to write things people
+            // were only thinking about, this disjunct is the thing to remove.
+            // -----------------------------------------------------------------
+            const writeSlot =
+              fc.args?.scheduled_at ?? fc.args?.new_scheduled_at ?? fc.args?.requested_at ?? null;
+            const callerRestatedSlot = Boolean(
+              writeSlot &&
+                lastCallerText &&
+                !withdrawsAgreement(lastCallerText) &&
+                !/\?\s*$/.test(String(lastCallerText).trim()) &&
+                readBackMentionsSlot(lastCallerText, writeSlot)
+            );
+            if (callerRestatedSlot && !isAffirmative(lastCallerText)) {
+              bumpCounter("write_consent_restated_slot");
+            }
+            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot;
 
             // -----------------------------------------------------------------
             // THE CONSENT LATCH. CAf1d6447d34, 2026-09-13.
@@ -1215,8 +1271,10 @@ export async function executeToolCall(fc, ctx) {
             // reading it -- so `latchSlot` was null on every reschedule, which
             // made `latchSlotAgreed` false, which made the latch structurally
             // unreachable for the one tool that moves an existing appointment.
-            const latchSlot =
-              fc.args?.scheduled_at ?? fc.args?.new_scheduled_at ?? fc.args?.requested_at ?? null;
+            // ONE DERIVATION, read twice. `writeSlot` is the same expression
+            // this line used to carry; LVX144 needed it further up, and two
+            // copies of "which slot is being written" is how they drift apart.
+            const latchSlot = writeSlot;
             const latchSlotAgreed = Boolean(
               latchSlot && readBackMentionsSlot(ctx?.lastReadBackText, latchSlot)
             );

@@ -454,6 +454,34 @@ const EXPECTATIONS = {
       },
     ],
   },
+  // -------------------------------------------------------------------------
+  // 2026-09-18 05:08, the first call on the LVX140/141/142 build
+  // (voice-uk-prod-00078-8fp, image 963dfef). It exercised NONE of the three
+  // and found two defects neither of them covered.
+  // -------------------------------------------------------------------------
+  CA239c7c: {
+    note: "3.8 on the LVX140 build. The reschedule was refused because the caller answered by naming the time back, and the model then said it had been done. claim_audit claimed:0 -- the sentence was never detected, so none of LVX140's work could reach it.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "fired the write while the offered times were still on the table and nothing had been read back: readback_now=false, agreed_now=false. The model asking 'which of those works best' and calling reschedule_appointment_db eight seconds later is the shape the gate exists for. Correct.",
+      },
+      {
+        expect: "write",
+        // THE CALLER TEXT IS DECLARED, and this is the only attempt in the
+        // corpus where it is. The log records `agreed_now` and never the
+        // sentence behind it, and on this call the utterance records close out
+        // of order with the turn log, so the derivation picks the wrong one of
+        // two adjacent caller turns. This is the transcript's own text for the
+        // reply to that read-back; it is marked `declared` in the fixture so it
+        // can never be read as observed.
+        caller_text: "the Thursday 2 p.m.",
+        why:
+          "THE ONE LVX144 CHANGES. 'Shall we reschedule your appointment to Thursday, September 24 at 2:00 PM?' answered with 'the Thursday 2 p.m.' -- the caller naming the exact slot back, which is how people confirm times out loud. readback_now=true and agreed_now=FALSE, so the write was refused, changed_rows was 0, and the model told the caller it had been done anyway. The slot named is the slot being written, on the right weekday, with no withdrawal and no question mark, so this now reads as agreement and writes.",
+      },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -474,7 +502,7 @@ const CORPUS_DATE = "2026-09-18";
 //
 // Saturday and Sunday are left out: the tenant is closed and no read-back in
 // the corpus names them.
-const CORPUS_DAYS = [CORPUS_DATE, "2026-09-21", "2026-09-22", "2026-09-23"];
+const CORPUS_DAYS = [CORPUS_DATE, "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
 const GRID = (() => {
   const out = [];
   for (let h = 8; h <= 19; h += 1) {
@@ -628,11 +656,25 @@ function build(file) {
     const named = source ? slotsNamedIn(source.assistant) : [];
 
     // The caller text the gate saw. The probe is the authority.
+    //
+    // AND NOTHING IN THE LOG RECORDS IT. The probe carries `agreed_now` but not
+    // the sentence it judged, so this is reconstructed from the turn AFTER the
+    // standing read-back -- which is right whenever the transcript lands inside
+    // its own turn and wrong when it does not.
+    //
+    // CA239c7c is where that bit. Its two caller turns around the read-back are
+    // "the Thursday 2 p.m." and a 10-character fragment, the utterance records
+    // close out of order with the turn log, and the heuristic picks the wrong
+    // one. So an expectation may DECLARE the caller text, and when it does the
+    // fixture says `declared` rather than `logged` -- because a hand-written
+    // input that reads as an observed one is how a suite starts proving what it
+    // was told instead of what happened.
     const logged = standing ? (turns[standing.i + 1]?.caller ?? "") : "";
     const loggedAgrees = isAffirmative(logged) === Boolean(p.agreed_now);
     const loggedRan = logged.trim() !== "" === Boolean(p.gate_ran);
     const useLogged = Boolean(logged) && loggedAgrees && loggedRan;
     const substitute = !p.gate_ran ? "" : p.agreed_now ? "Yes." : "Let me think about that.";
+    const declared = typeof exp.caller_text === "string" ? exp.caller_text : null;
 
     return {
       at: p.ts,
@@ -664,8 +706,8 @@ function build(file) {
       target_candidates: named,
       target_from: source ? source.assistant : null,
       target_derived: true,
-      caller_text: useLogged ? logged : substitute,
-      caller_text_source: useLogged ? "logged" : "substituted",
+      caller_text: declared ?? (useLogged ? logged : substitute),
+      caller_text_source: declared !== null ? "declared" : useLogged ? "logged" : "substituted",
     };
   });
 

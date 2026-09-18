@@ -95,6 +95,11 @@ const LANG = "tests/liveAssistantLanguage.test.js";
 // refused write at all -- the stubbed-execute trap, the same one that kept
 // `sent-counts-attempts` green against postCallVerify.test.js.
 const CLAIMRACE = "tests/liveClaimGuardRefusedWrite.test.js";
+// The claim DETECTOR's own suite, which is a different question from the
+// look-back's: LVX143 is about whether the sentence is seen at all.
+const CLAIM = "tests/liveClaimGuard.test.js";
+const AFFIRM = "tests/isAffirmative.test.js";
+const ORDER = "tests/liveWriteOrder.test.js";
 
 const SABOTAGES = [
   {
@@ -454,11 +459,62 @@ const SABOTAGES = [
       '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
     red: [VERIFY],
   },
+  // -------------------------------------------------------------------------
+  // LVX143/144. The two detectors the first live call on 963dfef found.
+  // -------------------------------------------------------------------------
+  {
+    name: "claim-adverb-slot",
+    why:
+      "puts the claim detector's adverb slot back to the literal word `now`. CA239c7cd2: 'Your appointment has been SUCCESSFULLY rescheduled to Thursday, September 24 at 2:00 PM' on a call with changed_rows 0 -- claim_audit read claimed:0, so the sentence was never detected and none of LVX140's look-back could reach it. One ordinary English word defeated the whole predicate.",
+    file: "lib/voice/strings.js",
+    find: "const CLAIM_ADVERB = String.raw`(?:(?:now|already|just|[a-z]+ly)\\s+)?`;",
+    replace: "const CLAIM_ADVERB = String.raw`(?:now\\s+)?`; // SABOTAGE",
+    red: [CLAIM],
+  },
+  {
+    name: "no-worries-is-a-withdrawal",
+    why:
+      "restores the bare `no` in the withdrawal list. CAb4427e: 'Yeah, no worries.' answering a read-back, refused because an agreement idiom contains the word no. There is no reading of that turn in which the caller took anything back. No marker is possible -- the patch is inside a regex, which is the `confirm-readback-are-you-sure` shape and the reason the journal exists.",
+    file: "lib/transcriptUtils.js",
+    find: "(?:no(?!\\s+(?:worries|problems?|probs))|nope|nah|not|",
+    replace: "(?:no|nope|nah|not|",
+    red: [AFFIRM],
+  },
+  {
+    name: "restated-slot-not-agreement",
+    why:
+      "removes LVX144 entirely: the caller answering 'Shall we reschedule to Thursday, September 24 at 2:00 PM?' with 'the Thursday 2 p.m.' goes back to reading as no answer at all. That is CA239c7c, changed_rows 0, and a caller told it had been done. Red in the corpus too, because the fixture for that call expects the write.",
+    file: "services/tools.js",
+    find: "            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot;",
+    replace: "            const callerAgreed = isAffirmative(lastCallerText); // SABOTAGE",
+    red: [ORDER, REPLAY],
+  },
+  {
+    name: "restated-slot-ignores-question",
+    why:
+      "drops the question-mark guard, so 'Ten a.m.?' -- the caller CHECKING rather than agreeing -- authorises the write. The slot matcher cannot tell those apart and is not meant to; the punctuation is the one signal on this path that is not a judgement call, and it is the whole reason this widening was safe enough to take.",
+    file: "services/tools.js",
+    find: "                !/\\?\\s*$/.test(String(lastCallerText).trim()) &&",
+    replace: "                true && // SABOTAGE",
+    red: [ORDER],
+  },
 ];
 
 const only = process.argv.includes("--only")
   ? process.argv[process.argv.indexOf("--only") + 1]
   : null;
+// RESUME. A killed run costs the whole matrix otherwise, and the rows already
+// proven red do not become less red for having been interrupted. Named rather
+// than numbered, so reordering the array cannot silently skip a different row
+// than the one intended.
+const from = process.argv.includes("--from")
+  ? process.argv[process.argv.indexOf("--from") + 1]
+  : null;
+if (from && !SABOTAGES.some((s) => s.name === from)) {
+  console.error(`--from ${from}: no row by that name.`);
+  process.exit(1);
+}
+let reached = !from;
 
 // ---------------------------------------------------------------------------
 // A FOURTH RULE, added 2026-09-18: a run this cannot READ is not a red run.
@@ -485,7 +541,21 @@ function runSuites(files) {
   //   Unexpected value "--silent=tests/postCallVerify.test.js"
   // which is a crash, not a red suite -- and before the unreadable verdict
   // below existed it would have read as one.
-  const res = spawnSync("npx", ["vitest", "run", "--silent=true", ...files], {
+  // `--no-file-parallelism`: ONE worker, files in sequence.
+  //
+  // The OS killed this script for memory on 2026-09-18 for the second time,
+  // twenty-three rows into a thirty-seven row matrix, holding
+  // lib/voice/live/index.js patched. The journal did its job and named the file,
+  // so the tree was restored in under a minute instead of being discovered days
+  // later -- but the right answer to "this gets killed for memory" is to stop
+  // using so much of it, not to keep getting better at cleaning up afterwards.
+  //
+  // Vitest's default pool spawns a worker per core and this repo's suites boot
+  // whole Live sessions. Thirty-seven invocations of that back to back is what
+  // the machine cannot take. Sequential costs wall clock and nothing else: the
+  // matrix is not on anyone's critical path, and a run that finishes is worth
+  // more than a fast one that dies holding a patch.
+  const res = spawnSync("npx", ["vitest", "run", "--silent=true", "--no-file-parallelism", ...files], {
     encoding: "utf8",
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -527,6 +597,10 @@ console.log(`  green: ${targets.join(" ")}\n`);
 let bad = 0;
 for (const s of SABOTAGES) {
   if (only && s.name !== only) continue;
+  if (from) {
+    if (s.name === from) reached = true;
+    if (!reached) continue;
+  }
 
   const original = fs.readFileSync(s.file, "utf8");
   const hits = original.split(s.find).length - 1;
