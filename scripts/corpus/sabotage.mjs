@@ -30,6 +30,49 @@
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
+// ---------------------------------------------------------------------------
+// A THIRD RULE, added 2026-09-18 after this script was killed mid-row.
+//
+// Rule 2 restores in a `finally` block. A finally does not run when the process
+// is KILLED -- and on 2026-09-18 the OS killed this script for memory while it
+// held lib/voice/strings.js patched. The working tree was left with a shipped
+// fix silently removed.
+//
+// "Silently" is the whole problem. Most rows replace code with a line carrying
+// a SABOTAGE marker, so a leftover is greppable. The row that was interrupted
+// replaces a regex branch with the EMPTY STRING, because restoring an
+// alternation to its prior text means deleting the branch -- so there was
+// nothing to grep for, and the only evidence was a one-line `git diff` in a
+// repository that had legitimate uncommitted work in it at the time.
+//
+// So: a journal file is written BEFORE any file is touched and removed only
+// after the restore is verified. If one is found at startup, this refuses to
+// run and names the file to restore. Cheap, and it converts a silent broken
+// tree into a loud one.
+// ---------------------------------------------------------------------------
+const JOURNAL = "scripts/corpus/.sabotage-in-progress";
+
+function claimJournal(file) {
+  fs.writeFileSync(JOURNAL, `${file}\n`, "utf8");
+}
+function releaseJournal() {
+  try {
+    fs.unlinkSync(JOURNAL);
+  } catch {
+    /* already gone */
+  }
+}
+if (fs.existsSync(JOURNAL)) {
+  const stranded = fs.readFileSync(JOURNAL, "utf8").trim();
+  console.error("A previous sabotage run did not finish. It was patching:\n");
+  console.error(`    ${stranded}\n`);
+  console.error("That file may still carry the sabotage, and a row whose replacement is empty");
+  console.error("leaves NOTHING to grep for. Restore it before trusting anything:\n");
+  console.error(`    git checkout -- ${stranded}`);
+  console.error(`    rm ${JOURNAL}\n`);
+  process.exit(3);
+}
+
 const REPLAY = "tests/liveCorpusReplay.test.js";
 const LATCH = "tests/liveConsentLatch.test.js";
 const SLOTS = "tests/slotMention.test.js";
@@ -365,6 +408,9 @@ for (const s of SABOTAGES) {
   }
 
   let result;
+  // Claimed BEFORE the write, so a kill between the two leaves a journal
+  // naming a file that is still intact -- the harmless direction.
+  claimJournal(s.file);
   try {
     const patched = original.replace(s.find, s.replace);
     fs.writeFileSync(s.file, patched);
@@ -379,6 +425,8 @@ for (const s of SABOTAGES) {
       console.error(`FATAL: ${s.file} was not restored. Check it before doing anything else.`);
       process.exit(2);
     }
+    // Only once the bytes are confirmed back.
+    releaseJournal();
   }
 
   if (result.ok) {

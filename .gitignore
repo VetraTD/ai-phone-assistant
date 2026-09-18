@@ -80,3 +80,4 @@ voice-drift/
 # caller names, appointment times -- so the same rule applies: NEVER COMMITTED.
 # Fixtures derived from these get pseudonymised names before they go in tests.
 call-corpus/
+scripts/corpus/.sabotage-in-progress
