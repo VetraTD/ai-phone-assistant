@@ -624,7 +624,19 @@ function runSuites(files) {
 }
 
 console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
-const targets = [...new Set(SABOTAGES.flatMap((s) => s.red))];
+// NARROWED FOR --only, and this is a memory fix as much as a speed one.
+//
+// The baseline ran every suite named by every row -- nineteen of them, each
+// booting Live sessions -- even when `--only` was going to break one line and
+// check one file. That is most of the run, and the OS killed this script three
+// times on 2026-09-18 under exactly that pressure.
+//
+// A single row's baseline question is only ever "are the suites this row claims
+// to break green right now". The wider run is the right default when every row
+// is going to execute; it is pure waste when one is.
+const targets = only
+  ? [...new Set(SABOTAGES.filter((s) => s.name === only).flatMap((s) => s.red))]
+  : [...new Set(SABOTAGES.flatMap((s) => s.red))];
 const baseline = runSuites(targets);
 if (baseline.unreadable) {
   console.error(`Baseline could not be READ: ${baseline.reason}.`);
