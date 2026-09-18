@@ -14271,7 +14271,15 @@ appointment that **does not exist**. The caller agreed and the REAL row (Monday
 
 ## LVX140 — the claim guard counts write ATTEMPTS, so a refused write vouches for the claim it disproves
 
-**Status: OPEN · P0. Root cause read from the code, not inferred from counters.**
+**Status: SUPERSEDED 2026-09-18 — the title and the root cause below are both
+wrong. The symptom is real and the mechanism is a RACE, not attempt-counting:
+`actionToolsRanThisTurn()` already subtracted refusals, which this entry quotes
+the increment for and never checks. See the re-diagnosis at the bottom of this
+file. Left in place rather than rewritten, because "read from the code, not
+inferred from counters" was said about a reading that stopped one line short,
+and that is the thing worth remembering.**
+
+**Status as written: OPEN · P0. Root cause read from the code, not inferred from counters.**
 
 `lib/voice/live/index.js`:
 
@@ -14346,3 +14354,244 @@ through as "Annett", then "Nithin Dodla"; the company as "Aadhaar Dak Dairy".
 sentence repeated verbatim twenty seconds later.
 
 Unchanged, on every call, and still one text column.
+---
+
+# ROUND, 2026-09-18 — LVX140 was not what it said it was
+
+Three items, all verified OFFLINE only. Nothing in this block has taken a call.
+
+## LVX140 — RE-DIAGNOSED. It is a race, not attempt-counting. FIXED
+
+**Status: CLOSED in code · needs a live call.**
+
+The entry above says `actionToolCallsThisTurn` is "filtered by tool NAME only.
+Success is never consulted." That is true of the increment and false of the
+**reader**, which the entry did not quote:
+
+```js
+let actionToolCallsThisTurn = 0;
+const actionToolsRanThisTurn = () =>
+  actionToolCallsThisTurn - refusedActionCallsThisTurn > 0;
+```
+
+`refusedActionCallsThisTurn` is fed from `out.refusedActionCalls`, which
+`lib/voice/live/tools.js` increments exactly when
+`result.functionResponse?.response?.success === false` on an action tool. The
+arithmetic already nets a refused write out, and has since LVX31/LVX93.
+
+**Worked against `CAd978554` by hand, every term:**
+
+| term | value | why |
+|---|---|---|
+| `claimedCompletion` @ 02:17:48 | true | `completionClaimRe` matches that sentence — run offline against `lib/voice/strings.js` |
+| `actionToolCallsThisTurn` | 1 | the 02:17:41 reschedule |
+| `refusedActionCallsThisTurn` | 1 | write-order gate, `success:false`, `isAction` true |
+| `actionToolsRanThisTurn()` | false | 1 − 1 = 0 |
+| `actionToolRanPrevTurn` | false | the prior turn ran only `check_appointment_availability` |
+
+So the guard should have fired, and did not. **The stated fix would have been
+applied on top of a subtraction that already did most of it, and would have
+proved nothing.**
+
+### What it actually is
+
+`tests/liveClaimGuardRefusedWrite.test.js` replays the sequence through
+`tests/helpers/liveBoot.js` — the only instrument that can, because
+`tests/liveClaimGuard.test.js` stubs `execute` to return `{ success: true }` for
+every tool and therefore **cannot produce a refused write at all**. Five cases
+went straight to GREEN: a claim after a refused write IS counted, same turn and
+one turn later, and a landed write still silences it.
+
+The sixth went red. The increment and the subtraction do not share a moment —
+all three of these are inside `onToolCall`, in this order:
+
+```
+actionToolCallsThisTurn += <action calls in this round>
+out = await runner.handleToolCall(toolCall)          <-- yields
+refusedActionCallsThisTurn += out.refusedActionCalls
+```
+
+`onToolCall` is fire-and-forget from `onmessage` and nothing serialises it
+against the turnComplete path — `pendingToolCalls` gates the silence ladder and
+nothing else. On 3.8 turnComplete lands a median **17 ms** after a tool call.
+When it lands inside that await, `applyTurn` rolls a tally holding the ATTEMPT
+and not yet the REFUSAL, writes `actionToolRanPrevTurn = TRUE`, and the next
+turn's claim is vouched for by the write that was refused.
+
+`CAd978554` reports `turns_reply_empty: 3` — the zero-text tool turns this needs.
+
+### The fix
+
+The signal is now POSITIVE and written where the answer is known —
+`recordToolOutput`, which already reads `success` off every function response —
+and `turnSeq` credits a result to the turn it was CALLED on:
+
+```js
+if (seq === turnSeq) actionToolSucceededThisTurn = true;
+else if (seq === turnSeq - 1) actionToolRanPrevTurn = true;
+```
+
+A result two or more turns late is dropped, which lets the guard speak rather
+than silencing it. The attempt and refusal counters are kept: the deferral guard
+reads one of them and their series stay comparable.
+
+**Sabotage: `claim-guard-counts-attempts`, `claim-credit-ignores-late-result`.**
+The second matters as much as the first — without the late-credit half the fix
+is satisfied by a guard that simply always speaks, which is the hair trigger the
+whole count-first ladder existed to avoid.
+
+### Still open, and deliberately not taken
+
+The ANY-TOOL twin has the identical race: `toolRanPrevTurn` is rolled from
+`realToolCallsThisTurn - refusedCallsThisTurn`, written at the same two moments.
+It drives `live_claim_without_action`, a counter, and nothing spoken. Left as
+one fix rather than two, and recorded here so the next reader does not mistake
+it for an oversight.
+
+## LVX141 — the closing seam. FIXED
+
+**Status: CLOSED in code · needs a live call. `CA94f2b4`.**
+
+The fix is the state distinction the code already had, not a phrase list.
+`endCallAskWasInTurnOnly` is computed at `end_call` time — the only instant both
+facts exist — as `!askedAnythingElseThisCall && closingTicRe.test(turnReplyText)`,
+and folded into the existing one-turn hold. The hang-up is still ALLOWED; it is
+queued behind one more turn so the caller gets the beat in which to answer.
+
+Counter `live_exit_held_in_turn_ask`, separate from `live_exit_held_question`;
+both are bumped when both apply, so the older series keeps its meaning.
+
+**Known cost, stated rather than discovered: this makes LVX136 fire more often.**
+A held turn is another chance for the model to sign off, so the caller is more
+likely to hear the goodbye twice. That trade was accepted when LVX132 shipped —
+being hung up on mid-question is worse — and the rate is readable from
+`live_repeated_phrase` without building anything.
+
+**Sabotage: `exit-hold-ignores-in-turn-ask`, `in-turn-ask-ignores-the-latch`,
+`in-turn-ask-hold-never-spent`** — set, read, spent.
+
+## LVX142 — the escalation was silent ONCE, not twice. FIXED
+
+**Status: CLOSED in code · needs a live call.**
+
+The block above says the escalation "has now stayed silent twice". It had not.
+
+| call | verdict | `booked_rows` | `postcall_claim_reconciled` |
+|---|---|---|---|
+| `CAb4427e` | `write_abandoned` | 0 | **PRESENT** — a human was told |
+| `CAd978554` | `write_abandoned` | 1 | absent |
+| `CA03558d` | `write_abandoned` | 0 | absent — predates `3407ac0` |
+
+And `sent: 0, skipped: []` is not the defect. It is `SUPPRESSES_CONFIRMATION`
+bypassing the caller-confirmation loop by verdict, which logs
+`postcall_confirm_skipped_verdict` and pushes nothing. Correct, and visible.
+`sms_followup_enabled: false` is not it either: when that loop runs on this
+tenant it yields `skipped: ["not_sent"]` — see `CA94f2b4` and `CA64a36c` — because
+the flag is read inside `sendCallerSms`, after the bookkeeping.
+
+**The hole was one conjunct**, `lib/postCallVerify.js`:
+
+```js
+const abandonedWithNoRow = verdict === "write_abandoned" && bookedRows.length === 0;
+```
+
+justified as "a call that abandoned an attempt and then succeeded has nothing
+outstanding". That is already guaranteed one level up — `abandoned` is
+`refusedToolsThisCall` minus `completedToolsThisCall`, by tool NAME — so the
+conjunct never tested what its comment claimed. It tested whether some OTHER
+tool succeeded. On `CAd978554` an unrelated `book_appointment` four minutes later
+vouched for an abandoned reschedule, and the trap is the one `reconcile()` names
+for itself two hundred lines below: *an unrelated success must not vouch for an
+abandoned write.*
+
+Escalation now acts on `verdict === "write_abandoned"`. The narrow condition is
+kept as `postcall_abandoned_no_row`; the new one is
+`postcall_abandoned_outstanding`, and the gap between them is exactly what this
+widened.
+
+The triage note was reworded: "every attempt was refused, so nothing was
+recorded" is true of `CA03558d` and false of `CAd978554`, and a note that
+overstates is one the next person learns to distrust.
+
+**Sabotage: `abandoned-escalation-narrowed`.** The existing `abandoned-escalation`
+row was re-anchored — its `find` had gone stale and would have matched zero
+times, and a row that cannot run proves nothing.
+
+## The corpus grew, and the instrument had to grow with it
+
+Three calls added: `CA94f2b4`, `CA64a36c`, `CAd97855`. **18 fixtures, 50
+attempts.** Two harness defects surfaced doing it, neither predictable from
+reading:
+
+1. **The grid was one day.** Every corpus call up to 2026-09-17 was about Friday
+   18 September. These three are about the following week, and
+   `readBackMentionsSlot` refuses a slot whose weekday the sentence contradicts —
+   so every target derived to null and all three failed the replay on "That time
+   has not been checked yet", an availability refusal wearing a consent
+   refusal's clothes. `CORPUS_DAYS` now spans Fri 18 → Wed 23. A sentence naming
+   a time and no weekday matches that time on every day, which is one proposal
+   rather than four, so those collapse onto the corpus date and every fixture
+   written before this derives exactly what it did before.
+2. **Caller text was said once per WINDOW.** On `CAd97855` attempts 5 and 6 share
+   turn 19 and do not share a caller turn — the first is a retry fired into
+   silence, the second follows "Yeah, that works. Yes.", the answer that finally
+   authorised the booking. Under the window rule the second was refused for want
+   of an agreement the caller had given, and the fixture would have gone red
+   describing a gate defect that is not there. Now each DISTINCT caller text is
+   said once, which is a no-op for all fifteen older fixtures.
+
+`CAb4427e`'s derivation improved as a side effect (1/7 targets to 3/7) and it
+still passes unchanged.
+
+## A trap worth writing down: two time zones in one fixture
+
+A seeded row's `scheduled_at` is a naive string that `lib/harness/fakeDeps.js`
+hands to `Date.parse`, so it is read in the TEST process's zone
+(`America/Los_Angeles`). The tool's `requested_at` is read in the BUSINESS's zone
+(`America/Chicago`). Seeding 13:00 and asking for 15:00 gets "that time is
+taken" — two hours apart on the page, zero apart in the diary. It cost a control
+case and read, at first, like a consent refusal.
+
+## The sabotage matrix found two things reading the code did not
+
+It went **31 of 33** on the first full run, and both failures were mine.
+
+**A stranded anchor.** `question-before-hangup` matched its `find` zero times,
+because LVX141 split the line it anchored on into an alternation. The script
+reports a stranded anchor rather than skipping it, which is the only reason the
+row did not quietly stop testing anything — and it is the second time in two
+days that this script has caught a row that had gone blind. Re-anchored onto the
+WHOLE expression, per the standing rule: a widened alternation gets sabotaged
+back to its prior text, because narrowing one branch proves nothing while the
+other still carries the cases.
+
+**A control that could not tell the two disjuncts apart.**
+`in-turn-ask-ignores-the-latch` came back STILL GREEN. The case meant to pin the
+`!askedAnythingElseThisCall` half had a closing turn containing no ask at all, so
+`closingTicRe` was false either way and the case passed whether the half existed
+or not. The state where the disjuncts actually differ has to be written out
+rather than assumed: the caller asked on a COMPLETED turn, answered, and the
+model asking a second time on its way out. That is LVX136's transcript verbatim
+("...wonderful day.Is there anything else I can assist you with today?").
+
+Both are the same lesson this file already carries twice, arriving through a
+third door: a guard clause is only proven by a case that is DIFFERENT with it and
+without it, and reading the clause cannot tell you whether such a case exists.
+
+## And one in the sabotage script itself
+
+`spawnSync` had no `maxBuffer`. The corpus reached eighteen calls, the suites log
+every gate decision, the combined output went past the 1 MB default, and the run
+came back with `status: null` and `spawnSync ... ENOBUFS`. The baseline reported
+"Baseline is RED" against sixteen suites that were green when run by hand.
+
+**That is the harmless direction.** `ok: res.status === 0` is false for ENOBUFS
+too, so a PATCHED run that overflowed would have printed
+`v <name>: red, ? test(s) failed` and counted as a sabotage the suite caught,
+with nothing measured at all. A matrix reporting a pass it never observed is the
+exact failure this script exists to object to, turned on itself.
+
+Fixed with a 256 MB buffer, `--silent=true` (a bare `--silent` makes this
+vitest's CLI fold the next positional into the flag and die — a crash, which
+before this change also read as a red suite), and an `unreadable` verdict
+distinct from both red and green. Neither caller is allowed to guess.
