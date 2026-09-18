@@ -127,6 +127,24 @@ async function boot(env = {}) {
 
 const c = () => getLatencyStats().turnTaking;
 
+/**
+ * LVX146's precondition: the caller has been asked whether they need anything
+ * else, and has answered.
+ *
+ * Added 2026-09-18, and for the same reason the equivalent exchange was added
+ * to tests/liveExitClose.test.js's bookedCall() when LVX132 landed. The cases
+ * below are about the farewell DETECTOR -- which sentences read as a sign-off.
+ * LVX146 puts a condition in front of the arming, so without this they stop
+ * testing signOffRe and quietly become a second test of the ask gate, which is
+ * a fixture describing a call that can no longer happen.
+ *
+ * The asking turn is deliberately not itself a farewell, so it cannot arm.
+ */
+async function asked(s) {
+  await s.say("All set. Is there anything else I can help you with today?");
+  await s.caller("No, that's everything.");
+}
+
 const GOODBYE =
   "Wonderful. We've got that strategy call booked, and I've noted your details. " +
   "Thanks for calling Digile Media, and have a great day!";
@@ -139,6 +157,7 @@ describe("a spoken goodbye arms the hang-up", () => {
     // silence ladder nudged. The owner's rule -- once it says "thanks for
     // calling", the call should end.
     const s = await boot();
+    await asked(s);
     await s.say(GOODBYE);
 
     expect(c().live_goodbye_armed_exit).toBe(1);
@@ -171,6 +190,7 @@ describe("a spoken goodbye arms the hang-up", () => {
 
   it.each(REAL_FAREWELLS)("arms on a farewell the model actually said: %s", async (text) => {
     const s = await boot();
+    await asked(s);
     await s.say(text);
 
     expect(c().live_goodbye_armed_exit).toBe(1);
@@ -186,6 +206,7 @@ describe("a spoken goodbye arms the hang-up", () => {
     "Have a lovely weekend.",
   ])("arms on a bare farewell with no 'thanks for calling': %s", async (text) => {
     const s = await boot();
+    await asked(s);
     await s.say(text);
 
     expect(c().live_goodbye_armed_exit).toBe(1);
@@ -213,6 +234,7 @@ describe("a spoken goodbye arms the hang-up", () => {
 
   it("does not arm twice for one goodbye", async () => {
     const s = await boot();
+    await asked(s);
     await s.say(GOODBYE);
     await s.say("Thanks for calling Digile Media, have a great day!");
 
@@ -224,6 +246,7 @@ describe("a spoken goodbye arms the hang-up", () => {
     // run the exit, so barging in during a goodbye hung up FASTER. Now the
     // caller speaking calls it off, and the call stays up.
     const s = await boot();
+    await asked(s);
     await s.say(GOODBYE);
     expect(c().live_goodbye_armed_exit).toBe(1);
 
@@ -255,6 +278,7 @@ describe("a spoken goodbye arms the hang-up", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const s = await boot();
+      await asked(s);
       await s.say(GOODBYE);
       await s.markPlayed();
 
@@ -275,6 +299,7 @@ describe("a spoken goodbye arms the hang-up", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const s = await boot();
+      await asked(s);
       await s.say(GOODBYE);
       await s.markPlayed();
       await s.caller("wait, actually one more thing");
@@ -302,6 +327,11 @@ describe("a spoken goodbye arms the hang-up", () => {
     // Cancelling an ARMED exit was never going to be enough, because the thing
     // worth interrupting is the goodbye and the goodbye comes first.
     const s = await boot();
+    // LVX146's precondition, so this stays a test of the BARGE refusal. Without
+    // it the ask hold fires first, armExit is never called, and
+    // live_exit_refused_recent_barge reads 0 -- the case passing for a reason
+    // that has nothing to do with the barge.
+    await asked(s);
     await s.vendorInterrupt();
     await s.say(GOODBYE);
 
@@ -310,10 +340,30 @@ describe("a spoken goodbye arms the hang-up", () => {
     expect(s.closed()).toBe(false);
   });
 
+  it("holds for the unanswered question BEFORE the barge check is reached", async () => {
+    // The precedence between LVX146 and the barge refusal, asserted directly
+    // rather than left as an implication of the setups above. Both prevent the
+    // arming and the caller hears the same thing either way, so the only
+    // visible difference is which counter moves -- and a later change to either
+    // could silently hand the case to the other while both suites stayed green.
+    // That is the trap tests/liveExitClose.test.js already records between the
+    // ask gate and the held-question guard.
+    const s = await boot();
+    await s.caller("I want to book an appointment.");
+    await s.vendorInterrupt();
+    await s.say(GOODBYE);
+
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+    expect(c().live_exit_refused_recent_barge).toBeFalsy();
+    expect(c().live_goodbye_armed_exit).toBeFalsy();
+    expect(s.closed()).toBe(false);
+  });
+
   it("still arms normally when nobody interrupted", async () => {
     // The other side of it. A refusal that fired on every call would simply
     // stop the assistant ever hanging up, which is the defect it replaced.
     const s = await boot();
+    await asked(s);
     await s.say(GOODBYE);
 
     expect(c().live_exit_refused_recent_barge).toBe(0);
@@ -326,8 +376,106 @@ describe("a spoken goodbye arms the hang-up", () => {
     // the cancel above reachable at all: an exit that fired the instant the
     // goodbye ended would give nobody time to speak.
     const s = await boot();
+    await asked(s);
     await s.say(GOODBYE);
 
     expect(s.closed()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX146 — THE OTHER DOOR. CA299f23ce, 2026-09-18:
+//
+//   19:04:27  A: "I have you down for a strategy call on Friday, September
+//                 twenty-fifth at four-thirty in the afternoon. Does that
+//                 sound correct?"
+//   19:04:34  book_appointment -> REFUSED (readback=true, agreed=false)
+//   19:04:37  live_tool_rounds_capped {cap:5, round:6}
+//   19:04:39  live_tool_rounds_capped {cap:5, round:7}
+//   19:04:42  A: "That is all booked. Thanks for calling Digile Media, and
+//                 have a great day."
+//   19:04:43  live_exit_run
+//
+// booked_rows 0. The caller was told a booking existed, was never asked whether
+// they needed anything else, and the line dropped one second later.
+//
+// end_call_refusals read {no_ask: 0} -- nothing refused, because end_call was
+// NEVER CALLED. The model said a farewell out loud and the sign-off detector
+// armed the exit directly.
+//
+// THREE ROUNDS OF GUARDS ALL SIT ON THE end_call DOOR:
+//
+//   LVX132  never asked at all                      } every one of them reads
+//   LVX141  asked only in the closing turn          } state the end_call gate
+//   LVX145  asked, and never answered               } passes, or runs at the
+//                                                     exit branch that only
+//                                                     `endCallArmed` reaches
+//
+// armExit() is called from auditTurn, before that branch, and endCallArmed is
+// set only by the tool. So the farewell route reaches none of them. The model
+// can end any call at any time, without ever asking, by saying "have a great
+// day" -- which is what it did on the one call where it had just been refused a
+// write and announced success anyway.
+//
+// The same question is now asked here: is a question to the caller still
+// outstanding? Either they were never asked, or they were asked and have said
+// nothing since.
+//
+// HELD ONCE, NOT REFUSED. The silence ladder and the media watchdog are still
+// the backstops, so a model that says nothing further still closes the call;
+// what this buys is the one turn in which a caller can answer. A permanent
+// refusal here would trade a premature hang-up for a line nobody can end, which
+// is the defect on the other call of 2026-09-17 and the worse of the two.
+// ---------------------------------------------------------------------------
+const GOODBYE_NO_ASK = "That is all booked. Thanks for calling Digile Media, and have a great day.";
+const GOODBYE_WITH_ASK =
+  "That is all booked. Is there anything else I can help you with today? " +
+  "Thanks for calling Digile Media, and have a great day.";
+
+describe("a spoken goodbye is not a way around the ask gate", () => {
+  beforeEach(() => clearStats());
+
+  it("does not arm when the caller was never asked anything", async () => {
+    const s = await boot();
+    await s.caller("I want to book an appointment.");
+    await s.say(GOODBYE_NO_ASK);
+
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+    expect(c().live_goodbye_armed_exit).toBeFalsy();
+    expect(s.closed()).toBe(false);
+  });
+
+  it("does not arm when the ask is in the very turn that signs off", async () => {
+    // The caller cannot have answered a question that is still being spoken.
+    const s = await boot();
+    await s.caller("I want to book an appointment.");
+    await s.say(GOODBYE_WITH_ASK);
+
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+    expect(c().live_goodbye_armed_exit).toBeFalsy();
+  });
+
+  it("arms once the caller has been asked and has answered", async () => {
+    const s = await boot();
+    await s.caller("I want to book an appointment.");
+    await s.say("All set. Is there anything else I can help you with today?");
+    await s.caller("No, that's everything.");
+    await s.say(GOODBYE_NO_ASK);
+
+    expect(c().live_goodbye_armed_exit).toBe(1);
+    expect(c().live_goodbye_exit_held_no_ask).toBeFalsy();
+  });
+
+  it("holds only once, so the ladder is never the only way out", async () => {
+    const s = await boot();
+    await s.caller("I want to book an appointment.");
+    await s.say(GOODBYE_NO_ASK);
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+
+    // Still nothing from the caller. The second farewell goes through.
+    await s.say(GOODBYE_NO_ASK);
+
+    expect(c().live_goodbye_armed_exit).toBe(1);
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
   });
 });

@@ -231,6 +231,10 @@ describe("LVX96 route A — a refusal outranks the sign-off detector", () => {
     // assistant says thank-you-for-calling, nothing runs, and the line dangles
     // until the silence ladder nudges eleven seconds later.
     const s = await boot({ endCall: "refuse" });
+    // LVX146: the caller must have been asked and answered, or the sign-off
+    // detector holds the exit once and this stops testing route A at all.
+    await s.say("All set. Is there anything else I can help you with today?");
+    await s.caller("No, that is everything.");
     await s.say(PLAIN_GOODBYE);
 
     expect(c().live_goodbye_armed_exit).toBe(1);
