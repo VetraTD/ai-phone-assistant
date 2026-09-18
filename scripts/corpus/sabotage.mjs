@@ -264,6 +264,20 @@ const SABOTAGES = [
     red: [DENIAL],
   },
   {
+    name: "confirm-readback-are-you-sure",
+    why:
+      "restores confirmReadBackRe to its pre-2026-09-18 text, which is the state that lost CAb4427e: the caller said yes to 'Are you sure you would like me to cancel your appointment?' and the cancellation was refused, because this family knew 'shall I', 'would you like me to proceed' and 'are you happy for me to' but not this. Seven write attempts, zero rows, two false claims to the caller.",
+    file: "lib/voice/strings.js",
+    // The ONLY change made to this expression, removed whole. Both of that
+    // call's other confirmations matched the untouched branches, so nothing
+    // else can carry this case -- which is what the farewell-adjective row had
+    // to learn the hard way.
+    find:
+      "|are\\s+you\\s+sure\\s+(?:you'?d\\s+like|you\\s+would\\s+like|you\\s+want)\\s+(?:me\\s+)?to\\s+${READ_BACK_ACTION_VERB}",
+    replace: "",
+    red: [REPLAY],
+  },
+  {
     name: "assistant-language-detector",
     why:
       "the assistant can answer an English caller in Spanish and nothing counts it. Three calls in eighteen did exactly that, and every one was reported by a human because no instrument watched what the assistant SAID.",

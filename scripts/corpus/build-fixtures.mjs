@@ -250,6 +250,78 @@ const EXPECTATIONS = {
       { expect: "write", why: "read back as a cancellation, agreed on the turn, cancelled." },
     ],
   },
+  // -------------------------------------------------------------------------
+  // THE FIRST RESCHEDULE IN THIS CORPUS, and the reason it is here.
+  //
+  // Before this call there were NINE cancel attempts across fourteen calls and
+  // ZERO reschedules. The write-consent gate -- the write-order rule, the
+  // latch, the read-back requirement -- was built and tuned entirely on
+  // bookings and cancellations, and reschedule went to production having never
+  // once been replayed through it. It then failed on the first live attempt.
+  //
+  // Seven write attempts, zero rows, and the caller told twice that things had
+  // been done. The claim guard caught both false claims and the model corrected
+  // itself on the call, so the caller did leave knowing the truth.
+  //
+  // THE ROOT CAUSE IS ONE THING, VISIBLE IN THE PROBES: the gate needs a
+  // read-back AND agreement true at the same instant, and across all seven
+  // attempts they were never simultaneously true.
+  //
+  //   readback=T agreed=F   the model fired 4 s after asking, before any answer
+  //   readback=F agreed=T   the caller said yes to "Are you sure you would like
+  //                         me to cancel your appointment?" -- a confirmation
+  //                         that names no time, so it is not a read-back
+  //
+  // The second is the new one and the reason this call matters. Every
+  // successful cancellation in this corpus was "read back in full"; this model
+  // asked a detail-free question instead, and a detail-free question can never
+  // satisfy a rule that looks for the slot. The gate is phrasing-dependent, and
+  // this is the phrasing that broke it.
+  // -------------------------------------------------------------------------
+  CAb4427e: {
+    note: "3.8. The first reschedule ever replayed here, and it failed -- seven attempts, zero rows, two false claims. A read-back and an agreement were never true at the same moment.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "fired while the three offered Monday times were still on the table and the caller had chosen none of them. No read-back, no agreement. Correct.",
+      },
+      {
+        expect: "refuse",
+        why: "'Shall I reschedule your appointment to Monday, September twenty-first at eleven-thirty AM?' was spoken four seconds earlier and the caller had not answered yet. readback=true, agreed=false. Correct, and the same shape CA2556d4 and CAb76b13 already record -- the model routinely writes before the answer exists.",
+      },
+      {
+        expect: "refuse",
+        why: "cancel fired with nothing read back and nothing agreed. Correct.",
+      },
+      {
+        // THE FIXTURE THIS CALL WAS ADDED FOR. It is expected to FAIL until the
+        // read-back stops being inferred from the model's phrasing.
+        expect: "write",
+        why:
+          "THE ONE THAT MUST CHANGE. The assistant asked 'Are you sure you would like me to cancel your appointment?' and the caller said yes -- agreed_now=true, recorded by the probe. The appointment was unique, on file, and had been read to the caller at 00:41:57 ('Friday, September eighteenth, at three PM'). A human receptionist cancels here. The gate refused because the confirming sentence named no time, which is a fact about the model's wording and not about whether this caller consented. Until a read-back is something the system OWNS rather than something it parses out of the model's speech, this attempt refuses and the caller loses the thing they rang to do.",
+      },
+      {
+        expect: "refuse",
+        why: "the held-write retry, and it could not help: by now the standing reply was 'I've successfully rescheduled your appointment...' -- a claim, not a read-back. A retry fired at the moment the evidence has aged out is a retry that cannot succeed.",
+      },
+      {
+        // These last two were authored expecting a refusal, because on the day
+        // NOTHING had landed and every later attempt was still chasing an
+        // uncancelled row. Once attempt 3 writes, they stop being attempts and
+        // become duplicates -- and the corpus already has a convention for
+        // that, from CA03558d: "duplicate of the write that already landed."
+        //
+        // The expectations were contingent on an earlier attempt's outcome and
+        // nothing said so. The replay is what noticed.
+        expect: "write",
+        why: "a duplicate of the cancellation that now lands at attempt 3. The pack answers 'That appointment has been cancelled.' without touching the row, which is the duplicate guard doing its job -- cancelling an already-cancelled appointment is a no-op, not a second write.",
+      },
+      {
+        expect: "write",
+        why: "the same duplicate, one turn later. On the day this was the model re-asking properly ('Would you like me to proceed with cancelling it now?') and firing before the answer arrived; with the cancellation already committed there is nothing left for it to get wrong.",
+      },
+    ],
+  },
   CA03558d: {
     note: "3.8 with the supersession fix that was reverted. The worst call: one cancel, six booking attempts, ZERO booked rows, three live_tool_rounds_capped, five writes in 2.3 seconds, and 'Yes, I have confirmed that your appointment is booked.'",
     attempts: [
