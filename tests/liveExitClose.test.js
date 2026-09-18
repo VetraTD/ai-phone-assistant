@@ -394,3 +394,91 @@ describe("asked and signed off in one breath", () => {
     expect(counters().live_exit_held_in_turn_ask).toBeFalsy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX145 — ASKED, AND NOT WAITED FOR. CA06cadea6, 2026-09-18:
+//
+//   17:28:08  A: "...I have that additional strategy call booked for you on
+//                 Monday, September twenty-first at four-thirty PM. Is there
+//                 anything else I can help you with today?"
+//   17:28:13  caller: 40 ms of voice, 4 characters   <- starting to answer
+//   17:28:14  end_call  success=TRUE                 <- allowed
+//   17:28:23  line drops
+//
+// end_call_refusals {no_ask: 0}. Nothing refused, nothing held, and the caller
+// was cut off mid-syllable six seconds after being asked a question.
+//
+// THE THIRD SHAPE, and neither existing guard covers it:
+//
+//   never asked at all                       -> LVX132's ask gate
+//   asked only in the turn that is closing   -> LVX141's in-turn hold
+//   asked LAST turn, caller silent, hang up  -> nothing
+//
+// LVX132's latch says "a caller asked once has been asked" and is never reset,
+// so from the instant the question goes out the hang-up is permitted for the
+// rest of the call. That is the right rule for the defect it was built on --
+// ten calls that hung up having never asked at all -- and it cannot see this
+// one, because it records that the question was ASKED and never whether it was
+// ANSWERED. LVX141 fires only when the ask exists nowhere but the closing turn,
+// which is false here: the ask completed its own turn.
+//
+// WHY `callerSaidThisCall.length` AND NOT A TURN COUNT. callerTurnCount is
+// incremented by the VAD closing an utterance, and on this call it ticked at
+// 17:28:13 on FORTY MILLISECONDS of voice -- a breath would move it. The
+// accumulated transcript only grows when words actually arrive, so "has the
+// caller said anything since we asked" is a length comparison and nothing else.
+//
+// It is also the safe direction under transcript lag: if the caller HAS spoken
+// and the words have not landed yet, the length has not grown, so the exit
+// waits a beat. The failure mode is a pause, not a dropped line.
+// ---------------------------------------------------------------------------
+const ASK_ON_ITS_OWN_TURN =
+  "That's booked for you on Monday, September twenty-first at four-thirty PM. Is there anything else I can help you with today?";
+const FAREWELL = "Thanks for calling Digile Media, and I hope you have a great day.";
+
+describe("asked on the previous turn, and never answered", () => {
+  it("holds the exit when the caller has said nothing since the question", async () => {
+    const s = await bookedCallNeverAsked();
+
+    await s.assistantTurn(ASK_ON_ITS_OWN_TURN);
+    // The caller says NOTHING. This is the whole case.
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success, "the ask gate allows it -- they were asked").toBe(true);
+
+    await s.assistantTurn(FAREWELL);
+
+    expect(counters().live_exit_held_unanswered_ask).toBe(1);
+    expect(counters().live_exit_arm_checked).toBeFalsy();
+    expect(s.ws.readyState).not.toBe(3);
+  });
+
+  it("does NOT hold once the caller has answered", async () => {
+    const s = await bookedCallNeverAsked();
+
+    await s.assistantTurn(ASK_ON_ITS_OWN_TURN);
+    await s.callerSays("No, that's everything.");
+    await s.callTool("end_call", {});
+    await s.assistantTurn(FAREWELL);
+
+    expect(counters().live_exit_held_unanswered_ask).toBeFalsy();
+    expect(counters().live_exit_arm_checked).toBe(1);
+  });
+
+  it("closes on the next turn, and holds only once", async () => {
+    // A hold that could repeat is a line nobody can end, which is worse than
+    // the hang-up it prevents. Spent when it fires, exactly like LVX141's.
+    const s = await bookedCallNeverAsked();
+
+    await s.assistantTurn(ASK_ON_ITS_OWN_TURN);
+    await s.callTool("end_call", {});
+    await s.assistantTurn(FAREWELL);
+    expect(counters().live_exit_held_unanswered_ask).toBe(1);
+
+    // Still nothing from the caller -- the silence ladder is the backstop and
+    // the exit must not be held a second time waiting for it.
+    await s.assistantTurn("I'll let you go now.");
+
+    expect(counters().live_exit_arm_checked).toBe(1);
+    expect(counters().live_exit_held_unanswered_ask).toBe(1);
+  });
+});

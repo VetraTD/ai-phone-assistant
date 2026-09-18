@@ -228,8 +228,11 @@ const SABOTAGES = [
     // The old anchor matched ZERO times after the split, and the run said so:
     // this script reports a stranded anchor instead of skipping it, which is the
     // only reason the row did not quietly stop testing anything.
+    // RE-ANCHORED AGAIN when LVX145 added the third disjunct. Same rule as
+    // last time: the whole expression, because narrowing one branch proves
+    // nothing while the other two still carry the cases.
     find:
-      "        const askedTheCaller =\n          (endCallArmed && !exitAfterTurn && /\\?['\")\\]\\s]*$/.test(replyAtTurnEnd)) || heldForInTurnAsk;",
+      "        const askedTheCaller =\n          (endCallArmed && !exitAfterTurn && /\\?['\")\\]\\s]*$/.test(replyAtTurnEnd)) ||\n          heldForInTurnAsk ||\n          heldForUnansweredAsk;",
     replace: "        const askedTheCaller = false; // SABOTAGE",
     red: [EXITCLOSE],
   },
@@ -442,7 +445,22 @@ const SABOTAGES = [
     why:
       "leaves the one-shot standing after it fires. `endCallArmed` is never lowered, so an unspent flag holds the exit at the end of every remaining turn and the line can never close -- trading a premature hang-up for a call nobody can end, which is the defect on the other call of that night.",
     file: "lib/voice/live/index.js",
-    find: "          endCallAskWasInTurnOnly = false;\n        } else {",
+    // RE-ANCHORED when LVX145 put its own spend between this line and the
+    // `} else {` the anchor used to reach for. The preceding log line is what
+    // makes it unique -- `endCallAskWasInTurnOnly = false;` now appears in both
+    // branches, and an anchor matching twice is refused rather than guessed at.
+    find:
+      "            log.info(\"live_exit_held_unanswered_ask\", { callSid, step: state.step });\n          }\n          endCallAskWasInTurnOnly = false;",
+    replace:
+      "            log.info(\"live_exit_held_unanswered_ask\", { callSid, step: state.step });\n          }\n          // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "unanswered-ask-hold-never-spent",
+    why:
+      "leaves LVX145's one-shot standing after it fires. The caller may still say nothing, so an unspent flag holds the exit at the end of every remaining turn and the line can never close -- trading a premature hang-up for a call nobody can end, which is CAaef5bd82's defect and the worse of the two.",
+    file: "lib/voice/live/index.js",
+    find: "          endCallAskUnanswered = false;\n        } else {",
     replace: "          // SABOTAGE\n        } else {",
     red: [EXITCLOSE],
   },
@@ -458,6 +476,28 @@ const SABOTAGES = [
     replace:
       '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
     red: [VERIFY],
+  },
+  // -------------------------------------------------------------------------
+  // LVX145. The third closing shape. Two rows: the marker has to be RECORDED
+  // when the question goes out, and it has to be READ when the exit arms.
+  // -------------------------------------------------------------------------
+  {
+    name: "unanswered-ask-hold",
+    why:
+      "removes the hold for a question the caller never got to answer. CA06cadea6: asked at 17:28:08, end_call allowed at 17:28:14, line down at 17:28:23, with forty milliseconds of the caller's voice in between. LVX132's latch had already recorded that they were ASKED and is never reset, so every check downstream passed.",
+    file: "lib/voice/live/index.js",
+    find: "        const heldForUnansweredAsk = endCallArmed && !exitAfterTurn && endCallAskUnanswered;",
+    replace: "        const heldForUnansweredAsk = false; // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "unanswered-ask-marker-never-set",
+    why:
+      "leaves the caller-transcript marker at -1, so the hold can never fire however long the caller stays silent. The read and the write are separate rows because a guard reading a value nothing writes is this file's most-repeated defect -- present, plausible and permanently dead.",
+    file: "lib/voice/live/index.js",
+    find: "        askedAnythingElseAtCallerChars = callerSaidThisCall.length;",
+    replace: "        // SABOTAGE",
+    red: [EXITCLOSE],
   },
   // -------------------------------------------------------------------------
   // LVX143/144. The two detectors the first live call on 963dfef found.
