@@ -919,3 +919,100 @@ describe("what `sent` counts", () => {
     expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX147 — THE SECOND READER GETS A VOTE.
+//
+// Every call is read twice after it ends. A pattern matcher looks for sentences
+// that mean "I did the thing", and an LLM reads the transcript and answers the
+// same question. The second one has been running on every call since 5bf13e0,
+// writing its answer to the log and having it thrown away -- that is what
+// `shadow` means.
+//
+// THE MATCHER HAS LOST THREE TIMES IN A ROW, on three consecutive production
+// calls, and the judge was right on all three:
+//
+//   CA239c7c  "has been SUCCESSFULLY rescheduled"        missed / caught
+//   CA7ec8af  "I have THAT CALL booked for you"          missed / caught
+//   CA299f23  "THAT IS all booked."                      missed / caught
+//
+// The matcher is not broken; it is a list, and the model keeps saying things
+// that are not on it. It has been widened twice this week and missed again on
+// the next call. LVX143's own note measured why: the WIDE variant, which exists
+// precisely to catch phrasings the narrow one misses, fires on the same 26 of
+// 207 corpus turns and has never caught anything extra.
+//
+// A UNION, NEVER A REPLACEMENT. The judge can add a claim and can never remove
+// one, so a judge that is down, slow, or wrong in the quiet direction leaves
+// exactly today's behaviour. That property is what makes this safe to ship on
+// an LLM's answer, and it is asserted below rather than described.
+//
+// What it is NOT: this is an after-the-fact net. The caller still hears the
+// sentence. It changes whether anybody finds out afterwards.
+// ---------------------------------------------------------------------------
+describe("LVX147 — the judge can add a claim the matcher missed", () => {
+  beforeEach(() => clearStats());
+
+  it("calls it a fabrication when the judge saw a claim and no row exists", async () => {
+    // CA299f23's shape with the refusal removed: the assistant announced a
+    // booking, no tool ever ran, so nothing is abandoned and nothing was
+    // written. Today that is `ok` and the call disappears.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: true },
+      d
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+    expect(d.db.createCustomerRequest).toHaveBeenCalled();
+  });
+
+  it("leaves it alone when the judge saw no claim either", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: false },
+      d
+    );
+
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("behaves exactly as before when the judge did not answer", async () => {
+    // The degradation property, and the reason a union is safe. undefined is
+    // what a judge that failed, timed out or never ran produces.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall({ ...input(), writes: [], claims: [] }, d);
+
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("cannot REMOVE a claim the matcher found", async () => {
+    // The half that makes this one-directional. If the judge's "no" could
+    // overrule the matcher's "yes", an LLM shrug would switch the oldest guard
+    // on this path off.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [{ turn: 1, kind: "claim" }], judgeClaimedDone: false },
+      d
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("reports both readers on the line, so a disagreement is visible", async () => {
+    // The mistake made with write_consent_restated_slot, not repeated: a rule
+    // that decides something and leaves no trace of WHY cannot be audited. The
+    // pair is what carries the meaning -- matcher false and judge true is the
+    // population this change added.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: true },
+      d
+    );
+
+    expect(out.claimedByMatcher).toBe(false);
+    expect(out.claimedByJudge).toBe(true);
+  });
+});

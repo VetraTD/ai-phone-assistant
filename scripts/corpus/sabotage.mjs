@@ -100,6 +100,9 @@ const CLAIMRACE = "tests/liveClaimGuardRefusedWrite.test.js";
 const CLAIM = "tests/liveClaimGuard.test.js";
 const AFFIRM = "tests/isAffirmative.test.js";
 const ORDER = "tests/liveWriteOrder.test.js";
+// The teardown wiring, which is a different question from what verifyCall does
+// with what it is handed.
+const POSTCALLWIRE = "tests/livePostCall.test.js";
 
 const SABOTAGES = [
   {
@@ -476,6 +479,29 @@ const SABOTAGES = [
     replace:
       '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
     red: [VERIFY],
+  },
+  // -------------------------------------------------------------------------
+  // LVX147. Two rows, because the fix is in two files: verifyCall has to UNION
+  // the two readers, and the live teardown has to HAND IT the judge's answer.
+  // Breaking one while the other stands is how half a fix ships looking whole.
+  // -------------------------------------------------------------------------
+  {
+    name: "judge-claim-not-unioned",
+    why:
+      "puts the verdict back on the phrase matcher alone. It lost three times on three consecutive production calls -- CA239c7c 'has been SUCCESSFULLY rescheduled', CA7ec8af 'I have THAT CALL booked', CA299f23 'THAT IS all booked' -- with the judge right every time. Without the union a caller told they are booked, on a call that ran no tool at all, reads as verdict ok and nobody hears about it.",
+    file: "lib/postCallVerify.js",
+    find: '  const claimed = claims.some((c) => c?.kind === "claim") || judgeClaimedDone === true;',
+    replace: '  const claimed = claims.some((c) => c?.kind === "claim"); // SABOTAGE',
+    red: [VERIFY],
+  },
+  {
+    name: "judge-answer-dropped",
+    why:
+      "stops the teardown handing the judge's answer to verifyCall, which is what it did until 2026-09-18: the answer was computed, logged and dropped on the floor. verifyCall's own tests still pass with this -- they hand it the field directly -- so only the wire test can see it. A producer whose field is never copied is the most-repeated defect in lib/voice/live/index.js.",
+    file: "lib/voice/live/index.js",
+    find: "          return runVerify(j?.claimed_done === true ? true : undefined);",
+    replace: "          return runVerify(undefined); // SABOTAGE",
+    red: [POSTCALLWIRE],
   },
   // -------------------------------------------------------------------------
   // LVX145. The third closing shape. Two rows: the marker has to be RECORDED

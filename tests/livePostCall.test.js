@@ -685,3 +685,69 @@ describe("the recovery is told whether the caller ever agreed", () => {
     expect(s.recover.mock.calls[0][0].agreed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX147 — THE WIRE. The judge's answer has to actually reach verifyCall.
+//
+// lib/postCallVerify.js's own tests prove the union: a judge claim with no row
+// becomes `claim_without_row`. Nothing proved that the live path ever HANDS it
+// over, and a producer whose field is never copied is the most-repeated defect
+// in lib/voice/live/index.js -- present, plausible, and silently doing nothing.
+// The judge chain's value went nowhere at all until today, which is that defect
+// in its purest form: the answer was computed, logged, and dropped on the floor.
+//
+// So these assert the handover from the outside, on the real teardown ordering,
+// with both readers stubbed.
+// ---------------------------------------------------------------------------
+describe("LVX147 — the judge's answer reaches the verification", () => {
+  beforeEach(() => clearStats());
+
+  it("passes claimed_done through to verify", async () => {
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    s.judge.mockResolvedValue({ ran: true, claimed_done: true });
+    await s.book();
+    await s.hangUp();
+
+    expect(s.judge).toHaveBeenCalledTimes(1);
+    expect(arg(s.verify).judgeClaimedDone).toBe(true);
+  });
+
+  it("passes undefined when the judge saw no claim", async () => {
+    // NOT false. verifyCall unions on `=== true`, and undefined and false mean
+    // the same thing to it -- but sending `false` would read, to anyone looking
+    // at the call, as the judge having actively disagreed rather than simply
+    // not having found one.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    s.judge.mockResolvedValue({ ran: true, claimed_done: false });
+    await s.book();
+    await s.hangUp();
+
+    expect(arg(s.verify).judgeClaimedDone).toBeUndefined();
+  });
+
+  it("STILL VERIFIES when the judge throws", async () => {
+    // The whole safety argument. The verification is the last thing that can
+    // tell anyone a caller was lied to; a judge that fails must cost it its
+    // second reader and nothing else.
+    const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
+    s.judge.mockRejectedValue(new Error("judge down"));
+    await s.book();
+    await s.hangUp();
+
+    expect(s.verify).toHaveBeenCalledTimes(1);
+    expect(arg(s.verify).judgeClaimedDone).toBeUndefined();
+  });
+
+  it("does not wait for a judge that was never going to run", async () => {
+    // POSTCALL_JUDGE unset. The chain resolves to null immediately rather than
+    // racing a timeout it cannot win, so nothing about the teardown changes on
+    // the configuration this has shipped with for weeks.
+    const s = await boot({ POSTCALL_VERIFY: "count" });
+    await s.book();
+    await s.hangUp();
+
+    expect(s.judge).not.toHaveBeenCalled();
+    expect(s.verify).toHaveBeenCalledTimes(1);
+    expect(arg(s.verify).judgeClaimedDone).toBeUndefined();
+  });
+});
