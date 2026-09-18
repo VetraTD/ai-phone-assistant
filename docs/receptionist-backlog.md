@@ -11519,8 +11519,13 @@ chained after it and had fired).
 
 ## LVX122 — `postcall_verify`'s `sent` counts ATTEMPTS, not deliveries
 
-**Status: OPEN · P2. Filed 2026-09-12 after this entry's first version was wrong;
-the retraction is below and is the more useful half.**
+**Status: FIXED — corrected 2026-09-17. This line read OPEN for five days after
+the fix landed.** `services/notifications.js` returns `await sendSms(...)` so a
+blocked send no longer reads as a delivered one, and `sent-counts-attempts` in
+the sabotage matrix exists to keep it that way (pointed at
+`tests/notifications.sms.test.js`, NOT `postCallVerify.test.js`, which stubs
+`notifications` wholesale). Filed 2026-09-12 after this entry's first version was
+wrong; the retraction is below and is the more useful half.
 
 On `CA6b773e2a` the caller was asked "can I send you a text confirmation?",
 declined, and `postcall_verify` reported:
@@ -14018,3 +14023,145 @@ utterance 7 onward.
 Read `input_transcript_lag_ms_p50` from `live_call_summary`, which is computed
 independently, and treat a monotonically climbing `transcript_ms` as a
 bookkeeping shift until that p50 says otherwise.
+
+---
+
+## LVX139 — the assistant answers an English caller in another language
+
+**Status: COUNTED, not fixed · P1 by frequency. Three calls in eighteen.**
+
+| call | date | language | how it was found |
+|---|---|---|---|
+| `CAd48d7b` | 2026-09-17 | Spanish | owner |
+| `CAfcd28789` | 2026-09-17 | reported as French | owner |
+| `CAdc602f` | 2026-09-17 | Spanish | owner |
+
+**Every one reported by a human, because nothing in this system watched what the
+assistant SAID.** That is the defect this entry is really about; the language
+itself is downstream.
+
+`CAdc602f`, verbatim, on a session opened `language_code: en-US`,
+`language_source: tenant`, `output_language_pinned: TRUE`:
+
+```
+23:14:00  A: "Thanks for calling Digile Media..."
+23:14:18  A: "I'm Digile Media's AI assistant. I can answer questions and help
+              you with appointments. How can I help you today?"     <- re-greet
+23:14:31  A: "Sí, es completamente normal. ¿En qué puedo ayudarte hoy?"
+```
+
+Forty seconds, nothing accomplished, caller hung up (`close_reason:
+twilio_stop`).
+
+### Why the existing counter could never see it
+
+`live_caller_turn_non_english` did not fire on any of the three, and could not
+have:
+
+1. it reads the **caller's** turn, not the assistant's;
+2. it **excludes Spanish deliberately** — `lib/transcriptUtils.js` states the
+   reason, and the reason is right: Spanish is a supported locale, so
+   "Sí, quiero una cita para el martes" is a legitimate caller rather than a
+   transcription fault.
+
+Both decisions are correct. Together they leave the actual defect with no
+instrument at all, which is how it reached three sightings before anything
+counted it.
+
+### What the audio says, and it is the more interesting half
+
+`CAdc602f`'s caller utterances, transcribed:
+
+```
+2,640 ms of speech  ->   0 characters
+1,840 ms            ->   0 characters
+1,080 ms            ->   0 characters
+    300 ms          ->   6 characters
+    160 ms          ->  11 characters
+```
+
+and `media_gap_max_ms` **3,561** against 290 and 236 on the two healthy calls
+earlier the same day — twelve times worse, on a forty-second call.
+
+So the shape is: **inbound audio degrades, the model (which IS the ASR) gets
+nothing usable, and it fills the gap in another language.** Turn 2 being a
+re-greeting — the classic did-not-understand fallback — sits exactly where that
+predicts. This is a hypothesis with one call behind it, not a conclusion.
+
+Worth noting that `media_gap_max_ms` only exists because LVX131 shipped that
+afternoon. The instrument built for a severed socket is what made the audio
+degradation visible.
+
+### `output_language_pinned` is proven worthless for this
+
+All three calls had it TRUE. `lib/voice/live/client.js` already says the pin
+governs the voice rather than the words; these calls are what that distinction
+costs in practice. Nothing in the session config constrains the language the
+model writes.
+
+### What shipped: a counter on our own output
+
+`replyLooksNonEnglish` in `lib/transcriptUtils.js`, and in `auditTurn`:
+
+- `live_assistant_turn_language_checked` — every assistant turn on an
+  English-only tenant. The denominator.
+- `live_assistant_turn_non_english` — the fault.
+
+Three decisions worth keeping:
+
+**Spanish is INCLUDED here and excluded on the caller side.** On a tenant whose
+`languages_spoken` is `["en"]` there is no legitimate Spanish assistant turn.
+Same machinery, opposite inclusion rule, because "legitimate" means opposite
+things on the two sides of the call. The caller has to be told apart from a
+fault; the assistant does not.
+
+**Accent-blind, and that is load bearing.** `lib/logger.js` writes non-ASCII as
+`?`, so the stored form of the real turn is `"S?, es completamente normal."` A
+detector matching `sí` and `qué` would read live traffic correctly and every
+log-derived fixture wrongly. Both sides are stripped.
+
+**Multilingual tenants are exempt.** `services/gemini.js` tells a tenant with
+more than one language to follow the caller's language, so counting that as a
+fault would make the counter fire hardest exactly where the behaviour is
+correct.
+
+Scored before shipping against **166 real English assistant turns: zero false
+positives**, and both surviving foreign turns caught in accented and mangled
+form.
+
+### The trap this hit while being written, which is the most repeated one here
+
+The check was first placed inside `if (turnUserText)`, beside its caller-side
+sibling. That guard would have made it **blind on exactly the calls it exists
+for**: on `CAdc602f` the caller's 2,640 ms transcribed to zero characters, so
+the turn that answered in Spanish carried no caller text at all. Present,
+plausible, and silent when it matters. Four tests caught it immediately, and
+`assistant-language-behind-caller-text` in the sabotage matrix now holds it
+there.
+
+### On making the switch legitimate instead
+
+The owner asked the right question: should the assistant follow a caller who
+genuinely speaks Spanish? Yes — and the prompt already supports it, emitted
+whenever `languages_spoken` has more than one entry.
+
+**But not yet, and the counting is why.** Genuine foreign-language callers
+observed: **zero**. False switches: **three in eighteen calls**. On this API the
+model is the ASR, so "follow the caller's language" reads as *follow your own
+transcription of the caller* — and when that transcription is a hallucination of
+2,640 ms of silence, the instruction legitimises the failure instead of
+preventing it. `CAd48d7b` is the worked example: English caller, transcribed as
+`"¿sabes inglés?"`, model answers that question correctly in Spanish, caller
+replies "Why do you speak Spanish? I'm speaking in English."
+
+Enable it per tenant once the false-switch rate is known and low, and make the
+switch require **sustained** evidence — two or three consecutive caller turns in
+the same language — because a real Spanish speaker is Spanish for the whole
+call while a mis-transcription is one odd turn among English ones. That is a
+rule code can hold; a prompt sentence is not (four documented failures in this
+file).
+
+**Done when:** `live_assistant_turn_non_english` has a rate against its
+denominator across a few days of calls, and the audio-degradation hypothesis is
+either supported or dropped by comparing `media_gap_max_ms` on the calls that
+flip against those that do not.

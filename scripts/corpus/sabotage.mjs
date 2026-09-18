@@ -46,6 +46,7 @@ const ASK = "tests/liveEndCallAsk.test.js";
 // the only place the CASCADE's side of a shared gate is visible at all.
 const TOOLSGATE = "tests/tools.test.js";
 const DENIAL = "tests/liveAvailabilityDenial.test.js";
+const LANG = "tests/liveAssistantLanguage.test.js";
 
 const SABOTAGES = [
   {
@@ -261,6 +262,42 @@ const SABOTAGES = [
     find: "          for (const sentence of replyText.split(/(?<=[.!?])\\s+/)) {",
     replace: "          for (const sentence of [replyText]) { // SABOTAGE",
     red: [DENIAL],
+  },
+  {
+    name: "assistant-language-detector",
+    why:
+      "the assistant can answer an English caller in Spanish and nothing counts it. Three calls in eighteen did exactly that, and every one was reported by a human because no instrument watched what the assistant SAID.",
+    file: "lib/voice/live/index.js",
+    find: "      if (replyLooksNonEnglish(replyText)) {",
+    replace: "      if (false) { // SABOTAGE",
+    red: [LANG],
+  },
+  {
+    name: "assistant-language-behind-caller-text",
+    why:
+      "puts the assistant-language check back inside `if (turnUserText)`, which is where it was first written. That guard makes it blind on exactly the calls it exists for: on CAdc602f the caller's 2,640 ms of speech transcribed to ZERO characters, so the turn that answered in Spanish carried no caller text at all. Present, plausible, and silent when it matters -- the most repeated defect shape in this file.",
+    file: "lib/voice/live/index.js",
+    find: "    if (englishOnlyTenant && replyText) {",
+    replace: "    if (englishOnlyTenant && replyText && turnUserText) { // SABOTAGE",
+    red: [LANG],
+  },
+  {
+    name: "assistant-language-accent-blind",
+    why:
+      "stops normalising accents, so a marker that exists ONLY in an accented form stops matching. The Spanish turns survive this on their unaccented markers alone, which is why the first version of this row stayed GREEN and the fix had no test -- the case that fails is 'Voce prefere amanha ou quinta feira', whose only marker is accented.",
+    file: "lib/transcriptUtils.js",
+    find: "  const words = stripDiacritics(text)\n    .toLowerCase()",
+    replace: "  const words = String(text) // SABOTAGE\n    .toLowerCase()",
+    red: [LANG],
+  },
+  {
+    name: "assistant-language-hits-multilingual",
+    why:
+      "drops the English-only condition, so a tenant configured for two languages is counted as faulty every time it does the thing services/gemini.js explicitly tells it to do -- reply in the caller's language. The counter would then fire hardest exactly where the behaviour is correct.",
+    file: "lib/voice/live/index.js",
+    find: "    if (englishOnlyTenant && replyText) {",
+    replace: "    if (replyText) { // SABOTAGE",
+    red: [LANG],
   },
   {
     name: "call-summary",
