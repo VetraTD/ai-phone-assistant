@@ -146,7 +146,11 @@
       "standing_read_back": "That works. We have Monday, September twenty-first at nine AM, one PM, or four-thirty PM available. Which one suits you best?",
       "agreed_read_back": "That works. We have Monday, September twenty-first at nine AM, one PM, or four-thirty PM available. Which one suits you best?",
       "target": null,
-      "target_candidates": [],
+      "target_candidates": [
+        "2026-09-21T09:00:00",
+        "2026-09-21T13:00:00",
+        "2026-09-21T16:30:00"
+      ],
       "target_from": "That works. We have Monday, September twenty-first at nine AM, one PM, or four-thirty PM available. Which one suits you best?",
       "target_derived": true,
       "caller_text": "11:30 a.m.",
@@ -174,8 +178,10 @@
       "agreed_turn": 5,
       "standing_read_back": "Shall I reschedule your appointment to Monday, September twenty-first at eleven-thirty AM?",
       "agreed_read_back": "Shall I reschedule your appointment to Monday, September twenty-first at eleven-thirty AM?",
-      "target": null,
-      "target_candidates": [],
+      "target": "2026-09-21T11:30:00",
+      "target_candidates": [
+        "2026-09-21T11:30:00"
+      ],
       "target_from": "Shall I reschedule your appointment to Monday, September twenty-first at eleven-thirty AM?",
       "target_derived": true,
       "caller_text": "Yeah, no worries.",
@@ -203,8 +209,10 @@
       "agreed_turn": 6,
       "standing_read_back": "I've successfully rescheduled your appointment to Monday, September twenty-first at eleven-thirty AM.",
       "agreed_read_back": "I've successfully rescheduled your appointment to Monday, September twenty-first at eleven-thirty AM.",
-      "target": null,
-      "target_candidates": [],
+      "target": "2026-09-21T11:30:00",
+      "target_candidates": [
+        "2026-09-21T11:30:00"
+      ],
       "target_from": "I've successfully rescheduled your appointment to Monday, September twenty-first at eleven-thirty AM.",
       "target_derived": true,
       "caller_text": "Actually, sorry, do you think we could cancel that?",

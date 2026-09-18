@@ -817,7 +817,9 @@ describe("a call that tried to write and could not", () => {
     // triaging it needs to know the caller is expecting an appointment.
     const [{ requestType, notes }] = d.db.createCustomerRequest.mock.calls[0];
     expect(requestType).toBe("unconfirmed_claim");
-    expect(notes).toMatch(/every attempt was refused/);
+    // Reworded when the gate widened on 2026-09-18 -- see the block below for
+    // why "nothing was recorded" stopped being true of this shape.
+    expect(notes).toMatch(/the attempt was refused/);
   });
 
   it("counts the listed-only shape without acting on it", async () => {
@@ -831,15 +833,48 @@ describe("a call that tried to write and could not", () => {
     expect(getLatencyStats().turnTaking.postcall_booking_owed).toBeFalsy();
   });
 
-  it("does not escalate an abandoned write when a row exists after all", async () => {
-    // A call that abandoned one attempt and then succeeded has nothing
-    // outstanding, and a net that fires on it teaches people to ignore it.
+  // -------------------------------------------------------------------------
+  // THIS CASE ASSERTED THE OPPOSITE UNTIL 2026-09-18, and it was wrong for a
+  // reason worth keeping rather than deleting.
+  //
+  // It read "a call that abandoned one attempt and then succeeded has nothing
+  // outstanding, and a net that fires on it teaches people to ignore it." The
+  // premise is true and the test does not test it: `abandoned` is built as
+  // refusedToolsThisCall MINUS completedToolsThisCall, by tool NAME, so an
+  // attempt that later succeeded never reaches this module at all. What the
+  // row conjunct actually tested was whether SOME OTHER tool succeeded.
+  //
+  // CAd978554, production, 2026-09-18: reschedule_appointment_db abandoned, the
+  // caller told it was done, the fiction then took their consent to cancel an
+  // appointment that did not exist -- and an unrelated book_appointment four
+  // minutes later put a row in `bookedRows` and suppressed the escalation.
+  // Nobody was told. reconcile() names that exact trap at the bottom of
+  // lib/postCallVerify.js: an unrelated success must not vouch for an abandoned
+  // write.
+  // -------------------------------------------------------------------------
+  it("STILL escalates when a DIFFERENT write succeeded on the same call", async () => {
     const d = fakeDeps({ booked: [row()] });
     const out = await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
 
     expect(out.verdict).toBe("write_abandoned");
-    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.db.createCustomerRequest).toHaveBeenCalled();
+    // The narrow counter stays narrow: it is the measurement of what the old
+    // gate would have caught, and the gap between the two is the widening.
     expect(getLatencyStats().turnTaking.postcall_abandoned_no_row).toBeFalsy();
+    expect(getLatencyStats().turnTaking.postcall_abandoned_outstanding).toBe(1);
+  });
+
+  it("says in the note that other parts of the call may have gone through", async () => {
+    // The old sentence said "every attempt was refused, so nothing was
+    // recorded". True of CA03558d, false of CAd978554, and a triage note that
+    // overstates is one the next person learns to distrust.
+    const d = fakeDeps({ booked: [row()] });
+    await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
+
+    const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
+    expect(notes).toMatch(/was refused, so that change was never recorded/);
+    expect(notes).toMatch(/Other parts of the call may have gone through/);
+    expect(notes).not.toMatch(/nothing was recorded/);
   });
 });
 

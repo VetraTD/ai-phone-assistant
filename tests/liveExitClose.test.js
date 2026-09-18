@@ -253,3 +253,144 @@ describe("the ask gate runs before the held-question guard", () => {
     expect(s.ws.readyState).not.toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CA94f2b4, 2026-09-18, VERBATIM:
+//
+//   01:56:19  reschedule_appointment_db  success=true
+//   01:56:22  end_call                   success=true   <- allowed
+//   01:56:30  A: "...updated to Monday, September 21st at 1 PM. Is there
+//                 anything else I can help you with today?Thank you for calling
+//                 Digile Media, and have a great day."
+//   01:56:32  live_exit_run
+//
+// Asked and signed off in ONE BREATH, then hung up. The caller never answered,
+// and `end_call_refusals` read {no_ask: 0} -- so nothing refused, nothing held.
+//
+// BOTH GUARDS BEHAVED AS WRITTEN, which is why this is a seam and not a bug in
+// either of them:
+//
+//   - LVX132's ask gate asks "was a question asked ANYWHERE?" The in-turn half
+//     of turnState().askedAnythingElse read the reply as it stood at tool time,
+//     saw the question, and allowed the hang-up. That branch exists to stop
+//     FALSE refusals when a model asks and calls end_call in one turn, and it
+//     did its job.
+//   - live_exit_held_question asks "does the reply END with one?" This reply
+//     ends with the farewell.
+//
+// A turn that asks mid-sentence and then signs off satisfies the first and
+// evades the second. The fix is the state distinction the code already had:
+// an ask carried ONLY by the in-turn read belongs to a turn that has not
+// finished, so the caller cannot have answered it.
+// ---------------------------------------------------------------------------
+
+/**
+ * A booking on a call where NOBODY has been asked "anything else" on a
+ * completed turn. That is the whole precondition: `askedAnythingElseThisCall`
+ * is written at turnComplete, so it is still false here, and the only thing
+ * that can satisfy the ask gate is the sentence being spoken right now.
+ */
+async function bookedCallNeverAsked() {
+  const s = await bootLive({ config: CONFIG, callSid: "CA94f2b4" });
+  await s.callTool("check_appointment_availability", { requested_at: SLOT });
+  await s.callerSays("I'd like Friday afternoon.");
+  await s.assistantTurn(READ_BACK);
+  await s.callerSays("Yes, that works.");
+  await s.callTool("book_appointment", { client_name: CLIENT, scheduled_at: SLOT });
+  expect(s.store.scheduled()).toHaveLength(1);
+  return s;
+}
+
+const ASK_THEN_SIGN_OFF_PART_1 =
+  "Your appointment has been successfully updated to Friday, September eighteenth at three thirty PM. Is there anything else I can help you with today?";
+const ASK_THEN_SIGN_OFF_PART_2 =
+  "Thank you for calling Digile Media, and have a great day.";
+
+describe("asked and signed off in one breath", () => {
+  it("holds the exit when the only ask is in the turn that is closing", async () => {
+    const s = await bookedCallNeverAsked();
+
+    // The model speaks first and the tool runs mid-turn, which is the ordering
+    // the Live API produces and the one the in-turn branch was written for.
+    await s.assistantSays(ASK_THEN_SIGN_OFF_PART_1);
+    const [res] = await s.callTool("end_call", {});
+
+    // THE ASK GATE ALLOWED IT, and that is the premise rather than a detail. If
+    // this ever starts refusing, the case below stops testing the seam and
+    // becomes a second test of LVX132.
+    expect(res.response.success).toBe(true);
+    expect(counters().end_call_refused_no_ask).toBeFalsy();
+
+    await s.assistantTurn(ASK_THEN_SIGN_OFF_PART_2);
+
+    // The positional guard cannot see this: the reply ends with the farewell.
+    expect(counters().live_exit_held_question).toBeFalsy();
+    // The new one can.
+    expect(counters().live_exit_held_in_turn_ask).toBe(1);
+    expect(counters().live_exit_arm_checked).toBeFalsy();
+    expect(s.ws.readyState).not.toBe(3);
+  });
+
+  it("closes on the next turn once the caller has answered", async () => {
+    // The cost, stated: one turn. A hold that could never release would be a
+    // line nobody can close, which is worse than the hang-up it prevents.
+    const s = await bookedCallNeverAsked();
+    await s.assistantSays(ASK_THEN_SIGN_OFF_PART_1);
+    await s.callTool("end_call", {});
+    await s.assistantTurn(ASK_THEN_SIGN_OFF_PART_2);
+    expect(counters().live_exit_held_in_turn_ask).toBe(1);
+
+    await s.callerSays("No, that's everything.");
+    await s.assistantTurn("Thanks again, and have a wonderful day.");
+
+    expect(counters().live_exit_arm_checked).toBe(1);
+    // ONE HOLD, NOT TWO. The flag is spent when it fires; a latch left standing
+    // would hold every remaining turn and the call could never end.
+    expect(counters().live_exit_held_in_turn_ask).toBe(1);
+  });
+
+  it("does NOT hold when the caller was already asked on an earlier turn", async () => {
+    // -----------------------------------------------------------------------
+    // THE CLOSING TURN ASKS AGAIN, AND THAT IS THE POINT OF THIS CASE.
+    //
+    // The first version of it did not repeat the question, and it was worthless:
+    // with no ask in the closing turn `closingTicRe` is false either way, so the
+    // case passed whether or not `!askedAnythingElseThisCall` was there at all.
+    // The sabotage matrix caught it -- `in-turn-ask-ignores-the-latch` came back
+    // STILL GREEN -- and that is the matrix doing the job a reading of the code
+    // did not.
+    //
+    // The state where the two disjuncts actually differ has to be written out
+    // rather than assumed: the caller was asked on a COMPLETED turn, answered,
+    // and the model asks a second time on its way out. That is not a rare shape
+    // -- it is LVX136's transcript verbatim ("...wonderful day.Is there
+    // anything else I can assist you with today?"). A caller asked once has
+    // been asked, and holding here would cost an extra turn on every close a
+    // repetitive model makes.
+    // -----------------------------------------------------------------------
+    const s = await bookedCall();
+
+    await s.assistantSays(
+      "Of course — that's Friday the eighteenth at three thirty PM. Is there anything else I can help you with today?"
+    );
+    await s.callTool("end_call", {});
+    await s.assistantTurn("Thanks for calling Digile Media, and have a wonderful day.");
+
+    expect(counters().live_exit_held_in_turn_ask).toBeFalsy();
+    expect(counters().live_exit_arm_checked).toBe(1);
+  });
+
+  it("still holds on the positional rule when the reply ends with the question", async () => {
+    // CA2556d43d's shape, re-asserted from this block: the two holds have
+    // different causes and the older one must keep firing on its own case.
+    const s = await bookedCall();
+
+    await s.callTool("end_call", {});
+    await s.assistantTurn(
+      "That's now cancelled. Is there anything else I can help you with today?"
+    );
+
+    expect(counters().live_exit_held_question).toBe(1);
+    expect(counters().live_exit_held_in_turn_ask).toBeFalsy();
+  });
+});

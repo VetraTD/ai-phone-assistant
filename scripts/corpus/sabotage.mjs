@@ -90,6 +90,11 @@ const ASK = "tests/liveEndCallAsk.test.js";
 const TOOLSGATE = "tests/tools.test.js";
 const DENIAL = "tests/liveAvailabilityDenial.test.js";
 const LANG = "tests/liveAssistantLanguage.test.js";
+// LVX140's suite. NOT tests/liveClaimGuard.test.js: that file's `execute` stub
+// returns { success: true } for every tool, so no case in it can produce a
+// refused write at all -- the stubbed-execute trap, the same one that kept
+// `sent-counts-attempts` green against postCallVerify.test.js.
+const CLAIMRACE = "tests/liveClaimGuardRefusedWrite.test.js";
 
 const SABOTAGES = [
   {
@@ -163,7 +168,12 @@ const SABOTAGES = [
     why:
       "puts the escalation back behind reconcile()'s single ordered verdict. write_abandoned is tested before claim_without_row, so CA03558d -- six refused attempts, zero rows, a caller told it was confirmed -- told nobody anything.",
     file: "lib/postCallVerify.js",
-    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) {',
+    // RE-ANCHORED 2026-09-18 when LVX142 widened the disjunct from
+    // abandonedWithNoRow to abandonedOutstanding. The old anchor matched zero
+    // times, which this script reports rather than skipping -- but a row that
+    // cannot run is a row that proves nothing, and the first sign of it is a
+    // matrix that suddenly counts one lower.
+    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding) {',
     replace: '  if (verdict === "claim_without_row" || bookingOwedNoRow) { // SABOTAGE',
     red: [VERIFY],
   },
@@ -203,7 +213,18 @@ const SABOTAGES = [
     why:
       "arms the exit whatever the closing turn said. CA2556d43d asked 'Is there anything else I can help you with today?' and dropped the line 1.6 seconds later.",
     file: "lib/voice/live/index.js",
-    find: "        const askedTheCaller = endCallArmed && !exitAfterTurn && /\\?['\")\\]\\s]*$/.test(replyAtTurnEnd);",
+    // RE-ANCHORED 2026-09-18, and onto the WHOLE expression rather than the
+    // positional half of it. LVX141 turned this into an alternation, and the
+    // standing rule is that a widened alternation gets sabotaged back to its
+    // prior text -- narrowing one branch proves nothing while the other still
+    // carries the cases, which is how `farewell-adjective` stayed green on its
+    // first run. The new branch has its own row below.
+    //
+    // The old anchor matched ZERO times after the split, and the run said so:
+    // this script reports a stranded anchor instead of skipping it, which is the
+    // only reason the row did not quietly stop testing anything.
+    find:
+      "        const askedTheCaller =\n          (endCallArmed && !exitAfterTurn && /\\?['\")\\]\\s]*$/.test(replyAtTurnEnd)) || heldForInTurnAsk;",
     replace: "        const askedTheCaller = false; // SABOTAGE",
     red: [EXITCLOSE],
   },
@@ -365,29 +386,138 @@ const SABOTAGES = [
     replace: "      // SABOTAGE",
     red: [SESSION],
   },
+  // -------------------------------------------------------------------------
+  // LVX140. The claim guard's look-back, and BOTH halves of the fix.
+  // -------------------------------------------------------------------------
+  {
+    name: "claim-guard-counts-attempts",
+    why:
+      "restores the attempts-minus-refusals tally the claim guard used until 2026-09-18. The arithmetic is right and the TIMING is not: the attempt is counted before `await runner.handleToolCall` and the refusal after it, and nothing serialises that against turnComplete. On CAd978554 the turn rolled inside the await, so actionToolRanPrevTurn was written from a tally holding the attempt and not the refusal, and 'I have successfully rescheduled your appointment' went uncontradicted.",
+    file: "lib/voice/live/index.js",
+    find: "  const actionToolsRanThisTurn = () => actionToolSucceededThisTurn;",
+    replace:
+      "  const actionToolsRanThisTurn = () =>\n    actionToolCallsThisTurn - refusedActionCallsThisTurn > 0; // SABOTAGE",
+    red: [CLAIMRACE],
+  },
+  {
+    name: "claim-credit-ignores-late-result",
+    why:
+      "drops the half that credits a tool result to the turn it was CALLED on. Without it a write that succeeds while the turn is rolling is credited to nobody, the look-back reads false, and the guard accuses the model of fabricating a booking it actually made. The refusal half alone is satisfied by a guard that simply always speaks; this is what stops that being the fix.",
+    file: "lib/voice/live/index.js",
+    find: "        else if (seq === turnSeq - 1) actionToolRanPrevTurn = true;",
+    replace: "        // SABOTAGE",
+    red: [CLAIMRACE],
+  },
+  // -------------------------------------------------------------------------
+  // LVX141. The closing seam. Three rows, because the fix is three facts: the
+  // flag is SET only for an in-turn ask, it is READ by the hold, and it is
+  // SPENT when the hold fires. Breaking one and watching the others carry the
+  // cases is how `farewell-adjective` stayed green on its first run.
+  // -------------------------------------------------------------------------
+  {
+    name: "exit-hold-ignores-in-turn-ask",
+    why:
+      "restores the exit hold to the positional test alone. CA94f2b4 asked 'Is there anything else I can help you with today?' and said 'have a great day' in the same breath: the reply ends with the farewell, so the positional test says no, and LVX132's ask gate had already allowed the hang-up on the strength of that same question. The caller got 1.5 seconds of dial tone in which to answer.",
+    file: "lib/voice/live/index.js",
+    find: "        const heldForInTurnAsk = endCallArmed && !exitAfterTurn && endCallAskWasInTurnOnly;",
+    replace: "        const heldForInTurnAsk = false; // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "in-turn-ask-ignores-the-latch",
+    why:
+      "makes every closing turn that contains the question look like an in-turn ask, by dropping the `askedAnythingElseThisCall` half. The distinction IS the fix: a caller asked on an earlier turn has already had their chance to answer, and holding that call costs an extra turn on every normal close. Red on the earlier-turn control rather than on the CA94f2b4 case, which is the point of having both.",
+    file: "lib/voice/live/index.js",
+    find: "        !askedAnythingElseThisCall &&",
+    replace: "        true && // SABOTAGE",
+    red: [EXITCLOSE],
+  },
+  {
+    name: "in-turn-ask-hold-never-spent",
+    why:
+      "leaves the one-shot standing after it fires. `endCallArmed` is never lowered, so an unspent flag holds the exit at the end of every remaining turn and the line can never close -- trading a premature hang-up for a call nobody can end, which is the defect on the other call of that night.",
+    file: "lib/voice/live/index.js",
+    find: "          endCallAskWasInTurnOnly = false;\n        } else {",
+    replace: "          // SABOTAGE\n        } else {",
+    red: [EXITCLOSE],
+  },
+  // -------------------------------------------------------------------------
+  // LVX142. The post-call escalation.
+  // -------------------------------------------------------------------------
+  {
+    name: "abandoned-escalation-narrowed",
+    why:
+      "puts `&& bookedRows.length === 0` back in front of the abandoned-write escalation. `abandoned` already excludes any tool that later succeeded, so that conjunct never tested what its comment claimed -- it tested whether some OTHER tool succeeded. On CAd978554 an unrelated booking four minutes later vouched for an abandoned reschedule and nobody was told that a caller had been lied to.",
+    file: "lib/postCallVerify.js",
+    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding) {',
+    replace:
+      '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
+    red: [VERIFY],
+  },
 ];
 
 const only = process.argv.includes("--only")
   ? process.argv[process.argv.indexOf("--only") + 1]
   : null;
 
+// ---------------------------------------------------------------------------
+// A FOURTH RULE, added 2026-09-18: a run this cannot READ is not a red run.
+//
+// The corpus grew to eighteen calls and these suites log every gate decision,
+// so the combined output of the target files went past spawnSync's 1 MB default
+// and the call came back with status null and `spawnSync ... ENOBUFS`. The
+// baseline then reported "Baseline is RED" against sixteen suites that were all
+// green when run by hand. That is the harmless direction.
+//
+// The other direction is not. `ok: res.status === 0` is false for ENOBUFS too,
+// so a PATCHED run that overflowed would have printed `v <name>: red, ? test(s)
+// failed` and counted as a sabotage the suite caught -- with nothing measured
+// at all. A matrix reporting a pass it never observed is the exact failure this
+// script exists to object to, turned on itself.
+//
+// So: a large buffer, `--silent` so a run stops carrying every log line the
+// tests print, and an UNREADABLE verdict distinct from both red and green.
+// Neither caller is allowed to guess.
+// ---------------------------------------------------------------------------
 function runSuites(files) {
-  const res = spawnSync("npx", ["vitest", "run", ...files], {
+  // `--silent=true`, not a bare `--silent`: this vitest's CLI parser folds the
+  // next positional into the flag and dies with
+  //   Unexpected value "--silent=tests/postCallVerify.test.js"
+  // which is a crash, not a red suite -- and before the unreadable verdict
+  // below existed it would have read as one.
+  const res = spawnSync("npx", ["vitest", "run", "--silent=true", ...files], {
     encoding: "utf8",
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 256 * 1024 * 1024,
   });
   // Strip ANSI before matching. vitest colours the numbers, so a pattern
   // written against the visible text silently misses and reports "?" -- a tally
   // that cannot be read is the thing this whole script exists to object to.
   const out = `${res.stdout || ""}${res.stderr || ""}`.replace(/\[[\d;]*m/g, "");
-  const m = out.match(/Tests\s+(\d+)\s+failed/);
-  return { ok: res.status === 0, failed: m ? Number(m[1]) : res.status === 0 ? 0 : null };
+  const failedMatch = out.match(/Tests\s+(\d+)\s+failed/);
+  const passedMatch = out.match(/Tests\s+.*?(\d+)\s+passed/);
+  // The tally line is the only proof vitest ran to completion. Without it, or
+  // with no exit status at all, we know nothing -- and saying so is the whole
+  // point of this return shape.
+  const unreadable = res.error != null || res.status == null || (!failedMatch && !passedMatch);
+  return {
+    ok: !unreadable && res.status === 0,
+    failed: failedMatch ? Number(failedMatch[1]) : unreadable ? null : 0,
+    unreadable,
+    reason: res.error?.message || (res.status == null ? "no exit status" : "no test tally in the output"),
+  };
 }
 
 console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
 const targets = [...new Set(SABOTAGES.flatMap((s) => s.red))];
 const baseline = runSuites(targets);
+if (baseline.unreadable) {
+  console.error(`Baseline could not be READ: ${baseline.reason}.`);
+  console.error("That is not the same as red. Nothing was measured, so nothing below would mean");
+  console.error("anything -- fix the run before trusting a single row.");
+  process.exit(1);
+}
 if (!baseline.ok) {
   console.error("Baseline is RED. Fix the suite before asking whether it can fail.");
   process.exit(1);
@@ -429,7 +559,13 @@ for (const s of SABOTAGES) {
     releaseJournal();
   }
 
-  if (result.ok) {
+  if (result.unreadable) {
+    // NOT counted as red. An overflowed or crashed run fails the same exit-code
+    // test a genuine failure does, and letting it through here is how a row
+    // nobody measured reports as a row the suite caught.
+    console.log(`x ${s.name}: the run could not be READ (${result.reason}). Nothing was measured.`);
+    bad += 1;
+  } else if (result.ok) {
     console.log(`x ${s.name}: STILL GREEN with the fix removed. The suite is not watching this.`);
     console.log(`    ${s.why}`);
     bad += 1;

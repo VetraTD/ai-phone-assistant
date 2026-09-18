@@ -65,6 +65,15 @@ const PSEUDONYMS = [
   [/W-H-I-T-E?-F-I-E-L-D/gi, "B-E-L-L"],
   [/W H I T E? ?F I E L D/gi, "B E L L"],
   [/M-A-R-C-U-S/gi, "M-A-R-C-U-S"],
+  // CAd978554, 2026-09-18. The name is spelled out TWICE on that call in two
+  // different shapes -- the caller says it as bare letters and the assistant
+  // reads it back with the commas it inserted itself -- and both have to go
+  // before the plain sweep below or eleven loose capitals survive it. The
+  // letter counts differ (11 in, 10 out), which is fine: nothing downstream
+  // measures the spelling, and the replacement has to be the same person the
+  // rest of the corpus calls Marcus Bell.
+  [/N,\s*I,\s*T,\s*H,\s*I,\s*N,\s*D,\s*O,\s*D,\s*L,\s*A/g, "M, A, R, C, U, S, B, E, L, L"],
+  [/N\s+I\s+T\s+H\s+I\s+N\s+D\s+O\s+D\s+L\s+A/g, "M A R C U S B E L L"],
   [/WHITE?FIELDS?/g, "BELL"],
   [/Whit[ef]field/g, "Bell"],
   [/Whitfields/g, "Bells"],
@@ -76,10 +85,24 @@ const PSEUDONYMS = [
   [/Dillan Bhakta/gi, "Elena Farrow"],
   [/Bhakta/gi, "Farrow"],
   [/Dillan/gi, "Elena"],
+  // CAd978554 again. `Annett` is the transcriber's first attempt at the name
+  // before it was spelled, so its replacement is a MIS-HEARING of Marcus rather
+  // than Marcus itself -- LVX134 measures this call partly on the fact that the
+  // name arrived wrong twice, and flattening both to the correct form would
+  // erase the thing the fixture records.
+  [/Nithin\s+Dodla/gi, "Marcus Bell"],
+  [/Dodla/gi, "Bell"],
+  [/Nithin/gi, "Marcus"],
+  [/Annett/gi, "Marnie"],
+  // The company, in the three shapes the transcriber produced for it.
+  [/Aadhaar\s+Dak\s+Dairy/gi, "Riverbend Dairy"],
+  [/Aadhaar\s+lekar/gi, "Riverbend"],
+  [/Aadhaar/gi, "Riverbend"],
+  [/Chandni/gi, "Riverbend"],
 ];
 
 /** Anything still matching this after pseudonymisation is a leak and aborts. */
-const LEAK_RE = /whit[ef]|bhakta|dillan/i;
+const LEAK_RE = /whit[ef]|bhakta|dillan|nithin|dodla|annett|aadhaar|chandni/i;
 
 function pseudonymise(s) {
   let out = String(s || "");
@@ -345,6 +368,92 @@ const EXPECTATIONS = {
       { expect: "write", why: "duplicate of the write that should already have landed." },
     ],
   },
+  // -------------------------------------------------------------------------
+  // 2026-09-18, 01:55-02:21, four calls on voice-uk-prod-00077-xp9 (b87ee81).
+  // The first two are what the gate looks like when it is RIGHT -- kept as
+  // regression fixtures, not as a to-do list -- and the third is the call that
+  // found LVX140.
+  // -------------------------------------------------------------------------
+  CA94f2b4: {
+    note: "3.8. The FIRST reschedule ever to complete through the consent gate. One write, both halves of consent true at the same instant, and the row MOVED rather than being cancelled and rebooked.",
+    attempts: [
+      {
+        expect: "write",
+        why:
+          "both halves present and turn-local: 'Just to confirm, you would like to move your appointment to Monday, September 21st at 1:00 PM?' and the caller answered inside the model's four-second gap. readback_now=true, agreed_now=true, no token needed. This is the shape every earlier reschedule in this corpus failed to reach.",
+      },
+    ],
+  },
+  CA64a36c: {
+    note: "3.8. Book, cancel and reschedule in ONE call, all three correct, every claim backed, verdict ok. It refused to guess between two appointments: looked them up, asked which, read the chosen one back before writing.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "fired on 'Would Tuesday, September twenty-second at ten a-m Central work for the separate appointment?' -- a proposal, not a read-back the caller had answered. readback_now=false, agreed_now=false, and a token was present from an earlier agreement about a DIFFERENT appointment. Exactly the state a surviving token must not authorise.",
+      },
+      {
+        expect: "write",
+        why:
+          "the same slot one turn later, after 'So, I have you down for a Strategy Call on Tuesday, September twenty-second at ten a-m Central -- shall I go ahead and book that?' and the caller's yes. Both halves true on the turn, point-verified slot, and it wrote first time.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the caller asked to cancel 'my appointment' and there were TWO. Nothing was read back, nobody had agreed to anything, and guessing is the failure this gate exists to prevent. The model then did the right thing without being told: looked them up and asked which.",
+      },
+      {
+        expect: "write",
+        why:
+          "after 'Shall I go ahead and cancel your appointment on Tuesday, September twenty-second at ten a-m?' and 'Actually, let's cancel the Tuesday one.' The caller named the one they meant and the sentence they answered names the same time.",
+      },
+      {
+        expect: "write",
+        why:
+          "the reschedule, read back in full ('Shall I go ahead and reschedule your appointment to Monday, September twenty-first at two p-m?') and agreed to on the turn. Third correct write of one call.",
+      },
+    ],
+  },
+  CAd97855: {
+    note: "3.8, the immediate repeat of CA64a36c with no code change between them. A refused reschedule was followed by 'I have successfully rescheduled...' and the claim guard stayed silent -- LVX140 -- and the fiction then took the caller's consent to cancel an appointment that did not exist.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "'That time is available. Would you like me to reschedule your appointment to Tuesday, September 22, at 3:00 PM?' and the tool fired three seconds later, before any answer. readback_now=true, agreed_now=FALSE -- the model asked and did not wait. Refusing is right; what happened next is the item.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "a cancellation with nothing standing: readback_now=false, agreed_now=false. The model has by this point told the caller the reschedule succeeded, and is acting on its own sentence rather than on anything the caller said.",
+      },
+      {
+        expect: "write",
+        why:
+          "THE GATE IS RIGHT HERE AND THE CALL IS STILL WRONG, which is why this attempt is in the corpus. 'Just to confirm, you would like me to cancel your appointment on Tuesday, September 22, at 3 PM?' -- read back, agreed to, turn-local. The consent is real. The APPOINTMENT is not: it exists only in the false claim two turns earlier, and the row that died was the caller's Monday 2 PM one. No consent gate can see that; the claim guard was the thing that could, and it said nothing.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the booking, fired before the answer again: 'To confirm, you'd like to book your free strategy call ... on Wednesday, September 23, at 11:30 AM?' with agreed_now=false. The token still standing was ten caller turns old and matched no current read-back.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the held-write retry, half a second later. gate_ran=false, silent_turn_verdict=refused_no_consent: a retry fired before the caller had said anything cannot be more authorised than the write it is retrying.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the same retry nine seconds on, after the model re-asked properly ('Just to confirm, I am booking your free strategy call for Wednesday, September 23, at 11:30 AM. Shall I go ahead and book that?') and fired again before the answer. Still refused_no_consent, and still right.",
+      },
+      {
+        expect: "write",
+        why:
+          "the caller finally answers -- 'Yeah, that works. Yes.' -- and the booking lands. readback_now=true, agreed_now=true, and it is the one row this call actually produced. It is also the row that later vouched for the abandoned reschedule and suppressed the post-call escalation.",
+      },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -352,6 +461,20 @@ const EXPECTATIONS = {
 // grid is that business day at half-hour steps.
 // ---------------------------------------------------------------------------
 const CORPUS_DATE = "2026-09-18";
+// THE GRID IS NO LONGER ONE DAY, and it had to stop being one.
+//
+// Every corpus call up to 2026-09-17 was about Friday 18 September, so a
+// one-day grid derived their slots exactly. The calls of 2026-09-18 are about
+// the following week -- Monday 21st, Tuesday 22nd, Wednesday 23rd -- and
+// readBackMentionsSlot REFUSES a slot whose weekday the sentence contradicts
+// (lib/voice/slotMention.js:195). So "Monday, September 21st at 1:00 PM"
+// matched nothing on a Friday grid, every target came back null, and all three
+// new calls failed the replay on the availability invariant: "That time has not
+// been checked yet." A gate defect that is not there.
+//
+// Saturday and Sunday are left out: the tenant is closed and no read-back in
+// the corpus names them.
+const CORPUS_DAYS = [CORPUS_DATE, "2026-09-21", "2026-09-22", "2026-09-23"];
 const GRID = (() => {
   const out = [];
   for (let h = 8; h <= 19; h += 1) {
@@ -360,9 +483,27 @@ const GRID = (() => {
   return out;
 })();
 
-/** Which grid times does this sentence name? */
-function timesNamedIn(text) {
-  return GRID.filter((hhmm) => readBackMentionsSlot(text, `${CORPUS_DATE}T${hhmm}`));
+/**
+ * Which grid slots does this sentence name?
+ *
+ * Returns whole naive datetimes now, not bare times, because a multi-day grid
+ * makes the day part of the answer.
+ */
+function slotsNamedIn(text) {
+  const hits = [];
+  for (const day of CORPUS_DAYS) {
+    for (const hhmm of GRID) {
+      if (readBackMentionsSlot(text, `${day}T${hhmm}`)) hits.push(`${day}T${hhmm}:00`);
+    }
+  }
+  // A SENTENCE THAT NAMES A TIME AND NO WEEKDAY names it on every day in the
+  // grid, and that is one proposal rather than four. Collapsed onto the corpus
+  // date, which is exactly what this function returned when the grid was a
+  // single day -- so every fixture written before 2026-09-18 derives the same
+  // target it did then, and the widening is invisible to them.
+  const times = new Set(hits.map((s) => s.slice(11, 16)));
+  if (hits.length > 1 && times.size === 1) return [`${CORPUS_DATE}T${[...times][0]}:00`];
+  return hits;
 }
 
 const EVENTS_KEPT = new Set([
@@ -481,10 +622,10 @@ function build(file) {
     // actually answering said three o'clock. Fall back to the agreed read-back
     // only when the standing one names no time at all, which is CA03558d's
     // spelling check.
-    const source = standing?.assistant && timesNamedIn(standing.assistant).length
+    const source = standing?.assistant && slotsNamedIn(standing.assistant).length
       ? standing
       : agreedTurn;
-    const named = source ? timesNamedIn(source.assistant) : [];
+    const named = source ? slotsNamedIn(source.assistant) : [];
 
     // The caller text the gate saw. The probe is the authority.
     const logged = standing ? (turns[standing.i + 1]?.caller ?? "") : "";
@@ -519,8 +660,8 @@ function build(file) {
       agreed_turn: agreedTurn ? agreedTurn.i : null,
       standing_read_back: standing ? standing.assistant : null,
       agreed_read_back: agreedTurn ? agreedTurn.assistant : null,
-      target: named.length === 1 ? `${CORPUS_DATE}T${named[0]}:00` : null,
-      target_candidates: named.map((t) => `${CORPUS_DATE}T${t}:00`),
+      target: named.length === 1 ? named[0] : null,
+      target_candidates: named,
       target_from: source ? source.assistant : null,
       target_derived: true,
       caller_text: useLogged ? logged : substitute,

@@ -168,11 +168,31 @@ async function replay(fixture) {
     const window = fixture.attempts.filter((a) => a.standing_turn === turn.i);
     if (!window.length) continue;
 
-    // Once per window, not once per attempt: turnUserText accumulates, and
-    // saying "Yes." five times would build "Yes. Yes. Yes. Yes. Yes."
-    if (window[0].caller_text) await s.callerSays(window[0].caller_text);
-
+    // EACH DISTINCT CALLER TURN ONCE, not once per attempt and not once per
+    // window.
+    //
+    // Once per attempt is wrong because turnUserText ACCUMULATES: saying "Yes."
+    // five times builds "Yes. Yes. Yes. Yes. Yes.", which is not a thing any
+    // caller said.
+    //
+    // Once per window was the fix for that and it is wrong too, for a case the
+    // corpus did not contain until CAd97855. Attempts 5 and 6 there share turn
+    // 19 and do NOT share a caller turn: the first is a retry fired into
+    // silence, and the second follows "Yeah, that works. Yes." -- the answer
+    // that finally authorised the booking. Under the window rule only the first
+    // attempt's text is ever spoken, so the second is refused for want of an
+    // agreement the caller actually gave, and the fixture goes red describing a
+    // gate defect that is not there.
+    //
+    // Saying each DISTINCT text once has both properties, and it is a no-op for
+    // every window whose attempts share one caller turn -- which is all fifteen
+    // of the fixtures written before this one.
+    let lastSaid = null;
     for (const attempt of window) {
+      if (attempt.caller_text && attempt.caller_text !== lastSaid) {
+        await s.callerSays(attempt.caller_text);
+        lastSaid = attempt.caller_text;
+      }
       const [response] = await s.callTool(attempt.tool, argsFor(attempt));
       results.push({ attempt, response });
     }
@@ -186,8 +206,8 @@ describe("the real calls, replayed through the real gate", () => {
   // stopped being written because its expectations went missing -- would
   // otherwise shrink the suite without failing it.
   it("has a fixture for every call in the corpus", () => {
-    expect(FIXTURES).toHaveLength(15);
-    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(37);
+    expect(FIXTURES).toHaveLength(18);
+    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(50);
   });
 
   for (const fixture of FIXTURES) {
