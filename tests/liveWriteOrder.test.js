@@ -59,8 +59,16 @@ vi.mock("../services/db.js", () => ({
 }));
 vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));
 vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
+// Mocked so the PROBE PAYLOAD can be asserted, which is the one thing LVX144
+// shipped without. See the block at the bottom of this file.
+vi.mock("../lib/logger.js", () => ({
+  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  createRequestId: vi.fn(() => "req-1"),
+  recordTurnLatency: vi.fn(),
+}));
 
 import { executeToolCall } from "../services/tools.js";
+import { log } from "../lib/logger.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
@@ -837,5 +845,60 @@ describe("LVX144 — the caller restates the time instead of saying yes", () => 
   it("still refuses without a read-back, however clearly the time is named", async () => {
     const res = await book(ctx({ said: "Ten a.m.", replied: "What time suits you?" }));
     expect(res.functionResponse.response.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX144's INSTRUMENT. A rule that decides writes and leaves no trace on the
+// call it decided is a rule nobody can audit.
+//
+// It shipped as a bare `bumpCounter("write_consent_restated_slot")` and nothing
+// else. That counter is not a field of live_call_summary and bumpCounter emits
+// no log line, so on CA7ec8af -- the first call carrying the rule -- there was
+// no way to tell from the log or the summary whether it had fired. It had not,
+// as it happens, but that was established by reading `agreed_now` on each probe
+// and reasoning backwards, which is exactly what the probe exists to avoid.
+//
+// `restated_slot` is logged on EVERY attempt rather than only the ones it
+// changes, because the pair is what carries the meaning:
+//
+//   agreed_now=false restated_slot=true   this write happened because of LVX144
+//   agreed_now=true  restated_slot=true   it would have gone through anyway
+//   agreed_now=false restated_slot=false  refused, and not for this reason
+//
+// A counter alone collapses the first two, and the first is the population the
+// owner asked to be able to watch.
+// ---------------------------------------------------------------------------
+describe("LVX144's probe line", () => {
+  const SLOT_READ_BACK = "Just to confirm, shall I book that for ten a.m. for you?";
+  const probes = () =>
+    log.info.mock.calls.filter((c) => c[0] === "write_consent_probe").map((c) => c[1]);
+
+  it("records the restatement that carried the write", async () => {
+    await book(ctx({ said: "Ten a.m.", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p).toBeTruthy();
+    expect(p.agreed_now).toBe(false);
+    expect(p.restated_slot).toBe(true);
+  });
+
+  it("records it as false when the caller said a plain yes", async () => {
+    await book(ctx({ said: "Yes", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.agreed_now).toBe(true);
+    expect(p.restated_slot).toBe(false);
+  });
+
+  it("records it as false when the caller named a different time", async () => {
+    await book(ctx({ said: "Eleven a.m.", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.agreed_now).toBe(false);
+    expect(p.restated_slot).toBe(false);
+  });
+
+  it("records it as false when the caller was asking", async () => {
+    await book(ctx({ said: "Ten a.m.?", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.restated_slot).toBe(false);
   });
 });

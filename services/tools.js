@@ -790,6 +790,33 @@ export async function executeToolCall(fc, ctx) {
           const probeToken =
             tokenSuperseded || tokenSpent ? null : (ctx?.lastAgreementReadBackKey ?? null);
           const gateRan = lastCallerText.trim() !== "";
+          // -------------------------------------------------------------------
+          // LVX144, COMPUTED HERE SO THE PROBE CAN SEE IT.
+          //
+          // It shipped as a bare bumpCounter and nothing else, which made it
+          // unreadable per call: `write_consent_restated_slot` is not a field of
+          // live_call_summary and bumpCounter writes no log line, so the rule
+          // could have decided a write on 2026-09-18 and neither the log nor the
+          // summary would say so. A counter nobody can read on the call that
+          // fired it is the trap this repo keeps writing down, and I walked into
+          // it the same day I quoted it.
+          //
+          // So it is derived once, beside the other probe facts, and consumed
+          // twice -- once by the log line below and once by the gate. Two copies
+          // of "did the caller name the slot back" is how they drift.
+          //
+          // `writeSlot` is the slot the tool is about to write; see the gate for
+          // why the match is generated from it rather than parsed out of speech,
+          // and why a trailing question mark disqualifies.
+          const writeSlot =
+            fc.args?.scheduled_at ?? fc.args?.new_scheduled_at ?? fc.args?.requested_at ?? null;
+          const callerRestatedSlot = Boolean(
+            writeSlot &&
+              lastCallerText &&
+              !withdrawsAgreement(lastCallerText) &&
+              !/\?\s*$/.test(lastCallerText.trim()) &&
+              readBackMentionsSlot(lastCallerText, writeSlot)
+          );
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
           // services/gemini.js never mentions callerSaidThisCall; Live
@@ -866,6 +893,14 @@ export async function executeToolCall(fc, ctx) {
               gate_ran: gateRan,
               readback_now: probeReadBack,
               agreed_now: isAffirmative(lastCallerText),
+              // LVX144. Did the caller answer by naming the slot being written
+              // instead of saying yes? Logged on EVERY attempt, not only the
+              // ones it changes, so `agreed_now=false, restated_slot=true` reads
+              // as "this write happened because of the new rule" and
+              // `agreed_now=true, restated_slot=true` reads as "it would have
+              // gone through anyway". Without both on the line the counter
+              // cannot say which.
+              restated_slot: callerRestatedSlot,
               token_present: Boolean(probeToken),
               // Does the durable token refer to the read-back still standing? If
               // this is true on attempts where gate_ran is false, the token would
@@ -1198,15 +1233,11 @@ export async function executeToolCall(fc, ctx) {
             // not good we can change". If it turns out to write things people
             // were only thinking about, this disjunct is the thing to remove.
             // -----------------------------------------------------------------
-            const writeSlot =
-              fc.args?.scheduled_at ?? fc.args?.new_scheduled_at ?? fc.args?.requested_at ?? null;
-            const callerRestatedSlot = Boolean(
-              writeSlot &&
-                lastCallerText &&
-                !withdrawsAgreement(lastCallerText) &&
-                !/\?\s*$/.test(String(lastCallerText).trim()) &&
-                readBackMentionsSlot(lastCallerText, writeSlot)
-            );
+            // DERIVED AT THE PROBE, ~400 lines up, and read here. It has to be
+            // computed there so the probe can log it -- a rule that decides
+            // writes and leaves no trace on the call it decided is unreadable --
+            // and computing it twice is how the log and the gate come to
+            // disagree about what happened.
             if (callerRestatedSlot && !isAffirmative(lastCallerText)) {
               bumpCounter("write_consent_restated_slot");
             }

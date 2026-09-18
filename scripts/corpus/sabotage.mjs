@@ -494,8 +494,12 @@ const SABOTAGES = [
     why:
       "drops the question-mark guard, so 'Ten a.m.?' -- the caller CHECKING rather than agreeing -- authorises the write. The slot matcher cannot tell those apart and is not meant to; the punctuation is the one signal on this path that is not a judgement call, and it is the whole reason this widening was safe enough to take.",
     file: "services/tools.js",
-    find: "                !/\\?\\s*$/.test(String(lastCallerText).trim()) &&",
-    replace: "                true && // SABOTAGE",
+    // RE-ANCHORED when the derivation moved up to the probe so the rule could
+    // be logged. There is one copy now; there were briefly two, which is the
+    // state where this anchor could have kept matching the dead one and gone on
+    // reporting red about code nothing calls.
+    find: "              !/\\?\\s*$/.test(lastCallerText.trim()) &&",
+    replace: "              true && // SABOTAGE",
     red: [ORDER],
   },
 ];

@@ -232,7 +232,27 @@ try {
               -- Same family as the heredoc trap already recorded for this repo.
               (general_info ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand') AS general_info_mentions_price,
               coalesce(length(custom_instructions), 0) AS custom_instructions_chars,
-              (custom_instructions ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand') AS custom_instructions_mentions_price
+              (custom_instructions ~* '[$£€]\\s*[0-9]|[0-9][0-9,. ]*\\s*(dollars|pounds|usd|gbp)|thousand') AS custom_instructions_mentions_price,
+              -- CAN THE ESCALATION REACH A HUMAN AT ALL? LVX142.
+              --
+              -- The abandoned-write escalation inserts a customer_requests row
+              -- and then calls notifyUnconfirmedClaim, which loads these two
+              -- columns and RETURNS SILENTLY when both are empty -- no log, no
+              -- counter. So "a caller was told something was done, it was not,
+              -- and nobody was told" and "the owner was emailed" look identical
+              -- from outside the VPC. Same blind spot as sms_followup_enabled
+              -- above, on the other half of the net.
+              --
+              -- notifications_enabled is the tenant's own master switch and is
+              -- checked before either: false there and neither column matters.
+              --
+              -- PRESENCE, NOT VALUES. This file's line is config and numbers,
+              -- and "is there somewhere to send it" is answered by a boolean.
+              -- The addresses themselves are the owner's contact details and
+              -- are no more printable here than a caller's.
+              notifications_enabled,
+              (notification_email IS NOT NULL AND notification_email <> '') AS has_notification_email,
+              (notification_phone IS NOT NULL AND notification_phone <> '') AS has_notification_phone
          FROM app_lookup_business_by_phone($1)`,
       [BUSINESS]
     );
