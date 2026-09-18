@@ -539,3 +539,49 @@ describe("selectAgreedSlot", () => {
     expect(JSON.stringify(line)).not.toContain("2026-09-14");
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE CONTRACT BETWEEN THIS VERDICT AND ITS ONE CONSUMER.
+//
+// judgeCall RETURNS camelCase and LOGS snake_case. Both are right on their own
+// terms -- the log line is read by humans and by log queries, the object by
+// JavaScript -- and having both is what made this go wrong.
+//
+// LVX147 wired the verdict into verifyCall and read `claimed_done` off the
+// object, which is the LOG's name. It was undefined on every call, the union
+// silently never happened, and the wire's own test passed because it stubbed
+// the judge with `{ claimed_done: true }`: a shape invented by reading the log
+// line instead of the return value. A test can only prove a wire if both ends
+// of it are real.
+//
+// Production caught it on CA5b7e359, and only because the postcall_verify line
+// had just started carrying both readers:
+//
+//     postcall_judge   claimed_done: true
+//     postcall_verify  claimed_by_judge: FALSE
+//
+// So the key name is now pinned here, next to the thing that produces it, and
+// the log's name is asserted to be DIFFERENT -- because a future rename that
+// quietly unified them would fix this test and break the log queries instead.
+// ---------------------------------------------------------------------------
+describe("the shape verifyCall reads", () => {
+  it("returns claimedDone on the object and claimed_done in the log", async () => {
+    const h = harness(reply({ claimed_done: true }));
+    const out = await judgeCall(
+      { transcript: TRANSCRIPT, bookedRowCount: 1, mode: "shadow" },
+      h.deps
+    );
+
+    // What lib/voice/live/index.js reads.
+    expect(out).toHaveProperty("claimedDone");
+    expect(out.claimedDone).toBe(true);
+    // And the name that is NOT on the object, asserted so the mistake cannot be
+    // made the same way twice.
+    expect(out.claimed_done).toBeUndefined();
+
+    // What a log query reads.
+    const line = h.deps.log.info.mock.calls.find((c) => c[0] === "postcall_judge")?.[1];
+    expect(line).toBeTruthy();
+    expect(line.claimed_done).toBe(true);
+  });
+});

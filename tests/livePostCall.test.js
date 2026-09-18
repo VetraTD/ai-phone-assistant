@@ -704,7 +704,7 @@ describe("LVX147 — the judge's answer reaches the verification", () => {
 
   it("passes claimed_done through to verify", async () => {
     const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
-    s.judge.mockResolvedValue({ ran: true, claimed_done: true });
+    s.judge.mockResolvedValue({ ran: true, claimedDone: true });
     await s.book();
     await s.hangUp();
 
@@ -718,7 +718,7 @@ describe("LVX147 — the judge's answer reaches the verification", () => {
     // at the call, as the judge having actively disagreed rather than simply
     // not having found one.
     const s = await boot({ POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" });
-    s.judge.mockResolvedValue({ ran: true, claimed_done: false });
+    s.judge.mockResolvedValue({ ran: true, claimedDone: false });
     await s.book();
     await s.hangUp();
 

@@ -499,7 +499,11 @@ const SABOTAGES = [
     why:
       "stops the teardown handing the judge's answer to verifyCall, which is what it did until 2026-09-18: the answer was computed, logged and dropped on the floor. verifyCall's own tests still pass with this -- they hand it the field directly -- so only the wire test can see it. A producer whose field is never copied is the most-repeated defect in lib/voice/live/index.js.",
     file: "lib/voice/live/index.js",
-    find: "          return runVerify(j?.claimed_done === true ? true : undefined);",
+    // RE-ANCHORED onto the CORRECT key. The first version of this row pointed
+    // at `j?.claimed_done`, which was the bug it was meant to guard -- so the
+    // row was sabotaging a line that already did nothing, and reported red
+    // against a wire that was broken in production.
+    find: "          return runVerify(j?.claimedDone === true ? true : undefined);",
     replace: "          return runVerify(undefined); // SABOTAGE",
     red: [POSTCALLWIRE],
   },
