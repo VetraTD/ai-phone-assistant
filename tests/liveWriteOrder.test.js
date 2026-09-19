@@ -102,6 +102,34 @@ const book = (c) =>
     c
   );
 
+// Three distinct future slots, for the fixtures where the CALLER is moving and
+// the tool arguments have to move with them. LVX153.
+const dayAt = (n) =>
+  `${new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
+const DAY_ONE = dayAt(30);
+const DAY_TWO = dayAt(31);
+const DAY_THREE = dayAt(32);
+
+const bookSlot = (scheduled_at, c) =>
+  executeToolCall(
+    {
+      id: "fc1",
+      name: "book_appointment",
+      args: { client_name: "Marcus Bell", scheduled_at, notes: "consultation" },
+    },
+    c
+  );
+
+const bookAs = (client_name, c) =>
+  executeToolCall(
+    {
+      id: "fc1",
+      name: "book_appointment",
+      args: { client_name, scheduled_at: FUTURE_SLOT, notes: "consultation" },
+    },
+    c
+  );
+
 const counters = () => getLatencyStats().turnTaking;
 
 beforeEach(() => {
@@ -334,10 +362,20 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     //
     // There is no livelock when the caller is the one moving: every new
     // read-back is a new question, and they can end it at any time by agreeing.
-    const first = await book(
+    //
+    // THE SLOT MOVES WITH THE SENTENCE, corrected under LVX153. This fixture
+    // used to send the identical `scheduled_at` on all three attempts while its
+    // read-backs said Tuesday, then Thursday, then Friday -- a call no model can
+    // make, since one that asks "shall I book Thursday?" sends Thursday's
+    // timestamp. It passed only because the key being tested read the SENTENCE.
+    // Once the key reads the proposal, a fixture whose proposal never moves is
+    // testing the opposite of what it claims.
+    const first = await bookSlot(
+      DAY_ONE,
       ctx({ said: "Actually make it Thursday", replied: "Just to confirm, shall I book Tuesday?" })
     );
-    const second = await book(
+    const second = await bookSlot(
+      DAY_TWO,
       ctx({
         said: "No, sorry, Friday",
         replied: "Just to confirm, shall I book Thursday?",
@@ -347,7 +385,8 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     );
 
     clearStats();
-    const third = await book(
+    const third = await bookSlot(
+      DAY_THREE,
       ctx({
         said: "Hmm, what about Monday",
         replied: "Just to confirm, shall I book Friday?",
@@ -1027,5 +1066,110 @@ describe("LVX150 — a held write says what did not happen, first", () => {
     expect(stateEffects.toolResult.callerSafe).toBe(true);
     expect(stateEffects.toolResult.message).not.toContain("NOTHING HAS BEEN WRITTEN");
     expect(stateEffects.toolResult.message).not.toContain("[not caller speech]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX153 — the ceiling is keyed on the assistant's WORDING, so it never fires.
+//
+// CA00649d86, rev 00085, 2026-09-19. A caller asked to cancel an appointment,
+// was refused three times, was told twice "I'm unable to process the
+// cancellation right now", was offered a callback, and hung up with the
+// appointment still standing. verdict=write_abandoned.
+//
+// The trigger was a mangled yes -- "A la works." -- which isAffirmative cannot
+// see and neither could a human. Surviving that is exactly what the ceiling is
+// for, and it did not fire. Measured across the 32 calls in call-corpus/:
+//
+//     write_order_refused            49
+//     write_order_gate_ceiling        0
+//
+// Zero, in forty-nine refusals. The cause is services/tools.js's
+// `readBackKey`: a fingerprint of `lastReplyText`, used as the identity of the
+// PROPOSAL. The model rephrases its read-back between attempts -- "Would you
+// like me to cancel that for you?" then "Just to confirm, are you asking me to
+// go ahead and cancel the appointment on Thursday at 1:30 PM?" -- and the key
+// changes, so `sameProposal` is false and the count resets to zero. Same
+// appointment, same action, same caller, counted as a brand new request.
+//
+// The RULE is right and stays: count attempts at one proposal, not refusals in
+// a call. What is wrong is the identity function.
+// ---------------------------------------------------------------------------
+describe("LVX153 — a rephrased read-back is the same proposal", () => {
+  it("reaches the ceiling when the model rewords the SAME proposal", async () => {
+    // Identical args every time -- one appointment, one action. Only the
+    // sentence moves, which is what the model does naturally and what the
+    // caller cannot influence.
+    const first = await book(
+      ctx({ said: "A la works.", replied: "Would you like me to book that for you?" })
+    );
+    expect(first.functionResponse.response.success).toBe(false);
+
+    const second = await book(
+      ctx({
+        said: "Ah, ya.",
+        replied: "Just to confirm, are you asking me to go ahead and book the strategy call?",
+        capabilityState: first.stateEffects.capabilityState,
+        turn: 5,
+      })
+    );
+    expect(second.functionResponse.response.success).toBe(false);
+
+    clearStats();
+    const third = await book(
+      ctx({
+        said: "O que piensas?",
+        replied: "So shall I go ahead and get that booked in for you now?",
+        capabilityState: second.stateEffects.capabilityState,
+        turn: 6,
+      })
+    );
+
+    // The caller has now been asked three times and answered three times. The
+    // gate cannot hear any of it, and refusing a fourth time is how CA00649d86
+    // ended.
+    expect(third.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_gate_ceiling).toBe(1);
+    expect(counters().write_order_refused).toBeFalsy();
+  });
+
+  it("gives a fresh budget when the NAME moves and the slot stands still", async () => {
+    // The 2026-09-09 call was a caller changing the NAME, not the time:
+    //
+    //   C: "You can use the same name. I actually do Nitin Dodla."   refused
+    //   C: "Yeah, actually, could you change the name to <...>?"     refused
+    //
+    // So a proposal key built from the slot alone would have read all three of
+    // these as one proposal and released on the third -- writing a row on a turn
+    // whose only content was the caller changing their mind. client_name is in
+    // the key for this call and no other reason.
+    const first = await bookAs(
+      "Nitin Dodla",
+      ctx({ said: "Actually, use Nithin", replied: "Shall I book that for Nitin Dodla?" })
+    );
+    const second = await bookAs(
+      "Nithin Dodla",
+      ctx({
+        said: "Sorry, could you change the name?",
+        replied: "Shall I book that for Nithin Dodla?",
+        capabilityState: first.stateEffects.capabilityState,
+        turn: 5,
+      })
+    );
+
+    clearStats();
+    const third = await bookAs(
+      "Nithin Dodla-Smith",
+      ctx({
+        said: "Hmm, actually hyphenate it",
+        replied: "Shall I book that for Nithin Dodla-Smith?",
+        capabilityState: second.stateEffects.capabilityState,
+        turn: 6,
+      })
+    );
+
+    expect(third.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
 });

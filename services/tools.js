@@ -1524,7 +1524,48 @@ export async function executeToolCall(fc, ctx) {
             const readBackKey = readBackMade
               ? textFingerprint(lastReplyText)
               : `none:${writeAttemptFingerprint(fc)}`;
-            const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey;
+            // -----------------------------------------------------------------
+            // LVX153. THE PROPOSAL IS WHAT WOULD BE WRITTEN, not the sentence
+            // that proposed it.
+            //
+            // `readBackKey` above fingerprints `lastReplyText`, and it was being
+            // used as the identity of the proposal. A model that rephrases its
+            // read-back between attempts -- which is what models do -- produced
+            // a new key every time, so `sameProposal` was false, the count reset
+            // to zero, and the ceiling could never be reached.
+            //
+            // Measured across the 32 calls in call-corpus/: 49
+            // `write_order_refused` and `write_order_gate_ceiling` fired ZERO
+            // times. The escape hatch has never once worked in production.
+            //
+            // CA00649d86, 2026-09-19, is what it costs. The caller's "yes"
+            // arrived as "A la works.", isAffirmative could not see it, the gate
+            // refused three times across three different read-back wordings, and
+            // the model gave up and offered a callback. The appointment is still
+            // standing. Surviving a mangled yes is the entire reason this
+            // ceiling exists.
+            //
+            // The RULE is unchanged and correct -- count attempts at one
+            // proposal, not refusals in a call, which is the 2026-09-09
+            // correction recorded below. Only the identity function moves.
+            //
+            // client_name is in the key and scheduled_at is not enough without
+            // it: on 2026-09-09 the caller changed the NAME between refusals
+            // while the slot stood still, and that is a moving proposal even
+            // though nothing about the time moved.
+            // -----------------------------------------------------------------
+            const proposalKey = textFingerprint(
+              [
+                fc?.name,
+                fc?.args?.scheduled_at,
+                fc?.args?.new_scheduled_at,
+                fc?.args?.appointment_id,
+                fc?.args?.client_name,
+              ]
+                .map((v) => v || "")
+                .join("|")
+            );
+            const sameProposal = orderScratch.writeOrderProposalKey === proposalKey;
             const orderRefusals = sameProposal ? Number(orderScratch.writeOrderRefusals) || 0 : 0;
             // Per CALLER TURN, not per tool round, for the reason written on
             // the spelling gate below: gemini.js rebuilds ctx from merged
@@ -1695,6 +1736,11 @@ export async function executeToolCall(fc, ctx) {
                         // new one, and that question is independent of whose
                         // turn it is.
                         writeOrderReadBackKey: readBackKey,
+                        // LVX153: the identity the ceiling actually counts by.
+                        // Kept beside the read-back key rather than replacing
+                        // it, because the read-back key is still what the stash
+                        // and the latch compare against.
+                        writeOrderProposalKey: proposalKey,
                         // The shared count, so the spelling gate's
                         // refusals and this one land in the same total.
                         ...writeAttemptPatch(attemptBudget),

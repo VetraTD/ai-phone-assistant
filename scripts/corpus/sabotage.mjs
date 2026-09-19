@@ -607,6 +607,16 @@ const SABOTAGES = [
     red: [ORDER],
   },
   {
+    name: "ceiling-keyed-on-wording",
+    why:
+      "the write-order ceiling goes back to identifying a proposal by the assistant's SENTENCE, so a model that rephrases its read-back resets the count to zero and the escape hatch can never be reached. Measured before the fix: 49 write_order_refused across 32 calls in call-corpus/ and write_order_gate_ceiling fired ZERO times. CA00649d86 is what that costs -- a caller asked to cancel, the yes came through as 'A la works.', three refusals across three wordings, the model gave up and offered a callback, and the appointment is still standing.",
+    file: "services/tools.js",
+    find: "            const sameProposal = orderScratch.writeOrderProposalKey === proposalKey;",
+    replace:
+      "            const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey; // SABOTAGE",
+    red: [ORDER],
+  },
+  {
     name: "refusal-noun-ignores-the-tool",
     why:
       "every held write says 'the appointment has NOT been booked', including a cancellation and a reschedule. Telling the model a cancellation was not BOOKED is a second false statement in the other direction, and it is the specific failure a single shared refusal string invites -- the message is one sentence away from being right for three tools and wrong for two of them.",
