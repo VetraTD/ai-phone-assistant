@@ -15409,3 +15409,83 @@ Three calls have so far produced LVX152, a falsification of LVX62's central
 claim, and confirmation that the two numbers are separate tenants. That is a
 better return than the three episodes, and it is the reason to finish the run
 even though the statistical verdict is likely to be "not demonstrated".
+
+---
+
+# LVX150 CLOSED at five calls — NOT DEMONSTRATED, and the unit was wrong
+
+Stopped at 5 of the planned 15, by the owner, after a question this file should
+have answered before it was asked: *"didn't all of the tools work?"*
+
+They did.
+
+| call | type | outcome | verdict |
+|---|---|---|---|
+| `CA2ca0ed73` | book | `booked=1` | ok |
+| `CA0ef8d221` | book | `booked=1` | ok |
+| `CA3a4699ce` | reschedule | `changed=1` | ok |
+| `CAea2b08b9` | cancel | `changed=1` | ok |
+| `CA6dcec78f` | book | `booked=1` | ok |
+
+**Five calls, five correct rows, zero abandoned writes.** Booking, cancelling
+and rescheduling all worked. **One false sentence in the set** — `CA2ca0ed73`
+at 14:21:35 — caught by the claim guard, re-asked, and the booking landed. The
+caller heard one wrong sentence and got the right outcome.
+
+## The reporting error, which is the durable lesson
+
+This round reported **26% of refused-write episodes**. That is the correct unit
+for "does the new wording stop the lie" and **the wrong unit for "is the system
+working"**. One call can carry four refusals, so the denominator is gate events,
+not caller experience. The same five calls read:
+
+- **per episode:** 1 of 5 — 20%, sounds like a system that lies constantly
+- **per call:** 1 false sentence across 5 calls, self-corrected, 5/5 correct rows
+
+Both numbers are true. Only the second describes what a caller gets. **A rate
+whose denominator is an internal event will mislead the person paying for the
+system, and it misled this file for a whole round.** Report both, and lead with
+the one a caller would recognise.
+
+## The comparison NOT made, and why
+
+`call-corpus/` shows 14 of 24 older calls clean against 5 of 5 now. **That is
+selection bias and it is not evidence.** Those calls were pulled precisely
+because something went wrong with them — the corpus is a collection of
+investigations, not a sample. Quoting 58% → 100% would be inventing an
+improvement out of how the data was gathered.
+
+Five clean calls is five clean calls, at n=5.
+
+## The verdict on the wording
+
+**NOT DEMONSTRATED**, and it stays shipped. The text is more accurate than what
+it replaced and costs nothing. But it did not prevent the one fabrication that
+occurred, and the in-message version of the recency fix — *"Do not tell the
+caller this is done until a call to this tool comes back successful"* — was in
+front of the model on that exact turn. **That is the fourth prompt-side attempt
+at this defect to fail**, after the three refusal rewordings LVX72 recorded.
+
+**Recency as the next step is therefore weaker than it looked**, because its
+cheap form has now been tested and lost.
+
+## What NOT to do, recorded so it is not revisited on a whim
+
+**Do not switch back to the cascade for this.** The cascade's ordering
+guarantee is real — it composes after the tool returns and structurally cannot
+claim a booking that has not happened. But the thing it would buy, on this
+evidence, is preventing **one sentence in five calls that the system already
+caught and recovered from**, at the cost of latency and of guards built
+specifically for the Live path. An investigation into cascade viability was
+started and deliberately stopped.
+
+## The defect that actually deserves the next round
+
+**`CA0ef8d221` wrote the wrong name into the diary.** The caller spelled
+`N-I-T-H-I-N D-O-D-L-A` and the row says **`Nitin Dadla`**.
+
+A transient false sentence is corrected inside the same call. **Wrong data in a
+row is not**, and nobody finds it until someone reads the diary. See the LVX62
+update above, and the mechanism `CA6dcec78f` then confirmed: the letters win
+when the spelling gate HOLDS the write and the stash re-issues it, and lose
+when the spelling arrives by any other path.
