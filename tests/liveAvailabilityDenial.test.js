@@ -153,3 +153,69 @@ describe("a denial of a slot the system itself listed as open", () => {
     expect(counters().availability_denied_verified_open).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX148 — AND WHEN THE DENIAL AND THE OFFER SHARE A SENTENCE.
+//
+// The block above splits replies sentence by sentence so alternatives offered
+// in a LATER sentence are not scored as refusals. CA58bb3640, 2026-09-19, put
+// both in one:
+//
+//   "I'm sorry, 2 PM isn't available on Monday, but we do have openings at
+//    1:30 PM or 2:30 PM."
+//
+//   availability_denied_verified_open  slots: [13:30, 14:00, 14:30]
+//
+// Three, and two of them were the times it was OFFERING. The sentence split
+// cannot help here because there is only one sentence, so the counter reported
+// double on the call that was meant to establish the rate.
+//
+// That matters more than it looks. This counter exists to decide whether the
+// underlying defect -- the assistant turning down a time its own record says is
+// open -- is worth building a gate for. A number that over-reports is a number
+// that argues for building the wrong thing.
+//
+// Split on the CONTRAST word, which is where the reply turns from what it
+// cannot do to what it can. Scored against the real sentence and four others
+// before it was written, because a detector settled by reading is how this file
+// got its first defect.
+// ---------------------------------------------------------------------------
+describe("a denial and an offer in the same sentence", () => {
+  it("counts only the time that was turned down", async () => {
+    const s = await listedTheDay("CA_deny_one_sentence");
+    await s.assistantTurn(
+      "I'm sorry, 2:00 PM is not available, but we do have openings at 1:00 PM or 4:30 PM."
+    );
+
+    expect(counters().availability_denial_spoken).toBe(1);
+    // ONE. 1:00 PM and 4:30 PM are in the verified set and named in the same
+    // sentence; they are the alternatives, not refusals.
+    expect(counters().availability_denied_verified_open).toBe(1);
+  });
+
+  it("handles 'however' the same way", async () => {
+    const s = await listedTheDay("CA_deny_however");
+    await s.assistantTurn("2:00 PM is taken, however 4:30 PM is free.");
+
+    expect(counters().availability_denied_verified_open).toBe(1);
+  });
+
+  it("still counts both when two times are turned down together", async () => {
+    // The guard on the guard: splitting on the contrast word must not let a
+    // genuine double refusal through as one. Both times are in the denial
+    // clause, so both count.
+    const s = await listedTheDay("CA_deny_two");
+    // NO WEEKDAY IN THE CONTRAST CLAUSE. The first draft of this case ended
+    // "but Monday is wide open", and every slot in the fixture is a Friday --
+    // so readBackMentionsSlot's weekday guard correctly refused all of them and
+    // the case scored 0 for a reason that had nothing to do with the split.
+    // Also not "neither 1:00 PM nor 4:30 PM", which deniedAvailabilityRe does
+    // not recognise at all: a real gap, left alone here rather than widened on
+    // the way past.
+    await s.assistantTurn(
+      "I'm sorry, 1:00 PM and 4:30 PM are not available, but we do have other times that day."
+    );
+
+    expect(counters().availability_denied_verified_open).toBe(2);
+  });
+});

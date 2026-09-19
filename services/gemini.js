@@ -938,11 +938,39 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   identity += `- Until the caller gives you a name, do not address them by any stand-in — no "user", no "caller", no placeholder of any kind. Speak to them directly with no name at all.\n`;
   identity += `- Never describe the systems behind you as people or as things with needs: not "the calendar needs to know", not "the system requires", not "your record says". Ask for what you need the way a receptionist would — "what are you coming in for?"`;
 
+  // ---------------------------------------------------------------------------
+  // LVX149. A SINGLE-LANGUAGE ENGLISH TENANT WAS TOLD NOTHING AT ALL.
+  //
+  // Both branches below have always existed and neither fires for
+  // languagesSpoken: ["en"] -- length 1, and it IS English. So on the only
+  // tenant this project runs, the model received NO instruction about language
+  // anywhere in the prompt.
+  //
+  // It is not misbehaving when it drifts. Live transcription hands it the
+  // caller's turn already in another language -- "C'est tout bien",
+  // "Ahm, no entiendo", "Ja, klar" are all verbatim from real calls where the
+  // caller was speaking English -- and with nothing said about language, the
+  // reasonable thing to do with a French sentence is answer in French. It did
+  // exactly that on CA5b7e359 (Spanish) and CA58bb3640 (French).
+  //
+  // WHY THE CURE IS NOT WORSE. The Live API exposes no way to constrain or even
+  // report the INPUT language, so the mis-transcription cannot be fixed at
+  // source; `output_language_pinned` in the session log is the VOICE and has
+  // misled two readers into thinking this was already handled. What is left is
+  // telling the model what the business speaks. Across eighteen calls there
+  // have been three false switches and ZERO genuine foreign-language callers,
+  // so for a tenant configured ["en"] this instruction matches reality.
+  //
+  // It names the mis-hearing explicitly, because "reply in English" alone
+  // competes with a whole French sentence sitting in the context and loses.
+  // ---------------------------------------------------------------------------
   const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
   if (langs.length > 1) {
     identity += `\nYou can speak: ${langs.join(", ")}. ALWAYS reply in the language of the caller's most recent message — if they speak Spanish, reply in Spanish. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   } else if (langs.length === 1 && langs[0] !== "en") {
     identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
+  } else {
+    identity += `\nThis business operates in English and ALWAYS replies in English. If a caller's words reach you as French, Spanish, German or any other language, that is the transcription mis-hearing an English speaker — it is not the caller switching language. Answer in English anyway. Never apologise for the language or offer to continue in another one.`;
   }
   sections.push(identity);
 

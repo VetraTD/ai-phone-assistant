@@ -27,6 +27,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive, counters } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { buildStaticSystemPrefix } from "../services/gemini.js";
 
 const OPEN = { open: "09:00", close: "17:00", closed: false };
 const baseConfig = (languagesSpoken) => ({
@@ -167,5 +168,60 @@ describe("what must NOT be counted", () => {
     const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_short" });
     await s.assistantTurn("Sí, claro.");
     expect(counters().live_assistant_turn_non_english).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX149 — THE ENGLISH-ONLY TENANT WAS TOLD NOTHING ABOUT LANGUAGE.
+//
+// The identity section has carried two language branches for as long as it has
+// existed: one for multilingual tenants and one for a single non-English
+// language. Neither fires for languagesSpoken: ["en"] -- length 1, and it IS
+// English -- so on the only tenant this project runs, the model was given no
+// instruction about language anywhere in the prompt.
+//
+// It was not misbehaving when it drifted. Live transcription hands it the
+// caller's turn already in another language:
+//
+//   CA5b7e359  caller "Ahm, no entiendo"     -> assistant answered in Spanish
+//   CA58bb3640 caller "C'est tout bien"      -> assistant answered in French
+//
+// Both callers were speaking English. With nothing said about language, the
+// reasonable response to a French sentence is a French sentence.
+//
+// These assert the PROMPT, not the counter. tests above cover the detector that
+// notices a flip after the fact; this covers the one thing that might stop it
+// happening.
+// ---------------------------------------------------------------------------
+describe("LVX149 — what an English-only tenant is told", () => {
+  const prefixFor = (languagesSpoken) =>
+    buildStaticSystemPrefix(baseConfig(languagesSpoken), {});
+
+  it("tells an English-only tenant to answer in English", () => {
+    const p = prefixFor(["en"]);
+    expect(p).toMatch(/ALWAYS replies in English/);
+    // And names the mis-hearing, because "reply in English" on its own competes
+    // with a whole French sentence in the context and loses.
+    expect(p).toMatch(/transcription mis-hearing an English speaker/);
+  });
+
+  it("treats a missing languagesSpoken the same way", () => {
+    // services/db.js defaults the column, but a config assembled anywhere else
+    // must not fall through into silence -- which is exactly how this defect
+    // existed: by being the case no branch covered.
+    const p = prefixFor(undefined);
+    expect(p).toMatch(/ALWAYS replies in English/);
+  });
+
+  it("leaves a multilingual tenant on the mirroring rule", () => {
+    const p = prefixFor(["en", "es"]);
+    expect(p).toMatch(/ALWAYS reply in the language of the caller's most recent message/);
+    expect(p).not.toMatch(/ALWAYS replies in English/);
+  });
+
+  it("leaves a single non-English tenant alone", () => {
+    const p = prefixFor(["es"]);
+    expect(p).toMatch(/Speak es by default/);
+    expect(p).not.toMatch(/ALWAYS replies in English/);
   });
 });

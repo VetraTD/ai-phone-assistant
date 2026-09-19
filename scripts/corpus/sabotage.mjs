@@ -103,6 +103,9 @@ const ORDER = "tests/liveWriteOrder.test.js";
 // The teardown wiring, which is a different question from what verifyCall does
 // with what it is handed.
 const POSTCALLWIRE = "tests/livePostCall.test.js";
+// The byte-locked prompt. A language instruction that vanishes is invisible to
+// every behavioural suite -- the model simply drifts on calls nobody is running.
+const PROMPTS = "tests/promptSnapshot.test.js";
 
 const SABOTAGES = [
   {
@@ -479,6 +482,28 @@ const SABOTAGES = [
     replace:
       '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
     red: [VERIFY],
+  },
+  {
+    name: "denial-scored-whole-sentence",
+    why:
+      "restores scoring the whole sentence, so a reply that turns one time down and offers two others in the SAME sentence counts all three. CA58bb3640 reported slots [13:30, 14:00, 14:30] for one refusal -- double, on the call meant to establish the rate. This counter decides whether the underlying defect is worth a gate, and a number that over-reports argues for building the wrong thing.",
+    file: "lib/voice/live/index.js",
+    find:
+      "            const deniedClauses = sentence\n              .split(/\\b(?:but|however|although|though)\\b/i)\n              .filter((clause) => S.deniedAvailabilityRe.test(clause));\n            const denied = openSlots.filter((slot) =>\n              deniedClauses.some((clause) => readBackMentionsSlot(clause, slot))\n            );",
+    replace:
+      "            const denied = openSlots.filter((slot) => readBackMentionsSlot(sentence, slot)); // SABOTAGE",
+    red: [DENIAL],
+  },
+  {
+    name: "english-tenant-told-nothing",
+    why:
+      "puts the identity section back to saying NOTHING about language for languagesSpoken: [\"en\"] -- length 1, and it is English, so neither existing branch fires. That silence is why CA5b7e359 answered in Spanish and CA58bb3640 in French: live transcription handed the model a foreign-language turn and nothing in the prompt said what the business speaks.",
+    file: "services/gemini.js",
+    find:
+      "  } else {\n    identity += `\\nThis business operates in English and ALWAYS replies in English.",
+    replace:
+      "  } else if (false) { // SABOTAGE\n    identity += `\\nThis business operates in English and ALWAYS replies in English.",
+    red: [LANG, PROMPTS],
   },
   // -------------------------------------------------------------------------
   // LVX147. Two rows, because the fix is in two files: verifyCall has to UNION
