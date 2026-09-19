@@ -1,0 +1,308 @@
+{
+  "callSid": "CA7ec8af",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00079. Cancel then rebook. The rebook took four attempts and the last one landed -- and the claim that followed, 'Your All-In-One Package is now booked', was TRUE and still invisible to the deployed claim detector, because 'Package' is not one of its four nouns.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 16,
+    "probes": 5,
+    "write_order_refused": 2,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": {
+    "claimed": 2,
+    "note_sent": 0,
+    "suppressed_existing_report": 1,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 16,
+    "turns_reply_empty": 0,
+    "unbacked_action": 1,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 4,
+    "availability_blocked": 0,
+    "availability_day_listed": 37,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 31
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-18T14:21:04.488Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-18T14:21:15.604Z",
+      "step": "identify_intent",
+      "caller": "I just want to check if I have any appointments.",
+      "assistant": "You have an appointment scheduled for Wednesday, September 23 at 11:30 AM."
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-18T14:21:34.328Z",
+      "step": "gather_details",
+      "caller": "Can we go ahead and cancel that?",
+      "assistant": "I can certainly help with that. To confirm, do you want to cancel your appointment scheduled for Wednesday, September 23 at 11:30 AM?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-18T14:21:45.599Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Your appointment on Wednesday, September 23 at 11:30 AM has been successfully cancelled."
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-18T14:21:59.180Z",
+      "step": "confirm",
+      "caller": "Now could we book an appointment?",
+      "assistant": "Of course. What type of service are you looking to book?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-18T14:22:20.204Z",
+      "step": "confirm",
+      "caller": "la bouteille de gaz like what would you recommend for me? I'm trying to figure out.",
+      "assistant": "We offer an All-In-One Package that combines Meta and Google Ads, or we can manage Meta or Google Ads separately. Do you want to focus on one platform or combine them?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-18T14:22:28.195Z",
+      "step": "confirm",
+      "caller": "Ooh, come on.",
+      "assistant": "Great. What day and time works best for your strategy call?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-18T14:22:45.919Z",
+      "step": "confirm",
+      "caller": "Ahm, what do you guys have?",
+      "assistant": "For today, Friday, September 18, we have openings at 9:30 AM, 1:00 PM, and 4:30 PM. Which of those suits you best?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-18T14:23:00.552Z",
+      "step": "gather_details",
+      "caller": "delivering on Monday",
+      "assistant": "On Monday, September 21, we have openings at 9:00 AM, 1:00 PM, and 4:30 PM. Which of these works best for you?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-18T14:23:11.777Z",
+      "step": "gather_details",
+      "caller": "1:00 p.m.",
+      "assistant": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-18T14:23:21.356Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Perfect. Before finalizing, could you please spell your full name for me?"
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-18T14:23:38.550Z",
+      "step": "gather_details",
+      "caller": "n i c h i n d o d l a",
+      "assistant": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-18T14:24:00.422Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Your All-In-One Package is now booked for Monday, September 21 at 1:00 PM under the name Nichin Bell. Is there anything else I can help you with today?-on Package is now booked for Monday, September 21 at 1:00 PM under the name Nichin Bell. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-18T14:24:03.619Z",
+      "step": "confirm",
+      "caller": "",
+      "assistant": "I'm still here whenever you're ready."
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-18T14:24:15.200Z",
+      "step": "confirm",
+      "caller": "",
+      "assistant": "Just say yes to confirm, or let me know if anything needs to change."
+    },
+    {
+      "i": 15,
+      "ts": "2026-09-18T14:24:27.714Z",
+      "step": "confirm",
+      "caller": "No, no, nothing else.",
+      "assistant": "Thank you for calling Digile Media. Have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-18T14:21:38.321Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the cancellation, read back and agreed.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "I can certainly help with that. To confirm, do you want to cancel your appointment scheduled for Wednesday, September 23 at 11:30 AM?",
+      "agreed_read_back": "I can certainly help with that. To confirm, do you want to cancel your appointment scheduled for Wednesday, September 23 at 11:30 AM?",
+      "target": "2026-09-23T11:30:00",
+      "target_candidates": [
+        "2026-09-23T11:30:00"
+      ],
+      "target_from": "I can certainly help with that. To confirm, do you want to cancel your appointment scheduled for Wednesday, September 23 at 11:30 AM?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T14:23:16.299Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 8,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "other_gate",
+      "budget_released": false,
+      "expect": "write",
+      "why": "readback_now=true and agreed_now=true; held in production by the SPELLING gate, which is off in the replay.",
+      "standing_turn": 9,
+      "agreed_turn": 1,
+      "standing_read_back": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "agreed_read_back": "You have an appointment scheduled for Wednesday, September 23 at 11:30 AM.",
+      "target": "2026-09-21T13:00:00",
+      "target_candidates": [
+        "2026-09-21T13:00:00"
+      ],
+      "target_from": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T14:23:28.571Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 1,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "write",
+      "why": "IN PRODUCTION this refused -- readback_now=false, agreed_now=false, nothing put to the caller on that turn. The harness reads consent as present on EVERY attempt of this call, so it writes. Kept as an honest record of what the replay does rather than what the call did: the two booleans are derived from the fixture's turn list, upstream of any gate, so this disagreement says nothing about the write-order gate and everything about the derivation.",
+      "standing_turn": 10,
+      "agreed_turn": 9,
+      "standing_read_back": "Perfect. Before finalizing, could you please spell your full name for me?",
+      "agreed_read_back": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "target": "2026-09-21T13:00:00",
+      "target_candidates": [
+        "2026-09-21T13:00:00"
+      ],
+      "target_from": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "target_derived": true,
+      "caller_text": "n i c h i n d o d l a",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T14:23:38.555Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 1,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "and this one refuses in the replay where the attempt before it wrote, which is the derivation gap reversing direction inside a single call. In production this was the second of two refusals at this proposal, one short of the ceiling, and the model re-issued a fourth time with real consent.",
+      "standing_turn": 11,
+      "agreed_turn": 10,
+      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?",
+      "agreed_read_back": "Perfect. Before finalizing, could you please spell your full name for me?",
+      "target": null,
+      "target_candidates": [],
+      "target_from": "Perfect. Before finalizing, could you please spell your full name for me?",
+      "target_derived": true,
+      "caller_text": "Let me think about that.",
+      "caller_text_source": "substituted"
+    },
+    {
+      "at": "2026-09-18T14:23:42.528Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 2,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "read back, agreed, written. The booking the caller actually got.",
+      "standing_turn": 11,
+      "agreed_turn": 9,
+      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?",
+      "agreed_read_back": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "target": "2026-09-21T13:00:00",
+      "target_candidates": [
+        "2026-09-21T13:00:00"
+      ],
+      "target_from": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

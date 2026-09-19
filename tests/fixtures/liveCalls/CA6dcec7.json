@@ -1,0 +1,219 @@
+{
+  "callSid": "CA6dcec7",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00085. Booked, and THE NAME CAME OUT RIGHT. The counterpart to CA0ef8d2: here the spelling gate held the write and the caller spelled two seconds before it landed, so the model still had the letters in front of it. On CA0ef8d2 the spelling arrived 101 seconds and several turns before the write, and the misheard version won. Recency, not the retry stash -- neither call used the stash at all.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 16,
+    "probes": 2,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 16,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 2,
+    "availability_blocked": 0,
+    "availability_day_listed": 19,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 16
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-19T16:46:17.194Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-19T16:46:25.633Z",
+      "step": "identify_intent",
+      "caller": "I want to schedule an appointment.",
+      "assistant": "Of course. To get started, may I have your name, please?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-19T16:46:35.787Z",
+      "step": "gather_details",
+      "caller": "Marcas Gorrick",
+      "assistant": "Thank you. What is the best contact number to reach you on?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-19T16:46:46.141Z",
+      "step": "gather_details",
+      "caller": "the one I'm calling from",
+      "assistant": "Thanks. I have that down as four six nine, nine three three, eight eight eight seven."
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-19T16:46:52.826Z",
+      "step": "gather_details",
+      "caller": "Ja.",
+      "assistant": "Thanks. Which company are you with?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-19T16:47:01.878Z",
+      "step": "gather_details",
+      "caller": "Halvern Consulting",
+      "assistant": "Thanks. And what industry is your company in?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-19T16:47:07.490Z",
+      "step": "gather_details",
+      "caller": "consulting",
+      "assistant": "Thanks. And what does your company sell?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-19T16:47:14.623Z",
+      "step": "gather_details",
+      "caller": "insulting",
+      "assistant": "Thanks. And what is your main marketing challenge right now?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-19T16:47:25.096Z",
+      "step": "gather_details",
+      "caller": "getting customs",
+      "assistant": "Thanks for sharing that. I'd love to offer you a free strategy call with the team to discuss this further ? what day and time would work best for you?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-19T16:47:40.766Z",
+      "step": "gather_details",
+      "caller": "anything next week? For this coming week?",
+      "assistant": "On Monday, September twenty-first, we have slots available at nine in the morning, one in the afternoon, or four-thirty in the afternoon. Which one suits you best?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-19T16:47:50.281Z",
+      "step": "gather_details",
+      "caller": "Azt hiszem, sz?val",
+      "assistant": "The options I offered were for Monday, September twenty-first."
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-19T16:48:04.128Z",
+      "step": "gather_details",
+      "caller": "Aerosol-Pen",
+      "assistant": "Great, Monday, September twenty-first at one in the afternoon. Just to confirm, I have your name as Marcas Gorrick. Is that correct?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-19T16:48:18.682Z",
+      "step": "gather_details",
+      "caller": "No, no entiendo.",
+      "assistant": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?"
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-19T16:48:29.742Z",
+      "step": "gather_details",
+      "caller": "Yeah.",
+      "assistant": "Before we finalize the booking, could you please spell your full name for me, including both the first name and surname?"
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-19T16:48:45.228Z",
+      "step": "gather_details",
+      "caller": "n i t h i n d o d l a",
+      "assistant": "I've booked your free strategy call for Monday, September twenty-first at one in the afternoon under Marcus Bell.Is there anything else I can help you with today?"
+    },
+    {
+      "i": 15,
+      "ts": "2026-09-19T16:48:53.843Z",
+      "step": "confirm",
+      "caller": "No.",
+      "assistant": "Thank you for calling Digile Media, and we wish you a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-19T16:48:23.248Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "other_gate",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "readback_now=true and agreed_now=true IN PRODUCTION, held there by the SPELLING gate. The harness derives no slot at all for this call (derived-slot 0 of 2), so the read-back cannot be matched and the write-order gate refuses on its own terms. Recorded rather than forced: a fixture whose consent cannot be derived is a limit of the builder, not a verdict about the gate.",
+      "standing_turn": 12,
+      "agreed_turn": 12,
+      "standing_read_back": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?",
+      "agreed_read_back": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?",
+      "target": null,
+      "target_candidates": [
+        "2026-09-21T12:00:00",
+        "2026-09-21T13:00:00"
+      ],
+      "target_from": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?",
+      "target_derived": true,
+      "caller_text": "Yeah.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-19T16:48:36.181Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": true,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 1,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "same derivation gap as the attempt above. In production this is the write that landed carrying the corrected name, re-issued by the model with the spelling fresh in the previous turn -- the LVX62 mechanism, and the half of it that works.",
+      "standing_turn": 13,
+      "agreed_turn": 12,
+      "standing_read_back": "Before we finalize the booking, could you please spell your full name for me, including both the first name and surname?",
+      "agreed_read_back": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?",
+      "target": null,
+      "target_candidates": [
+        "2026-09-21T12:00:00",
+        "2026-09-21T13:00:00"
+      ],
+      "target_from": "I understand. Let me correct that name and read back the details for your booking on Monday, September twenty-first at one o'clock in the afternoon for Marcas Basl. Is that correct?",
+      "target_derived": true,
+      "caller_text": "n i t h i n d o d l a",
+      "caller_text_source": "logged"
+    }
+  ]
+}

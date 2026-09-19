@@ -1,0 +1,109 @@
+{
+  "callSid": "CAea2b08",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00085. A cancellation in 63 seconds, zero refusals, claim true. Also the call where the end_call ask-gate held a hang-up and the model appended 'is there anything else' to a goodbye it had already said.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 5,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 5,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 0,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 0
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-19T16:42:24.452Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-19T16:42:39.813Z",
+      "step": "identify_intent",
+      "caller": "I wanted to see if I could cancel my appointment.",
+      "assistant": "I can help with that. Could you please spell your full name for me?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-19T16:42:54.774Z",
+      "step": "gather_details",
+      "caller": "A M A R C U S B E L L",
+      "assistant": "Thanks, Marcas. I found your appointment for Wednesday, September 23 at 9 00 AM. Would you like me to go ahead and cancel that for you?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-19T16:43:09.013Z",
+      "step": "gather_details",
+      "caller": "Yeah.",
+      "assistant": "Your appointment on Wednesday, September 23 at 9 00 AM is now cancelled. Thank you for calling Digile Media, and have a wonderful day.Is there anything else I can help you with today?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-19T16:43:16.927Z",
+      "step": "confirm",
+      "caller": "N?o.",
+      "assistant": "Thank you for calling Digile Media. Have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-19T16:42:58.165Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the appointment was read back in full and the caller agreed on that turn. The cancel control, matching CA5b982c's booking control.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "Thanks, Marcas. I found your appointment for Wednesday, September 23 at 9 00 AM. Would you like me to go ahead and cancel that for you?",
+      "agreed_read_back": "Thanks, Marcas. I found your appointment for Wednesday, September 23 at 9 00 AM. Would you like me to go ahead and cancel that for you?",
+      "target": "2026-09-23T09:00:00",
+      "target_candidates": [
+        "2026-09-23T09:00:00"
+      ],
+      "target_from": "Thanks, Marcas. I found your appointment for Wednesday, September 23 at 9 00 AM. Would you like me to go ahead and cancel that for you?",
+      "target_derived": true,
+      "caller_text": "Yeah.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

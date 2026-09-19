@@ -1,0 +1,183 @@
+{
+  "callSid": "CA00649d",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00085, AND THE CALL THAT FOUND LVX153. A caller asked to cancel, was refused three times, was told twice 'I'm unable to process the cancellation right now', was offered a callback, and hung up with the appointment still standing. The trigger was a mangled yes -- 'A la works.' -- which isAffirmative cannot read and neither can a human.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 7,
+    "probes": 3,
+    "write_order_refused": 3,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 0,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 7,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 0,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 0
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-19T17:15:50.466Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-19T17:16:07.895Z",
+      "step": "identify_intent",
+      "caller": "Amiable, could you cancel my appointment?",
+      "assistant": "Of course. I see an appointment on Thursday, September 24th at 1:30 PM. Would you like me to cancel that for you?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-19T17:16:21.546Z",
+      "step": "gather_details",
+      "caller": "A la works.",
+      "assistant": "Just to confirm, are you asking me to go ahead and cancel the appointment on Thursday, September 24th at 1:30 PM?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-19T17:16:35.756Z",
+      "step": "gather_details",
+      "caller": "Ah, ya.",
+      "assistant": "I'm sorry, I'm unable to process the cancellation right now. Shall I take down your details so a team member can follow up with you?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-19T17:16:45.797Z",
+      "step": "gather_details",
+      "caller": "?O qu? piensas?",
+      "assistant": "I'm sorry, I'm unable to process that request right now. Would you like me to take your details so someone can follow up with you?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-19T17:16:54.527Z",
+      "step": "gather_details",
+      "caller": "Okay.",
+      "assistant": "Thanks. What is the best number to reach you on?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-19T17:16:58.402Z",
+      "step": "gather_details",
+      "caller": "",
+      "assistant": "Please provide the best callback number to reach you on."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-19T17:16:11.992Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "the appointment was read back and the caller had not answered yet. Correct.",
+      "standing_turn": 1,
+      "agreed_turn": 1,
+      "standing_read_back": "Of course. I see an appointment on Thursday, September 24th at 1:30 PM. Would you like me to cancel that for you?",
+      "agreed_read_back": "Of course. I see an appointment on Thursday, September 24th at 1:30 PM. Would you like me to cancel that for you?",
+      "target": "2026-09-24T13:30:00",
+      "target_candidates": [
+        "2026-09-24T13:30:00"
+      ],
+      "target_from": "Of course. I see an appointment on Thursday, September 24th at 1:30 PM. Would you like me to cancel that for you?",
+      "target_derived": true,
+      "caller_text": "A la works.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-19T17:16:27.400Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "the caller DID answer, and it transcribed as 'A la works.' The gate cannot see agreement in that and must not guess one: a write invented out of an unreadable turn is the failure this gate exists to prevent. Refusing here is right even though the caller said yes.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "Just to confirm, are you asking me to go ahead and cancel the appointment on Thursday, September 24th at 1:30 PM?",
+      "agreed_read_back": "Just to confirm, are you asking me to go ahead and cancel the appointment on Thursday, September 24th at 1:30 PM?",
+      "target": "2026-09-24T13:30:00",
+      "target_candidates": [
+        "2026-09-24T13:30:00"
+      ],
+      "target_from": "Just to confirm, are you asking me to go ahead and cancel the appointment on Thursday, September 24th at 1:30 PM?",
+      "target_derived": true,
+      "caller_text": "Ah, ya.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-19T17:16:54.537Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "THE ONE LVX153 CHANGES IN PRODUCTION, AND THIS SUITE CANNOT SEE IT. Third refusal at the same proposal across three different read-back wordings: the ceiling should release it, and after LVX153 it does. It is asserted as `refuse` here because THE REPLAY HARNESS CANNOT ADVANCE CALLER TURNS. `callerTurnCount` is incremented at lib/voice/live/index.js:3921 when the VAD closes an utterance, which needs audio frames; this harness pushes transcriptions and turnCompletes and no audio, so the count is 0 for the whole replay. The refusal budget is spent per caller TURN -- `orderRefusalIsNew` compares against it -- so the count can never exceed 1 and a ceiling needing 2 can never fire. Measured across the whole suite: 249 write_order_refused, ZERO write_order_gate_ceiling, with and without the fix. Same construction as the spelling gate above: the assertion is routed to the suite that can make it, and tests/liveWriteOrder.test.js owns the ceiling -- it goes red without LVX153 and green with it.",
+      "standing_turn": 5,
+      "agreed_turn": 5,
+      "standing_read_back": "Thanks. What is the best number to reach you on?",
+      "agreed_read_back": "Thanks. What is the best number to reach you on?",
+      "target": null,
+      "target_candidates": [],
+      "target_from": "Thanks. What is the best number to reach you on?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "substituted"
+    }
+  ]
+}

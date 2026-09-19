@@ -1,0 +1,317 @@
+{
+  "callSid": "CA5b7e35",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00082. Two cancellations a second apart, then a booking that took two attempts. Kept for the duplicate-write pair.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 22,
+    "probes": 4,
+    "write_order_refused": 1,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 22,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 2,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 1,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 1,
+    "read_memo_hit": 0,
+    "verified_slots": 1
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-18T19:30:50.367Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-18T19:30:59.745Z",
+      "step": "identify_intent",
+      "caller": "Yeah, I have some appointments I wanted to cancel.",
+      "assistant": "I can help with that. Which of your upcoming appointments would you like to cancel?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-18T19:31:10.205Z",
+      "step": "gather_details",
+      "caller": "all of them. How many do I have?",
+      "assistant": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-18T19:31:19.822Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "I have now cancelled both of your appointments. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-18T19:31:27.768Z",
+      "step": "confirm",
+      "caller": "Ja, klar. Book an appointment.",
+      "assistant": "Sure thing. Can I please have your full name to get started?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-18T19:31:38.796Z",
+      "step": "confirm",
+      "caller": "I just want to check I don't have any appointments, right?",
+      "assistant": "That's correct, you don't have any upcoming appointments scheduled. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-18T19:31:50.004Z",
+      "step": "gather_details",
+      "caller": "Yes, continue booking the appointment.",
+      "assistant": "To proceed with the booking, may I please have your full name?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-18T19:31:59.697Z",
+      "step": "gather_details",
+      "caller": "Ahm, no entiendo.",
+      "assistant": "Claro, para proceder con la reserva, ?podr?a darme su nombre completo?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-18T19:32:09.230Z",
+      "step": "gather_details",
+      "caller": "Sorry, English.",
+      "assistant": "Of course. To proceed with the booking, may I please have your full name?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-18T19:32:16.442Z",
+      "step": "gather_details",
+      "caller": "nicht in Dadler",
+      "assistant": "Thanks and what's the best number to reach you on?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-18T19:32:28.583Z",
+      "step": "gather_details",
+      "caller": "stolen calling card",
+      "assistant": "Understood, I will use the number you are calling from, which is 4-6-9-9-3-3-8-8-8-7."
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-18T19:32:38.919Z",
+      "step": "gather_details",
+      "caller": "Yeah, that was",
+      "assistant": "Thanks. What company are you with?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-18T19:32:46.435Z",
+      "step": "gather_details",
+      "caller": "Dortler Consult",
+      "assistant": "Thank you. And which industry does your company operate in?"
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-18T19:32:52.327Z",
+      "step": "gather_details",
+      "caller": "consulting",
+      "assistant": "Got it. And what does your company sell?"
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-18T19:33:04.046Z",
+      "step": "gather_details",
+      "caller": "second",
+      "assistant": "Thank you for that information. We offer a free strategy call to discuss how we can help your business ? what day and time would work best for you?"
+    },
+    {
+      "i": 15,
+      "ts": "2026-09-18T19:33:19.576Z",
+      "step": "gather_details",
+      "caller": "Do everything. Let's do Friday. 1:00 p.m.",
+      "assistant": "I have that available. Does Friday, September 25th at 1 PM work for you?"
+    },
+    {
+      "i": 16,
+      "ts": "2026-09-18T19:33:31.506Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Just to confirm, I am booking your free strategy call for Friday, September 25th at 1 PM. Shall I go ahead and finalize that?"
+    },
+    {
+      "i": 17,
+      "ts": "2026-09-18T19:33:38.642Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Before I finalize that, could you please spell out your full name for me?"
+    },
+    {
+      "i": 18,
+      "ts": "2026-09-18T19:33:57.622Z",
+      "step": "gather_details",
+      "caller": "Ahm, ya. M A R C U S B E L L",
+      "assistant": "Thank you. To confirm, that is spelled N-I-T-H-I-N, and Bell D-O-D-L-A. Is that correct?"
+    },
+    {
+      "i": 19,
+      "ts": "2026-09-18T19:34:08.883Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Your free strategy call is booked for Friday, September 25th at 1 PM under Marcus Bell. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 20,
+      "ts": "2026-09-18T19:34:30.818Z",
+      "step": "confirm",
+      "caller": "No. Sorry. Yeah. What are your services? What are your hours?",
+      "assistant": "We are open Monday to Friday from 9 AM to 5 PM Central time. We offer Meta and Google Ads management and an all-in-one package combining both."
+    },
+    {
+      "i": 21,
+      "ts": "2026-09-18T19:34:40.857Z",
+      "step": "confirm",
+      "caller": "passo",
+      "assistant": "Thank you for calling Digile Media. Have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-18T19:31:13.644Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the cancellation the caller authorised.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "agreed_read_back": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "target": null,
+      "target_candidates": [],
+      "target_from": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T19:31:14.147Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "THE SECOND CANCEL, one second later and inside the same turn. The write-order gate's answer is the same for both because the consent is the same; whether a duplicate should reach the database at all is the duplicate-write guard's question, not this one's.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "agreed_read_back": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "target": null,
+      "target_candidates": [],
+      "target_from": "You have two upcoming appointments scheduled. Would you like me to go ahead and cancel both of them for you?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T19:33:23.033Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 14,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "no read-back recognised on the turn the booking was fired.",
+      "standing_turn": 15,
+      "agreed_turn": 1,
+      "standing_read_back": "I have that available. Does Friday, September 25th at 1 PM work for you?",
+      "agreed_read_back": "I can help with that. Which of your upcoming appointments would you like to cancel?",
+      "target": "2026-09-18T13:00:00",
+      "target_candidates": [
+        "2026-09-18T13:00:00"
+      ],
+      "target_from": "I have that available. Does Friday, September 25th at 1 PM work for you?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T19:34:00.675Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 2,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "read back and agreed, and the row landed.",
+      "standing_turn": 18,
+      "agreed_turn": 16,
+      "standing_read_back": "Thank you. To confirm, that is spelled N-I-T-H-I-N, and Bell D-O-D-L-A. Is that correct?",
+      "agreed_read_back": "Just to confirm, I am booking your free strategy call for Friday, September 25th at 1 PM. Shall I go ahead and finalize that?",
+      "target": "2026-09-18T13:00:00",
+      "target_candidates": [
+        "2026-09-18T13:00:00"
+      ],
+      "target_from": "Just to confirm, I am booking your free strategy call for Friday, September 25th at 1 PM. Shall I go ahead and finalize that?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

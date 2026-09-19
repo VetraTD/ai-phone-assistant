@@ -1,0 +1,189 @@
+{
+  "callSid": "CA06cade",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00080. Booked, and reported verdict row_without_claim -- the row landed and the assistant never clearly told the caller so.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 12,
+    "probes": 2,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 0,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 12,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 2,
+    "availability_blocked": 0,
+    "availability_day_listed": 18,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 15
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-18T17:26:05.166Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-18T17:26:19.204Z",
+      "step": "identify_intent",
+      "caller": "Yeah, I want to book an appointment.",
+      "assistant": "I see you already have a strategy call booked for Monday, September twenty-first at one PM ? would you like to add anything to that appointment?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-18T17:26:32.173Z",
+      "step": "gather_details",
+      "caller": "A no, I want to book a new one.",
+      "assistant": "Since you already have a session scheduled, I can help you book another one as well. What service are you looking to book for this new appointment?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-18T17:26:42.083Z",
+      "step": "gather_details",
+      "caller": "strategical",
+      "assistant": "Sure thing ? what day and time were you thinking of for the new appointment?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-18T17:26:56.396Z",
+      "step": "gather_details",
+      "caller": "Ahm, I need to Oh, actually, sorry. What do you What do you have available?",
+      "assistant": "To check our availability, what day would you like to come in for your strategy call?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-18T17:27:06.013Z",
+      "step": "gather_details",
+      "caller": "What day is today?",
+      "assistant": "Today is Friday, September eighteenth, twenty twenty-six. What day would you like to check for availability?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-18T17:27:18.990Z",
+      "step": "gather_details",
+      "caller": "What days do you have available?",
+      "assistant": "We have openings on Monday, September twenty-first at nine AM, twelve-thirty PM, or four-thirty PM. Which of those times works for you?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-18T17:27:29.751Z",
+      "step": "gather_details",
+      "caller": "Oh.",
+      "assistant": "We have openings at nine AM, twelve-thirty PM, or four-thirty PM on Monday, September twenty-first. Which time would you prefer?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-18T17:27:42.843Z",
+      "step": "gather_details",
+      "caller": "What's the 4:30?",
+      "assistant": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-18T17:27:52.092Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Thanks ? before I finish booking that, could you please spell your full name for me?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-18T17:28:08.406Z",
+      "step": "gather_details",
+      "caller": "n i t h i n d o d l a",
+      "assistant": "Thanks, Marcus ? I have that additional strategy call booked for you on Monday, September twenty-first at four-thirty PM. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-18T17:28:21.747Z",
+      "step": "confirm",
+      "caller": "Ahm",
+      "assistant": "...Thanks for calling Digile Media, and I hope you have a great day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-18T17:27:47.375Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "other_gate",
+      "budget_released": false,
+      "expect": "write",
+      "why": "readback_now=true and agreed_now=true. Held in production by the SPELLING gate, which the replay runs with off.",
+      "standing_turn": 8,
+      "agreed_turn": 8,
+      "standing_read_back": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?",
+      "agreed_read_back": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?",
+      "target": "2026-09-21T16:30:00",
+      "target_candidates": [
+        "2026-09-21T16:30:00"
+      ],
+      "target_from": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-18T17:27:59.258Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": true,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 1,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the write that landed, carried by the standing agreement.",
+      "standing_turn": 9,
+      "agreed_turn": 8,
+      "standing_read_back": "Thanks ? before I finish booking that, could you please spell your full name for me?",
+      "agreed_read_back": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?",
+      "target": "2026-09-21T16:30:00",
+      "target_candidates": [
+        "2026-09-21T16:30:00"
+      ],
+      "target_from": "Sounds good ? just to confirm, you'd like to book an additional strategy call for Monday, September twenty-first at four-thirty PM?",
+      "target_derived": true,
+      "caller_text": "n i t h i n d o d l a",
+      "caller_text_source": "logged"
+    }
+  ]
+}

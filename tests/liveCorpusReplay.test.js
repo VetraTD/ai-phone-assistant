@@ -206,8 +206,8 @@ describe("the real calls, replayed through the real gate", () => {
   // stopped being written because its expectations went missing -- would
   // otherwise shrink the suite without failing it.
   it("has a fixture for every call in the corpus", () => {
-    expect(FIXTURES).toHaveLength(19);
-    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(52);
+    expect(FIXTURES).toHaveLength(32);
+    expect(FIXTURES.flatMap((f) => f.attempts)).toHaveLength(92);
   });
 
   for (const fixture of FIXTURES) {

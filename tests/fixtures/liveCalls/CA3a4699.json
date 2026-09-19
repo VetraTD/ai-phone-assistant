@@ -1,0 +1,130 @@
+{
+  "callSid": "CA3a4699",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00085. A reschedule in 80 seconds with ZERO refusals -- read back, agreed, written, and the claim that followed was true. The shortest clean call in the corpus.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 8,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": {
+    "claimed": 2,
+    "note_sent": 0,
+    "suppressed_existing_report": 1,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 8,
+    "turns_reply_empty": 0,
+    "unbacked_action": 1,
+    "unbacked_any": 1
+  },
+  "guards": {
+    "availability_allowed": 1,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 1,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 1,
+    "read_memo_hit": 0,
+    "verified_slots": 1
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-19T16:19:27.734Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-19T16:19:39.358Z",
+      "step": "identify_intent",
+      "caller": "I want to see if I need appointments.",
+      "assistant": "Thanks for calling. To look up your records, may I have your first name, please?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-19T16:19:44.926Z",
+      "step": "gather_details",
+      "caller": "Marcas",
+      "assistant": "Thanks, Marcas. Could you please spell your last name for me?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-19T16:19:53.762Z",
+      "step": "gather_details",
+      "caller": "de hoy de hoy",
+      "assistant": "Thanks, Marcas. You have an appointment scheduled for Tuesday, September 22 at 9:00 AM."
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-19T16:20:07.292Z",
+      "step": "gather_details",
+      "caller": "A Okay, could we go ahead and reschedule that?",
+      "assistant": "Of course. What day and time would you prefer to reschedule to?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-19T16:20:18.943Z",
+      "step": "gather_details",
+      "caller": "Can we do the next day same time?",
+      "assistant": "That time is available. Just to confirm, would you like to reschedule your appointment to Wednesday, September 23 at 9:00 AM?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-19T16:20:30.605Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Great, I've successfully rescheduled your appointment to Wednesday, September 23rd at 9:00 AM. Is there anything else I can help you with today?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-19T16:20:38.210Z",
+      "step": "confirm",
+      "caller": "No.",
+      "assistant": "Thank you for calling Digile Media, and have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-19T16:20:22.197Z",
+      "tool": "reschedule_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "readback_now=true and agreed_now=true on the turn. Nothing to argue about, and that is the point of keeping it: a change that starts refusing this has broken the gate.",
+      "standing_turn": 5,
+      "agreed_turn": 5,
+      "standing_read_back": "That time is available. Just to confirm, would you like to reschedule your appointment to Wednesday, September 23 at 9:00 AM?",
+      "agreed_read_back": "That time is available. Just to confirm, would you like to reschedule your appointment to Wednesday, September 23 at 9:00 AM?",
+      "target": "2026-09-23T09:00:00",
+      "target_candidates": [
+        "2026-09-23T09:00:00"
+      ],
+      "target_from": "That time is available. Just to confirm, would you like to reschedule your appointment to Wednesday, September 23 at 9:00 AM?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

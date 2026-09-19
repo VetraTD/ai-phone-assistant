@@ -74,6 +74,36 @@ const PSEUDONYMS = [
   // rest of the corpus calls Marcus Bell.
   [/N,\s*I,\s*T,\s*H,\s*I,\s*N,\s*D,\s*O,\s*D,\s*L,\s*A/g, "M, A, R, C, U, S, B, E, L, L"],
   [/N\s+I\s+T\s+H\s+I\s+N\s+D\s+O\s+D\s+L\s+A/g, "M A R C U S B E L L"],
+  // 2026-09-19. The seven calls of that round put the name in the transcript in
+  // PLAIN form for the first time -- every earlier appearance was spelled out,
+  // so the two entries above were the whole of the cover and `Nithin Dodla`
+  // walked straight through them. Caught by the leak guard refusing to write
+  // CA6dcec7, which is exactly the job it was built for.
+  //
+  // THE MIS-HEARINGS MAP TO MIS-HEARINGS, per the `Annett` note below. Four of
+  // these seven calls got the name wrong in a different way each time, and
+  // LVX62 is measured on precisely that -- flattening them all to the correct
+  // pseudonym would erase the defect the fixtures exist to record.
+  [/Nithin\s+Dodla-Smith/gi, "Marcus Bell-Smith"],
+  [/Nithin\s+Dodla/gi, "Marcus Bell"],
+  [/Nitin\s+Gadkari/gi, "Marcas Gorrick"],
+  [/Nitin\s+Dadla/gi, "Marcas Bel"],
+  [/Nitin\s+Dasla/gi, "Marcas Basl"],
+  [/Nithin/gi, "Marcus"],
+  [/Nitin/gi, "Marcas"],
+  [/Dodla/gi, "Bell"],
+  [/Dadla/gi, "Bel"],
+  [/Dasla/gi, "Basl"],
+  // The +44 call's persona, and the company names the transcriber mangled.
+  // Neither is in LEAK_RE, so nothing would have stopped these reaching a
+  // committed fixture -- covered here rather than left to chance.
+  [/J\s+O\s+S\s+H\s+U\s+A\s+T\s+I\s+T\s+E/gi, "E L E N A F A R R O W"],
+  [/Joshua\s+Tite/gi, "Elena Farrow"],
+  [/Joshua\s+tight/gi, "Elena fallow"],
+  [/Joshua/gi, "Elena"],
+  [/\bTite\b/gi, "Farrow"],
+  [/Dalberg\s+Consulting/gi, "Halvern Consulting"],
+  [/Darla\s+Consulting/gi, "Harlan Consulting"],
   [/WHITE?FIELDS?/g, "BELL"],
   [/Whit[ef]field/g, "Bell"],
   [/Whitfields/g, "Bells"],
@@ -103,6 +133,32 @@ const PSEUDONYMS = [
 
 /** Anything still matching this after pseudonymisation is a leak and aborts. */
 const LEAK_RE = /whit[ef]|bhakta|dillan|nithin|dodla|annett|aadhaar|chandni/i;
+
+/**
+ * Calls kept in call-corpus/ but NOT turned into replay fixtures, and why.
+ *
+ * `scripts/corpus/score-claims.mjs` still reads them -- they are real calls and
+ * they count in every measurement. This list is only about the REPLAY, which
+ * cannot express them.
+ *
+ * LVX155. A fixture says what each enumerated write attempt should do, and the
+ * diary assertion is DERIVED from those: `wantsBooking` is true when some
+ * attempt expects "write". That breaks for a call where every attempt is
+ * correctly refused at the gate and the row is then written by
+ * `retryPendingWrite` -- the held write re-issued in code, which is LVX72's
+ * entire purpose and the system working. The replay produces the right diary
+ * (one row, as in production) by a route the fixture format has no attempt to
+ * hang it on, so the derived assertion demands zero rows and finds one.
+ *
+ * Skipping is the honest option until the format can say "the retry wrote it".
+ * Forcing an attempt to `write` to satisfy the derivation would assert that the
+ * GATE passed something it correctly refused, which is a worse lie than a
+ * missing fixture.
+ */
+const SKIP_FIXTURE = {
+  CA2ca0ed:
+    "every attempt refuses at the gate and retryPendingWrite writes the row; the derived diary assertion cannot express that. Still scored by score-claims.mjs. Also the only +44 / tenant 55c7c8c4 call, so nothing else in the replay depends on it.",
+};
 
 function pseudonymise(s) {
   let out = String(s || "");
@@ -482,6 +538,243 @@ const EXPECTATIONS = {
       },
     ],
   },
+
+  // -------------------------------------------------------------------------
+  // Revisions 00080-00084. These calls were pulled into call-corpus/ in earlier
+  // rounds and never given expectations, which left `npm run corpus:build`
+  // throwing for anyone who ran it -- found 2026-09-19, and NOT by a test:
+  // the replay suite reads committed fixtures, so a corpus that cannot be
+  // rebuilt is invisible to it. Filled in here from the transcripts.
+  // -------------------------------------------------------------------------
+
+  CA06cade: {
+    note: "3.8, rev 00080. Booked, and reported verdict row_without_claim -- the row landed and the assistant never clearly told the caller so.",
+    attempts: [
+      {
+        expect: "write",
+        why: "readback_now=true and agreed_now=true. Held in production by the SPELLING gate, which the replay runs with off.",
+      },
+      { expect: "write", why: "the write that landed, carried by the standing agreement." },
+    ],
+  },
+
+  CA299f23: {
+    note: "3.8, rev 00081. ONE refused write and then 'That is all booked. Thanks for calling Digile Media, and have a great day.' -- booked_rows 0, line down a second later. An uncorrected fabrication, and one the deployed claim detector cannot see at all: no determiner-headed noun, no recognised copular.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the read-back was made and the caller had not agreed. Correct, and the defect on this call is entirely what the model SAID afterwards.",
+      },
+    ],
+  },
+
+  CA58bb36: {
+    note: "3.8, rev 00083. A cancel and a booking, both properly authorised, both written. Also the call where the assistant twice refused times its own verified-open record said were free (LVX148).",
+    attempts: [
+      { expect: "write", why: "cancel read back in full, agreed on the turn." },
+      { expect: "write", why: "booking read back in full, agreed on the turn." },
+    ],
+  },
+
+  CA5b7e35: {
+    note: "3.8, rev 00082. Two cancellations a second apart, then a booking that took two attempts. Kept for the duplicate-write pair.",
+    attempts: [
+      { expect: "write", why: "the cancellation the caller authorised." },
+      {
+        expect: "write",
+        why: "THE SECOND CANCEL, one second later and inside the same turn. The write-order gate's answer is the same for both because the consent is the same; whether a duplicate should reach the database at all is the duplicate-write guard's question, not this one's.",
+      },
+      { expect: "refuse", why: "no read-back recognised on the turn the booking was fired." },
+      { expect: "write", why: "read back and agreed, and the row landed." },
+    ],
+  },
+
+  CA7ec8af: {
+    note: "3.8, rev 00079. Cancel then rebook. The rebook took four attempts and the last one landed -- and the claim that followed, 'Your All-In-One Package is now booked', was TRUE and still invisible to the deployed claim detector, because 'Package' is not one of its four nouns.",
+    attempts: [
+      { expect: "write", why: "the cancellation, read back and agreed." },
+      {
+        expect: "write",
+        why: "readback_now=true and agreed_now=true; held in production by the SPELLING gate, which is off in the replay.",
+      },
+      {
+        expect: "write",
+        why:
+          "IN PRODUCTION this refused -- readback_now=false, agreed_now=false, nothing put to the caller on that turn. The harness reads consent as present on EVERY attempt of this call, so it writes. Kept as an honest record of what the replay does rather than what the call did: the two booleans are derived from the fixture's turn list, upstream of any gate, so this disagreement says nothing about the write-order gate and everything about the derivation.",
+      },
+      {
+        expect: "refuse",
+        why: "and this one refuses in the replay where the attempt before it wrote, which is the derivation gap reversing direction inside a single call. In production this was the second of two refusals at this proposal, one short of the ceiling, and the model re-issued a fourth time with real consent.",
+      },
+      { expect: "write", why: "read back, agreed, written. The booking the caller actually got." },
+    ],
+  },
+
+  CA954592: {
+    note:
+      "3.8, rev 00084, and the worst call in the corpus: TWELVE write attempts, three separate operations, booked_rows 0 and a booking owed at the end. Two false claims mid-call, and a third -- 'Your free strategy call has been successfully booked for Monday' -- left uncorrected at the sign-off.",
+    attempts: [
+      { expect: "refuse", why: "reschedule read back, caller had not answered." },
+      { expect: "refuse", why: "re-fired seconds later, still no answer." },
+      { expect: "refuse", why: "again, inside the same caller turn. A tool round is not a caller turn and must not spend the budget." },
+      {
+        expect: "refuse",
+        why: "and again. THE FALSE CLAIM FOLLOWS THIS ONE: 'Your appointment has been successfully rescheduled to Tuesday 22nd at 2 30 PM' with nothing written.",
+      },
+      { expect: "refuse", why: "the caller agreed but no read-back was standing -- the assistant had moved on to something else." },
+      {
+        expect: "refuse",
+        why: "the SILENT-TURN gate: the caller's turn carried no speech at all, so there is nothing that could be consent. Its own refusal, not the write-order gate's.",
+      },
+      { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
+      { expect: "refuse", why: "cancel read back, caller had not answered yet." },
+      { expect: "refuse", why: "caller agreed, but to a read-back that was no longer standing." },
+      { expect: "write", why: "read back and agreed. The cancellation landed." },
+      { expect: "refuse", why: "booking fired with nothing read back and nothing agreed." },
+      {
+        expect: "refuse",
+        why:
+          "THE LAST ATTEMPT ON THE CALL, and the one the caller paid for. Read back, not agreed, refused -- and nine seconds later the model said 'Your free strategy call has been successfully booked for Monday, September 21st at 9:00 AM' and ended the call. booked_rows 0, booking_owed true. Nothing after this corrects it.",
+      },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // The 2026-09-19 round: seven owner calls on revisions 00085 and 00086, taken
+  // to measure the LVX150 refusal wording. The A/B closed "not demonstrated",
+  // and the calls were worth far more than the number they were made for --
+  // LVX152 and LVX153 both come from here.
+  // -------------------------------------------------------------------------
+
+  CA2ca0ed: {
+    note: "3.8, rev 00085, and the ONLY call in the corpus on the +44 number -- tenant 55c7c8c4, a different diary from every other entry. Booked correctly in the end, after one false 'I have that scheduled for you' that the claim guard caught and the model corrected itself out of.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "fired straight after the availability check with nothing read back and nothing agreed. The textbook case and it must stay refused.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the read-back was made four seconds earlier and the caller had not answered yet. THE FALSE CLAIM FOLLOWS THIS ONE: ten seconds later the model said 'I have that scheduled for you' with nothing written, which is the sentence LVX150's rewritten refusal was meant to prevent and did not.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "IN PRODUCTION consent was complete -- readback_now=true, agreed_now=true -- and the SPELLING gate held it, which the replay runs off. It still refuses here, because the harness derives the consent pair from the fixture's turn list and this call's derivation does not reproduce it (derived-slot 1 of 4). The write-order gate's real answer on this attempt is covered by tests/liveWriteOrder.test.js; what this fixture certifies is the sequence, not this one attempt.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the write that actually landed in production, on the shared attempt budget's release after three refusals -- and the release cannot happen here for the same reason the ceiling cannot: caller turns never advance in this harness. Recorded as LVX152, since by this point the caller had agreed and spelled the name and the row was right; the gate had run out rather than been satisfied.",
+      },
+    ],
+  },
+
+  CA0ef8d2: {
+    note: "3.8, rev 00085. Booked correctly with no fabrication -- refused once, asked properly, then wrote. The refusal loop working exactly as designed. It is also the call that wrote the WRONG NAME: the caller spelled their surname out letter by letter, correctly, and the row still carries the version the model had misheard three turns earlier (LVX62).",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "'I'll book that for you on Tuesday 22nd at 9 AM. Please confirm these details.' was not recognised as a read-back, and the caller's 'agreed' came before any question had been put. Refusing is right, and the model's response to it -- reading the details back properly and asking -- is the behaviour the refusal text asks for.",
+      },
+      {
+        expect: "write",
+        why: "'Shall I go ahead and book the strategy call for Tuesday 22nd at 9:00 AM?' answered 'Yeah, that that works.' Both halves present, no hatch, no latch. The clean control for this round.",
+      },
+    ],
+  },
+
+  CA3a4699: {
+    note: "3.8, rev 00085. A reschedule in 80 seconds with ZERO refusals -- read back, agreed, written, and the claim that followed was true. The shortest clean call in the corpus.",
+    attempts: [
+      {
+        expect: "write",
+        why: "readback_now=true and agreed_now=true on the turn. Nothing to argue about, and that is the point of keeping it: a change that starts refusing this has broken the gate.",
+      },
+    ],
+  },
+
+  CAea2b08: {
+    note: "3.8, rev 00085. A cancellation in 63 seconds, zero refusals, claim true. Also the call where the end_call ask-gate held a hang-up and the model appended 'is there anything else' to a goodbye it had already said.",
+    attempts: [
+      {
+        expect: "write",
+        why: "the appointment was read back in full and the caller agreed on that turn. The cancel control, matching CA5b982c's booking control.",
+      },
+    ],
+  },
+
+  CA6dcec7: {
+    note: "3.8, rev 00085. Booked, and THE NAME CAME OUT RIGHT. The counterpart to CA0ef8d2: here the spelling gate held the write and the caller spelled two seconds before it landed, so the model still had the letters in front of it. On CA0ef8d2 the spelling arrived 101 seconds and several turns before the write, and the misheard version won. Recency, not the retry stash -- neither call used the stash at all.",
+    attempts: [
+      {
+        expect: "refuse",
+        why:
+          "readback_now=true and agreed_now=true IN PRODUCTION, held there by the SPELLING gate. The harness derives no slot at all for this call (derived-slot 0 of 2), so the read-back cannot be matched and the write-order gate refuses on its own terms. Recorded rather than forced: a fixture whose consent cannot be derived is a limit of the builder, not a verdict about the gate.",
+      },
+      {
+        expect: "refuse",
+        why: "same derivation gap as the attempt above. In production this is the write that landed carrying the corrected name, re-issued by the model with the spelling fresh in the previous turn -- the LVX62 mechanism, and the half of it that works.",
+      },
+    ],
+  },
+
+  CA7d174d: {
+    note: "3.8, rev 00085. The caller asked to cancel Monday and book Thursday instead, and the model correctly collapsed that into ONE reschedule rather than a cancel plus a booking. Kept because the scorer initially read its true 'your new appointment is scheduled for Thursday' as a fabricated booking.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the slot had just been offered and the caller had chosen one, but nothing had been put back to them and nothing agreed. Refusing is correct.",
+      },
+      {
+        expect: "write",
+        why: "'Just to confirm, would you like to reschedule your appointment to Wednesday 23 at 9:00 AM?' answered yes. Both halves, clean write.",
+      },
+    ],
+  },
+
+  CA9c8e42: {
+    note:
+      "3.8, rev 00087 -- the FIRST call on the LVX153 fix, and it still failed. The caller asked to cancel four times, was told three times that the system was broken, was offered a transfer, and hung up with the appointment standing. verdict=write_abandoned. The fix is in the image (bba1d9e contains 9c8dcb2) and the ceiling still did not fire.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "fired straight after the lookup with nothing read back and nothing agreed. Correct.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the model read the cancellation back and fired again three seconds later, before the caller could answer. Correct on its own terms, and this is the SECOND refusing caller turn.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "WHY THE CEILING STILL CANNOT FIRE, measured on a live call. This refusal is 0.567s after the one above and inside the SAME caller turn, so it does not spend budget -- deliberately, because gemini.js rebuilds ctx from merged capabilityState after every round and three calls in one turn would otherwise burn the whole budget without the caller being asked anything. That leaves TWO refusing turns, and `WRITE_ORDER_MAX_REFUSALS = 2` releases on the THIRD. The model never made a third attempt: it gave up and started offering a callback. **The ceiling is set one higher than the model's patience**, which is why it has fired zero times in 33 calls. LVX153 fixed the identity function and this is the second half of the same defect.",
+      },
+    ],
+  },
+
+  CA00649d: {
+    note:
+      "3.8, rev 00085, AND THE CALL THAT FOUND LVX153. A caller asked to cancel, was refused three times, was told twice 'I'm unable to process the cancellation right now', was offered a callback, and hung up with the appointment still standing. The trigger was a mangled yes -- 'A la works.' -- which isAffirmative cannot read and neither can a human.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the appointment was read back and the caller had not answered yet. Correct.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "the caller DID answer, and it transcribed as 'A la works.' The gate cannot see agreement in that and must not guess one: a write invented out of an unreadable turn is the failure this gate exists to prevent. Refusing here is right even though the caller said yes.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "THE ONE LVX153 CHANGES IN PRODUCTION, AND THIS SUITE CANNOT SEE IT. Third refusal at the same proposal across three different read-back wordings: the ceiling should release it, and after LVX153 it does. It is asserted as `refuse` here because THE REPLAY HARNESS CANNOT ADVANCE CALLER TURNS. `callerTurnCount` is incremented at lib/voice/live/index.js:3921 when the VAD closes an utterance, which needs audio frames; this harness pushes transcriptions and turnCompletes and no audio, so the count is 0 for the whole replay. The refusal budget is spent per caller TURN -- `orderRefusalIsNew` compares against it -- so the count can never exceed 1 and a ceiling needing 2 can never fire. Measured across the whole suite: 249 write_order_refused, ZERO write_order_gate_ceiling, with and without the fix. Same construction as the spelling gate above: the assertion is routed to the suite that can make it, and tests/liveWriteOrder.test.js owns the ceiling -- it goes red without LVX153 and green with it.",
+      },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -748,6 +1041,15 @@ const files = fs.readdirSync(CORPUS_DIR).filter((f) => f.endsWith(".json")).sort
 let differed = 0;
 
 for (const file of files) {
+  const skip = SKIP_FIXTURE[file.slice(0, 8)];
+  if (skip) {
+    // Announced, not silent. A corpus call that produces no fixture must be
+    // visible in the build output, or the replay quietly shrinks.
+    console.log(`${file.slice(0, 8)}  SKIPPED -- ${skip}`);
+    const stale = path.join(OUT_DIR, `${file.slice(0, 8)}.json`);
+    if (fs.existsSync(stale)) fs.rmSync(stale);
+    continue;
+  }
   const fixture = build(file);
   const json = `${JSON.stringify(fixture, null, 2)}\n`;
 

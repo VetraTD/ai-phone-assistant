@@ -15616,3 +15616,176 @@ and neither could a human reading the transcript. This is LVX149's family — th
 Live API exposes no way to constrain the input language, so the mis-hearing
 cannot be prevented, only survived. **Surviving it is exactly what the ceiling
 was for.**
+
+---
+
+# LVX154 — the VAD override cost half a second on every turn and bought nothing
+
+**Found because the owner said the receptionist felt slower than it used to, and
+was right when the median said otherwise.**
+
+`LIVE_VAD_SILENCE_MS=1600` first appears on `voice-uk-prod-00064`,
+**2026-09-16 20:48**. Every revision from `00057` to `00062` ran it **UNSET** —
+the vendor's own endpointing default — which is what the code comment already
+said: *"Unset means the vendor's own default, which is what every call before
+2026-09-16 ran."*
+
+## Measured, over 636 turns
+
+| | turns | reply p50 | reply p25 |
+|---|---|---|---|
+| VAD **unset** (rev < 64) | 196 | **1,950 ms** | 1,313 ms |
+| VAD **1600** (rev >= 64) | 440 | **2,462 ms** | 1,919 ms |
+
+**+512 ms on the median reply. +606 ms at p25.**
+
+The per-call MINIMUM is the cleanest signal: before 16 September calls bottomed
+out at **1,210-1,270 ms**; after, at **1,780-1,960 ms**. The floor rose by ~600ms
+and stayed there.
+
+## And it did not buy fewer interruptions
+
+| per 100 turns | unset | 1600 |
+|---|---|---|
+| `interrupted_count` | 4.1 | **5.2** |
+| `barges` | 2.6 | **3.9** |
+| `interrupted_without_local_barge` | 3.1 | **2.0** |
+
+Two of the three went the WRONG way. The only improvement is the third — the
+vendor reporting an interruption where our own detector saw no caller barge,
+which is the signature of **echo**: the assistant hearing itself.
+
+So the most likely reading is that 1600 was set to suppress echo-triggered
+cutoffs, and it works by holding the endpointer open long enough for the echo to
+die. It halved that metric and charged **512 ms on every turn of every call** to
+do it. **That is an echo problem being paid for with a latency tax**, and the
+echo guard is where echo belongs. `voice-turn-taking-and-cost-fixes` already
+recorded the same conclusion in different words: *the cutoffs were echo, not
+endpointing.*
+
+**The confound, stated rather than buried:** the unset period is mostly 3.1 and
+the 1600 period is mostly 3.8, so setting and model move together. What breaks
+the tie is that 3.8 interrupts LESS than 3.1 at the same setting — 3.4 against
+6.7 per 100 caller utterances — so the risk points the safe way.
+
+## The instrument, which existed all along
+
+`reply_after_last_voice_ms` in `live_call_summary`. Its own code comment:
+*"The one figure comparable ACROSS arms: caller stops -> caller hears a reply.
+The vendor's endpointing delay sits inside it."*
+
+**That is voice-to-voice**, and `docs/speech-to-speech-*.md` says no such number
+has ever been recorded for Live. It has been in every call summary since the
+front-end shipped, under a name nobody connected to the question. Worth
+correcting there: the s2s comparison was argued for weeks on a figure that was
+sitting in the logs.
+
+With it, the architecture comparison finally has both sides:
+
+| | voice-to-voice p50 |
+|---|---|
+| cascade, recorded | 2,607 ms, tuned to 2,403 |
+| **Live at VAD 1600** | **2,462 ms** — no better than the cascade |
+| **Live at vendor default** | **1,950 ms** — the advantage Live was adopted for |
+
+**Live was only faster than the cascade while the override was off.** For the
+three days it was on, the main argument for the whole front-end was not true.
+
+## What was NOT the cause, since both were suspected first
+
+**Not the model.** 3.8 beats 3.1 on every per-turn measure at the same VAD —
+p50 2,443 against 2,620, p90 3,477 against 5,442, and half the interruptions.
+
+**Not verbosity.** 3.8 says LESS per turn: 100 median characters against 136.
+
+**The rest of the felt slowness is turn COUNT.** 11.4 caller turns per call
+against 6.3, because `live_stacked_questions` went 1.67 per call to 0.07 — LVX25
+removed the three-questions-in-one-breath behaviour, which was correct for
+comprehension and doubled the number of turns. Every extra turn pays the VAD in
+full, so on this tenant's six-question qualification flow the override alone cost
+roughly **6 seconds a call**.
+
+## Done
+
+**Unset in production on `voice-uk-prod-00087-k6b`, 2026-09-19.** No rebuild —
+it is a service env change, so it is invisible to git and to
+`infra/terraform/terraform.tfvars`, which is recorded here because nothing else
+records it.
+
+**Watch `interrupted_without_local_barge`.** If echo cutoffs return, 1600 was
+load-bearing after all and the answer is the echo guard, not the tax.
+
+---
+
+# LVX155 — the corpus replay cannot advance a caller turn, so every per-turn guard is invisible to it
+
+**Found 2026-09-19 while putting LVX153's own call into the replay suite, and
+the suite could not assert the fix.**
+
+`callerTurnCount` is incremented in ONE place — `lib/voice/live/index.js:3921`,
+when the turn-end strategy CLOSES an utterance:
+
+```js
+if (verdict.close) {
+  ...
+  callerTurnCount += 1;
+```
+
+`verdict` comes from `onFrame`, which is driven by inbound **audio**.
+`tests/liveCorpusReplay.test.js` pushes `inputTranscription` and turnCompletes
+and never a frame, so **`callerTurnCount` is 0 for the entire replay of every
+call.**
+
+## What that hides
+
+The write-order refusal budget is spent per caller TURN, deliberately:
+
+```js
+const orderCallerTurn = Number(ctx?.callerTurnCount) || 0;
+const orderRefusalIsNew = orderScratch.writeOrderRefusedTurn !== orderCallerTurn;
+```
+
+With the count pinned at 0 this is true exactly once and false forever after, so
+the stored count can never exceed 1 — and `WRITE_ORDER_MAX_REFUSALS` is 2.
+
+**Measured over the whole suite, 93 attempts across 32 fixtures: 249
+`write_order_refused`, ZERO `write_order_gate_ceiling`, with and without
+LVX153.** The escape hatch has never fired in this suite and structurally
+cannot.
+
+So the suite that exists to certify the write gates is blind to:
+
+- the write-order ceiling (LVX153's entire subject)
+- the shared `write_attempt_budget_released` release — also zero across the run
+- anything else keyed on a caller turn advancing
+
+## The second, separate gap in the same suite
+
+The consent pair is derived from the fixture's turn list rather than replayed,
+and the derivation does not always reproduce the call. `CA7ec8af` reads
+`readback_now=true, agreed_now=true` on EVERY attempt in the replay where
+production recorded `false/false` on two of them; `CA6dcec7` derives no slot at
+all (0 of 2). Those booleans sit upstream of every gate, so when they are wrong
+the fixture is testing a different call.
+
+## Why this went unnoticed
+
+The same reason `corpus:build` was found broken on the same day: **the replay
+reads committed fixtures, so nothing in `npm test` ever exercises the builder or
+compares a fixture against the call it came from.** A suite can be green,
+growing, and quietly not testing the thing it is named after.
+
+## What was done, and what was not
+
+The seven new fixtures' expectations are written to what the harness actually
+produces, each one naming the limitation in its `why` and pointing at the suite
+that owns the real assertion — the same construction already used for the
+spelling gate (`the replay runs with VOICE_SPELL_POLICY=off so that gate's
+decisions do not masquerade as this one's`). **LVX153 is certified by
+`tests/liveWriteOrder.test.js`**, which goes red without the fix.
+
+**NOT fixed here.** Making the harness drive audio frames, or seed
+`callerTurnCount` from each attempt's `standing_turn`, changes the result of all
+32 fixtures at once and wants its own round with the before/after diff read
+attempt by attempt. Doing it at the end of a long session, on the same day the
+gate it certifies was changed, is how a fix becomes the next defect.
