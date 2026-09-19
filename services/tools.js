@@ -105,6 +105,44 @@ const agreementSuperseded = (ctx) => {
 const WRITE_ORDER_MAX_REFUSALS = 2;
 
 /**
+ * THE CEILING WHEN THE CALLER WAS ACTUALLY ASKED. LVX156.
+ *
+ * One, so the release lands on the SECOND refusal instead of the third.
+ *
+ * `WRITE_ORDER_MAX_REFUSALS` is 2, which means "release on the third attempt at
+ * this proposal", and across 33 calls `write_order_gate_ceiling` has fired
+ * ZERO times -- because reaching it needs one more attempt than the model
+ * makes. CA9c8e42, the first call on LVX153's fix, is the proof: two refusing
+ * caller turns, then the model gave up and told the caller four times that the
+ * system was broken. The ceiling was set one higher than the model's patience.
+ *
+ * WHY THIS IS SCOPED TO readBackMade, and the scope is the entire safety
+ * argument. Decomposing all 45 write-order refusals in call-corpus/:
+ *
+ *     40%  neither half present -- no read-back AND no yes
+ *     40%  read-back made, the YES was not heard
+ *     20%  caller agreed, no read-back recognised
+ *
+ * Of that middle group, 14 of 18 had the caller SPEAKING before the write. The
+ * answer arrived and the TRANSCRIPT mangled it: "go on" logged as "gone",
+ * "that works" as "nada works", "ah yeah" as "Ah, ya.", one turn as "?". The
+ * model receives audio and understood every one of them; only the gate, reading
+ * a degraded copy of the caller's speech, did not -- and it then handed the
+ * model a refusal saying "the caller has not agreed", which the model knew to
+ * be false and answered by offering a transfer.
+ *
+ * So: asked twice, unreadable twice, release. The caller has heard the details
+ * and been asked to confirm on two separate turns; refusing a third time is
+ * choosing the error that costs them the thing they rang for, and the evidence
+ * says consent was present in about two thirds of those cases.
+ *
+ * NOT applied when nothing was read back. Those writes were never put to the
+ * caller at all, there is no consent to have misheard, and releasing them would
+ * write something nobody was asked about -- worse than the defect this fixes.
+ */
+const WRITE_ORDER_ASKED_MAX_REFUSALS = 1;
+
+/**
  * How many times ONE ATTEMPTED WRITE may be refused, counting every gate.
  *
  * ---------------------------------------------------------------------------
@@ -1627,7 +1665,13 @@ export async function executeToolCall(fc, ctx) {
             // -----------------------------------------------------------------
             if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed)) {
               bumpCounter("write_order_would_refuse");
-              if (orderRefusals >= WRITE_ORDER_MAX_REFUSALS) {
+              // LVX156. A read-back that was made and answered unreadably
+              // reaches the ceiling a turn earlier than a write nobody was
+              // asked about. See WRITE_ORDER_ASKED_MAX_REFUSALS.
+              const orderCeiling = readBackMade
+                ? WRITE_ORDER_ASKED_MAX_REFUSALS
+                : WRITE_ORDER_MAX_REFUSALS;
+              if (orderRefusals >= orderCeiling) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can
                 // refuse forever holds a caller on the line over our own
                 // vocabulary; LVX21 is what a hair trigger on this path costs.

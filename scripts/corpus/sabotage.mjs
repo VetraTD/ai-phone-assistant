@@ -607,6 +607,15 @@ const SABOTAGES = [
     red: [ORDER],
   },
   {
+    name: "ceiling-ignores-the-read-back",
+    why:
+      "the early ceiling stops distinguishing 'we asked properly and could not read the answer twice' from 'we never asked', so every held write waits for the third attempt again -- and the model gives up after two. CA9c8e42 is what that costs: the caller asked to cancel four times, was told three times that the system was broken, and the appointment is still standing. Measured across 45 refusals, 14 of the 18 where a read-back HAD been made had the caller speaking before the write, with the answer mangled in transcription -- 'go on' as 'gone', 'that works' as 'nada works'.",
+    file: "services/tools.js",
+    find: "              const orderCeiling = readBackMade",
+    replace: "              const orderCeiling = false // SABOTAGE",
+    red: [ORDER],
+  },
+  {
     name: "ceiling-keyed-on-wording",
     why:
       "the write-order ceiling goes back to identifying a proposal by the assistant's SENTENCE, so a model that rephrases its read-back resets the count to zero and the escape hatch can never be reached. Measured before the fix: 49 write_order_refused across 32 calls in call-corpus/ and write_order_gate_ceiling fired ZERO times. CA00649d86 is what that costs -- a caller asked to cancel, the yes came through as 'A la works.', three refusals across three wordings, the model gave up and offered a callback, and the appointment is still standing.",

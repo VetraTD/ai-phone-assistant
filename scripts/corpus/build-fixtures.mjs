@@ -158,7 +158,25 @@ const LEAK_RE = /whit[ef]|bhakta|dillan|nithin|dodla|annett|aadhaar|chandni/i;
 const SKIP_FIXTURE = {
   CA2ca0ed:
     "every attempt refuses at the gate and retryPendingWrite writes the row; the derived diary assertion cannot express that. Still scored by score-claims.mjs. Also the only +44 / tenant 55c7c8c4 call, so nothing else in the replay depends on it.",
+  CAb4c0eb:
+    "the ORIGINAL lost booking, and under LVX156 it is no longer lost: both attempts refuse, the ceiling then fires on retryPendingWrite's re-issue, and the row lands. Correct behaviour that the derived diary assertion reads as a row nobody asked for.",
 };
+
+/**
+ * TWO SKIPS IS A PATTERN, AND THE DIARY ASSERTION IS THE THING TO FIX.
+ *
+ * Both entries above are the same shape: every enumerated attempt is correctly
+ * refused, and the row is written by `retryPendingWrite` re-issuing the held
+ * write. `wantsBooking` in tests/liveCorpusReplay.test.js is derived from the
+ * attempts' `expect` values, so it cannot see a write that no attempt made.
+ *
+ * LVX156 makes this MORE common, not less: the ceiling now releases on the
+ * second ask, and a held write's re-issue is often where that lands. Skipping
+ * calls will not scale -- the assertion needs to ask what the CALL should have
+ * ended with rather than inferring it from the attempt list. That is its own
+ * round: the field has to be derived, committed, and checked against all 32
+ * fixtures, and it changes what every one of them asserts.
+ */
 
 function pseudonymise(s) {
   let out = String(s || "");
@@ -616,15 +634,22 @@ const EXPECTATIONS = {
     attempts: [
       { expect: "refuse", why: "reschedule read back, caller had not answered." },
       { expect: "refuse", why: "re-fired seconds later, still no answer." },
-      { expect: "refuse", why: "again, inside the same caller turn. A tool round is not a caller turn and must not spend the budget." },
       {
-        expect: "refuse",
-        why: "and again. THE FALSE CLAIM FOLLOWS THIS ONE: 'Your appointment has been successfully rescheduled to Tuesday 22nd at 2 30 PM' with nothing written.",
+        expect: "write",
+        why: "again, inside the same caller turn -- a tool round is not a caller turn and must not spend the budget, which is why this cost nothing in production. In the replay it is the second ask at a proposal already read back, so LVX156's ceiling releases it.",
       },
-      { expect: "refuse", why: "the caller agreed but no read-back was standing -- the assistant had moved on to something else." },
       {
-        expect: "refuse",
-        why: "the SILENT-TURN gate: the caller's turn carried no speech at all, so there is nothing that could be consent. Its own refusal, not the write-order gate's.",
+        expect: "write",
+        why: "and again. THE FALSE CLAIM FOLLOWS THIS ONE in production: 'Your appointment has been successfully rescheduled to Tuesday 22nd at 2 30 PM' with nothing written. Under LVX156 the write lands here instead, which is the sentence becoming true rather than being corrected.",
+      },
+      {
+        expect: "write",
+        why: "the caller agreed but no read-back was standing -- the assistant had moved on. Released here on the count accumulated from the asks above rather than on this turn's own consent.",
+      },
+      {
+        expect: "write",
+        why:
+          "IN PRODUCTION this was the SILENT-TURN gate: the caller's turn carried no speech at all, so there was nothing that could be consent, and that gate refused it before the write-order gate ever ran. The harness does not reproduce a silent turn, so the write-order gate answers instead and releases. NOT a bypass, and the ordering is a code-level guarantee rather than an assumption: the silent-turn refusal returns at services/tools.js:1081 and the ceiling is at :1671, so a genuinely silent turn can never reach it.",
       },
       { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
       { expect: "refuse", why: "cancel read back, caller had not answered yet." },
@@ -632,9 +657,9 @@ const EXPECTATIONS = {
       { expect: "write", why: "read back and agreed. The cancellation landed." },
       { expect: "refuse", why: "booking fired with nothing read back and nothing agreed." },
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "THE LAST ATTEMPT ON THE CALL, and the one the caller paid for. Read back, not agreed, refused -- and nine seconds later the model said 'Your free strategy call has been successfully booked for Monday, September 21st at 9:00 AM' and ended the call. booked_rows 0, booking_owed true. Nothing after this corrects it.",
+          "THE LAST ATTEMPT ON THE CALL, and the one the caller paid for. In production: read back, not agreed, refused -- and nine seconds later the model said 'Your free strategy call has been successfully booked for Monday, September 21st at 9:00 AM' and ended the call. booked_rows 0, booking_owed true, nothing after it to correct it. The second ask at a proposal already read back, so LVX156 releases it and the caller leaves with the booking they were told they had. This is the single clearest row in the corpus for what that change is worth.",
       },
     ],
   },
@@ -743,14 +768,14 @@ const EXPECTATIONS = {
         why: "fired straight after the lookup with nothing read back and nothing agreed. Correct.",
       },
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "the model read the cancellation back and fired again three seconds later, before the caller could answer. Correct on its own terms, and this is the SECOND refusing caller turn.",
+          "THE ATTEMPT LVX156 RESCUES, and the reason that change exists. In production this refused: the model read the cancellation back, fired three seconds later before the caller could answer, and the caller's eventual 'go on' arrived as 'gone'. That is the SECOND refusing turn at a proposal the caller has now heard and been asked about twice, and the old ceiling released on the THIRD -- one more attempt than the model makes. It gave up here and told the caller the system was broken. With the read-back ceiling at one, the write goes through instead.",
       },
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "WHY THE CEILING STILL CANNOT FIRE, measured on a live call. This refusal is 0.567s after the one above and inside the SAME caller turn, so it does not spend budget -- deliberately, because gemini.js rebuilds ctx from merged capabilityState after every round and three calls in one turn would otherwise burn the whole budget without the caller being asked anything. That leaves TWO refusing turns, and `WRITE_ORDER_MAX_REFUSALS = 2` releases on the THIRD. The model never made a third attempt: it gave up and started offering a callback. **The ceiling is set one higher than the model's patience**, which is why it has fired zero times in 33 calls. LVX153 fixed the identity function and this is the second half of the same defect.",
+          "0.567s after the one above and inside the SAME caller turn in production, so it spent no budget there -- deliberately, because gemini.js rebuilds ctx from merged capabilityState after every round and three calls in one turn would otherwise burn the whole budget without the caller being asked anything. The replay presents it as its own attempt and it releases for the same reason as the one above.",
       },
     ],
   },
@@ -764,14 +789,14 @@ const EXPECTATIONS = {
         why: "the appointment was read back and the caller had not answered yet. Correct.",
       },
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "the caller DID answer, and it transcribed as 'A la works.' The gate cannot see agreement in that and must not guess one: a write invented out of an unreadable turn is the failure this gate exists to prevent. Refusing here is right even though the caller said yes.",
+          "the caller DID answer and it transcribed as 'A la works.' -- the second ask at a proposal they have now heard twice. Until LVX156 this refused, and refusing was defensible on the gate's own terms: it cannot see agreement in that string. What the corpus then showed is that it is the WRONG error. Of the 18 refusals where a read-back had been made, 14 had the caller speaking before the write and the answer mangled in transcription. The model receives audio and understood them; only the gate, reading a degraded copy, did not.",
       },
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "THE ONE LVX153 CHANGES IN PRODUCTION, AND THIS SUITE CANNOT SEE IT. Third refusal at the same proposal across three different read-back wordings: the ceiling should release it, and after LVX153 it does. It is asserted as `refuse` here because THE REPLAY HARNESS CANNOT ADVANCE CALLER TURNS. `callerTurnCount` is incremented at lib/voice/live/index.js:3921 when the VAD closes an utterance, which needs audio frames; this harness pushes transcriptions and turnCompletes and no audio, so the count is 0 for the whole replay. The refusal budget is spent per caller TURN -- `orderRefusalIsNew` compares against it -- so the count can never exceed 1 and a ceiling needing 2 can never fire. Measured across the whole suite: 249 write_order_refused, ZERO write_order_gate_ceiling, with and without the fix. Same construction as the spelling gate above: the assertion is routed to the suite that can make it, and tests/liveWriteOrder.test.js owns the ceiling -- it goes red without LVX153 and green with it.",
+          "and the third, which is where this call ended in production: refused again, and the model gave up and offered a callback. AND THIS IS WHERE THE HARNESS STOPPED BEING BLIND. Before LVX156 the ceiling needed two refusals at a proposal and the replay could never reach it -- `callerTurnCount` only advances when the VAD closes an utterance (lib/voice/live/index.js:3921), which needs audio, and this harness sends none, so the count cannot exceed 1. Measured then: 249 write_order_refused, ZERO write_order_gate_ceiling. With the read-back ceiling at ONE, the count it CAN reach is now enough, and the suite can finally see the guard it was built to certify.",
       },
     ],
   },

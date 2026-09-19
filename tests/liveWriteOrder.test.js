@@ -240,20 +240,22 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     // Driven through real refusals rather than seeded state, because the budget
     // is keyed to the proposal now and a hand-written key would be testing the
     // fixture rather than the gate.
+    // ONE REFUSAL, NOT TWO, as of LVX156. `replied` here is a read-back, and a
+    // proposal the caller has heard and been asked about now reaches the
+    // ceiling on the SECOND attempt rather than the third -- measured, because
+    // the old third-attempt ceiling fired zero times in 33 calls: the model
+    // gives up after two. The property this test exists for is unchanged and is
+    // the release itself; only which attempt carries it has moved.
     const unchanged = { said: "Cancel all three", replied: READ_BACK };
 
     const first = await book(ctx(unchanged));
     expect(first.functionResponse.response.success).toBe(false);
     const afterFirst = first.stateEffects.capabilityState;
 
-    const second = await book(ctx({ ...unchanged, capabilityState: afterFirst, turn: 5 }));
-    expect(second.functionResponse.response.success).toBe(false);
-    const afterSecond = second.stateEffects.capabilityState;
-
     clearStats();
-    const third = await book(ctx({ ...unchanged, capabilityState: afterSecond, turn: 6 }));
+    const second = await book(ctx({ ...unchanged, capabilityState: afterFirst, turn: 5 }));
 
-    expect(third.functionResponse.response.success).toBe(true);
+    expect(second.functionResponse.response.success).toBe(true);
     expect(counters().write_order_gate_ceiling).toBe(1);
     expect(counters().write_order_refused).toBeFalsy();
     // Still counted as a situation. The ceiling changes what we DO, never what
@@ -491,7 +493,23 @@ describe("the shared attempt budget — refusals across gates, counted together"
     return out;
   };
 
-  const attempt = ({ capabilityState, turn, said, settled, name = "Marcus Bell", when = FUTURE_SLOT }) =>
+  // `replied` is parameterised as of LVX156, and the write-order legs below use
+  // a NON-read-back on purpose. This describes what the comment on
+  // alternateToCeiling already claimed -- "neither gate is at its own two" --
+  // which stopped being true when the read-back ceiling dropped to one: a
+  // write-order refusal with the details standing now releases on its own count
+  // at the next attempt, and would pre-empt the shared budget this block exists
+  // to certify. Without a read-back the write-order ceiling is still two, so the
+  // shared budget is once again the only thing that can end the sequence.
+  const attempt = ({
+    capabilityState,
+    turn,
+    said,
+    settled,
+    name = "Marcus Bell",
+    when = FUTURE_SLOT,
+    replied = READ_BACK,
+  }) =>
     executeToolCall(
       { id: "fc1", name: "book_appointment", args: { client_name: name, scheduled_at: when, notes: "consultation" } },
       {
@@ -504,9 +522,12 @@ describe("the shared attempt budget — refusals across gates, counted together"
         spellingSettled: settled,
         callerTurnCount: turn,
         lastCallerText: said,
-        lastReplyText: READ_BACK,
+        lastReplyText: replied,
       }
     );
+
+  /** A turn where the assistant said something that is not a read-back. */
+  const NO_READ_BACK = "You have one appointment coming up.";
 
   // The sequence alternates on purpose. Three refusals from ONE gate would trip
   // that gate's own ceiling of two first, which is correct and is not what this
@@ -520,7 +541,7 @@ describe("the shared attempt budget — refusals across gates, counted together"
     cs = merge(cs, a.stateEffects.capabilityState);
 
     // write-order refuses: no agreement this time.
-    const b = await attempt({ capabilityState: cs, turn: 5, said: "No, hang on", settled: true, name: nameFor(1) });
+    const b = await attempt({ capabilityState: cs, turn: 5, said: "No, hang on", settled: true, name: nameFor(1), replied: NO_READ_BACK });
     expect(b.functionResponse.response.success).toBe(false);
     cs = merge(cs, b.stateEffects.capabilityState);
 
@@ -536,7 +557,7 @@ describe("the shared attempt budget — refusals across gates, counted together"
     clearStats();
     // The write-order gate would refuse again on its own count, which is one of
     // its permitted two. The shared budget is the only thing that ends this.
-    const d = await attempt({ capabilityState: cs, turn: 7, said: "No, hang on", settled: true });
+    const d = await attempt({ capabilityState: cs, turn: 7, said: "No, hang on", settled: true, replied: NO_READ_BACK });
 
     expect(d.functionResponse.response.success).toBe(true);
     expect(counters().write_attempt_budget_released).toBe(1);
@@ -557,6 +578,7 @@ describe("the shared attempt budget — refusals across gates, counted together"
       said: "No, hang on",
       settled: true,
       name: "Venkat Yalavarapu",
+      replied: NO_READ_BACK,
     });
     expect(released.functionResponse.response.success).toBe(true);
     expect(counters().write_attempt_budget_released).toBe(1);
@@ -1105,6 +1127,7 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
     );
     expect(first.functionResponse.response.success).toBe(false);
 
+    clearStats();
     const second = await book(
       ctx({
         said: "Ah, ya.",
@@ -1113,22 +1136,13 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
         turn: 5,
       })
     );
-    expect(second.functionResponse.response.success).toBe(false);
 
-    clearStats();
-    const third = await book(
-      ctx({
-        said: "O que piensas?",
-        replied: "So shall I go ahead and get that booked in for you now?",
-        capabilityState: second.stateEffects.capabilityState,
-        turn: 6,
-      })
-    );
-
-    // The caller has now been asked three times and answered three times. The
-    // gate cannot hear any of it, and refusing a fourth time is how CA00649d86
-    // ended.
-    expect(third.functionResponse.response.success).toBe(true);
+    // ONE REWORD IS ENOUGH TO PROVE IT, as of LVX156. The two turns propose the
+    // same booking in different words; if the key still read the SENTENCE the
+    // count would have reset here and this would refuse. The caller has now
+    // been asked twice and answered twice, and refusing a third time is how
+    // CA00649d86 and CA9c8e42 both ended.
+    expect(second.functionResponse.response.success).toBe(true);
     expect(counters().write_order_gate_ceiling).toBe(1);
     expect(counters().write_order_refused).toBeFalsy();
   });
@@ -1171,5 +1185,80 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
     expect(third.functionResponse.response.success).toBe(false);
     expect(counters().write_order_gate_ceiling).toBeFalsy();
     expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX156 — the ceiling sat one higher than the model's patience.
+//
+// CA9c8e42, rev 00087, the FIRST call on LVX153's fix, and the cancellation
+// still failed. Three refusals, no release, and the caller asked four times:
+//
+//   19:36:31  REFUSED  rb=false ag=false        <- caller turn A
+//   19:36:39  "Would you like me to go ahead and cancel ...?"
+//   19:36:42  REFUSED  rb=true  ag=false        <- caller turn B
+//   19:36:43  REFUSED  rb=true  ag=false        <- SAME turn, 0.5s later
+//   19:36:53  "I'm having a little trouble with the system right now"
+//
+// The budget is spent per caller TURN, so 19:36:43 costs nothing -- correct,
+// and deliberate. That leaves TWO refusing turns, and the ceiling releases on
+// the THIRD. The model never made a third attempt: it gave up and offered a
+// transfer. Measured across 33 calls: write_order_gate_ceiling has fired ZERO
+// times, because reaching it requires one more attempt than the model makes.
+//
+// WHY THE EARLY RELEASE IS SCOPED TO A READ-BACK, and this is the whole of the
+// safety argument. Decomposing all 45 write-order refusals in call-corpus/:
+//
+//   40%  neither half present -- no read-back AND no yes
+//   40%  read-back made, the YES was not heard
+//   20%  caller agreed, no read-back recognised
+//
+// And of that middle group, 14 of 18 had the caller SPEAKING before the write:
+// the answer arrived and the transcript mangled it. "go on" logged as "gone",
+// "that works" as "nada works", "ah yeah" as "Ah, ya.", and one turn as "?".
+// The model hears AUDIO and understood them; only the gate, reading a degraded
+// copy, did not.
+//
+// So "we asked properly and could not read the answer twice" is a different
+// situation from "we never asked", and only the first gets the early release.
+// The 40% who were never asked keep the full ceiling, because releasing those
+// would write something the caller was never put to -- worse than the defect.
+// ---------------------------------------------------------------------------
+describe("LVX156 — asked twice and unreadable is not the same as never asked", () => {
+  it("releases on the SECOND refusal once the details have been read back", async () => {
+    // Both turns carry a real read-back; the answers are the ones this corpus
+    // actually produced, and neither survives isAffirmative.
+    const first = await book(ctx({ said: "gone", replied: READ_BACK }));
+    expect(first.functionResponse.response.success).toBe(false);
+
+    clearStats();
+    const second = await book(
+      ctx({
+        said: "nada works",
+        replied: "Just to confirm, shall I book that for you?",
+        capabilityState: first.stateEffects.capabilityState,
+        turn: 5,
+      })
+    );
+
+    expect(second.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_gate_ceiling).toBe(1);
+  });
+
+  it("does NOT release early when the caller was never asked", async () => {
+    // The 40% case. No read-back on either turn, so nothing was put to the
+    // caller and there is no consent to have misheard. The full ceiling stands.
+    const noAsk = { said: "Cancel it", replied: "You have one appointment coming up." };
+
+    const first = await book(ctx(noAsk));
+    expect(first.functionResponse.response.success).toBe(false);
+
+    clearStats();
+    const second = await book(
+      ctx({ ...noAsk, capabilityState: first.stateEffects.capabilityState, turn: 5 })
+    );
+
+    expect(second.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
   });
 });
