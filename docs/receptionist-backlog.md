@@ -15141,3 +15141,91 @@ assistant asking.
 That design is already built and running, in the scorer, against 304 real
 assistant turns and 15 adversarial negatives. Porting it is the cheap half; the
 measurement of what it changes live is the half that needs a round of its own.
+
+---
+
+# LVX152 — a spelling question buries the agreement underneath it
+
+**OPEN. Observed twice, wrong outcome zero times.** Recorded now because the
+second sighting was on the first call of the refusal-wording A/B and it would
+otherwise be read as part of that change. **It is not.** The wording round is
+about what the model SAYS after a refusal; this is about WHEN the gate PERMITS a
+write. Different layer, different code, no interaction.
+
+## The shape
+
+`CA2ca0ed73`, 2026-09-19, rev `00085`:
+
+```
+14:21:55  probe  readback_now=true  agreed_now=true      <- the caller agrees
+14:21:59  "To finish the booking, could you please spell your full name?"
+14:22:03  spelling_voiced_answer                         <- caller spells it
+14:22:12  probe  readback_now=false agreed_now=false     <- the agreement is gone
+14:22:12  write_attempt_budget_released                  <- the hatch, not the gate
+14:22:12  book_appointment success=true
+```
+
+The gate reads consent off **the immediately preceding turn pair**, and by
+14:22:12 that pair is a spelling question and a string of letters. No slot in
+it, so no agreement. The caller agreed seventeen seconds and two turns earlier.
+
+The consent latch exists to carry an agreement forward and **cannot help here**,
+by its own construction: it requires `agreementKey === standingReadBackKey` and
+`latchSlotAgreed`. The standing read-back at that moment is *"could you please
+spell your full name for me"*, which names no slot. Both conditions fail. The
+latch is not misfiring — it is being asked to match a key that the spelling
+exchange overwrote.
+
+So the write landed on `write_attempt_budget_released`: three refusals on one
+proposal across all gates, and the ceiling let it through. **The booking was
+correct — the caller HAD agreed and HAD spelled the name — but the gate never
+approved it. It stopped refusing.**
+
+## Prior sighting, and the one that is NOT this
+
+`CA919b6974`, rev `00070`, 2026-09-17, byte for byte the same sequence:
+`spelling_voiced_answer` → refused `readback=false agreed=false token=true` →
+`write_attempt_budget_released` → `success=true`. Booking correct there too.
+
+**Two calls in twenty-six. Both released. Both right.**
+
+`CA03558d` is NOT an instance of this, and the in-code comment at the
+supersession block says it is. Its five refusals at 02:57:07-09 read
+`rb=true agreed=true` — a turn on which the caller HAD just agreed to a
+read-back — which is the **supersession** veto, removed from the decision in the
+corpus-replay round. The burial is visible on that call at 02:56:28
+(`readback=false agreed=true token=true`) but it is not what cost it the
+booking. Worth correcting in that comment: citing the wrong call as evidence is
+how a fixed defect goes on being used to argue for the next change.
+
+## Why this is not urgent, stated so it is not oversold
+
+**It has never produced a wrong booking.** Both times the hatch fired, the
+caller had genuinely agreed and the row that landed was the row they wanted. The
+hatch is doing exactly the job it was written for — LVX21's livelock, where the
+model re-proposes the same booking in words the gate does not recognise and the
+caller is asked the same question until they hang up.
+
+The risk is that the hatch releases on a **count**, not on a fact. It cannot
+tell "the caller agreed two turns ago and the spelling buried it" from "the
+caller never agreed at all". Today the first was true. Three refusals is all it
+takes to reach the same release in the second case.
+
+## The fix, and why it is not being started now
+
+Not removing the hatch — that turns this call back into a livelock. **Make the
+agreement survive a question that is not about the slot.** An agreement to a
+time should not be erased by the assistant asking something unrelated on top of
+it; the spelling gate's own refusal already knows the write is still pending,
+and stashes it.
+
+Deliberately NOT started during the A/B: it changes when writes land, which is
+the behaviour those calls are measuring. Anything that alters the write path
+mid-arm makes the arm unreadable.
+
+**Measurement to take first, cheaply, once the arm closes:** how often does
+`write_attempt_budget_released` fire with `token_present=true` and a
+`spelling_voiced_answer` inside the preceding two turns? That separates "the
+hatch rescued a buried agreement" from "the hatch released something nobody
+agreed to", and the second number is the one that decides whether this is a P1
+or a note.
