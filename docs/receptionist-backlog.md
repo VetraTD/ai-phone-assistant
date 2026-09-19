@@ -15279,3 +15279,85 @@ mid-arm makes the arm unreadable.
 hatch rescued a buried agreement" from "the hatch released something nobody
 agreed to", and the second number is the one that decides whether this is a P1
 or a note.
+
+---
+
+# LVX150 A/B — PRE-REGISTERED, 2026-09-19, before call 4
+
+Written **before the data**, because the honest failure mode of a 15-call
+experiment is reading whatever arrives as confirmation. Owner chose 15 calls
+over 8 after seeing the arithmetic below.
+
+## The instrument
+
+`npm run corpus:score -- --after 85`. BEFORE is every call on a revision below
+`00085`; AFTER is `00085` and up. Unit is the **episode** — one refused write
+proposal, collapsed when several refusals share the reply they lead to.
+
+**BEFORE, frozen: 11 fabrications / 39 episodes / 25 calls = 28.2%.**
+
+That number does not move again. If the scorer changes, both arms are rescored
+and this line is rewritten with the reason.
+
+## Why 8 calls was not enough, and 15 might be
+
+One-sided Fisher against 11/39, at the observed rate of ~1.2 episodes per call:
+
+| AFTER episodes | p if the arm were PERFECT (0 fabrications) |
+|---|---|
+| 6 | 0.165 |
+| 8 | 0.096 |
+| 10 | 0.058 |
+| **15** | **0.018** |
+
+Eight calls could not have produced a result **even if the fix were flawless**.
+And flawless is already gone: `CA2ca0ed73`, the first AFTER call, fabricated
+with the new text in front of the model.
+
+## The decision rule, fixed now
+
+At an expected ~18 AFTER episodes:
+
+| fabrications | rate | p | reading |
+|---|---|---|---|
+| 0 | 0.0% | 0.009 | **MOVED** |
+| 1 | 5.6% | 0.048 | **MOVED** |
+| 2 | 11.1% | 0.137 | not demonstrated |
+| 3 | 16.7% | 0.276 | not demonstrated |
+| 4+ | 22%+ | 0.45+ | **no change** |
+
+**The arm already carries 1.** So "MOVED" now requires every remaining episode
+to be clean, and one more fabrication puts the ceiling at "not demonstrated".
+That is a hard bar and it is the correct one — a fix that leaves a quarter of
+refusals still being lied about has not fixed anything.
+
+**"Not demonstrated" and "no change" lead to the same next step**, and that is
+stated in advance so the middle band cannot be argued into a win later: wording
+is eliminated, and what remains is recency (move the never-claim rule next to
+the tool response) or giving up speech-to-speech for the cascade's ordering
+guarantee. Neither starts without the owner.
+
+**What is NOT a reason to stop early:** a good run. Three clean calls in a row
+is 3 episodes and proves nothing; the table above is the only thing that
+settles it.
+
+## Two caveats on the arm, recorded now rather than discovered later
+
+1. **The arm spans two tenants.** `CA2ca0ed73` came in on `+441372656055`
+   (tenant `55c7c8c4`); everything since is `+18176011171` (tenant
+   `2083c6a4`). Separate diaries, separate config. Remaining calls stay on the
+   `+1` number so the arm is one tenant with one exception, rather than a
+   mixture nobody can unpick.
+2. **A clean call contributes nothing.** `CA3a4699ce` rescheduled correctly
+   with zero refusals, so it added a call and no episode. The denominator grows
+   only when the gate refuses, which is not something the caller controls. 15
+   calls is an estimate, not a guarantee of 18 episodes — the rule is on
+   EPISODES, and if the count falls short the answer is "not demonstrated",
+   not a lowered bar.
+
+## What the calls are worth beyond the A/B
+
+Three calls have so far produced LVX152, a falsification of LVX62's central
+claim, and confirmation that the two numbers are separate tenants. That is a
+better return than the three episodes, and it is the reason to finish the run
+even though the statistical verdict is likely to be "not demonstrated".
