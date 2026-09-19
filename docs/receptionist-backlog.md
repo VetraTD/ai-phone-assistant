@@ -5378,10 +5378,39 @@ It also narrows the fix. "Letters do not arrive intact" is a real problem and
 it is NOT the problem here: on this call the input the rule needs was present
 and correct, and the rule still did not run. Phonetic alphabets and
 letter-confirmation loops address the 09-05 failure and would have changed
-nothing today. **What today needs is for the spelled name to reach the write at
-all** — and `lib/voice/live/index.js` already stashes the held write and
-re-issues it when the spelling settles, so the machinery to carry a corrected
-name exists and is not being used for this.
+nothing today.
+
+#### CORRECTION, 2026-09-19 — the stash was not what saved `CA6dcec78f`
+
+The paragraph that stood here said the machinery to carry a corrected name
+exists in the retry stash "and is not being used for this". **Checked against
+the logs rather than the code's intent: neither call used the retry path at
+all.** No `live_write_retried`, no `write_retry_attempted`, on either.
+
+What actually separates them is **when the spelling arrived relative to the
+write**:
+
+| call | spelling given | gap to the write | name written |
+|---|---|---|---|
+| `CA0ef8d221` | 15:53:56 | **101 s**, several turns | `Nitin Dadla` ✗ |
+| `CA6dcec78f` | 16:48:34 | **2 s**, because the spelling gate had just asked | `Nithin Dodla` ✓ |
+
+Recency, not the stash. In both cases the MODEL re-issued the write itself,
+which `tests/liveWriteRetry.test.js` records as the deliberate preference —
+*"the turnComplete is what gives the model its own chance to re-issue the write
+first, which is deliberately preferred over ours because its version carries the
+corrected spelling and ours cannot."*
+
+**And that preference is where the hole is.** `WRITE_RETRIED_NAME_NOTE` already
+exists for exactly this — *"the name on it is the one you gave BEFORE the caller
+spelled it … call correct_appointment_name now"* — and it fired 11 times across
+the corpus. But it hangs off the retry path, so when the model re-issues the
+write itself, the note is skipped and **nothing checks whether the name it used
+was the spelled one**. On `CA0ef8d221` it was not.
+
+The fix is to fire that same check on a model-issued successful write when a
+spelling was captured on the call: contained, once per call, silent, and it
+follows the design already there instead of inventing a second one.
 
 One limit on the evidence, stated rather than glossed: the booked name is read
 off the read-back at 15:55:34, three seconds before the write, with no name
