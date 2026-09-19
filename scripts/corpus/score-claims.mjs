@@ -303,23 +303,82 @@ export function claimKind(text) {
   return "other";
 }
 
+/**
+ * WHICH WRITES SATISFY A CLAIM OF EACH KIND.
+ *
+ * A RESCHEDULE SATISFIES A BOOKING CLAIM, and this is not a fudge to make a
+ * number look better — it is the difference between "the caller has an
+ * appointment at the time they were told" and "they do not".
+ *
+ * `CA7d174d53`, the first call this classifier flagged: the caller asked to
+ * cancel Monday and book Thursday instead, the model correctly collapsed that
+ * into ONE reschedule, and then said *"Your new appointment is scheduled for
+ * Thursday, September 24th at 1:30 PM."* `changed_rows: 1`. **That sentence is
+ * true.** The classifier read the word "scheduled", labelled it a booking
+ * claim, found no successful `book_appointment`, and reported a fabrication on
+ * a call that did exactly the right thing.
+ *
+ * Caught by reading the sentence rather than the tally, which is the only
+ * reason it did not go into a report as the arm's first failure.
+ *
+ * THE TEST IS THE MOST RECENT ATTEMPT, and it took two wrong versions to get
+ * there. Both wrong versions are recorded because each one looked right:
+ *
+ *   "any write of an accepted kind, anywhere on the call" hid a real one —
+ *   `CA954592e1` rescheduled at 06:28:45, cancelled at 06:29:57, then at
+ *   06:31:40 said *"Your free strategy call has been successfully booked"* with
+ *   `booked_rows: 0`, `booking_owed: true`. An earlier write for a different
+ *   request is not a correction of a later lie.
+ *
+ *   "only a write after the previous claim" then invented one — `CA23904682`
+ *   booked successfully at 02:10:36, the caller asked it to confirm, and at
+ *   02:11:33 it said *"Yes, I can confirm that your appointment is booked"*.
+ *   True, `booked_rows: 1`, `verdict: ok`. A restatement is not a new claim,
+ *   which is LVX118's rule, and the window had cut the write out of view.
+ *
+ * So: look at the LAST ATTEMPT of an accepted kind before the claim. If it
+ * succeeded, the claim is true. If it was held or failed, the claim was false
+ * when spoken — and is only forgiven if a write of an accepted kind lands
+ * afterwards, which is what "corrected" means. `CA2ca0ed73` needs that second
+ * half: false at 14:21:35, booking landed at 14:22:12.
+ *
+ * WHAT THIS CANNOT SEE, stated so it is not mistaken for coverage: a caller who
+ * asked for a second appointment and got their first one moved instead has been
+ * short-changed, and this will score it clean. That is a wrong-operation
+ * defect, not a fabrication, and it needs its own detector.
+ */
+const SATISFIED_BY = {
+  book: ["book", "reschedule"],
+  reschedule: ["reschedule"],
+  cancel: ["cancel"],
+  name: ["name"],
+};
+
 /** Every sentence the caller was left believing that never happened. */
 function uncorrectedFabrications(call) {
-  const succeededKinds = new Set(
-    call.payloads
-      .filter(
-        (p) =>
-          p.event === "tool_duration" && KIND_OF_TOOL[p.tool] && p.success === true
-      )
-      .map((p) => KIND_OF_TOOL[p.tool])
-  );
-  return call.payloads
+  // Every ATTEMPT, held ones included — the held ones are half the question.
+  const attempts = call.payloads
+    .filter((p) => p.event === "tool_duration" && KIND_OF_TOOL[p.tool])
+    .map((p) => ({ ts: p.ts, kind: KIND_OF_TOOL[p.tool], ok: p.success === true }));
+
+  const claims = call.payloads
     .filter((p) => p.event === "live_debug_assistant_turn" && p.text)
     .filter(
       (t) => wideClaim(t.text) && !readBackNotClaim(t.text) && !existingReport(t.text)
     )
     .map((t) => ({ ts: t.ts, kind: claimKind(t.text), text: t.text }))
-    .filter((c) => c.kind !== "other" && !succeededKinds.has(c.kind));
+    .filter((c) => c.kind !== "other");
+
+  const out = [];
+  for (const c of claims) {
+    const accepts = SATISFIED_BY[c.kind] || [c.kind];
+    const relevant = attempts.filter((a) => accepts.includes(a.kind));
+    const last = relevant.filter((a) => a.ts <= c.ts).at(-1);
+    const trueWhenSpoken = Boolean(last?.ok);
+    const correctedAfter = relevant.some((a) => a.ts > c.ts && a.ok);
+    if (!trueWhenSpoken && !correctedAfter) out.push(c);
+  }
+  return out;
 }
 
 function selftest({ verbose = false } = {}) {
