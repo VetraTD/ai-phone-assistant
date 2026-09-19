@@ -15489,3 +15489,101 @@ row is not**, and nobody finds it until someone reads the diary. See the LVX62
 update above, and the mechanism `CA6dcec78f` then confirmed: the letters win
 when the spelling gate HOLDS the write and the stash re-issues it, and lose
 when the spelling arrives by any other path.
+
+---
+
+# LVX153 — the write-order ceiling has never fired, and it cannot
+
+**P1. A caller asked to cancel an appointment, was told twice that it could not
+be done, and the appointment is still there.**
+
+`CA00649d86`, rev `00085`, 2026-09-19:
+
+```
+17:16:07  "I see an appointment Thursday 24th at 1:30 PM. Cancel that for you?"
+17:16:11  REFUSED   readBackMade=true  callerAgreed=false   (no answer yet)
+17:16:21  "Just to confirm, are you asking me to go ahead and cancel ...?"
+          caller: "A la works."          <- the yes, mangled in transcription
+17:16:27  REFUSED   readBackMade=true  callerAgreed=false
+17:16:35  "I'm sorry, I'm unable to process the cancellation right now.
+           Shall I take down your details so a team member can follow up?"
+17:16:45  the same sentence again
+17:16:54  REFUSED   readBackMade=FALSE callerAgreed=true    <- too late
+17:17:11  verdict=write_abandoned   abandoned=["cancel_appointment_db"]
+```
+
+**No fabrication — `claims: 0`.** It told the truth. The caller simply did not
+get what they rang for.
+
+## The measurement
+
+```
+across 32 calls in call-corpus/:
+  write_order_refused              49
+  write_order_gate_ceiling          0     <- the gate's own ceiling
+  write_attempt_budget_released     2     <- the shared one
+```
+
+**Zero. Forty-nine refusals and the ceiling has never once fired.**
+
+## Why, and it is one line
+
+`services/tools.js:1524-1528`:
+
+```js
+const readBackKey = readBackMade
+  ? textFingerprint(lastReplyText)
+  : `none:${writeAttemptFingerprint(fc)}`;
+const sameProposal = orderScratch.writeOrderReadBackKey === readBackKey;
+const orderRefusals = sameProposal ? Number(orderScratch.writeOrderRefusals) || 0 : 0;
+```
+
+**The key is a fingerprint of the assistant's WORDING, and it is being used as
+the identity of the PROPOSAL.** When the model rephrases — *"Would you like me
+to cancel that for you?"* then *"Just to confirm, are you asking me to go ahead
+and cancel the appointment on Thursday, September 24th at 1:30 PM?"* — same
+appointment, same time, same request, different sentence, so `sameProposal` is
+false and the counter **resets to zero**.
+
+The ceiling needs 2. It has been handed 0 on forty-nine consecutive refusals.
+
+The reset itself is deliberate and correct in intent — the comment above it
+records the 2026-09-09 correction to counting attempts at ONE proposal rather
+than refusals in a call. **The bug is the identity function, not the rule.** A
+model that varies its phrasing is not making a new proposal, and
+`textFingerprint(lastReplyText)` cannot tell the difference.
+
+## The fix
+
+Key the counter on the **proposal** — tool name, target appointment, and the
+slot being written — rather than on the sentence that proposed it.
+`writeAttemptFingerprint(fc)` already computes something of that shape for the
+shared budget, which is the counter that DOES work (2 firings) and is the reason
+this went unnoticed: the shared ceiling of 3 quietly covers for a per-gate
+ceiling of 2 that never arrives. On this call even that was one refusal short,
+because the model gave up at three.
+
+**Not started during the call run.** It changes when writes land, which is what
+those calls are measuring.
+
+## The second finding on the same call
+
+The model said *"I'm unable to process the cancellation right now. Shall I take
+down your details so a team member can follow up?"* — **twice**.
+
+The refusal message it had just been handed says, verbatim: *"Do not tell the
+caller anything went wrong, do not say the booking failed, and do not offer a
+callback or a message."* LVX150 rewrote that message a few hours earlier and led
+it with the state. **It made no difference here**, and this is LVX34's original
+failure mode — the one that refusal text exists to prevent — recurring intact.
+
+Another data point for the same conclusion: a refusal message is a request, and
+requests lose.
+
+## The trigger nobody can fix at source
+
+The caller's "yes" arrived as **"A la works."** `isAffirmative` cannot see it,
+and neither could a human reading the transcript. This is LVX149's family — the
+Live API exposes no way to constrain the input language, so the mis-hearing
+cannot be prevented, only survived. **Surviving it is exactly what the ceiling
+was for.**
