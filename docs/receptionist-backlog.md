@@ -5342,6 +5342,56 @@ a signal to ask again rather than to overwrite.
 Recorded now because the model's disobedience is currently load-bearing: it
 produced the right name tonight, and nothing guarantees it will next time.
 
+#### 2026-09-19 — next time arrived, and the disobedience was wrong
+
+`CA0ef8d221`, rev `00085`. The same disobedience, the opposite outcome, and it
+is the case this entry said it could not rule out.
+
+```
+15:53:40  caller (misheard):  "My name is Nitin Dadla."
+15:53:52  "Could you please spell your full name for me?"
+15:53:56  caller spells:      n i t h i n d o d l a        <- INTACT. Correct.
+15:54:00  "Thank you for spelling that out."
+15:55:34  "Shall I go ahead and book the strategy call for NITIN DADLA ...?"
+15:55:37  book_appointment success=true
+```
+
+**The letters arrived perfectly this time and the model discarded them anyway.**
+Not a letter was corrupted — no D-as-V, no T-as-G. The spelling said
+`nithindodla`, the model kept the version it had misheard three turns earlier,
+read that back, and wrote it. Both names are wrong in the row: `Nitin` for
+`Nithin` and `Dadla` for `Dodla`.
+
+So the picture is now symmetric, and worse than either half alone:
+
+| | letters arrived | model obeyed the rule | outcome |
+|---|---|---|---|
+| 2026-09-05 | corrupted (`nighin`) | no | right name, by luck |
+| 2026-09-19 | **intact** (`nithindodla`) | no | **wrong name, in the row** |
+
+**This removes the comfort the entry closed on.** The disobedience was never
+load-bearing — it was uncorrelated with whether the letters were any good. A
+model that ignores the spelling is right exactly when its mishearing happens to
+beat the transcription, which is not a property anyone can rely on.
+
+It also narrows the fix. "Letters do not arrive intact" is a real problem and
+it is NOT the problem here: on this call the input the rule needs was present
+and correct, and the rule still did not run. Phonetic alphabets and
+letter-confirmation loops address the 09-05 failure and would have changed
+nothing today. **What today needs is for the spelled name to reach the write at
+all** — and `lib/voice/live/index.js` already stashes the held write and
+re-issues it when the spelling settles, so the machinery to carry a corrected
+name exists and is not being used for this.
+
+One limit on the evidence, stated rather than glossed: the booked name is read
+off the read-back at 15:55:34, three seconds before the write, with no name
+exchange in between. The tool arguments are not logged. Confirming it from the
+row itself needs `db-inspect` via the migrate job.
+
+**And the caller is the owner of this project**, whose name appears correctly in
+`call-corpus/` fixtures from earlier rounds — so this is not an exotic name the
+system has never seen.
+
 ### Smaller
 
 - **"Monday morning" was answered with 8:00 am, 12:30 pm and 4:30 pm.** Two of
