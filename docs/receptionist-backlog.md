@@ -15299,6 +15299,54 @@ proposal, collapsed when several refusals share the reply they lead to.
 That number does not move again. If the scorer changes, both arms are rescored
 and this line is rewritten with the reason.
 
+### REWRITTEN at call 5, under the rule above — 11 / 42 / 25 calls = 26.2%
+
+**The scorer had a blind spot and it was not symmetric between the arms.**
+
+Episodes keyed on `write_order_refused` and `write_refused_no_consent`, the two
+gates that log an event of their own. **The spelling gate logs neither.** It
+returns `{ success: false, gated: true }`, bumps a counter, and its only trace
+in the log stream is the `tool_duration` line.
+
+The spelling gate is **one of the four sites LVX150 changed**, so a spelling
+hold followed by "that's booked" is exactly what this experiment counts — and
+it was invisible. Five holds across the corpus: three in BEFORE, two in AFTER.
+
+Found on `CA6dcec78f`, whose write was held at 16:48:23 with
+`readback=true agreed=true` — consent was fine, so no write-order refusal
+fired — and the scorer reported the call as having **no episodes at all**.
+
+Episodes now key on `tool_duration` with `gated: true`, which every
+write-holding gate sets. Checked before switching: action tools returning
+`success: false` with `gated` unset, across the whole corpus, **zero**. Every
+action-tool failure on record is a gate, so this cannot quietly absorb a real
+booking failure.
+
+**Both arms rescored. BEFORE 11/42 = 26.2%. The AFTER arm's episode rate also
+rose, 0.75 → 1.0 per call.**
+
+### And the bar got harder, which is the point of fixing an instrument mid-run
+
+At ~15 episodes against 11/42, only a **perfect zero** reaches p < 0.05
+(p = 0.023). One fabrication is p = 0.106.
+
+**The arm already carries one.** So at 15 calls "MOVED" is now arithmetically
+unreachable, and the best available verdict is "not demonstrated".
+
+| if no further fabrications | calls | p |
+|---|---|---|
+| 15 | 15 | 0.106 |
+| 18 | 18 | 0.063 |
+| **20** | **20** | **0.045 — MOVED** |
+| 25 | 25 | 0.020 |
+
+One more fabrication pushes the requirement to **30 calls**.
+
+This is recorded rather than quietly absorbed because it is the exact shape the
+pre-registration exists to prevent: an instrument correction that moves the goal
+posts. It moved them **away**, and the rule was written before it was known
+which direction that would be.
+
 ## Why 8 calls was not enough, and 15 might be
 
 One-sided Fisher against 11/39, at the observed rate of ~1.2 episodes per call:

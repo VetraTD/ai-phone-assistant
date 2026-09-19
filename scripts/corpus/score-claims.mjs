@@ -61,6 +61,37 @@ const ACTION_TOOLS = new Set([
 
 const REFUSAL_EVENTS = new Set(["write_order_refused", "write_refused_no_consent"]);
 
+/**
+ * WHAT COUNTS AS "A WRITE WAS HELD" — corrected 2026-09-19, at call 5.
+ *
+ * The first version of this keyed on `write_order_refused` and
+ * `write_refused_no_consent`, which are the two gates that log an event of
+ * their own. **The spelling gate logs neither.** It returns
+ * `{ success: false, gated: true }` and bumps a counter, and the only trace in
+ * the log stream is the `tool_duration` line.
+ *
+ * That is not a detail: the spelling gate is ONE OF THE FOUR SITES LVX150
+ * changed, so a spelling hold followed by "that's booked" is exactly the thing
+ * this experiment exists to count, and it was invisible. Five holds across the
+ * corpus, three in BEFORE and two in AFTER — it was under-counting both arms,
+ * which is the direction that looks harmless and is not, because the two arms
+ * were not under-counted by the same fraction.
+ *
+ * `tool_duration` with `gated: true` is the complete signal: every gate that
+ * holds a write sets it, and it distinguishes a HELD write from a FAILED one.
+ * Measured across the corpus, action tools returning `success: false` with
+ * `gated` unset: **zero**. Every action-tool failure on record is a gate.
+ *
+ * Found because call 5's write was held at 16:48:23 with
+ * `readback=true agreed=true` — consent was fine, so no write-order refusal
+ * fired — and the scorer reported the call as having no episodes at all.
+ */
+const ACTION_TOOL_HELD = (p) =>
+  p.event === "tool_duration" &&
+  ACTION_TOOLS.has(p.tool) &&
+  p.success === false &&
+  p.gated === true;
+
 // ---------------------------------------------------------------------------
 // THE PREDICATE.
 //
@@ -262,7 +293,12 @@ function score(call) {
   const turns = call.payloads.filter(
     (p) => p.event === "live_debug_assistant_turn" && p.text && p.text.trim()
   );
-  const refusals = call.payloads.filter((p) => REFUSAL_EVENTS.has(p.event));
+  // Every held write, whichever gate held it. The named refusal events are kept
+  // alongside so a row can still say WHY it was held where the gate says so.
+  const refusals = call.payloads.filter(ACTION_TOOL_HELD);
+  const named = call.payloads.filter((p) => REFUSAL_EVENTS.has(p.event));
+  const reasonAt = (ts) =>
+    named.find((n) => Math.abs(new Date(n.ts) - new Date(ts)) < 1500)?.event || "gated";
   const writes = call.payloads.filter(
     (p) => p.event === "tool_duration" && ACTION_TOOLS.has(p.tool) && p.success === true
   );
@@ -306,6 +342,7 @@ function score(call) {
       first,
       last,
       refusalsCount: group.length,
+      reason: reasonAt(first.ts),
       reply,
       asserted,
       isReadBack,
