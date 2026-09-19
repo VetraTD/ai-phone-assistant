@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. A clean booking: one attempt, written first time, zero refusals, clean close.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 16,
     "probes": 1,

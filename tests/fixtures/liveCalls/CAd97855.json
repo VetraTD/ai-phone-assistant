@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, the immediate repeat of CA64a36c with no code change between them. A refused reschedule was followed by 'I have successfully rescheduled...' and the claim guard stayed silent -- LVX140 -- and the fiction then took the caller's consent to cancel an appointment that did not exist.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 1,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 21,
     "probes": 7,

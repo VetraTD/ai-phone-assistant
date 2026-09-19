@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. Booked despite the model switching to Spanish mid-call and apologising for it three times. The gate was unaffected by any of that.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 19,
     "probes": 1,

@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00085. Booked, and THE NAME CAME OUT RIGHT. The counterpart to CA0ef8d2: here the spelling gate held the write and the caller spelled two seconds before it landed, so the model still had the letters in front of it. On CA0ef8d2 the spelling arrived 101 seconds and several turns before the write, and the misheard version won. Recency, not the retry stash -- neither call used the stash at all.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 16,
     "probes": 2,

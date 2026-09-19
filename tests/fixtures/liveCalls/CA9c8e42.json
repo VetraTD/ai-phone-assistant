@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00087 -- the FIRST call on the LVX153 fix, and it still failed. The caller asked to cancel four times, was told three times that the system was broken, was offered a transfer, and hung up with the appointment standing. verdict=write_abandoned. The fix is in the image (bba1d9e contains 9c8dcb2) and the ceiling still did not fire.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 0,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 7,
     "probes": 3,

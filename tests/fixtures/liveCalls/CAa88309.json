@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. A cancellation the caller asked for, preceded by the model firing the write before reading anything back.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 9,
     "probes": 2,

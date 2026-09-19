@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. The first reschedule ever replayed here, and it failed -- seven attempts, zero rows, two false claims. A read-back and an agreement were never true at the same moment.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 0,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 12,
     "probes": 7,

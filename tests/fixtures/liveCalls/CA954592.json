@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00084, and the worst call in the corpus: TWELVE write attempts, three separate operations, booked_rows 0 and a booking owed at the end. Two false claims mid-call, and a third -- 'Your free strategy call has been successfully booked for Monday' -- left uncorrected at the sign-off.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 23,
     "probes": 12,

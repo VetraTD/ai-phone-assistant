@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. A cancellation, and the call whose closing turn asked a question and then hung up 1.6 s later.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 5,
     "probes": 2,

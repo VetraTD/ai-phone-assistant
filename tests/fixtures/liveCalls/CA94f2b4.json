@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. The FIRST reschedule ever to complete through the consent gate. One write, both halves of consent true at the same instant, and the row MOVED rather than being cancelled and rebooked.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "row_without_claim"
+  },
   "counts": {
     "turns": 7,
     "probes": 1,

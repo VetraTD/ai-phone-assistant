@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00085, AND THE CALL THAT FOUND LVX153. A caller asked to cancel, was refused three times, was told twice 'I'm unable to process the cancellation right now', was offered a callback, and hung up with the appointment still standing. The trigger was a mangled yes -- 'A la works.' -- which isAffirmative cannot read and neither can a human.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 0,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 7,
     "probes": 3,

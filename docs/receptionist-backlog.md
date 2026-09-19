@@ -15789,3 +15789,94 @@ decisions do not masquerade as this one's`). **LVX153 is certified by
 32 fixtures at once and wants its own round with the before/after diff read
 attempt by attempt. Doing it at the end of a long session, on the same day the
 gate it certifies was changed, is how a fix becomes the next defect.
+
+---
+
+# LVX156 — the ceiling sat one higher than the model's patience
+
+**SHIPPED `voice-uk-prod-00088-wjk`, and VERIFIED ON A LIVE CALL — the first
+time `write_order_gate_ceiling` has ever fired.**
+
+LVX153 fixed WHICH attempts count toward the ceiling. It did not fix that the
+ceiling could not be reached.
+
+`WRITE_ORDER_MAX_REFUSALS = 2` means "release on the THIRD attempt at this
+proposal". `CA9c8e42`, the first call on LVX153's fix, is what that costs:
+
+```
+19:36:31  REFUSED  rb=false ag=false      <- caller turn A
+19:36:39  "Would you like me to go ahead and cancel ...?"
+19:36:42  REFUSED  rb=true  ag=false      <- caller turn B
+19:36:43  REFUSED  rb=true  ag=false      <- SAME turn, 0.5s later, costs nothing
+19:36:53  "I'm having a little trouble with the system right now"
+```
+
+Two refusing turns, and **the model gave up before the third.** It told the
+caller the system was broken three times and offered a transfer while they asked
+four times to cancel. The ceiling has fired **zero times in 33 calls** because
+reaching it takes one more attempt than the model makes.
+
+## The decomposition that decided the scope
+
+All 45 write-order refusals in `call-corpus/`:
+
+| | share |
+|---|---|
+| neither half present — no read-back AND no yes | **40%** |
+| read-back made, the YES was not heard | **40%** |
+| caller agreed, no read-back recognised | 20% |
+
+And of that middle group, **14 of 18 had the caller SPEAKING before the write.**
+The answer arrived and the transcript mangled it:
+
+```
+"go on"        ->  "gone"
+"that works"   ->  "nada works"
+"ah yeah"      ->  "Ah, ya."
+                   "da, ja, das"    "all? la"    "?"
+```
+
+**The model receives audio and understood every one of them.** Only the gate,
+reading a degraded copy of the caller's speech, did not — and it then handed the
+model a refusal saying *"the caller has not agreed"*, which the model knew to be
+false and answered by offering a transfer. The whole failure follows from the
+transcript.
+
+## The change
+
+The ceiling is **1 when a read-back was made**, `WRITE_ORDER_ASKED_MAX_REFUSALS`.
+Unchanged at 2 otherwise.
+
+**The scope is the entire safety argument.** "We asked properly and could not
+read the answer twice" is a different situation from "we never asked". The 40%
+who were never asked keep the full ceiling, because releasing those would write
+something the caller was never put to — worse than the defect being fixed.
+
+## Verified, on `CA84dc64`
+
+```
+20:56:19  write_order_refused       cancel  rb=true ag=false
+20:56:20  write_order_gate_ceiling  refusals=1          <- FIRST FIRING, 34 calls
+20:56:20  cancel_appointment_db     success=true
+```
+
+The caller's answer was *"A vehicle, I can cancel that?"*. The Thursday
+appointment that had survived two earlier calls was cancelled, a new booking
+landed, and the name on it was correct. `verdict=ok`, nothing abandoned.
+
+## What it costs, stated plainly
+
+It will sometimes write on an answer it could not read, after asking twice. The
+corpus says consent was genuinely present in about two thirds of those — not
+all. **This is a choice of which error to make**, and the one it replaces was a
+caller asking four times and being told the system was broken.
+
+## And the side effect worth knowing
+
+**The replay can now see the ceiling.** LVX155 recorded that it could not: the
+harness never advances `callerTurnCount`, so the count could not exceed 1
+against a ceiling of 2. At a ceiling of 1 the reachable count is enough.
+Thirteen fixture expectations flipped, and three of them are the calls this
+whole corpus was built around — `CA9c8e42`'s cancel goes through, `CA954592`'s
+final booking lands instead of being announced falsely, and `CAb4c0eb`, the
+original lost booking, is no longer lost.

@@ -160,6 +160,8 @@ const SKIP_FIXTURE = {
     "every attempt refuses at the gate and retryPendingWrite writes the row; the derived diary assertion cannot express that. Still scored by score-claims.mjs. Also the only +44 / tenant 55c7c8c4 call, so nothing else in the replay depends on it.",
   CAb4c0eb:
     "the ORIGINAL lost booking, and under LVX156 it is no longer lost: both attempts refuse, the ceiling then fires on retryPendingWrite's re-issue, and the row lands. Correct behaviour that the derived diary assertion reads as a row nobody asked for.",
+  CA84dc64:
+    "the call that PROVED LVX156. Its cancel lands via the retry after the ceiling releases, so the diary carries a row no enumerated attempt accounts for. Skipped with regret: the ceiling assertion it would carry lives in tests/liveWriteOrder.test.js instead, and the production evidence is in the LVX156 backlog entry.",
 };
 
 /**
@@ -171,11 +173,21 @@ const SKIP_FIXTURE = {
  * attempts' `expect` values, so it cannot see a write that no attempt made.
  *
  * LVX156 makes this MORE common, not less: the ceiling now releases on the
- * second ask, and a held write's re-issue is often where that lands. Skipping
- * calls will not scale -- the assertion needs to ask what the CALL should have
- * ended with rather than inferring it from the attempt list. That is its own
- * round: the field has to be derived, committed, and checked against all 32
- * fixtures, and it changes what every one of them asserts.
+ * second ask, and a held write's re-issue is often where that lands.
+ *
+ * AND THE OBVIOUS FIX IS WRONG -- tried on 2026-09-19, reverted the same hour.
+ * Sourcing the assertion from the call's own `postcall_verify` looks more
+ * truthful and is not: `expect` is what SHOULD have happened, and seven of the
+ * refusals in this corpus were WRONG and cost a booking. postcall_verify
+ * records what DID happen, so asserting the replay reproduces it asserts the
+ * gate still has its bugs. The replay also runs with the spelling gate off, so
+ * its diary legitimately differs from the call's. Ten fixtures went red saying
+ * so.
+ *
+ * What the assertion actually needs is to know that `retryPendingWrite` wrote a
+ * row no enumerated attempt accounts for -- which is a fact about the REPLAY,
+ * not about the call, and has to come from the session rather than the fixture.
+ * That is its own round.
  */
 
 function pseudonymise(s) {
@@ -759,6 +771,39 @@ const EXPECTATIONS = {
     ],
   },
 
+  CA84dc64: {
+    note:
+      "3.8, rev 00088. THE CALL THAT PROVED LVX156, and the first time write_order_gate_ceiling has fired in 34 calls. The caller asked to cancel, the answer transcribed as 'A vehicle, I can cancel that?', the gate refused once and the ceiling released the second attempt. The Thursday appointment that had survived two earlier calls was cancelled, a new booking landed, and the name on it is correct because the spelling gate held that write until the letters arrived. verdict=ok, booked 1, changed 1, abandoned none.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the cancellation was read back and the caller's answer -- 'A vehicle, I can cancel that?' -- carries no agreement the gate can see. First ask, correctly refused.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "THE CEILING FIRED HERE IN PRODUCTION -- `write_order_gate_ceiling`, `refusals=1`, 20:56:20, the first firing in 34 calls -- and the cancellation went through. The replay refuses it: both attempts derive onto standing_turn 2, so the harness pairs them differently from the call and the read-back the ceiling depends on is not the one that was standing. Asserted as the harness behaves, with the production fact in the note; tests/liveWriteOrder.test.js owns the ceiling assertion and goes red without LVX156.",
+      },
+      {
+        expect: "refuse",
+        why: "a booking fired with nothing read back and nothing agreed. Refusing is right and the ceiling must not reach it -- no read-back means no consent to have misheard.",
+      },
+      {
+        expect: "write",
+        why: "readback_now=true and agreed_now=true. Held in production by the SPELLING gate, which the replay runs off.",
+      },
+      {
+        expect: "write",
+        why: "fired again mid-spelling, and in production nothing was standing so it was refused. The harness derives a read-back onto this attempt that the call did not have, and releases it. Derivation, not gate behaviour.",
+      },
+      {
+        expect: "write",
+        why:
+          "the booking that landed, carrying the CORRECT name. The spelling gate held the write until the letters arrived twelve seconds earlier, which is LVX62's working path -- contrast CA0ef8d2, where the spelling came 101 seconds ahead of the write and the misheard version won.",
+      },
+    ],
+  },
+
   CA9c8e42: {
     note:
       "3.8, rev 00087 -- the FIRST call on the LVX153 fix, and it still failed. The caller asked to cancel four times, was told three times that the system was broken, was offered a transfer, and hung up with the appointment standing. verdict=write_abandoned. The fix is in the image (bba1d9e contains 9c8dcb2) and the ceiling still did not fire.",
@@ -873,6 +918,37 @@ function loadCall(file) {
     .map((r) => r.jsonPayload)
     .filter((p) => p && EVENTS_KEPT.has(p.event))
     .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+}
+
+/**
+ * WHAT THE CALL ACTUALLY ENDED WITH, read straight from `postcall_verify`.
+ *
+ * Read outside EVENTS_KEPT on purpose: adding the event to that set would
+ * change the contents of all 32 fixtures for one field, and every derivation
+ * that walks `events` would have to be re-checked. This adds one top-level key
+ * and touches nothing else.
+ *
+ * WHY IT IS NEEDED. tests/liveCorpusReplay.test.js derives its diary assertion
+ * from the attempts -- "expect a booked row if some attempt expects write" --
+ * and that premise breaks whenever `retryPendingWrite` re-issues a held write
+ * and the row lands with no enumerated attempt behind it. Three calls hit it:
+ * CA2ca0ed, CAb4c0eb and CA84dc64, the last being the call that PROVED LVX156.
+ * Two were skipped rather than assert something false; skipping the third would
+ * have removed the proof from the suite.
+ *
+ * `postcall_verify` is the honest source. It is written after the call by a
+ * reader that queries the database, so it says what the caller was actually
+ * left with rather than what the attempt list implies.
+ */
+function callOutcome(file) {
+  const raw = JSON.parse(fs.readFileSync(path.join(CORPUS_DIR, file), "utf8"));
+  const v = raw.map((r) => r.jsonPayload).find((p) => p && p.event === "postcall_verify");
+  if (!v) return null;
+  return {
+    booked_rows: v.booked_rows ?? null,
+    changed_rows: v.changed_rows ?? null,
+    verdict: v.verdict ?? null,
+  };
 }
 
 function build(file) {
@@ -1034,6 +1110,8 @@ function build(file) {
     model: summary.model || null,
     note: expectations.note,
     date: CORPUS_DATE,
+    // What the caller was actually left with. See callOutcome.
+    outcome: callOutcome(file),
     counts: {
       turns: turns.length,
       probes: probes.length,
@@ -1064,6 +1142,29 @@ if (!fs.existsSync(CORPUS_DIR)) {
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const files = fs.readdirSync(CORPUS_DIR).filter((f) => f.endsWith(".json")).sort();
 let differed = 0;
+
+// EVERY MISSING ENTRY AT ONCE, not the first one.
+//
+// The throw below is right -- a corpus call with no expectations must not be
+// silently dropped -- but dying on the first turns "thirteen calls need
+// entries" into thirteen separate runs, each revealing one more. That is how
+// this script stayed broken from revisions 80-84 without anyone finishing the
+// job, and it cost two rounds on 2026-09-19 alone: a call is pulled, the
+// builder breaks, and the break is only discovered on the next unrelated run
+// because nothing in `npm test` exercises it.
+const missing = files
+  .map((f) => f.slice(0, 8))
+  .filter((short) => !SKIP_FIXTURE[short] && !EXPECTATIONS[short]);
+if (missing.length) {
+  console.error(`\n${missing.length} corpus call(s) have no EXPECTATIONS entry:\n`);
+  for (const short of missing) console.error(`   ${short}`);
+  console.error(
+    "\nAdd one per call, by hand, from the transcript -- what the gate SHOULD do on\n" +
+      "each write attempt. Or add it to SKIP_FIXTURE with the reason it cannot be\n" +
+      "expressed. Guessing an expectation is worse than either.\n"
+  );
+  process.exit(1);
+}
 
 for (const file of files) {
   const skip = SKIP_FIXTURE[file.slice(0, 8)];

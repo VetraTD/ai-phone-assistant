@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00079. Cancel then rebook. The rebook took four attempts and the last one landed -- and the claim that followed, 'Your All-In-One Package is now booked', was TRUE and still invisible to the deployed claim detector, because 'Package' is not one of its four nouns.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 16,
     "probes": 5,

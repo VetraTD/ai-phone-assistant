@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8 on the LVX140 build. The reschedule was refused because the caller answered by naming the time back, and the model then said it had been done. claim_audit claimed:0 -- the sentence was never detected, so none of LVX140's work could reach it.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 0,
+    "verdict": "write_abandoned"
+  },
   "counts": {
     "turns": 7,
     "probes": 2,

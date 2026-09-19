@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00083. A cancel and a booking, both properly authorised, both written. Also the call where the assistant twice refused times its own verified-open record said were free (LVX148).",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 17,
     "probes": 2,

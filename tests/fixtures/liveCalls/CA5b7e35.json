@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00082. Two cancellations a second apart, then a booking that took two attempts. Kept for the duplicate-write pair.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 2,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 22,
     "probes": 4,

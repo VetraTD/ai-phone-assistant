@@ -3,6 +3,7 @@
   "model": null,
   "note": "3.8. The call whose websocket died mid-sentence: no stop, no close, so finish() never ran and neither did postcall_verify. The one real defect of the round, and nothing to do with the gate.",
   "date": "2026-09-18",
+  "outcome": null,
   "counts": {
     "turns": 11,
     "probes": 1,

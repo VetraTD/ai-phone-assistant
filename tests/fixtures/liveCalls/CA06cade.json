@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00080. Booked, and reported verdict row_without_claim -- the row landed and the assistant never clearly told the caller so.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "row_without_claim"
+  },
   "counts": {
     "turns": 12,
     "probes": 2,

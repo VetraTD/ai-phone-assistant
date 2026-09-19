@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8. Book, cancel and reschedule in ONE call, all three correct, every claim backed, verdict ok. It refused to guess between two appointments: looked them up, asked which, read the chosen one back before writing.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 2,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 23,
     "probes": 5,

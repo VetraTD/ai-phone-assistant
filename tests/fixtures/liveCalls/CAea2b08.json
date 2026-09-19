@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00085. A cancellation in 63 seconds, zero refusals, claim true. Also the call where the end_call ask-gate held a hang-up and the model appended 'is there anything else' to a goodbye it had already said.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 5,
     "probes": 1,

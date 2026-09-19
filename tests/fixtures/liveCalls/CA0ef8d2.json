@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8, rev 00085. Booked correctly with no fabrication -- refused once, asked properly, then wrote. The refusal loop working exactly as designed. It is also the call that wrote the WRONG NAME: the caller spelled their surname out letter by letter, correctly, and the row still carries the version the model had misheard three turns earlier (LVX62).",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 17,
     "probes": 2,

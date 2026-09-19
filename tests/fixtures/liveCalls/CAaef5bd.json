@@ -3,6 +3,11 @@
   "model": "gemini-3.8-live",
   "note": "3.8 on the gate fixes. The first successful booking of the round, and the call that proves the supersession removal on real audio.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 15,
     "probes": 2,

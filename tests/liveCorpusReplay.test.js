@@ -247,6 +247,20 @@ describe("the real calls, replayed through the real gate", () => {
 
       it("leaves the diary with exactly the rows it should", async () => {
         const { s } = await replay(fixture);
+        // DERIVED FROM THE EXPECTATIONS, and it has to be.
+        //
+        // Tried and reverted on 2026-09-19: sourcing this from the call's own
+        // `postcall_verify` instead. It is wrong twice over, and the header of
+        // this file says why -- `expect` is what SHOULD have happened, and of
+        // the twenty attempts recorded before the fixes, SEVEN refusals were
+        // wrong and cost a booking. postcall_verify records what DID happen,
+        // wrong refusals included, so asserting the replay reproduces it is
+        // asserting the gate still has the bugs. The replay also runs with the
+        // spelling gate OFF, so its diary legitimately differs from the call's.
+        //
+        // Ten fixtures went red saying exactly that. The `outcome` field the
+        // builder now emits is kept because it is useful to read, and nothing
+        // asserts against it.
         const wantsBooking = fixture.attempts.some(
           (a) => a.tool === "book_appointment" && a.expect === "write"
         );

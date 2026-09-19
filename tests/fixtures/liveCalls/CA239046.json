@@ -3,6 +3,11 @@
   "model": "gemini-3.1-flash-live-preview",
   "note": "3.1. Booked, via the consent latch rather than a recognised read-back. Also the call where an appended claim note made the model retract a false claim out loud.",
   "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 1,
+    "changed_rows": 0,
+    "verdict": "ok"
+  },
   "counts": {
     "turns": 11,
     "probes": 2,
