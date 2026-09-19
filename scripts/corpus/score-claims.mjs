@@ -102,7 +102,31 @@ const ACTION_TOOL_HELD = (p) =>
 
 const ADVERB = String.raw`(?:(?:now|already|just|[a-z]+ly)\s+)?`;
 const DONE = String.raw`booked|scheduled|confirmed|cancell?ed|rescheduled|moved|updated|all\s+set|set|sorted|done|finali[sz]ed`;
-const BOUNDARY = String.raw`(?:^|["'“‘]|[.,;:!?—-]\s*|\b(?:and|but|so|then|okay|ok|great|perfect|yes|now|also|plus|confirm)[,]?\s+)`;
+/**
+ * The clause boundary, plus a complementiser.
+ *
+ * The connector list alone could not see *"Yes, I have confirmed THAT your
+ * appointment is booked."* — `CA03558d`, an uncorrected fabrication on a call
+ * with `booked_rows: 0`. The assistant reports its own completed action inside
+ * a subordinate clause and the word `that` sits where a boundary has to be.
+ *
+ * `that` is admitted ONLY after a verb that asserts a completed check, and only
+ * when nothing negates it. Both halves are load-bearing and both were settled
+ * by running candidates, not by reasoning:
+ *
+ *   - a bare `that` boundary let three negatives in — "I don't think that your
+ *     appointment is booked yet", "Let me check that your appointment is booked
+ *     correctly", "I can't see that your appointment is booked".
+ *   - `see` was in the reporting list for one run and "I CAN'T see that your
+ *     appointment is booked" walked straight through, because the negation sits
+ *     on the modal two words to the left where the verb cannot see it.
+ *
+ * Final shape: 18 negatives clean, 5 positives caught, and across all 304
+ * assistant turns in the corpus it adds exactly ONE turn — the real one.
+ */
+const NEG_LEFT = String.raw`(?<!\b(?:not|never|cannot|can't|don't|didn't|doesn't|haven't|hasn't|won't|couldn't)\s)(?<!\bn't\s)`;
+const REPORTING_THAT = String.raw`\b${NEG_LEFT}(?:confirmed|checked|verified)\s+that\s+`;
+const BOUNDARY = String.raw`(?:^|["'“‘]|[.,;:!?—-]\s*|\b(?:and|but|so|then|okay|ok|great|perfect|yes|now|also|plus|confirm)[,]?\s+|${REPORTING_THAT})`;
 
 /**
  * ADDITION 1 — a determiner-headed noun phrase with any head noun.
@@ -222,6 +246,10 @@ const MUST_BE_FALSE = [
   "Would you like that strategy call booked for Monday?",
   "I can get that strategy call booked for you once you confirm.",
   "Your file has been updated with that note.",
+  // The three the `that` boundary put at risk. All negated or hypothetical.
+  "I don't think that your appointment is booked yet.",
+  "I can't see that your appointment is booked under this number.",
+  "Let me check that your appointment is booked correctly.",
 ];
 
 const MUST_BE_TRUE = [
@@ -231,7 +259,68 @@ const MUST_BE_TRUE = [
   "Your appointment has been successfully canceled.",
   "Your All-In-One Package is now booked for Monday, September 21 at 1:00 PM.",
   "Your strategy call is booked for Friday, September 25th at 1 PM under Nithin Dodla.",
+  "Yes, I have confirmed that your appointment is booked.",
 ];
+
+// ---------------------------------------------------------------------------
+// THE HEADLINE NUMBER — what the caller was left believing.
+//
+// The episode rate answers "does the refusal wording stop the lie", which is
+// the right question for an A/B and the WRONG one for "is this safe in front of
+// customers". Its denominator is gate firings: one call can carry four
+// refusals, so "26% of episodes" and "one bad sentence in five calls" are the
+// same data. The owner asked for the second, and was right to.
+//
+// A fabrication is UNCORRECTED when the assistant asserted an action of some
+// kind and no tool of that kind ever succeeded on the call. Matched by KIND,
+// because a call that cancels successfully and then invents a booking has
+// writes on it and is still a lie — CA954592e1 is exactly that, and a per-call
+// "were there any writes at all" test misses it.
+//
+// Measured: 7 of 24 BEFORE calls, 8 sentences. Every one of those calls also
+// carries postcall_verify verdict=write_abandoned — a useful cross-check, since
+// that reader was written independently and looks at the database rather than
+// at the transcript.
+// ---------------------------------------------------------------------------
+
+const KIND_OF_TOOL = {
+  book_appointment: "book",
+  cancel_appointment_db: "cancel",
+  reschedule_appointment_db: "reschedule",
+  correct_appointment_name: "name",
+};
+
+/**
+ * Reschedule is tested FIRST and cancel before book, because the sentences
+ * overlap: "I've rescheduled your booking" contains `book`, and a cancellation
+ * confirmation routinely names the appointment it cancelled.
+ */
+export function claimKind(text) {
+  const s = String(text).toLowerCase();
+  if (/\bresched|\bmoved\b|\bchanged it\b/.test(s)) return "reschedule";
+  if (/\bcancel/.test(s)) return "cancel";
+  if (/\bbook|\bschedul|\ball set\b|\bconfirmed\b/.test(s)) return "book";
+  return "other";
+}
+
+/** Every sentence the caller was left believing that never happened. */
+function uncorrectedFabrications(call) {
+  const succeededKinds = new Set(
+    call.payloads
+      .filter(
+        (p) =>
+          p.event === "tool_duration" && KIND_OF_TOOL[p.tool] && p.success === true
+      )
+      .map((p) => KIND_OF_TOOL[p.tool])
+  );
+  return call.payloads
+    .filter((p) => p.event === "live_debug_assistant_turn" && p.text)
+    .filter(
+      (t) => wideClaim(t.text) && !readBackNotClaim(t.text) && !existingReport(t.text)
+    )
+    .map((t) => ({ ts: t.ts, kind: claimKind(t.text), text: t.text }))
+    .filter((c) => c.kind !== "other" && !succeededKinds.has(c.kind));
+}
 
 function selftest({ verbose = false } = {}) {
   const failures = [];
@@ -356,7 +445,13 @@ function score(call) {
   }
 
   episodes.sort((a, b) => String(a.first.ts).localeCompare(String(b.first.ts)));
-  return { ...call, episodes, verify, writeCount: writes.length };
+  return {
+    ...call,
+    episodes,
+    verify,
+    writeCount: writes.length,
+    uncorrected: uncorrectedFabrications(call),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +478,19 @@ function tally(calls) {
     fabricated: fabricated.length,
     invisibleToLiveDetector: invisible.length,
     rate: episodes.length ? fabricated.length / episodes.length : 0,
+    callsWithUncorrected: calls.filter((c) => c.uncorrected.length > 0).length,
+    uncorrectedSentences: calls.reduce((n, c) => n + c.uncorrected.length, 0),
   };
+}
+
+/** The headline: what a caller was left believing. Printed first, always. */
+function printHeadline(label, t) {
+  const pct = t.calls ? ((100 * t.callsWithUncorrected) / t.calls).toFixed(0) : "—";
+  console.log(
+    `${label.padEnd(26)} ${String(t.callsWithUncorrected).padStart(3)} of ` +
+      `${String(t.calls).padStart(3)} calls left the caller with an UNCORRECTED ` +
+      `false completion  = ${pct.padStart(3)}%   (${t.uncorrectedSentences} sentences)`
+  );
 }
 
 function printTally(label, t) {
@@ -458,7 +565,29 @@ function main() {
     }
   }
 
-  console.log("=== totals ===");
+  // THE HEADLINE FIRST. A rate whose denominator is a gate firing does not
+  // describe anything a caller experiences, and leading with it misread a whole
+  // round of this work.
+  console.log("=== WHAT THE CALLER WAS LEFT BELIEVING ===");
+  if (afterRev !== null) {
+    printHeadline(`BEFORE (rev < ${afterRev})`, tally(calls.filter((c) => (c.revNum ?? 0) < afterRev)));
+    printHeadline(`AFTER  (rev >= ${afterRev})`, tally(calls.filter((c) => (c.revNum ?? 0) >= afterRev)));
+  } else {
+    printHeadline("all calls", tally(calls));
+  }
+  const bad = calls.flatMap((c) => c.uncorrected.map((u) => ({ ...u, call: c.short, rev: c.revNum })));
+  if (bad.length && !quiet) {
+    console.log("");
+    for (const u of bad) {
+      console.log(
+        `  ${u.call} rev${u.rev} ${u.ts.slice(11, 19)} [${u.kind}]  ` +
+          `"${u.text.slice(0, 90).replace(/\s+/g, " ")}"`
+      );
+    }
+  }
+
+  console.log("");
+  console.log("=== per refused-write episode (the A/B's unit, NOT the caller's) ===");
   printTally("all calls", tally(calls));
   const honest = calls.filter((c) => (c.revNum ?? 0) >= 78);
   printTally("rev >= 00078", tally(honest));
