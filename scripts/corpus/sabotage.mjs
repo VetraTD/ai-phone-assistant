@@ -696,6 +696,59 @@ function runSuites(files) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// --census: does every anchor still land, WITHOUT running a single suite.
+//
+// The full matrix was OOM-killed again on 2026-09-19, mid-row, leaving
+// lib/voice/strings.js patched and the journal naming it -- the recovery this
+// script's own docstring warns is dangerous when the file holds uncommitted
+// work, which is why committing first is the rule.
+//
+// The two questions the matrix answers are separable, and only one of them is
+// expensive. "Does the anchor still match exactly once" is a string count over
+// files already on disk; "does the row still go red" needs vitest. An edit
+// somewhere else in a patched file can only break the FIRST one, so after an
+// ordinary change this is the check that is actually about the change -- and it
+// runs in under a second for all of them instead of dying halfway.
+//
+// It is not a substitute for the matrix. A green census says the anchors point
+// at live code, never that the suites can still see the damage.
+// ---------------------------------------------------------------------------
+if (process.argv.includes("--census")) {
+  let drifted = 0;
+  const seen = new Map();
+  for (const s of SABOTAGES) {
+    if (seen.has(s.name)) {
+      console.error(`x ${s.name}: duplicate row name.`);
+      drifted += 1;
+    }
+    seen.set(s.name, true);
+    if (!fs.existsSync(s.file)) {
+      console.error(`x ${s.name}: ${s.file} does not exist.`);
+      drifted += 1;
+      continue;
+    }
+    const hits = fs.readFileSync(s.file, "utf8").split(s.find).length - 1;
+    if (hits !== 1) {
+      console.error(`x ${s.name}: anchor matches ${hits} times in ${s.file}, not once.`);
+      drifted += 1;
+      continue;
+    }
+    for (const suite of s.red) {
+      if (!fs.existsSync(suite)) {
+        console.error(`x ${s.name}: names a red suite that does not exist -- ${suite}`);
+        drifted += 1;
+      }
+    }
+  }
+  console.log(
+    drifted === 0
+      ? `census: ${SABOTAGES.length} rows, every anchor lands exactly once and every red suite exists.`
+      : `census: ${drifted} problem(s) across ${SABOTAGES.length} rows.`
+  );
+  process.exit(drifted === 0 ? 0 : 1);
+}
+
 console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
 // NARROWED FOR --only, and this is a memory fix as much as a speed one.
 //
