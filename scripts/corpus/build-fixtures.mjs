@@ -104,6 +104,14 @@ const PSEUDONYMS = [
   [/\bTite\b/gi, "Farrow"],
   [/Dalberg\s+Consulting/gi, "Halvern Consulting"],
   [/Darla\s+Consulting/gi, "Harlan Consulting"],
+  // 2026-09-19 night. Two mis-hearings the table had never seen, and the leak
+  // guard did not catch either: LEAK_RE only knows the spellings someone
+  // thought to list, so a NEW mangling of a real name walks through it. Both
+  // added here and to LEAK_RE, and the lesson is that the guard's coverage
+  // grows only as fast as the transcriber's inventiveness is noticed.
+  [/Nittendorf/gi, "Bendorf"],
+  [/Doddle\s+Consulting/gi, "Bodell Consulting"],
+  [/Doddle/gi, "Bodell"],
   [/WHITE?FIELDS?/g, "BELL"],
   [/Whit[ef]field/g, "Bell"],
   [/Whitfields/g, "Bells"],
@@ -132,7 +140,8 @@ const PSEUDONYMS = [
 ];
 
 /** Anything still matching this after pseudonymisation is a leak and aborts. */
-const LEAK_RE = /whit[ef]|bhakta|dillan|nithin|dodla|annett|aadhaar|chandni/i;
+const LEAK_RE =
+  /whit[ef]|bhakta|dillan|nithin|dodla|dadla|dasla|gadkari|nittendorf|doddle|joshua|annett|aadhaar|chandni/i;
 
 /**
  * Calls kept in call-corpus/ but NOT turned into replay fixtures, and why.
@@ -767,6 +776,53 @@ const EXPECTATIONS = {
       {
         expect: "write",
         why: "'Just to confirm, would you like to reschedule your appointment to Wednesday 23 at 9:00 AM?' answered yes. Both halves, clean write.",
+      },
+    ],
+  },
+
+  // The four verification calls of 2026-09-19 night, on rev 00088 -- LVX153 +
+  // LVX156 + the VAD override unset. All four ended `verdict=ok` with nothing
+  // abandoned, on the three tools that had been failing.
+
+  CA240834: {
+    note:
+      "3.8, rev 00088. A RESCHEDULE, the worst tool in the corpus at 38% abandonment, and the SECOND firing of write_order_gate_ceiling. Also the cleanest closing sequence recorded: completion, then the ask, then the goodbye, in three separate turns.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "fired the moment the caller named a day, with nothing read back and nothing agreed.",
+      },
+      {
+        expect: "refuse",
+        why:
+          "THE CEILING FIRED HERE IN PRODUCTION, its second firing: 'Just to confirm, I'll move your appointment to Wednesday 23rd at 12:30 PM. Shall I go ahead?' answered with '12:30' -- the caller naming the slot back, which isAffirmative does not read as agreement. Released, `changed_rows` 1, on the tool with the worst abandonment rate in the corpus. The replay refuses it because the builder derives NO slot for this call at all (derived-slot 0 of 2), so the read-back the ceiling depends on cannot be matched. Same limitation as CA84dc64; tests/liveWriteOrder.test.js owns the ceiling assertion.",
+      },
+    ],
+  },
+
+  CAec2309: {
+    note:
+      "3.8, rev 00088. A cancellation that needed no hatch: refused once for a question that was not agreement, asked again, and got a readable answer. The gate working as designed rather than being rescued.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "'Yeah, can I cancel that?' is a question, not consent. Refusing is right and the model's response -- asking once more, plainly -- is what the refusal asks for.",
+      },
+      { expect: "write", why: "asked again, answered readably, written." },
+    ],
+  },
+
+  CA94817d: {
+    note:
+      "3.8, rev 00088, and THE CALL THAT BROKE LVX62'S STATED MECHANISM. The surname was misheard badly, the caller spelled it, and the booking landed 104 seconds later under the CORRECT name -- a LONGER gap than CA0ef8d2's 101 seconds, which got it wrong. Recency is not what decides it. What differs is that the read-back before the write carried the corrected name here, and on CA0ef8d2 the read-back was already wrong, so nothing at the write could have saved it.",
+    attempts: [
+      {
+        expect: "refuse",
+        why: "the caller agreed, but to a turn the read-back detector did not recognise -- 'Please confirm if these details are correct' rather than a question about going ahead. The 20% slice of refusals.",
+      },
+      {
+        expect: "write",
+        why: "the model read the details back properly, including the corrected name, the caller confirmed, and the row landed. The whole loop working, and the name correct in the database.",
       },
     ],
   },

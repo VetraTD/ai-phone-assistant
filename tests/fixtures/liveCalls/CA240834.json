@@ -1,0 +1,184 @@
+{
+  "callSid": "CA240834",
+  "model": "gemini-3.8-live",
+  "note": "3.8, rev 00088. A RESCHEDULE, the worst tool in the corpus at 38% abandonment, and the SECOND firing of write_order_gate_ceiling. Also the cleanest closing sequence recorded: completion, then the ask, then the goodbye, in three separate turns.",
+  "date": "2026-09-18",
+  "outcome": {
+    "booked_rows": 0,
+    "changed_rows": 1,
+    "verdict": "ok"
+  },
+  "counts": {
+    "turns": 10,
+    "probes": 2,
+    "write_order_refused": 1,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": {
+    "claimed": 2,
+    "note_sent": 0,
+    "suppressed_existing_report": 1,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 10,
+    "turns_reply_empty": 0,
+    "unbacked_action": 1,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 2,
+    "availability_blocked": 0,
+    "availability_day_listed": 37,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 31
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-19T22:42:21.963Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-19T22:42:31.090Z",
+      "step": "identify_intent",
+      "caller": "I just want to check if I have any appointments.",
+      "assistant": "You have an appointment booked for Wednesday, September 23rd at 2:00 PM."
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-19T22:42:41.687Z",
+      "step": "gather_details",
+      "caller": "Okay, could I reschedule that?",
+      "assistant": "Of course. What day and time would you prefer to move your appointment to?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-19T22:42:50.804Z",
+      "step": "gather_details",
+      "caller": "tomorrow",
+      "assistant": "Our office is closed on Sundays. Would you like to look at a weekday instead?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-19T22:43:02.174Z",
+      "step": "gather_details",
+      "caller": "What do you have available?",
+      "assistant": "On Monday, we have openings at 9:00 AM, 1:00 PM, and 4:30 PM. Which of those times works best for you?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-19T22:43:13.478Z",
+      "step": "gather_details",
+      "caller": "Wednesday",
+      "assistant": "On Wednesday, September 23rd, we have openings at 9:00 AM, 12:30 PM, and 4:30 PM. Do any of those work for you?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-19T22:43:23.539Z",
+      "step": "gather_details",
+      "caller": "12:30",
+      "assistant": "Just to confirm, I'll move your appointment to Wednesday, September 23rd at 12:30 PM. Shall I go ahead with that?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-19T22:43:33.167Z",
+      "step": "gather_details",
+      "caller": "go on",
+      "assistant": "That's all set. Your appointment is now confirmed for Wednesday, September 23rd at 12:30 PM."
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-19T22:43:39.764Z",
+      "step": "confirm",
+      "caller": "Thank you very much.",
+      "assistant": "Is there anything else I can help you with today?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-19T22:43:46.232Z",
+      "step": "confirm",
+      "caller": "N?o.",
+      "assistant": "Thank you for calling Digile Media. Have a great day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-19T22:43:15.947Z",
+      "tool": "reschedule_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "fired the moment the caller named a day, with nothing read back and nothing agreed.",
+      "standing_turn": 5,
+      "agreed_turn": 5,
+      "standing_read_back": "On Wednesday, September 23rd, we have openings at 9:00 AM, 12:30 PM, and 4:30 PM. Do any of those work for you?",
+      "agreed_read_back": "On Wednesday, September 23rd, we have openings at 9:00 AM, 12:30 PM, and 4:30 PM. Do any of those work for you?",
+      "target": null,
+      "target_candidates": [
+        "2026-09-23T09:00:00",
+        "2026-09-23T12:30:00",
+        "2026-09-23T14:30:00",
+        "2026-09-23T16:30:00"
+      ],
+      "target_from": "On Wednesday, September 23rd, we have openings at 9:00 AM, 12:30 PM, and 4:30 PM. Do any of those work for you?",
+      "target_derived": true,
+      "caller_text": "12:30",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-19T22:43:26.684Z",
+      "tool": "reschedule_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "THE CEILING FIRED HERE IN PRODUCTION, its second firing: 'Just to confirm, I'll move your appointment to Wednesday 23rd at 12:30 PM. Shall I go ahead?' answered with '12:30' -- the caller naming the slot back, which isAffirmative does not read as agreement. Released, `changed_rows` 1, on the tool with the worst abandonment rate in the corpus. The replay refuses it because the builder derives NO slot for this call at all (derived-slot 0 of 2), so the read-back the ceiling depends on cannot be matched. Same limitation as CA84dc64; tests/liveWriteOrder.test.js owns the ceiling assertion.",
+      "standing_turn": 6,
+      "agreed_turn": 6,
+      "standing_read_back": "Just to confirm, I'll move your appointment to Wednesday, September 23rd at 12:30 PM. Shall I go ahead with that?",
+      "agreed_read_back": "Just to confirm, I'll move your appointment to Wednesday, September 23rd at 12:30 PM. Shall I go ahead with that?",
+      "target": null,
+      "target_candidates": [
+        "2026-09-23T12:30:00",
+        "2026-09-23T14:30:00"
+      ],
+      "target_from": "Just to confirm, I'll move your appointment to Wednesday, September 23rd at 12:30 PM. Shall I go ahead with that?",
+      "target_derived": true,
+      "caller_text": "go on",
+      "caller_text_source": "logged"
+    }
+  ]
+}

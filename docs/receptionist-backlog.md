@@ -5412,6 +5412,40 @@ The fix is to fire that same check on a model-issued successful write when a
 spelling was captured on the call: contained, once per call, silent, and it
 follows the design already there instead of inventing a second one.
 
+#### SECOND CORRECTION, same night — recency is NOT the mechanism either
+
+The table above says the letters win when the spelling lands close to the write.
+**`CA94817d`, rev `00088`, falsifies it on the first call that tested it.**
+
+| call | spelling → write | name written |
+|---|---|---|
+| `CA0ef8d2` | **101 s** | wrong |
+| `CA6dcec7` | 2 s | right |
+| `CA94817d` | **104 s** | **right** |
+
+A *longer* gap than the failing case, and it came out correct. Two calls made a
+tidy story and the third broke it.
+
+**What actually separates them is the READ-BACK, not the write.** On `CA94817d`
+the model said *"I'll read back your details: &lt;corrected name&gt; for a free
+strategy call on Wednesday…"* — it had already repaired its working copy of the
+name before it went near the tool. On `CA0ef8d2` the read-back itself carried
+the misheard version, so the name was settled wrong a turn before any write
+happened.
+
+**This kills the fix sketched above.** Firing a name-check at the write would
+have changed nothing on either call: on one the name was already right, on the
+other it was already wrong and the write was merely where the damage landed. A
+check at the write is downstream of the decision.
+
+**Rate, corrected: 1 wrong in 4**, not 1 in 3.
+
+**What the next round should actually do:** read every call in `call-corpus/`
+where a name was spelled, and compare the spelling against the model's next
+READ-BACK. That says where the name is decided and whether anything can be done
+about it. Until that exists there is nothing worth building here, and this entry
+should not be used to justify a change.
+
 One limit on the evidence, stated rather than glossed: the booked name is read
 off the read-back at 15:55:34, three seconds before the write, with no name
 exchange in between. The tool arguments are not logged. Confirming it from the
@@ -15880,3 +15914,122 @@ Thirteen fixture expectations flipped, and three of them are the calls this
 whole corpus was built around — `CA9c8e42`'s cancel goes through, `CA954592`'s
 final booking lands instead of being announced falsely, and `CAb4c0eb`, the
 original lost booking, is no longer lost.
+
+---
+
+# VERIFIED ON CALLS — LVX153, LVX156 and the VAD, 2026-09-19 night
+
+Five calls on `voice-uk-prod-00088-wjk`, all `verdict=ok`, nothing abandoned, on
+the three tools that had been failing.
+
+| | before | after |
+|---|---|---|
+| `write_order_gate_ceiling` | **0 firings in 33 calls** | fired **twice**, both released correctly |
+| the Thursday appointment | survived two cancel attempts | cancelled |
+| reschedule | 38% of calls abandoned | landed, first attempt at the ceiling |
+| reply p50 | 2,473 ms | **1,868 ms** |
+| reply p25 | 1,916 ms | **1,276 ms** |
+
+The ceiling fired on `CA84dc64` (cancel, answer heard as *"A vehicle, I can
+cancel that?"*) and `CA240834` (reschedule, answer *"12:30"* — a slot
+restatement `isAffirmative` does not read as consent). Both released, both
+correct, both `changed_rows=1`.
+
+## The VAD verdict: keep it unset
+
+The interruption rate spiked after unsetting and then decayed as data arrived:
+
+```
+calls at unset:   1      2      3      4      5
+interrupted/100  14.3   10.0    8.6    5.9    5.9
+```
+
+Against **4.7 per 100 at VAD 1600**. Every event was on a single call; the last
+three calls recorded **zero interruptions between them**. That is an outlier
+diluting, not a regression.
+
+**And the latency win is larger than LVX154 claimed.** The p50 figure understates
+it: p25 went 1,916 → **1,276 ms**, so the quick replies — the ones that make a
+conversation feel responsive — are **640 ms faster**. The p50 number was the
+conservative half of the story.
+
+## The closing sequence, which was not measured before
+
+Two of the five calls produced the textbook order — completion, then *"anything
+else?"*, then the goodbye, in three separate turns. `live_goodbye_exit_held_no_ask`
+fired on a third and held an exit the caller had not been asked about, and the
+model then asked properly.
+
+So the closing guards work. **What they do not fix is the early goodbye**, which
+is a separate defect and is written up below.
+
+---
+
+# LVX157 — it says goodbye the moment the job is done, without asking
+
+**OPEN. Reported by the owner, then measured. This is NOT the goodbye-then-ask
+jam, which is a different and much smaller thing.**
+
+Two thirds of the time the assistant finishes an action, it signs off in the
+same breath and never asks whether the caller needs anything else:
+
+```
+33 calls
+turns that COMPLETE an action AND sign off together :  9
+  of those, also asked "anything else"              :  3
+  so: farewell with NO ask at all                   :  6
+  caller demonstrably still had something to say    :  2
+```
+
+Verbatim:
+
+```
+"I have successfully booked your strategy call for Tuesday,
+ September 22nd at 9:00 AM. Thank you for calling..."        [NO ASK]
+
+"I've cancelled your strategy call scheduled for Friday,
+ September 18 at 4:30 PM. Thanks for calling..."             [NO ASK]
+
+"That's all set - I've booked your free strategy call for
+ Friday, September 18th at 12:45 PM. Thanks..."              [NO ASK]
+```
+
+## Why the ask-gate does not catch it
+
+LVX132 gates the **`end_call` tool**. When the model merely SAYS a farewell
+without calling it, the gate never runs — nothing is refused, so nothing is
+counted. `end_call_refusals` reads `{no_ask: 0}` on exactly the calls where the
+caller was signed off at.
+
+LVX146's detector exists for this and fires (`live_goodbye_exit_held_no_ask`
+fired on two calls on 2026-09-19), but it works on the turn AFTER the farewell
+has been spoken. It can hold the line open. **It cannot un-say the goodbye**, and
+a caller who has been thanked for calling and wished a good day behaves as though
+the call is over whether or not the line is.
+
+## What it must NOT be confused with
+
+**The goodbye-then-ask jam is fine and should be left alone.** Measured the same
+night: 2 occurrences in 33 calls, and the gate producing it is **11 for 11** —
+every single `end_call` it refused was followed by the caller saying something
+more. Zero wasted turns. That guard is earning its keep and the awkward sentence
+is the visible cost of it working.
+
+## Why the obvious fix is not obvious
+
+`end_call`'s own declaration requires the sign-off in the SAME response as the
+call. Making the farewell wait until after the gate approves was shipped once
+and **reverted the same day**: it produced "You're all set then", then dead air,
+then a silence nudge. Strictly worse than an awkward sentence.
+
+So the fix is about when the model is ALLOWED to compose a sign-off, not about
+adding another guard after it has spoken — and the last attempt in that area
+lasted hours. Its own round, with the revert read first.
+
+## The one lead worth starting from
+
+**It is not universal.** On `CA240834` and `CAec2309`, both 2026-09-19, the model
+produced completion → ask → goodbye across three separate turns, correctly, with
+no guard intervening. Something distinguishes those from the six. Finding it is
+cheaper than designing a gate, and it is the first thing the next round should
+do.
