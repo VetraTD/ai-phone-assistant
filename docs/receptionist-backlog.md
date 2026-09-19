@@ -14775,3 +14775,166 @@ the mess:
 **And the operating rule, which cost nothing to learn twice: commit before
 running the matrix.** Uncommitted work in a file the script patches is the one
 state where its own recovery instructions are dangerous.
+
+---
+
+# THE BLOCKING PIN, MEASURED — and a verdict I got wrong first
+
+`fdd3035` pinned every tool declaration `BLOCKING` on 2026-09-16, and left its
+own verdict open in the comment:
+
+> *"ACCEPTED IS NOT ENFORCED... this is an unverified control until a real call
+> shows the zero-text and promise-only turns gone."*
+
+Twenty-two 3.8 calls in `call-corpus/` now answer it. Revision `00070-b95` is
+the first carrying `GIT_COMMIT_SHA=fdd3035`; `00069-4f8` is `837338c`, the
+commit before.
+
+| | calls | turns | zero-text | promise-only |
+|---|---|---|---|---|
+| before (`837338c`) | 2 | 15 | **5** | **2** |
+| after (`fdd3035`+) | 20 | 270 | **2** | **0** |
+
+Per call: 2.50 → 0.10 zero-text, 1.00 → 0.00 promise-only. **A promise-only
+turn — "let me check the openings" spoken before any lookup ran — has not
+happened once in 270 turns.** The vendor honours the pin.
+
+**I called it ignored an hour before measuring it**, on the strength of ONE
+zero-text turn in a 23-turn call. That is the 0.1-per-call residue, not a
+counter-example, and reading a single event as a verdict is the failure this
+file has recorded more than any other.
+
+**The honest limit: the before arm is two calls.** It cannot separate the pin
+from anything else that shipped between those revisions. The promise-only number
+is the strongest single signal, because that symptom is specifically "spoke
+before the tool returned".
+
+## What it rules out, and what it does not
+
+**Ruled out:** the model talking over work it has not received. That was the
+leading explanation for the false-completion claims and it is now the weakest.
+
+**NOT established, and I over-claimed this too:** that the REFUSAL WORDING is
+the cause. The reasoning is that the model waits, reads
+
+> `[not caller speech] NOT A FAILURE — nothing is wrong and nothing needs
+> redoing... Do not tell the caller anything went wrong, do not say the booking
+> failed`
+
+and then says "that's all booked". Plausible, suspicious, and untested — the
+text has not been varied. Competing explanations that survive:
+
+- the model may assert completion by default regardless of the tool response;
+- it may not track `success: false` reliably at all;
+- the prompt rule "never claim an action happened unless the tool returned
+  success=true" sits thousands of tokens away while the refusal is immediate, so
+  RECENCY may matter more than wording — in which case rewording does nothing
+  and moving the rule closer is the fix.
+
+Three refusal rewordings have already failed to change this model's behaviour.
+That is the base rate for this class of fix here.
+
+**The test is an A/B:** change the refusal text, hold everything else, count
+`live_claim_unbacked_by_action` on calls where a write was refused. Six to eight
+calls for anything worth believing.
+
+## GPT-Live does not solve it either, and this was already measured
+
+`docs/gptlive-vs-gemini38-architecture.md` §7. GPT-Live gives a real chokepoint
+the Gemini API does not: a tool result is appended and the model stays silent
+until the application sends `response.create`. That is genuine control over WHEN
+it speaks — and the documented trap is that forgetting the second call leaves
+the assistant silent forever.
+
+It is not control over WHAT it says. Both vendors document the same hazard, and
+OpenAI states it as *"a corrective instruction cannot retract audio already
+heard"*. Probed: **GPT-Live leaked 0 of 10, 3.8 leaked 0 of 9.** Neither races.
+
+So the hook is better and the defect is vendor-independent. Switching would
+re-litigate a settled measurement to buy a control that still has to be built.
+
+---
+
+# LVX148 — the denial counter was double-counting the times it offered
+
+`CA58bb3640`, 2026-09-19. Reported FOUR denied slots; two were alternatives
+being OFFERED:
+
+```
+"I'm sorry, 2 PM isn't available on Monday, but we do have openings at
+ 1:30 PM or 2:30 PM."      ->  slots: [13:30, 14:00, 14:30]
+```
+
+The existing sentence split exists for exactly this and cannot reach inside one
+sentence. **This counter decides whether the underlying defect is worth a gate,
+so a number that over-reports argues for building the wrong thing.** Now split
+at the contrast word — where a reply turns from what it cannot do to what it
+can.
+
+Settled against the real sentence and four others in a throwaway script first.
+Two things that cost nothing to find that way and would have cost a round
+otherwise:
+
+- the first draft of the double-refusal test ended *"but Monday is wide open"*,
+  and every slot in that fixture is a **Friday** — `readBackMentionsSlot`'s
+  weekday guard correctly refused all three and the case scored 0 for a reason
+  unrelated to the split;
+- `deniedAvailabilityRe` cannot see *"neither 1 PM nor 4:30 PM is available"* at
+  all. A real gap, recorded and deliberately not widened on the way past.
+
+**The underlying defect is NOT fixed.** On that call the assistant turned down
+2 PM Monday while its own verified-open set contained `2026-09-21T14:00`, twice,
+and no gate watches for a model contradicting its own tool result. The rate is
+now measurable without being inflated, which is the honest next step.
+
+# LVX149 — the English-only tenant was told nothing about language
+
+The identity section has always carried two language branches: multilingual, and
+single NON-English. Neither fires for `languagesSpoken: ["en"]` — length 1, and
+it IS English. **On the only tenant this project runs, the model received no
+instruction about language anywhere in the prompt.**
+
+It was not misbehaving when it drifted. Live transcription hands it the caller's
+turn already in another language — "C'est tout bien", "Ahm, no entiendo", "Ja,
+klar", all verbatim from calls where the caller was speaking English — and with
+nothing said about language, the reasonable answer to a French sentence is a
+French sentence. `CA5b7e359` replied in Spanish, `CA58bb3640` in French.
+
+The Live API exposes no way to constrain or report the INPUT language, so this
+cannot be fixed at source; `output_language_pinned` is the VOICE and has misled
+two readers. What is left is saying what the business speaks, and the line names
+the mis-hearing explicitly, because "reply in English" alone competes with a
+whole French sentence in the context and loses.
+
+Six golden snapshots moved — three English-only fixtures × two modes, six
+insertions of one line, nothing removed. The bilingual and Spanish fixtures did
+not, which is the correct blast radius.
+
+**First clean call afterwards: `CA954592e`, zero non-English turns.** One call.
+
+## What a bilingual tenant would actually need, since it came up
+
+`resolveLang(config)` returns `languagesSpoken[0]` — **the first entry, for the
+whole call.** So the prompt tells a bilingual tenant to follow the caller's
+language while the guards stay pinned to one, chosen by array order:
+
+| config | guards run in |
+|---|---|
+| `["en","es"]` | English, including for Spanish callers |
+| `["es","en"]` | Spanish, including for English callers |
+
+And the Spanish bundle is materially thinner:
+
+```
+confirmReadBackRe      EN 2108   ES  241
+completionClaimRe      EN 1052   ES  186
+closingTicRe           EN  323   ES   28
+deniedAvailabilityRe   EN  277   ES    0   <-- does not exist
+```
+
+So a Spanish call runs with a write-consent gate that struggles to recognise a
+read-back, a claim guard that misses most fabrications, and no refused-time
+detector at all. **"Support Spanish too" is not adding a string to an array**,
+and the array's ORDER currently decides which guards protect the call. A
+separate number per language is the cheap correct answer; per-turn `resolveLang`
+plus Spanish detector parity is the expensive one.
