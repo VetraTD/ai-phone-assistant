@@ -902,3 +902,130 @@ describe("LVX144's probe line", () => {
     expect(p.restated_slot).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX150 — the refusal never said what the state of the world was.
+//
+// Until now every held-write refusal in services/tools.js opened "NOT A
+// FAILURE - nothing is wrong and nothing needs redoing" and then described
+// only what to DO next. The single thing carrying "this did not happen" was
+// `success: false`, one boolean, against three sentences of reassurance.
+// Scored over call-corpus/ with scripts/corpus/score-claims.mjs: 11 of 39
+// refused-write episodes were followed by the assistant telling the caller it
+// was done, 4.0 to 11.0 seconds later.
+//
+// These are the FIRST tests to assert this gate's message content at all. The
+// three suites that looked like coverage -- liveExitPrecedence, livePostCall,
+// liveDeferralGuard -- each hand-write a string of this shape as a stub
+// `execute` and never call services/tools.js, so the real text could have said
+// anything and they would all have stayed green. That is the same trap as the
+// judge stub whose shape came from a log line.
+//
+// What is asserted, and why each one:
+//   - the state comes FIRST, before the reassurance. That is the change.
+//   - "NOT A FAILURE" is still present. It is demoted, not deleted: LVX34's
+//     failure (the model read success:false as "impossible" and offered a
+//     callback twice) is not being reopened to test this.
+//   - the noun matches the TOOL. A cancellation told "has NOT been booked" is
+//     a second false statement in the other direction.
+//   - `gated: true` still set. retryPendingWrite branches on it, and CAa08fc3
+//     is what happens when it is missing.
+// ---------------------------------------------------------------------------
+describe("LVX150 — a held write says what did not happen, first", () => {
+  // appointment_id, because pack.hasWriteTarget reads args/scratch/callerContext
+  // and NOT the database: a change tool with nothing to act on skips this gate
+  // entirely so the pack can say "there is nothing on record" instead. Without
+  // the id these two tests pass through a different branch and assert nothing.
+  const cancel = (c) =>
+    executeToolCall(
+      { id: "fc9", name: "cancel_appointment_db", args: { appointment_id: "appt-7" } },
+      c
+    );
+  const reschedule = (c) =>
+    executeToolCall(
+      {
+        id: "fc9",
+        name: "reschedule_appointment_db",
+        args: { appointment_id: "appt-7", new_scheduled_at: FUTURE_SLOT },
+      },
+      c
+    );
+
+  // The branch where the assistant never put it to the caller.
+  const NO_READ_BACK = { said: "Cancel it", replied: "You have one appointment coming up." };
+  // The branch where it did, and called before the answer arrived.
+  const READ_BACK_NO_YES = { said: "Yes, but make it Thursday instead" };
+
+  for (const [label, seed] of [
+    ["no read-back yet", NO_READ_BACK],
+    ["read-back made, no yes yet", READ_BACK_NO_YES],
+  ]) {
+    it(`states the outcome before the reassurance (${label})`, async () => {
+      const { functionResponse } = await book(ctx(seed));
+      const m = functionResponse.response.message;
+
+      expect(functionResponse.response.success).toBe(false);
+      expect(functionResponse.response.gated).toBe(true);
+      expect(m).toMatch(/^\[not caller speech\] NOTHING HAS BEEN WRITTEN/);
+      expect(m).toContain("the appointment has NOT been booked");
+      // The ORDER is the whole change. Reassurance after the fact, not instead
+      // of it.
+      expect(m.indexOf("NOTHING HAS BEEN WRITTEN")).toBeLessThan(m.indexOf("NOT A FAILURE"));
+      expect(m).toContain("NOT A FAILURE");
+      expect(m).toMatch(/do not tell the caller this is done until a call to this tool comes back successful/i);
+      // LVX34's guarantees, unchanged.
+      expect(m).toMatch(/do not offer a callback/i);
+      expect(m).toMatch(/anything went wrong/i);
+    });
+  }
+
+  it("keeps the two branches saying different things about the read-back", async () => {
+    const asked = (await book(ctx(READ_BACK_NO_YES))).functionResponse.response.message;
+    const notAsked = (await book(ctx({ ...NO_READ_BACK, turn: 9 }))).functionResponse.response.message;
+
+    // Asking for a second read-back when one already happened is the defect
+    // that split this message in two; the preamble must not have merged them.
+    expect(asked).toMatch(/do not read them back\s+again/i);
+    expect(notAsked).toMatch(/Read the details back to them in one short sentence/);
+    expect(notAsked).not.toMatch(/do not read them back/i);
+  });
+
+  // A cancel or reschedule with nothing on record never reaches this gate --
+  // `hasTarget` is false, so capabilities/appointments.js answers first with
+  // "no upcoming appointments on record". The row is what puts the write-order
+  // gate back in the path. Found by the test failing for the wrong reason,
+  // which is the cheapest possible way to find it.
+  const ONE_ON_RECORD = [
+    { id: "appt-7", scheduled_at: FUTURE_SLOT_ISO, client_name: "Marcus Bell", status: "scheduled" },
+  ];
+
+  it("names the cancellation, not a booking", async () => {
+    mockListAppointmentsByCaller.mockResolvedValue(ONE_ON_RECORD);
+    mockGetAppointmentById.mockResolvedValue(ONE_ON_RECORD[0]);
+    const { functionResponse } = await cancel(ctx(NO_READ_BACK));
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toContain("the appointment has NOT been cancelled");
+    expect(functionResponse.response.message).not.toContain("has NOT been booked");
+  });
+
+  it("names the reschedule as a move that did not happen", async () => {
+    mockListAppointmentsByCaller.mockResolvedValue(ONE_ON_RECORD);
+    mockGetAppointmentById.mockResolvedValue(ONE_ON_RECORD[0]);
+    const { functionResponse } = await reschedule(ctx(NO_READ_BACK));
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toContain("the appointment has NOT been moved");
+    expect(functionResponse.response.message).toContain("still stands at its original time");
+  });
+
+  it("leaves the caller-facing line alone", async () => {
+    // The model-facing message is the only thing this change touches. What the
+    // caller can hear is a separate field and it stays a plain question.
+    const { stateEffects } = await book(ctx(NO_READ_BACK));
+
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    expect(stateEffects.toolResult.message).not.toContain("NOTHING HAS BEEN WRITTEN");
+    expect(stateEffects.toolResult.message).not.toContain("[not caller speech]");
+  });
+});

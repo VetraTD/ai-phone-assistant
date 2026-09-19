@@ -137,6 +137,77 @@ function writeAttemptMaxRefusals() {
   return Number.isFinite(v) && v >= 1 && v <= 10 ? v : 3;
 }
 
+/**
+ * WHAT DID NOT HAPPEN, said first, in the tool's own noun.
+ *
+ * ---------------------------------------------------------------------------
+ * LVX150. The experiment, and what it is a test OF
+ * ---------------------------------------------------------------------------
+ *
+ * Every gate in this file that HOLDS A WRITE used to open the same way:
+ *
+ *   "NOT A FAILURE — nothing is wrong and nothing needs redoing..."
+ *   "NOT A FAILURE — this is still going ahead, it just needs..."
+ *
+ * and then never said what the state of the world was. The only thing carrying
+ * "this did not happen" was `success: false`, one boolean, against three
+ * sentences of reassurance that read — if you take them literally, which is
+ * what a language model does — as "it's fine". Measured on call-corpus/:
+ * ELEVEN of 39 refused-write episodes were followed by the assistant telling
+ * the caller it was done, 4.0 to 11.0 seconds later. 28%.
+ *
+ * The reassurance is not a mistake and is not being removed. It was written
+ * for LVX34, where the model read `success: false` as "this cannot be done"
+ * and offered the caller a callback twice rather than asking the one question
+ * it had been asked to ask, and it fixed that. So the state goes IN FRONT of
+ * it rather than in place of it, and "NOT A FAILURE" stays in the string.
+ *
+ * WHAT THIS IS NOT. It is a request, and a request competes with everything
+ * else in the context (see the goodbye that no refusal could retract, and the
+ * three rewritten refusals that never made the model retry an abandoned
+ * write). THREE REFUSAL REWORDINGS HAVE ALREADY FAILED HERE. This one is
+ * instrumented — `scripts/corpus/score-claims.mjs` scores the same rate before
+ * and after — precisely so that its failure is a RESULT and not another
+ * unfalsified story. If the rate does not move, wording is eliminated and what
+ * is left is recency or the cascade's ordering guarantee.
+ *
+ * ONE VARIABLE. Applied to all four write-holding gates in this file and to
+ * nothing else: `end_call`'s refusals report a call state, not a held write,
+ * and the `capabilities/appointments.js` "NOT A FAILURE" family reports what a
+ * RECORD says. Leaving the silent-turn gate on the old text would have put 5
+ * of the corpus's 47 refusals in the wrong arm.
+ *
+ * The noun is per tool because a cancellation told "the appointment has NOT
+ * been booked" is a second false statement, in the other direction.
+ */
+const HELD_WRITE_STATE = {
+  book_appointment:
+    "the appointment has NOT been booked and there is nothing in the diary for it",
+  cancel_appointment_db:
+    "the appointment has NOT been cancelled and it is still standing in the diary",
+  reschedule_appointment_db:
+    "the appointment has NOT been moved and it still stands at its original time",
+  correct_appointment_name:
+    "the name has NOT been changed and the record still holds the old one",
+};
+
+function heldWriteState(toolName) {
+  const state = HELD_WRITE_STATE[toolName];
+  return state || "nothing has been written and the record is unchanged";
+}
+
+/**
+ * The opening every held-write refusal shares. Ends with a colon so the gate's
+ * own guidance reads on from it as one sentence.
+ */
+function heldWritePreamble(toolName) {
+  return (
+    `[not caller speech] NOTHING HAS BEEN WRITTEN — ${heldWriteState(toolName)}. ` +
+    `Do not tell the caller this is done until a call to this tool comes back ` +
+    `successful. This is NOT A FAILURE and nothing needs redoing: `
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -991,7 +1062,8 @@ export async function executeToolCall(fc, ctx) {
                   success: false,
                   gated: true,
                   message:
-                    `[not caller speech] NOT A FAILURE — nothing has gone wrong and this is still ` +
+                    heldWritePreamble(fc.name) +
+                    `this is still ` +
                     `going ahead. The caller has not answered you: their last turn carried no speech ` +
                     `at all, and they have not agreed to anything on this call. Do not write ` +
                     `anything. Ask them once, plainly, whether to go ahead, and WAIT for their ` +
@@ -1578,13 +1650,14 @@ export async function executeToolCall(fc, ctx) {
                 // actually missing instead: the caller's answer, which nobody
                 // has waited for.
                 const message = readBackMade
-                  ? `[not caller speech] NOT A FAILURE — nothing is wrong and nothing needs redoing. ` +
-                    `You have ALREADY read these details back to the caller; do not read them back ` +
+                  ? heldWritePreamble(fc.name) +
+                    `you have ALREADY read these details back to the caller; do not read them back ` +
                     `again and do not ask them to confirm a second time. You called this before they ` +
                     `had answered. WAIT for their reply, and when they agree, call this again with the ` +
                     `same details. Do not tell the caller anything went wrong, do not say the booking ` +
                     `failed, and do not offer a callback or a message.`
-                  : `[not caller speech] NOT A FAILURE — this is still going ahead, it just needs the ` +
+                  : heldWritePreamble(fc.name) +
+                    `this is still going ahead, it just needs the ` +
                     `caller's go-ahead first. Read the details back to them in one short sentence — what ` +
                     `you are about to do, and when — and ask whether to go ahead. Wait for their answer. ` +
                     `If they say yes, call this again with the same details. Do not tell the caller ` +
@@ -1594,11 +1667,14 @@ export async function executeToolCall(fc, ctx) {
                     id: fc.id,
                     name: fc.name,
                     // HELD, NOT FAILED, as a boolean rather than as prose. The
-                    // message has opened "NOT A FAILURE" since LVX95 and that
-                    // did not help: retryPendingWrite branched on `success`
-                    // alone, so on CAa08fc3 a write this gate was holding for a
-                    // confirmation was announced to the caller as a booking
-                    // that "didn't go through", with a callback offered for it.
+                    // message has said so in words since LVX95 -- "NOT A
+                    // FAILURE" then, "NOTHING HAS BEEN WRITTEN ... This is NOT
+                    // A FAILURE" since LVX150 -- and prose did not help:
+                    // retryPendingWrite branched on `success` alone, so on
+                    // CAa08fc3 a write this gate was holding for a confirmation
+                    // was announced to the caller as a booking that "didn't go
+                    // through", with a callback offered for it. Code, not
+                    // wording, is what fixed that one.
                     response: { success: false, gated: true, message },
                   },
                   stateEffects: {
@@ -1773,7 +1849,8 @@ export async function executeToolCall(fc, ctx) {
             // speech, the name quoted, one attempt per caller turn, and the
             // decline escape hatch that stops a caller being asked forever.
             const message =
-              `[not caller speech] NOT A FAILURE — this booking is still going ahead, it just needs one ` +
+              heldWritePreamble(fc.name) +
+              `this booking is still going ahead, it just needs one ` +
               `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
               // "spell it" was read as "spell the first name". On 2026-09-05 the
               // model asked "could you spell that first name for me?", the caller

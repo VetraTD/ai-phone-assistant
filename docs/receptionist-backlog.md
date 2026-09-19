@@ -14938,3 +14938,206 @@ detector at all. **"Support Spanish too" is not adding a string to an array**,
 and the array's ORDER currently decides which guards protect the call. A
 separate number per language is the cheap correct answer; per-turn `resolveLang`
 plus Spanish detector parity is the expensive one.
+
+---
+
+# THE BASELINE, RE-DERIVED — and the metric that could not carry it
+
+The round before this one specified the A/B's scoreboard as
+`live_claim_unbacked_by_action` over `call-corpus/`. Re-derived from scratch
+rather than taken on trust, and **that metric cannot do the job**. Three
+separate reasons, each found by running code rather than by reading it.
+
+## 1. It is a LIVE counter, so it is three different counters
+
+`call-corpus/` spans revisions `00067` to `00084`, and two commits inside that
+window change what the counter can see:
+
+| commit | first served on | before it |
+|---|---|---|
+| `6bf03e3` LVX140 | rev `00078` | a REFUSED write vouched for the claim it disproved — the counter read **zero** on precisely this population |
+| `bdfbac3` LVX143 | rev `00079` | "has been SUCCESSFULLY rescheduled" did not match at all |
+
+Established by `git merge-base --is-ancestor`, not by dates: `8d3123b` (00076)
+and `b87ee81` (00077) lack `6bf03e3`; `963dfef` (00078) and `0c76433` (00084)
+have it. **18 of the 25 corpus calls were taken on code blind to the thing
+being measured.**
+
+This also closes a question the previous session left open. `CA239c7cd2`
+reports `claim_audit.claimed: 0` on a call carrying a textbook fabrication —
+*"Your appointment has been successfully rescheduled to Thursday, September 24
+at 2:00 PM"*, `changed_rows 0` — and so does `CA94f2b4ef`. **Both are the
+missing adverb slot, and both are already fixed and deployed.** Running HEAD's
+`completionClaimRe` against those exact sentences matches them. Nothing to do.
+
+## 2. It still misses real fabrications at HEAD
+
+Two gaps, both confirmed by running the deployed predicate:
+
+```
+true   Your appointment has been successfully booked for Monday.
+true   Your call has been successfully booked for Monday.
+false  Your strategy call has been successfully booked for Monday.
+false  Your free strategy call has been successfully booked for Monday.
+```
+
+`claimNounSubject` requires the determiner to be followed IMMEDIATELY by one of
+`appointment|booking|call|consultation`. On the only tenant this project runs,
+the thing being booked is a **free strategy call** and the package is an
+**All-In-One Package**, so the live predicate is silent on this business's own
+booking nouns. And `claimCopular` covers `that's / it's / you're / you are` but
+not the uncontracted **"That is all booked."** — spoken on `CA299f23ce` eight
+seconds after a refused book, on a call that wrote nothing.
+
+Five turns across the corpus, two of them fabrications on the honest
+revisions. **Filed as LVX151 and deliberately NOT fixed in the live path during
+the A/B** — see below.
+
+## 3. The counter is not the rate anyway
+
+Of the 16 firings in the corpus, most carry a suppression flag. A raw count
+mixes fabrications with read-backs and with correct reports of an existing
+booking.
+
+## What replaced it: `scripts/corpus/score-claims.mjs`
+
+Scores the TRANSCRIPT against what the tools actually returned, which is fixed
+once the call is over, so every call in the corpus becomes usable whatever code
+took it. Unit is the **episode** — one refused write proposal, not one refusal
+event, because the gate can refuse the same proposal four times inside one turn
+and they all resolve to the same spoken reply. `CA954592e1` alone would
+otherwise contribute ten.
+
+An episode is a FABRICATION when the next assistant turn asserts completion and
+no action tool returned `success: true` between the refusal and that sentence.
+The narrow reading is deliberate: `retryPendingWrite` re-issues a held write in
+code, and when that retry lands the claim is TRUE. `CA7ec8af77` is exactly that
+— refused 14:23:38, succeeded 14:23:42, claimed 14:24:00 — and must not be
+scored against the model.
+
+It reuses the live `confirmReadBackRe` for read-back suppression rather than
+inventing one. **That single decision moves the baseline from 15 to 11**, and
+the four it removes are all of this shape:
+
+```
+"I have you down for a strategy call on Friday, September eighteenth at three
+ thirty PM. Shall we go ahead and book that?"
+```
+
+which is the assistant doing exactly what the refusal asked. Scoring those as
+fabrications would put 36% of the numerator on correct behaviour — and, worse
+for an A/B, **they are the turns a working fix should PRODUCE**, so leaving
+them in would make a successful change look like a failure.
+
+### The baseline
+
+| population | calls | with a refusal | episodes | fabrications | rate |
+|---|---|---|---|---|---|
+| all of `call-corpus/` | 25 | 16 | 39 | **11** | **28.2%** |
+| rev >= `00078` | 7 | 5 | 14 | **5** | **35.7%** |
+
+All 11 hand-read against their transcripts. Two of them are invisible to the
+deployed detector. The gaps between the refusal and the claim run **4.0 to
+11.0 seconds** — a full turn every time, which is what rules out the race for a
+second time on a bigger sample than the first.
+
+---
+
+# LVX150 — the refusal never said what did not happen
+
+Every gate in `services/tools.js` that HOLDS A WRITE opened the same way:
+
+> `[not caller speech] NOT A FAILURE — nothing is wrong and nothing needs
+> redoing...`
+
+and then described only what to DO next. The one thing carrying "this did not
+happen" was `success: false` — one boolean, against three sentences of
+reassurance that read, taken literally, as *it's fine*.
+
+The reassurance is not a mistake and has not been removed. It was written for
+LVX34, where the model read `success: false` as "this cannot be done" and
+offered the caller a callback twice rather than asking the one question it had
+been asked to ask, and it fixed that. **So the state goes in front of it rather
+than in place of it**, and "NOT A FAILURE" stays in the string:
+
+```
+[not caller speech] NOTHING HAS BEEN WRITTEN — the appointment has NOT been
+booked and there is nothing in the diary for it. Do not tell the caller this is
+done until a call to this tool comes back successful. This is NOT A FAILURE and
+nothing needs redoing: <the gate's existing guidance, unchanged>
+```
+
+**The noun is per tool.** A cancellation told "the appointment has NOT been
+booked" is a second false statement in the other direction.
+
+**Applied to all four write-holding gates** — write-order (both branches), the
+silent-turn consent gate, the spelling gate — and to nothing else. `end_call`'s
+refusals report a call state and the `capabilities/appointments.js` family
+reports what a RECORD says; neither holds a write. Leaving the silent-turn gate
+on the old text would have put 5 of the corpus's 47 refusals in the wrong arm.
+
+## What this is a test OF, stated before the result
+
+It is a REQUEST, and a request competes with everything else in the context and
+loses often enough to matter. **Three refusal rewordings have already failed
+here.** This one is instrumented so that its failure is a RESULT rather than
+another unfalsified story: if the rate does not move, wording is eliminated and
+what is left is recency — moving the never-claim rule next to the tool response
+— or giving up speech-to-speech for the cascade's ordering guarantee.
+
+Note honestly: the message now also carries *"do not tell the caller this is
+done until a call to this tool comes back successful"*, which is the prompt's
+non-negotiable rule 2 restated at the point of use. **So a win is "wording or
+in-message recency", not wording alone.** The owner chose that deliberately over
+the weaker state-only variant.
+
+## The tests are the first ones to exist
+
+The write-order gate's two messages had **no test asserting their content at
+all**. Three suites looked like coverage and were not:
+`liveExitPrecedence.test.js`, `livePostCall.test.js` and
+`liveDeferralGuard.test.js` each hand-write a string of this shape as a stub
+`execute` and never call `services/tools.js` — the real text could have said
+anything and all three would have stayed green. The same trap as the judge stub
+whose shape came from a log line.
+
+Two sabotage rows, both anchored on code: `refusal-hides-the-outcome` removes
+the state clause, `refusal-noun-ignores-the-tool` makes every tool say
+"booked".
+
+One thing the tests found that reading would not: a cancel or reschedule with
+nothing on record **never reaches this gate**. `pack.hasWriteTarget` reads
+args, scratch and callerContext and not the database, so a change tool with
+nothing to act on skips the consent question entirely and the pack answers
+"there is nothing on record" instead. The first draft of both noun tests passed
+through that branch and asserted nothing.
+
+---
+
+# LVX151 — the claim detector cannot see this tenant's own booking noun
+
+Recorded, measured, and **deliberately not fixed while the A/B is running**.
+
+`claimNounSubject` requires the determiner to be followed immediately by
+`appointment|booking|call|consultation`; `claimCopular` has no uncontracted
+form. Consequences on the corpus: *"Your free strategy call has been
+successfully booked"*, *"Your All-In-One Package is now booked"*, *"Your
+strategy call is booked for Friday"*, *"That is all booked."*
+
+**Why it waits.** Widening the deployed detector would start firing
+`CLAIM_NOTE` on turns that were previously silent. The model would then
+self-correct more often, and a drop in the fabrication rate could not be
+attributed to the refusal wording. One variable at a time.
+
+The fix, when it comes, is the LVX107 trade applied to the noun-subject branch:
+the object side loosens to any determiner-headed noun phrase **and the verb
+side tightens at the same time** to participles that can mean nothing but a
+booking. `set`, `sorted`, `done`, `updated` and `moved` must NOT come along, or
+"your file has been updated" becomes a fabrication alert. An open head noun also
+needs a question guard that the closed list currently provides for free — *"The
+phone number the appointment is booked under?"* has exactly its shape and is the
+assistant asking.
+
+That design is already built and running, in the scorer, against 304 real
+assistant turns and 15 adversarial negatives. Porting it is the cheap half; the
+measurement of what it changes live is the half that needs a round of its own.

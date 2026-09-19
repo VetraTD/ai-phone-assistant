@@ -597,6 +597,24 @@ const SABOTAGES = [
     replace: "              true && // SABOTAGE",
     red: [ORDER],
   },
+  {
+    name: "refusal-hides-the-outcome",
+    why:
+      "a held write goes back to opening with reassurance alone and never saying what the state of the world is, which is the text 11 of the 39 refused-write episodes in call-corpus/ were spoken into before the assistant told the caller it was done. LVX150. The whole point of that round is that `success: false` on its own is one boolean against three sentences of 'nothing is wrong', so if this clause can be removed with the suite still green, the round shipped nothing that is held in place.",
+    file: "services/tools.js",
+    find: "    `[not caller speech] NOTHING HAS BEEN WRITTEN — ${heldWriteState(toolName)}. ` +",
+    replace: "    `[not caller speech] ` + // SABOTAGE",
+    red: [ORDER],
+  },
+  {
+    name: "refusal-noun-ignores-the-tool",
+    why:
+      "every held write says 'the appointment has NOT been booked', including a cancellation and a reschedule. Telling the model a cancellation was not BOOKED is a second false statement in the other direction, and it is the specific failure a single shared refusal string invites -- the message is one sentence away from being right for three tools and wrong for two of them.",
+    file: "services/tools.js",
+    find: "  const state = HELD_WRITE_STATE[toolName];",
+    replace: "  const state = HELD_WRITE_STATE.book_appointment; // SABOTAGE",
+    red: [ORDER],
+  },
 ];
 
 const only = process.argv.includes("--only")
