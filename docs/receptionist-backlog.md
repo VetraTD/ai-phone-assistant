@@ -16281,3 +16281,54 @@ corrected, and Layer A has not worked.
 `end_call_refusals.no_ask` **can now exceed 1 per call**, which was previously
 stated as an invariant in `lib/voice/metrics.js`. Any series compared across
 2026-09-19 has to know that.
+
+## FIRST CALL — `CA98d6b04`, rev `00089-lx6`, 2026-09-20 02:33
+
+The defect did not occur, and the call cannot be used to say why.
+
+```
+02:35:34.205  book_appointment    success          <- row lands
+02:35:37.288  end_call            REFUSED          <- no_ask: 1
+02:35:41.950  "I've confirmed that booking for you, and is there
+               anything else I can help you with today?"
+02:35:46.284  end_call            success
+02:35:49.960  "Thank you for calling Digile Media. Have a wonderful day."
+```
+
+**No farewell in the completion turn, no goodbye-then-ask jam, and
+`live_completion_signoff_without_ask` did not fire.** The row is right:
+`6e8be0`, Thursday 24th 16:30 local, `client_name: "Nithin Dodla"` — spelled on
+the call and correct in the diary, which is the LVX62 shape coming out right.
+
+### Three things this call does NOT establish, stated because the outcome is flattering
+
+**It does not test Layer B.** One completed action, never asked. The latches
+were in identical states under the old code and plain LVX132 would have refused
+exactly the same hang-up. **The per-action scoping — the entire point — was
+never exercised.** A call needs two pieces of work, or an ask before the work
+exists, and neither has happened yet.
+
+**Layer A did not stop the hang-up attempt.** The note went out with the write
+at 02:35:34 and the model called `end_call` three seconds later regardless. What
+it may have done is keep the FAREWELL out of that turn: nothing was spoken
+between the write and the refusal, where `CA94817d` spoke the goodbye first and
+got the jam. That is the outcome that matters and there is one call of it.
+
+**The instrumentation could not answer the question the call was run to ask.**
+All five counters shipped as process-global `bumpCounter`s, so `note_sent` and
+`note_honoured` had no per-call value at all. This file warns about exactly that
+above `endCallRefusals` and again in `claimAudit`'s docstring, and the warning
+was quoted in the same round that ignored it. Fixed immediately after: the
+`closing` ledger now rides in `live_call_summary` with a sabotage row on the
+wire, because a ledger that is filled in and never emitted reads identically to
+one that was never filled in.
+
+### One new gap, recorded not fixed
+
+`claim_audit.claimed: 0` on this call. ***"I've confirmed that booking for
+you"* is invisible to the claim detector, LVX151 included.** `CLAIM_LOOSE_OBJECT`
+requires one to three words between the subject and the participle and
+"I've confirmed" has none. It cost nothing here — the write had landed — but it
+is the same class as LVX151 and the fix is not obvious: dropping to `{0,3}`
+admits *"I have booked"*, which is wanted, and also every *"I've checked"*,
+which is not. Needs the corpus run that LVX151 got, not a guess.

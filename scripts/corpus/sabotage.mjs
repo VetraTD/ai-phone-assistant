@@ -704,6 +704,15 @@ const SABOTAGES = [
   // any of the three being broken and prove none of them individually.
   // -------------------------------------------------------------------------
   {
+    name: "closing-ledger-wire",
+    why:
+      "drops the per-call closing ledger from live_call_summary. LVX157's five counters shipped as process-global bumpCounters, and on CA98d6b04 -- the first real call on the fix -- whether the completion note had gone out or been honoured had NO per-call answer, so the only question the call was made to settle could not be settled from it. A ledger that is filled in and never emitted reads exactly like one that was never filled in.",
+    file: "lib/voice/live/index.js",
+    find: "      closing: { ...closingAudit },",
+    replace: "      // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  {
     name: "claim-open-head-noun",
     why:
       "closes the head noun back to appointment|booking|call|consultation adjacent to the determiner. The only tenant this project runs books a 'free strategy call' and sells an 'All-In-One Package' -- note that 'call' IS in that list and still does not help, because in 'your free strategy call' it is not next to the determiner. Five turns in the corpus, including CA954592e1's sign-off fabrication.",

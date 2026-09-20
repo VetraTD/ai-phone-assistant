@@ -398,3 +398,116 @@ describe("the defect's own counter", () => {
     expect(counters().live_completion_signoff_without_ask ?? 0).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE PER-CALL RECORD, and this suite is the reason it exists.
+//
+// All five of LVX157's counters shipped on 2026-09-19 as process-global
+// bumpCounters. On CA98d6b04 -- the first real call on the fix -- the outcome
+// was right and **whether the note had gone out or been honoured had no
+// per-call answer at all**, so the one question the call was made to settle
+// could not be settled from it. The counters are zeroed by the next deploy and
+// shared by every call the instance handles.
+//
+// This asserts the WIRE, not the arithmetic: a ledger that is filled in and
+// never emitted reads exactly like one that was never filled in, and that is
+// the most-repeated defect in lib/voice/live/index.js.
+// ---------------------------------------------------------------------------
+describe("the per-call closing record", () => {
+  async function summaryOf(run) {
+    const chunks = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      if (typeof chunk === "string" && chunk.includes('"event":"live_call_summary"')) {
+        chunks.push(chunk);
+      }
+      return true;
+    });
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    const summaries = chunks
+      .flatMap((c) => c.split("\n"))
+      .filter((l) => l.includes('"event":"live_call_summary"'))
+      .map((l) => JSON.parse(l));
+    expect(summaries).toHaveLength(1);
+    return summaries[0];
+  }
+
+  it("carries the note and the ask on the call that made them", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_ledger_honoured");
+      await s.assistantTurn(
+        "That is booked. Is there anything else I can help you with today?"
+      );
+      await s.hangUp();
+    });
+
+    expect(summary.closing).toBeTruthy();
+    expect(summary.closing.actions_completed).toBe(1);
+    expect(summary.closing.ask_note_sent).toBe(1);
+    expect(summary.closing.ask_note_honoured).toBe(1);
+    expect(summary.closing.signoff_without_ask).toBe(0);
+  });
+
+  it("carries the note going UNhonoured, which is the case that decides", async () => {
+    // sent 1 / honoured 0 is what "the model reads the instruction and ignores
+    // it" looks like. Without both numbers on the same record it is
+    // indistinguishable from the note never having been sent.
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_ledger_ignored");
+      await s.assistantTurn(
+        "I have successfully booked your strategy call. Thank you for calling Digile Media, and have a wonderful day."
+      );
+      await s.hangUp();
+    });
+
+    expect(summary.closing.ask_note_sent).toBe(1);
+    expect(summary.closing.ask_note_honoured).toBe(0);
+    expect(summary.closing.signoff_without_ask).toBe(1);
+  });
+
+  it("carries the stale ask and the re-arm, the two shapes the fix is for", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bootLive({
+        config: CONFIG,
+        callSid: "CA_ledger_rearm",
+        seedAppointments: SEEDED,
+      });
+      await cancelsFirst(s);
+      // Never asked, so the first hang-up is refused on the plain LVX132 rule.
+      // Not stale: there is no ask to be stale.
+      expect(ok(await s.callTool("end_call", {}))).toBe(false);
+      await s.assistantTurn(ASKED); // asked, at action 1
+      await s.callerSays("Actually yes, one more thing.");
+      // Action 2. The ask above is now about work that has been superseded, and
+      // the refusal above was spent on it -- both halves move together, which is
+      // CA84dc64 and CA0ef8d221 arriving on the same call.
+      await thenBooks(s);
+      expect(ok(await s.callTool("end_call", {}))).toBe(false);
+      await s.hangUp();
+    });
+
+    expect(summary.closing.actions_completed).toBe(2);
+    expect(summary.closing.ask_rearmed_by_action).toBe(1);
+    expect(summary.closing.ask_latch_stale).toBe(1);
+    // The old invariant, now false and worth pinning as false.
+    expect(summary.end_call_refusals.no_ask).toBe(2);
+  });
+
+  it("is present and empty on a call that completed nothing", async () => {
+    // A clean call and a call the fix could not apply to must not read the
+    // same. actions_completed is the denominator that separates them.
+    const summary = await summaryOf(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_ledger_noop" });
+      await s.callerSays("What are your hours?");
+      await s.assistantTurn("We're open nine to five, Monday to Friday.");
+      await s.hangUp();
+    });
+
+    expect(summary.closing.actions_completed).toBe(0);
+    expect(summary.closing.ask_note_sent).toBe(0);
+    expect(summary.closing.signoff_without_ask).toBe(0);
+  });
+});
