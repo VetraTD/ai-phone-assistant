@@ -5451,6 +5451,19 @@ off the read-back at 15:55:34, three seconds before the write, with no name
 exchange in between. The tool arguments are not logged. Confirming it from the
 row itself needs `db-inspect` via the migrate job.
 
+**2026-09-19 — that is now possible.** `db-inspect --appointments` printed no
+names at all, which is why this entry has been argued four times from a
+read-back and never once from the row. `scripts/db-inspect.js` gained a
+`--names` flag: opt-in, refuses on its own, output byte-identical without it,
+and it extends the `--appointments` select with `client_name` and the last four
+digits of `client_phone`.
+
+That moves the line this file draws, deliberately and once. Everything else in
+it prints shape and never content, because in production the transcript dump is
+patient speech. A `client_name` is not that — it is a value the caller gave in
+order to be written into their own booking, and it is the only column that can
+answer whether the name the assistant wrote is the name the caller spelled.
+
 **And the caller is the owner of this project**, whose name appears correctly in
 `call-corpus/` fixtures from earlier rounds — so this is not an exotic name the
 system has never seen.
@@ -15255,6 +15268,54 @@ That design is already built and running, in the scorer, against 304 real
 assistant turns and 15 adversarial negatives. Porting it is the cheap half; the
 measurement of what it changes live is the half that needs a round of its own.
 
+## PORTED, 2026-09-19 — and the blast radius measured first
+
+The A/B closed "not demonstrated" at 0 of 7, so the one reason to wait was gone.
+
+**Moved, not copied.** `CLAIM_MODIFIED_NOUN`, `CLAIM_UNCONTRACTED_COPULAR`, the
+`REPORTING_THAT` boundary and the per-sentence question guard now live in
+`lib/voice/strings.js` behind `claimsCompletion(text)` /
+`claimsCompletionWide(text)`, and `scripts/corpus/score-claims.mjs` imports
+them. Its 18 negatives and 7 positives stayed where they are: `selftest()` runs
+on every invocation and exits 1 on a dirty predicate, so the fixtures go on
+guarding the code from the file they were written in. **A predicate and the only
+thing that can falsify it should not live in the same file.**
+
+**Measured before it shipped**, over every assistant turn in `call-corpus/`:
+
+```
+assistant turns with text : 434
+narrow (drives CLAIM_NOTE):  52
+with the additions        :  62
+NEWLY FIRING              :  10   <- every one a real completion claim
+  already suppressed by readback/existing-report : 0
+  false positives                                : 0
+```
+
+The ten are the tenant's own booking noun (*"your free strategy call is
+booked"*, *"Your All-In-One Package is now booked"*), the uncontracted copular
+(*"That is all booked"*), and the complement clause (*"Yes, I have confirmed
+that your appointment is booked"*).
+
+**The number that justifies it:** `score-claims.mjs` reported **2 of 12
+fabricated episodes invisible to the live detector** before the port and **0**
+after. Both were uncorrected fabrications the model was never told about —
+`CA03558d` with `booked_rows: 0`, and `CA299f23ce` eight seconds after a refused
+write.
+
+**The question guard is load-bearing and is its own sabotage row.** With an open
+head noun and no guard, *"The phone number the appointment is booked under?"* —
+the assistant asking — becomes a fabrication alert.
+
+**Spanish keeps its regex and gets the key.** The additions are English
+determiners and English copulas. Applied to `es` they would be inert rather than
+wrong, but inert and validated-against-nothing read identically in a counter;
+this is the trade `deniedAvailabilityRe: null` already makes.
+
+**Expect `claim_audit.note_sent` to rise.** Turns that were silent will now get
+a note when they are also unbacked. That is the point, and it means claim
+counters are not comparable across this change.
+
 ---
 
 # LVX152 — a spelling question buries the agreement underneath it
@@ -16033,3 +16094,129 @@ produced completion → ask → goodbye across three separate turns, correctly, 
 no guard intervening. Something distinguishes those from the six. Finding it is
 cheaper than designing a gate, and it is the first thing the next round should
 do.
+
+#### CORRECTION, 2026-09-19 — a guard DID intervene on `CA240834`
+
+The paragraph above is half wrong, and the wrong half is the one that would
+have set the next round looking in the wrong place.
+
+```
+22:43:33  A: "That's all set. Your appointment is now confirmed for
+              Wednesday, September 23rd at 12:30 PM."      <- no farewell
+22:43:37  end_call   success=FALSE                         <- REFUSED
+22:43:39  A: "Is there anything else I can help you with today?"
+22:43:42  end_call   success=TRUE
+22:43:46  A: "Thank you for calling Digile Media. Have a great day."
+```
+
+`live_call_summary` for that call reads `end_call_refusals {no_ask: 1}`. The
+model asked **because LVX132 refused it**, not on its own initiative. Reading
+the ask and the goodbye as separate turns and concluding "no guard fired" is
+what a transcript looks like when a guard fires correctly — the refusal is
+invisible in the words.
+
+`CAec2309` IS a genuine clean case, and for a reason worth naming: the model
+asked *"Is there anything else I can help you with today?"* at 22:45:42, while
+reporting the caller's existing appointment, **before any action had run at
+all**. It then asked again in the same turn as the completion. Nothing was
+outstanding at the sign-off because the question had been kept alive throughout.
+
+So the honest lead was: one call in the pair is the gate working, and the other
+is the model asking early. Both point at the same thing — whether an ask is live
+at the moment the work finishes — and that is what the round below acted on.
+
+---
+
+# LVX157 — MECHANISM, AND WHAT SHIPPED · 2026-09-19
+
+Measured over **all 37 calls in `call-corpus/`** rather than one night: **12
+turns complete an action and sign off in the same breath, 11 of them without
+asking anything.** That is a count of turns in a corpus of investigations, not a
+rate — the calls are in the corpus *because* something went wrong on them. The
+number in the unit a caller would recognise is still the owner's: 6 farewells
+with no ask across the night's 33 calls, 2 of which left a caller with something
+to say.
+
+**What the corpus cannot settle:** `live_utterance` carries `transcript_chars`,
+not text. All 11 have caller voice after the farewell and 8 have more than
+fifteen characters of it, but "Bye." and "Actually, one more thing" are the same
+event to that instrument. The 2-of-6 stands and was not extended.
+
+## Three causes, and only one of them was known
+
+**1. The declaration.** `services/gemini.js:545-561` requires the sign-off in
+the same response as `end_call`. Every guard runs after the words exist. This is
+the constraint, not the bug, and the one attempt to change it — `bfb65fb`,
+reverted by `f603af4` in under four hours for six seconds of dead air — is why
+nothing in this round defers a single word.
+
+**2. The instruction to ask arrives one turn late.** The `confirm` step tail
+(`services/gemini.js:1851-1863`) is the only prompt text that says to ask, and
+the step advances in `applyReplyState` at the END of the turn that completed the
+action. `services/tools.js:532-542` had already measured the consequence and it
+was sitting in this file unused: **0 of 3 asked when `end_call` came first, 4 of
+6 when `confirm` did.**
+
+**3. Both halves of the ask gate could be disarmed before they mattered.** This
+is the new part, and each half has a call behind it.
+
+| | what it was | the call |
+|---|---|---|
+| `askedAnythingElseThisCall` | *"Never reset. A caller asked once has been asked."* | `CA0ef8d221` asked at 15:53:04 with **nothing booked**, booked at 15:55:37, signed off unasked. `{no_ask: 0}`. `CA58bb3640` the same, with a cancel in front. |
+| `anythingElseRefused` | one-shot per **call** | `CA84dc64` spent it at 20:56:22 on a cancel the caller abandoned; the booking landed at 20:58:31 and the 20:58:36 sign-off was ungated. |
+
+Both are the same error: a fact about *the caller* used to answer a question
+about *the work*.
+
+## What shipped
+
+**Layer A — the note on the result.** A successful `book`/`cancel`/`reschedule`
+returns `next_step`, a model-facing instruction to report what it did, ask once,
+and not sign off on that turn. It lands before the model composes anything.
+
+**The seam was measured, not assumed:** across the 33 `end_call` attempts in
+the corpus that follow a successful write, the **shortest** gap between the two
+is 1.86 seconds and **not one pair shares a tool batch**. The model always reads
+this and then decides, in a later round. The one shape where it would not — a
+write and an `end_call` declared together — is exactly why there is a Layer B.
+
+**Layer B — the latches count actions, not calls.** An ask counts only for the
+work that existed when it was asked; one no-ask refusal is available per
+completed action. LVX146's back-door hold is scoped the same way, because a
+model that merely *says* a farewell never touches the gate at all.
+
+**Re-arming requires a SUCCESSFUL write.** A refused write re-arms nothing, so
+the LVX21 livelock — re-propose, refuse, re-propose — cannot recur. That is the
+whole reason the count is of completions rather than attempts.
+
+## The prediction, registered before the code was written
+
+Replayed over `call-corpus/`:
+
+- newly refuses on `CA0ef8d221`, `CA58bb3640`, `CA84dc64`
+- changes **nothing** on `CAec2309` and `CA240834`
+- **11 hang-ups newly refused, 0 newly allowed** — strictly additive
+
+The first version of that simulation reported 7 *newly allowed* and was wrong:
+it read the model's reply to a refusal as text composed in the same turn,
+crediting the gate with an ask its own refusal had produced. That is LVX96 route
+A in a different costume, and it is the second time this exact confusion has
+cost something here.
+
+## What this will look like on a call, stated before it happens
+
+**The goodbye-then-ask jam will get more common.** Every farewell Layer B
+catches was already spoken; the refusal arrives after it. That is the accepted
+trade — an awkward sentence with the caller still on the line beats a caller
+thanked and dismissed with business outstanding — and Layer A exists to keep the
+farewell out of the completion turn so the jam is not the usual outcome.
+
+**Read `live_completion_signoff_without_ask` first.** It is the defect's own
+number and belongs to no guard: bumped on any turn that signs off over a
+completed action with no live ask, whether or not anything then refused, held or
+armed. If only the refusal counters move, the model is being caught rather than
+corrected, and Layer A has not worked.
+
+`end_call_refusals.no_ask` **can now exceed 1 per call**, which was previously
+stated as an invariant in `lib/voice/metrics.js`. Any series compared across
+2026-09-19 has to know that.

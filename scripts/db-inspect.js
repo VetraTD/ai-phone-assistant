@@ -55,6 +55,9 @@ const cfg = {
 //   --appointments      status breakdown and scheduled times. No names, no
 //                       phone numbers, no notes text. Tells `cancelled` from
 //                       `scheduled`, which a count of the table cannot.
+//   --names             ONLY with --appointments, and the one flag in this file
+//                       that prints something a caller supplied. See the block
+//                       above WANT_NAMES for where the line moved and why.
 //   --calls             one line of metadata per call: status, ended_at,
 //                       duration, whether a summary exists, how many
 //                       transcript rows. NO message text. Safe anywhere, and
@@ -79,6 +82,32 @@ const WANT_CALLS = argv.includes("--calls");
 // only way to check a booking existed was to ask the assistant -- which is the
 // thing under test.
 const WANT_APPTS = argv.includes("--appointments");
+// ---------------------------------------------------------------------------
+// --names: THE LINE THIS FILE DRAWS, MOVED ONCE, DELIBERATELY.
+//
+// Everything above prints shape and never content, and the header explains why:
+// in production the transcript dump is patient speech. `client_name` is not
+// that. It is a value the caller gave in order to be written into their own
+// booking, and it is the ONLY column that can answer the question LVX62 has now
+// asked four times and never once settled from the row itself -- whether the
+// name the assistant wrote is the name the caller spelled.
+//
+// On CA0ef8d221 the caller spelled `n i t h i n d o d l a`, the model kept the
+// version it had misheard three turns earlier, read THAT back, and wrote it.
+// The tool arguments are not logged. Every attempt to confirm that from outside
+// the VPC has failed, and the entry has twice been argued from a read-back
+// instead -- which is how a wrong mechanism (recency) survived two rounds and
+// was falsified by the third call that tested it.
+//
+// OPT-IN, NEVER IMPLIED. It does nothing without --appointments, and it is not
+// in the AD_HOC OR on its own: `--names` alone must not unlock anything, or the
+// flag becomes a way to reach the full audit sideways.
+//
+// The phone number is NOT printed in full. Four digits join a row to a caller
+// the reader already knows about and are not a handle on anyone else, which is
+// the same trade --calls makes with the SID.
+// ---------------------------------------------------------------------------
+const WANT_NAMES = argv.includes("--names");
 // Bounded so a tenant with a long history cannot turn one question into a
 // thousand log lines. Cloud Logging drops what it cannot ship, and a truncated
 // answer that looks complete is the failure mode this file already knows about.
@@ -114,6 +143,15 @@ if (!AD_HOC && !looksLikeStaging) {
 // is not one is a mistake worth failing on rather than passing through.
 if (BUSINESS && !/^\+[1-9]\d{6,14}$/.test(BUSINESS)) {
   console.error(`Refusing: --business ${JSON.stringify(BUSINESS)} is not an E.164 number.`);
+  process.exit(1);
+}
+
+// A flag that silently does nothing is worse than one that refuses. --names on
+// its own reads as "print the names" and would have printed nothing at all,
+// which is indistinguishable from a tenant with no appointments -- the exact
+// ambiguity the --appointments flag was added to remove.
+if (WANT_NAMES && !WANT_APPTS) {
+  console.error("Refusing: --names does nothing on its own. Pass --appointments with it.");
   process.exit(1);
 }
 
@@ -404,13 +442,22 @@ try {
             ORDER BY n DESC`
         );
         show("appointments by status", breakdown.rows);
+        // Two column lists rather than one with a NULL in it, so a run without
+        // --names produces output byte-identical to every run before this flag
+        // existed. A diagnostic whose default output moves when a new option is
+        // added cannot be compared against the answers already in the backlog.
+        const nameColumns = WANT_NAMES
+          ? `,
+                  client_name,
+                  right(client_phone, 4) AS phone_last4`
+          : "";
         const rows = await client.query(
           `SELECT right(id::text, 6) AS id_tail,
                   scheduled_at,
                   status,
                   created_at,
                   call_id IS NOT NULL AS from_call,
-                  (notes IS NOT NULL AND notes <> '') AS has_notes
+                  (notes IS NOT NULL AND notes <> '') AS has_notes${nameColumns}
              FROM appointments
             ORDER BY scheduled_at DESC
             LIMIT $1`,

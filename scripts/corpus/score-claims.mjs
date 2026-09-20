@@ -100,100 +100,31 @@ const ACTION_TOOL_HELD = (p) =>
 // by reasoning about the regex.
 // ---------------------------------------------------------------------------
 
-const ADVERB = String.raw`(?:(?:now|already|just|[a-z]+ly)\s+)?`;
-const DONE = String.raw`booked|scheduled|confirmed|cancell?ed|rescheduled|moved|updated|all\s+set|set|sorted|done|finali[sz]ed`;
-/**
- * The clause boundary, plus a complementiser.
- *
- * The connector list alone could not see *"Yes, I have confirmed THAT your
- * appointment is booked."* — `CA03558d`, an uncorrected fabrication on a call
- * with `booked_rows: 0`. The assistant reports its own completed action inside
- * a subordinate clause and the word `that` sits where a boundary has to be.
- *
- * `that` is admitted ONLY after a verb that asserts a completed check, and only
- * when nothing negates it. Both halves are load-bearing and both were settled
- * by running candidates, not by reasoning:
- *
- *   - a bare `that` boundary let three negatives in — "I don't think that your
- *     appointment is booked yet", "Let me check that your appointment is booked
- *     correctly", "I can't see that your appointment is booked".
- *   - `see` was in the reporting list for one run and "I CAN'T see that your
- *     appointment is booked" walked straight through, because the negation sits
- *     on the modal two words to the left where the verb cannot see it.
- *
- * Final shape: 18 negatives clean, 5 positives caught, and across all 304
- * assistant turns in the corpus it adds exactly ONE turn — the real one.
- */
-const NEG_LEFT = String.raw`(?<!\b(?:not|never|cannot|can't|don't|didn't|doesn't|haven't|hasn't|won't|couldn't)\s)(?<!\bn't\s)`;
-const REPORTING_THAT = String.raw`\b${NEG_LEFT}(?:confirmed|checked|verified)\s+that\s+`;
-const BOUNDARY = String.raw`(?:^|["'“‘]|[.,;:!?—-]\s*|\b(?:and|but|so|then|okay|ok|great|perfect|yes|now|also|plus|confirm)[,]?\s+|${REPORTING_THAT})`;
+// MOVED INTO lib/voice/strings.js ON 2026-09-19, LVX151.
+//
+// This is where both additions were built and validated -- over all 304
+// assistant turns in this corpus, against 18 adversarial negatives and 7
+// positives -- and they lived HERE rather than in the live path on purpose:
+// widening the deployed detector while the LVX150 refusal-wording A/B was
+// running would have started firing CLAIM_NOTE on turns that had been silent,
+// the model would have self-corrected more often, and a drop in the
+// fabrication rate could not then be attributed to the wording. One variable.
+//
+// That arm closed "not demonstrated" at 0 of 7, so the predicate has moved
+// into the shipped strings table and this file now IMPORTS it.
+//
+// THE FIXTURES DID NOT MOVE. selftest() runs on every invocation and exits 1
+// on a dirty predicate, so they go on guarding the code from the file they
+// were written in, and this scorer keeps its ability to fail. A predicate and
+// the only thing that can falsify it should not live in the same file.
+//
+// ONE CONSEQUENCE, stated because it changes how this script reads: what it
+// scores is now, by construction, exactly what the live guard sees. Every
+// number printed before the move carried a note that it was deliberately MORE
+// than that, and the "invisible to the live detector" column existed to say
+// how much more. That column should now read 0 on new calls.
+export const wideClaim = (text) => S.claimsCompletionWide(text);
 
-/**
- * ADDITION 1 — a determiner-headed noun phrase with any head noun.
- *
- * The live `claimNounSubject` requires the determiner to be followed
- * immediately by one of appointment|booking|call|consultation. On the only
- * tenant this project runs, the thing being booked is a "free strategy call"
- * and the package is an "All-In-One Package", so the live predicate is silent
- * on this business's own booking nouns. Five turns in this corpus, including
- * the sign-off fabrication on CA954592e1.
- *
- * THE OBJECT SIDE LOOSENS SO THE VERB SIDE TIGHTENS. This branch takes only
- * participles that can mean nothing but a booking; `set`, `sorted`, `done`,
- * `updated` and `moved` are in DONE above and deliberately not here, because
- * "the paperwork is all set" and "your file has been updated" are ordinary
- * sentences that an open head noun would otherwise hand straight to the scorer.
- * LVX107's trade, applied to a different branch.
- */
-const BOOKED_ONLY = String.raw`booked|scheduled|rescheduled|cancell?ed|confirmed`;
-const MODIFIED_NOUN = new RegExp(
-  BOUNDARY +
-    String.raw`(?:your|the|that|this|those|these|both)\s+` +
-    String.raw`(?:[a-z][a-z-]*\s+){0,3}` +
-    String.raw`[a-z][a-z-]*\s+` +
-    String.raw`(?:is|are|'s|(?:has|have)\s+${ADVERB}been)\s+${ADVERB}(?:${BOOKED_ONLY})\b`,
-  "i"
-);
-
-/**
- * ADDITION 2 — the uncontracted copular.
- *
- * `claimCopular` covers that's / it's / you're / you are and stops there, so
- * "That is all booked." — spoken on CA299f23ce eight seconds after a refused
- * book, on a call that wrote nothing — does not match. One character of
- * contraction is the whole difference.
- */
-const UNCONTRACTED_COPULAR = new RegExp(
-  String.raw`\b(?:that|it|everything|you)\s+(?:is|are)\s+(?:all\s+)?(?:${DONE})\b`,
-  "i"
-);
-
-/**
- * A QUESTION IS NOT A CLAIM.
- *
- * Required by ADDITION 1 and by nothing else: its head noun is open, so "The
- * phone number the appointment is booked under?" has exactly its shape and is
- * the assistant asking. The live predicate is protected from that sentence by
- * its closed noun list; this one has to be protected explicitly.
- *
- * Split per sentence rather than per turn so that a real claim followed by
- * "Is there anything else I can help you with?" — which is most of them —
- * still counts.
- */
-function assertiveSentences(text) {
-  return String(text)
-    .split(/(?<=[.?!])\s+/)
-    .filter((s) => s.trim() && !s.trim().endsWith("?"));
-}
-
-export function wideClaim(text) {
-  if (!text) return false;
-  const live = S.completionClaimWideRe || S.completionClaimRe;
-  if (live.test(text)) return true;
-  return assertiveSentences(text).some(
-    (s) => MODIFIED_NOUN.test(s) || UNCONTRACTED_COPULAR.test(s)
-  );
-}
 
 /**
  * A SENTENCE THAT ASKS IS NOT A SENTENCE THAT ASSERTS, and this is not the
@@ -499,7 +430,14 @@ function score(call) {
       backed,
       fabricated: claimed && !backed,
       gapMs: new Date(reply.ts) - new Date(last.ts),
-      liveDetector: S.completionClaimRe.test(reply.text),
+      // What the DEPLOYED guard would see -- the narrow predicate, because that
+      // is what drives CLAIM_NOTE. Now `claimsCompletion` rather than the bare
+      // regex: LVX151 moved the two additions into it, and pointing this at the
+      // old regex would go on reporting a blind spot that has been closed.
+      //
+      // It is not decoration. This column is the only thing that says whether a
+      // fabrication the scorer found was one the model was ever told about.
+      liveDetector: S.claimsCompletion(reply.text),
     });
   }
 

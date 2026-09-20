@@ -85,6 +85,16 @@ const GOODBYE = "tests/liveGoodbyeExit.test.js";
 const EXITCLOSE = "tests/liveExitClose.test.js";
 const WATCHDOG = "tests/liveMediaWatchdog.test.js";
 const ASK = "tests/liveEndCallAsk.test.js";
+// LVX157's suite. A DIFFERENT question from ASK's: that one asks whether the
+// gate refuses a caller who was never asked, this one whether an ask or a
+// refusal spent on EARLIER work still counts for the write that just landed.
+// Every call in ASK has exactly one completed action, so no case in it can tell
+// the two apart -- the same shape as the CLAIM/CLAIMRACE split above.
+const COMPLETIONASK = "tests/liveCompletionAsk.test.js";
+// The claim predicate as the live guard now calls it: the regex plus the
+// per-sentence question guard. tests/completionClaimRe.test.js owns the
+// regexes AND the function, so LVX151's rows point here.
+const CLAIMRE = "tests/completionClaimRe.test.js";
 // The gate's own suite, which calls executeToolCall directly and is therefore
 // the only place the CASCADE's side of a shared gate is visible at all.
 const TOOLSGATE = "tests/tools.test.js";
@@ -292,7 +302,12 @@ const SABOTAGES = [
     why:
       "LVX132's hair trigger. The one-shot latch never reads as spent, so the gate refuses every hang-up on a call where the model never finds the wording -- which is a caller held on the line with no way off it. LVX21 is what that costs, and a latch that is never set looks identical from services/tools.js's own tests.",
     file: "lib/voice/live/tools.js",
-    find: "        anythingElseRefusalSpent: anythingElseRefused,",
+    // RE-ANCHORED 2026-09-19. LVX157 scoped the latch to a completed action, so
+    // the expression gained its second conjunct. The sabotage is unchanged in
+    // meaning -- the wire reads "never spent" -- and still has to break the same
+    // suite, which is the point of re-anchoring rather than retiring a row.
+    find:
+      "        anythingElseRefusalSpent:\n          anythingElseRefused && anythingElseRefusedAtAction === completedActionCount,",
     replace: "        anythingElseRefusalSpent: false, // SABOTAGE",
     red: [ASK],
   },
@@ -307,8 +322,10 @@ const SABOTAGES = [
     why:
       "drops the call-scoped half of askedAnythingElse, so a question asked on an EARLIER turn is forgotten by the time the model tries to hang up. This is the ordinary shape: ask, caller answers, hang up.",
     file: "lib/voice/live/index.js",
+    // RE-ANCHORED 2026-09-19, LVX157: the latch half is now scoped to the
+    // action count it was asked at, so the branch carries its own parentheses.
     find:
-      '      askedAnythingElseThisCall ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
+      '      (askedAnythingElseThisCall && askedAnythingElseAtAction === completedActionCount) ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
     replace:
       '      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")), // SABOTAGE',
     red: [ASK],
@@ -318,9 +335,11 @@ const SABOTAGES = [
     why:
       "drops the half that reads THIS turn's reply at tool time, so a model that asks and calls end_call in one breath is refused although it did exactly the right thing. The latch cannot cover that turn: it is written in auditTurn, at turnComplete, after the tool round.",
     file: "lib/voice/live/index.js",
+    // RE-ANCHORED 2026-09-19, LVX157, same reason as the row above.
     find:
-      '      askedAnythingElseThisCall ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
-    replace: "      askedAnythingElseThisCall, // SABOTAGE",
+      '      (askedAnythingElseThisCall && askedAnythingElseAtAction === completedActionCount) ||\n      Boolean(getStrings(state.config)?.closingTicRe?.test(turnReplyText || "")),',
+    replace:
+      "      (askedAnythingElseThisCall && askedAnythingElseAtAction === completedActionCount), // SABOTAGE",
     red: [ASK],
   },
   {
@@ -633,6 +652,85 @@ const SABOTAGES = [
     find: "  const state = HELD_WRITE_STATE[toolName];",
     replace: "  const state = HELD_WRITE_STATE.book_appointment; // SABOTAGE",
     red: [ORDER],
+  },
+  // -------------------------------------------------------------------------
+  // LVX157. FOUR ROWS, because the fix is four separate decisions and three of
+  // them are one-line conjuncts that a suite could easily not be looking at.
+  // -------------------------------------------------------------------------
+  {
+    name: "completion-ask-note",
+    why:
+      "removes the instruction that rides back with a completed write, which is the ONLY point at which a sign-off can be prevented rather than caught: end_call's declaration requires the farewell in the same response as the call, so every gate downstream runs after the words exist. bfb65fb tried to make the words wait instead and f603af4 reverted it the same day for six seconds of dead air.",
+    file: "lib/voice/live/tools.js",
+    find: "            result.functionResponse.response.next_step = COMPLETION_ASK_NOTE;",
+    replace: "            // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  {
+    // A THIRD ROW ON askedAnythingElse, and the reason is the rule this file
+    // already states twice: ask-branch-latch and ask-branch-in-turn break the
+    // two ALTERNATIVES, and neither of them can see the conjunct added inside
+    // the first one. A row per decision, not a row per expression.
+    name: "ask-latch-per-action",
+    why:
+      "restores the call-scoped ask latch -- 'never reset, a caller asked once has been asked'. CA0ef8d221 asked at 15:53:04 with NOTHING booked, booked at 15:55:37, and signed off unasked at 15:55:46 with end_call_refusals {no_ask: 0}. The gate was satisfied by a question about an empty diary two and a half minutes earlier. CA58bb3640 is the same shape with a cancel in front of it.",
+    file: "lib/voice/live/index.js",
+    find:
+      "      (askedAnythingElseThisCall && askedAnythingElseAtAction === completedActionCount) ||",
+    replace: "      askedAnythingElseThisCall || // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  {
+    name: "no-ask-refusal-rearm",
+    why:
+      "puts the no-ask refusal back to one-shot per CALL. CA84dc64 spent it at 20:56:22 on a cancel the caller then abandoned, completed a booking at 20:58:31, and the sign-off at 20:58:36 went through ungated -- the gate was inert at the only moment it mattered. Re-arming requires a SUCCESSFUL write, so LVX21's livelock stays unreachable: a refused write re-arms nothing.",
+    file: "lib/voice/live/tools.js",
+    find: "        if (anythingElseRefused && anythingElseRefusedAtAction !== completedActionCount) {",
+    replace: "        if (false) { // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  {
+    name: "goodbye-held-per-action",
+    why:
+      "puts LVX146's hold back to one-shot per call. That door is the one a model walks through by simply SAYING a farewell and never calling end_call -- CA299f23ce, CAb4c0eb91 -- so the gate rows above cannot cover it at all. Spent on one piece of work, the back door stood open for the next.",
+    file: "lib/voice/live/index.js",
+    find: "        if (askStillOutstanding && goodbyeExitHeldAtAction !== completedActionCount) {",
+    replace: "        if (askStillOutstanding && goodbyeExitHeldAtAction === null) { // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  // -------------------------------------------------------------------------
+  // LVX151. THREE ROWS, for the same reason: two additions and the guard that
+  // makes one of them safe. A single row switching the pair off would go red on
+  // any of the three being broken and prove none of them individually.
+  // -------------------------------------------------------------------------
+  {
+    name: "claim-open-head-noun",
+    why:
+      "closes the head noun back to appointment|booking|call|consultation adjacent to the determiner. The only tenant this project runs books a 'free strategy call' and sells an 'All-In-One Package' -- note that 'call' IS in that list and still does not help, because in 'your free strategy call' it is not next to the determiner. Five turns in the corpus, including CA954592e1's sign-off fabrication.",
+    file: "lib/voice/strings.js",
+    find: "    String.raw`(?:[a-z][a-z-]*\\s+){0,3}` +",
+    replace: "    String.raw`(?:[a-z][a-z-]*\\s+){0,0}` + // SABOTAGE",
+    red: [CLAIMRE],
+  },
+  {
+    name: "claim-uncontracted-copular",
+    why:
+      "puts the copular branch back to contractions only. 'That is all booked.' was spoken on CA299f23ce eight seconds after a REFUSED book, on a call that wrote nothing, and claimCopular covers that's / it's / you're / you are and stops there. One character of contraction was the whole difference between a fabrication alert and silence.",
+    file: "lib/voice/strings.js",
+    find:
+      "  String.raw`\\b(?:that|it|everything|you)\\s+(?:is|are)\\s+(?:all\\s+)?(?:${CLAIM_DONE_PARTICIPLES})\\b`,",
+    replace:
+      "  String.raw`\\b(?:that|it|everything|you)\\s+(?:'s|'re)\\s+(?:all\\s+)?(?:${CLAIM_DONE_PARTICIPLES})\\b`, // SABOTAGE",
+    red: [CLAIMRE],
+  },
+  {
+    name: "claim-question-guard",
+    why:
+      "lets interrogative sentences reach the two additions. Required by the open head noun and by nothing else: 'The phone number the appointment is booked under?' has exactly a claim's shape and is the assistant ASKING. The closed noun list protected the old predicate from that sentence for free; the open one has to be protected on purpose, and without this the guard starts contradicting the model for asking a question.",
+    file: "lib/voice/strings.js",
+    find: '    .filter((s) => s.trim() && !s.trim().endsWith("?"));',
+    replace: "    .filter((s) => s.trim()); // SABOTAGE",
+    red: [CLAIMRE],
   },
 ];
 

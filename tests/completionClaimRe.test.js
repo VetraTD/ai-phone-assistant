@@ -446,3 +446,110 @@ describe("completionClaimRe — LVX107, the general object form", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX151 — the two shapes the regex above still could not see, and the tenant's
+// own booking noun walking through the middle of them.
+//
+// claimNounSubject requires the determiner to be followed IMMEDIATELY by one of
+// appointment|booking|call|consultation. The only tenant this project runs
+// books a "free strategy call" and sells an "All-In-One Package", so the
+// deployed predicate was silent on this business's own nouns -- note that
+// "call" is IN the closed list and still does not help, because in "your free
+// strategy call" it is not adjacent to the determiner.
+//
+// These assert the FUNCTION, not the regex. The function is the thing
+// lib/voice/live/index.js now calls, and the difference between the two is the
+// per-sentence question guard -- which is load-bearing here and only here: an
+// open head noun turns "The phone number the appointment is booked under?" into
+// a fabrication alert without it.
+//
+// Every positive below is a real sentence from call-corpus/. Measured before
+// the change shipped: across all 434 assistant turns with text in the corpus,
+// the narrow regex matched 52 and this function matches 62, and all ten of the
+// newly matched turns are genuine completion claims. Nothing else moved.
+// ---------------------------------------------------------------------------
+describe("claimsCompletion — LVX151's widening", () => {
+  const claims = getStrings({ languagesSpoken: ["en"] }).claimsCompletion;
+  const claimsWide = getStrings({ languagesSpoken: ["en"] }).claimsCompletionWide;
+
+  const NEWLY_SEEN = [
+    // CA954592e1, the sign-off fabrication. An open head noun over two words.
+    "Your free strategy call has been successfully booked for Monday, September 21st at 9:00 AM.",
+    // CA7ec8af77. The tenant's package, which no closed noun list would hold.
+    "Your All-In-One Package is now booked for Monday, September 21 at 1:00 PM.",
+    // CA58bb3640, and CA94817d06 and CAd9785546 in the same shape.
+    "Your strategy call is booked for Monday, September 21 at 2:30 PM under Nithin Dodla.",
+    // CA299f23ce, spoken eight seconds after a REFUSED book on a call that
+    // wrote nothing. One character of contraction was the whole difference.
+    "That is all booked. Thanks for calling Digile Media, and have a great day.",
+    // CA03558d, an uncorrected fabrication with booked_rows 0. The claim sits
+    // inside a subordinate clause and `that` is where the boundary has to be.
+    "Yes, I have confirmed that your appointment is booked.",
+    // CA7d174d53.
+    "Your new appointment is scheduled for Thursday, September 24th at 1:30 PM.",
+  ];
+  for (const said of NEWLY_SEEN) {
+    it(`sees: ${said.slice(0, 46)}`, () => {
+      expect(claims(said)).toBe(true);
+      expect(claimsWide(said)).toBe(true);
+    });
+  }
+
+  // The negatives the two additions put at risk, and nothing else. Each one is
+  // here because a candidate version of the predicate let it through.
+  const STILL_NOT_CLAIMS = [
+    // THE ONE THE QUESTION GUARD EXISTS FOR. Same shape as an open-head-noun
+    // claim, and it is the assistant asking.
+    "The phone number the appointment is booked under?",
+    // Why the open-noun branch takes booked|scheduled|rescheduled|cancelled|
+    // confirmed and NOT set|sorted|done|updated|moved.
+    "Your file has been updated with that note.",
+    "The paperwork is all set.",
+    // The three that a bare `that` boundary admitted. All negated or
+    // hypothetical, and the negation sits where a verb cannot see it.
+    "I don't think that your appointment is booked yet.",
+    "I can't see that your appointment is booked under this number.",
+    "Let me check that your appointment is booked correctly.",
+    // Still a question, still an offer, still a report.
+    "Would you like that strategy call booked for Monday?",
+    "Do you have that appointment booked already?",
+    "Your appointment is on Monday, September 21st at 2:30 PM.",
+  ];
+  for (const said of STILL_NOT_CLAIMS) {
+    it(`ignores: ${said.slice(0, 46)}`, () => {
+      expect(claims(said)).toBe(false);
+      expect(claimsWide(said)).toBe(false);
+    });
+  }
+
+  // The same property the regexes assert, carried into the functions. Both are
+  // built from the same additions over their own floor, so this holds by
+  // construction -- asserted anyway, because that was true of the regexes too
+  // right up until LVX97 drifted them apart.
+  it("the wide function is a superset of the narrow one", () => {
+    for (const said of [...NEWLY_SEEN, ...STILL_NOT_CLAIMS]) {
+      if (claims(said)) expect(claimsWide(said)).toBe(true);
+    }
+  });
+
+  // A claim followed by the closing question is the commonest real shape in the
+  // corpus. Splitting per sentence is what keeps it counted.
+  it("still sees a claim that ends with the closing question", () => {
+    expect(
+      claims(
+        "Your free strategy call is booked for Friday, September 25th at 1 PM under Nithin Dodla. Is there anything else I can help you with today?"
+      )
+    ).toBe(true);
+  });
+
+  // Spanish keeps its regex and gets the key. The additions are English
+  // determiners and English copulas; applying them to another locale would be a
+  // closed list written from imagination, which is this file's oldest mistake.
+  it("is present on every locale, with the regex alone where there is no evidence", () => {
+    const esClaims = getStrings({ languagesSpoken: ["es"] }).claimsCompletion;
+    expect(typeof esClaims).toBe("function");
+    expect(esClaims("He cancelado su cita.")).toBe(true);
+    expect(esClaims("Your All-In-One Package is now booked for Monday.")).toBe(false);
+  });
+});
