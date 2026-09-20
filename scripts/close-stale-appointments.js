@@ -149,7 +149,16 @@ try {
   console.error(`[stale] failed: ${err?.message}`);
   exitCode = 1;
 } finally {
-  await pool.end().catch(() => {});
-  await close?.().catch?.(() => {});
+  // `close` returns undefined, not a promise, so a `.catch` on it throws in the
+  // finally block and turns a clean run into a failed one. The first dry run
+  // did exactly that: it found the row, rolled back correctly, and then exited
+  // non-zero on the way out. Same shape as db-inspect's teardown, which does
+  // not chain anything onto it.
+  try {
+    await pool.end();
+    await close?.();
+  } catch {
+    /* the work is done; a teardown that fails must not fail the run */
+  }
 }
 process.exit(exitCode);
