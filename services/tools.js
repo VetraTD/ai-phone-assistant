@@ -1668,9 +1668,48 @@ export async function executeToolCall(fc, ctx) {
               // LVX156. A read-back that was made and answered unreadably
               // reaches the ceiling a turn earlier than a write nobody was
               // asked about. See WRITE_ORDER_ASKED_MAX_REFUSALS.
-              const orderCeiling = readBackMade
+              //
+              // -----------------------------------------------------------------
+              // LVX161. "WAS A READ-BACK MADE" IS A FACT ABOUT THE PROPOSAL, NOT
+              // ABOUT THIS TURN, AND READING IT PER-TURN INVERTED THE GATE.
+              //
+              // `readBackMade` looks at the immediately preceding turn pair. So
+              // when the model answers a refusal with an APOLOGY instead of
+              // re-reading the proposal back, the read-back ages out, this flag
+              // goes false, and the ceiling RISES from one to two. The model
+              // apologising bought the gate an extra refusal against the caller.
+              //
+              // CAad88df4a, 2026-09-20, a cancellation the caller had to ask for
+              // four times:
+              //
+              //   04:08:14  readback=TRUE  agreed=false   refuse   (ceiling 1)
+              //   04:08:26  "I am unable to process the cancellations right now"
+              //   04:08:37  "...why the system isn't working right now"
+              //   04:08:39  readback=FALSE agreed=false   refuse   (ceiling 2!)
+              //   04:08:49  readback=TRUE  agreed=TRUE    written
+              //
+              // The 04:08:39 attempt is the same proposal, already read back
+              // once and already refused once. Under LVX156's stated intent it
+              // was at its ceiling and should have been released. It was not,
+              // because two apologies had moved the read-back out of view.
+              //
+              // So the ceiling now asks whether this PROPOSAL was ever read
+              // back, which is what LVX156 meant. Scoped to the proposal and
+              // reset with it: a new proposal is a new question and gets the
+              // full budget, because nobody has been asked about it yet.
+              // -----------------------------------------------------------------
+              const everReadBackThisProposal =
+                readBackMade || (sameProposal && orderScratch.writeOrderEverReadBack === true);
+              const orderCeiling = everReadBackThisProposal
                 ? WRITE_ORDER_ASKED_MAX_REFUSALS
                 : WRITE_ORDER_MAX_REFUSALS;
+              // The two diverging is the whole of this fix, so it is counted
+              // rather than trusted: a release that happens only because the
+              // proposal was read back on an EARLIER turn is invisible against
+              // `write_order_gate_ceiling` alone.
+              if (everReadBackThisProposal && !readBackMade) {
+                bumpCounter("write_order_ceiling_kept_by_history");
+              }
               if (orderRefusals >= orderCeiling) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can
                 // refuse forever holds a caller on the line over our own
@@ -1785,6 +1824,13 @@ export async function executeToolCall(fc, ctx) {
                         // it, because the read-back key is still what the stash
                         // and the latch compare against.
                         writeOrderProposalKey: proposalKey,
+                        // LVX161. Sticky for the life of this proposal, and
+                        // written on EVERY refusal for the same reason the key
+                        // above is: it answers a question about the proposal,
+                        // not about whose turn it is. Cleared implicitly when
+                        // the proposal changes, because `sameProposal` gates the
+                        // read of it.
+                        writeOrderEverReadBack: everReadBackThisProposal,
                         // The shared count, so the spelling gate's
                         // refusals and this one land in the same total.
                         ...writeAttemptPatch(attemptBudget),

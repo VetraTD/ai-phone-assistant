@@ -91,6 +91,11 @@ const ASK = "tests/liveEndCallAsk.test.js";
 // Every call in ASK has exactly one completed action, so no case in it can tell
 // the two apart -- the same shape as the CLAIM/CLAIMRACE split above.
 const COMPLETIONASK = "tests/liveCompletionAsk.test.js";
+// LVX160/LVX161. The two ways a write the caller ASKED FOR ended with nothing
+// written. Not a tail case: measured across call-corpus/ before either fix, of
+// the calls that ATTEMPTED each write, the share ending with no row at all was
+// book 24% (5 of 21), cancel 21% (4 of 19), reschedule 33% (3 of 9).
+const RECOVERY = "tests/liveWriteRecovery.test.js";
 // The claim predicate as the live guard now calls it: the regex plus the
 // per-sentence question guard. tests/completionClaimRe.test.js owns the
 // regexes AND the function, so LVX151's rows point here.
@@ -630,7 +635,11 @@ const SABOTAGES = [
     why:
       "the early ceiling stops distinguishing 'we asked properly and could not read the answer twice' from 'we never asked', so every held write waits for the third attempt again -- and the model gives up after two. CA9c8e42 is what that costs: the caller asked to cancel four times, was told three times that the system was broken, and the appointment is still standing. Measured across 45 refusals, 14 of the 18 where a read-back HAD been made had the caller speaking before the write, with the answer mangled in transcription -- 'go on' as 'gone', 'that works' as 'nada works'.",
     file: "services/tools.js",
-    find: "              const orderCeiling = readBackMade",
+    // RE-ANCHORED 2026-09-20. LVX161 replaced `readBackMade` here with
+    // `everReadBackThisProposal`, which asks the same question of the PROPOSAL
+    // rather than of this turn. The sabotage is unchanged in meaning -- the
+    // early ceiling never applies -- and must still break the same suite.
+    find: "              const orderCeiling = everReadBackThisProposal",
     replace: "              const orderCeiling = false // SABOTAGE",
     red: [ORDER],
   },
@@ -740,6 +749,46 @@ const SABOTAGES = [
     find: '    .filter((s) => s.trim() && !s.trim().endsWith("?"));',
     replace: "    .filter((s) => s.trim()); // SABOTAGE",
     red: [CLAIMRE],
+  },
+  // -------------------------------------------------------------------------
+  // LVX160 and LVX161 — the write the caller asked for that never landed.
+  // -------------------------------------------------------------------------
+  {
+    name: "ceiling-ignores-history",
+    why:
+      "puts the release ceiling back to reading `readBackMade` for THIS turn only, which inverted the gate: when the model answered a refusal with an apology instead of re-reading the proposal back, the read-back aged out, the flag went false, and the ceiling ROSE from one to two. The model apologising bought the gate another refusal against the caller. CAad88df4a needed four before a cancellation went through, with two 'the system isn't working' sentences in between. Distinct from ceiling-ignores-the-read-back, which removes the early ceiling entirely; this one keeps it and makes it unreachable after an apology.",
+    file: "services/tools.js",
+    find: "                readBackMade || (sameProposal && orderScratch.writeOrderEverReadBack === true);",
+    replace: "                readBackMade; // SABOTAGE",
+    red: [RECOVERY],
+  },
+  {
+    name: "in-addition-stash",
+    why:
+      "drops the corrected arguments the pack stores when it refuses a booking for a caller who already has one. The refusal tells the model to re-call with in_addition_to_existing set; on CAad88df4a it asked the caller the right question TWICE and never re-sent the call with the flag, our own retry re-issued the original argument-less call, and the caller was told twice that it could not be booked. Six rewordings of a refusal have failed to make this model change a tool argument, which is why the argument is now stored rather than requested.",
+    file: "capabilities/appointments.js",
+    find: "                            args: { ...args, in_addition_to_existing: true },",
+    replace: "                            args: { ...args }, // SABOTAGE",
+    red: [RECOVERY],
+  },
+  {
+    name: "in-addition-spelling-release",
+    why:
+      "lets the spelling gate settling release an in_addition stash. retryPendingWrite fires on spellingSettled ALONE with no agreement anywhere in the condition -- correct for a write held for letters, which was already consented to, and catastrophic for one created the instant the pack refuses and carrying in_addition_to_existing: true. The first run of liveWriteRecovery.test.js wrote a second appointment for a caller who had just said 'No, move the first one instead.' This row is the difference between a fix and a new defect.",
+    file: "lib/voice/live/index.js",
+    find:
+      '      const spellingMayRelease = spellingSettled(state) && retryReason !== "in_addition";',
+    replace: "      const spellingMayRelease = spellingSettled(state); // SABOTAGE",
+    red: [RECOVERY],
+  },
+  {
+    name: "write-target-arg-keys",
+    why:
+      "stops logging which arguments the model actually sent on a write. Tool arguments have never been logged anywhere, so on CAad88df4a 'the flag was never set' had to be deduced from the refusal branch reached plus the model's own sentences -- on a call that cost the caller their booking. Keys and booleans only, which is the same line the rest of that block already draws: an argument NAME is schema and a boolean is a branch, so no datetime, name or phone is printed.",
+    file: "lib/voice/live/guards.js",
+    find: "        arg_keys: Object.keys(fc.args || {}).sort(),",
+    replace: "        // SABOTAGE",
+    red: [RECOVERY],
   },
 ];
 

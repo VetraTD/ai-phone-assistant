@@ -2057,10 +2057,63 @@ async function bookAppointment(fc, ctx) {
                   message:
                     policy === "block"
                       ? "It looks like you already have an upcoming appointment with us. I can move that one to a new time if you'd like."
-                      : "It looks like you already have an appointment with us — did you want this as a second one, or should I move the existing one?",
+                      : // LVX160. A READ-BACK, NOT AN EITHER/OR.
+                        //
+                        // This used to ask "did you want this as a second one,
+                        // or should I move the existing one?", which names no
+                        // time and cannot be answered yes. Nothing downstream
+                        // could act on the answer: the write-order gate needs a
+                        // read-back that names the slot, and a "yes" to an
+                        // either/or is not consent to either branch.
+                        //
+                        // Naming the new time makes this an ordinary read-back,
+                        // so the caller's "yes" releases the stash below through
+                        // exactly the machinery every other held write uses.
+                        `You already have an appointment with us — shall I book this additional one for ` +
+                        `${speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config))} as well?`,
                   callerSafe: true,
                 },
                 toolCallEvent: { name: fc.name, args },
+                // -----------------------------------------------------------------
+                // LVX160. THE FLAG RIDES IN THE STASH.
+                //
+                // CAad88df4a, 2026-09-20: the caller asked to book, the model
+                // was told to ask about the existing appointment and re-call
+                // with `in_addition_to_existing`, it ASKED THE QUESTION TWICE,
+                // and never re-called with the flag. Our own retry re-issued the
+                // stash from the earlier write-order refusal, which carried the
+                // original arguments and failed here identically. No row, and
+                // the caller was told twice that it could not be booked.
+                //
+                // Six rewordings of a refusal have failed to make this model
+                // change a tool argument. So the corrected argument is stored
+                // rather than requested, and released by the caller's answer
+                // through the existing consent path -- the model does not have
+                // to get anything right for the booking to land.
+                //
+                // `block` never reaches here: the flag is not advertised under
+                // that policy and honouring it would turn an opt-in parameter
+                // into a bypass of the business's own rule.
+                //
+                // A DISTINCT `reason`, and the retry trigger in
+                // lib/voice/live/index.js names it explicitly. That trigger's
+                // own comment records why it may not be widened loosely: a
+                // spelling-gate stash carries the UNSPELLED name, and releasing
+                // that on a "yes" writes the mis-heard name into the row.
+                // -----------------------------------------------------------------
+                ...(policy === "block"
+                  ? {}
+                  : {
+                      capabilityState: {
+                        appointments: {
+                          pendingWrite: {
+                            name: fc.name,
+                            args: { ...args, in_addition_to_existing: true },
+                            reason: "in_addition",
+                          },
+                        },
+                      },
+                    }),
               },
             };
           }

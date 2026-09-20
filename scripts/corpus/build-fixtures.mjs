@@ -687,7 +687,11 @@ const EXPECTATIONS = {
       },
       { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
       { expect: "refuse", why: "cancel read back, caller had not answered yet." },
-      { expect: "refuse", why: "caller agreed, but to a read-back that was no longer standing." },
+      {
+        expect: "write",
+        why:
+          "CHANGED refuse -> write on 2026-09-20 by LVX161, and the expectation was wrong before rather than the code being wrong now. The caller HAD agreed -- this entry said so in its own previous wording -- and the read-back was no longer standing only because the assistant had moved on. That is the same shape attempt 4 already accepts as a write two operations earlier, for the same stated reason. It was refused under the old reading only because `readBackMade` was evaluated for THIS turn, so an apology in between reset the ceiling upward and the accumulated count could never reach it. The cancellation lands one attempt earlier than it used to, on a caller who had already said yes.",
+      },
       { expect: "write", why: "read back and agreed. The cancellation landed." },
       { expect: "refuse", why: "booking fired with nothing read back and nothing agreed." },
       {

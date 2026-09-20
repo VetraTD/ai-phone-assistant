@@ -16487,3 +16487,104 @@ shape on a call where nothing was broken.
   `ask_note_sent` counted NOTES, and two writes in one tool round produced
   `sent=2 honoured=1` on a call where the model did exactly the right thing.
   Two writes in one round can only ever produce one ask. Now one per round.
+
+---
+
+# LVX161 — the apology that raised the ceiling
+
+**FIXED 2026-09-20.** The direct cause of a caller having to ask four times for
+a cancellation, and it had been inverting LVX156's ceiling since that shipped.
+
+## The mechanism
+
+The write-order gate releases a held write once it has refused enough times.
+The ceiling is **1 when the proposal was read back** and **2 when it was not** —
+LVX156's reasoning being that a caller who was asked properly and whose answer
+could not be read deserves the escape hatch a turn earlier than a caller nobody
+asked at all.
+
+`readBackMade` looks at the **immediately preceding turn pair**. So:
+
+```
+04:08:14  readback=TRUE   agreed=false   refuse      ceiling 1, refusals 1
+04:08:26  "I am unable to process the cancellations right now..."
+04:08:37  "...why the system isn't working right now"
+04:08:39  readback=FALSE  agreed=false   refuse      ceiling 2  <-- ROSE
+04:08:49  readback=TRUE   agreed=TRUE    written
+```
+
+Two apology turns pushed the read-back out of view. `readBackMade` went false,
+**the ceiling went UP from 1 to 2**, and the write that was already at its
+ceiling was refused again.
+
+**The model apologising bought the gate another refusal against the caller.**
+And the apologies are themselves produced by the refusals (LVX158), so the loop
+feeds itself: refuse, apologise, apologise, and the apologies make the next
+refusal more likely.
+
+## The fix
+
+"Was a read-back made" is a fact about the **proposal**, not about this turn.
+`writeOrderEverReadBack` is sticky for the life of a proposal and resets with
+it — a new proposal is a new question and gets the full budget, because nobody
+has been asked about it yet.
+
+Counted separately as `write_order_ceiling_kept_by_history`: a release that
+happens only because the proposal was read back on an *earlier* turn is
+invisible against `write_order_gate_ceiling` alone.
+
+## Why it was not caught before
+
+`ceiling-ignores-the-read-back` sabotages the early ceiling **entirely**, and
+`tests/liveWriteOrder.test.js` catches that. Neither could see a ceiling that
+was present and merely unreachable after an apology — the sabotage removes the
+branch, so no case had to survive the branch being *right but starved*. Its
+replacement row, `ceiling-ignores-history`, is the one that covers this.
+
+---
+
+# LVX160 — FIXED, and the defect the fix nearly shipped with
+
+The flag now rides in the stash: when the pack refuses a booking for a caller
+who already has one, it stores the call **with `in_addition_to_existing: true`**
+and the caller's own "yes" releases it. **The model does not have to get the
+argument right for the booking to land** — on `CAad88df4a` it was told twice and
+did not.
+
+The caller-facing line changed too. It used to ask *"did you want this as a
+second one, or should I move the existing one?"* — an either/or that names no
+time and cannot be answered yes, so nothing downstream could act on the reply.
+It now names the new time, which makes it an ordinary read-back.
+
+Tool arguments are now logged on every write as `arg_keys` and `arg_flags` —
+names and booleans only, the same line the rest of that block draws. "The flag
+was never set" was a deduction on a call that cost a caller their booking.
+
+## THE PART WORTH READING: the first version booked an appointment nobody agreed to
+
+`retryPendingWrite` fires on `spellingSettled` **alone**, with no agreement
+anywhere in the condition. That is correct for a write the spelling gate held —
+it was already consented to and was waiting only on letters.
+
+An `in_addition` stash has **not** been consented to. It is created the instant
+the pack refuses, before the caller has answered anything, and it carries
+"book a second appointment". Released by the spelling gate settling, it books
+one the caller never agreed to.
+
+The first run of `tests/liveWriteRecovery.test.js` wrote a second row for a
+caller who had just said **"No, move the first one instead."**
+
+So a reason may be releasable by a "yes" and still not releasable by a spelling
+answer, and **those are two different questions**. The whitelist now has two
+halves. `in-addition-spelling-release` is the row that keeps them apart, and it
+is the difference between a fix and a new defect.
+
+## One property worth stating, since it is not obvious
+
+An `in_addition` stash can only be created when consent has just passed — the
+write-order gate runs first, so the pack is unreachable without it. In practice
+the stash is therefore released on the same turn it is created, by the
+agreement that got the write past the gate. A test written for "the caller says
+no afterwards" could not fail, because the booking has already landed correctly
+by then. That is a safety property, not a gap, and the test that replaced it
+exercises the release path that can actually go wrong.
