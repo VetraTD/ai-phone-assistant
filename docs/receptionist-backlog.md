@@ -16598,3 +16598,163 @@ Three things this cost, all worth keeping:
 - **The sabotage matrix is what settled it**, by reporting STILL GREEN on a row
   written for a guard that does nothing.
 
+
+---
+
+# LVX162 / LVX163 — the two defects three real calls found, and the calls that closed them
+
+**BOTH FIXED, 2026-09-20, rev `00092-tbs`. One verified live, one not.**
+
+## LVX162 — a booking made on the call had no id
+
+`applyToCallerSnapshot` added a booking made DURING the call to the caller
+snapshot with **`id: null`, hardcoded**. That snapshot is what fills a missing
+`appointment_id` for cancel and reschedule, so a caller who books and then
+changes their mind on the same call could not name the row they had just made.
+
+`CA1d405002`: booked 06:52:04, asked to cancel seconds later.
+
+```
+nine cancel attempts, all failing
+THREE of them with gated=false -- the consent gate had already stepped aside
+06:53:12  "I've successfully cancelled..."                      <- false
+06:53:43  "I have cancelled your strategy call..."              <- false again
+06:53:53  "that cancellation didn't go through just yet. May I take
+           your details so someone can follow up?"
+06:54:00  "I'll have someone call you back to sort this out."
+06:54:20  get_caller_appointments_from_db  ->  cancel SUCCEEDS
+```
+
+**Eighty seconds.** And `gated=false` on three attempts is what proves this was
+never a consent problem: the gate had released and the write still failed.
+
+**The id was always available.** `booked` is built as
+`{ ...args, id: bookedRowId }` and the comment at that line records the id being
+restored to the effect after a real call needed it. The restore reached the
+effect and never reached this list -- so the one consumer that needs a row
+identity held the one field that had none.
+
+**VERIFIED on `CAc89df2fe`, 15:03.** Booked, then cancelled on the same call:
+one refusal (the model fired before the caller confirmed), one clarifying
+question, then `cancel_appointment_db success gated=false`. **Eleven seconds.**
+The `gated=false` is the proof -- it passed the gate normally, which it could
+only do by naming the right row.
+
+## LVX163 — a hang-up in the same batch as the write it should have waited for
+
+LVX157's staleness check was resolved in `lib/voice/live/index.js` against its
+**mirrored** action count, which is only written when a tool round returns. A
+batch carrying the write and the hang-up together was therefore judged against
+the world as it stood BEFORE the write.
+
+`CA1dfe055f`:
+
+```
+06:47:33      "...Is there anything else I can help you with today?"   <- 0 actions
+06:49:03.326  book_appointment  SUCCESS
+06:49:03.330  end_call          ALLOWED -- four milliseconds later
+06:49:08      "That's all set, and your appointment is booked..."      <- no ask
+```
+
+`end_call_refusals` read `{no_ask: 0}` on the exact shape LVX157 exists for.
+Layer A's own comment called this "Layer B's case"; **Layer B could not see it
+either.** The two raw facts now leave `turnState` uncombined and the runner
+resolves them against its own live count.
+
+**NOT YET SEEN ON A LIVE CALL.** It needs the model to bundle the write and the
+hang-up, which it has done once in seven calls and cannot be forced.
+
+**`tests/helpers/liveBoot.js` gained `callToolBatch`** for this: `callTool`
+sends one call per message, which is a turn boundary the real session does not
+have, so **no test could reach this shape at all**. That is why it survived a
+whole round of work on the thing it breaks.
+
+## What the verification calls also settled
+
+- **The argument logging paid for itself on its first call.** `CAf4df02ef`
+  booked against an existing appointment and `write_target` recorded
+  `in_addition_to_existing=True` on all three attempts. The model set the flag
+  correctly, unprompted, having asked the caller first. LVX160's stash never
+  fired. That is a FACT now rather than the inference LVX160 was argued from.
+- **LVX159 is intermittent, not systematic.** The same call spelled a name and
+  the row reads `Nithin Dodla` -- correct spelling and correct casing.
+- **Six calls on these builds: zero unasked sign-offs, zero uncorrected false
+  claims, zero lost writes, and no fault sentence since LVX162 shipped.**
+
+---
+
+# DEAD ENDS, 2026-09-20 — four things tried and abandoned, with the reason
+
+Recorded because each looks reasonable on paper, and this file already carries
+entries that exist only because someone re-derived a bad idea weeks later.
+
+## 1. Inferring consent from "the caller spoke"
+
+**Falsified by measurement.** Scored against the 96 hand-written expectations in
+`tests/fixtures/liveCalls/`:
+
+```
+should WRITE, rule releases :  8   <- recovered
+should REFUSE, rule RELEASES: 11   <- the cost
+```
+
+Net harmful. The signal is satisfied by the caller having said *"I need to
+reschedule"* ten seconds earlier, because the model reads a proposal back and
+fires the tool in the same breath.
+
+## 2. Inferring consent from "the caller spoke AFTER the read-back"
+
+The timing repair. Better, still net harmful: **8 recovered, 5 wrongly
+released.** The false releases were a correction (*"It's a 12:45"*), a question
+(*"Yeah, can I cancel that?"*), and three tool calls fired three seconds after
+the model spoke, before any answer existed.
+
+**Both die on the same wall, and it is worth stating plainly: yes and no are
+both voice.** No audio-shaped signal -- duration, loudness, timing -- separates
+them. Only words do.
+
+**This is what makes the external STT the only fix for the mangled yes**, rather
+than the expensive option reached for after cheaper ones fail. Reasoned about
+for an hour, settled by fifteen minutes of measurement.
+
+## 3. A guard on the in_addition stash, written and removed the same hour
+
+The first version of LVX160 excluded that stash from `retryPendingWrite`'s
+`spellingSettled` branch, reasoning it is created before the caller has answered
+and carries "book a second appointment".
+
+**It cannot fire.** `retryPendingWrite` re-enters `handleToolCall`, so the
+released write passes the write-order gate like any other, and the consent latch
+requires agreement matching the STANDING read-back. `sabotage.mjs` reported
+STILL GREEN with the guard removed, before the reasoning caught up.
+
+**What made it look necessary was a test whose premise was wrong** -- it
+asserted no booking may land after the caller says *"No, move the first one
+instead."* One landed, correctly: they had agreed two turns earlier and the row
+was the one they asked for.
+
+## 4. "Suppress the model's sentence and speak the gate's line instead"
+
+Proposed after reading one line of `services/gemini.js:2773`, abandoned on a
+proper read. Three reasons, any one sufficient:
+
+- that line is the **cascade** path; on Live it is not wired at all
+- **there is no TTS leg on Live.** The repeat-cutter can CUT audio; nothing can
+  substitute it
+- the only mechanism that makes the model say a fixed line, `speakLine()`,
+  injects a **user-role turn**. On `CAfc89ebd3` that was measured: the caller
+  said "Yes." three times to a read-back, the agreement ledger recorded nothing,
+  the gate refused the same booking three times and released it unconsented.
+  *"One displaced variable, six consequences."*
+
+Using it on a refused write would inject turns into precisely the conversation
+the consent gate is already failing to read.
+
+## And a reversal worth recording as one
+
+The cheap consent-signal work was recommended **before** the external STT, on
+the grounds it might make the STT unnecessary. The measurement reversed that
+within the hour. **The STT is not the fallback; it is the only thing that
+addresses the cause** -- and it is parked by owner decision on 2026-09-20,
+because a mangled yes now costs a repeated question rather than a lost booking.
+It moves back up the moment bookings start being lost to it.
