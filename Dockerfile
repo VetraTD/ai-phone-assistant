@@ -118,6 +118,7 @@ COPY scripts/seed-staging.js ./scripts/seed-staging.js
 # Read-only. Answers questions about what the REAL database allows, which the
 # local dev container cannot be trusted to represent — it is more permissive.
 COPY scripts/db-inspect.js ./scripts/db-inspect.js
+COPY scripts/close-stale-appointments.js ./scripts/close-stale-appointments.js
 # Lane C's two verification entrypoints. Same job, same reason as the three
 # above: staging's Cloud SQL is private-IP only, so a check that has to run
 # against the real database has to travel in the image.
