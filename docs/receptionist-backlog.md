@@ -16332,3 +16332,73 @@ requires one to three words between the subject and the participle and
 is the same class as LVX151 and the fix is not obvious: dropping to `{0,3}`
 admits *"I have booked"*, which is wanted, and also every *"I've checked"*,
 which is not. Needs the corpus run that LVX151 got, not a guess.
+
+---
+
+# LVX158 — the caller was told it could not be booked, and then it was
+
+**OPEN. P1, and the only caller-facing defect on `CAb034305c`, rev `00090-npw`,
+2026-09-20.** Recorded rather than fixed: the refusal wording has six failed
+attempts behind it and the A/B closed "not demonstrated" at 0 of 7, so this
+needs its own round and not another rewrite.
+
+```
+04:02:36  "I have you down for an additional strategy call on Monday,
+           September twenty first at one PM. Should I go ahead and book that?"
+04:02:45  write_order_refused   book_appointment      <- no consent yet
+04:02:53  "I'm sorry, I CAN'T BOOK THAT TIME RIGHT NOW. Can I take your
+           details so someone can get back to you?"
+04:03:15  book_appointment      SUCCESS               <- 22 seconds later
+```
+
+The gate refused because the caller had not yet answered the read-back. The
+model read that as **the system being unable to book** and fell back to taking a
+message. Twenty-two seconds later the same booking went through.
+
+**This is the failure mode LVX156 already named**, in those words: *"it
+concluded the system was broken and offered a transfer. `CA9c8e42`: four
+requests to cancel, three 'the system is not working', nothing written."* The
+difference is that here the write DID land, so nothing downstream reports a
+problem — `postcall_verify` is clean, the row is correct, and the only trace is
+a sentence the caller heard.
+
+**Why it is not a wording fix.** The refusal text already opens `[not caller
+speech] NOTHING HAS BEEN WRITTEN` and says what to do. Six wordings have been
+tried. The A/B that was supposed to settle it closed at 0 of 7. The thing that
+has never been tried is making the refusal **not reach the model as a tool
+failure at all** — `success: false` is what a broken integration looks like, and
+the model is being asked to read past its own tool protocol.
+
+**Cheap measurement first**, and it is free: how often does an assistant turn
+matching the "cannot / unable / not able" family appear within two turns AFTER a
+`write_order_refused` that is later followed by a successful write? That
+separates "the model announces a failure that then un-happens" from "the model
+handles refusals fine and this was one call". `call-corpus/` can answer it
+offline today.
+
+---
+
+# LVX159 — the name goes into the diary in block capitals
+
+**OPEN. Cosmetic, cheap, and visible to a caller.** `CAb034305c`:
+
+```
+04:03:07  "Could you please spell your full name for me?"
+04:03:22  "That's booked for Monday, September twenty first at 1 PM
+           under NITHIN DODLA."
+```
+
+Row `e735ab`, `client_name: "NITHIN DODLA"`.
+
+The spelling is CORRECT — this is not LVX62. The model rebuilt the name from the
+spelled letters, which is the rule working, and then kept the letters' own case.
+`b9e1e1` in the same table reads `DILLAN BHAKTA` from an earlier round, so this
+is not a one-off.
+
+It matters because the row is what a confirmation message would quote and what
+the dashboard shows. Fixing it in the prompt is the wrong door — the model is
+doing what it was told with the letters. Normalising case at the write, where
+the value is already being handled, is one line and testable.
+
+Not urgent, not free of judgement: `McDonald` and `O'Brien` are what a naive
+title-case does badly, so the test table matters more than the fix.
