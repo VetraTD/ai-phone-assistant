@@ -772,21 +772,11 @@ const SABOTAGES = [
     red: [RECOVERY],
   },
   {
-    name: "in-addition-spelling-release",
-    why:
-      "lets the spelling gate settling release an in_addition stash. retryPendingWrite fires on spellingSettled ALONE with no agreement anywhere in the condition -- correct for a write held for letters, which was already consented to, and catastrophic for one created the instant the pack refuses and carrying in_addition_to_existing: true. The first run of liveWriteRecovery.test.js wrote a second appointment for a caller who had just said 'No, move the first one instead.' This row is the difference between a fix and a new defect.",
-    file: "lib/voice/live/index.js",
-    find:
-      '      const spellingMayRelease = spellingSettled(state) && retryReason !== "in_addition";',
-    replace: "      const spellingMayRelease = spellingSettled(state); // SABOTAGE",
-    red: [RECOVERY],
-  },
-  {
     name: "write-target-arg-keys",
     why:
       "stops logging which arguments the model actually sent on a write. Tool arguments have never been logged anywhere, so on CAad88df4a 'the flag was never set' had to be deduced from the refusal branch reached plus the model's own sentences -- on a call that cost the caller their booking. Keys and booleans only, which is the same line the rest of that block already draws: an argument NAME is schema and a boolean is a branch, so no datetime, name or phone is printed.",
     file: "lib/voice/live/guards.js",
-    find: "        arg_keys: Object.keys(fc.args || {}).sort(),",
+    find: "      const argKeys = Object.keys(fc.args || {}).sort();",
     replace: "        // SABOTAGE",
     red: [RECOVERY],
   },

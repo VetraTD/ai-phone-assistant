@@ -16560,31 +16560,41 @@ Tool arguments are now logged on every write as `arg_keys` and `arg_flags` —
 names and booleans only, the same line the rest of that block draws. "The flag
 was never set" was a deduction on a call that cost a caller their booking.
 
-## THE PART WORTH READING: the first version booked an appointment nobody agreed to
+## THE PART WORTH READING: a guard I wrote, could not prove, and removed
 
-`retryPendingWrite` fires on `spellingSettled` **alone**, with no agreement
-anywhere in the condition. That is correct for a write the spelling gate held —
-it was already consented to and was waiting only on letters.
+The first version excluded an `in_addition` stash from the `spellingSettled`
+half of retryPendingWrite's trigger. The reasoning looked sound: that stash is
+created the instant the pack refuses, before the caller has answered anything,
+and it carries "book a second appointment" -- so releasing it on a spelling
+answer would write something nobody agreed to.
 
-An `in_addition` stash has **not** been consented to. It is created the instant
-the pack refuses, before the caller has answered anything, and it carries
-"book a second appointment". Released by the spelling gate settling, it books
-one the caller never agreed to.
+**It cannot.** `retryPendingWrite` re-enters `handleToolCall`, so the released
+write passes through the write-order gate like any other. The consent latch it
+checks requires the agreement to match the STANDING read-back, and after the
+model asks *"shall I book this additional one?"* the standing read-back is that
+question, unanswered. The gate refuses. The only way the write lands is if
+consent is genuinely standing -- and then it is the booking the caller agreed to.
 
-The first run of `tests/liveWriteRecovery.test.js` wrote a second row for a
-caller who had just said **"No, move the first one instead."**
+**`scripts/corpus/sabotage.mjs` said so before the reasoning did.** With the
+guard removed the suite stayed GREEN, and no scenario could be constructed in
+which it changed an outcome. Same shape as the supersession disjunct removed in
+the corpus-replay round: a clause whose condition is already implied by the gate
+downstream of it. Removed, with the argument written at the site so it is not
+re-added.
 
-So a reason may be releasable by a "yes" and still not releasable by a spelling
-answer, and **those are two different questions**. The whitelist now has two
-halves. `in-addition-spelling-release` is the row that keeps them apart, and it
-is the difference between a fix and a new defect.
+**What made it look necessary was a test whose premise was wrong.** It asserted
+that no booking may land after the caller says *"No, move the first one
+instead."* One landed -- correctly. The caller had agreed two turns earlier, the
+pack refused only for the missing flag, and the row that landed was the one they
+asked for. The decline came after the booking was already right.
 
-## One property worth stating, since it is not obvious
+Three things this cost, all worth keeping:
 
-An `in_addition` stash can only be created when consent has just passed — the
-write-order gate runs first, so the pack is unreachable without it. In practice
-the stash is therefore released on the same turn it is created, by the
-agreement that got the write past the gate. A test written for "the caller says
-no afterwards" could not fail, because the booking has already landed correctly
-by then. That is a safety property, not a gap, and the test that replaced it
-exercises the release path that can actually go wrong.
+- **A test can invent a defect.** The failing assertion read as "the fix books
+  things nobody agreed to" for half an hour. It was the test that was wrong.
+- **An in_addition stash can only be created when consent has just passed**,
+  because the write-order gate runs before the pack. That is a safety property
+  of the ordering, not of any guard.
+- **The sabotage matrix is what settled it**, by reporting STILL GREEN on a row
+  written for a guard that does nothing.
+
