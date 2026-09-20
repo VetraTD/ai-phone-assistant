@@ -5451,6 +5451,67 @@ off the read-back at 15:55:34, three seconds before the write, with no name
 exchange in between. The tool arguments are not logged. Confirming it from the
 row itself needs `db-inspect` via the migrate job.
 
+#### SETTLED FROM THE ROW, 2026-09-19
+
+The diary audit ran on `voice-uk-prod`'s database, tenant `+18176011171`, 53
+appointment rows. **`CA0ef8d221`'s row says what the read-back said:**
+
+```
+id_tail 8e8aec  scheduled 2026-09-23T14:00Z  created 2026-09-19T15:55:37
+client_name "Nitin Dadla"
+```
+
+`created_at` is `book_appointment`'s own success timestamp on that call. The
+caller spelled `n i t h i n d o d l a`, intact, 101 seconds earlier. **Both
+names are wrong in the row, and this is no longer an inference from a
+read-back.** Four rounds of argument about this entry rested on transcript
+evidence; one column settled it.
+
+It is not the only one. Across 53 rows, one caller's name is recorded eight
+different ways:
+
+| written | rows |
+|---|---|
+| `Nithin Dodla` | correct |
+| **`Nitin Dadla`** | `CA0ef8d221` — the LVX62 case |
+| **`Nichin Dodla`** | `CA7ec8af77`, 2026-09-18 |
+| `Dillan` / `Dylan` / `DILLAN` `Bhakta` | three spellings of one persona |
+| `Venkat Yalavarthi` / `Yalavarupu` / `Ayyalavarupu` / `Balapure` | four |
+
+**AND THE AUDIT FOUND A LEAK THE GUARD COULD NOT.** `Nichin` had reached a
+COMMITTED fixture — `tests/fixtures/liveCalls/CA7ec8af.json` read *"under the
+name Nichin Bell"*. The surname was pseudonymised because `Dodla` is in the
+table; the mangled first name was not, because `Nichin` was not. A
+half-pseudonymised name looks clean to `LEAK_RE`, which only knows the spellings
+someone thought to list. Third miss for that guard.
+
+**The generalisable part:** it was not found by reading transcripts. It was
+found by reading `client_name` out of the appointments table, which is the one
+place a mis-hearing is recorded as a fact rather than as transcript noise. The
+diary is now the way to look for these — audit the rows, then check the
+pseudonym table against what they say.
+
+## Two other findings, recorded because they are cheap and nobody asked
+
+**The stale row is still there**, and it is now five days past:
+
+```
+id_tail dc0a19  scheduled 2026-09-14T21:00Z  status SCHEDULED
+created 2026-09-14T05:50:39  client_name "Marcus Bell"
+```
+
+It sits below the default 25-row display, so only `--limit 200` shows it. A
+`scheduled` row in the past is read by availability arithmetic and nothing
+sweeps it. **Not deleted** — that is the owner's call, and it is one of only two
+`scheduled` rows on the tenant.
+
+**51 cancelled against 2 scheduled.** Test debris from three weeks of rounds,
+harmless to availability, and worth knowing before anyone reads a booking rate
+off this table. The other scheduled row is `86f459`, `2026-09-23T15:00Z`, created
+`22:50:13` on `CA94817d06` — name correct.
+
+---
+
 **2026-09-19 — that is now possible.** `db-inspect --appointments` printed no
 names at all, which is why this entry has been argued four times from a
 read-back and never once from the row. `scripts/db-inspect.js` gained a

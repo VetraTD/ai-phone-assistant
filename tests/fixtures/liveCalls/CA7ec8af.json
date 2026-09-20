@@ -124,14 +124,14 @@
       "ts": "2026-09-18T14:23:38.550Z",
       "step": "gather_details",
       "caller": "n i c h i n d o d l a",
-      "assistant": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?"
+      "assistant": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Marcis Bell. Shall I proceed?"
     },
     {
       "i": 12,
       "ts": "2026-09-18T14:24:00.422Z",
       "step": "gather_details",
       "caller": "Yes.",
-      "assistant": "Your All-In-One Package is now booked for Monday, September 21 at 1:00 PM under the name Nichin Bell. Is there anything else I can help you with today?-on Package is now booked for Monday, September 21 at 1:00 PM under the name Nichin Bell. Is there anything else I can help you with today?"
+      "assistant": "Your All-In-One Package is now booked for Monday, September 21 at 1:00 PM under the name Marcis Bell. Is there anything else I can help you with today?-on Package is now booked for Monday, September 21 at 1:00 PM under the name Marcis Bell. Is there anything else I can help you with today?"
     },
     {
       "i": 13,
@@ -269,7 +269,7 @@
       "why": "and this one refuses in the replay where the attempt before it wrote, which is the derivation gap reversing direction inside a single call. In production this was the second of two refusals at this proposal, one short of the ceiling, and the model re-issued a fourth time with real consent.",
       "standing_turn": 11,
       "agreed_turn": 10,
-      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?",
+      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Marcis Bell. Shall I proceed?",
       "agreed_read_back": "Perfect. Before finalizing, could you please spell your full name for me?",
       "target": null,
       "target_candidates": [],
@@ -298,7 +298,7 @@
       "why": "read back, agreed, written. The booking the caller actually got.",
       "standing_turn": 11,
       "agreed_turn": 9,
-      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Nichin Bell. Shall I proceed?",
+      "standing_read_back": "Thank you. I will now book your strategy call for the AllInOne Package on Monday, September 21 at 100 PM under Marcis Bell. Shall I proceed?",
       "agreed_read_back": "I have that down for Monday, September 21 at 1:00 PM under Marcus Bell. Is that correct?",
       "target": "2026-09-21T13:00:00",
       "target_candidates": [

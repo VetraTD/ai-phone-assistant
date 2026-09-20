@@ -112,6 +112,19 @@ const PSEUDONYMS = [
   [/Nittendorf/gi, "Bendorf"],
   [/Doddle\s+Consulting/gi, "Bodell Consulting"],
   [/Doddle/gi, "Bodell"],
+  // 2026-09-19, a THIRD miss, and this one had already reached a committed
+  // fixture: CA7ec8af carried "under the name Nichin Bell". The surname was
+  // pseudonymised and the mangled FIRST name was not, because `Dodla` is in the
+  // table and `Nichin` was not -- and LEAK_RE, which only knows the spellings
+  // someone thought to list, saw nothing to object to. A half-pseudonymised
+  // name reads as clean to every check in this file.
+  //
+  // It was not found by the guard. It was found by reading `client_name` out of
+  // the production appointments table, which is the only place a mis-hearing is
+  // recorded as a FACT rather than as transcript noise. That is now the way to
+  // look for these: audit the diary, then check the table against it.
+  [/Nichin\s+Dodla/gi, "Marcis Bell"],
+  [/Nichin/gi, "Marcis"],
   [/WHITE?FIELDS?/g, "BELL"],
   [/Whit[ef]field/g, "Bell"],
   [/Whitfields/g, "Bells"],
@@ -141,7 +154,7 @@ const PSEUDONYMS = [
 
 /** Anything still matching this after pseudonymisation is a leak and aborts. */
 const LEAK_RE =
-  /whit[ef]|bhakta|dillan|nithin|dodla|dadla|dasla|gadkari|nittendorf|doddle|joshua|annett|aadhaar|chandni/i;
+  /whit[ef]|bhakta|dillan|dylan|nithin|nitin|nichin|dodla|dadla|dasla|gadkari|nittendorf|doddle|joshua|annett|aadhaar|chandni|yalavar|ayyalavar|balapure|raghunathan|kandarpa/i;
 
 /**
  * Calls kept in call-corpus/ but NOT turned into replay fixtures, and why.
