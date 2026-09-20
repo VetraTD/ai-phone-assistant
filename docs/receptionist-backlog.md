@@ -16402,3 +16402,88 @@ the value is already being handled, is one line and testable.
 
 Not urgent, not free of judgement: `McDonald` and `O'Brien` are what a naive
 title-case does badly, so the test table matters more than the fix.
+
+---
+
+# LVX160 — a booking lost to an argument the model never set
+
+**OPEN. P0 by caller impact: the caller asked to book, agreed, spelled their
+name, and got nothing — and was told twice that the system could not do it.**
+`CAad88df4a`, rev `00090-npw`, 2026-09-20.
+
+## The call
+
+The first half worked. Two appointments cancelled at 04:08:49, read back,
+reported, and the closing ledger reads exactly as designed. Then:
+
+```
+04:09:35  "I have availability on Wednesday, September 23rd at 9, 1, or 4:30."
+04:09:48  "...Since you already have an appointment on that day at 10 AM, would
+           you like to book this new one IN ADDITION to the existing one?"
+04:10:53  spelling_voiced_answer                        <- caller spells the name
+04:10:54  book_appointment  gated=FALSE  success=FALSE  <- past every guard
+04:11:03  "...Since you already have an appointment on Monday, September 21st at
+           1 PM, would you like to book this new time IN ADDITION to it?"
+04:11:08  "I couldn't get that time into the diary right now, so the team will
+           confirm the time with you directly."
+04:11:19  "I'm sorry, I'm still not able to get that slot booked for you."
+```
+
+No row. Call ends.
+
+## Why this is NOT the write-order gate, and the log says so in one field
+
+`gated=False`. The gate had already released on the ceiling
+(`write_order_gate_ceiling refusals=2`, twice), the write ran, and **the
+appointments pack refused it**. The 04:10:42 attempt reads `gated=True`; the
+04:10:54 one reads `gated=False`. That single flag separates "a guard held it"
+from "the tool said no", and it is the reason to keep it.
+
+The branch is `capabilities/appointments.js` — an existing upcoming appointment
+with no `in_addition_to_existing` flag, whose refusal message says: *"call
+`book_appointment` again with `in_addition_to_existing` set to true."*
+
+**The model asked the caller that exact question — twice — and never re-called
+the tool with the flag.** `live_write_retried ok=False` at 04:11:03 is our own
+retry re-issuing the stashed call, which carried no flag either and failed
+identically.
+
+**One limit on the evidence, stated rather than glossed:** tool ARGUMENTS are
+not logged, so "the flag was never set" is inferred from the refusal branch that
+was reached plus the model's own words. Logging the argument on a refused write
+would make this a fact rather than an inference, and is cheap.
+
+## Why it is worse than a lost booking
+
+The refusal is invisible to every net. `postcall_verify` sees no claim, so there
+is no `claim_without_row`. The gate counters are clean — it was not gated. The
+closing ledger is clean. **The only trace that a caller was turned away is three
+sentences they heard**, and two of them are LVX158's "the system is not working"
+shape on a call where nothing was broken.
+
+## What to do, in order
+
+1. **Log tool arguments on a refused action write.** One line, turns the
+   inference above into a fact, and it is the thing missing from every previous
+   round of this.
+2. **Count it.** A `book_appointment` refused for a missing
+   `in_addition_to_existing` and never retried WITH it, per call. Nothing counts
+   this today.
+3. Only then decide the fix. The candidates are not equal: making the pack infer
+   the flag from the model having asked is a guess about consent, while having
+   the refusal carry the retry itself is the LVX72 shape that already exists and
+   was reverted once for dead air. Neither should be chosen from one call.
+
+## Also on this call
+
+- **LVX158 again, twice, and worse wording**: *"I am unable to process the
+  cancellations right now"* at 04:08:26 and *"I'm not able to get into the
+  details of why the system isn't working right now"* at 04:08:37 — both while
+  the cancellations were merely awaiting a read-back, and both followed 23
+  seconds later by the cancellations succeeding.
+- **A stale diary read**: at 04:09:48 the model offered to book "in addition" to
+  a 10 AM appointment it had cancelled a minute earlier.
+- **The closing ledger's own first defect**, fixed in the same commit:
+  `ask_note_sent` counted NOTES, and two writes in one tool round produced
+  `sent=2 honoured=1` on a call where the model did exactly the right thing.
+  Two writes in one round can only ever produce one ask. Now one per round.

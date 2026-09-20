@@ -496,6 +496,31 @@ describe("the per-call closing record", () => {
     expect(summary.end_call_refusals.no_ask).toBe(2);
   });
 
+  it("counts one note per ROUND, so two writes together still expect one ask", async () => {
+    // CAad88df4a cancelled two appointments in one tool round, reported both and
+    // asked once -- correct -- and the ledger read sent=2 honoured=1, which
+    // reads as an instruction obeyed half the time. Two writes in one round can
+    // only ever produce one ask. The twin is only readable if both sides count
+    // the same event.
+    const summary = await summaryOf(async () => {
+      const s = await bootLive({
+        config: CONFIG,
+        callSid: "CA_ledger_two_writes",
+        seedAppointments: SEEDED,
+      });
+      await cancelsFirst(s);
+      await thenBooks(s);
+      await s.assistantTurn(
+        "Both of those are done. Is there anything else I can help you with today?"
+      );
+      await s.hangUp();
+    });
+
+    expect(summary.closing.actions_completed).toBe(2);
+    expect(summary.closing.ask_note_sent).toBe(2); // two rounds, one note each
+    expect(summary.closing.ask_note_honoured).toBe(1);
+  });
+
   it("is present and empty on a call that completed nothing", async () => {
     // A clean call and a call the fix could not apply to must not read the
     // same. actions_completed is the denominator that separates them.
