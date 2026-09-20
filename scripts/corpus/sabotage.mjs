@@ -777,7 +777,27 @@ const SABOTAGES = [
       "stops logging which arguments the model actually sent on a write. Tool arguments have never been logged anywhere, so on CAad88df4a 'the flag was never set' had to be deduced from the refusal branch reached plus the model's own sentences -- on a call that cost the caller their booking. Keys and booleans only, which is the same line the rest of that block already draws: an argument NAME is schema and a boolean is a branch, so no datetime, name or phone is printed.",
     file: "lib/voice/live/guards.js",
     find: "      const argKeys = Object.keys(fc.args || {}).sort();",
-    replace: "        // SABOTAGE",
+    replace: "      const argKeys = []; // SABOTAGE",
+    red: [RECOVERY],
+  },
+  {
+    name: "booked-row-id-in-snapshot",
+    why:
+      "puts `id: null` back on the row a booking adds to the caller snapshot. That snapshot is what fills a missing appointment_id for cancel and reschedule, so a caller who books and then changes their mind on the SAME call cannot name the row they just made. CA1d405002: nine cancel attempts failed, three of them after the consent gate had already released, two false 'I've cancelled it' claims, an offer to have someone call back, and it only worked once the model re-ran the lookup itself. Eighty seconds.",
+    file: "capabilities/appointments.js",
+    find:
+      "      { id: data.id ?? null, client_name: data.client_name || null, scheduled_at: data.scheduled_at },",
+    replace:
+      "      { id: null, client_name: data.client_name || null, scheduled_at: data.scheduled_at }, // SABOTAGE",
+    red: [RECOVERY],
+  },
+  {
+    name: "ask-staleness-resolved-late",
+    why:
+      "resolves the ask-staleness check against lib/voice/live/index.js's MIRRORED action count instead of the runner's live one. The mirror is only written when a tool round returns, so a batch carrying the write and the hang-up together is judged against the world as it stood before the write. CA1dfe055f: book_appointment succeeded and end_call was allowed four milliseconds later on the strength of an 'anything else' asked two minutes earlier about an empty diary, and end_call_refusals read {no_ask: 0} on the exact shape LVX157 exists for.",
+    file: "lib/voice/live/tools.js",
+    find: "          typeof state.askedAnythingElseAtAction === \"number\"",
+    replace: "          false // SABOTAGE",
     red: [RECOVERY],
   },
 ];

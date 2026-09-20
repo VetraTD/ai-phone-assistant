@@ -294,3 +294,90 @@ describe("what the model actually sent", () => {
     expect(JSON.stringify(last)).not.toContain(CLIENT);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX162 / LVX163 — the two defects three real calls found on 2026-09-20.
+// ---------------------------------------------------------------------------
+describe("a booking made on the call can be changed on the call", () => {
+  it("carries the row id into the caller snapshot — CA1d405002", async () => {
+    // The caller booked at 06:52:04 and asked to cancel it seconds later. NINE
+    // cancel attempts failed, including three the consent gate had already
+    // released, because the snapshot row written by the booking had `id: null`
+    // and nothing could name a row. It worked at 06:54:20, immediately after
+    // the model re-ran the lookup itself.
+    //
+    // Eighty seconds, two false claims, and an offer to have someone call back.
+    const s = await bootLive({ config: CONFIG, callSid: "CA_book_then_cancel" });
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.callerSays("Friday at three thirty please.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes, that works.");
+    expect(ok(await s.callTool("book_appointment", bookArgs()))).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+
+    // Straight into a cancellation, with NO lookup in between -- which is the
+    // whole point: the model has no id of its own and must get one from the
+    // snapshot the booking just wrote.
+    await s.callerSays("Actually, cancel that please.");
+    await s.assistantTurn(
+      "To confirm, you would like to cancel your strategy call on Friday, September eighteenth at three thirty PM?"
+    );
+    await s.callerSays("Yes, cancel it.");
+    const res = await s.callTool("cancel_appointment_db", {});
+
+    expect(ok(res), "the cancellation could not name the row the call just booked").toBe(true);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+});
+
+describe("a write and a hang-up in the SAME tool batch", () => {
+  it("does not let a stale ask cover the write beside it — CA1dfe055f", async () => {
+    // 06:47:33  "...Is there anything else I can help you with today?"  <- 0 actions
+    // 06:49:03.326  book_appointment  SUCCESS
+    // 06:49:03.330  end_call          ALLOWED, four milliseconds later
+    // 06:49:08  "That's all set, and your appointment is booked..."     <- no ask
+    //
+    // end_call_refusals read {no_ask: 0} on the exact shape LVX157 exists for.
+    // The mirrored action count in live/index.js is a round behind, so the
+    // hang-up was judged against the world before the booking landed.
+    const s = await bootLive({ config: CONFIG, callSid: "CA_batch_stale_ask" });
+    await s.callTool("get_caller_appointments_from_db", {});
+    await s.assistantTurn(
+      "I've checked the records for this number, and I don't see any upcoming appointments. Is there anything else I can help you with today?"
+    );
+    await s.callerSays("Yes, I'd like to book one.");
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes, that works.");
+
+    // Both in one batch, in the order the model sent them.
+    const out = await s.callToolBatch([
+      ["book_appointment", bookArgs()],
+      ["end_call", {}],
+    ]);
+
+    const booked = out.find((r) => r.name === "book_appointment");
+    const ended = out.find((r) => r.name === "end_call");
+    expect(booked?.response?.success, "the booking itself must still land").toBe(true);
+    expect(
+      ended?.response?.success,
+      "the hang-up was allowed by an ask that predated the booking beside it"
+    ).toBe(false);
+    expect(counters().end_call_refused_no_ask).toBe(1);
+    expect(counters().live_ask_latch_stale_at_action).toBe(1);
+  });
+
+  it("still allows the hang-up when the ask came after the write", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_batch_fresh_ask" });
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.callerSays("Friday at three thirty please.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes, that works.");
+    expect(ok(await s.callTool("book_appointment", bookArgs()))).toBe(true);
+    await s.assistantTurn("That's booked. Is there anything else I can help you with today?");
+    await s.callerSays("No, that's everything.");
+
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_no_ask ?? 0).toBe(0);
+  });
+});

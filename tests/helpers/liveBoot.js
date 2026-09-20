@@ -178,6 +178,29 @@ export async function bootLive({
     },
 
     /** Any tool, with any args. Returns the functionResponses it produced. */
+    /**
+     * SEVERAL tool calls in ONE batch, the way the model actually sends them.
+     *
+     * `callTool` sends one per message, which is a turn boundary the real
+     * session does not have. On CA1dfe055f the model sent book_appointment and
+     * end_call together, four milliseconds apart, and every guard that reads
+     * state mirrored from the runner was judging the hang-up against the world
+     * as it stood BEFORE the booking. No test could reach that shape.
+     *
+     * @param {Array<[string, object]>} calls - [name, args] pairs, in order
+     */
+    async callToolBatch(calls) {
+      const before = live.sent.toolResponses.length;
+      const functionCalls = calls.map(([name, args = {}]) => {
+        toolSeq += 1;
+        return { id: `fc${toolSeq}`, name, args };
+      });
+      live.push({ toolCall: { functionCalls } });
+      await settle();
+      await settle();
+      return live.sent.toolResponses.slice(before).flatMap((m) => m.functionResponses || []);
+    },
+
     async callTool(name, args = {}) {
       const before = live.sent.toolResponses.length;
       toolSeq += 1;

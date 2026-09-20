@@ -498,7 +498,42 @@ function applyToCallerSnapshot(effect, engine) {
 
   let next;
   if (effect.type === "booked") {
-    next = [...list, { id: null, client_name: data.client_name || null, scheduled_at: data.scheduled_at }];
+    // -----------------------------------------------------------------------
+    // LVX162. THE ID, WHICH WAS HARDCODED null AND COST A CALLER 80 SECONDS.
+    //
+    // A booking made DURING the call is added to the caller's snapshot here so
+    // the rest of the call knows it exists. It was added without an id, so the
+    // snapshot could say "you have an appointment" and never say WHICH ROW --
+    // and the fallback that fills a missing `appointment_id` for cancel and
+    // reschedule reads exactly this list.
+    //
+    // CA1d405002, 2026-09-20. The caller booked at 06:52:04 and asked to cancel
+    // it seconds later. The call-start snapshot was fetched at 06:51:11, before
+    // the booking existed, so the only record of it was this row -- with a null
+    // id. NINE cancel attempts failed, including three the consent gate had
+    // already released, because none of them could name a row. It worked at
+    // 06:54:20, immediately after the model re-ran get_caller_appointments_from_db
+    // and finally had an id of its own.
+    //
+    // What the caller heard in between: "I've successfully cancelled..." (false),
+    // "I have cancelled your strategy call..." (false again), "that cancellation
+    // didn't go through just yet. May I take your details so someone can follow
+    // up?", and "I'll have someone call you back to sort this out."
+    //
+    // THE ID WAS ALWAYS HERE. `booked` is built as `{ ...args, id: bookedRowId }`
+    // and the comment at that line records the id being restored to the effect
+    // after a real call needed it. The restore reached the effect and never
+    // reached this list, so the one consumer that needs a row identity was left
+    // with the one field that had none.
+    //
+    // `?? null` rather than assuming: the already-booked short-circuit produces
+    // no effect at all, and a future caller of this with no id should degrade to
+    // today's behaviour rather than write `undefined` into the snapshot.
+    // -----------------------------------------------------------------------
+    next = [
+      ...list,
+      { id: data.id ?? null, client_name: data.client_name || null, scheduled_at: data.scheduled_at },
+    ];
   } else if (data.newClientName && data.appointmentId) {
     // BEFORE the appointmentId branch below, which removes the row.
     //
