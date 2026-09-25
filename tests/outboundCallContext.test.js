@@ -229,3 +229,32 @@ describe("state.config stays the BUSINESS config, built through the inbound path
     expect(loadConfig(ctx.business).businessName).toBe("Digile Media");
   });
 });
+
+describe("O-9: a contact with no first name (fix round 2)", () => {
+  it.each([null, undefined, ""])("firstName %j: the seed text drops the first-name sentence -- the same text dispatch rendered the clip from", async (firstName) => {
+    const db = fakeDb({ row: ctxRow({ firstName }) });
+    const ctx = await resolveOutboundContext(SID, { db, log: quietLog() });
+    expect(ctx.openerText).toBe("It's Ava, an AI assistant from Digile Media.");
+    expect(ctx.openerAudio).toBe(AUDIO);
+    expect(ctx.openerRefused).toBe(false);
+    expect(ctx.contact.firstName).toBeNull();
+  });
+
+  it("nothing usable left: no opener text, the clip is not used (and not re-read), logged", async () => {
+    const config = { ...CAMPAIGN_CONFIG, opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}." };
+    const db = fakeDb({ row: ctxRow({ firstName: null, config }) });
+    const log = quietLog();
+    const ctx = await resolveOutboundContext(SID, { db, log });
+    expect(ctx.openerText).toBeNull();
+    expect(ctx.openerAudio).toBeNull();
+    expect(ctx.openerRefused).toBe(true);
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "att-1", reason: "unusable_line" });
+  });
+
+  it("the context never carries 'null' or 'undefined' text", async () => {
+    for (const firstName of [null, undefined, ""]) {
+      const ctx = await resolveOutboundContext(SID, { db: fakeDb({ row: ctxRow({ firstName }) }), log: quietLog() });
+      expect(String(ctx.openerText)).not.toMatch(/\bnull\b|\bundefined\b/);
+    }
+  });
+});

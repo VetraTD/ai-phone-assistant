@@ -526,3 +526,50 @@ describe("dispatch: the opener is stored before a slow voicemail render finishes
     expect(db.storeAttemptAudio.mock.calls).toEqual([["a1", { opener }]]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 14 fix round 2, owner decision O-9: a contact with no first name.
+// dispatch renders through renderCampaignLine, the same renderer the session
+// seeds with -- never the literal "null".
+// ---------------------------------------------------------------------------
+describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
+  it.each([null, undefined, ""])("first_name %j: the opener drops its first-name sentence; the voicemail, unusable without it, is not rendered", async (firstName) => {
+    const db = fakeDb(row({ first_name: firstName }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    const { lines } = renderAudio.mock.calls[0][0];
+    expect(lines).toEqual({ opener: "It's Ava, an AI assistant from Digile Media." });
+    expect(JSON.stringify(lines)).not.toMatch(/\bnull\b|\bundefined\b/);
+    expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", reason: "unusable_line" });
+  });
+
+  it("an opener with nothing usable left is not rendered at all (the session takes the prompt path)", async () => {
+    const db = fakeDb(
+      row({
+        first_name: null,
+        config: {
+          ...structuredClone(TEMPLATES.speed_to_lead),
+          caller_id: "+441372656055",
+          opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}.",
+        },
+      })
+    );
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(renderAudio).not.toHaveBeenCalled(); // neither line is usable
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", reason: "unusable_line" });
+  });
+
+  it("with a first name, the lines are exactly what they were", async () => {
+    const db = fakeDb();
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(renderAudio.mock.calls[0][0].lines.opener).toBe("Hi, is that Sam? It's Ava, an AI assistant from Digile Media.");
+  });
+});

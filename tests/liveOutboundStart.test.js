@@ -27,7 +27,7 @@ vi.mock("../lib/logger.js", async (importOriginal) => {
 
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
-import { BACKSTOP_END_MARK } from "../lib/outbound/firstSeconds.js";
+import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK } from "../lib/outbound/firstSeconds.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -77,7 +77,7 @@ const CAMPAIGN_CONFIG = {
 
 const BUSINESS_ROW = { id: BIZ, name: "Digile Media", timezone: "Europe/London", phone_number: CALLER_ID };
 
-function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true, lateOpenerAudio = null } = {}) {
+function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true, lateOpenerAudio = null, firstName = "Sam", campaignConfig = CAMPAIGN_CONFIG } = {}) {
   const base = fakeDb(CONFIG, BIZ);
   return {
     ...base,
@@ -107,8 +107,8 @@ function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true, lateOpenerAud
       templateKey: "speed_to_lead",
       complianceClass: "solicited",
       audience: "business",
-      config: CAMPAIGN_CONFIG,
-      firstName: "Sam",
+      config: campaignConfig,
+      firstName,
       contactTimezone: "America/Chicago",
     })),
     fetchBusinessById: vi.fn(async () => BUSINESS_ROW),
@@ -559,6 +559,107 @@ describe("inbound unchanged", () => {
     });
     expect(database.lookupBusinessByPhone).toHaveBeenCalledWith(CALLER_ID);
     expect(database.createCall.mock.calls[0]).toEqual([BIZ, "CAinbound0003", INBOUND_CALLER, CALLER_ID]);
+    await call.hangUp();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 2 -- owner decisions O-6..O-9, through the real session.
+// ---------------------------------------------------------------------------
+describe("outbound fix round 2: the owner decisions through the real session", () => {
+  const isSeed = (m) => m.turns?.[0]?.role === "model" && m.turnComplete === false;
+
+  it("O-6: one loud frame near pickup + 1.5 s is not speech -- the backstop is queued at the silence deadline and seeded", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(1160);
+    await call.feed(20, { voiced: true }); // 1,180: a click
+    await call.feed(460); // 1,640
+    expect(enqueue).not.toHaveBeenCalled();
+    await call.feed(20); // 1,660
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+    expect(call.live.sent.clientContent.filter(isSeed)).toHaveLength(1);
+    expect(call.ws.liveDialFirstSeconds.onsetAt()).toBeNull();
+    await call.hangUp();
+  });
+
+  it("O-7: the first-audio mark reaches the wire before the first frame, and the metric is taken at its echo", async () => {
+    const call = await bootOutbound();
+    const sent = [];
+    vi.spyOn(call.ws, "send").mockImplementation((raw) => sent.push(JSON.parse(raw)));
+    await call.feed(1660); // queued at 1,660
+    const firstMark = sent.findIndex((m) => m.event === "mark" && m.mark.name === FIRST_AUDIO_MARK);
+    const firstMedia = sent.findIndex((m) => m.event === "media");
+    expect(firstMark).toBeGreaterThanOrEqual(0);
+    expect(firstMedia).toBeGreaterThan(firstMark);
+
+    expect(call.ws.liveDialFirstSeconds.firstAudio()).toMatchObject({ from_answer_ms: 2010, measured: "enqueue" });
+    await call.feed(140); // 1,800: Twilio echoes the mark as the clip starts to play
+    call.ws.deliver({ event: "mark", mark: { name: FIRST_AUDIO_MARK } });
+    expect(call.ws.liveDialFirstSeconds.firstAudio()).toEqual({
+      from_answer_ms: 2150,
+      from_speech_ms: null,
+      path: "backstop_silence",
+      measured: "playout",
+    });
+    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 2150, measured: "playout" })]);
+    await call.hangUp();
+    expect(events("outbound_first_audio")).toHaveLength(1);
+  });
+
+  it("O-7: no echo before the hang-up -- the queue-time value is logged, flagged measured:'enqueue'", async () => {
+    const call = await bootOutbound();
+    await call.feed(1660);
+    await call.hangUp();
+    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 2010, measured: "enqueue" })]);
+  });
+
+  it("O-8: the slow-path clip is NOT seeded when it fires -- only when its end mark echoes", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400, { voiced: true }); // onset at 20 (confirmed at ~220)
+    await call.feed(1240); // 1,640: past onset + 1,600
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+    expect(call.live.sent.clientContent).toEqual([]);
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent).toEqual([{ turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false }]);
+    await call.hangUp();
+  });
+
+  it("O-8: a slow-path clip cut by a barge is never seeded", async () => {
+    const call = await bootOutbound();
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(400, { voiced: true });
+    await call.feed(1240);
+    await call.feed(600, { voiced: true }); // talks over the clip
+    expect(clear).toHaveBeenCalled();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent.filter(isSeed)).toEqual([]);
+    await call.hangUp();
+  });
+
+  it("O-9: no first name -- the seed is the opener without its first-name sentence", async () => {
+    const call = await bootOutbound({ database: outboundDb({ firstName: null }) });
+    await call.feed(1660);
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: "It's Ava, an AI assistant from Digile Media." }] }], turnComplete: false },
+    ]);
+    await call.hangUp();
+  });
+
+  it("O-9: no first name and nothing usable left -- no clip; Live is asked to introduce itself with the disclosure", async () => {
+    allowErrors("outbound_backstop_render_refused", "outbound_backstop_missing");
+    const campaignConfig = { ...CAMPAIGN_CONFIG, opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}." };
+    const database = outboundDb({ firstName: null, campaignConfig });
+    const call = await bootOutbound({ database });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(1660);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
+    const [prompt] = call.live.sent.clientContent;
+    expect(prompt.turns[0].parts[0].text).toContain("that you are Ava, an AI assistant from Digile Media.");
+    expect(JSON.stringify(call.live.sent.clientContent)).not.toMatch(/\bnull\b|\bundefined\b/);
     await call.hangUp();
   });
 });
