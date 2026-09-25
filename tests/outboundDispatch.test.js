@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createDispatcher, startOfLocalDay } from "../lib/outbound/dispatch.js";
 import { TEMPLATES } from "../lib/outbound/templates.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+import { renderTemplate, spokenNumber } from "../lib/outbound/campaignSchema.js";
 
 const NOW = new Date("2026-09-28T13:00:00Z");
 function row(over = {}) {
@@ -373,5 +374,106 @@ describe("dispatch counters reach the metrics snapshot", () => {
     const { d } = mk(fakeDb(), twilio);
     await d({ businessId: "b1", outreachId: "o1" });
     expect(getLatencyStats().turnTaking.outbound_dial_failed).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 13 (session 2b), spec §9.3 step 1 / O-4: dispatch renders the TEXT of
+// the backstop line (and the voicemail when due) from the row's CURRENT
+// values, and passes it as `renderAudio({row, attemptNo, lines})`. Extending
+// THIS 2a test file (not a new one) for dispatch's new `lines` argument is
+// the brief's own named carve-out.
+// ---------------------------------------------------------------------------
+describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
+  it("the default template's attempt 1 (in voicemail_on, solicited) renders BOTH lines from the row's current values", async () => {
+    const db = fakeDb();
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    const cfg = TEMPLATES.speed_to_lead;
+    const vars = { first_name: "Sam", persona_name: "Ava", business_name: "Digile Media", topic: cfg.topic, caller_id_spoken: spokenNumber("+441372656055") };
+    const expectedOpener = renderTemplate(cfg.opener, vars);
+    const expectedVoicemail = renderTemplate(cfg.voicemail, vars);
+    expect(expectedOpener.length).toBeLessThanOrEqual(120);
+    expect(expectedVoicemail.length).toBeLessThanOrEqual(300);
+
+    expect(renderAudio).toHaveBeenCalledTimes(1);
+    expect(renderAudio).toHaveBeenCalledWith({
+      row: expect.objectContaining({ first_name: "Sam", business_name: "Digile Media" }),
+      attemptNo: 1,
+      lines: { opener: expectedOpener, voicemail: expectedVoicemail },
+    });
+  });
+
+  it("an attempt NOT in voicemail_on ([1,5]): lines has only opener, no voicemail key", async () => {
+    const db = fakeDb(row({ attempts_made: 1 })); // attempt 2
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    const call = renderAudio.mock.calls[0][0];
+    expect(call.attemptNo).toBe(2);
+    expect(call.lines).toHaveProperty("opener");
+    expect(call.lines).not.toHaveProperty("voicemail");
+  });
+
+  // "in voicemail_on but the class doesn't permit" is unreachable through the
+  // real gate: consentSatisfies (lib/outbound/consent.js) refuses EVERY
+  // marketing_consented row with consent_missing (Part 3 territory), and
+  // solicited/service are exactly the two classes voicemailPermitted allows
+  // -- so a row that reaches dispatch's dial branch at all can never carry a
+  // refused class. voicemailPermitted itself (the same function this line
+  // reuses) is covered directly in tests/outboundAmd.test.js, at both the
+  // pure decideAmd table and the AMD route level.
+
+  it("O-4: an opener over 120 characters is refused, never truncated -- omitted from lines, logged with {attemptId, chars}, and the voicemail (independently under budget) still renders", async () => {
+    const longOpener = "x".repeat(130); // no placeholders: renders to exactly 130 chars, every time
+    const db = fakeDb(row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", opener: longOpener } }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", chars: 130 });
+    const call = renderAudio.mock.calls[0][0];
+    expect(call.lines).not.toHaveProperty("opener");
+    expect(call.lines).toHaveProperty("voicemail"); // independent -- the default voicemail template is unaffected
+  });
+
+  it("O-4: a voicemail over 300 characters is refused, never truncated -- omitted from lines, logged with {attemptId, chars}, and the opener (independently under budget) still renders", async () => {
+    const longVoicemail = "y".repeat(310);
+    const db = fakeDb(row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", voicemail: longVoicemail } }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", chars: 310 });
+    const call = renderAudio.mock.calls[0][0];
+    expect(call.lines).not.toHaveProperty("voicemail");
+    expect(call.lines).toHaveProperty("opener");
+  });
+
+  it("both lines over budget: lines is empty and renderAudio is not even called", async () => {
+    const db = fakeDb(
+      row({
+        config: {
+          ...structuredClone(TEMPLATES.speed_to_lead),
+          caller_id: "+441372656055",
+          opener: "x".repeat(130),
+          voicemail: "y".repeat(310),
+        },
+      })
+    );
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    const result = await d({ businessId: "b1", outreachId: "o1" });
+
+    expect(result.status).toBe("dialed"); // the call still goes out; the backstop is optional
+    expect(renderAudio).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", chars: 130 });
+    expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", chars: 310 });
   });
 });

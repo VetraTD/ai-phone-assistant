@@ -50,7 +50,7 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
-import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
+import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath, createTwilioClientFor } from "./lib/outbound/internalRoutes.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
 
 const app = express();
@@ -625,12 +625,20 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
 //
 // `postCall` is Task 20's placeholder: `tryClaim` always resolves false until
 // that task wires the real implementation in.
+//
+// `twilioClientFor` (Task 13) is the SAME lazy, account-A-only factory
+// `buildOutboundDeps` below uses for the dispatcher, extracted so both can
+// share one construction rule: the Twilio SDK's constructor throws outright
+// on a SID that doesn't start with "AC", so the client must not be built
+// until the AMD door's first real use, independent of whether
+// buildOutboundDeps ever resolves its own (separate) Cloud Tasks config.
 // ---------------------------------------------------------------------------
 registerOutboundDoorRoutes(app, {
   validate: twilioValidationAnyAccount,
   db,
   mintToken: mintMediaStreamToken,
   postCall: { tryClaim: async () => false }, // Task 20 wires postCall
+  twilioClientFor: createTwilioClientFor(),
   log,
   now: () => Date.now(),
 });

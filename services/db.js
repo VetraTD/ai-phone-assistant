@@ -2834,3 +2834,67 @@ export async function fetchAttemptVoicemailAudio(attemptId) {
   noteAccess("fetchAttemptVoicemailAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
   return row?.voicemail_audio ?? null;
 }
+
+/**
+ * Stamp one async AMD verdict onto a call_attempts row (spec §9.4, Task 13).
+ * Runs inside `withTenant`/`withTenantSafe` -- the caller resolves
+ * businessId first via `outboundAttemptByCallSid`, the same as
+ * `stampAttemptStatus`.
+ *
+ * `answered_by` and `amd_duration_ms` are written on EVERY call. `result` is
+ * written only when it is still NULL (COALESCE) -- a status callback can
+ * race ahead of AMD and set a terminal result (busy/no-answer/failed/
+ * canceled) first, and that must not be clobbered by AMD's own verdict
+ * arriving after it. `result: null` is therefore a safe no-op for that one
+ * column: doorRoutes.js calls this once to record what Twilio observed
+ * BEFORE it has decided anything (result omitted/null), then again with the
+ * decided result once it has one.
+ * @param {string} attemptId
+ * @param {{answeredBy: string|null, amdDurationMs?: number|null, result?: string|null}} stamp
+ */
+export async function stampAttemptAmd(attemptId, { answeredBy, amdDurationMs = null, result = null }) {
+  requireTenantScope("stampAttemptAmd");
+  const res = await q(
+    `UPDATE call_attempts
+        SET answered_by = $2,
+            amd_duration_ms = $3,
+            result = CASE WHEN $4::text IS NOT NULL THEN COALESCE(result, $4::text) ELSE result END
+      WHERE id = $1`,
+    [attemptId, answeredBy, amdDurationMs, result]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`stampAttemptAmd: expected 1 row, got ${res.rowCount}`);
+  noteAccess("stampAttemptAmd", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * The campaign context `decideAmd` (lib/outbound/amd.js) needs, but
+ * `outboundAttemptByCallSid` deliberately does not carry -- that function's
+ * shape stays general because Task 14 reuses it for the Live session's own
+ * context resolution (plan C15/P-0), so it is not trimmed to only what one
+ * caller needs. Runs inside `withTenant`/`withTenantSafe`, the same caller
+ * pattern as the rest of this block.
+ * @param {string} attemptId
+ * @returns {Promise<{attemptNo: number, complianceClass: string, voicemailOn: number[]}|null>}
+ */
+export async function outboundAmdContext(attemptId) {
+  requireTenantScope("outboundAmdContext");
+  const res = await q(
+    `SELECT a.attempt_no, c.compliance_class, v.config
+       FROM call_attempts a
+       JOIN outreach o ON o.id = a.outreach_id
+       JOIN campaigns c ON c.id = o.campaign_id
+       JOIN campaign_versions v ON v.campaign_id = o.campaign_id AND v.version = o.campaign_version
+      WHERE a.id = $1`,
+    [attemptId]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("outboundAmdContext", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  if (!row) return null;
+  return {
+    attemptNo: row.attempt_no,
+    complianceClass: row.compliance_class,
+    voicemailOn: Array.isArray(row.config?.retries?.voicemail_on) ? row.config.retries.voicemail_on : [],
+  };
+}
