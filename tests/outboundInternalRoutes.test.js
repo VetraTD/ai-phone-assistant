@@ -6,6 +6,7 @@ import {
   registerOutboundInternalRoutes,
   buildOutboundDeps,
   createCallerIdValidator,
+  isOutboundInternalPath,
 } from "../lib/outbound/internalRoutes.js";
 
 const BIZ = "11111111-1111-1111-1111-111111111111";
@@ -134,6 +135,49 @@ describe("POST /internal/outbound/sweep", () => {
     const deps = fakeDeps({ db: { outboundDue: vi.fn(async () => { throw new Error("pg down"); }) } });
     const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
     expect(res.status).toBe(500);
+  });
+});
+
+// Checkpoint 2a, M5. server.js skips its global 100kb parser for exactly the
+// requests these routes will serve. Express 5 routes them case-insensitively
+// with ONE optional trailing slash (measured: `//`, `%64`, `.json` 404), so
+// the predicate accepts exactly that set and nothing wider.
+describe("isOutboundInternalPath: the same set of spellings Express routes", () => {
+  it.each([
+    "/internal/outbound/dispatch", "/internal/outbound/dispatch/", "/INTERNAL/OUTBOUND/DISPATCH",
+    "/Internal/Outbound/Dispatch/", "/internal/outbound/sweep", "/internal/outbound/sweep/", "/INTERNAL/outbound/SWEEP",
+  ])("%s -> true", (p) => expect(isOutboundInternalPath(p)).toBe(true));
+
+  it.each([
+    "/internal/outbound/dispatch//", "/internal//outbound/dispatch", "/internal/outbound/dispatchx",
+    "/internal/outbound", "/internal/outbound/", "/api/debug/probe-script", "/", "", undefined,
+  ])("%s -> false", (p) => expect(isOutboundInternalPath(p)).toBe(false));
+});
+
+describe("M5: an oversized body is answered 413 by the route itself, never the central error handler", () => {
+  it.each(["/internal/outbound/dispatch", "/internal/outbound/sweep"])("%s: 413 {error: 'payload too large'}", async (p) => {
+    const deps = fakeDeps();
+    const app = express();
+    registerOutboundInternalRoutes(app, deps);
+    const central = vi.fn((err, req, res, _next) => res.status(500).json({ error: "Internal server error" }));
+    app.use(central);
+    const res = await request(app).post(p).set("Authorization", "Bearer good").send({ padding: "x".repeat(6200) });
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: "payload too large" });
+    expect(central).not.toHaveBeenCalled();
+    expect(deps.dispatch).not.toHaveBeenCalled();
+    expect(deps.verifier.verify).not.toHaveBeenCalled();
+  });
+
+  it("a malformed body still goes on to the next error handler (only entity.too.large is answered here)", async () => {
+    const deps = fakeDeps();
+    const app = express();
+    registerOutboundInternalRoutes(app, deps);
+    const central = vi.fn((err, req, res, _next) => res.status(418).json({ type: err.type }));
+    app.use(central);
+    const res = await request(app).post("/internal/outbound/dispatch").set("Content-Type", "application/json").send("{not json");
+    expect(central).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual({ type: "entity.parse.failed" });
   });
 });
 

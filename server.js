@@ -50,7 +50,7 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
-import { registerOutboundInternalRoutes, buildOutboundDeps, OUTBOUND_INTERNAL_PATHS } from "./lib/outbound/internalRoutes.js";
+import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -186,9 +186,11 @@ app.use((req, res, next) => {
   // skips re-parsing a request whose body stream is already drained, so if
   // this global (100kb) parser ran first on those paths, the route-scoped
   // 4kb limit would never apply -- exactly what fix round 1 found live.
-  // OUTBOUND_INTERNAL_PATHS is imported from that same module so this
-  // exclusion cannot drift from what is actually mounted there.
-  if (OUTBOUND_INTERNAL_PATHS.includes(req.path)) return next();
+  // isOutboundInternalPath comes from that same module so this exclusion
+  // cannot drift from what is mounted there, and it matches every spelling
+  // Express routes (any case, one trailing slash); an exact-string compare
+  // let `/internal/outbound/dispatch/` through (Checkpoint 2a, M5).
+  if (isOutboundInternalPath(req.path)) return next();
   return defaultJsonParser(req, res, next);
 });
 

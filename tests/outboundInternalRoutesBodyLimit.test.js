@@ -48,7 +48,7 @@ afterAll(() => {
 const padded = (obj) => ({ ...obj, padding: "x".repeat(6200) });
 
 describe("the outbound internal routes' 4kb body limit, through the real server", () => {
-  it("refuses a ~6KB dispatch body before auth ever runs (never 200, never the unauthenticated 401)", async () => {
+  it("refuses a ~6KB dispatch body before auth ever runs: 413, generic body", async () => {
     const res = await request(app)
       .post("/internal/outbound/dispatch")
       .send(padded({ business_id: "11111111-1111-1111-1111-111111111111", outreach_id: "22222222-2222-2222-2222-222222222222" }));
@@ -56,15 +56,31 @@ describe("the outbound internal routes' 4kb body limit, through the real server"
     // policed at all here, it would parse fine under the global 100kb limit
     // and reach the route's own auth check, which would then refuse it for
     // being unauthenticated (401) -- a DIFFERENT reason than the one this
-    // test exists to prove. The scoped 4kb parser must reject it first.
-    expect(res.status).not.toBe(200);
-    expect(res.status).not.toBe(401);
+    // test exists to prove. The scoped 4kb parser must reject it first, and
+    // (Checkpoint 2a, M5) the route answers 413 itself instead of letting the
+    // error reach the central 500 handler and Sentry.
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: "payload too large" });
   });
 
   it("refuses a ~6KB sweep body the same way", async () => {
     const res = await request(app).post("/internal/outbound/sweep").send(padded({}));
-    expect(res.status).not.toBe(200);
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(413);
+  });
+
+  // Checkpoint 2a, M5. Express routes these paths case-insensitively and with
+  // one optional trailing slash, but the global parser's exclusion compared
+  // exact strings: `/internal/outbound/dispatch/` got the 100kb parser, the
+  // route's 4kb one then saw a drained stream, and an 8 KB body went through.
+  it.each([
+    "/internal/outbound/dispatch/",
+    "/INTERNAL/OUTBOUND/DISPATCH",
+    "/Internal/Outbound/Dispatch/",
+    "/internal/outbound/sweep/",
+    "/INTERNAL/OUTBOUND/SWEEP",
+  ])("refuses a ~6KB body on %s (a spelling Express still routes) with 413", async (p) => {
+    const res = await request(app).post(p).send(padded({}));
+    expect(res.status).toBe(413);
   });
 
   it("the global parser still accepts a 6KB body on an ordinary path (the exclusion is scoped, not a blanket shrink)", async () => {
