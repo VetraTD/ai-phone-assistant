@@ -97,6 +97,42 @@ describe("evaluateGate: cheap pinning gaps", () => {
   });
 });
 
+// F4 (Checkpoint 2a, owner-approved). scripts/outbound-admin.js refuses to
+// write an "operator-test" consent unless the number is on the MIGRATE JOB's
+// OUTBOUND_TEST_ALLOWLIST -- but that row then outlives the list. At dial
+// time it counts only while the number is on the SERVICE's allow-list
+// (env.allowlist, the dispatcher's own outboundEnv()).
+describe("evaluateGate: an operator-test consent counts only while the number is allow-listed (F4)", () => {
+  const operatorTest = () => ({ ...base().consents[0], source: "manual", wording_version: "operator-test" });
+
+  it("operator-test consent, number on the service allow-list, outbound enabled: allow", () => {
+    const f = base(); f.env.enabled = true; f.consents = [operatorTest()];
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+
+  it("the same consent once the number is OFF the allow-list (outbound enabled): consent_missing", () => {
+    const f = base(); f.env.enabled = true; f.env.allowlist = new Set(); f.consents = [operatorTest()];
+    expect(gate(f)).toEqual({ verdict: "never", reason: "consent_missing" });
+  });
+
+  it("an ordinary consent is unaffected by the allow-list", () => {
+    const f = base(); f.env.enabled = true; f.env.allowlist = new Set();
+    f.consents = [{ ...base().consents[0], source: "form", wording_version: "v3" }];
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+
+  it("an ordinary consent still counts alongside a dropped operator-test one", () => {
+    const f = base(); f.env.enabled = true; f.env.allowlist = new Set();
+    f.consents = [operatorTest(), { ...base().consents[0], source: "form", wording_version: null }];
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+
+  it("a consent with no wording_version at all (the column is nullable) is not an error", () => {
+    const f = base(); const c = { ...base().consents[0] }; delete c.wording_version; f.consents = [c];
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+});
+
 describe("evaluateGate: a missing or malformed fact throws, never allows", () => {
   // Task 9 builds `facts` from DB helpers; a wrong alias or an unguarded `?.`
   // there must not silently switch a check off (e.g. do-not-call, the daily

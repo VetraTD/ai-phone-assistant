@@ -241,4 +241,19 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
     await expect(db.countDialsSince(PHONES.placed, new Date(0))).rejects.toThrow(/withTenant/);
     await expect(db.lockCapacity()).rejects.toThrow(/withTenant/);
   });
+
+  // F4: the gate drops an "operator-test" consent unless the number is on the
+  // service allow-list. That rule reads wording_version -- if listConsents did
+  // not select it, every consent would arrive without one and the rule would
+  // never fire (fail open). So the column must be real, read through RLS.
+  it("listConsents returns source and wording_version, so the gate's operator-test rule has a real fact", async () => {
+    const { contactId } = await seed("optest-1", "+447700900409");
+    await admin.query(`INSERT INTO consents (business_id,contact_id,purpose,channels,covers_automated,source,captured_at,wording_version)
+                       VALUES ($1,$2,'enquiry_followup','{call}',true,'manual',now() - interval '1 day','operator-test')`, [BIZ, contactId]);
+    const consents = await db.withTenant(BIZ, () => db.listConsents(contactId));
+    expect(consents.map((c) => ({ source: c.source, wording_version: c.wording_version }))).toEqual([
+      { source: "manual", wording_version: null },            // seed()'s, captured now (newest first)
+      { source: "manual", wording_version: "operator-test" },
+    ]);
+  });
 });

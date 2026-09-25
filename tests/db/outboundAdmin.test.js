@@ -26,6 +26,7 @@ import {
   triggerOutreach,
 } from "../../scripts/outbound-admin.js";
 import { TEMPLATES, PURPOSE_BY_TEMPLATE } from "../../lib/outbound/templates.js";
+import { OPERATOR_TEST_WORDING } from "../../lib/outbound/gate.js";
 
 const ADMIN_URL = process.env.DATABASE_URL;
 const describeDb = ADMIN_URL ? describe : describe.skip;
@@ -391,9 +392,10 @@ describeDb("outbound-admin: triggerOutreach", () => {
     expect(contact.rows[0].id).toBe(r.contactId);
     expect(contact.rows[0].first_name).toBe("Sam");
 
-    const consent = await admin.query(`SELECT source, covers_automated, purpose, channels FROM consents WHERE contact_id = $1`, [r.contactId]);
+    const consent = await admin.query(`SELECT source, covers_automated, purpose, channels, wording_version FROM consents WHERE contact_id = $1`, [r.contactId]);
     expect(consent.rowCount).toBe(1);
-    expect(consent.rows[0]).toMatchObject({ source: "manual", covers_automated: true, purpose: PURPOSE_BY_TEMPLATE.speed_to_lead, channels: ["call"] });
+    // wording_version is what the dial-time gate keys the allow-list rule on (F4).
+    expect(consent.rows[0]).toMatchObject({ source: "manual", covers_automated: true, purpose: PURPOSE_BY_TEMPLATE.speed_to_lead, channels: ["call"], wording_version: OPERATOR_TEST_WORDING });
 
     const outreach = await admin.query(`SELECT id, state, next_attempt_at, idempotency_key FROM outreach WHERE id = $1`, [r.outreachId]);
     expect(outreach.rowCount).toBe(1);

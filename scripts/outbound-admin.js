@@ -56,6 +56,9 @@ import { connect } from "./migrate.js";
 import { validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
 import { outboundEnv } from "../lib/outbound/config.js";
+// The dial-time gate honours this consent only while the number is on the
+// SERVICE's allow-list (Checkpoint 2a, F4); one constant, so the two agree.
+import { OPERATOR_TEST_WORDING } from "../lib/outbound/gate.js";
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 const CAMPAIGN_STATUSES = ["draft", "active", "paused"];
@@ -414,7 +417,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       campaignVersion: campaign.current_version,
       contact: { phone_e164: phone, first_name: firstName || null },
       consent: consentManual
-        ? { source: "manual", covers_automated: true, purpose, channels: ["call"], wording_version: "operator-test" }
+        ? { source: "manual", covers_automated: true, purpose, channels: ["call"], wording_version: OPERATOR_TEST_WORDING }
         : null,
       outreach: { state: "waiting", next_attempt_at: "now()", trigger: { source: "outbound-admin" }, idempotency_key: idempotencyKey },
     };
@@ -445,8 +448,8 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
     if (created && consentManual) {
       await client.query(
         `INSERT INTO consents (business_id, contact_id, purpose, channels, covers_automated, source, captured_at, wording_version, wording_text)
-         VALUES ($1, $2, $3, '{call}', true, 'manual', now(), 'operator-test', $4)`,
-        [business.id, contactId, purpose, "Operator test on the owner's own handset"]
+         VALUES ($1, $2, $3, '{call}', true, 'manual', now(), $5, $4)`,
+        [business.id, contactId, purpose, "Operator test on the owner's own handset", OPERATOR_TEST_WORDING]
       );
     }
 

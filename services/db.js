@@ -2375,13 +2375,15 @@ export async function isSuppressed(phone) {
 /**
  * The contact's consent evidence (gate check 5), newest first. Revoked and
  * expired rows are returned too: consentSatisfies decides what counts.
+ * `source` and `wording_version` are what the gate's operator-test rule reads
+ * (Checkpoint 2a, F4): without them every consent would look like a real one.
  * @param {string} contactId
- * @returns {Promise<Array<{id: string, purpose: string, channels: string[], covers_automated: boolean, captured_at: Date, expires_at: Date|null, revoked_at: Date|null}>>}
+ * @returns {Promise<Array<{id: string, purpose: string, channels: string[], covers_automated: boolean, source: string, wording_version: string|null, captured_at: Date, expires_at: Date|null, revoked_at: Date|null}>>}
  */
 export async function listConsents(contactId) {
   requireTenantScope("listConsents");
   const res = await q(
-    `SELECT id, purpose, channels, covers_automated, captured_at, expires_at, revoked_at
+    `SELECT id, purpose, channels, covers_automated, source, wording_version, captured_at, expires_at, revoked_at
        FROM consents
       WHERE contact_id = $1
       ORDER BY captured_at DESC`,
