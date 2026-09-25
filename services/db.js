@@ -2438,18 +2438,20 @@ export async function countDialsSince(phone, since) {
 
 /**
  * Live outbound dials, globally and for this business (gate check 10). Reads
- * dial_registry through the app_active_dial_counts() definer (migration 044),
- * which holds ids and timestamps only.
+ * dial_registry through the app_active_dial_counts(p_business) definer
+ * (migration 044), which returns exactly two counts and never another
+ * tenant's id. A missing row or a non-numeric count throws (finiteCount): the
+ * gate must never read "no row" as "zero live calls".
  * @param {string} businessId
  * @returns {Promise<{globalOutbound: number, businessOutbound: number}>}
  */
 export async function activeDialCounts(businessId) {
-  const res = await q(`SELECT business_id, active FROM app_active_dial_counts()`);
+  const res = await q(`SELECT global_active, business_active FROM app_active_dial_counts($1)`, [businessId]);
   if (res.error) throw res.error;
-  const rows = (res.rows || []).map((r) => ({ business_id: r.business_id, active: finiteCount(r.active, "activeDialCounts") }));
+  const row = one(res);
   return {
-    globalOutbound: rows.reduce((s, r) => s + r.active, 0),
-    businessOutbound: rows.find((r) => r.business_id === businessId)?.active ?? 0,
+    globalOutbound: finiteCount(row?.global_active, "activeDialCounts"),
+    businessOutbound: finiteCount(row?.business_active, "activeDialCounts"),
   };
 }
 

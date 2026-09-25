@@ -6,10 +6,11 @@ const d = url ? describe : describe.skip;
 const APP_URL = "postgres://vetra_app:probe_only@localhost:55432/vetra";
 const OWNER = "outdir_owner";
 const BIZ = "0d0d0000-0000-4000-8000-000000000001";
+const BIZ2 = "0d0d0000-0000-4000-8000-000000000002"; // F3's second tenant
 const FNS = [
   "app_outbound_attempt_by_call_sid(text)",
   "app_outbound_due(integer, integer)",
-  "app_active_dial_counts()",
+  "app_active_dial_counts(uuid)",
   "app_sync_outbound_directories()",
   "app_sync_outreach_schedule()",
 ];
@@ -40,7 +41,7 @@ beforeAll(async () => {
   for (const fn of FNS) await admin.query(`ALTER FUNCTION ${fn} OWNER TO ${OWNER}`);
   await admin.query(`ALTER ROLE vetra_app LOGIN PASSWORD 'probe_only'`);
 
-  await admin.query(`DELETE FROM businesses WHERE id = $1`, [BIZ]);
+  await admin.query(`DELETE FROM businesses WHERE id = ANY($1::uuid[])`, [[BIZ, BIZ2]]);
   await admin.query(`INSERT INTO businesses (id, name) VALUES ($1,'Dir')`, [BIZ]);
   const camp = await admin.query(`INSERT INTO campaigns (business_id,name,template_key,compliance_class,audience,status,current_version)
                                    VALUES ($1,'c','speed_to_lead','solicited','business','active',3) RETURNING id`, [BIZ]);
@@ -59,7 +60,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!admin) return;
   await app?.end().catch(() => {});
-  await admin.query(`DELETE FROM businesses WHERE id = $1`, [BIZ]).catch(() => {});
+  await admin.query(`DELETE FROM businesses WHERE id = ANY($1::uuid[])`, [[BIZ, BIZ2]]).catch(() => {});
   for (const fn of FNS) await admin.query(`ALTER FUNCTION ${fn} OWNER TO vetra`).catch(() => {});
   await admin.query(`ALTER ROLE vetra_app NOLOGIN`).catch(() => {});
   await admin.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${OWNER}`).catch(() => {});
@@ -72,6 +73,13 @@ afterAll(async () => {
 async function appTx(fn) {
   await app.query("BEGIN");
   try { return await fn(app); } finally { await app.query("ROLLBACK"); }
+}
+
+/** This business's live dial count, as vetra_app sees it through the definer (F3: one row, always). */
+async function businessActive(biz) {
+  const r = await appTx((c) => c.query(`SELECT business_active FROM app_active_dial_counts($1)`, [biz]));
+  expect(r.rows).toHaveLength(1);
+  return r.rows[0].business_active;
 }
 
 d("outbound directories: honest ownership", () => {
@@ -163,18 +171,15 @@ d("app_outbound_due", () => {
 
 d("app_active_dial_counts", () => {
   it("counts an open attempt and stops counting it when it ends", async () => {
-    const before = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
-    expect(before.rows[0]?.active).toBe(1); // CAdir0001 from above
+    expect(await businessActive(BIZ)).toBe(1); // CAdir0001 from above
     await admin.query(`UPDATE call_attempts SET ended_at = now(), result = 'connected' WHERE twilio_call_sid = 'CAdir0001'`);
-    const after = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
-    expect(after.rows).toEqual([]);
+    expect(await businessActive(BIZ)).toBe(0);
   });
 
   it("ignores an attempt older than an hour that never ended (a lost status callback cannot block capacity forever)", async () => {
     await admin.query(`INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at)
                        VALUES ($1,$2,2,'+441372656055','+447700900111','CAdir-stale', now() - interval '2 hours')`, [BIZ, outreachId]);
-    const r = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
-    expect(r.rows).toEqual([]);
+    expect(await businessActive(BIZ)).toBe(0);
   });
 });
 
@@ -207,14 +212,13 @@ d("the directories stay true to call_attempts / outreach", () => {
       `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at)
        VALUES ($1,$2,1,'+441372656055','+447700900111','CAdir-sync-del',now()) RETURNING id`, [BIZ, oid])).rows[0].id;
 
-    const before = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
-    expect(before.rows[0]?.active).toBe(1);
+    expect(await businessActive(BIZ)).toBe(1);
     expect((await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-sync-del')`))).rows).toHaveLength(1);
 
     await admin.query(`DELETE FROM call_attempts WHERE id = $1`, [attemptId]);
 
     expect((await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-sync-del')`))).rows).toEqual([]);
-    expect((await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]))).rows).toEqual([]);
+    expect(await businessActive(BIZ)).toBe(0);
 
     await admin.query(`DELETE FROM outreach WHERE id = $1`, [oid]);
   });
@@ -230,4 +234,62 @@ d("the directories stay true to call_attempts / outreach", () => {
 
     await admin.query(`DELETE FROM outreach WHERE id = $1`, [oid]);
   });
+});
+
+// F3 (Checkpoint 2a, owner-approved). The zero-arg function returned one row
+// per tenant with a live dial -- every such tenant's business_id -- to ANY
+// vetra_app caller. The capacity check needs two numbers, not that list.
+d("app_active_dial_counts(p_business) is tenant-private (F3)", () => {
+  it("returns exactly [global_active, business_active] -- one row, no business_id column", async () => {
+    const r = await appTx((c) => c.query(`SELECT * FROM app_active_dial_counts($1)`, [BIZ]));
+    expect(r.fields.map((f) => f.name)).toEqual(["global_active", "business_active"]);
+    expect(r.rows).toHaveLength(1);
+  });
+
+  it("the zero-arg overload is gone: the only signature takes the business", async () => {
+    const r = await admin.query(
+      `SELECT pg_get_function_identity_arguments(oid) AS args FROM pg_proc WHERE proname = 'app_active_dial_counts'`);
+    expect(r.rows).toEqual([{ args: "p_business uuid" }]);
+  });
+
+  it("counts right for two tenants: each sees its own number and the same global total", async () => {
+    await admin.query(`INSERT INTO businesses (id, name) VALUES ($1,'Dir2')`, [BIZ2]);
+    const camp2 = (await admin.query(`INSERT INTO campaigns (business_id,name,template_key,compliance_class,audience,status,current_version)
+                                       VALUES ($1,'c2','speed_to_lead','solicited','business','active',1) RETURNING id`, [BIZ2])).rows[0].id;
+    const con2 = (await admin.query(`INSERT INTO contacts (business_id, phone_e164) VALUES ($1,'+447700900222') RETURNING id`, [BIZ2])).rows[0].id;
+    const o2 = (await admin.query(`INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key)
+                                    VALUES ($1,$2,1,$3,'dialing','{}','dir2-1') RETURNING id`, [BIZ2, camp2, con2])).rows[0].id;
+    const o1 = await mk("dir-f3", "dialing", null);
+    const live = (biz, outreach, n) => admin.query(
+      `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,dialed_at) VALUES ($1,$2,$3,'+441372656055','+447700900000',now())`,
+      [biz, outreach, n]);
+    await live(BIZ, o1, 1);        // BIZ: one live dial (CAdir0001 ended, CAdir-stale is 2 h old)
+    await live(BIZ2, o2, 1);       // BIZ2: two
+    await live(BIZ2, o2, 2);
+
+    const a = (await appTx((c) => c.query(`SELECT * FROM app_active_dial_counts($1)`, [BIZ]))).rows[0];
+    const b = (await appTx((c) => c.query(`SELECT * FROM app_active_dial_counts($1)`, [BIZ2]))).rows[0];
+    const truth = (await admin.query(`SELECT count(*)::int AS n FROM dial_registry WHERE dialed_at > now() - interval '1 hour'`)).rows[0].n;
+
+    expect(a.business_active).toBe(1);
+    expect(b.business_active).toBe(2);
+    expect(a.global_active).toBe(truth);
+    expect(b.global_active).toBe(truth);
+    expect(truth).toBeGreaterThanOrEqual(3);
+
+    await admin.query(`DELETE FROM outreach WHERE id = $1`, [o1]);
+  });
+
+  it("an unknown business sees zero for itself and still the global total", async () => {
+    const r = (await appTx((c) => c.query(`SELECT * FROM app_active_dial_counts($1)`, ["0d0d0000-0000-4000-8000-0000000000ff"]))).rows[0];
+    const truth = (await admin.query(`SELECT count(*)::int AS n FROM dial_registry WHERE dialed_at > now() - interval '1 hour'`)).rows[0].n;
+    expect(r).toEqual({ global_active: truth, business_active: 0 });
+  });
+
+  it.each(["call_attempt_directory", "dial_registry", "outreach_schedule"])(
+    "%s carries a routing-only COMMENT (the 033/039 idiom)", async (t) => {
+      const r = await admin.query(`SELECT obj_description($1::regclass, 'pg_class') AS c`, [`public.${t}`]);
+      expect(r.rows[0].c).toMatch(/^Routing only:/);
+      expect(r.rows[0].c).toMatch(/never carry a phone number or a name/);
+    });
 });

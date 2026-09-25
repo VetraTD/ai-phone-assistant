@@ -1569,6 +1569,13 @@ CREATE INDEX IF NOT EXISTS outreach_schedule_due_idx ON outreach_schedule (state
 REVOKE ALL ON call_attempt_directory, dial_registry, outreach_schedule FROM PUBLIC;
 REVOKE ALL ON call_attempt_directory, dial_registry, outreach_schedule FROM vetra_app;
 
+COMMENT ON TABLE call_attempt_directory IS
+  'Routing only: Twilio CallSid -> outbound attempt and tenant, for the answer door, status callbacks and the session. Deliberately has NO row-level security and NO grant to vetra_app: only the migration 044 SECURITY DEFINER functions read it, and a trigger on call_attempts keeps it true. Holds ids only. Must never carry a phone number or a name.';
+COMMENT ON TABLE dial_registry IS
+  'Routing only: live outbound dials of the last hour, for the capacity check. Deliberately has NO row-level security and NO grant to vetra_app: only app_active_dial_counts(p_business) reads it, and it returns two counts, never another tenant''s id; a trigger on call_attempts keeps it true. Holds ids and a timestamp. Must never carry a phone number or a name.';
+COMMENT ON TABLE outreach_schedule IS
+  'Routing only: which outreach is due, for the sweep. Deliberately has NO row-level security and NO grant to vetra_app: only app_outbound_due reads it, and a trigger on outreach keeps it true. Holds ids, a timestamp and a state word. Must never carry a phone number or a name.';
+
 -- Keeping them true. SECURITY DEFINER because the writer (vetra_app, under
 -- RLS on call_attempts / outreach) has no rights on the directories.
 CREATE OR REPLACE FUNCTION app_sync_outbound_directories()
@@ -1653,18 +1660,21 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
    LIMIT LEAST(GREATEST(p_limit, 1), 500);
 $$;
 
-CREATE OR REPLACE FUNCTION app_active_dial_counts()
-RETURNS TABLE (business_id uuid, active int)
+-- Two counts and never a business id: the caller learns the global total and
+-- its own, nothing about which other tenants are dialing. Always one row.
+DROP FUNCTION IF EXISTS app_active_dial_counts();
+CREATE OR REPLACE FUNCTION app_active_dial_counts(p_business uuid)
+RETURNS TABLE (global_active int, business_active int)
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-  SELECT r.business_id, count(*)::int
+  SELECT count(*)::int,
+         (count(*) FILTER (WHERE r.business_id = p_business))::int
     FROM dial_registry r
-   WHERE r.dialed_at > now() - interval '1 hour'
-   GROUP BY r.business_id;
+   WHERE r.dialed_at > now() - interval '1 hour';
 $$;
 
 REVOKE ALL ON FUNCTION app_outbound_attempt_by_call_sid(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_outbound_due(int, int) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_active_dial_counts() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_active_dial_counts(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_outbound_attempt_by_call_sid(text) TO vetra_app;
 GRANT EXECUTE ON FUNCTION app_outbound_due(int, int) TO vetra_app;
-GRANT EXECUTE ON FUNCTION app_active_dial_counts() TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_active_dial_counts(uuid) TO vetra_app;
