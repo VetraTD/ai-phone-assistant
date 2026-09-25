@@ -204,6 +204,25 @@ describe("fix A: the SID write is retried, and a call no callback can route is h
   });
 });
 
+// Checkpoint 2a, M2. On a DB outage the SID write fails AND the reschedule
+// that follows it throws. The log line and the counter used to come after the
+// reschedule, so the one failure worth an alert left no trace at all.
+describe("M2: a failed SID write is logged and counted before the reschedule that can throw", () => {
+  beforeEach(() => clearStats());
+  it("failAndReschedule throwing (DB down) still leaves outbound_dial_failed {reason: sid_write_failed, hungUp} and the counter", async () => {
+    const db = fakeDb();
+    db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    db.lockOutreachState = vi.fn(async () => { throw new Error("db down"); }); // failAndReschedule's first DB call
+    const { twilio } = twilioWithUpdate(vi.fn(async () => ({ status: "canceled" })));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(db, twilio, { sleep: noSleep, log });
+    await expect(d({ businessId: "b1", outreachId: "o1" })).rejects.toThrow("db down");
+    expect(log.error).toHaveBeenCalledWith("outbound_dial_failed",
+      expect.objectContaining({ attemptId: "a1", reason: "sid_write_failed", hungUp: "canceled" }));
+    expect(getLatencyStats().turnTaking.outbound_dial_failed).toBe(1);
+  });
+});
+
 describe("fix B: the failure path reads the outreach state under lock and never reopens a closed one", () => {
   it("a failed create locks the outreach before writing the attempt", async () => {
     const db = fakeDb(); const twilio = { calls: { create: vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 400 }); }) } };
