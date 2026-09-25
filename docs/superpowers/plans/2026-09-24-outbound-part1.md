@@ -97,6 +97,12 @@
 | 3 | Tasks 24–31: qualification, outcomes/callback/opt-out, retries plus callback recognition, SMS, results webhook, trigger webhook, booking, live round 2 | `feat/outbound-stage3` from the stage 2 tip | SMS sender; testers; owner decision C3 |
 | 4 | Tasks 32–37: dashboard, demo | `feat/outbound-stage4` from the stage 3 tip | owner review |
 
+**Owner decision 2026-09-24: stage 2 runs as TWO sessions, not four.**
+- **"Stage 2 build"** covers 2a and 2b (Tasks 0–21) in one session. Checkpoint 2a (full suites plus code review) is a hard stop inside it. Task 0 (2b), the refresh, becomes an in-session step: re-anchor the 2b line references against HEAD and re-record the baselines.
+- **"Stage 2 go-live"** covers 2.6 (Task 22, deploy plus decision C17) and 2.7 (Task 23, live round 1, plus fixes from its calls). It runs when the owner is free for about 2 hours.
+
+The reasoning: 2a and 2b have no owner gate between them and share one deploy, so splitting them only adds a handoff. The deploy and the live calls depend on the owner's timing, and should start fresh.
+
 **Each session begins with its "Task 0: refresh".**
 - Re-read this plan section against the code as it now stands.
 - Update every `file:line` anchor, since earlier sessions move lines.
