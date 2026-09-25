@@ -16,13 +16,27 @@ describe("Google OIDC verification for /internal/outbound/*", () => {
     expect(await verifier.verify(`Bearer ${sign({})}`)).toEqual({ ok: true, email: SA }));
   it("refuses a missing header", async () => expect((await verifier.verify(undefined)).ok).toBe(false));
   it("refuses the wrong audience", async () => expect((await verifier.verify(`Bearer ${sign({ aud: "https://evil.example" })}`)).ok).toBe(false));
+  it("refuses an array audience even when it contains the right value (aud must equal the service URL, not merely include it)", async () =>
+    expect((await verifier.verify(`Bearer ${sign({ aud: [AUD, "https://evil.example"] })}`)).ok).toBe(false));
   it("refuses the wrong service account", async () =>
     expect((await verifier.verify(`Bearer ${sign({ email: "someone@else.iam.gserviceaccount.com" })}`)).ok).toBe(false));
   it("refuses an unverified email", async () => expect((await verifier.verify(`Bearer ${sign({ email_verified: false })}`)).ok).toBe(false));
   it("refuses the wrong issuer", async () => expect((await verifier.verify(`Bearer ${sign({ iss: "https://securetoken.google.com/x" })}`)).ok).toBe(false));
-  it("refuses an expired token", async () => expect((await verifier.verify(`Bearer ${sign({}, { expiresIn: -10 })}`)).ok).toBe(false));
+  it("refuses an expired token", async () => expect((await verifier.verify(`Bearer ${sign({}, { expiresIn: -120 })}`)).ok).toBe(false));
+  it("accepts a token that expired 30s ago, within the 60s clock tolerance", async () =>
+    expect(await verifier.verify(`Bearer ${sign({}, { expiresIn: -30 })}`)).toEqual({ ok: true, email: SA }));
   it("refuses alg none", async () => {
     const none = jwt.sign({ iss: "https://accounts.google.com", aud: AUD, email: SA, email_verified: true }, "", { algorithm: "none" });
     expect((await verifier.verify(`Bearer ${none}`)).ok).toBe(false);
+  });
+  it("refuses a token signed with no kid", async () => {
+    const noKid = jwt.sign(
+      { iss: "https://accounts.google.com", aud: AUD, email: SA, email_verified: true },
+      privateKey, { algorithm: "RS256", expiresIn: 300 });
+    expect((await verifier.verify(`Bearer ${noKid}`)).ok).toBe(false);
+  });
+  it("accepts a token when the configured audience has a trailing slash", async () => {
+    const v = createGoogleOidcVerifier({ audience: AUD + "/", allowedEmails: [SA], getPublicKey: async () => publicKey });
+    expect(await v.verify(`Bearer ${sign({})}`)).toEqual({ ok: true, email: SA });
   });
 });
