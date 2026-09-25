@@ -6,6 +6,7 @@ import {
   registerOutboundInternalRoutes,
   buildOutboundDeps,
   createCallerIdValidator,
+  createTwilioClientFor,
   isOutboundInternalPath,
 } from "../lib/outbound/internalRoutes.js";
 
@@ -263,6 +264,39 @@ describe("buildOutboundDeps", () => {
         OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
       })
     ).not.toThrow();
+  });
+
+  // Fix round 1, MINOR 3: server.js builds ONE createTwilioClientFor()
+  // instance and passes it into BOTH registerOutboundDoorRoutes and
+  // buildOutboundDeps, rather than each holding an independent client
+  // against the same account. Accepting the injected factory must not
+  // change the "no credentials needed to build" property, and must not call
+  // it eagerly -- laziness is what let buildOutboundDeps be called at
+  // server.js's own module-load time in the first place.
+  it("accepts an injected twilioClientFor (a shared instance) without calling it, and without needing its own credentials", () => {
+    const twilioClientFor = vi.fn(() => ({ calls: vi.fn() }));
+    const deps = buildOutboundDeps(
+      {
+        BASE_URL: "https://x.example/",
+        OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q",
+        OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+      },
+      { twilioClientFor }
+    );
+    expect(deps).not.toBeNull();
+    expect(twilioClientFor).not.toHaveBeenCalled(); // still lazy: building deps must not invoke it
+  });
+
+  // The default (no twilioClientFor passed -- every existing direct caller,
+  // including every other test in this file) must keep building its OWN
+  // fresh factory, exactly as before this option existed.
+  it("without an injected twilioClientFor, still builds successfully with no ambient Twilio credentials (the pre-existing default path)", () => {
+    const deps = buildOutboundDeps({
+      BASE_URL: "https://x.example/",
+      OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q",
+      OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+    });
+    expect(deps).not.toBeNull();
   });
 });
 

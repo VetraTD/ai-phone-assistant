@@ -626,19 +626,21 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
 // `postCall` is Task 20's placeholder: `tryClaim` always resolves false until
 // that task wires the real implementation in.
 //
-// `twilioClientFor` (Task 13) is the SAME lazy, account-A-only factory
-// `buildOutboundDeps` below uses for the dispatcher, extracted so both can
-// share one construction rule: the Twilio SDK's constructor throws outright
-// on a SID that doesn't start with "AC", so the client must not be built
-// until the AMD door's first real use, independent of whether
+// `outboundTwilioClientFor` (Task 13; ONE shared instance, fix round 1 MINOR
+// 3) is the SAME lazy, account-A-only factory passed into `buildOutboundDeps`
+// below for the dispatcher -- one client, not two, against the same account.
+// It stays lazy: the Twilio SDK's constructor throws outright on a SID that
+// doesn't start with "AC", so the client must not be built until either the
+// AMD door or the dispatcher's first real use, independent of whether
 // buildOutboundDeps ever resolves its own (separate) Cloud Tasks config.
 // ---------------------------------------------------------------------------
+const outboundTwilioClientFor = createTwilioClientFor();
 registerOutboundDoorRoutes(app, {
   validate: twilioValidationAnyAccount,
   db,
   mintToken: mintMediaStreamToken,
   postCall: { tryClaim: async () => false }, // Task 20 wires postCall
-  twilioClientFor: createTwilioClientFor(),
+  twilioClientFor: outboundTwilioClientFor,
   log,
   now: () => Date.now(),
 });
@@ -1450,9 +1452,13 @@ app.get("/api/debug/probe-results", async (req, res) => {
 // Mounted only when buildOutboundDeps() resolves BASE_URL, OUTBOUND_TASKS_QUEUE
 // and OUTBOUND_TASKS_SA -- the posture before Task 22 is "not mounted", which
 // is what keeps these two routes off the live service today.
+//
+// `outboundTwilioClientFor` is the SAME instance registerOutboundDoorRoutes
+// got above (fix round 1, MINOR 3) -- one shared, lazy Twilio client for the
+// whole outbound surface, not one per call site.
 // ---------------------------------------------------------------------------
 
-const outboundDeps = buildOutboundDeps();
+const outboundDeps = buildOutboundDeps(process.env, { twilioClientFor: outboundTwilioClientFor });
 if (outboundDeps) {
   registerOutboundInternalRoutes(app, outboundDeps);
 } else {

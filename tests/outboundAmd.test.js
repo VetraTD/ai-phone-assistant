@@ -161,6 +161,10 @@ function fakeDb(over = {}) {
     outboundAttemptByCallSid: vi.fn(async (sid) =>
       sid === CALL_SID ? { businessId: BIZ, attemptId: ATTEMPT, outreachId: OUTREACH, campaignId: CAMPAIGN, campaignVersion: 1 } : null
     ),
+    // Mirrors the real withTenant: runs the unit of work, and PROPAGATES a
+    // throw (fix round 1, IMPORTANT 1: the record write needs this, not the
+    // degrade-and-swallow shape withTenantSafe has).
+    withTenant: vi.fn(async (_businessId, fn) => fn()),
     // Mirrors the real withTenantSafe's degrade-on-throw shape closely enough
     // for these tests: run the unit of work, and swallow anything it throws.
     withTenantSafe: vi.fn(async (_businessId, fn) => {
@@ -210,10 +214,11 @@ function postAmd(deps, body) {
 }
 
 describe("POST /twilio/outbound-amd: routing and recording", () => {
-  it("an unknown CallSid is a 200 no-op, logged at info, and never reaches withTenantSafe", async () => {
+  it("an unknown CallSid is a 200 no-op, logged at info, and never reaches withTenant/withTenantSafe", async () => {
     const deps = fakeDeps();
     const res = await postAmd(deps, { CallSid: "CAghost", AnsweredBy: "human" });
     expect(res.status).toBe(200);
+    expect(deps.db.withTenant).not.toHaveBeenCalled();
     expect(deps.db.withTenantSafe).not.toHaveBeenCalled();
     expect(deps.log.info).toHaveBeenCalledWith("outbound_amd_unknown_sid", { callSid: "CAghost" });
   });
@@ -224,8 +229,53 @@ describe("POST /twilio/outbound-amd: routing and recording", () => {
     const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "human" });
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(res.status).toBeLessThan(600);
+    expect(deps.db.withTenant).not.toHaveBeenCalled();
     expect(deps.db.withTenantSafe).not.toHaveBeenCalled();
     expect(deps.log.error).toHaveBeenCalledWith("outbound_amd_lookup_failed", expect.objectContaining({ callSid: CALL_SID }));
+  });
+
+  // Fix round 1, IMPORTANT 1: the record write (answered_by/amd_duration_ms)
+  // is its OWN withTenant unit now, separate from the context read -- a
+  // throw from the record write itself must 500 (Twilio retries), the same
+  // ruling as the by-CallSid lookup just above.
+  it("a throw from the record write (stampAttemptAmd) returns 500 and never reaches the context read", async () => {
+    const db = fakeDb({ withTenant: vi.fn(async () => { throw new Error("pg down mid-write"); }) });
+    const deps = fakeDeps({ db });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "human" });
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBeLessThan(600);
+    expect(deps.db.withTenantSafe).not.toHaveBeenCalled();
+    expect(deps.log.error).toHaveBeenCalledWith("outbound_amd_record_failed", expect.objectContaining({ callSid: CALL_SID, attemptId: ATTEMPT }));
+  });
+
+  // Fix round 1, IMPORTANT 1: the two writes/reads are no longer bundled in
+  // one transaction, so a throw from the CONTEXT read must not roll back the
+  // record write that already landed -- proven here by a fakeDb whose
+  // withTenant (used ONLY by the record write) actually persists into a
+  // shared spy, independent of withTenantSafe's own throw.
+  it("a throw from the context read (outboundAmdContext) still leaves answered_by/amd_duration_ms recorded, and the route still answers 200", async () => {
+    const db = fakeDb({ outboundAmdContext: vi.fn(async () => { throw new Error("pg down on read"); }) });
+    const deps = fakeDeps({ db });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "human" });
+    expect(res.status).toBe(200);
+    // The record write ran, via withTenant, to completion -- unaffected by
+    // the later throw inside withTenantSafe's own (separate) unit of work.
+    expect(deps.db.withTenant).toHaveBeenCalledTimes(1);
+    expect(deps.db.stampAttemptAmd).toHaveBeenCalledWith(ATTEMPT, { answeredBy: "human", amdDurationMs: null, result: null });
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_amd", { callSid: CALL_SID, attemptId: ATTEMPT, answered_by: "human" });
+  });
+
+  // Fix round 1, IMPORTANT 1 (Ruling): an AnsweredBy value outside the
+  // CHECK-constrained set is normalised to "unknown" before it is ever
+  // written -- never a raw INSERT that would throw and 500-loop forever --
+  // and the raw value is logged separately so it is not silently lost.
+  it("an unrecognised AnsweredBy value is normalised to 'unknown', the raw value is logged, and the route answers 200 (never a CHECK-violation 500)", async () => {
+    const deps = fakeDeps();
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "some_future_twilio_value" });
+    expect(res.status).toBe(200);
+    expect(deps.db.stampAttemptAmd).toHaveBeenCalledWith(ATTEMPT, expect.objectContaining({ answeredBy: "unknown" }));
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_amd_unrecognized_answered_by", { callSid: CALL_SID, attemptId: ATTEMPT, raw: "some_future_twilio_value" });
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_amd", { callSid: CALL_SID, attemptId: ATTEMPT, answered_by: "unknown" });
   });
 
   it("a failed signature (validate refuses) returns 403 and never reaches the lookup", async () => {
@@ -349,16 +399,27 @@ describe("POST /twilio/outbound-amd: hangup (outside voicemail_on, class refuses
 });
 
 describe("POST /twilio/outbound-amd: a Twilio REST error is caught, logged, and still answers 200", () => {
-  it("a REST update() throw on the voicemail path still writes the decided result and returns 200", async () => {
+  // Fix round 1, IMPORTANT 2 (controller ruling): the result reflects the
+  // REST OUTCOME, not the decision. Claiming voicemail_left when the <Play>
+  // never reached anyone (the update() call itself failed) is a
+  // compliance-reporting error -- this must read exactly like the no_audio
+  // case, not like a successful play.
+  it("a REST update() throw on the voicemail path downgrades the result to voicemail_skipped/update_failed, and still returns 200", async () => {
     const update = vi.fn(async () => { throw new Error("call not found (already ended)"); });
     const twilio = twilioClientFake(update);
     const deps = fakeDeps({ twilioClientFor: twilio.twilioClientFor });
     const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep" });
     expect(res.status).toBe(200);
     expect(deps.log.error).toHaveBeenCalledWith("outbound_amd_update_failed", expect.objectContaining({ callSid: CALL_SID, attemptId: ATTEMPT }));
-    expect(deps.db.stampAttemptAmd).toHaveBeenNthCalledWith(2, ATTEMPT, expect.objectContaining({ result: "voicemail_left" }));
+    expect(deps.db.stampAttemptAmd).toHaveBeenNthCalledWith(2, ATTEMPT, expect.objectContaining({ result: "voicemail_skipped" }));
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_voicemail", { callSid: CALL_SID, attemptId: ATTEMPT, result: "skipped", reason: "update_failed" });
+    expect(deps.log.info).not.toHaveBeenCalledWith("outbound_voicemail", expect.objectContaining({ result: "left" }));
   });
 
+  // Ruling (controller, fix round 1, IMPORTANT 2): the hangup branch's REST
+  // failure keeps today's behaviour -- the call is ending anyway, and
+  // "failed"/"voicemail_skipped" already means no voicemail was left,
+  // whether or not the REST call itself succeeded.
   it("a REST update() throw on the hangup path also stays 200 and still writes the result", async () => {
     const update = vi.fn(async () => { throw new Error("already ended"); });
     const twilio = twilioClientFake(update);
