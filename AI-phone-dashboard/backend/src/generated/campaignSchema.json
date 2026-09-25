@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "limits": {
+    "persona_name": 30,
+    "topic": 80,
+    "objective": 500,
+    "notes": 2000,
+    "rendered_opener": 120,
+    "rendered_voicemail": 300,
+    "question_ask": 200,
+    "questions": 10,
+    "retries": 6,
+    "give_up_after_days": 30,
+    "consent_window_days": 90,
+    "max_call_minutes": 30,
+    "first_name_worst_case": 30
+  },
+  "enums": {
+    "template_key": [
+      "speed_to_lead",
+      "missed_call_callback",
+      "reminder",
+      "no_show",
+      "aftercare",
+      "review_request",
+      "reactivation",
+      "custom"
+    ],
+    "compliance_class": [
+      "solicited",
+      "service",
+      "marketing_consented"
+    ],
+    "audience": [
+      "business",
+      "patient"
+    ],
+    "capabilities": [
+      "qualification",
+      "appointments",
+      "transfer",
+      "callback",
+      "opt_out",
+      "outcome"
+    ],
+    "question_type": [
+      "text",
+      "number",
+      "yes_no"
+    ],
+    "outside_window": [
+      "queue",
+      "queue_and_text"
+    ],
+    "booking_adapter": [
+      "internal"
+    ]
+  },
+  "placeholders": [
+    "first_name",
+    "persona_name",
+    "business_name",
+    "topic",
+    "caller_id_spoken"
+  ],
+  "aiDisclosurePattern": "\\b(AI|artificial intelligence|automated assistant|virtual assistant)\\b",
+  "windowBounds": {
+    "earliest": "08:00",
+    "latest": "21:00"
+  },
+  "refusedInPart1": {
+    "compliance_class": [
+      "marketing_consented"
+    ],
+    "audience": [
+      "patient"
+    ]
+  }
+}
