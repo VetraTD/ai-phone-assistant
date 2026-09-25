@@ -48,7 +48,10 @@
 //     --status active|paused|draft [--confirm]
 //   node scripts/outbound-admin.js outbound --phone +1... --enabled true|false --max 2 [--confirm]
 //   node scripts/outbound-admin.js trigger --phone +1... --campaign-id <uuid> \
-//     --contact-phone +1... [--first-name "Sam"] [--consent-manual] [--confirm]
+//     --contact-phone +1... [--timezone America/Chicago] [--first-name "Sam"] \
+//     [--consent-manual] [--confirm]
+//   --timezone (an IANA zone) is REQUIRED unless --contact-phone is +44: the
+//   calling window runs on the contact's clock, and only +44 has a default.
 // ---------------------------------------------------------------------------
 
 import { pathToFileURL } from "node:url";
@@ -366,6 +369,32 @@ export async function setBusinessOutbound(client, { businessPhone, enabled, max,
 // triggerOutreach
 // ---------------------------------------------------------------------------
 /**
+ * Checkpoint 2a, M8(c). The calling window is evaluated on the CONTACT's
+ * clock, and with contacts.timezone NULL, contactTimezone()
+ * (lib/outbound/schedule.js) assumes Europe/London for +44 and the
+ * BUSINESS's zone for anything else -- for a UK business calling a US number,
+ * the wrong clock by 5-8 hours. So outside +44 the operator must name the
+ * zone, and any zone given is checked by Intl, the engine the scheduler runs
+ * it through.
+ * @param {string} phone - E.164, already validated
+ * @param {string|null} timezone - already trimmed; null when absent
+ * @returns {string|null} the refusal, or null
+ */
+function timezoneError(phone, timezone) {
+  if (timezone === null) {
+    return phone.startsWith("+44")
+      ? null
+      : `--timezone <IANA zone> is required for ${phone}: only +44 numbers have a default (Europe/London); any other number would be called on the business's clock`;
+  }
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: timezone });
+    return null;
+  } catch {
+    return `--timezone ${JSON.stringify(timezone)} is not a time zone (use an IANA name, e.g. America/Chicago)`;
+  }
+}
+
+/**
  * Upsert the contact, optionally record a manual consent, and create the
  * outreach `waiting` with `next_attempt_at = now()` -- REQUIRED, because
  * app_outbound_due (migration 044) and the dispatcher both treat a NULL
@@ -381,7 +410,7 @@ export async function setBusinessOutbound(client, { businessPhone, enabled, max,
  * operator re-running the same trigger is not spammed with duplicate
  * "operator test" consent rows.
  */
-export async function triggerOutreach(client, { businessPhone, campaignId, phone, firstName, consentManual, confirm }) {
+export async function triggerOutreach(client, { businessPhone, campaignId, phone, timezone, firstName, consentManual, confirm }) {
   if (!E164.test(businessPhone || "")) {
     return { ok: false, error: "businessPhone must be an E.164 number" };
   }
@@ -391,6 +420,12 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
   if (!E164.test(phone || "")) {
     return { ok: false, error: "phone must be an E.164 number" };
   }
+  if (timezone !== undefined && timezone !== null && typeof timezone !== "string") {
+    return { ok: false, error: "--timezone must be a string (an IANA zone)" };
+  }
+  const tz = typeof timezone === "string" && timezone.trim() !== "" ? timezone.trim() : null;
+  const tzError = timezoneError(phone, tz);
+  if (tzError) return { ok: false, error: tzError };
 
   // ALLOW-LIST GUARD. Refused before any transaction opens and before the
   // campaign or contact are even looked up: a manual consent can never be
@@ -433,7 +468,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       businessId: business.id,
       campaignId: campaign.id,
       campaignVersion: campaign.current_version,
-      contact: { phone_e164: phone, first_name: firstName || null },
+      contact: { phone_e164: phone, first_name: firstName || null, timezone: tz },
       consent: consentManual
         ? { source: "manual", covers_automated: true, purpose, channels: ["call"], wording_version: OPERATOR_TEST_WORDING }
         : null,
@@ -445,14 +480,15 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       return { ok: true, dryRun: true, wouldWrite };
     }
 
-    // COALESCE (Checkpoint 2a, M8b): a re-run without --first-name keeps the
-    // stored name rather than wiping the one Ava greets the contact by.
+    // COALESCE (Checkpoint 2a, M8b/M8c): a re-run without --first-name or
+    // --timezone keeps the stored value rather than wiping it.
     const contactRes = await client.query(
-      `INSERT INTO contacts (business_id, phone_e164, first_name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name), updated_at = now()
+      `INSERT INTO contacts (business_id, phone_e164, first_name, timezone)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
+                                                           timezone = COALESCE(EXCLUDED.timezone, contacts.timezone), updated_at = now()
        RETURNING id`,
-      [business.id, phone, firstName || null]
+      [business.id, phone, firstName || null, tz]
     );
     const contactId = contactRes.rows[0].id;
 
@@ -486,6 +522,13 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       if (row.contact_id !== contactId) mismatches.push("contact_id");
       if (row.state !== "waiting") mismatches.push("state");
       if (!row.next_attempt_at) mismatches.push("next_attempt_at");
+    }
+    // The contact fields this run asked for (absent ones were kept, M8b/c).
+    const contactCheck = (await client.query("SELECT first_name, timezone FROM contacts WHERE id = $1", [contactId])).rows[0];
+    if (!contactCheck) mismatches.push("contact missing");
+    else {
+      if (firstName && contactCheck.first_name !== firstName) mismatches.push("first_name");
+      if (tz && contactCheck.timezone !== tz) mismatches.push("timezone");
     }
     if (mismatches.length) {
       await client.query("ROLLBACK");
@@ -595,13 +638,15 @@ export function parseArgs(argv) {
     const campaignId = argOf(args, "campaign-id");
     const contactPhone = argOf(args, "contact-phone");
     const firstName = argOf(args, "first-name") || null;
+    // Validated (and required outside +44) by triggerOutreach -- one place.
+    const timezone = argOf(args, "timezone") || null;
     const consentManual = has(args, "consent-manual");
     if (!campaignId) push("campaign-id", "is required (--campaign-id)");
     if (!E164.test(contactPhone || "")) push("contact-phone", "must be an E.164 number (--contact-phone)");
     if (errors.length) return { ok: false, errors };
     return {
       ok: true,
-      value: { command, confirm, businessPhone: phone, campaignId, phone: contactPhone, firstName, consentManual },
+      value: { command, confirm, businessPhone: phone, campaignId, phone: contactPhone, timezone, firstName, consentManual },
     };
   }
 

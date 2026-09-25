@@ -37,6 +37,8 @@ const PROBE_PASS = "probe_only";
 const BUSINESS_PHONE = "+15550199001";
 const ALLOWED_PHONE = "+15550199002";
 const NOT_ALLOWED_PHONE = "+15550199003";
+// M8(c): a contact outside +44 needs an explicit --timezone; these +1 test numbers carry one.
+const US_TZ = "America/Chicago";
 const BUSINESS_NAME = "Digile Media"; // same fixture name outboundCampaignSchema.test.js uses; the shipped speed_to_lead template's rendered lengths were designed against it.
 
 const META = { name: "Speed to lead", template_key: "speed_to_lead", compliance_class: "solicited", audience: "business" };
@@ -145,6 +147,12 @@ describeDb("outbound-admin: parseArgs", () => {
     ]);
     expect(r.ok).toBe(true);
     expect(r.value).toMatchObject({ businessPhone: BUSINESS_PHONE, phone: ALLOWED_PHONE, firstName: "Sam", consentManual: true, confirm: true });
+  });
+
+  it("parses trigger --timezone (M8c); absent is null", () => {
+    const base = ["trigger", "--phone", BUSINESS_PHONE, "--campaign-id", "11111111-1111-4111-8111-111111111111", "--contact-phone", ALLOWED_PHONE];
+    expect(parseArgs([...base, "--timezone", "America/Chicago"]).value.timezone).toBe("America/Chicago");
+    expect(parseArgs(base).value.timezone).toBeNull();
   });
 });
 
@@ -431,7 +439,7 @@ describeDb("outbound-admin: triggerOutreach", () => {
   it("a dry run writes nothing", async () => {
     const beforeContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1`, [businessId]);
     const beforeOutreach = await admin.query(`SELECT count(*)::int AS n FROM outreach WHERE business_id = $1`, [businessId]);
-    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, firstName: "Sam", consentManual: false, confirm: false }));
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, timezone: US_TZ, firstName: "Sam", consentManual: false, confirm: false }));
     expect(r).toMatchObject({ ok: true, dryRun: true });
     const afterContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1`, [businessId]);
     const afterOutreach = await admin.query(`SELECT count(*)::int AS n FROM outreach WHERE business_id = $1`, [businessId]);
@@ -441,7 +449,7 @@ describeDb("outbound-admin: triggerOutreach", () => {
 
   it("--consent-manual for a number NOT on the allow-list is refused, and nothing is written", async () => {
     const beforeContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, NOT_ALLOWED_PHONE]);
-    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: NOT_ALLOWED_PHONE, firstName: "Nope", consentManual: true, confirm: true }));
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: NOT_ALLOWED_PHONE, timezone: US_TZ, firstName: "Nope", consentManual: true, confirm: true }));
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/OUTBOUND_TEST_ALLOWLIST/);
     const afterContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, NOT_ALLOWED_PHONE]);
@@ -451,7 +459,7 @@ describeDb("outbound-admin: triggerOutreach", () => {
   });
 
   it("--confirm with --consent-manual for an allow-listed number creates contact, consent and outreach, and they read back", async () => {
-    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, firstName: "Sam", consentManual: true, confirm: true }));
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, timezone: US_TZ, firstName: "Sam", consentManual: true, confirm: true }));
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.created).toBe(true);
 
@@ -476,7 +484,7 @@ describeDb("outbound-admin: triggerOutreach", () => {
   it("is idempotent: triggering the same phone and campaign again the same day gives exactly one outreach row", async () => {
     const first = await admin.query(`SELECT count(*)::int AS n FROM outreach WHERE business_id = $1 AND campaign_id = $2`, [businessId, campaignId]);
 
-    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, firstName: "Sam", consentManual: true, confirm: true }));
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: ALLOWED_PHONE, timezone: US_TZ, firstName: "Sam", consentManual: true, confirm: true }));
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.created).toBe(false); // conflicted -- the row from the previous test already exists
 
@@ -506,5 +514,59 @@ describeDb("outbound-admin: triggerOutreach", () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const k = await admin.query(`SELECT first_name FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
     expect(k.rows[0].first_name).toBe("Samantha");
+  });
+
+  // Checkpoint 2a, M8(c). The calling window is evaluated on the CONTACT's
+  // clock; with contacts.timezone NULL, a non-+44 number falls back to the
+  // business's zone (schedule.js contactTimezone), which for a UK business
+  // calling a US number is the wrong clock by 5-8 hours.
+  const contactRow = async (phone) => (await admin.query(
+    `SELECT first_name, timezone FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone])).rows[0];
+
+  it("a number outside +44 without --timezone is refused with a clear error, and nothing is written (M8c)", async () => {
+    const phone = "+15550199030";
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: "Tz", consentManual: false, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/--timezone/);
+    expect(r.error).toMatch(/\+44/);
+    expect(await contactRow(phone)).toBeUndefined();
+  });
+
+  it("an invalid --timezone is refused, and nothing is written (M8c)", async () => {
+    const phone = "+15550199031";
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, timezone: "Mars/Olympus_Mons", firstName: "Tz", consentManual: false, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/--timezone/);
+    expect(r.error).toMatch(/Mars\/Olympus_Mons/);
+    expect(await contactRow(phone)).toBeUndefined();
+  });
+
+  it("an invalid --timezone is refused on a +44 number too (validated whenever given)", async () => {
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: "+447700900604", timezone: "Europe/Nowhere", consentManual: false, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/--timezone/);
+  });
+
+  it("a valid --timezone is stored in contacts.timezone, and shows in the dry run (M8c)", async () => {
+    const phone = "+15550199032";
+    const dry = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, timezone: US_TZ, consentManual: false, confirm: false }));
+    expect(dry.wouldWrite.contact).toMatchObject({ phone_e164: phone, timezone: US_TZ });
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, timezone: US_TZ, consentManual: false, confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect((await contactRow(phone)).timezone).toBe(US_TZ);
+  });
+
+  it("+44 does not need one; a re-run without it keeps the stored zone (M8c)", async () => {
+    const bare = "+447700900603";
+    const r0 = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: bare, consentManual: false, confirm: true }));
+    expect(r0.ok, JSON.stringify(r0)).toBe(true);
+    expect((await contactRow(bare)).timezone).toBeNull();
+
+    const phone = "+447700900602";
+    const r1 = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, timezone: "Europe/Dublin", consentManual: false, confirm: true }));
+    expect(r1.ok, JSON.stringify(r1)).toBe(true);
+    const r2 = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, consentManual: false, confirm: true }));
+    expect(r2.ok, JSON.stringify(r2)).toBe(true);
+    expect((await contactRow(phone)).timezone).toBe("Europe/Dublin");
   });
 });
