@@ -231,6 +231,86 @@ describeDb("outbound-admin: setCampaignStatus", () => {
   });
 });
 
+// Ruling 2a-11 (fix round 1). dispatch.js parks a paused campaign's `waiting`
+// outreach with next_attempt_at = NULL -- app_outbound_due (migration 044)
+// never lists a NULL as due, so without this fix resuming a campaign here
+// (this script is Part 1's only way to set a campaign back to `active`) left
+// every parked outreach stranded forever. Spec §8: "A paused campaign holds
+// its outreach in waiting without closing it. Resuming re-enqueues them."
+describeDb("outbound-admin: setCampaignStatus resumes parked outreach (Ruling 2a-11)", () => {
+  let campaignId, outreachNullId, outreachFutureId;
+  const FUTURE = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+
+  beforeAll(async () => {
+    const created = await asProbe((c) =>
+      upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, name: "resume target" }, config: goodConfig(), confirm: true })
+    );
+    campaignId = created.campaignId;
+    await admin.query(`UPDATE campaigns SET status = 'paused' WHERE id = $1`, [campaignId]);
+
+    const a = await admin.query(`INSERT INTO contacts (business_id, phone_e164, first_name) VALUES ($1, '+15550199010', 'Null') RETURNING id`, [businessId]);
+    const b = await admin.query(`INSERT INTO contacts (business_id, phone_e164, first_name) VALUES ($1, '+15550199011', 'Future') RETURNING id`, [businessId]);
+
+    // Parked: what the dispatcher leaves behind while a campaign is paused.
+    const oa = await admin.query(
+      `INSERT INTO outreach (business_id, campaign_id, campaign_version, contact_id, state, next_attempt_at, trigger, idempotency_key)
+       VALUES ($1, $2, 1, $3, 'waiting', NULL, '{}', 'resume-null') RETURNING id`,
+      [businessId, campaignId, a.rows[0].id]
+    );
+    outreachNullId = oa.rows[0].id;
+    // Genuinely scheduled for later (e.g. outside_window, tomorrow) -- must
+    // never be touched by a resume.
+    const ob = await admin.query(
+      `INSERT INTO outreach (business_id, campaign_id, campaign_version, contact_id, state, next_attempt_at, trigger, idempotency_key)
+       VALUES ($1, $2, 1, $3, 'waiting', $4, '{}', 'resume-future') RETURNING id`,
+      [businessId, campaignId, b.rows[0].id, FUTURE]
+    );
+    outreachFutureId = ob.rows[0].id;
+  });
+
+  it("a dry-run resume changes nothing but reports reArmed = 1", async () => {
+    const r = await asProbe((c) => setCampaignStatus(c, { businessPhone: BUSINESS_PHONE, campaignId, status: "active", confirm: false }));
+    expect(r).toMatchObject({ ok: true, dryRun: true, wouldWrite: { campaignId, status: "active", reArmed: 1 } });
+
+    const nullRow = await admin.query(`SELECT next_attempt_at FROM outreach WHERE id = $1`, [outreachNullId]);
+    expect(nullRow.rows[0].next_attempt_at).toBeNull();
+    const campaign = await admin.query(`SELECT status FROM campaigns WHERE id = $1`, [campaignId]);
+    expect(campaign.rows[0].status).toBe("paused");
+  });
+
+  it("--confirm resume re-arms the NULL outreach, leaves the future one alone, and reports reArmed = 1", async () => {
+    const r = await asProbe((c) => setCampaignStatus(c, { businessPhone: BUSINESS_PHONE, campaignId, status: "active", confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.reArmed).toBe(1);
+
+    const nullRow = await admin.query(`SELECT next_attempt_at FROM outreach WHERE id = $1`, [outreachNullId]);
+    expect(nullRow.rows[0].next_attempt_at).not.toBeNull();
+    expect(new Date(nullRow.rows[0].next_attempt_at).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+
+    const futureRow = await admin.query(`SELECT next_attempt_at FROM outreach WHERE id = $1`, [outreachFutureId]);
+    expect(new Date(futureRow.rows[0].next_attempt_at).getTime()).toBe(new Date(FUTURE).getTime());
+
+    const campaign = await admin.query(`SELECT status FROM campaigns WHERE id = $1`, [campaignId]);
+    expect(campaign.rows[0].status).toBe("active");
+  });
+
+  it("pausing again re-arms nothing", async () => {
+    const c2 = await admin.query(`INSERT INTO contacts (business_id, phone_e164, first_name) VALUES ($1, '+15550199012', 'Null2') RETURNING id`, [businessId]);
+    const o2 = await admin.query(
+      `INSERT INTO outreach (business_id, campaign_id, campaign_version, contact_id, state, next_attempt_at, trigger, idempotency_key)
+       VALUES ($1, $2, 1, $3, 'waiting', NULL, '{}', 'resume-null-2') RETURNING id`,
+      [businessId, campaignId, c2.rows[0].id]
+    );
+
+    const r = await asProbe((c) => setCampaignStatus(c, { businessPhone: BUSINESS_PHONE, campaignId, status: "paused", confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.reArmed).toBe(0);
+
+    const still = await admin.query(`SELECT next_attempt_at FROM outreach WHERE id = $1`, [o2.rows[0].id]);
+    expect(still.rows[0].next_attempt_at).toBeNull();
+  });
+});
+
 describeDb("outbound-admin: setBusinessOutbound", () => {
   it("a dry run writes nothing", async () => {
     const before = await admin.query(`SELECT outbound_enabled, outbound_max_concurrent FROM businesses WHERE id = $1`, [businessId]);
@@ -245,6 +325,22 @@ describeDb("outbound-admin: setBusinessOutbound", () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const after = await admin.query(`SELECT outbound_enabled, outbound_max_concurrent FROM businesses WHERE id = $1`, [businessId]);
     expect(after.rows[0]).toEqual({ outbound_enabled: true, outbound_max_concurrent: 3 });
+  });
+
+  it("accepts --max at the dashboard's documented boundary of 10", async () => {
+    const r = await asProbe((c) => setBusinessOutbound(c, { businessPhone: BUSINESS_PHONE, enabled: true, max: 10, confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const after = await admin.query(`SELECT outbound_max_concurrent FROM businesses WHERE id = $1`, [businessId]);
+    expect(after.rows[0].outbound_max_concurrent).toBe(10);
+  });
+
+  it("refuses --max above 10, and writes nothing", async () => {
+    const before = await admin.query(`SELECT outbound_enabled, outbound_max_concurrent FROM businesses WHERE id = $1`, [businessId]);
+    const r = await asProbe((c) => setBusinessOutbound(c, { businessPhone: BUSINESS_PHONE, enabled: true, max: 11, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/10/);
+    const after = await admin.query(`SELECT outbound_enabled, outbound_max_concurrent FROM businesses WHERE id = $1`, [businessId]);
+    expect(after.rows[0]).toEqual(before.rows[0]);
   });
 });
 

@@ -59,6 +59,9 @@ import { outboundEnv } from "../lib/outbound/config.js";
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 const CAMPAIGN_STATUSES = ["draft", "active", "paused"];
+// The dashboard's documented bound on outbound_max_concurrent (fix round 1,
+// Minor). Named so parseArgs and setBusinessOutbound cannot drift apart.
+const MAX_OUTBOUND_CONCURRENT = 10;
 
 /**
  * Order-insensitive deep equality for the read-back check. A naive
@@ -224,21 +227,60 @@ export async function setCampaignStatus(client, { businessPhone, campaignId, sta
       return { ok: false, error: `no campaign ${campaignId} for business ${businessPhone}` };
     }
 
-    const wouldWrite = { campaignId, status };
+    // Ruling 2a-11. dispatch.js parks a paused campaign's `waiting` outreach
+    // with next_attempt_at = NULL (a `later` verdict with `at === null`), and
+    // app_outbound_due (migration 044) never lists a NULL as due -- so a
+    // paused campaign's outreach sits forever unless something re-arms it.
+    // This script is Part 1's only way to move a campaign back to `active`,
+    // so resuming here is the one place that has to do it (spec §8: "A
+    // paused campaign holds its outreach in waiting without closing it.
+    // Resuming re-enqueues them."). Scoped to `state = 'waiting' AND
+    // next_attempt_at IS NULL` only -- an outreach with a real future
+    // next_attempt_at (e.g. outside_window, tomorrow 09:00) is genuinely
+    // scheduled and must not be touched. Setting next_attempt_at = now()
+    // (not enqueuing anything) is enough: the 5-minute sweep picks it up.
+    const reArmMatch = { text: `SELECT count(*)::int AS n FROM outreach
+        WHERE business_id = $1 AND campaign_id = $2 AND state = 'waiting' AND next_attempt_at IS NULL`,
+      values: [business.id, campaignId] };
+    let reArmed = 0;
+    if (status === "active") {
+      const countRes = await client.query(reArmMatch.text, reArmMatch.values);
+      reArmed = countRes.rows[0].n;
+    }
+
+    const wouldWrite = { campaignId, status, reArmed };
     if (!confirm) {
       await client.query("ROLLBACK");
       return { ok: true, dryRun: true, wouldWrite };
     }
 
     await client.query("UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1", [campaignId, status]);
+
+    let reArmedCount = 0;
+    if (status === "active") {
+      const armRes = await client.query(
+        `UPDATE outreach SET next_attempt_at = now(), updated_at = now()
+           WHERE business_id = $1 AND campaign_id = $2 AND state = 'waiting' AND next_attempt_at IS NULL
+         RETURNING id`,
+        [business.id, campaignId]
+      );
+      reArmedCount = armRes.rowCount;
+    }
+
     const check = await client.query("SELECT status FROM campaigns WHERE id = $1", [campaignId]);
-    if (check.rowCount !== 1 || check.rows[0].status !== status) {
+    const mismatches = [];
+    if (check.rowCount !== 1 || check.rows[0].status !== status) mismatches.push("status");
+    if (status === "active") {
+      const stillParked = await client.query(reArmMatch.text, reArmMatch.values);
+      if (stillParked.rows[0].n !== 0) mismatches.push("outreach still parked after resume");
+    }
+    if (mismatches.length) {
       await client.query("ROLLBACK");
-      return { ok: false, error: `read-back mismatch: wanted status=${status}, got ${check.rows[0]?.status ?? "(no row)"}` };
+      return { ok: false, error: `read-back mismatch: ${mismatches.join(", ")}` };
     }
 
     await client.query("COMMIT");
-    return { ok: true, businessId: business.id, campaignId, status };
+    return { ok: true, businessId: business.id, campaignId, status, reArmed: reArmedCount };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;
@@ -255,8 +297,8 @@ export async function setBusinessOutbound(client, { businessPhone, enabled, max,
   if (typeof enabled !== "boolean") {
     return { ok: false, error: "enabled must be a boolean" };
   }
-  if (!Number.isInteger(max) || max < 1) {
-    return { ok: false, error: "max must be a positive whole number" };
+  if (!Number.isInteger(max) || max < 1 || max > MAX_OUTBOUND_CONCURRENT) {
+    return { ok: false, error: `max must be a whole number from 1 to ${MAX_OUTBOUND_CONCURRENT} (the dashboard's documented bound)` };
   }
 
   await client.query("BEGIN");
@@ -519,7 +561,9 @@ export function parseArgs(argv) {
     const maxRaw = argOf(args, "max");
     if (enabledRaw !== "true" && enabledRaw !== "false") push("enabled", "must be true or false (--enabled)");
     const max = maxRaw !== null ? Number(maxRaw) : NaN;
-    if (!Number.isInteger(max) || max < 1) push("max", "must be a positive whole number (--max)");
+    if (!Number.isInteger(max) || max < 1 || max > MAX_OUTBOUND_CONCURRENT) {
+      push("max", `must be a whole number from 1 to ${MAX_OUTBOUND_CONCURRENT} (--max)`);
+    }
     if (errors.length) return { ok: false, errors };
     return { ok: true, value: { command, confirm, businessPhone: phone, enabled: enabledRaw === "true", max } };
   }
