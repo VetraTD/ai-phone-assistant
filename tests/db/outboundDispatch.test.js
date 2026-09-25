@@ -52,7 +52,12 @@ d("G6: the double-dial lock under real concurrency", () => {
     const create = vi.fn(async () => { await new Promise((r) => setTimeout(r, 50)); return { sid: `CArace${create.mock.calls.length}` }; });
     const dispatch = createDispatcher({
       db, twilio: { calls: { create } }, enqueue: async () => ({ created: true }),
-      env: { enabled: false, allowlist: new Set(["+447700900321"]), maxConcurrent: 8, inboundReserve: 2, baseUrl: "https://svc.example" },
+      // maxConcurrent 1000, not the production default 8: the GLOBAL count is
+      // every tenant's live dial_registry row from the last hour, and a local
+      // database with 6 or more of them (other runs, other files) made this
+      // go red as `capacity` with zero calls. This test is about the row lock
+      // and the unique key, not capacity; the business cap still applies.
+      env: { enabled: false, allowlist: new Set(["+447700900321"]), maxConcurrent: 1000, inboundReserve: 2, baseUrl: "https://svc.example" },
       // FIXED clock inside the 08:00-21:00 window. With `new Date()` this test
       // goes red every evening London time (outside_window -> zero dials).
       now: () => new Date("2026-09-28T13:00:00Z"), rand: () => 0,
