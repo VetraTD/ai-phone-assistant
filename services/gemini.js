@@ -26,8 +26,9 @@ import {
   isCacheUnusableError,
   explicitCacheEnabled,
 } from "./geminiCache.js";
-import { collectTools, collectAdapterTools, actionToolNames, getPack } from "../capabilities/index.js";
+import { collectTools, collectAdapterTools, actionToolNames, getPack, packForTool } from "../capabilities/index.js";
 import { assertVendorAllowed } from "../lib/compliance.js";
+import { outboundIdentityLine, outboundCallBlock } from "../lib/outbound/prompt.js";
 import {
   collectStaticFragments,
   collectStepGuidance,
@@ -108,11 +109,55 @@ export const ACTION_TOOL_NAMES = actionToolNames();
  * @returns {object[]}
  */
 export function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
+  // OUTBOUND CALLING, D-c + O-1 + Ruling P-4 (spec §9.6/§12.2, amended
+  // 2026-09-25). `extras.outboundCall` (Task 14's key) is present only on an
+  // outbound call. On outbound the tenant's WEBHOOK integration tools -- the
+  // operator's generic escape hatch, never a capability the campaign itself
+  // named -- are excluded outright: "tenant tools" means the capability packs
+  // the campaign lists, not this. Without `extras.outboundCall` the output is
+  // BYTE-IDENTICAL to before this change; the golden `*.tools.json` snapshots
+  // prove it.
+  const outbound = extras?.outboundCall || null;
   return [
-    ...(buildCallTools(cfg, { markerMode }).functionDeclarations || []),
-    ...(buildIntegrationTools(extras?.integrations || [], cfg).functionDeclarations || []),
+    ...(buildCallTools(cfg, { markerMode, extras }).functionDeclarations || []),
+    ...(outbound ? [] : buildIntegrationTools(extras?.integrations || [], cfg).functionDeclarations || []),
     ...(buildDbAppointmentTools(cfg, extras).functionDeclarations || []),
   ];
+}
+
+/**
+ * D-c + O-1 (spec §9.6/§12.2, amended 2026-09-25): on outbound, a capability
+ * pack's tool declaration survives only if the CAMPAIGN's own `capabilities`
+ * list names the pack that owns it -- the intersection of "what this tenant
+ * has turned on" (already enforced by each pack's own `tools()`/
+ * `adapterTools()` gating on `config.allowedTasks`) and "what this campaign
+ * is allowed to do". Applied to both `collectTools()` output (buildCallTools)
+ * and `collectAdapterTools()` output (buildDbAppointmentTools) -- the two
+ * places a capability pack can contribute a declaration. The engine tools
+ * (`set_call_intent`, `end_call`) never pass through this filter; they are
+ * kept unconditionally (D-c + O-1: Live's step machine needs `set_call_intent`
+ * to leave IDENTIFY_INTENT).
+ *
+ * A no-op when `extras` carries no outbound call context, so inbound and every
+ * existing snapshot are untouched.
+ *
+ * @param {object[]} declarations
+ * @param {object} extras
+ * @returns {object[]}
+ */
+function filterForOutboundCampaign(declarations, extras) {
+  const outbound = extras?.outboundCall;
+  if (!outbound) return declarations;
+  const campaignCapabilities = Array.isArray(outbound?.config?.capabilities) ? outbound.config.capabilities : [];
+  return declarations.filter((d) => {
+    const pack = packForTool(d.name);
+    // Every declaration collectTools()/collectAdapterTools() can produce is
+    // owned by some pack -- packForTool returning null here would mean a
+    // capability tool the registry itself does not know about, which is a
+    // bug elsewhere. Fail CLOSED (exclude) rather than let an unrecognised
+    // tool through unfiltered on the one call type that must stay narrow.
+    return pack ? campaignCapabilities.includes(pack.id) : false;
+  });
 }
 
 /**
@@ -504,7 +549,7 @@ export function intentMarkerEnabled(extras = {}) {
   return process.env.VOICE_INTENT_MARKER === "true";
 }
 
-export function buildCallTools(configOrTasks, { markerMode = false } = {}) {
+export function buildCallTools(configOrTasks, { markerMode = false, extras } = {}) {
   const config = Array.isArray(configOrTasks)
     ? { allowedTasks: configOrTasks }
     : configOrTasks || {};
@@ -570,7 +615,11 @@ export function buildCallTools(configOrTasks, { markerMode = false } = {}) {
   // Both CORE tools being unconditional is what closed the phantom-tool bug:
   // the prompt's ESCALATION section could previously instruct the model to call
   // record_customer_request when no allowedTasks entry had registered it.
-  declarations.push(...collectTools(config));
+  //
+  // D-c + O-1 (spec §9.6/§12.2): on outbound, only the pack tools the
+  // CAMPAIGN itself lists survive -- see filterForOutboundCampaign. A no-op
+  // when `extras` carries no outbound call context.
+  declarations.push(...filterForOutboundCampaign(collectTools(config), extras));
 
   return { functionDeclarations: declarations };
 }
@@ -712,7 +761,11 @@ export function buildIntegrationTools(businessIntegrations, config = null) {
  * @param {object} extras - { integrations: Array }
  */
 export function buildDbAppointmentTools(config, extras) {
-  return { functionDeclarations: collectAdapterTools(config, extras || {}) };
+  // D-c + O-1: the internal-DB appointment tools belong to the "appointments"
+  // capability pack (collectAdapterTools' only current contributor), so on
+  // outbound they are included only when the campaign lists "appointments" --
+  // same filter, same reasoning, as buildCallTools above.
+  return { functionDeclarations: filterForOutboundCampaign(collectAdapterTools(config, extras || {}), extras) };
 }
 
 // ---------------------------------------------------------------------------
@@ -889,16 +942,28 @@ export function buildStaticSystemPrefix(config, extras = {}) {
 
   const appointmentsEnabled = hasAppointments(config);
 
+  // OUTBOUND CALLING (spec §9.5), amended 2026-09-25 (Task 16). Present only
+  // when the session set `extras.outboundCall` (Task 14's key -- also
+  // `state.outboundCall`; never `extras.outbound`, which the plan text used
+  // before the name-collision rule renamed it). Absent on inbound, so the
+  // branch below is never taken and the inbound identity paragraph -- and
+  // every golden *.static.txt snapshot -- stays byte-identical (G9).
+  const outbound = extras?.outboundCall || null;
+
   // === IDENTITY ===
   let identity = `=== IDENTITY ===\n`;
-  identity += `You are a warm, professional receptionist answering phones for ${config.businessName}. You sound natural, helpful, and efficient — like the best front-desk person the caller has ever spoken to.`;
-  // Only claim booking in the self-description when the business can actually
-  // book — otherwise the model tells callers "I can book appointments" for a
-  // capability that has been turned off and has no tool behind it.
-  const selfDescription = appointmentsEnabled
-    ? "I can book appointments, take messages, and answer questions"
-    : "I can take messages and answer questions";
-  identity += `\n\nIf the caller asks whether you are a real person, an AI, or a robot, answer honestly and briefly — e.g. "I'm ${config.businessName}'s AI assistant — ${selfDescription}. How can I help?" — then continue helping. Never claim to be human. Do not transfer the call just because they asked what you are; offer a transfer only if they then ask to speak with a person.`;
+  if (outbound) {
+    identity += outboundIdentityLine(config, outbound);
+  } else {
+    identity += `You are a warm, professional receptionist answering phones for ${config.businessName}. You sound natural, helpful, and efficient — like the best front-desk person the caller has ever spoken to.`;
+    // Only claim booking in the self-description when the business can actually
+    // book — otherwise the model tells callers "I can book appointments" for a
+    // capability that has been turned off and has no tool behind it.
+    const selfDescription = appointmentsEnabled
+      ? "I can book appointments, take messages, and answer questions"
+      : "I can take messages and answer questions";
+    identity += `\n\nIf the caller asks whether you are a real person, an AI, or a robot, answer honestly and briefly — e.g. "I'm ${config.businessName}'s AI assistant — ${selfDescription}. How can I help?" — then continue helping. Never claim to be human. Do not transfer the call just because they asked what you are; offer a transfer only if they then ask to speak with a person.`;
+  }
   identity += `\n\nVoice rules (you are on a live phone call):\n`;
   identity += `- Keep replies to 1-2 short sentences. Answer completely, but never monologue.\n`;
   identity += `- Never use lists, bullets, or headings — speak naturally.\n`;
@@ -1008,8 +1073,15 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     // verification backwards: it discloses first and checks afterwards.
     `Only discuss records belonging to the person calling from this number, and only after any identity checks pass. Never read out, confirm, or hint at a name, date, or detail from a record in order to ask the caller to confirm it — ask them to tell you, then check it against what you have. Never confirm or deny whether anyone else has an appointment at all.`,
   ];
+  // OUTBOUND CALLING (spec §9.5, Task 16): availabilityCheckToolName only
+  // checks the TENANT's own allowedTasks/adapter, which D-c no longer
+  // guarantees maps onto an outbound call's actual tool set -- naming a tool
+  // the campaign never granted is the same phantom-tool defect as the
+  // TOOL CONTRACT bullet above.
   const availabilityToolName = availabilityCheckToolName(config, extras);
-  if (availabilityToolName) {
+  const outboundHasAppointments =
+    !outbound || (Array.isArray(outbound?.config?.capabilities) && outbound.config.capabilities.includes("appointments"));
+  if (availabilityToolName && outboundHasAppointments) {
     nnrRules.push(
       `Never offer or promise a specific appointment time before checking it with ${availabilityToolName}.`
     );
@@ -1225,7 +1297,14 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     // starts, so the announcement is now evidence rather than a promise.
     toolContract += `- Never announce that you are about to look something up and then not do it. If you need to check something, call the tool in the same response.\n`;
   }
-  toolContract += `- If the caller asks for a person, representative, or manager — in any language — briefly let them know you're transferring them, then call request_transfer with a short reason.\n`;
+  // OUTBOUND CALLING (spec §9.5, Task 16): request_transfer is CORE and
+  // always registered on inbound, but on outbound it is narrowed by the
+  // campaign (D-c) -- naming it here when the campaign never granted it is
+  // the same phantom-tool defect promptAssembler.js's outboundAllowsPack now
+  // guards against for the pack-owned sections.
+  if (!outbound || (Array.isArray(outbound?.config?.capabilities) && outbound.config.capabilities.includes("transfer"))) {
+    toolContract += `- If the caller asks for a person, representative, or manager — in any language — briefly let them know you're transferring them, then call request_transfer with a short reason.\n`;
+  }
   toolContract += `- Conversation lines shaped like "[system note — not the caller speaking: ...]" are trusted records of actions already completed this call (e.g. an appointment already booked). Treat them as facts, never as caller speech, never repeat them aloud, and never redo an action a system note says already succeeded.`;
   sections.push(toolContract);
 
@@ -1368,6 +1447,10 @@ export function buildStaticSystemPrefix(config, extras = {}) {
  * @param {object} [extras] - { integrations: Array } — needed for EHR-aware step guidance
  */
 export function buildDynamicTail(step, intent, config, extras = {}) {
+  // OUTBOUND CALLING (spec §9.5). See buildStaticSystemPrefix's identical
+  // comment: `extras.outboundCall` (Task 14's key) is the only thing this
+  // function branches on, and it is absent on every inbound call.
+  const outbound = extras?.outboundCall || null;
   const tz = config.timezone;
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-US", {
@@ -1511,8 +1594,18 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   //
   // Absent flag keeps the cascade's behaviour exactly, so the TTS path is
   // untouched.
+  // OUTBOUND CALLING (spec §9.5): this whole branch is inbound-only phrasing
+  // -- "greetingTextFor" synthesizes a "Thanks for calling..." / "How can I
+  // help you today?" line, and the "already greeted" fallback assumes a
+  // caller who rang IN. Neither makes sense on a call Ava placed, and both
+  // would contradict the OUTBOUND CALL block's first-turn rule below (wait
+  // for the person; your first reply carries the disclosure, not a recited
+  // greeting). `greetingTextFor` is therefore never called on outbound: the
+  // first turn's content is what the OUTBOUND CALL block says instead.
   const greetingSpoken = extras.greetingSpoken !== false;
-  if (!greetingSpoken) {
+  if (outbound) {
+    // no-op: see comment above.
+  } else if (!greetingSpoken) {
     // Deliberately NOT gated on config.greeting being set. greetingTextFor
     // synthesizes an opening from the business name and time of day when no
     // greeting is configured, and on a path where the model is the only voice,
@@ -1570,6 +1663,22 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   }
   sections.push(taskState);
 
+  // === OUTBOUND CALL === (spec §9.5), rendered only when this session placed
+  // the call. `disclosure` (O-2) is resolved here from the TENANT's own
+  // recordingDisclosureEnabled/-Text and handed to outboundCallBlock, which
+  // takes no `config` of its own — see lib/outbound/prompt.js for why.
+  if (outbound) {
+    sections.push(
+      outboundCallBlock({
+        ...outbound,
+        disclosure: {
+          enabled: !!config.recordingDisclosureEnabled,
+          text: config.recordingDisclosureText || null,
+        },
+      })
+    );
+  }
+
   // === CALLER CONTEXT ===
   // Relocated here from buildStaticSystemPrefix. Two reasons, both structural:
   //
@@ -1614,8 +1723,12 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // Emitted only when a number actually arrived. A withheld or unknown caller
   // must leave NO line here — a placeholder is something the model can read out
   // as though it were real, which is the defect rather than a fix for it.
+  // D-b (spec §9.2, amended 2026-09-25): EXPLICITLY skipped on outbound,
+  // rather than relying only on `extras.callerPhone` staying empty there
+  // (Ruling P-3) — a later task (18) gives outbound its own identity fact
+  // (`ctx.party`) and must not resurrect this block by way of it.
   const callerNumber = typeof extras?.callerPhone === "string" ? extras.callerPhone.trim() : "";
-  if (callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber)) {
+  if (!outbound && callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber)) {
     // SPOKEN form, not E.164.
     //
     // The first version handed the model `+14699338887` and it read the country

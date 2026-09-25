@@ -212,3 +212,153 @@ export const FIXTURES = {
     },
   },
 };
+
+// ---------------------------------------------------------------------------
+// OUTBOUND FIXTURES (Task 16, spec §9.5) -- kept SEPARATE from FIXTURES above.
+// tests/promptSnapshot.test.js iterates FIXTURES only and never sees these;
+// tests/outboundPromptSnapshot.test.js iterates OUTBOUND_FIXTURES only, with
+// its own snapshot directory (tests/__snapshots__/prompts/outbound/).
+//
+// Each entry is `{ config, extras }`, same shape as FIXTURES, except `extras`
+// carries `outboundCall` -- the object lib/voice/live/index.js builds at
+// onStart from lib/outbound/callContext.js's `resolveOutboundContext` (with
+// the `business` field stripped out; Task 14). `extras.callerPhone` stays ""
+// and `extras.greetingSpoken` stays `false`, matching what the Live front-end
+// actually passes on an outbound call (D-b, P-3).
+// ---------------------------------------------------------------------------
+
+/** The tenant's own business config -- unrelated to the campaign. */
+const OUTBOUND_TENANT_CONFIG = {
+  businessName: "Riverside Family Clinic",
+  greeting: "Thanks for calling Riverside Family Clinic.",
+  _hasCustomGreeting: true,
+  timezone: "America/Chicago",
+  businessHours: WEEKLY_HOURS,
+  transferPhoneNumber: "+15551230000",
+  // book_appointment/check_appointment/cancel_reschedule give "appointments" a
+  // real tool to filter; take_message gives "messages" one too -- messages is
+  // CORE and always registered on inbound (capabilities/messages.js), so
+  // including it here is what proves the campaign intersection (D-c) actually
+  // excludes a capability the campaign itself never listed, not merely one the
+  // tenant never turned on.
+  allowedTasks: normalizeAllowedTasks(["book_appointment", "check_appointment", "cancel_reschedule", "take_message"]),
+  mainPhone: "555-0100",
+  generalInfo: "We are a family practice serving the Riverside area since 1998.",
+  afterHoursPolicy: "take_message",
+  transferPolicy: "always",
+  languagesSpoken: ["en"],
+  customInstructions: null,
+  recordingDisclosureEnabled: false,
+  recordingDisclosureText: null,
+};
+
+/**
+ * The campaign config (spec §7), as it lives on `outboundCall.config`. Values
+ * match the shipped `speed_to_lead` template (lib/outbound/templates.js) --
+ * literal here, not imported, so these fixtures do not silently drift the day
+ * that template's defaults change.
+ */
+const SPEED_TO_LEAD_CAMPAIGN = {
+  persona_name: "Ava",
+  caller_id: "+441372656055",
+  calling_window: { mon_fri: "09:00-20:00", sat: "10:00-16:00", sun: null, outside_window: "queue" },
+  opener: "Hi, is that {first_name}? It's {persona_name}, an AI assistant from {business_name}.",
+  topic: "your recent enquiry",
+  objective: "Qualify the clinic and book a 30-minute discovery call.",
+  notes: "",
+  questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text" }],
+  // The shipped template's list verbatim. qualification/callback/opt_out/
+  // outcome have no capability pack yet (spec §12.2 is stage 3) and
+  // contribute no tool either way -- see the D-c intersection test.
+  capabilities: ["qualification", "appointments", "transfer", "callback", "opt_out", "outcome"],
+  booking: { adapter: "internal", length_min: 30 },
+  transfer: null,
+  retries: { schedule: ["now", "+10m", "+3h"], voicemail_on: [1], text_after_missed: [], give_up_after_days: 7 },
+  voicemail:
+    "Hi {first_name}, it's {persona_name}, the AI assistant from {business_name}, about your enquiry. " +
+    "We'll try again later, or call us back on {caller_id_spoken}.",
+  consent_window_days: 30,
+  max_call_minutes: 10,
+};
+
+/** `extras.outboundCall` (Task 14's key; also `state.outboundCall`). */
+function outboundCallContext({
+  campaignConfig = SPEED_TO_LEAD_CAMPAIGN,
+  firstName = "Priya",
+  templateKey = "speed_to_lead",
+  triggerSummary = "source: web-form; service: teeth cleaning",
+} = {}) {
+  return {
+    attemptId: "att-fixture-1",
+    outreachId: "out-fixture-1",
+    campaignId: "camp-fixture-1",
+    campaignVersion: 1,
+    contactId: "contact-fixture-1",
+    attemptNo: 1,
+    config: campaignConfig,
+    campaign: { templateKey, complianceClass: "solicited", audience: "business" },
+    contact: { firstName, timezone: "America/Chicago", phone: "+15559876543" },
+    triggerSummary,
+    openerText: firstName
+      ? `Hi, is that ${firstName}? It's ${campaignConfig.persona_name}, an AI assistant from ${OUTBOUND_TENANT_CONFIG.businessName}.`
+      : `It's ${campaignConfig.persona_name}, an AI assistant from ${OUTBOUND_TENANT_CONFIG.businessName}.`,
+    openerAudio: null,
+    openerRefused: false,
+  };
+}
+
+const OUTBOUND_BASE_EXTRAS = {
+  knowledge: [],
+  callerContext: null,
+  // D-b / P-3: always empty on outbound, whatever the stream sent.
+  callerPhone: "",
+  // The Live front-end has no TTS leg, so this is always false on every call
+  // it makes -- inbound and outbound alike (see lib/voice/live/index.js).
+  greetingSpoken: false,
+  transferAllowed: true,
+  integrations: [],
+};
+
+export const OUTBOUND_FIXTURES = {
+  "speed-to-lead": {
+    config: OUTBOUND_TENANT_CONFIG,
+    extras: { ...OUTBOUND_BASE_EXTRAS, outboundCall: outboundCallContext() },
+  },
+  // O-2, disclosure flag ON: the tenant wants the transcription notice, and
+  // (spec §9.3) the opener line above is exactly the line that gets played as
+  // the backstop and seeded as Ava's own first turn -- so when that has
+  // already happened, the OUTBOUND CALL block must defer the notice to her
+  // NEXT reply rather than double up on a turn she never actually spoke.
+  "speed-to-lead-disclosure-on": {
+    config: { ...OUTBOUND_TENANT_CONFIG, recordingDisclosureEnabled: true },
+    extras: { ...OUTBOUND_BASE_EXTRAS, outboundCall: outboundCallContext() },
+  },
+  // O-9: contacts.first_name is optional. With none on file, Ava must ask who
+  // she is speaking to before she shares why she is calling.
+  "speed-to-lead-no-first-name": {
+    config: OUTBOUND_TENANT_CONFIG,
+    extras: { ...OUTBOUND_BASE_EXTRAS, outboundCall: outboundCallContext({ firstName: null }) },
+  },
+  // Part 3's template (spec §7: "missed_call_callback ... arrives with Part
+  // 3"). SHAPE ONLY -- the fields are plausible, not validated by
+  // lib/outbound/campaignSchema.js. Its capabilities list only stage-3 names
+  // no pack implements yet, so this also proves the D-c intersection degrades
+  // safely: the model is left with exactly the two engine tools, never a
+  // phantom one.
+  "missed-call-callback": {
+    config: OUTBOUND_TENANT_CONFIG,
+    extras: {
+      ...OUTBOUND_BASE_EXTRAS,
+      outboundCall: outboundCallContext({
+        templateKey: "missed_call_callback",
+        triggerSummary: "source: missed-call",
+        campaignConfig: {
+          ...SPEED_TO_LEAD_CAMPAIGN,
+          topic: "the call we missed from them",
+          objective: "Find out what they needed and offer to help or book them in.",
+          capabilities: ["qualification", "callback", "opt_out", "outcome"],
+        },
+      }),
+    },
+  },
+};

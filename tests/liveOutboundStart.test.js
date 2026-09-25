@@ -315,6 +315,28 @@ describe("outbound: context by CallSid", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Task 16, mechanical ruling (spec §9.5/§13.2). The LVX23 bisect arm
+// (LIVE_PROMPT=minimal, lib/voice/live/minimalPrompt.js) predates outbound
+// calling and carries no AI disclosure, no first-turn rule and no OUTBOUND
+// CALL block. An outbound call must never run without those, so direction
+// wins over the experiment flag outright. tests/liveBisectArms.test.js keeps
+// proving the flag still shrinks the prompt on INBOUND, unchanged.
+// ---------------------------------------------------------------------------
+describe("outbound: LIVE_PROMPT=minimal is ignored (spec §13.2, mechanical ruling)", () => {
+  it("still connects with the full instruction, including the OUTBOUND CALL block, and logs that the flag was ignored", async () => {
+    const database = outboundDb();
+    const { out: call, events: logEvents } = await logsDuring(() => bootOutbound({ database, env: { LIVE_PROMPT: "minimal" } }));
+    const { systemInstruction } = call.live.connect.mock.calls[0][0].config;
+    const text = systemInstruction.parts[0].text;
+    expect(text).toContain("=== OUTBOUND CALL ===");
+    expect(text.length).toBeGreaterThan(2000);
+    expect(logEvents("live_outbound_minimal_prompt_ignored")).toHaveLength(1);
+    expect(logEvents("live_bisect_arm")).toHaveLength(0);
+    await call.hangUp();
+  });
+});
+
 describe("outbound: the first seconds through the real session", () => {
   it("silence: the backstop clip is queued at 1,650 ms and seeded as Live's own turn (S1)", async () => {
     const call = await bootOutbound();
