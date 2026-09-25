@@ -140,6 +140,11 @@ COPY scripts/attach-tenant-user.js ./scripts/attach-tenant-user.js
 # workstation -- Cloud SQL is private-IP only and the service exposes no
 # settings endpoint -- so this runs through the migrate job like db-inspect.
 COPY scripts/set-business-config.js ./scripts/set-business-config.js
+# Task 11. The operator path for outbound calling while there is no dashboard
+# for it: create/update a campaign, set its status, switch outbound on for a
+# business, and trigger a test outreach for an allow-listed number. Dry run by
+# default, same migrate-job route as the two scripts above.
+COPY scripts/outbound-admin.js ./scripts/outbound-admin.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:

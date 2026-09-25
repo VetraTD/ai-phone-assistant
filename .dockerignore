@@ -46,6 +46,7 @@ scripts
 # could be run.
 !scripts/attach-tenant-user.js
 !scripts/set-business-config.js
+!scripts/outbound-admin.js
 docs
 latency-runs
 infra
