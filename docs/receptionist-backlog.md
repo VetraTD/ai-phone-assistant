@@ -3212,6 +3212,115 @@ Only worth opening with the $/call metric in hand. LLM is ~36% of turn time and
 the majority of variable cost; it is also the thing most likely to break quality
 if changed. **Do not touch until C4 can prove what was saved.**
 
+### Live-era cost levers (added 2026-09-24, owner request)
+
+C1–C5 were written for the cascade (ElevenLabs, Deepgram, `generateContent`
+caching). Production now runs **Gemini Live `gemini-3.8-live`** on AI Studio, and
+outbound calling (spec `2026-09-24-outbound-calling-design.md`) shares the same
+brain, so every item below pays on **inbound and outbound alike**.
+
+**Why a Live call costs what it does** (measured on 3.1 Live, 2026-08-30, §9
+and memory *gemini-live-measured*):
+- Live **re-bills the entire context on every turn**. That covers the static
+  prompt plus every second of audio from both sides, Ava's own speech included,
+  so cost is **quadratic** in call length. A 10-minute call costs well over
+  3.3× a 3-minute one.
+- The re-sent prompt was **85% of the prompt tokens**.
+- The unit cost in `docs/pricing.md` is ~$0.31/UK call, ~$0.28/US call, about
+  $0.10/min. It is **modelled, not measured** (see C4).
+- Outbound adds Twilio's higher outbound rates (UK mobile $0.0305/min against
+  $0.0100 inbound; US $0.014 against $0.0085), $0.0075 per call for AMD, and
+  about $0.003 per attempt for the Live-rendered backstop.
+
+**Do them in this order: C4 → C6 → C2 (+C8) → C7.** C9 is only a safety cap, and
+C10 is recorded so it is not re-proposed. Together C6, C2, C8 and C7
+plausibly cut **30–50% per call** with no audible change. That figure is **unmeasured
+on 3.8**: the only measured numbers come from 3.1.
+
+**C4 for Live** (an addendum to C4 above): `live_call_summary` already logs
+`usage` per call (`lib/voice/live/summary.js`), so the Gemini share of $/call can
+be computed from logs before any column exists. Add Twilio minutes, plus AMD and
+streams for outbound. **Done when** 10 real production calls are priced and
+`docs/pricing.md`'s $0.31/$0.28 is confirmed or corrected.
+
+### C6 · Does `gemini-3.8-live` discount repeated prompt tokens? `[cheap]` · P0
+
+On 3.1 Live, `cachedContentTokenCount` was **zero on every turn**, so there was no
+discount, unlike OpenAI's $0.40/M for repeated audio. 3.8 has never been checked.
+If 3.8 applies implicit caching to the re-sent prompt, that prompt becomes
+roughly **90% cheaper** (cached text around $0.05/M against $0.50/M; the rate is
+assumed, not published for Live).
+- **Effort:** one probe. About six turns against the real production prefix,
+  reading `usageMetadata` per turn. Roughly **$0.05**; ask first, per
+  *ask-before-spending-api-money*.
+- **Risk to call quality:** none. It is a measurement.
+- **Done when:** the per-turn cached-token counts on 3.8 are recorded here, and
+  the rest of this list is re-ranked on the answer. If the discount exists, C2's
+  value drops and C7's does not.
+
+### C2 on Live · Prompt diet (C2 above, applied to production) `[cheap]` · P1
+
+C2 is unchanged in substance and is now the largest *controllable* lever on the
+production stack. Two Live-specific moves:
+- **Move the knowledge base and rarely-needed rules behind lookup tools**
+  instead of re-sending them every turn. The knowledge block is pasted whole
+  today (`services/gemini.js:1063-1075`).
+- **Keep the outbound block lean.** The OUTBOUND CALL block and situations table
+  (plan Task 16) are sent on every outbound turn, so they need a token budget.
+
+Guard with the eval band exactly as C2 says, because a "harmless" reword has
+regressed booking before.
+
+### C7 · Text reseeding on Live `[medium]` · P2
+
+Every few turns, at a natural pause, the session's stored **audio** history is
+replaced with a **text** transcript of it. The current turn stays audio.
+- **Measured on 3.1:** 3 turns of history was 67 text tokens against 426 audio
+  tokens. A 3-minute call went **$0.136 → $0.096 (−30%)**, and **$0.085 (−37%)**
+  with a halved prefix. The saving grows with call length, because this removes
+  the quadratic term.
+- **Nothing was forgotten:** spelling was 5/5 after the reseed
+  (`scripts/probes/l4-gemini-reseed.mjs`).
+- **The engineering risk** is the swap itself: a new session, or session
+  resumption, has to happen inside a pause without an audible gap.
+- **Effort:** a spike, then a guarded rollout behind a flag.
+- **Done when:** A/B'd on real calls with no measurable change in the claim,
+  booking and turn-taking counters, and the per-call Gemini cost is measured
+  before and after.
+
+### C8 · Shorter assistant replies `[cheap]` · P2
+
+Ava's own speech is re-billed as audio on every later turn, so each extra second
+she talks is paid for again and again. Tightening reply length also makes calls
+feel quicker.
+- **Measure:** mean assistant audio seconds per turn, before and after.
+- **Guard:** the eval band (tone and completeness), because brevity can cost
+  clarity on read-backs.
+- **Done when:** replies are shorter with no rise in `re-ask` or claim counters.
+
+### C9 · Context-window compression, only as a safety cap for very long calls `[cheap]` · P3
+
+Google's `contextWindowCompression` works, but **the saving and the forgetting
+are the same dial**. At `triggerTokens: 3100` the model retained about 1 turn
+(memory *gemini-live-measured*). It is only acceptable as a cap that fires on
+unusually long calls, e.g. past 15 minutes, where cost would otherwise run away.
+- **Done when:** the cap is set high enough that a normal call never reaches it,
+  and one long simulated call shows it firing without losing booking state.
+
+### C10 · Stop streaming silence to Live — NOT recommended now, recorded so it is not re-proposed
+
+Silence frames are billed as audio input and accumulate in the context, so
+dropping them would save money. But Live's server-side VAD uses that silence to
+decide when the caller has finished. The last change to turn-end detection cost
+**512 ms on every turn** (memory *vad-override-cost-half-a-second*). Revisit only
+with a turn-taking measurement in hand.
+
+### Outbound-specific (for the outbound plan, not this backlog's sessions)
+
+Render the Live-voiced backstop line **once per lead** and reuse it across that
+lead's attempts, rather than once per attempt. It is small (about $0.003) but
+multiplied by every retry.
+
 ---
 
 ## §3 Latency
