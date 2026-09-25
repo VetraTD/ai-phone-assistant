@@ -399,7 +399,11 @@ OIDC verification reuses the existing `jsonwebtoken` + `jwks-rsa` stack (Identit
 - With `Timeout=25`, the owner's US carrier rang for 24 s and ended `no-answer` (SIP 487) **before voicemail picked up**, so no message could be left.
 - With 45 s, voicemail answered after **26.6 s** of ringing.
 
-**A declined call becomes a voicemail call.** Measured on spike B call 3: pressing decline sent the call to voicemail 7 s after ringing began, followed by `machine_end_beep` and a message left. So "rejected" usually reads as `voicemail_*`, not `busy`, and the retry logic treats it as a voicemail attempt. Carriers differ, and the UK carriers are unmeasured (D7).
+**A declined call ends one of two ways, and both are handled by what Twilio reports, not by guessing.**
+- **Sent to voicemail**, as measured on spike B call 3 (the owner's US carrier): voicemail answered 7 s after ringing began, then `machine_end_beep`, and a message was left. This is handled as a voicemail attempt (`voicemail_left` / `voicemail_skipped`).
+- **Ended outright:** some carriers, phones and settings (e.g. "decline with busy", some UK networks) end the call immediately. Twilio then reports `busy`, or `no-answer`/`failed`, and it is handled **exactly like an unanswered attempt**: `result` is `busy` or `no_answer`, no message is left, and the next schedule entry applies (§8).
+
+Neither path is treated as "not interested", because a decline often just means "not now". UK carriers are unmeasured (D7).
 
 On the AMD callback:
 - **`human`, `unknown`:** record the value and change nothing.
@@ -698,7 +702,7 @@ All of them are recorded for later Terraform import. The deploy itself needs own
   3. answer and say nothing (the backstop at about 2 s);
   4. let it go to voicemail;
   5. don't answer;
-  6. decline the call (expect it to read as voicemail on US carriers, per §9.4);
+  6. decline the call. Either outcome of §9.4 passes: a voicemail attempt if the carrier forwards it, or `busy`/`no_answer` if it ends the call. Either way no conversation happens and the next attempt is scheduled;
   7. hang up during Ava's first line;
   8. ask for a human;
   9. say "stop calling me";

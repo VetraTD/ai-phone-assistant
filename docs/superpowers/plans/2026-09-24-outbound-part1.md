@@ -2623,6 +2623,7 @@ Classify all 16 functions in `lib/phiAudit.js`. `activeDialCounts`, `outboundDue
     - status `in-progress` stamps `answered_at`;
     - status `completed` stamps `status_completed_at` and calls `postCall.tryClaim`;
     - status `no-answer` sets `result='no_answer'`;
+    - status `busy` sets `result='busy'` and calls `postCall.tryClaim` exactly as `no-answer` does. This is a decline that the carrier ends outright (spec §9.4);
     - **a spy on `notifications.sendCallerSms` shows it is never called for any status**;
     - the media route returns 403 when the signature is bad and serves bytes starting with `RIFF` when it is good.
 - [ ] **Step 2: Implement.** Also export `signingKey` from `lib/mediaStreamToken.js` without changing its behaviour. `tests/mediaStreamToken*.test.js` must stay green.
@@ -2917,7 +2918,7 @@ Every harness run with a real Live session is a paid run. It needs `reserveP1("P
     - "I'm not a real person, I'm an AI" is NOT claimed-human;
     - "Yes, I'm a real person" is claimed-human.
   - The DB race: status-completed and session-finished land concurrently from two clients, and `runPostCall` executes **once**. Assert with a counter row.
-  - Unanswered attempts (`no-answer`) run steps 1 and 5–7 only.
+  - Unanswered attempts (`no-answer`, `busy` (a decline the carrier ended), `failed`, `canceled`) run steps 1 and 5–7 only. `busy` and `no-answer` produce the **same** next `next_attempt_at`, asserted in one parameterised test. A decline is never scored `not_interested`.
   - A callback-requested outcome schedules at the requested time.
   - The silent rule, on each limb:
     - human, spoke, `from_speech_ms` 2,300 gives `silent` plus a 72 h hold;
@@ -3016,7 +3017,7 @@ Every harness run with a real Live session is a paid run. It needs `reserveP1("P
 | 3 | answers and says nothing | backstop at about 2.0 s after pickup (`backstop_silence`); Live continues without repeating it |
 | 4 | lets it go to voicemail | `answered_by=machine_end_*`; message heard after the beep; `result=voicemail_left` (G4) |
 | 5 | doesn't answer | `result=no_answer`, or a voicemail answer (see §9.4); next attempt scheduled per the schedule |
-| 6 | declines the call | expect a **voicemail** outcome on US carriers (spike B call 3); next attempt scheduled |
+| 6 | declines the call | **either** outcome passes (spec §9.4): a **voicemail** attempt if the carrier forwards it (spike B call 3), or `busy`/`no_answer` if it ends the call. Either way the next attempt is scheduled, and it is never scored "not interested" |
 | 7 | hangs up during Ava's first line | no silent-call flag (audio was heard); post-call runs once |
 | 8 | asks for a human | transfer per §9.7 (or "not in window" handled) |
 | 9 | says "stop calling me" | suppression row written before the call ends (tool) or at post-call (detector) (G7) |
