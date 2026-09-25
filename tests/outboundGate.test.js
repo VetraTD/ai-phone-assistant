@@ -128,6 +128,16 @@ describe("evaluateGate: a missing or malformed fact throws, never allows", () =>
     ["active.globalOutbound not finite", (f) => { delete f.active.globalOutbound; }],
     ["active.businessOutbound not finite", (f) => { delete f.active.businessOutbound; }],
     ["active missing both counters", (f) => { f.active = {}; }],
+    // Fix round 2: `!= null` treated a missing DB alias (undefined) the same
+    // as an intentional `null`, so check 6 silently disabled instead of
+    // throwing. Verified live: deleting outreach.hold_until gave "allow".
+    ["outreach.hold_until undefined", (f) => { delete f.outreach.hold_until; }],
+    // Same class: undefined here makes check 8b compare against NaN, so
+    // give_up_window silently never fires.
+    ["campaign.config.retries.give_up_after_days missing", (f) => { delete f.campaign.config.retries.give_up_after_days; }],
+    ["campaign.status undefined", (f) => { f.campaign.status = undefined; }],
+    ["campaign.compliance_class undefined", (f) => { f.campaign.compliance_class = undefined; }],
+    ["campaign.template_key undefined", (f) => { f.campaign.template_key = undefined; }],
   ];
   it.each(badCases)("%s -> throws", (_label, mutate) => {
     const f = base(); mutate(f);
