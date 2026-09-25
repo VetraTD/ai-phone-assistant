@@ -52,6 +52,11 @@ describe("evaluateGate: each check refuses on its own (11 reasons)", () => {
 });
 
 describe("evaluateGate: 'later' carries a time", () => {
+  it("silent_hold's at equals the hold time when it is inside the window", () => {
+    const f = base();
+    f.outreach.hold_until = new Date("2026-09-28T15:00:00Z"); // Mon 16:00 BST, inside 09:00-20:00
+    expect(gate(f)).toEqual({ verdict: "later", reason: "silent_hold", at: new Date("2026-09-28T15:00:00Z") });
+  });
   it("capacity retries 30 s later", () => {
     const f = base(); f.active.businessOutbound = 2;
     expect(gate(f).at.toISOString()).toBe("2026-09-28T13:00:30.000Z");
@@ -78,5 +83,54 @@ describe("evaluateGate: order -- the first failure decides", () => {
   it("global_disabled beats everything", () => {
     const f = base(); f.contact.phone_e164 = "+447700900999"; f.suppressed = true; f.callerIdValid = false;
     expect(gate(f).reason).toBe("global_disabled");
+  });
+});
+
+describe("evaluateGate: cheap pinning gaps", () => {
+  it("env.enabled=true allows a number that is not on the allow-list", () => {
+    const f = base(); f.env.enabled = true; f.contact.phone_e164 = "+447700900999";
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+  it("dialsToday=2 still allows (below the cap of 3)", () => {
+    const f = base(); f.dialsToday = 2;
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+});
+
+describe("evaluateGate: a missing or malformed fact throws, never allows", () => {
+  // Task 9 builds `facts` from DB helpers; a wrong alias or an unguarded `?.`
+  // there must not silently switch a check off (e.g. do-not-call, the daily
+  // cap). So a fact that is missing or the wrong shape throws -- dispatch
+  // then sees a 500, not a dial and not a permanent close of the outreach.
+  const badCases = [
+    ["now missing", (f) => { delete f.now; }],
+    ["now invalid", (f) => { f.now = new Date("garbage"); }],
+    ["env.enabled not a boolean", (f) => { f.env.enabled = "false"; }],
+    ["env.allowlist not a Set", (f) => { f.env.allowlist = ["+447700900001"]; }],
+    ["env.maxConcurrent not finite", (f) => { delete f.env.maxConcurrent; }],
+    ["env.inboundReserve undefined", (f) => { f.env.inboundReserve = undefined; }],
+    ["business.outbound_enabled not a boolean", (f) => { f.business.outbound_enabled = 1; }],
+    ["business.outbound_max_concurrent not finite", (f) => { f.business.outbound_max_concurrent = "2"; }],
+    ["campaign.config not an object", (f) => { f.campaign.config = null; }],
+    ["campaign.config.retries.schedule not an array", (f) => { f.campaign.config.retries.schedule = "now"; }],
+    ["campaign.config.calling_window not an object", (f) => { f.campaign.config.calling_window = null; }],
+    ["contact.phone_e164 not a non-empty string", (f) => { f.contact.phone_e164 = ""; }],
+    ["contact.timezone empty", (f) => { f.contact.timezone = ""; }],
+    ["outreach.attempts_made undefined", (f) => { f.outreach.attempts_made = undefined; }],
+    ["outreach.created_at garbage", (f) => { f.outreach.created_at = "garbage"; }],
+    ["outreach.hold_until unparsable", (f) => { f.outreach.hold_until = "garbage"; }],
+    ["suppressed undefined", (f) => { f.suppressed = undefined; }],
+    ["suppressed null", (f) => { f.suppressed = null; }],
+    ["hasRelationship not a boolean", (f) => { f.hasRelationship = "no"; }],
+    ["callerIdValid undefined", (f) => { f.callerIdValid = undefined; }],
+    ["consents not an array", (f) => { f.consents = null; }],
+    ["dialsToday a numeric string", (f) => { f.dialsToday = "3"; }],
+    ["active.globalOutbound not finite", (f) => { delete f.active.globalOutbound; }],
+    ["active.businessOutbound not finite", (f) => { delete f.active.businessOutbound; }],
+    ["active missing both counters", (f) => { f.active = {}; }],
+  ];
+  it.each(badCases)("%s -> throws", (_label, mutate) => {
+    const f = base(); mutate(f);
+    expect(() => gate(f)).toThrow(/gate fact/);
   });
 });
