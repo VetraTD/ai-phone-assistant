@@ -209,6 +209,74 @@ describeDb("outbound-admin: upsertCampaign", () => {
   });
 });
 
+// Checkpoint 2a, M8(a). In-flight outreach is pinned to an older campaign
+// version and was consented/gated under that campaign's compliance_class,
+// template_key and audience. Changing them on the campaign row would silently
+// re-label every pinned outreach's legal basis, so an update refuses to.
+describeDb("outbound-admin: upsertCampaign keeps compliance_class, template_key and audience immutable (M8a)", () => {
+  const versionsOf = async (id) => (await admin.query(`SELECT version FROM campaign_versions WHERE campaign_id = $1 ORDER BY version`, [id])).rows.map((r) => r.version);
+  const rowOf = async (id) => (await admin.query(`SELECT template_key, compliance_class, audience, current_version FROM campaigns WHERE id = $1`, [id])).rows[0];
+  // Seeded directly: the validator refuses these values at save in Part 1, so
+  // only a row written some other way can carry them -- which is exactly the
+  // row an update must not quietly rewrite.
+  const seedRaw = async (over) => {
+    const r = await admin.query(
+      `INSERT INTO campaigns (business_id, name, template_key, compliance_class, audience, current_version)
+       VALUES ($1, 'raw', $2, $3, $4, 1) RETURNING id`,
+      [businessId, over.template_key ?? "speed_to_lead", over.compliance_class ?? "solicited", over.audience ?? "business"]);
+    await admin.query(`INSERT INTO campaign_versions (campaign_id, business_id, version, config) VALUES ($1, $2, 1, $3)`, [r.rows[0].id, businessId, goodConfig()]);
+    return r.rows[0].id;
+  };
+
+  it("changing compliance_class on an existing campaign is refused with a clear error, and nothing is written", async () => {
+    const created = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, name: "immutable class" }, config: goodConfig(), confirm: true }));
+    expect(created.ok).toBe(true);
+    const r = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, id: created.campaignId, name: "immutable class", compliance_class: "service" }, config: goodConfig(), confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/compliance_class/);
+    expect(r.error).toMatch(/cannot change/);
+    expect(await rowOf(created.campaignId)).toMatchObject({ compliance_class: "solicited", current_version: 1 });
+    expect(await versionsOf(created.campaignId)).toEqual([1]);
+  });
+
+  it("a DRY RUN of that change is refused too (the operator learns before --confirm)", async () => {
+    const created = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, name: "immutable dry" }, config: goodConfig(), confirm: true }));
+    const r = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, id: created.campaignId, name: "immutable dry", compliance_class: "service" }, config: goodConfig(), confirm: false }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/compliance_class/);
+    expect(r.error).toMatch(/cannot change/);
+  });
+
+  it("changing template_key on an existing campaign is refused", async () => {
+    const id = await seedRaw({ template_key: "reminder" });
+    const r = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, id, name: "raw" }, config: goodConfig(), confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/template_key/);
+    // The refusal itself, not the read-back mismatch that would also catch
+    // an update that no longer writes template_key (a second line, not this one).
+    expect(r.error).toMatch(/cannot change/);
+    expect(await rowOf(id)).toMatchObject({ template_key: "reminder", current_version: 1 });
+    expect(await versionsOf(id)).toEqual([1]);
+  });
+
+  it("changing audience on an existing campaign is refused", async () => {
+    const id = await seedRaw({ audience: "patient" });
+    const r = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, id, name: "raw" }, config: goodConfig(), confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/audience/);
+    expect(r.error).toMatch(/cannot change/);
+    expect(await rowOf(id)).toMatchObject({ audience: "patient", current_version: 1 });
+    expect(await versionsOf(id)).toEqual([1]);
+  });
+
+  it("an update that keeps all three still versions normally", async () => {
+    const created = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, name: "immutable ok" }, config: goodConfig(), confirm: true }));
+    const r = await asProbe((c) => upsertCampaign(c, { businessPhone: BUSINESS_PHONE, meta: { ...META, id: created.campaignId, name: "immutable ok v2" }, config: goodConfig(), confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.version).toBe(2);
+  });
+});
+
 describeDb("outbound-admin: setCampaignStatus", () => {
   let campaignId;
   beforeAll(async () => {

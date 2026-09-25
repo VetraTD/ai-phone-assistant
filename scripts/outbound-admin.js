@@ -65,6 +65,9 @@ const CAMPAIGN_STATUSES = ["draft", "active", "paused"];
 // The dashboard's documented bound on outbound_max_concurrent (fix round 1,
 // Minor). Named so parseArgs and setBusinessOutbound cannot drift apart.
 const MAX_OUTBOUND_CONCURRENT = 10;
+// A campaign's legal basis. Set at creation, never changed by an update
+// (Checkpoint 2a, M8a): make a new campaign instead.
+const IMMUTABLE_CAMPAIGN_FIELDS = Object.freeze(["compliance_class", "template_key", "audience"]);
 
 /**
  * Order-insensitive deep equality for the read-back check. A naive
@@ -119,7 +122,7 @@ export async function upsertCampaign(client, { businessPhone, meta, config, conf
     let existing = null;
     if (m.id) {
       const r = await client.query(
-        "SELECT id, current_version FROM campaigns WHERE id = $1 AND business_id = $2",
+        "SELECT id, current_version, template_key, compliance_class, audience FROM campaigns WHERE id = $1 AND business_id = $2",
         [m.id, business.id]
       );
       if (r.rowCount !== 1) {
@@ -127,6 +130,21 @@ export async function upsertCampaign(client, { businessPhone, meta, config, conf
         return { ok: false, error: `no campaign ${m.id} for business ${businessPhone}` };
       }
       existing = r.rows[0];
+
+      // Checkpoint 2a, M8(a). In-flight outreach is pinned to an older
+      // version and was gated and consented under THIS legal basis; rewriting
+      // it on the campaign row would re-label every pinned outreach. Refused
+      // before the dry-run return, so a dry run reports it too.
+      const changed = IMMUTABLE_CAMPAIGN_FIELDS.filter((f) => existing[f] !== m[f]);
+      if (changed.length) {
+        await client.query("ROLLBACK");
+        return {
+          ok: false,
+          error: `campaign ${m.id}: ${changed.map((f) => `${f} ${existing[f]} -> ${m[f]}`).join(", ")} refused -- ` +
+            `${IMMUTABLE_CAMPAIGN_FIELDS.join(", ")} cannot change on an existing campaign (its in-flight outreach ` +
+            "is pinned to older versions under that legal basis); create a new campaign instead",
+        };
+      }
     }
 
     const version = existing ? existing.current_version + 1 : 1;
@@ -148,11 +166,11 @@ export async function upsertCampaign(client, { businessPhone, meta, config, conf
     }
 
     if (existing) {
+      // The immutable fields are not written at all on an update (M8a).
       await client.query(
-        `UPDATE campaigns SET name = $2, template_key = $3, compliance_class = $4, audience = $5,
-                current_version = $6, updated_at = now()
+        `UPDATE campaigns SET name = $2, current_version = $3, updated_at = now()
           WHERE id = $1`,
-        [campaignId, m.name, m.template_key, m.compliance_class, m.audience, version]
+        [campaignId, m.name, version]
       );
     } else {
       await client.query(
