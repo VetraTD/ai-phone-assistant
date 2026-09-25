@@ -191,6 +191,30 @@ describe("fix A: the SID write is retried, and a call no callback can route is h
     expect(enqueue).toHaveBeenCalledWith({ businessId: "b1", outreachId: "o1", at: new Date("2026-09-28T13:10:00Z"), source: "reschedule" });
     expect(log.error).toHaveBeenCalledWith("outbound_dial_failed", expect.objectContaining({ attemptId: "a1", reason: "sid_write_failed" }));
   });
+  // Checkpoint 2a, M3. Twilio's docs: `canceled` on an in-progress call is a
+  // SUCCESSFUL no-op -- 200, and the call is still up. The throw-then-complete
+  // path below never ran for an answered call; the returned status has to be
+  // read.
+  it("M3: `canceled` that comes back in-progress (a 200 no-op) is followed by `completed`", async () => {
+    const db = fakeDb(); db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    const update = vi.fn(async ({ status }) => (status === "canceled" ? { status: "in-progress" } : { status: "completed" }));
+    const { twilio } = twilioWithUpdate(update);
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(db, twilio, { sleep: noSleep, log });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dial_failed");
+    expect(update.mock.calls).toEqual([[{ status: "canceled" }], [{ status: "completed" }]]);
+    expect(log.error).toHaveBeenCalledWith("outbound_dial_failed", expect.objectContaining({ reason: "sid_write_failed", hungUp: "completed" }));
+  });
+  it("M3: a real cancel (status canceled) is not followed by anything", async () => {
+    const db = fakeDb(); db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    const update = vi.fn(async () => ({ status: "canceled" }));
+    const { twilio } = twilioWithUpdate(update);
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(db, twilio, { sleep: noSleep, log });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(update.mock.calls).toEqual([[{ status: "canceled" }]]);
+    expect(log.error).toHaveBeenCalledWith("outbound_dial_failed", expect.objectContaining({ hungUp: "canceled" }));
+  });
   it("a call already answered cannot be canceled, so it is completed instead", async () => {
     const db = fakeDb(); db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
     const update = vi.fn()
