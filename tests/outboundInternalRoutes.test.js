@@ -211,6 +211,28 @@ describe("buildOutboundDeps", () => {
     expect(deps.audience).toBe("https://x.example");
   });
 
+  // Checkpoint 2a, M7. Count only, never the dropped values: they are meant
+  // to be phone numbers, and a log line is not the place for one.
+  it("logs outbound_allowlist_entries_dropped {count} once when OUTBOUND_TEST_ALLOWLIST has non-E.164 entries", () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    buildOutboundDeps({
+      BASE_URL: "https://x.example/", OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q", OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+      OUTBOUND_TEST_ALLOWLIST: "+447700900123,07700900123,garbage",
+    }, { log });
+    const calls = [...log.info.mock.calls, ...log.error.mock.calls].filter(([e]) => e === "outbound_allowlist_entries_dropped");
+    expect(calls).toEqual([["outbound_allowlist_entries_dropped", { count: 2 }]]);
+  });
+
+  it("logs nothing about the allow-list when every entry is E.164", () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    buildOutboundDeps({
+      BASE_URL: "https://x.example/", OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q", OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+      OUTBOUND_TEST_ALLOWLIST: "+447700900123,+14699338887",
+    }, { log });
+    const calls = [...log.info.mock.calls, ...log.error.mock.calls].filter(([e]) => e === "outbound_allowlist_entries_dropped");
+    expect(calls).toEqual([]);
+  });
+
   it("does not construct a Twilio or Cloud Tasks client just by being called (no credentials needed to import/build)", () => {
     // No TWILIO_ACCOUNT_SID/TOKEN in this env at all; a real Twilio client
     // built eagerly with a non-"AC" SID throws in its constructor. Building
