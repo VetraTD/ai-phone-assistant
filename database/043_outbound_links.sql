@@ -5,6 +5,9 @@
 -- "our number" on outbound calls too, so the data-subject export/erase paths
 -- and analytics keyed on caller_number work unchanged (§6.2).
 
+-- Fail fast instead of queueing inbound queries behind an ACCESS EXCLUSIVE wait; the migrate job is retried.
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE calls
   ADD COLUMN IF NOT EXISTS direction text NOT NULL DEFAULT 'inbound' CHECK (direction IN ('inbound','outbound')),
   ADD COLUMN IF NOT EXISTS campaign_id uuid REFERENCES campaigns(id) ON DELETE SET NULL,

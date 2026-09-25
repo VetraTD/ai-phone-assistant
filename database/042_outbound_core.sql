@@ -11,6 +11,9 @@
 -- on these tables -- FORCE RLS binds a definer's owner too (033:8-31). They
 -- go through the no-RLS directories of migration 044.
 
+-- Fail fast instead of queueing inbound queries behind an ACCESS EXCLUSIVE wait; the migrate job is retried.
+SET LOCAL lock_timeout = '5s';
+
 CREATE TABLE IF NOT EXISTS campaigns (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id      uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,

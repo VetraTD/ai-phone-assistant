@@ -58,3 +58,23 @@ describe("F1: 042 grants its nine tables to vetra_app explicitly", () => {
     expect(inFold.has(t)).toBe(true);
   });
 });
+
+/**
+ * F2 (Checkpoint 2a, owner-approved): 042 and 043 take ACCESS EXCLUSIVE locks
+ * on live tables (043 alters `calls` and `businesses`). Queued behind a long
+ * inbound transaction, that wait would itself block every inbound query that
+ * arrives after it. So each file's FIRST statement bounds the wait: fail fast,
+ * and the migrate job is retried. scripts/migrate.js wraps each file in
+ * BEGIN/COMMIT, so SET LOCAL is scoped to that file. schema.sql is the empty-
+ * database path, where there is nothing to queue behind: it does not carry it.
+ */
+describe("F2: 042 and 043 bound their lock wait", () => {
+  it.each(["042_outbound_core.sql", "043_outbound_links.sql"])(
+    "%s starts (after comments) with SET LOCAL lock_timeout = '5s'", (f) => {
+      expect(stripComments(read(f)).trimStart().startsWith("SET LOCAL lock_timeout = '5s';")).toBe(true);
+    });
+
+  it("schema.sql does not carry it", () => {
+    expect(read("schema.sql")).not.toMatch(/lock_timeout/i);
+  });
+});
