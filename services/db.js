@@ -2723,27 +2723,55 @@ export async function outboundAttemptByCallSid(callSid) {
  *   - `answered_at`, `ended_at` and `status_completed_at` are each written
  *     only the first time (COALESCE again), so a duplicate terminal callback
  *     moves none of them a second time.
- *   - `twilio_status` is the one field always overwritten -- it is meant to
- *     read as "the last status Twilio reported", not a first-write record.
+ *   - `twilio_status` is overwritten on every call EXCEPT one: once a
+ *     terminal stamp has landed (`status_completed_at` is already set), a
+ *     NON-terminal status arriving after it (an out-of-order "ringing" or
+ *     "in-progress" retry, reordered in flight) is frozen out rather than
+ *     overwriting "completed" back to "ringing". A terminal status is always
+ *     written through, including a duplicate of the SAME terminal status --
+ *     `twilio_status` is allowed to re-confirm itself even though the
+ *     timestamps/result next to it do not move again (fix round 1, item 5).
+ *
+ * Returns whether THIS call was the first terminal stamp, and whether the
+ * attempt had already been answered before it (i.e. `answered_at` was set
+ * prior to this call, since a terminal status never sets `answered_at`
+ * itself). The caller (doorRoutes.js) uses both to decide whether to run
+ * `completeCall` at all (fix round 1, item 9): only once, per attempt, and
+ * only for an attempt that was actually answered -- an attempt that never
+ * connected has no `calls` row for `completeCall` to touch, and re-running it
+ * on a duplicate terminal callback would move `calls.ended_at` a second time
+ * for nothing.
  *
  * @param {string} attemptId
  * @param {{twilioStatus: string, answered?: boolean, terminal?: boolean, result?: string|null}} stamp
+ * @returns {Promise<{firstTerminalStamp: boolean, answered: boolean}>}
  */
 export async function stampAttemptStatus(attemptId, { twilioStatus, answered = false, terminal = false, result = null }) {
   requireTenantScope("stampAttemptStatus");
   const res = await q(
-    `UPDATE call_attempts
-        SET twilio_status = $2,
-            answered_at = CASE WHEN $3 THEN COALESCE(answered_at, now()) ELSE answered_at END,
-            ended_at = CASE WHEN $4 THEN COALESCE(ended_at, now()) ELSE ended_at END,
-            status_completed_at = CASE WHEN $4 THEN COALESCE(status_completed_at, now()) ELSE status_completed_at END,
-            result = CASE WHEN $5::text IS NOT NULL THEN COALESCE(result, $5::text) ELSE result END
-      WHERE id = $1`,
+    `WITH before AS (
+       SELECT status_completed_at, answered_at FROM call_attempts WHERE id = $1
+     )
+     UPDATE call_attempts a
+        SET twilio_status = CASE
+                               WHEN before.status_completed_at IS NOT NULL AND NOT $4 THEN a.twilio_status
+                               ELSE $2
+                             END,
+            answered_at = CASE WHEN $3 THEN COALESCE(before.answered_at, now()) ELSE before.answered_at END,
+            ended_at = CASE WHEN $4 THEN COALESCE(a.ended_at, now()) ELSE a.ended_at END,
+            status_completed_at = CASE WHEN $4 THEN COALESCE(before.status_completed_at, now()) ELSE before.status_completed_at END,
+            result = CASE WHEN $5::text IS NOT NULL THEN COALESCE(a.result, $5::text) ELSE a.result END
+       FROM before
+      WHERE a.id = $1
+      RETURNING (before.status_completed_at IS NULL AND $4) AS first_terminal_stamp,
+                (before.answered_at IS NOT NULL) AS answered`,
     [attemptId, twilioStatus, answered, terminal, result]
   );
   if (res.error) throw res.error;
   if (res.rowCount !== 1) throw new Error(`stampAttemptStatus: expected 1 row, got ${res.rowCount}`);
   noteAccess("stampAttemptStatus", { resourceIds: [attemptId], rowCount: res.rowCount });
+  const row = one(res);
+  return { firstTerminalStamp: !!row?.first_terminal_stamp, answered: !!row?.answered };
 }
 
 /**

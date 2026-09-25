@@ -127,6 +127,17 @@ d("outboundAttemptByCallSid", () => {
   });
 });
 
+/** A fresh call_attempts row under the shared outreach, for tests that must
+ * not share mutable state with each other. */
+async function mkAttempt(sid, attemptNo) {
+  const att = await admin.query(
+    `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at)
+     VALUES ($1,$2,$3,'+441372656055','+447700900199',$4,now()) RETURNING id`,
+    [BIZ, outreachId, attemptNo, sid]
+  );
+  return att.rows[0].id;
+}
+
 d("stampAttemptStatus and fetchAttemptVoicemailAudio, as vetra_app inside withTenant", () => {
   it("stamps twilio_status/answered_at and the row actually lands", async () => {
     await db.withTenant(BIZ, () => db.stampAttemptStatus(attemptId, { twilioStatus: "in-progress", answered: true, terminal: false, result: null }));
@@ -160,5 +171,75 @@ d("stampAttemptStatus and fetchAttemptVoicemailAudio, as vetra_app inside withTe
 
   it("a different tenant's scope cannot read this attempt's audio (RLS, not the query, is what protects it)", async () => {
     await expect(db.withTenant(OTHER_BIZ, () => db.fetchAttemptVoicemailAudio(attemptId))).resolves.toBeNull();
+  });
+
+  // Fix round 1, item 6. Every case above reuses the SAME `attemptId`
+  // fixture, which by this point has already been stamped `answered: true`
+  // (the very first test in this block). `no-answer` on a real attempt is
+  // never answered, and nothing above proves that path lands correctly.
+  it("no-answer on a FRESH attempt sets result='no_answer', stamps status_completed_at, and never sets answered_at", async () => {
+    const freshId = await mkAttempt("CAdoorattempt-noanswer", 2);
+    const outcome = await db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(freshId, { twilioStatus: "no-answer", answered: false, terminal: true, result: "no_answer" })
+    );
+    expect(outcome).toEqual({ firstTerminalStamp: true, answered: false });
+
+    const row = (await admin.query(
+      `SELECT twilio_status, result, status_completed_at, ended_at, answered_at FROM call_attempts WHERE id = $1`,
+      [freshId]
+    )).rows[0];
+    expect(row.twilio_status).toBe("no-answer");
+    expect(row.result).toBe("no_answer");
+    expect(row.status_completed_at).not.toBeNull();
+    expect(row.ended_at).not.toBeNull();
+    expect(row.answered_at).toBeNull();
+  });
+});
+
+// Fix round 1, items 5 and 9: covered separately from the block above, on
+// FRESH attempts each time, so the sequencing (which status landed first)
+// is unambiguous and not entangled with the don't-overwrite tests' own
+// mutations of the shared `attemptId` fixture.
+d("stampAttemptStatus: twilio_status freezes after a terminal stamp unless the new status is itself terminal (item 5); firstTerminalStamp/answered report the real state transition (item 9)", () => {
+  it("an answered call's first terminal stamp reports {firstTerminalStamp:true, answered:true}; the in-progress stamp before it does not", async () => {
+    const id = await mkAttempt("CAdoorattempt-seq1", 3);
+
+    const inProgress = await db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(id, { twilioStatus: "in-progress", answered: true, terminal: false, result: null })
+    );
+    // Not terminal, so firstTerminalStamp is false regardless; "answered"
+    // reports the state BEFORE this call, which had never been answered yet.
+    expect(inProgress).toEqual({ firstTerminalStamp: false, answered: false });
+
+    const completed = await db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(id, { twilioStatus: "completed", answered: false, terminal: true, result: null })
+    );
+    expect(completed).toEqual({ firstTerminalStamp: true, answered: true });
+
+    const duplicate = await db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(id, { twilioStatus: "completed", answered: false, terminal: true, result: null })
+    );
+    expect(duplicate).toEqual({ firstTerminalStamp: false, answered: true });
+  });
+
+  it("a late out-of-order NON-terminal status after a terminal stamp does not move twilio_status backwards", async () => {
+    const id = await mkAttempt("CAdoorattempt-seq2", 4);
+    await db.withTenant(BIZ, () => db.stampAttemptStatus(id, { twilioStatus: "completed", answered: false, terminal: true, result: null }));
+
+    // A reordered "ringing" arriving after "completed" -- must be frozen out.
+    await db.withTenant(BIZ, () => db.stampAttemptStatus(id, { twilioStatus: "ringing", answered: false, terminal: false, result: null }));
+    const afterStrayRinging = (await admin.query(`SELECT twilio_status FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(afterStrayRinging.twilio_status).toBe("completed");
+
+    // A SECOND terminal status (a duplicate/retry spelling a different word)
+    // still writes twilio_status through -- only non-terminal is frozen out.
+    await db.withTenant(BIZ, () => db.stampAttemptStatus(id, { twilioStatus: "canceled", answered: false, terminal: true, result: null }));
+    const afterDuplicateTerminal = (await admin.query(`SELECT twilio_status FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(afterDuplicateTerminal.twilio_status).toBe("canceled");
+
+    // And a non-terminal arriving after THAT is frozen out too.
+    await db.withTenant(BIZ, () => db.stampAttemptStatus(id, { twilioStatus: "ringing", answered: false, terminal: false, result: null }));
+    const afterSecondStrayRinging = (await admin.query(`SELECT twilio_status FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(afterSecondStrayRinging.twilio_status).toBe("canceled");
   });
 });
