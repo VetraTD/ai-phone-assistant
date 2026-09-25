@@ -29,7 +29,13 @@ import pg from "pg";
 const url = process.env.DATABASE_URL;
 const describeDb = url ? describe : describe.skip;
 
-const DIRECTORIES = ["business_directory", "user_directory"];
+const DIRECTORIES = [
+  "business_directory",
+  "user_directory",
+  "call_attempt_directory",
+  "dial_registry",
+  "outreach_schedule",
+];
 
 let admin;
 
