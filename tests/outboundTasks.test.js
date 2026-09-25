@@ -38,6 +38,15 @@ describe("createDispatchEnqueuer", () => {
     await q.enqueue({ businessId: "b1", outreachId: "o1", at, source: "dispatch" });
     expect(await q.enqueue({ businessId: "b1", outreachId: "o1", at, source: "sweep", now: new Date("2026-09-28T13:07:00Z") })).toEqual({ created: true });
   });
+  // Checkpoint 2a, M4. Cloud Tasks takes whole seconds. Flooring a due time
+  // with a fraction fires the task up to 999 ms BEFORE it is due; the
+  // re-deferral then enqueues the same outreach at the same due ms -- the
+  // same task NAME, which ALREADY_EXISTS swallows. Round up instead.
+  it("a due time with a 500 ms fraction is scheduled at the NEXT whole second, never before it", async () => {
+    const c = fakeClient();
+    await mk(c).enqueue({ businessId: "b1", outreachId: "o1", at: new Date("2026-09-28T13:00:00.500Z"), source: "dispatch" });
+    expect(Number(c.made[0].task.scheduleTime.seconds)).toBe(Date.parse("2026-09-28T13:00:01Z") / 1000);
+  });
   it("any other error propagates", async () => {
     const client = { createTask: async () => { const e = new Error("perm"); e.code = 7; throw e; } };
     await expect(mk(client).enqueue({ businessId: "b1", outreachId: "o1", at: new Date(), source: "dispatch" })).rejects.toThrow("perm");
