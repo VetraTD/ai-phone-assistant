@@ -103,6 +103,13 @@
 
 The reasoning: 2a and 2b have no owner gate between them and share one deploy, so splitting them only adds a handoff. The deploy and the live calls depend on the owner's timing, and should start fresh.
 
+**The split-on-evidence rule** (owner-approved). After Checkpoint 2a, **stop the session and start 2b as a fresh session** if ANY of these is true:
+- (a) the checkpoint review found a **Critical** issue, or more than **3 Important** ones;
+- (b) the checkpoint fixes changed code in **more than two** tasks;
+- (c) the session's context has **already been summarised** at least once.
+
+The stopping session ends as usual: summary, memory, and the exact 2b prompt, starting at "Task 0 (2b)". Otherwise, continue into 2b.
+
 **Each session begins with its "Task 0: refresh".**
 - Re-read this plan section against the code as it now stands.
 - Update every `file:line` anchor, since earlier sessions move lines.
