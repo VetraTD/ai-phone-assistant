@@ -13,9 +13,35 @@
  * before this task, down to the createCall arguments and the kick.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Fix round 1 (M8): every structured log line the engine writes is RECORDED
+// here instead of printed, so this file's output is clean -- and any ERROR
+// line a test did not declare with allowErrors() fails that test (afterEach).
+const logged = vi.hoisted(() => []);
+vi.mock("../lib/logger.js", async (importOriginal) => {
+  const rec = (level) => (event, fields = {}) => {
+    logged.push({ level, event, ...fields });
+  };
+  return { ...(await importOriginal()), log: { debug: rec("DEBUG"), info: rec("INFO"), error: rec("ERROR") } };
+});
+
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
 import { BACKSTOP_END_MARK } from "../lib/outbound/firstSeconds.js";
+
+let allowed = new Set();
+/** Declare the ERROR-level events this test expects. Anything else fails it. */
+const allowErrors = (...names) => names.forEach((n) => allowed.add(n));
+const events = (name) => logged.filter((l) => l.event === name);
+
+beforeEach(() => {
+  logged.length = 0;
+  allowed = new Set();
+});
+afterEach(() => {
+  const unexpected = logged.filter((l) => l.level === "ERROR" && !allowed.has(l.event)).map((l) => `${l.event}: ${l.reason ?? ""}`);
+  expect(unexpected).toEqual([]);
+});
 
 const BIZ = "biz-digile";
 const SID = "CAoutbound0001";
@@ -51,7 +77,7 @@ const CAMPAIGN_CONFIG = {
 
 const BUSINESS_ROW = { id: BIZ, name: "Digile Media", timezone: "Europe/London", phone_number: CALLER_ID };
 
-function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true } = {}) {
+function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true, lateOpenerAudio = null } = {}) {
   const base = fakeDb(CONFIG, BIZ);
   return {
     ...base,
@@ -59,6 +85,10 @@ function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true } = {}) {
     loadConfig: vi.fn(() => CONFIG),
     createCall: vi.fn(async () => "call-1"),
     fetchCallerContext: vi.fn(async () => null),
+    // The per-turn transcript write (LVX83); absent from fakeDb.
+    addTranscriptEntry: vi.fn(async () => {}),
+    // Fix round 1 (I4): the one late re-read of a clip stored after pickup.
+    fetchAttemptOpenerAudio: vi.fn(async () => lateOpenerAudio),
     outboundAttemptByCallSid: vi.fn(async (sid) =>
       resolves && sid === SID
         ? { businessId: BIZ, attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 3 }
@@ -88,23 +118,9 @@ function outboundDb({ openerAudio = OPENER_AUDIO, resolves = true } = {}) {
 
 /** Every structured log line the engine writes while `run` executes. */
 async function logsDuring(run) {
-  const lines = [];
-  const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-    if (typeof chunk === "string" && chunk.startsWith("{")) {
-      try {
-        lines.push(JSON.parse(chunk));
-      } catch {
-        /* not ours */
-      }
-    }
-    return true;
-  });
-  let out;
-  try {
-    out = await run();
-  } finally {
-    spy.mockRestore();
-  }
+  const start = logged.length;
+  const out = await run();
+  const lines = logged.slice(start);
   return { out, lines, events: (name) => lines.filter((l) => l.event === name) };
 }
 
@@ -206,6 +222,7 @@ describe("outbound: context by CallSid", () => {
   });
 
   it("an unresolvable CallSid closes the socket with 1008 and logs outbound_context_missing", async () => {
+    allowErrors("outbound_context_missing");
     const database = outboundDb({ resolves: false });
     const { out: call, events } = await logsDuring(async () => {
       const c = await bootOutbound({ database, waitForConnect: false });
@@ -213,25 +230,44 @@ describe("outbound: context by CallSid", () => {
       return c;
     });
     expect(events("outbound_context_missing")).toHaveLength(1);
-    expect(events("outbound_context_missing")[0].callSid).toBe(SID);
+    expect(events("outbound_context_missing")[0]).toMatchObject({ callSid: SID, reason: "no_attempt" });
     expect(call.live.connect).not.toHaveBeenCalled();
     expect(database.createCall).not.toHaveBeenCalled();
     expect(database.lookupBusinessByPhone).not.toHaveBeenCalled();
+    // A clean miss is an answer, not a blip: not retried (M11).
+    expect(database.outboundAttemptByCallSid).toHaveBeenCalledTimes(1);
   });
 
-  it("a resolver that throws is the same: 1008, outbound_context_missing, nothing connected", async () => {
+  it("a resolver that keeps throwing: one retry, then 1008, outbound_context_missing, nothing connected", async () => {
+    allowErrors("outbound_context_missing");
     const database = outboundDb();
-    database.outboundAttemptByCallSid.mockRejectedValueOnce(new Error("db down"));
+    database.outboundAttemptByCallSid.mockRejectedValue(new Error("db down"));
     const { out: call, events } = await logsDuring(async () => {
       const c = await bootOutbound({ database, waitForConnect: false });
       await vi.waitFor(() => expect(c.ws.closeCode).toBe(1008));
       return c;
     });
+    expect(database.outboundAttemptByCallSid).toHaveBeenCalledTimes(2);
     expect(events("outbound_context_missing")).toHaveLength(1);
+    expect(events("outbound_context_missing")[0]).toMatchObject({ reason: "db down" });
     expect(call.live.connect).not.toHaveBeenCalled();
   });
 
+  it("M11: a single database blip at pickup is retried once (~150 ms) and the call goes ahead", async () => {
+    const database = outboundDb();
+    database.outboundAttemptByCallSid.mockRejectedValueOnce(new Error("connection reset"));
+    const t0 = Date.now();
+    const call = await bootOutbound({ database });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
+    expect(database.outboundAttemptByCallSid).toHaveBeenCalledTimes(2);
+    expect(call.ws.closeCode).toBeUndefined();
+    expect(database.createCall).toHaveBeenCalledTimes(1);
+    expect(events("outbound_context_missing")).toHaveLength(0);
+    await call.hangUp();
+  });
+
   it("a forged direction on an INBOUND call's stream grants nothing: 1008 + outbound_context_missing, no business by phone", async () => {
+    allowErrors("outbound_context_missing");
     // An inbound call's token binds CAinbound. Its start frame claims
     // direction=outbound and names a real business number.
     const database = outboundDb();
@@ -268,10 +304,14 @@ describe("outbound: context by CallSid", () => {
   });
 
   it("with the stream token required and no CallSid bound to the socket, it refuses (1008)", async () => {
+    allowErrors("outbound_context_missing");
     const database = outboundDb();
     const call = await bootOutbound({ database, authorizedCallSid: null, waitForConnect: false });
     await vi.waitFor(() => expect(call.ws.closeCode).toBe(1008));
     expect(database.outboundAttemptByCallSid).not.toHaveBeenCalled();
+    expect(events("outbound_context_missing")).toEqual([
+      expect.objectContaining({ level: "ERROR", callSid: SID, reason: "unbound" }),
+    ]);
   });
 });
 
@@ -364,6 +404,7 @@ describe("outbound: the first seconds through the real session", () => {
   });
 
   it("no clip (render failed): the silence path prompts Live to say the line instead", async () => {
+    allowErrors("outbound_backstop_missing");
     const call = await bootOutbound({ database: outboundDb({ openerAudio: null }) });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
     const { events } = await logsDuring(() => call.feed(1660));
@@ -377,6 +418,7 @@ describe("outbound: the first seconds through the real session", () => {
   });
 
   it("first-turn check: an incomplete first reply gets one correction note", async () => {
+    allowErrors("outbound_first_turn_incomplete");
     const call = await bootOutbound();
     await call.feed(400, { voiced: true });
     call.live.push(modelAudioMsg());
@@ -391,6 +433,63 @@ describe("outbound: the first seconds through the real session", () => {
     expect(
       call.live.sent.clientContent.filter((m) => m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly"))
     ).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("I1: the reviewer's probe -- a barge cuts the backstop before the disclosure, Live's next turn lacks it, and it is corrected", async () => {
+    allowErrors("outbound_first_turn_incomplete");
+    const call = await bootOutbound();
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(1660); // backstop fires at 1,650 and is playing
+    // "Yes, speaking" -- 800 ms of speech over the clip.
+    await call.feed(800, { voiced: true });
+    expect(clear).toHaveBeenCalled();
+    await call.feed(200);
+
+    // Live answers what it heard, believing (from the seed) it already said
+    // the whole line.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Great, thanks Sam. I'm calling about your enquiry.");
+
+    const isNote = (m) => m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly: you are Ava, an AI assistant from Digile Media.");
+    expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(1);
+    expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("I4: a clip stored AFTER pickup is re-read once before the deadline and played", async () => {
+    const LATE = Buffer.alloc(4000, 0x55);
+    const database = outboundDb({ openerAudio: null, lateOpenerAudio: LATE });
+    const call = await bootOutbound({ database });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+
+    await call.feed(1240); // before deadline - lead
+    expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
+    await call.feed(20); // 1,260: past 1,650 - 400
+    expect(database.fetchAttemptOpenerAudio).toHaveBeenCalledTimes(1);
+    expect(database.fetchAttemptOpenerAudio).toHaveBeenCalledWith("att-1");
+    expect(database.withTenant.mock.calls.at(-1)[0]).toBe(BIZ);
+
+    await call.feed(400); // through 1,660
+    expect(enqueue).toHaveBeenCalledWith(LATE);
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false },
+    ]);
+    expect(database.fetchAttemptOpenerAudio).toHaveBeenCalledTimes(1);
+    await call.hangUp();
+  });
+
+  it("I4: no re-read when the call-time re-render refused the clip (O-4)", async () => {
+    allowErrors("outbound_backstop_render_refused", "outbound_backstop_missing");
+    const database = outboundDb({ openerAudio: Buffer.alloc(100, 1), lateOpenerAudio: Buffer.alloc(100, 1) });
+    database.fetchBusinessById.mockResolvedValue({ ...BUSINESS_ROW, name: "N".repeat(100) });
+    const call = await bootOutbound({ database });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(1660);
+    expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(events("outbound_backstop_render_refused")).toHaveLength(1);
     await call.hangUp();
   });
 });

@@ -23,7 +23,12 @@ import {
   createFirstSecondsController,
   BACKSTOP_END_MARK,
   FIRST_SECONDS_DEFAULTS,
+  BACKSTOP_MARK_GRACE_MS,
+  BACKSTOP_REFETCH_LEAD_MS,
 } from "../lib/outbound/firstSeconds.js";
+
+/** Let a started promise chain (the late clip re-read) settle. */
+const flush = () => new Promise((r) => setImmediate(r));
 
 /** The test's model of the measured answer -> stream-start offset (spike B). */
 const ANSWER_TO_STREAM = 350;
@@ -290,5 +295,169 @@ describe("7. no backstop audio (render failed or refused)", () => {
 
     expect(ctl.onModelAudio(3000)).toBe(true);
     expect(ctl.firstAudio()).toEqual({ from_answer_ms: 3350, from_speech_ms: 2000, path: "live_reply" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1.
+// ---------------------------------------------------------------------------
+
+describe("I1: a backstop cut before the disclosure does not count as the disclosure", () => {
+  const NOTE = "Tell them now, briefly: you are Ava, an AI assistant from Digile Media.";
+
+  it("the reviewer's probe: backstop -> an 800 ms barge clears it -> Live's next turn lacks the disclosure -> ONE correction", () => {
+    const { ctl, rec, events } = rig();
+    run(ctl, 0, 1650); // the backstop fires and starts playing
+    expect(rec.notes).toEqual([]); // the full backstop text passed the check when it fired
+
+    // "Yes, speaking" over the clip, before "It's Ava, an AI assistant…" is
+    // reached. index.js's barge path clears the audio: onAudioCleared.
+    run(ctl, 1660, 2460, (t) => t >= 1700);
+    ctl.onAudioCleared();
+
+    ctl.onAssistantTurnText("Great, thanks Sam. I'm calling about your enquiry.");
+    expect(rec.notes).toEqual([NOTE]);
+    expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
+
+    ctl.onAssistantTurnText("Is now a good time?");
+    expect(rec.notes).toEqual([NOTE]);
+  });
+
+  it("a re-armed check passes a complete next turn without a note", () => {
+    const { ctl, rec } = rig();
+    run(ctl, 0, 1650);
+    ctl.onAudioCleared();
+    ctl.onAssistantTurnText("Sorry -- it's Ava, an AI assistant from Digile Media. Is that Sam?");
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("a clip that played to its end mark is not re-armed by a LATER clear", () => {
+    const { ctl, rec } = rig();
+    run(ctl, 0, 1650);
+    ctl.onMark(BACKSTOP_END_MARK);
+    ctl.onAudioCleared(); // e.g. a barge on Live's own reply later on
+    ctl.onAssistantTurnText("Great, thanks Sam. I'm calling about your enquiry.");
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("the text of a reply whose audio was DROPPED during the clip cannot satisfy the re-armed check", () => {
+    // Slow-Live shape: Live's reply was suppressed while the clip played, the
+    // person barged, and the vendor then reports that (unheard) turn's text.
+    const { ctl, rec } = rig();
+    run(ctl, 0, 1650);
+    expect(ctl.onModelAudio(1700)).toBe(false); // dropped
+    ctl.onAudioCleared();
+    ctl.onAssistantTurnText("Hi Sam, it's Ava, an AI assistant from Digile Media."); // never heard
+    expect(rec.notes).toEqual([]);
+    ctl.onAssistantTurnText("Great, what's the clinic called?"); // the first turn the person heard
+    expect(rec.notes).toEqual([NOTE]);
+  });
+});
+
+describe("M3: dotted spellings of AI count as the disclosure", () => {
+  it.each([
+    "Hi Sam, it's Ava, an A.I. assistant from Digile Media.",
+    "Hi Sam, it's Ava, an A. I. assistant from Digile Media.",
+    "Hi Sam, it's Ava, an a.i. assistant from Digile Media.",
+  ])("%s -> no correction", (text) => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(text);
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("a dotted form without the business name is still corrected", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText("Hi Sam, it's Ava, an A.I. assistant.");
+    expect(rec.notes).toHaveLength(1);
+  });
+});
+
+describe("M9: the suppression has a safety lift", () => {
+  it("a mark that never echoes lifts it at clip length + BACKSTOP_MARK_GRACE_MS, logged", () => {
+    const { ctl, events } = rig();
+    run(ctl, 0, 1650); // 8,000 bytes = 1,000 ms of clip, fired at 1,650
+    const liftAt = 1650 + 1000 + BACKSTOP_MARK_GRACE_MS;
+    expect(BACKSTOP_MARK_GRACE_MS).toBe(1500);
+
+    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
+    ctl.tick(liftAt - 10);
+    expect(ctl.suppressing()).toBe(true);
+
+    ctl.tick(liftAt);
+    expect(ctl.suppressing()).toBe(false);
+    expect(ctl.onModelAudio(liftAt + 10)).toBe(true);
+    expect(events("outbound_backstop_mark_timeout")).toHaveLength(1);
+    expect(events("outbound_backstop_mark_timeout")[0].fields).toMatchObject({ callSid: "CA1", attemptId: "att-1", waited_ms: 2500 });
+  });
+
+  it("model audio alone (no frames) also sees the deadline", () => {
+    const { ctl } = rig();
+    run(ctl, 0, 1650);
+    expect(ctl.onModelAudio(1650 + 1000 + BACKSTOP_MARK_GRACE_MS)).toBe(true);
+  });
+
+  it("an echoed mark lifts it first, and the timeout then logs nothing", () => {
+    const { ctl, events } = rig();
+    run(ctl, 0, 1650);
+    ctl.onMark(BACKSTOP_END_MARK);
+    run(ctl, 1660, 6000);
+    expect(events("outbound_backstop_mark_timeout")).toHaveLength(0);
+  });
+});
+
+describe("I4: no clip at stream start -- the stored clip is re-read once, before the deadline", () => {
+  it(`reads at deadline - ${BACKSTOP_REFETCH_LEAD_MS} ms and plays the late clip at the deadline`, async () => {
+    const LATE = Buffer.alloc(4000, 0x55);
+    const refetch = vi.fn(async () => LATE);
+    const { ctl, enqueue, rec, events } = rig({ backstopAudio: null, refetchBackstopAudio: refetch });
+
+    run(ctl, 0, 1650 - BACKSTOP_REFETCH_LEAD_MS - 10);
+    expect(refetch).not.toHaveBeenCalled();
+    run(ctl, 1650 - BACKSTOP_REFETCH_LEAD_MS, 1650 - BACKSTOP_REFETCH_LEAD_MS);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    await flush();
+
+    run(ctl, 1260, 1650);
+    expect(enqueue).toHaveBeenCalledWith(LATE);
+    expect(rec.prompts).toEqual([]);
+    expect(rec.seeds).toEqual([BACKSTOP_TEXT]);
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ source: "refetched" });
+    expect(events("outbound_backstop_missing")).toHaveLength(0);
+    run(ctl, 1660, 4000);
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a read still out at the deadline is a miss: the prompt path fires on time, and a late answer is ignored", async () => {
+    let resolveLate;
+    const refetch = vi.fn(() => new Promise((r) => (resolveLate = r)));
+    const { ctl, enqueue, rec, events } = rig({ backstopAudio: null, refetchBackstopAudio: refetch });
+    run(ctl, 0, 1650);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(rec.prompts).toHaveLength(1);
+    expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ refetch: "pending" });
+
+    resolveLate(Buffer.alloc(800, 1));
+    await flush();
+    run(ctl, 1660, 4000);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("a read that fails, or finds nothing, is the prompt path", async () => {
+    for (const refetch of [vi.fn(async () => { throw new Error("db down"); }), vi.fn(async () => null)]) {
+      const { ctl, enqueue, rec } = rig({ backstopAudio: null, refetchBackstopAudio: refetch });
+      run(ctl, 0, 1300);
+      await flush();
+      run(ctl, 1310, 1650);
+      expect(refetch).toHaveBeenCalledTimes(1);
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(rec.prompts).toHaveLength(1);
+    }
+  });
+
+  it("no re-read when there is a clip already", () => {
+    const refetch = vi.fn(async () => Buffer.alloc(10));
+    const { ctl } = rig({ refetchBackstopAudio: refetch });
+    run(ctl, 0, 1650);
+    expect(refetch).not.toHaveBeenCalled();
   });
 });

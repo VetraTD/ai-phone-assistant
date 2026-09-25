@@ -11,6 +11,11 @@ import { describe, it, expect, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ ADAPTER: async () => ({ opener: null, voicemail: null }) }));
 
+// Fix round 1 (M8): no database_not_configured line from importing services/db.js.
+vi.mock("../lib/logger.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  log: { debug: () => {}, info: () => {}, error: () => {} },
+}));
 vi.mock("../lib/outbound/liveRender.js", () => ({
   createLiveRenderAudio: vi.fn(() => h.ADAPTER),
 }));

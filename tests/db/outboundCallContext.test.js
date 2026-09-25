@@ -212,3 +212,44 @@ d("createCall's outbound link", () => {
     expect(row).toMatchObject({ direction: "inbound", campaign_id: null, outreach_id: null, attempt_id: null, contact_id: null });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (I4): clips are stored one at a time, the moment each is ready,
+// and a session that found none at stream start re-reads the opener once.
+// ---------------------------------------------------------------------------
+d("storeAttemptAudio writes only what it is given; fetchAttemptOpenerAudio", () => {
+  it("the opener first, then the voicemail alone: the second write does not null the first", async () => {
+    await admin.query(`UPDATE call_attempts SET opener_audio = NULL, voicemail_audio = NULL WHERE id = $1`, [attemptId]);
+    await db.withTenant(BIZ, () => db.storeAttemptAudio(attemptId, { opener: Buffer.from([7, 7]) }));
+    let row = (await admin.query(`SELECT opener_audio, voicemail_audio FROM call_attempts WHERE id = $1`, [attemptId])).rows[0];
+    expect([...row.opener_audio]).toEqual([7, 7]);
+    expect(row.voicemail_audio).toBeNull();
+
+    await db.withTenant(BIZ, () => db.storeAttemptAudio(attemptId, { voicemail: Buffer.from([9]) }));
+    row = (await admin.query(`SELECT opener_audio, voicemail_audio FROM call_attempts WHERE id = $1`, [attemptId])).rows[0];
+    expect([...row.opener_audio]).toEqual([7, 7]);
+    expect([...row.voicemail_audio]).toEqual([9]);
+  });
+
+  it("the session's late re-read sees the stored opener, under the tenant scope only", async () => {
+    const got = await db.withTenant(BIZ, () => db.fetchAttemptOpenerAudio(attemptId));
+    expect([...got]).toEqual([7, 7]);
+    expect(await db.withTenant(OTHER_BIZ, () => db.fetchAttemptOpenerAudio(attemptId))).toBeNull();
+    await expect(db.fetchAttemptOpenerAudio(attemptId)).rejects.toThrow(/withTenant/);
+  });
+
+  it("the post-call guard still refuses: once post-call started, nothing is written back", async () => {
+    await admin.query(`UPDATE call_attempts SET post_call_started_at = now(), opener_audio = NULL WHERE id = $1`, [attemptId]);
+    try {
+      await expect(db.withTenant(BIZ, () => db.storeAttemptAudio(attemptId, { opener: Buffer.from([1]) }))).rejects.toThrow(/expected 1 row/);
+      const row = (await admin.query(`SELECT opener_audio FROM call_attempts WHERE id = $1`, [attemptId])).rows[0];
+      expect(row.opener_audio).toBeNull();
+    } finally {
+      await admin.query(`UPDATE call_attempts SET post_call_started_at = NULL WHERE id = $1`, [attemptId]);
+    }
+  });
+
+  it("another tenant's scope writes nothing (a tenantless write matches zero rows and must not pass)", async () => {
+    await expect(db.withTenant(OTHER_BIZ, () => db.storeAttemptAudio(attemptId, { opener: Buffer.from([2]) }))).rejects.toThrow(/expected 1 row/);
+  });
+});

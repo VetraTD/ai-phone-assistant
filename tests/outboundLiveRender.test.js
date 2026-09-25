@@ -9,11 +9,21 @@
  * paid run).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
+
+// Fix round 1 (M8): the modules' own default logger is replaced, so importing
+// services/db.js without a DATABASE_URL (for loadConfig) prints nothing. Every
+// assertion on a log line here goes through an injected `log` instead.
+vi.mock("../lib/logger.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  log: { debug: () => {}, info: () => {}, error: () => {} },
+}));
+
 import {
   renderLines,
   createLiveRenderAudio,
   RENDER_TIMEOUT_MS,
   RENDER_SYSTEM_PROMPT,
+  RENDER_MAX_WORD_RATIO,
   wordOverlap,
 } from "../lib/outbound/liveRender.js";
 import { loadConfig } from "../services/db.js";
@@ -35,7 +45,7 @@ function pcm24k(ms) {
  * (500 ms each), the transcript `say(line)`, then turnComplete -- the shape
  * a real render produced in spike A.
  */
-function fakeConnect({ say = (line) => line, hang = false, failConnect = false, closeEarly = false } = {}) {
+function fakeConnect({ say = (line) => line, hang = false, failConnect = false, closeEarly = false, gate = () => null, usage = null } = {}) {
   const sessions = [];
   const connect = vi.fn(async ({ config, callbacks }) => {
     if (failConnect) throw new Error("connect refused");
@@ -47,7 +57,9 @@ function fakeConnect({ say = (line) => line, hang = false, failConnect = false, 
         this.sent.push(msg);
         if (hang) return;
         const line = msg.turns[0].parts[0].text.replace(/^Say exactly: "/, "").replace(/"$/, "");
-        setImmediate(() => {
+        // `gate(line)` may return a promise that holds this line back -- a
+        // render that is still running while the other one finishes.
+        Promise.resolve(gate(line)).then(() => setImmediate(() => {
           if (closeEarly) {
             callbacks.onclose?.({ code: 1011, reason: "internal" });
             return;
@@ -55,8 +67,9 @@ function fakeConnect({ say = (line) => line, hang = false, failConnect = false, 
           callbacks.onmessage({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm24k(500) } }] } } });
           callbacks.onmessage({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm24k(500) } }] } } });
           callbacks.onmessage({ serverContent: { outputTranscription: { text: say(line) } } });
+          if (usage) callbacks.onmessage({ usageMetadata: usage });
           callbacks.onmessage({ serverContent: { turnComplete: true } });
-        });
+        }));
       },
       close() {
         this.closed = true;
@@ -231,5 +244,131 @@ describe("createLiveRenderAudio (dispatch's renderAudio)", () => {
       renderAudio({ row: { id: "out-1", business_id: BIZ, config: { caller_id: "+441372656055" } }, attemptNo: 1, lines: { opener: OPENER } })
     ).rejects.toThrow(/business/);
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1.
+// ---------------------------------------------------------------------------
+
+describe("M1: a transcript that says MORE than the line is refused", () => {
+  it("'Sure! Here you go. <line> Let me know...' contains every word and is still not the line", async () => {
+    const say = (line) => `Sure! Here you go. ${line} Let me know if you need anything else.`;
+    expect(wordOverlap(OPENER, say(OPENER))).toBe(1);
+    const { connect } = fakeConnect({ say });
+    const log = quietLog();
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    expect(out.opener).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(
+      "outbound_backstop_render_refused",
+      expect.objectContaining({ reason: "transcript_mismatch", overlap: 1 })
+    );
+    const [, fields] = log.error.mock.calls.find(([e]) => e === "outbound_backstop_render_refused");
+    expect(fields.word_ratio).toBeGreaterThan(RENDER_MAX_WORD_RATIO);
+  });
+
+  it("one extra word on a 12-word line is within the ratio", async () => {
+    expect(RENDER_MAX_WORD_RATIO).toBe(1.15);
+    const { connect } = fakeConnect({ say: (line) => `${line} Okay.` });
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog() });
+    expect(out.opener).not.toBeNull();
+  });
+});
+
+describe("M2: every render is metered", () => {
+  const USAGE = {
+    promptTokenCount: 40,
+    responseTokenCount: 150,
+    promptTokensDetails: [{ modality: "TEXT", tokenCount: 40 }],
+    responseTokensDetails: [{ modality: "AUDIO", tokenCount: 140 }, { modality: "TEXT", tokenCount: 10 }],
+  };
+
+  it("logs outbound_render_usage with the line kind, the outcome and the token buckets", async () => {
+    const { connect } = fakeConnect({ usage: USAGE });
+    const log = quietLog();
+    await renderLines({
+      lines: { opener: OPENER, voicemail: VOICEMAIL },
+      voiceName: "Kore",
+      languageCode: "en-GB",
+      connect,
+      log,
+      logFields: { outreachId: "out-1", attemptNo: 1 },
+    });
+    const usageLines = log.info.mock.calls.filter(([e]) => e === "outbound_render_usage").map(([, f]) => f);
+    expect(usageLines).toHaveLength(2);
+    expect(usageLines.find((f) => f.kind === "opener")).toEqual({
+      outreachId: "out-1",
+      attemptNo: 1,
+      kind: "opener",
+      outcome: "accepted",
+      text_in: 40,
+      audio_in: 0,
+      text_out: 10,
+      audio_out: 140,
+      cached_in: 0,
+      turns_billed: 1,
+    });
+    expect(usageLines.find((f) => f.kind === "voicemail")).toMatchObject({ outcome: "accepted", audio_out: 140 });
+  });
+
+  it("a refused render is metered too -- it was billed", async () => {
+    const { connect } = fakeConnect({ usage: USAGE, say: () => "Hello." });
+    const log = quietLog();
+    await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    expect(log.info).toHaveBeenCalledWith(
+      "outbound_render_usage",
+      expect.objectContaining({ kind: "opener", outcome: "transcript_mismatch", audio_out: 140 })
+    );
+  });
+});
+
+describe("I4: each verified clip is handed over as soon as its own render finishes", () => {
+  it("the opener reaches onLine while the voicemail render is still running", async () => {
+    let releaseVoicemail;
+    const voicemailHeld = new Promise((r) => (releaseVoicemail = r));
+    const { connect } = fakeConnect({ gate: (line) => (line === VOICEMAIL ? voicemailHeld : null) });
+    const onLine = vi.fn(async () => {});
+    let settled = false;
+    const p = renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog(), onLine }).then((v) => {
+      settled = true;
+      return v;
+    });
+
+    await vi.waitFor(() => expect(onLine).toHaveBeenCalledTimes(1));
+    expect(onLine.mock.calls[0][0]).toBe("opener");
+    expect(onLine.mock.calls[0][1].length).toBe(8000);
+    expect(settled).toBe(false);
+
+    releaseVoicemail();
+    const out = await p;
+    expect(onLine).toHaveBeenCalledTimes(2);
+    expect(onLine.mock.calls[1][0]).toBe("voicemail");
+    expect(out.voicemail.length).toBe(8000);
+  });
+
+  it("a refused line is never handed over; a throwing onLine is logged and does not fail the render", async () => {
+    const { connect } = fakeConnect({ say: (line) => (line === VOICEMAIL ? "nope" : line) });
+    const log = quietLog();
+    const onLine = vi.fn(async () => {
+      throw new Error("store refused");
+    });
+    const out = await renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log, onLine });
+    expect(onLine.mock.calls.map((c) => c[0])).toEqual(["opener"]);
+    expect(out.opener.length).toBe(8000);
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_store_refused", expect.objectContaining({ kind: "opener", error: "store refused" }));
+  });
+
+  it("the adapter passes dispatch's onClip through", async () => {
+    const db = {
+      withTenant: vi.fn(async (_id, fn) => fn()),
+      fetchBusinessById: vi.fn(async () => ({ id: "biz-digile", name: "Digile Media", locale: "en-GB" })),
+      fetchBusinessCapabilities: vi.fn(async () => []),
+      loadConfig,
+    };
+    const { connect } = fakeConnect();
+    const onClip = vi.fn(async () => {});
+    const renderAudio = createLiveRenderAudio({ db, env: {}, connect, log: quietLog() });
+    await renderAudio({ row: { id: "out-1", business_id: "biz-digile", config: { caller_id: "+441372656055" } }, attemptNo: 1, lines: { opener: OPENER }, onClip });
+    expect(onClip).toHaveBeenCalledWith("opener", expect.any(Buffer));
   });
 });

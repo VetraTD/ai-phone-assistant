@@ -403,6 +403,8 @@ describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
       row: expect.objectContaining({ first_name: "Sam", business_name: "Digile Media" }),
       attemptNo: 1,
       lines: { opener: expectedOpener, voicemail: expectedVoicemail },
+      // Task 14 fix round 1 (I4): the per-clip store hook.
+      onClip: expect.any(Function),
     });
   });
 
@@ -475,5 +477,52 @@ describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
     expect(renderAudio).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", chars: 130 });
     expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", chars: 310 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 14 fix round 1 (I4): each clip is stored the moment it is ready. The
+// session reads opener_audio when the person answers, and on a voicemail
+// attempt the voicemail render is the slow one -- storing both together made
+// an early answer find no clip at all.
+// ---------------------------------------------------------------------------
+describe("dispatch: the opener is stored before a slow voicemail render finishes (Task 14, I4)", () => {
+  it("stores the opener as soon as onClip hands it over, then the voicemail alone -- never re-writing the opener", async () => {
+    const db = fakeDb();
+    const opener = Buffer.from([1, 2, 3]);
+    const voicemail = Buffer.from([9, 9]);
+    let releaseVoicemail;
+    const voicemailDone = new Promise((r) => (releaseVoicemail = r));
+    let openerStoredBeforeVoicemail = null;
+
+    const renderAudio = vi.fn(async ({ onClip }) => {
+      await onClip("opener", opener);
+      // The voicemail is still rendering; the opener must already be on the row.
+      openerStoredBeforeVoicemail = db.storeAttemptAudio.mock.calls.map((c) => c.slice(0, 2));
+      await voicemailDone;
+      await onClip("voicemail", voicemail);
+      return { opener, voicemail };
+    });
+    const { d } = mk(db, undefined, { renderAudio });
+    const done = d({ businessId: "b1", outreachId: "o1" });
+    await vi.waitFor(() => expect(openerStoredBeforeVoicemail).not.toBeNull());
+    expect(openerStoredBeforeVoicemail).toEqual([["a1", { opener }]]);
+
+    releaseVoicemail();
+    expect((await done).status).toBe("dialed");
+    // One write per clip, each carrying only its own column. The returned
+    // object does not trigger a second opener write.
+    expect(db.storeAttemptAudio.mock.calls).toEqual([
+      ["a1", { opener }],
+      ["a1", { voicemail }],
+    ]);
+  });
+
+  it("a renderer that only RETURNS its clips (no onClip) still gets them stored, one column per write", async () => {
+    const db = fakeDb();
+    const opener = Buffer.from([1]);
+    const { d } = mk(db, undefined, { renderAudio: async () => ({ opener, voicemail: null }) });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(db.storeAttemptAudio.mock.calls).toEqual([["a1", { opener }]]);
   });
 });

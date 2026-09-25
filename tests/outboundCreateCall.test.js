@@ -15,6 +15,12 @@ import { pg, resetPg, allSql, params, setDbEnv, restoreDbEnv } from "./helpers/p
 
 vi.mock("pg", async () => (await import("./helpers/pgMock.js")).pgModuleMock());
 vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
+// Fix round 1 (M8): the error-path test's db_error line is asserted, not printed.
+const mockLogError = vi.fn();
+vi.mock("../lib/logger.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  log: { debug: () => {}, info: () => {}, error: (...args) => mockLogError(...args) },
+}));
 
 /** The statement createCall issued before Task 14, copied verbatim (whitespace included). */
 const PRE_TASK_14_SQL = `INSERT INTO calls (business_id, twilio_call_sid, caller_number, twilio_number)
@@ -74,7 +80,9 @@ describe("createCall: the outbound link", () => {
 
   it("returns null on error rather than throwing, like the four-argument call", async () => {
     pg.respond = () => new Error("boom");
+    mockLogError.mockClear();
     const { createCall } = await import("../services/db.js");
     await expect(createCall("biz-1", "CAout", "+1", "+2", { direction: "outbound" })).resolves.toBeNull();
+    expect(mockLogError).toHaveBeenCalledWith("db_error", expect.objectContaining({ operation: "createCall", error: "boom" }));
   });
 });

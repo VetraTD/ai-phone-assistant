@@ -14,6 +14,15 @@
  * third) and must use neither.
  */
 import { describe, it, expect, vi } from "vitest";
+
+// Fix round 1 (M8): importing services/db.js (for loadConfig) with no
+// DATABASE_URL logs database_not_configured; the default logger is replaced so
+// this file prints nothing. Log assertions use the injected `log`.
+vi.mock("../lib/logger.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  log: { debug: () => {}, info: () => {}, error: () => {} },
+}));
+
 import { resolveOutboundContext, summarizeTrigger, renderOpenerText } from "../lib/outbound/callContext.js";
 import { loadConfig } from "../services/db.js";
 
@@ -174,6 +183,7 @@ describe("the call-time opener re-check (O-4)", () => {
     const ctx = await resolveOutboundContext(SID, { db, log: quietLog() });
     expect(ctx.openerText).toBe("Hi, is that Sam? It's Ava, an AI assistant from Digile Media Group.");
     expect(ctx.openerAudio).toBe(AUDIO);
+    expect(ctx.openerRefused).toBe(false);
   });
 
   it("over 120 characters at call time: the clip is refused (prompt path) and logged, and the text is never truncated", async () => {
@@ -186,6 +196,8 @@ describe("the call-time opener re-check (O-4)", () => {
     expect(expected.length).toBeGreaterThan(120);
     expect(ctx.openerText).toBe(expected);
     expect(ctx.openerAudio).toBeNull();
+    // ...and the session must not let the stored clip back in by re-reading it.
+    expect(ctx.openerRefused).toBe(true);
     expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "att-1", chars: expected.length });
   });
 

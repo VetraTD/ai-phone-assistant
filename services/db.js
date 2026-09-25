@@ -2605,13 +2605,19 @@ export async function failAttempt(attemptId, twilioStatus = "failed") {
  * rings. Refused once post-call has started: post-call clears these columns
  * (spec §11 step 1), and a render that finished after a quick no-answer must
  * not write the clips back for good.
+ *
+ * WRITES ONLY WHAT IT IS GIVEN (Task 14 fix round 1, I4): a null or absent
+ * clip leaves its column as it is. Dispatch stores the opener the moment its
+ * render finishes and the voicemail when that one does, and the second write
+ * must not null out the first. Clearing is post-call's job (spec §11), with
+ * its own statement.
  * @param {string} attemptId
  * @param {{opener?: Buffer|null, voicemail?: Buffer|null}} audio
  */
 export async function storeAttemptAudio(attemptId, { opener = null, voicemail = null } = {}) {
   requireTenantScope("storeAttemptAudio");
   const res = await q(
-    `UPDATE call_attempts SET opener_audio = $2, voicemail_audio = $3
+    `UPDATE call_attempts SET opener_audio = COALESCE($2::bytea, opener_audio), voicemail_audio = COALESCE($3::bytea, voicemail_audio)
       WHERE id = $1 AND post_call_started_at IS NULL`,
     [attemptId, opener, voicemail]
   );
@@ -2974,4 +2980,23 @@ export async function outboundCallContext(attemptId) {
     firstName: row.first_name ?? null,
     contactTimezone: row.contact_timezone ?? null,
   };
+}
+
+/**
+ * The backstop clip, re-read ONCE by a Live session that found none at stream
+ * start (Task 14 fix round 1, I4): on a voicemail attempt the render can still
+ * be finishing when the person answers. Runs inside `withTenant` -- the session
+ * scopes to the tenant its by-CallSid resolution found, the same as
+ * outboundCallContext. PHI for the same reason as fetchAttemptVoicemailAudio:
+ * audio that addresses the contact by name.
+ * @param {string} attemptId
+ * @returns {Promise<Buffer|null>} raw mu-law bytes, or null when there is none
+ */
+export async function fetchAttemptOpenerAudio(attemptId) {
+  requireTenantScope("fetchAttemptOpenerAudio");
+  const res = await q(`SELECT opener_audio FROM call_attempts WHERE id = $1`, [attemptId]);
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("fetchAttemptOpenerAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  return row?.opener_audio ?? null;
 }
