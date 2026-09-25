@@ -35,8 +35,24 @@ export const SPEND_FILE = path.join(HERE, "..", "spend-gptlive.json");
  *   booking harness, and the agentic multi-step arms on BOTH vendors. $3.40 of
  *   the original $5.00 was already spent when it was raised, so the headroom
  *   this round actually has is ~$21.60, not $25.00.
+ * 2026-09-24: raised by exactly $10.00, to $31.73, by the owner, for OUTBOUND
+ *   PART 1 (spec docs/superpowers/specs/2026-09-24-outbound-calling-design.md,
+ *   decision D8: "$10 for Part 1 across Gemini and Twilio test spend, recorded
+ *   in this meter"). The ledger stood at $21.73 when it was raised, so the
+ *   older rounds keep exactly the headroom they had ($3.27) and Part 1 gets its
+ *   own $10, enforced separately by P1_CAP_USD below.
  */
-export const CAP_USD = 25.0;
+export const CAP_USD = 31.73;
+
+/**
+ * Outbound Part 1's own budget (D8), inside the overall cap. Every Part 1 entry
+ * is committed with a `probe` starting "P1-" (P1-SPIKE-A, P1-SPIKE-B, P1-LIVE-R1
+ * ...), and reserveP1() refuses anything that would take the P1- total past
+ * $10 OR the ledger past CAP_USD. Both, because either alone can be breached
+ * while the other still has room.
+ */
+export const P1_CAP_USD = 10.0;
+export const P1_PREFIX = "P1-";
 
 /** Voice layer: USD per SECOND of session wall clock. */
 export const LIVE_USD_PER_SECOND = 0.05 / 60;
@@ -210,6 +226,48 @@ export function commit(entry) {
   state.updated_at = new Date().toISOString();
   save(state);
   return state.spent_usd;
+}
+
+/** Everything committed under a P1- probe label. */
+export function p1Spent(state = load()) {
+  return state.entries
+    .filter((e) => typeof e.probe === "string" && e.probe.startsWith(P1_PREFIX))
+    .reduce((s, e) => s + (e.usd || 0), 0);
+}
+
+/**
+ * Check before any Part 1 spend -- a Gemini session, a TTS render, a Twilio
+ * dial. Takes a worst-case DOLLAR figure rather than reserve()'s seconds,
+ * because Part 1 spend is not GPT-Live wall clock: Gemini bills tokens, TTS
+ * bills characters and Twilio bills minutes plus AMD per call. Throws, like
+ * reserve(), rather than returning false.
+ *
+ * @param {string} probe - must start with "P1-"
+ * @param {number} worstCaseUsd
+ * @param {object} [state] - the ledger; injectable so the refusal can be tested
+ */
+export function reserveP1(probe, worstCaseUsd, state = load()) {
+  if (typeof probe !== "string" || !probe.startsWith(P1_PREFIX)) {
+    throw new TypeError(`reserveP1(): probe must start with "${P1_PREFIX}", got ${JSON.stringify(probe)}`);
+  }
+  if (typeof worstCaseUsd !== "number" || !(worstCaseUsd >= 0)) {
+    throw new TypeError(`reserveP1(): worstCaseUsd must be a non-negative number, got ${JSON.stringify(worstCaseUsd)}`);
+  }
+  const projected = state.spent_usd + worstCaseUsd;
+  if (projected > CAP_USD) {
+    throw new BudgetExceeded(
+      `BUDGET: ${probe} would take the ledger to $${projected.toFixed(4)} against the ` +
+      `$${CAP_USD.toFixed(2)} cap (spent $${state.spent_usd.toFixed(4)}). Aborting.`
+    );
+  }
+  const p1 = p1Spent(state);
+  if (p1 + worstCaseUsd > P1_CAP_USD) {
+    throw new BudgetExceeded(
+      `BUDGET: ${probe} would take Part 1 spend to $${(p1 + worstCaseUsd).toFixed(4)} against the ` +
+      `$${P1_CAP_USD.toFixed(2)} Part 1 cap (D8; spent $${p1.toFixed(4)}). Aborting.`
+    );
+  }
+  return { p1Spent: p1, p1Remaining: P1_CAP_USD - p1, ledgerRemaining: CAP_USD - state.spent_usd };
 }
 
 export function totalFor(probe) {
