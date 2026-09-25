@@ -510,7 +510,9 @@ describe("O-6: onset is confirmed speech (the VAD's sustained flag), backdated t
     expect(enqueue).not.toHaveBeenCalled();
     run(ctl, 1650, 1650);
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_silence", deferred_ms: 0 });
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_silence" });
+    // Nothing held it back, so no deferral is reported (fix round 3).
+    expect(events("outbound_backstop_played")[0].fields).not.toHaveProperty("deferred_ms");
   });
 
   it("a real hello at pickup + 1.87 s is caught, and from_speech_ms runs from the start of the hello", () => {
@@ -664,5 +666,50 @@ describe("O-9 (controller half): no usable line at all", () => {
     expect(enqueue).not.toHaveBeenCalled();
     expect(rec.seeds).toEqual([]);
     expect(rec.prompts).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 3.
+// ---------------------------------------------------------------------------
+
+describe("round 3: the dotted-AI fold only folds a TRUE acronym (the G3 check must not fail open)", () => {
+  const BRIGHTWORK = { businessName: "Brightwork", personaName: "Ava" };
+
+  it.each([
+    "Hi Sam, it's Ava from Digile Media, calling about Plan A. I wanted to check in.",
+    "Hi Sam, it's Ava from Digile Media. Your clinic got a grade A. I'll explain.",
+  ])("%s -> incomplete: a correction is sent", (text) => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(text);
+    expect(rec.notes).toEqual(["Tell them now, briefly: you are Ava, an AI assistant from Digile Media."]);
+  });
+
+  it.each(["Hi Sam, it's Ava, an A.I. assistant from Brightwork.", "Hi Sam, it's Ava, an A. I. assistant from Brightwork."])(
+    "%s -> complete: no correction",
+    (text) => {
+      const { ctl, rec } = rig(BRIGHTWORK);
+      ctl.onAssistantTurnText(text);
+      expect(rec.notes).toEqual([]);
+    }
+  );
+});
+
+describe("round 3: deferred_ms is reported only for a real deferral", () => {
+  it("a run that CONFIRMED during the deferral leaves no deferred_ms on the later slow-path fire", () => {
+    const { ctl, events } = rig();
+    // The reviewer's probe shape: voice from 1,560 -- unconfirmed at the 1,650
+    // deadline (deferral starts), confirmed at 1,760, slow fire at 3,160.
+    run(ctl, 0, 3160, (t) => t >= 1560 && t <= 1900);
+    const played = events("outbound_backstop_played");
+    expect(played).toHaveLength(1);
+    expect(played[0].fields).toMatchObject({ path: "backstop_slow" });
+    expect(played[0].fields).not.toHaveProperty("deferred_ms");
+  });
+
+  it("a deferral that ended in a silence fire is reported, on the missing-clip line too", () => {
+    const { ctl, events } = rig({ backstopAudio: null });
+    run(ctl, 0, 1710, (t) => t >= 1600 && t <= 1700);
+    expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_silence", deferred_ms: 60 });
   });
 });

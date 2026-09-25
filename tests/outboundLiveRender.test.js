@@ -372,3 +372,19 @@ describe("I4: each verified clip is handed over as soon as its own render finish
     expect(onClip).toHaveBeenCalledWith("opener", expect.any(Buffer));
   });
 });
+
+describe("round 3: the clip check shares the session's dotted-AI fold", () => {
+  it("a transcript that spells it 'A. I.' keeps the disclosure", async () => {
+    const { connect } = fakeConnect({ say: () => "Hi, is that Sam? It's Ava, an A. I. assistant from Digile Media." });
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog() });
+    expect(out.opener).not.toBeNull();
+  });
+
+  it("'A. I' with no dot after the I is two words, not the disclosure: refused", async () => {
+    const { connect } = fakeConnect({ say: () => "Hi, is that Sam? It's Ava, an A. I assistant from Digile Media." });
+    const log = quietLog();
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    expect(out.opener).toBeNull();
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", expect.objectContaining({ reason: "transcript_mismatch" }));
+  });
+});

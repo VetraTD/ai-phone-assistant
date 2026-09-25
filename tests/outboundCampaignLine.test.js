@@ -12,7 +12,7 @@
  * Nothing it returns can contain "null", "undefined" or an unfilled "{key}".
  */
 import { describe, it, expect } from "vitest";
-import { renderCampaignLine, SENTENCE_SPLIT_RE, validateCampaign } from "../lib/outbound/campaignSchema.js";
+import { renderCampaignLine, SENTENCE_SPLIT_RE, TITLE_ABBREVIATIONS, foldDottedAI, validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { TEMPLATES } from "../lib/outbound/templates.js";
 
 const CONFIG = { ...TEMPLATES.speed_to_lead, caller_id: "+441372656055" };
@@ -116,5 +116,58 @@ describe("save time: no warnings channel exists", () => {
       { businessName: BIZ }
     );
     expect(Object.keys(r).sort()).toEqual(["ok", "value"]);
+  });
+});
+
+describe("round 3: a title abbreviation's full stop does not end a sentence", () => {
+  it("TITLE_ABBREVIATIONS is the named list", () => {
+    expect(TITLE_ABBREVIATIONS).toEqual(["Dr", "Mr", "Mrs", "Ms", "Mx", "Prof", "St"]);
+    expect("Ask Dr. Lee. Or Mrs. Kay! Then St. Mary's? Done".split(SENTENCE_SPLIT_RE)).toEqual([
+      "Ask Dr. Lee.",
+      "Or Mrs. Kay!",
+      "Then St. Mary's?",
+      "Done",
+    ]);
+  });
+
+  it("'Hi {first_name}, this is Dr. Lee's line.' is dropped as ONE sentence", () => {
+    const tpl = "Hi {first_name}, this is Dr. Lee's line. It's {persona_name}, an AI assistant from {business_name}.";
+    expect(tpl.split(SENTENCE_SPLIT_RE)).toEqual([
+      "Hi {first_name}, this is Dr. Lee's line.",
+      "It's {persona_name}, an AI assistant from {business_name}.",
+    ]);
+    expect(renderCampaignLine(tpl, { firstName: null, businessName: BIZ, config: CONFIG })).toBe(
+      "It's Ava, an AI assistant from Digile Media."
+    );
+  });
+
+  it("'Hello Mr. {first_name}.' is dropped as ONE sentence", () => {
+    const tpl = "Hello Mr. {first_name}. It's {persona_name}, an AI assistant from {business_name}.";
+    expect(tpl.split(SENTENCE_SPLIT_RE)).toEqual([
+      "Hello Mr. {first_name}.",
+      "It's {persona_name}, an AI assistant from {business_name}.",
+    ]);
+    expect(renderCampaignLine(tpl, { firstName: "", businessName: BIZ, config: CONFIG })).toBe(
+      "It's Ava, an AI assistant from Digile Media."
+    );
+  });
+
+  it("with a first name the abbreviations change nothing", () => {
+    const tpl = "Hello Mr. {first_name}. It's {persona_name}, an AI assistant from {business_name}.";
+    expect(renderCampaignLine(tpl, { firstName: "Lee", businessName: BIZ, config: CONFIG })).toBe(
+      "Hello Mr. Lee. It's Ava, an AI assistant from Digile Media."
+    );
+  });
+});
+
+describe("round 3: foldDottedAI folds only a true dotted acronym", () => {
+  it.each([
+    ["an A.I. assistant", "an AI assistant"],
+    ["an A. I. assistant", "an AI assistant"],
+    ["an a.i. assistant", "an AI assistant"],
+    ["calling about Plan A. I wanted to check", "calling about Plan A. I wanted to check"],
+    ["a grade A. I'll explain", "a grade A. I'll explain"],
+  ])("%s -> %s", (input, out) => {
+    expect(foldDottedAI(input)).toBe(out);
   });
 });
