@@ -13,7 +13,15 @@ const FNS = [
   "app_sync_outbound_directories()",
   "app_sync_outreach_schedule()",
 ];
-let admin, app, outreachId, dueId, futureId, closedId;
+let admin, app, outreachId, dueId, futureId, closedId, campaignId, contactId;
+
+// Module scope (not beforeAll-local) so the "stays true" block can mint its
+// own outreach rows with campaignId/contactId already set by beforeAll.
+async function mk(key, state, next) {
+  return (await admin.query(
+    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key,next_attempt_at)
+     VALUES ($1,$2,3,$3,$4,'{}',$5,$6) RETURNING id`, [BIZ, campaignId, contactId, state, key, next])).rows[0].id;
+}
 
 beforeAll(async () => {
   if (!url) return;
@@ -36,10 +44,9 @@ beforeAll(async () => {
   await admin.query(`INSERT INTO businesses (id, name) VALUES ($1,'Dir')`, [BIZ]);
   const camp = await admin.query(`INSERT INTO campaigns (business_id,name,template_key,compliance_class,audience,status,current_version)
                                    VALUES ($1,'c','speed_to_lead','solicited','business','active',3) RETURNING id`, [BIZ]);
+  campaignId = camp.rows[0].id;
   const con = await admin.query(`INSERT INTO contacts (business_id, phone_e164) VALUES ($1,'+447700900111') RETURNING id`, [BIZ]);
-  const mk = async (key, state, next) => (await admin.query(
-    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key,next_attempt_at)
-     VALUES ($1,$2,3,$3,$4,'{}',$5,$6) RETURNING id`, [BIZ, camp.rows[0].id, con.rows[0].id, state, key, next])).rows[0].id;
+  contactId = con.rows[0].id;
   outreachId = await mk("dir-1", "dialing", null);
   dueId = await mk("dir-due", "waiting", new Date(Date.now() - 10 * 60_000));
   futureId = await mk("dir-future", "waiting", new Date(Date.now() + 60 * 60_000));
@@ -95,9 +102,44 @@ d("app_outbound_attempt_by_call_sid", () => {
     expect(r.scope).toBe(BIZ);
   });
 
-  it("returns nothing for an unknown CallSid", async () => {
-    const r = await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAnope')`));
-    expect(r.rows).toEqual([]);
+  // IMPORTANT 1: the "never repoint" rule (033's rule, reused here) was only
+  // backed by reading the code -- nothing exercised a transaction already
+  // scoped to a DIFFERENT tenant asking for this tenant's CallSid.
+  it("never repoints a transaction already scoped to a different tenant", async () => {
+    const OTHER = "0d0d0000-0000-4000-8000-000000000099";
+    const r = await appTx(async (c) => {
+      await c.query(`SELECT set_config('app.business_id', $1, true)`, [OTHER]);
+      const row = (await c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir0001')`)).rows;
+      const scope = (await c.query(`SELECT current_setting('app.business_id', true) AS s`)).rows[0].s;
+      return { row, scope };
+    });
+    expect(r.row).toEqual([]);
+    expect(r.scope).toBe(OTHER);
+  });
+
+  it("returns nothing for an unknown CallSid, and does not touch an unset scope", async () => {
+    const r = await appTx(async (c) => {
+      const row = (await c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAnope')`)).rows;
+      const scope = (await c.query(`SELECT current_setting('app.business_id', true) AS s`)).rows[0].s;
+      return { row, scope };
+    });
+    expect(r.row).toEqual([]);
+    expect(r.scope || "").toBe("");
+  });
+
+  // MINOR 2: every other write here goes through the superuser admin client,
+  // which never exercises the trigger under RLS as the actual application
+  // role. Production's writer is vetra_app.
+  it("a vetra_app write, not just admin's, fires the directory sync trigger", async () => {
+    const r = await appTx(async (c) => {
+      await c.query(`SELECT set_config('app.business_id', $1, true)`, [BIZ]);
+      await c.query(`UPDATE call_attempts SET twilio_call_sid = 'CAdir-renamed' WHERE twilio_call_sid = 'CAdir0001'`);
+      const renamed = (await c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-renamed')`)).rows;
+      const old = (await c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir0001')`)).rows;
+      return { renamed, old };
+    });
+    expect(r.renamed).toHaveLength(1);
+    expect(r.old).toEqual([]);
   });
 });
 
@@ -133,5 +175,59 @@ d("app_active_dial_counts", () => {
                        VALUES ($1,$2,2,'+441372656055','+447700900111','CAdir-stale', now() - interval '2 hours')`, [BIZ, outreachId]);
     const r = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
     expect(r.rows).toEqual([]);
+  });
+});
+
+// MINOR 3: mirrors phoneDirectoryBootstrap.test.js:147-192's "stays true"
+// block. Own outreach/attempt rows and keys throughout, so nothing here
+// shifts outreachId/dueId/futureId/closedId or CAdir0001/CAdir-stale's state
+// for the describes above.
+d("the directories stay true to call_attempts / outreach", () => {
+  it("an attempt inserted with no CallSid, then given one by UPDATE, resolves (production's write order)", async () => {
+    const oid = await mk("dir-sync-new", "dialing", null);
+    const attemptId = (await admin.query(
+      `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,dialed_at)
+       VALUES ($1,$2,1,'+441372656055','+447700900111',now()) RETURNING id`, [BIZ, oid])).rows[0].id;
+
+    // insertCallAttempt happens before Twilio ever hands back a CallSid --
+    // nothing should be resolvable yet.
+    expect((await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-sync-new')`))).rows).toEqual([]);
+
+    await admin.query(`UPDATE call_attempts SET twilio_call_sid = 'CAdir-sync-new' WHERE id = $1`, [attemptId]);
+    const r = await appTx((c) => c.query(`SELECT attempt_id FROM app_outbound_attempt_by_call_sid('CAdir-sync-new')`));
+    expect(r.rows).toEqual([{ attempt_id: attemptId }]);
+
+    await admin.query(`DELETE FROM call_attempts WHERE id = $1`, [attemptId]);
+    await admin.query(`DELETE FROM outreach WHERE id = $1`, [oid]);
+  });
+
+  it("deleting an attempt removes it from resolution and from the active dial count", async () => {
+    const oid = await mk("dir-sync-del", "dialing", null);
+    const attemptId = (await admin.query(
+      `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at)
+       VALUES ($1,$2,1,'+441372656055','+447700900111','CAdir-sync-del',now()) RETURNING id`, [BIZ, oid])).rows[0].id;
+
+    const before = await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]));
+    expect(before.rows[0]?.active).toBe(1);
+    expect((await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-sync-del')`))).rows).toHaveLength(1);
+
+    await admin.query(`DELETE FROM call_attempts WHERE id = $1`, [attemptId]);
+
+    expect((await appTx((c) => c.query(`SELECT * FROM app_outbound_attempt_by_call_sid('CAdir-sync-del')`))).rows).toEqual([]);
+    expect((await appTx((c) => c.query(`SELECT active FROM app_active_dial_counts() WHERE business_id = $1`, [BIZ]))).rows).toEqual([]);
+
+    await admin.query(`DELETE FROM outreach WHERE id = $1`, [oid]);
+  });
+
+  it("closing an outreach removes it from the due list", async () => {
+    const oid = await mk("dir-sync-closed", "waiting", new Date(Date.now() - 10 * 60_000));
+    const before = await appTx((c) => c.query(`SELECT outreach_id FROM app_outbound_due(100, 0)`));
+    expect(before.rows.map((x) => x.outreach_id)).toContain(oid);
+
+    await admin.query(`UPDATE outreach SET state = 'closed' WHERE id = $1`, [oid]);
+    const after = await appTx((c) => c.query(`SELECT outreach_id FROM app_outbound_due(100, 0)`));
+    expect(after.rows.map((x) => x.outreach_id)).not.toContain(oid);
+
+    await admin.query(`DELETE FROM outreach WHERE id = $1`, [oid]);
   });
 });
