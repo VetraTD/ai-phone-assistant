@@ -1,0 +1,677 @@
+# Outbound calling — design spec
+
+**Date:** 2026-09-24
+**Status:** Approved direction, awaiting owner review of this document
+**Scope of this spec:** Part 1 in full (the generic outbound engine, built before the Digile scoping call). Parts 2 and 3 are outlined only, in §15 and §16, so that Part 1 leaves the right seams. Part 2 gets its own spec after the scoping call (plan step 5.2).
+**Companion page:** https://claude.ai/artifact/3379bzmqHG1gVDSQB2mdrv. It holds the reasoning, research, diagrams, compliance background and the step-by-step plan. This spec is the build contract. Where the two disagree, this spec wins.
+
+---
+
+## 1. Summary
+
+The receptionist today can only answer. This spec adds the ability to place calls, as a second door into the **same** engine. The engine is the Gemini Live session, the prompt builder, the capability packs, the write guards, the tools, the database and post-call processing. The outbound door comes with the machinery a door needs:
+
+- **triggers**, which turn "something happened" into an outreach request;
+- an **outreach engine**, holding contacts, consent, the do-not-call list, an eligibility gate, the scheduler and the dialer;
+- the **outbound door** itself, where an answered call joins the existing live-stream session carrying an outbound call context;
+- **outcomes**: structured results, retries and a signed results webhook.
+
+Every client scenario is a **campaign**: configuration copied from a template, never code. Code changes only when a scenario needs a new *kind* of behaviour. This is the kinds-vs-values rule from `2026-07-22-capability-packs-design.md`.
+
+The first campaign is Digile Media's speed-to-lead qualifier. In Part 1 it runs as a demo, booking into the built-in calendar. In Part 2 it books into GoHighLevel.
+
+## 2. Locked decisions
+
+| # | Decision | Locked value |
+|---|---|---|
+| D1 | Schedule | Fast schedule: Part 1 in about one week, and the rest in about a month. Fall back to the standard schedule if a gate slips. |
+| D2 | Google Cloud | Stay on the current estate (`vetra-uk-edc8ca`). Outbound is consent-only by design. Write a short internal note (`docs/compliance/outbound-and-the-2026-08-appeal.md`) recording that the August appeal's "no outbound" statement was true then, and what changed and why. |
+| D3 | Recording | No audio recording in Part 1. A per-campaign recording option is a Part 2 item, built only if Digile wants audio. |
+| D4 | False disclosure | Replace "calls are recorded for quality" everywhere it is emitted with **"This call may be transcribed to help us assist you."** This is plan step 0.3. It is independent of outbound and ships first. |
+| D5 | Reactivation | Supported only for contacts holding a recorded consent to automated/AI calls, enforced in code. The `marketing_consented` compliance class is **refused at campaign save in Part 1** and enabled in Part 3. |
+| D6 | Voice and persona | The opener is rendered by the existing `services/googleTts.js` using the Chirp 3 HD voice matching the tenant's Live voice (Live default `Kore`, so `en-GB-Chirp3-HD-Kore`). Spike A generates three British samples for the owner to choose from. The demo persona is "Ava from Digile". |
+| D7 | Test caller ID | `+441372656055` (Digile's number, Twilio account A). A callback to it reaches Digile's inbound tenant, which exercises callback recognition. |
+| D8 | API budget | $10 for Part 1 across Gemini and Twilio test spend. Record spend in the existing meter (`scripts/probes/lib/spendLive.js`) and ask before exceeding. |
+| D9 | Parallel runs | Allowed on the fast schedule, for the dashboard and paperwork. |
+| D10 | Spec location | Committed on `fix/closing-sequence-2026-09-17` (production's branch). Step 0.2 fast-forwards local `main` and `dev` to it. **Nothing is pushed** until the owner confirms whether Railway still auto-deploys `main`. |
+
+**Deferred until after the scoping call:** pricing of outbound minutes, Digile's relationship to us (customer, referrer or reseller), Conversations entry vs contact note, and Digile's persona details, questions, hours and retry schedule.
+
+**Owner prerequisites that are not code:**
+- the Twilio console check (profile type, voice geo permissions for UK and US, whether `+441372656055` is SMS-capable);
+- a UK handset for live rounds;
+- 2–3 UK accent testers;
+- Claude plan capacity;
+- **the LLC.** It blocks go-live, not Part 1: the Digile DPA must name the company and needs the UK IDTA addendum.
+
+## 3. Goals and success criteria
+
+Part 1 is done when all of the following hold on the deployed service with outbound switched off except for allow-listed test numbers.
+
+| # | Criterion | How it's measured |
+|---|---|---|
+| G1 | The AI can place a call to an allow-listed number and hold a normal conversation using the same brain as inbound | Live round 1, scenario 1 |
+| G2 | The person hears the opener within 2,000 ms of answering (or of their first word when they speak first) | `outbound_opener_played.first_audio_ms` at or under 2000 on every live-round call |
+| G3 | The opener always contains the business name and an AI disclosure | Validated at campaign save, and asserted on every played opener |
+| G4 | Voicemail is detected and handled by policy: message left after the beep, or a clean hang-up | Live round 1, scenario 2; `call_attempts.answered_by` |
+| G5 | No call outside the calling window, to a suppressed number, without the required consent, or beyond attempt caps | Gate unit tests, each shown to fail when its check is removed |
+| G6 | No contact is ever dialled twice for the same attempt | Concurrency test: duplicate dispatch of the same task produces exactly one Twilio call |
+| G7 | "Stop calling me" suppresses the number before the call ends (tool), or at the latest in post-call processing (detector) | Live round 1, scenario 7; the detector sabotage test |
+| G8 | A lead ringing back is recognised by inbound, which knows why we called, and their pending retries stop | Live round 1, scenario 8 |
+| G9 | Inbound behaviour is unchanged | Every existing golden prompt snapshot byte-identical; full suite green; one ordinary inbound call placed during live round 1 |
+| G10 | A Digile-style qualifier campaign asks its questions, stores answers as structured data, books into the built-in calendar, and fires a signed results webhook | Live round 2; `calls.answers`; webhook test endpoint |
+
+## 4. Non-goals for Part 1
+
+GoHighLevel (any part), CSV/list upload, TPS/CTPS screening, audio recording, patient campaigns (`audience: "patient"` is modelled but refused at save in Part 1), the `marketing_consented` class, warm (conference) transfer, the agency/partner layer, plan/tier enforcement or pricing of outbound minutes, the US launch, and any change to the cascade front-end (`/twilio/voice`). Outbound runs on the Live front-end only.
+
+## 5. Architecture
+
+```
+Triggers ──request──▶ Outreach engine ──dial──▶ Twilio ──rings──▶ the person's phone
+ (JSON webhook,       (contacts, consent,         │
+  job script;           suppressions, gate,        │ on answer
+  inbound events        scheduler, dialer)         ▼
+  in Part 3)
+                             ▲              /twilio/outbound-answer (NEW)
+                             │                     │ <Connect><Stream> to the SAME
+                             │                     ▼ /twilio/live-stream/<token>
+                             │        Live session (EXISTING) + outbound call context
+                             │                     │ call ends
+                             │                     ▼
+                             └── next attempt ── Outcomes & post-call ──▶ outbox ──▶ results webhook
+```
+
+**Where it runs.** All new HTTP routes live on the existing `voice-uk-prod` Cloud Run service. Postgres (Cloud SQL, RLS) is the source of truth for every lead and attempt. **Cloud Tasks** is the alarm clock that wakes the dialer at an attempt's due time. A **Cloud Scheduler** job hits a sweep endpoint every 5 minutes as a safety net. In-process timers are not used for anything that must survive: `cpu_idle=true` throttles CPU between requests, instances restart, and two instances would both fire.
+
+**Cross-instance rule.** The Twilio webhooks (answer, status, AMD), the Cloud Tasks callback and the WebSocket session can each land on a different instance. So every piece of shared state goes through Postgres (the new tables, plus `call_state`), never through process memory. Voicemail is handled by redirecting the call through the Twilio REST API from whichever instance receives the AMD callback (§9.4), so it never needs to reach the session.
+
+## 6. Data model
+
+All tables are tenant-scoped with RLS on `business_id`, following the existing pattern (`app.business_id` set by `withTenant`). The service runs as `vetra_app` NOBYPASSRLS, so a tenantless write matches zero rows and reports success. Every write path must therefore run inside `withTenant(businessId, …)`, and tests must assert the row landed. The migrations are **042 onward**. Each is checksummed and never edited once applied.
+
+### 6.1 New tables
+
+**`campaigns`**: one per outbound scenario.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid fk | RLS |
+| `name` | text | |
+| `template_key` | text | `speed_to_lead`, `missed_call_callback`, `reminder`, `no_show`, `aftercare`, `review_request`, `reactivation`, `custom` |
+| `compliance_class` | text | `solicited`, `service`, `marketing_consented`; the last is refused at save in Part 1 |
+| `audience` | text | `business` or `patient`; `patient` is refused at save in Part 1 |
+| `status` | text | `draft`, `active`, `paused` |
+| `current_version` | int | |
+| `created_at`, `updated_at` | timestamptz | |
+
+**`campaign_versions`**: immutable config snapshots. Every call records the version that ran.
+
+| column | type | notes |
+|---|---|---|
+| `campaign_id` | uuid fk | |
+| `business_id` | uuid | RLS |
+| `version` | int | pk is (`campaign_id`, `version`) |
+| `config` | jsonb | validated against the campaign config schema (§7) |
+| `created_at` | timestamptz | |
+
+**`contacts`**: people a business may call. Inbound callers are **not** written here in Part 1; the one-timeline view is a Part 3 item.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `phone_e164` | text | unique per business, normalised on write |
+| `first_name`, `last_name`, `email` | text | |
+| `timezone` | text | IANA. Null means derive: a +44 number is `Europe/London`, otherwise the business timezone |
+| `external_ids` | jsonb | e.g. `{ "ghl_contact_id": "…" }` in Part 2 |
+| `attributes` | jsonb | trigger data and stored answers keyed by campaign |
+| `created_at`, `updated_at` | timestamptz | |
+
+**`consents`**: evidence of permission.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `contact_id` | uuid fk | |
+| `purpose` | text | e.g. `enquiry_followup`, `appointment_service` |
+| `channels` | text[] | `call`, `sms` |
+| `covers_automated` | boolean | true only if the captured wording mentions automated or AI calls |
+| `source` | text | `form`, `api`, `inbound_call`, `manual` |
+| `source_ref` | text | form ID or submission ID |
+| `wording_version` | text | |
+| `wording_text` | text | |
+| `captured_at` | timestamptz | |
+| `expires_at` | timestamptz | |
+| `revoked_at` | timestamptz null | |
+
+**`suppressions`**: the do-not-call list.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `phone_e164` | text | unique per business |
+| `reason` | text | `opted_out`, `wrong_number`, `complaint`, `manual`, `tps` (Part 3) |
+| `source_call_id` | uuid null | |
+| `created_by` | text | `tool`, `detector`, `dashboard`, `api` |
+| `created_at` | timestamptz | |
+
+**`outreach`**: one contact in one campaign; the retry state machine (§8).
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `campaign_id` | uuid fk | |
+| `campaign_version` | int | pinned at creation |
+| `contact_id` | uuid fk | |
+| `state` | text | `waiting`, `dialing`, `in_call`, `closed` |
+| `attempts_made` | int | |
+| `next_attempt_at` | timestamptz null | |
+| `last_attempt_at` | timestamptz null | |
+| `hold_until` | timestamptz null | silent-call block |
+| `outcome` | text null | |
+| `close_reason` | text null | |
+| `trigger` | jsonb | source plus the raw normalised payload |
+| `idempotency_key` | text | unique (`business_id`, `idempotency_key`) |
+| `created_at`, `updated_at`, `closed_at` | timestamptz | |
+
+Index: (`state`, `next_attempt_at`).
+
+**`call_attempts`**: every dial, answered or not. Kept 6 months for Ofcom.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `outreach_id` | uuid fk | |
+| `attempt_no` | int | unique (`outreach_id`, `attempt_no`); this is the double-dial lock (§10.2) |
+| `twilio_call_sid` | text | unique |
+| `from_number`, `to_number` | text | |
+| `dialed_at`, `answered_at`, `ended_at` | timestamptz | |
+| `twilio_status` | text | |
+| `answered_by` | text | Twilio `AnsweredBy` value: `human`, `machine_start`, `machine_end_beep`, `machine_end_silence`, `machine_end_other`, `fax`, `unknown` |
+| `amd_duration_ms` | int | |
+| `first_audio_ms` | int | answer to first outbound audio frame |
+| `silent` | boolean | |
+| `result` | text | `no_answer`, `busy`, `failed`, `canceled`, `voicemail_left`, `voicemail_skipped`, `connected` |
+| `call_id` | uuid null | fk to `calls` |
+| `status_completed_at`, `session_finished_at`, `post_call_started_at` | timestamptz null | the exactly-once post-call claim (§11) |
+| `opener_audio` | bytea null | raw 8 kHz μ-law, cleared at `ended_at` |
+| `voicemail_audio` | bytea null | same format, same clearing rule |
+| `created_at` | timestamptz | |
+
+**`webhook_endpoints`**: where results webhooks go.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `url` | text | HTTPS only |
+| `secret_ciphertext` | bytea | encrypted with the existing KMS key; never logged |
+| `events` | text[] | |
+| `active` | boolean | |
+| `created_at` | timestamptz | |
+
+**`outbox`**: pending deliveries.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `business_id` | uuid | RLS |
+| `kind` | text | `webhook` in Part 1; `crm` in Part 2 |
+| `target_id` | uuid | |
+| `event_type` | text | |
+| `payload` | jsonb | |
+| `idempotency_key` | text | unique per business |
+| `status` | text | `pending`, `delivered`, `dead` |
+| `attempts` | int | |
+| `next_attempt_at` | timestamptz | |
+| `last_error` | text | no PII |
+| `created_at`, `delivered_at` | timestamptz | |
+
+### 6.2 Changed tables
+
+- **`call_attempts`** (above) and the **generic trigger webhook** (§12.1) differ from the companion page's first draft. The page put trigger intake in Part 2 and `integration_connections` in Part 1. Here the generic JSON trigger is in Part 1 (stage 3), because any webhook source can use it. `integration_connections` moves to Part 2, where GoHighLevel needs it. This spec wins.
+- **`calls`** gains:
+  - `direction` text not null default `'inbound'`, check in (`inbound`, `outbound`);
+  - `campaign_id`, `campaign_version`, `outreach_id`, `attempt_id`, `contact_id`, all nullable;
+  - `answered_by` text;
+  - `outcome_code` text;
+  - `answers` jsonb.
+
+  **`caller_number` keeps the meaning "the other party"** on outbound calls (the contact's phone), and `twilio_number` keeps "our number". That way the data-subject export and erase paths and the analytics keyed on `caller_number` keep working unchanged.
+- **`businesses`** gains `outbound_enabled` boolean default false and `outbound_max_concurrent` int default 2.
+- **`call_state`**: `SHARED_FIELDS` (in `lib/callStateStore.js:43` and the SQL allow-list in `app_call_state_merge`) gains `direction` and `attemptId`. Both are written once at session start.
+
+### 6.3 SECURITY DEFINER functions
+
+These are needed because some reads happen before the tenant is known. They mirror `app_lookup_business_by_phone`: each returns the minimum, sets `app.business_id` where a single tenant is involved, and is granted to `vetra_app` only.
+
+- `app_outbound_attempt_by_call_sid(sid text)` returns `business_id` and the attempt, outreach and campaign-version identifiers, and sets `app.business_id`. The outbound door, the status and AMD callbacks, and the session all use it.
+- `app_outbound_due(limit int)` returns `(business_id, outreach_id)` pairs whose `state = 'waiting'` and `next_attempt_at <= now()`. It is used by the sweep.
+- `app_active_call_counts()` returns `(inbound, outbound)` counts of `calls` rows with `ended_at IS NULL AND started_at > now() - interval '1 hour'`. The one-hour bound stops a call row that was never completed from blocking capacity forever. It is used by the capacity check.
+- `app_open_outreach_by_phone(business_id uuid, phone text)` returns the most recent open outreach for that phone, with `last_attempt_at` within 14 days. It is used by inbound callback recognition.
+
+The RLS test suite (`test:db`) must prove all of these: every new table refuses a cross-tenant read and write as `vetra_app`; each definer function returns nothing for an unknown key; `app_outbound_due` returns IDs only.
+
+## 7. Campaign config
+
+Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema is exported to the dashboard the same way capability schemas are (`scripts/export-capability-schemas.js` pattern, with a drift test). Unknown keys are rejected at save (strict), unlike the lenient engine-side capability validation.
+
+```jsonc
+{
+  "persona_name": "Ava",                       // ≤ 30 chars
+  "caller_id": "+441372656055",                // must be a number on the service's Twilio account (checked at save)
+  "calling_window": {                          // local time of the contact
+    "mon_fri": "09:00-20:00", "sat": "10:00-16:00", "sun": null,
+    "outside_window": "queue"                  // "queue" | "queue_and_text"
+  },
+  "opener": "Hi, is that {first_name}? It's {persona_name}, an AI assistant calling from {business_name}. You just asked about {topic}. Have you got two minutes?",
+  "topic": "our clinic systems",               // ≤ 80 chars
+  "objective": "Qualify the clinic and book a 30-minute discovery call.",   // ≤ 500 chars
+  "notes": "",                                 // free text, ≤ 2000 chars, never truncated silently
+  "questions": [                               // qualification pack, stage 3
+    { "key": "clinic_name", "ask": "What's the clinic called?", "required": true, "type": "text" }
+  ],
+  "capabilities": ["qualification", "appointments", "transfer", "callback", "opt_out"],
+  "booking": { "adapter": "internal", "length_min": 30 },
+  "transfer": { "to": "+44…", "when": "Mon-Fri 09:00-18:00", "whisper": true },
+  "retries": {
+    "schedule": ["now", "+10m", "+3h", "next_day 10:00", "day_3 17:30"],
+    "voicemail_on": [1, 5],
+    "text_after_missed": [1],
+    "give_up_after_days": 7
+  },
+  "voicemail": "Hi {first_name}, it's {persona_name}, the AI assistant from {business_name}, about your enquiry. We'll try again later, or call us back on {caller_id_spoken}.",
+  "consent_window_days": 30,
+  "max_call_minutes": 10
+}
+```
+
+**Save-time validation beyond types.** Each rule is a coded rule because ignoring it would hurt, get someone sued, or make them angry.
+
+- The opener must contain `{business_name}` **and** an AI disclosure matching `/\b(AI|artificial intelligence|automated assistant|virtual assistant)\b/i`, and must render to at most 300 characters. The voicemail template has the same requirement.
+- The calling window must sit inside 08:00–21:00 local on every day.
+- `compliance_class = marketing_consented` and `audience = patient` are refused, with a message that they arrive in Part 3.
+- The retry schedule has at most 6 entries, and `give_up_after_days` is at most 30.
+- `caller_id` must be an owned number, looked up through the Twilio API at save.
+- Rendered text never exceeds its field's budget. A field over budget is refused, never truncated (compare the silent `.slice(0, 2000)` problem in `services/gemini.js:1244`).
+
+**Templates** are named presets of this object in `lib/outbound/templates.js`. Part 1 ships `speed_to_lead` only. `missed_call_callback` needs an inbound-event trigger and arrives with Part 3 (plan step 8.1), as do the rest.
+
+## 8. The outreach state machine
+
+States: `waiting` → `dialing` → `in_call` → (`waiting` | `closed`).
+
+- **Creation** puts the outreach in `waiting` with `next_attempt_at = now()` (or the window start) and enqueues a task.
+- **Dispatch**, if the gate passes, moves it to `dialing` (§10). If the gate says "later", it stays `waiting` with a new `next_attempt_at` and a new task. If the gate says "never", it moves to `closed` with a `close_reason`.
+- **Answered by a human**: `in_call`.
+- **Attempt ended.** Post-call (§11) sets the outcome and either closes the outreach or schedules the next attempt:
+  - Terminal outcomes close it: `booked`, `not_interested`, `not_a_fit`, `opted_out`, `wrong_person`.
+  - `callback_requested` schedules the requested time.
+  - Everything else takes the next schedule entry.
+- **Close reasons:** `terminal_outcome`, `attempts_exhausted`, `give_up_window`, `consent_missing`, `consent_expired`, `suppressed`, `called_back`, `campaign_deleted`.
+- **A paused campaign** holds its outreach in `waiting` without closing it. Resuming re-enqueues them.
+
+**Schedule grammar:**
+- `now`: immediately.
+- `+Nm` or `+Nh`: that long after the previous attempt ended.
+- `next_day HH:MM`: that time on the next calendar day in the contact's timezone.
+- `day_N HH:MM`: day N counted from outreach creation, where day 1 is the creation day.
+
+Any computed time outside the calling window moves to the next window opening plus 0–10 minutes of jitter.
+
+## 9. The outbound door and the call
+
+### 9.1 Routes (all on `voice-uk-prod`)
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `POST /twilio/outbound-answer` | Twilio signature | Returns `<Connect><Stream url=".../twilio/live-stream/<token>">` with `<Parameter name="direction" value="outbound"/>`. The token is minted exactly as for inbound (`mintMediaStreamToken(callSid)`). |
+| `POST /twilio/outbound-status` | Twilio signature | `initiated`, `ringing`, `answered` and `completed` events update `call_attempts`. `completed` triggers post-call. It **never** sends the inbound "missed call" text and never applies the inbound spam heuristic. |
+| `POST /twilio/outbound-amd` | Twilio signature | The async AMD verdict (§9.4). |
+| `GET /media/outbound/:attemptId/:kind.wav?exp=…&sig=…` | HMAC-signed URL, 10-minute TTL | Serves the voicemail audio to Twilio `<Play>`, wrapped as WAV μ-law. `kind` is `voicemail`. |
+| `POST /internal/outbound/dispatch` | Google OIDC ID token from the `outbound-tasks` service account; audience is the service URL | The Cloud Tasks handler (§10). |
+| `POST /internal/outbound/sweep` | Same OIDC check | The Cloud Scheduler handler, every 5 minutes. |
+| `POST /v1/triggers/:triggerToken` | A 32-byte random token per campaign, stored hashed | The generic JSON trigger (§12.1). |
+
+OIDC verification reuses the existing `jsonwebtoken` + `jwks-rsa` stack (Identity Platform verification) against Google's certs, checking `aud`, `iss` and `email`.
+
+### 9.2 Session start (`lib/voice/live/index.js` `onStart`)
+
+- When `customParameters.direction === "outbound"`, the session resolves context **by CallSid** through `app_outbound_attempt_by_call_sid`. It never trusts stream parameters for identity; the token binds only the CallSid. If there is no match, it logs `outbound_context_missing` and closes the call.
+- It loads the business **by ID** (new `lookupBusinessById` in `services/db.js`, under `withTenant`), runs the existing `loadConfig`, and builds an `outboundContext`:
+  - direction and attempt;
+  - campaign version config;
+  - contact (first name and timezone only in the prompt);
+  - trigger summary;
+  - the opener text as rendered;
+  - `party: { phone, source: "dialed", verified: false }`.
+- It creates the `calls` row with `direction: 'outbound'` and the link columns, and writes `direction` and `attemptId` to `call_state`.
+- **Inbound code paths are untouched**: an absent `direction` parameter means inbound, exactly as today.
+
+### 9.3 The opener and the first seconds
+
+1. The dispatch request renders the opener text, then synthesises it with `googleTts.synthesizeMulaw` (the Chirp 3 HD voice matching the tenant's Live voice), **after** calling Twilio `calls.create`, so the synthesis happens while the phone rings. It stores the audio in `call_attempts.opener_audio`. The voicemail audio is rendered the same way, only on attempts listed in `voicemail_on`.
+2. When the stream starts, the session reads `opener_audio`. It plays it on the first sign of caller speech: an energy threshold on inbound frames, reusing the existing gate/VAD code. If there is no speech within 1,500 ms of the stream starting, it plays anyway. Frames go to Twilio through the existing outbound-media path.
+3. **Gemini Live and the opener.** Spike A decides between two paths:
+   - **Seeded (preferred):** the Live session opens with the opener text seeded as the model's own first turn, so it does not speak again. Model audio is suppressed until the opener finishes playing. Caller audio is forwarded to Live throughout, so it hears whatever the caller said during the opener.
+   - **Fallback:** if seeding is not supported or sounds wrong, no pre-made audio plays for the opener. Live is told to speak the opener verbatim as its first turn, the same mechanism as the inbound greeting (`gemini.js:1551-1557`). G2 is then monitored, not guaranteed, and the spec records that.
+4. If `opener_audio` is missing (a very fast pickup, or a TTS failure), the session takes the fallback path and logs `outbound_opener_fallback`.
+5. `first_audio_ms` (answer to first outbound frame) is logged as `outbound_opener_played`. Over 2,000 ms, the attempt is marked `silent = true` (§13).
+6. Caller speech during the opener does not cut it off. The opener is short and carries the required disclosure.
+
+### 9.4 Answering machines (async AMD)
+
+`calls.create` uses `MachineDetection=DetectMessageEnd`, `AsyncAmd=true`, `AsyncAmdStatusCallback=/twilio/outbound-amd` and `Timeout=25`. That's at least 15 s of ringing per Ofcom, with Twilio adding about 5 s of buffer. AMD takes one of the four per-call stream forks, alongside the one bidirectional stream.
+
+On the AMD callback:
+- **`human`, `unknown`:** record the value and change nothing.
+- **`machine_end_beep`, `machine_end_silence`, `machine_end_other`:** if the attempt is in `voicemail_on` **and** the campaign's class permits a message, `calls(sid).update({ twiml: <Play>signed voicemail URL</Play><Hangup/> })`; result `voicemail_left`. Otherwise `calls(sid).update({ status: "completed" })`; result `voicemail_skipped`. Redirecting the call ends the media stream, and the session's normal `stop` handling tears it down.
+- **`machine_start`** (reported before the greeting has finished, which DetectMessageEnd should not normally return): wait for the `machine_end_*` event, which DetectMessageEnd guarantees.
+- **`fax`:** hang up; result `failed`.
+
+A machine-answered call is excluded from silent-call accounting.
+
+### 9.5 Prompt and wording (`services/gemini.js`, `lib/voice/strings.js`)
+
+- **Static prefix identity**, outbound only: "You are {persona_name}, an AI assistant calling on behalf of {business_name}." The inbound identity line stays byte-identical, and G9 is enforced by the golden snapshots.
+- **New dynamic block `OUTBOUND CALL`**, rendered only when direction is outbound:
+  - who you are calling (first name), and why (objective, topic, trigger summary);
+  - exactly what has already been said (the opener, verbatim), and not to repeat it;
+  - that the person's identity is not yet confirmed. For a `business` audience, confirming their name is enough. If it's the wrong person, say who you're calling for, offer to call back, and share nothing else;
+  - how to handle a call screener: state your name and reason once, then wait;
+  - that you never claim to be human, and if asked, you confirm you are an AI;
+  - the allowed actions (the campaign's capabilities), and how to end the call politely.
+- **Direction-aware strings:** sign-off ("Thanks for your time, {first_name}"), silence nudges ("Are you still there?"), and the goodbye detection used by the `end_call` gate. `closingTicRe` and `signOffRe` gain the outbound phrasings. Per the earlier closing-sequence defects, sabotage the **whole** alternation, not one branch.
+- The recorded-call disclosure line is never emitted on outbound. The opener carries the disclosure.
+
+### 9.6 Identity and appointments
+
+`ctx.callerPhone` consumers (`adapters/scheduling/internal.js:47-53`, `appointments.js:837-878`, `requirements.js:98-107`) read a new `ctx.party`. For outbound, `party.phone` is the dialled number, and `phone_on_file` is satisfied **only after** the model has confirmed the person's name (new engine tool `confirm_identity({ name_confirmed: true })`, outbound only). Bookings write `clientPhone = party.phone`. The Live write-order consent gate (read-back plus yes) applies unchanged. Inbound keeps `callerPhone` semantics exactly.
+
+### 9.7 Transfer
+
+The existing `request_transfer` / `redialForTransfer` (`live/index.js:5148-5162`), outbound variant:
+- `callerId` is the campaign's `caller_id`, **not** the contact's number.
+- The dialled number carries `<Number url="/twilio/outbound-whisper?attempt=…">`, whose TwiML says "Transfer from {persona_name}: {first_name}{, clinic_name if answered}." before the call is bridged.
+- The allowed window comes from `transfer.when`.
+- If nobody answers the transfer (a `<Dial>` timeout of 20 s), `<Dial action>` returns TwiML that says "{transfer name} will call you back shortly" and hangs up. Post-call records the outcome `callback_requested` with a `transfer_unanswered` note, and the owner notification says so. Resuming the AI session after a failed transfer is out of scope for Part 1.
+
+## 10. Dispatch, gate, capacity and dialling
+
+### 10.1 Dispatch flow (`POST /internal/outbound/dispatch`, payload `{ business_id, outreach_id }`)
+
+1. `withTenant(business_id)`: `SELECT … FROM outreach WHERE id = $1 FOR UPDATE SKIP LOCKED`. If the row is locked or its state is not `waiting`, return 200 and do nothing.
+2. Run the gate (§10.3). On "later", update `next_attempt_at`, enqueue a new task and return. On "never", close the outreach and return.
+3. `INSERT call_attempts (outreach_id, attempt_no = attempts_made + 1, …)`. A unique violation means another dispatcher won the race: return and do nothing. **This is the double-dial lock.**
+4. Set the outreach to `dialing`, increment `attempts_made`, commit.
+5. Call Twilio `calls.create`, then store the `twilio_call_sid`. If `calls.create` fails, record `result = failed`, return the outreach to `waiting` with the next schedule entry, and log `outbound_dial_failed`.
+6. Render the opener and voicemail audio (§9.3) and store them. Return 200.
+
+Cloud Tasks retries a non-2xx response up to 3 times. Because of steps 1 and 3, a retry can never produce a second call.
+
+### 10.2 Enqueueing
+
+`lib/outbound/tasks.js` wraps `@google-cloud/tasks`: queue `outbound-dispatch` in `europe-west2`, a task name derived from `outreach_id` and `next_attempt_at` (so a duplicate enqueue deduplicates), `scheduleTime = next_attempt_at`, and an OIDC token for the `outbound-tasks` service account. The sweep (`app_outbound_due`) re-enqueues anything overdue by more than 2 minutes.
+
+### 10.3 Eligibility gate (`lib/outbound/gate.js`), evaluated in this order
+
+The first failure decides. Every refusal logs `outbound_gate_refused{reason}`.
+
+| # | Check | Result on failure |
+|---|---|---|
+| 1 | `OUTBOUND_ENABLED=true`, **or** the destination is in `OUTBOUND_TEST_ALLOWLIST` | never: `global_disabled` |
+| 2 | `businesses.outbound_enabled` | never: `business_disabled` |
+| 3 | Campaign `status = active` | later (held, not closed): `campaign_paused` |
+| 4 | Destination not in `suppressions` | never: `suppressed` |
+| 5 | Consent satisfies the compliance class (§13.1) | never: `consent_missing`, `consent_expired` or `consent_not_automated` |
+| 6 | `hold_until` has passed (the silent-call block) | later: `silent_hold` |
+| 7 | Inside the calling window in the contact's timezone | later: `outside_window` |
+| 8 | Attempts under the schedule length; creation within `give_up_after_days` | never: `attempts_exhausted` or `give_up_window` |
+| 9 | Per contact: at most 3 dial attempts per local day across all campaigns | later (next day): `daily_contact_cap` |
+| 10 | Capacity: global outbound < `OUTBOUND_MAX_CONCURRENT` − `OUTBOUND_INBOUND_RESERVE`, and business outbound < `outbound_max_concurrent` | later (+30 s): `capacity` |
+| 11 | `caller_id` is still an owned number on the account (checked at most once an hour per number) | never: `caller_id_invalid` |
+
+The defaults are `OUTBOUND_MAX_CONCURRENT=8` and `OUTBOUND_INBOUND_RESERVE=2`, together with the existing Cloud SQL connection budget (38 of 50). Twilio's own account limit, which is unknown until the console check, may be lower. If `calls.create` returns Twilio's concurrency error, it is treated as `capacity`.
+
+## 11. Post-call
+
+Post-call (`lib/outbound/postCall.js`) runs **exactly once per attempt**, even though its two inputs can arrive on different instances in either order:
+
+- **Answered calls** need both the `completed` status callback (which stamps `call_attempts.status_completed_at`) and the session's `finish` (which persists tool results and stamps `session_finished_at`).
+- **Unanswered calls** need only the status callback.
+
+Whichever arrives second claims the run with an atomic `UPDATE call_attempts SET post_call_started_at = now() WHERE id = $1 AND post_call_started_at IS NULL AND <inputs present> RETURNING id`. If a session dies without finishing, the sweep runs post-call for any attempt whose `status_completed_at` is more than 2 minutes old and whose `session_finished_at` is null. It resolves the outcome from the summary only and logs `outbound_postcall_without_session`.
+
+The steps:
+
+1. Set `call_attempts.result` and `ended_at`, and clear `opener_audio` and `voicemail_audio`.
+2. Resolve the outcome:
+   - the model's `set_call_outcome` if it was called;
+   - otherwise derive it from effects: a booking means `booked`, an opt-out means `opted_out`;
+   - otherwise use the existing summary generation (`generateSummaryAndSentiment`), extended with the outbound outcome enum, falling back to `unknown`.
+3. Run the opt-out detector (§13.3).
+4. Persist `calls.outcome_code`, `calls.answers`, `contacts.attributes.answers[campaign_id]`.
+5. Apply the state machine (§8): close the outreach, or compute and enqueue the next attempt.
+6. On a miss, if the attempt is in `text_after_missed` and SMS is available (§12.4), send the text.
+7. Write outbox rows for `call.completed` (every attempt) and `outreach.closed` (on close).
+
+Unanswered attempts (no-answer, busy, failed) follow steps 1 and 5–7 only.
+
+## 12. Stage 3 features
+
+### 12.1 Generic trigger webhook
+
+`POST /v1/triggers/:triggerToken`, body:
+
+```jsonc
+{ "phone": "+447…", "first_name": "…", "last_name": "…", "email": "…",
+  "timezone": "Europe/London",                      // optional
+  "consent": { "purpose": "enquiry_followup", "channels": ["call","sms"],
+               "covers_automated": true, "wording_version": "v1",
+               "wording_text": "…", "captured_at": "ISO", "source_ref": "form-123" },
+  "data": { "any": "form fields" },
+  "idempotency_key": "form-123" }                    // defaults to a hash of phone + source_ref
+```
+
+The endpoint validates E.164, upserts the contact, records the consent, creates the outreach (idempotent), enqueues, and returns 202 with `{ outreach_id }`. A request without a `consent` block is accepted only for `service`-class campaigns. In Part 2, GoHighLevel's workflow webhook maps its payload onto this body.
+
+**Operator trigger for testing:** `scripts/outbound-trigger.js --campaign <id> --phone <e164> [--first-name …] --confirm` is a dry run by default. It runs through the migrate job (Cloud SQL is private-IP). It needs a Dockerfile COPY line and a `.dockerignore` negation (the scripts allowlist).
+
+### 12.2 Capability packs (following `capabilities/_contract.js`; registered in `capabilities/index.js`)
+
+- **`qualification`** (tool `record_answer({ key, value })`):
+  - Rejects unknown keys. Values are at most 500 characters.
+  - Answers accumulate in the session and are persisted post-call.
+  - Required questions gate `book_appointment` with **one** refusal naming the missing keys (a ceiling of 1). After that the booking proceeds and the missing keys are flagged in the outcome. A missing answer never costs a booking; see the `guards-that-ask-get-declined` and `a-mangled-yes` findings.
+  - Optional questions are never enforced.
+- **`outcome`** (tool `set_call_outcome({ outcome, note? })`): the enum is `qualified_no_booking`, `not_interested`, `not_a_fit`, `callback_requested`, `wrong_person`, `other`. `booked` and `opted_out` are set by effects, not by this tool.
+- **`callback`** (tool `schedule_callback({ when_iso, when_text })`): must fall inside the calling window and within 14 days, or the tool returns the nearest valid time for the model to offer instead.
+- **`opt_out`** (tool `opt_out()`): inserts the suppression **immediately** (not post-call), sets the outcome to `opted_out`, and the model confirms: "I've made sure we won't call you again."
+- **`confirm_identity`** (§9.6) is an engine tool, like `end_call`, not a pack.
+
+All tools are declared only on outbound calls, except `qualification`, which inbound also gets during callback recognition (§12.3). New counters must be registered in `lib/voice/metrics.js`, because `bumpCounter` silently drops unknown names.
+
+### 12.3 Callback recognition (inbound)
+
+At inbound `onStart`, once the business is resolved, `app_open_outreach_by_phone(business_id, From)` runs. On a hit:
+- The prompt gains a `CALLER CONTEXT` block: "We called this person on {date} about {topic}. Questions still unanswered: {…}."
+- The `qualification` tool is declared with that campaign's remaining questions.
+- The outreach is **closed** with `called_back` when the inbound call ends, unless a `schedule_callback` was made on it.
+- The inbound call's `calls` row gets `outreach_id`.
+
+### 12.4 Text after a missed call
+
+This is only available when `TWILIO_SMS_FROM` is set for the service. It is unset in production today, and a UK mobile number is needed; `+441372656055` is likely voice-only. It also requires the consent's `channels` to include `sms`. The template ("Hi {first_name}, it's {business_name}. We just tried to call about your enquiry. Reply here or call {caller_id_spoken}.") is at most 300 characters and validated like the opener. It is sent through the existing `services/notifications.js` SMS path. If SMS isn't available, the feature is off and says so at boot (`outbound_sms_unavailable`).
+
+### 12.5 Results webhook
+
+- **Events:** `call.completed` (every attempt, including unanswered ones) and `outreach.closed`.
+- **Payload:**
+
+  ```jsonc
+  { "event": "call.completed", "delivery_id": "…", "occurred_at": "ISO",
+    "campaign": { "id": "…", "name": "…", "version": 3 },
+    "outreach": { "id": "…", "attempt": 2, "state": "closed", "close_reason": "terminal_outcome" },
+    "call": { "result": "connected", "answered_by": "human", "duration_seconds": 312 },
+    "outcome": "booked",
+    "contact": { "id": "…", "phone": "+447…", "first_name": "…", "external_ids": {} },
+    "answers": { "clinic_name": "…" },
+    "booking": { "start": "ISO", "length_min": 30, "appointment_id": "…" },
+    "summary": "…",
+    "next_attempt_at": null }
+  ```
+
+- **Headers:** `X-Vetra-Event`, `X-Vetra-Delivery`, and `X-Vetra-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + raw_body)>`.
+- **Delivery:**
+  - HTTPS only, with the existing SSRF guard from `integrations/webhook.js` and a 6 s timeout.
+  - Backoff of 1 m, 5 m, 30 m, 2 h and 12 h, then `dead`.
+  - Each outbox insert enqueues a delivery task on the same queue mechanism, with the sweep as backstop.
+- **Documentation:** `docs/outbound-webhook-contract.md`, alongside the existing `integrations-webhook-contract.md`.
+
+### 12.6 Booking on the built-in calendar
+
+The appointments pack with the `internal` adapter works as-is on outbound, with `ctx.party` in place of `callerPhone` (§9.6). Availability, capacity and the `create_appointment_if_available` RPC are unchanged. Part 2 swaps in the GoHighLevel adapter behind the same interface (`checkAvailability`, `findSlots`, `book`).
+
+## 13. Compliance enforcement
+
+This is not legal advice. The rules below implement the positions on the companion page (§8 there) in code.
+
+### 13.1 Compliance classes (checked by gate step 5)
+
+- **`solicited`** (for example an enquiry follow-up) needs a consent with a matching `purpose`, `channels` containing `call`, `covers_automated = true`, and `captured_at` within `consent_window_days` (default 30, maximum 90). It is not revoked.
+- **`service`** (reminders, neutral no-show, aftercare) needs an existing relationship. In Part 1 that means the contact has a past or future `appointments` row, or a trigger flagged `existing_customer: true`. The templates carry no promotional wording, and a campaign's objective and notes for this class are held to the same rule by review. That rule can't be checked automatically, and the spec says so.
+- **`marketing_consented`** is refused at save in Part 1 (D5).
+
+### 13.2 Disclosure
+
+The opener and voicemail must name the business and state that this is an AI (§7). A post-call detector over the assistant transcript flags claims to be human (`/\b(I'?m|I am) (a )?(real|human|person)\b/i` without a following negation) as `outbound_claimed_human`. That's a count and an alert, because on Live it can only detect, not prevent (`live-removes-the-text-chokepoint`).
+
+### 13.3 Opt-out, belt and braces
+
+1. The `opt_out` tool writes the suppression immediately.
+2. Post-call, a detector scans the **assistant** transcript for confirmations ("won't call you again", "remove you from our list", "take you off our list") and the **caller** transcript for requests ("stop calling", "don't call me", "take me off", "remove me"). Any hit without an existing suppression inserts one (`created_by = detector`) and logs `outbound_optout_detector_fired`.
+3. The caller transcript is lossy (`live-transcript-is-lossy`), which is why the assistant-side confirmation is also scanned.
+
+### 13.4 Silent calls
+
+`first_audio_ms > 2000` on a human-answered call, or an answered call whose stream never connected, sets `silent = true`. It also sets `outreach.hold_until = answered_at + 72h` and logs `outbound_silent_call`. Machine-answered calls are excluded.
+
+### 13.5 Records
+
+`call_attempts` is kept for 6 months. The retention schedule document (`docs/compliance/`) gains the new tables. `contacts`, `consents` and `suppressions` are covered by the existing data-subject erase path, keyed on phone. A suppression outlives erasure: the phone is kept, hashed, as a do-not-call marker. Recording that exception is part of the paperwork step.
+
+## 14. Observability, flags and deployment
+
+**Log events:** `outbound_dial`, `outbound_dial_failed`, `outbound_gate_refused{reason}`, `outbound_answered`, `outbound_amd{answered_by}`, `outbound_opener_played{first_audio_ms}`, `outbound_opener_fallback`, `outbound_silent_call`, `outbound_voicemail{left|skipped}`, `outbound_attempt_result`, `outbound_outreach_closed{reason}`, `outbound_optout_tool`, `outbound_optout_detector_fired`, `outbound_claimed_human`, `outbound_context_missing`, `outbound_webhook_delivery{status}`, `outbound_callback_recognized`.
+
+`live_call_summary` gains `direction`, `attempt_id` and `campaign_id`. Log-based alert policies (in `monitoring.tf`, applied by hand while Terraform is broken locally) cover `outbound_silent_call`, `outbound_dial_failed` bursts and dead webhook deliveries. Event names are checked against real `log.error` call sites, because a metric on a name nothing logs is a permanently green alert.
+
+**Flags and environment.** All of these are documented in `.env.example`, because the `envInventory` test fails otherwise.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OUTBOUND_ENABLED` | `false` | Global switch |
+| `OUTBOUND_TEST_ALLOWLIST` | empty | E.164 list, the only numbers dialable while the switch is off |
+| `OUTBOUND_MAX_CONCURRENT` | 8 | Global outbound cap |
+| `OUTBOUND_INBOUND_RESERVE` | 2 | Lines always kept for inbound |
+| `OUTBOUND_TASKS_QUEUE` | — | Queue path |
+| `OUTBOUND_TASKS_SA` | — | Service account for task OIDC |
+| `OUTBOUND_MEDIA_URL_SECRET` | — | Signs the voicemail media URLs. Derived from `MEDIA_STREAM_SECRET` if unset, the same derivation idea as the stream token. |
+
+**Deployment.** Cloud Build (`--service-account=vetra-deployer@vetra-core-edc8ca…`), then the migrate job, then `gcloud run services update` with the new env and `GIT_COMMIT_SHA` set. Terraform's provider handshake fails on this machine, so these go in through gcloud:
+- the queue (`gcloud tasks queues create outbound-dispatch --location=europe-west2 --max-dispatches-per-second=1 --max-concurrent-dispatches=5 --max-attempts=3`);
+- the scheduler job (`*/5 * * * *` against `/internal/outbound/sweep` with OIDC);
+- the `outbound-tasks` service account with `roles/run.invoker` on the service;
+- Cloud Tasks enqueuer rights for the runtime service account.
+
+All of them are recorded for later Terraform import. The deploy itself needs owner approval, and nothing is pushed to git.
+
+## 15. Testing
+
+**Baseline first:** run the full suite with `DATABASE_URL` **unset**, and `test:db` with `DATABASE_URL=postgresql://vetra:vetra_local_dev@localhost:55432/vetra`. Record the counts before any change.
+
+- **Unit tests for each module:**
+  - the gate: every reason, each **sabotaged** to prove its test can fail;
+  - schedule grammar and window arithmetic across DST in `Europe/London`;
+  - campaign schema validation, including every refusal;
+  - the state machine;
+  - the webhook signer (verified against an independent implementation);
+  - the opt-out and claimed-human detectors, on transcript fixtures;
+  - AMD callback routing;
+  - OIDC verification (a wrong audience or wrong service account is refused).
+- **Database tests (`test:db`):** migrations up; RLS on every new table as `vetra_app`; the definer functions; the double-dial lock under concurrent inserts; the `calls.direction` default preserving inbound rows.
+- **Golden prompt snapshots:** all existing snapshots byte-identical (G9), plus new outbound fixtures (speed-to-lead demo, missed-call callback) reviewed by hand once and then frozen.
+- **Simulated outbound call:** extend the media-stream probe harness to drive `/twilio/live-stream/<token>` with `direction=outbound`. It fakes the Twilio answer, status and AMD callbacks and **echoes marks back, paced**, because without that no latency gets logged. It asserts that the opener plays before any model audio, the `calls` row has `direction = 'outbound'`, and post-call closes or reschedules correctly.
+- **Live round 1 (plan step 2.7),** on a UK handset, calling from `+441372656055`. The scenarios:
+  1. answer normally;
+  2. let it go to voicemail;
+  3. don't answer;
+  4. reject the call;
+  5. hang up during the opener;
+  6. ask for a human;
+  7. say "stop calling me";
+  8. ring back afterwards;
+  9. place one ordinary inbound call during the round.
+
+  **Pass criteria:** G1, G2, G4, G7, G8 and G9.
+- **Live round 2 (plan step 3.7):** 10–20 calls through the demo qualifier, including 2–3 regional accents and a noisy line. Pass criterion is G10. Report per call, the unit a caller feels, not per gate event.
+
+## 16. Part 2 and Part 3 outline (not specified here)
+
+**Part 2 (after the Digile scoping call; its own spec at step 5.2):**
+- **Auth:** a GoHighLevel **private app** (unlisted, OAuth, installed by link, up to 5 agencies), with a Private Integration Token as the fallback credential behind one `CredentialSource` interface.
+- **`CrmConnector` interface:** `upsertContact`, `setCustomFields`, `addTags`, `removeTags`, `addNote`, `logCall` (conversation provider), `upsertOpportunity`, `moveStage`.
+- **A `ghl` scheduling adapter** implementing `checkAvailability`, `findSlots` and `book`, which inbound can use too.
+- **Install flow:** only expected installs accepted; renewal serialised under a row lock, because GoHighLevel refresh tokens are single-use; the uninstall webhook.
+- **Integration plumbing:** outbox `kind = crm`, mapping from GoHighLevel's workflow webhook onto §12.1, and an `integration_connections` table.
+- **Digile's campaign:** their questions, hours, retries, persona, transfer and mapping.
+- **Recording:** only if they want audio.
+
+**Part 3:**
+- templates for reminders, no-show, aftercare and review requests;
+- list upload with TPS/CTPS screening;
+- the `marketing_consented` class and consented reactivation (after solicitor review);
+- the `patient` audience with name confirmation before any detail;
+- inbound callers upserted into `contacts` for one timeline;
+- an agency layer, if Digile resells;
+- outbound minutes in plans;
+- load tests of inbound and outbound together;
+- a monthly compliance report.
+
+## 17. Risks and open questions
+
+| Risk | Handling |
+|---|---|
+| Live may not accept a seeded first turn cleanly (spike A) | The fallback is fully specified (§9.3). G2 becomes monitored rather than guaranteed, and the page and this spec are updated. |
+| The Chirp 3 HD voice may not sound identical to the Live voice | The owner judges by ear in spike A. If it's jarring, choose a Live voice and Chirp voice pair that match, or use the fallback path. |
+| AMD accuracy and timing on UK mobile voicemail is unmeasured | Spike B measures it. `unknown` is treated as human, which is safe because the AI discloses and a machine hears a normal opener. |
+| Twilio account A limits are unknown (profile type) | Gate reason `capacity` handles Twilio's concurrency error. The Business profile follows the LLC. |
+| Gemini Live concurrent-session limit is unmeasured | `OUTBOUND_MAX_CONCURRENT` is kept low (8). A load test is a Part 3 item. |
+| No UK handset | An owner prerequisite. A US phone can run spike B's mechanics only. |
+| `services/googleTts.js` may not be configured on the Live-only deployment | Spike A checks `isConfigured()` against the serving revision's environment. If it isn't configured, adding the Cloud TTS credential or API enablement becomes a stage 2 deploy item. |
+| LLC not yet formed | Blocks go-live (the DPA), not Part 1. |
+| The August appeal said "no outbound" | D2 note, plus consent-only design. |
+
+## 18. References
+
+- **Companion page:** https://claude.ai/artifact/3379bzmqHG1gVDSQB2mdrv
+- **Capability packs:** `docs/superpowers/specs/2026-07-22-capability-packs-design.md`
+- **Code touchpoints:**
+  - `server.js:494-601`: the inbound Live route; its pattern is reused
+  - `lib/mediaStreamToken.js`
+  - `lib/voice/live/index.js`: `onStart` at about line 5185, transfer at 5148–5162, and the voice resolution around line 284
+  - `services/gemini.js`: `buildStaticSystemPrefix`, and the greeting at 1551–1557
+  - `services/db.js`: `lookupBusinessByPhone` at 733, `withTenant` at 2106
+  - `services/googleTts.js`: `synthesizeMulaw`
+  - `lib/callStateStore.js:43`
+  - `adapters/scheduling/internal.js`
+  - `capabilities/_contract.js`
+  - `integrations/webhook.js`: the SSRF guard
+  - `services/notifications.js`: SMS
+- **Compliance background:** PECR regs 19, 21, 24; ICO telephone marketing guidance and the 2025 avatar-call penalties; Ofcom persistent misuse statement (2016); Twilio Voice Services Policy; Google Cloud AUP and the Generative AI Prohibited Use Policy. Links are on the companion page.
