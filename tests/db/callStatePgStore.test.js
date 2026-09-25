@@ -76,13 +76,19 @@ describeDb("call state, Postgres store", () => {
     target: () => url,
     readRaw: async (callSid) => {
       const { rows } = await admin.query(
-        `SELECT db_call_id, business_id, saw_caller_final FROM call_state WHERE call_sid = $1`,
+        `SELECT db_call_id, business_id, saw_caller_final, direction, attempt_id FROM call_state WHERE call_sid = $1`,
         [callSid]
       );
       const row = rows[0] ?? {};
       // Column names back to field names, so the contract's assertion about
       // SHARED_FIELDS is asking the same question of both backends.
-      const map = { db_call_id: "dbCallId", business_id: "businessId", saw_caller_final: "sawCallerFinal" };
+      const map = {
+        db_call_id: "dbCallId",
+        business_id: "businessId",
+        saw_caller_final: "sawCallerFinal",
+        direction: "direction",
+        attempt_id: "attemptId",
+      };
       const keys = Object.entries(row)
         .filter(([, v]) => v !== null)
         .map(([k]) => map[k]);

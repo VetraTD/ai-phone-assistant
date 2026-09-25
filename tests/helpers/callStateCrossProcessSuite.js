@@ -91,8 +91,14 @@ export function crossProcessCallStateSuite({ label, kind, target, readRaw }) {
     // The negative half, and the more important one: nothing unserialisable
     // leaks into the store. The writer deliberately puts a fake WebSocket, an
     // audio queue and a full conversation history on local state before writing.
-    it("writes nothing but the three shared fields — no socket, no audio, no history", async () => {
-      runWriter("CA_cross_slice", { dbCallId: "call-db-6", businessId: "biz-6", sawCallerFinal: true });
+    it("writes nothing but the shared fields — no socket, no audio, no history", async () => {
+      runWriter("CA_cross_slice", {
+        dbCallId: "call-db-6",
+        businessId: "biz-6",
+        sawCallerFinal: true,
+        direction: "outbound",
+        attemptId: "att-6",
+      });
 
       const { keys, text } = await readRaw("CA_cross_slice");
       expect(text).not.toContain("websocket");

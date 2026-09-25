@@ -30,6 +30,8 @@ state.audioQueue = [Buffer.from([0xff, 0xfe])];
 state.history = [{ role: "user", parts: [{ text: "a whole conversation" }] }];
 state.dbCallId = payload.dbCallId;
 state.businessId = payload.businessId;
+state.direction = payload.direction;
+state.attemptId = payload.attemptId;
 
 if (!sabotage) {
   callState.writeShared(callSid, state);

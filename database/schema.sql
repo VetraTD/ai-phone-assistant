@@ -76,7 +76,11 @@ CREATE TABLE businesses (
   -- services/notifications.js sendCallerSms(). Opt-in per business.
   sms_followup_enabled         boolean DEFAULT false,
   sms_templates                jsonb DEFAULT '{}'::jsonb,
-  created_at                   timestamptz DEFAULT now()
+  created_at                   timestamptz DEFAULT now(),
+  -- Outbound calling (migration 043, spec §6.2). Off by default; capacity
+  -- default of 2 matches the spec's §0.1 defaults table.
+  outbound_enabled             boolean NOT NULL DEFAULT false,
+  outbound_max_concurrent      int NOT NULL DEFAULT 2
 );
 
 -- 2. Users (dashboard users per business)
@@ -120,7 +124,23 @@ CREATE TABLE calls (
   -- Per-call turn-latency rollup (migration 017), written from server.js's
   -- /twilio/status handler using lib/voice/metrics.js getCallStats().
   avg_turn_latency_ms int,
-  p95_turn_latency_ms int
+  p95_turn_latency_ms int,
+  -- Outbound links (migration 043, spec §6.2). `caller_number` keeps meaning
+  -- "the other party" and `twilio_number` "our number" on outbound calls too,
+  -- so the data-subject export/erase paths and analytics keyed on
+  -- caller_number work unchanged. The four FK columns below are declared
+  -- WITHOUT `REFERENCES` because campaigns/outreach/call_attempts/contacts are
+  -- created later in this file (the §0.1 fold rule for forward references);
+  -- the constraints themselves are added by ALTER TABLE after that section.
+  direction        text NOT NULL DEFAULT 'inbound' CHECK (direction IN ('inbound','outbound')),
+  campaign_id      uuid,
+  campaign_version int,
+  outreach_id      uuid,
+  attempt_id       uuid,
+  contact_id       uuid,
+  answered_by      text,
+  outcome_code     text,
+  answers          jsonb
 );
 
 -- 4. Call transcripts (conversation turns)
@@ -1219,6 +1239,9 @@ CREATE TABLE IF NOT EXISTS call_state (
   db_call_id       text,
   business_id      text,
   saw_caller_final boolean,
+  -- Migration 043: two more shared scalars, written once at session start.
+  direction        text,
+  attempt_id       text,
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
@@ -1248,25 +1271,22 @@ BEGIN
   -- true is a fourth field arriving quietly.
   SELECT string_agg(k, ', ') INTO unknown_keys
   FROM jsonb_object_keys(p_patch) AS k
-  WHERE k NOT IN ('dbCallId', 'businessId', 'sawCallerFinal');
+  WHERE k NOT IN ('dbCallId', 'businessId', 'sawCallerFinal', 'direction', 'attemptId');
 
   IF unknown_keys IS NOT NULL THEN
     RAISE EXCEPTION
-      'app_call_state_merge: refusing unknown shared field(s): %. The shared slice is dbCallId, businessId, sawCallerFinal and is written at call boundaries only — see database/038_call_state.sql', unknown_keys;
+      'app_call_state_merge: refusing unknown shared field(s): %. The shared slice is dbCallId, businessId, sawCallerFinal, direction, attemptId and is written at call boundaries only — see database/038_call_state.sql', unknown_keys;
   END IF;
 
-  INSERT INTO call_state AS cs (call_sid, db_call_id, business_id, saw_caller_final, updated_at)
-  VALUES (
-    p_call_sid,
-    p_patch ->> 'dbCallId',
-    p_patch ->> 'businessId',
-    (p_patch ->> 'sawCallerFinal')::boolean,
-    now()
-  )
+  INSERT INTO call_state AS cs (call_sid, db_call_id, business_id, saw_caller_final, direction, attempt_id, updated_at)
+  VALUES (p_call_sid, p_patch ->> 'dbCallId', p_patch ->> 'businessId', (p_patch ->> 'sawCallerFinal')::boolean,
+          p_patch ->> 'direction', p_patch ->> 'attemptId', now())
   ON CONFLICT (call_sid) DO UPDATE SET
     db_call_id       = CASE WHEN p_patch ? 'dbCallId'       THEN EXCLUDED.db_call_id       ELSE cs.db_call_id       END,
     business_id      = CASE WHEN p_patch ? 'businessId'     THEN EXCLUDED.business_id      ELSE cs.business_id      END,
     saw_caller_final = CASE WHEN p_patch ? 'sawCallerFinal' THEN EXCLUDED.saw_caller_final ELSE cs.saw_caller_final END,
+    direction        = CASE WHEN p_patch ? 'direction'      THEN EXCLUDED.direction        ELSE cs.direction        END,
+    attempt_id       = CASE WHEN p_patch ? 'attemptId'      THEN EXCLUDED.attempt_id       ELSE cs.attempt_id       END,
     updated_at       = now();
 END;
 $$;
@@ -1284,10 +1304,8 @@ DECLARE
   result jsonb;
 BEGIN
   SELECT jsonb_strip_nulls(jsonb_build_object(
-           'dbCallId', cs.db_call_id,
-           'businessId', cs.business_id,
-           'sawCallerFinal', cs.saw_caller_final
-         ))
+           'dbCallId', cs.db_call_id, 'businessId', cs.business_id, 'sawCallerFinal', cs.saw_caller_final,
+           'direction', cs.direction, 'attemptId', cs.attempt_id))
     INTO result
     FROM call_state cs
    WHERE cs.call_sid = p_call_sid
@@ -1495,3 +1513,19 @@ BEGIN
     EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (business_id = app_current_business_id()) WITH CHECK (business_id = app_current_business_id())', t);
   END LOOP;
 END $$;
+
+-- ============================================================
+-- Migration 043: outbound calling -- FK constraints on calls (spec §6.2)
+-- ============================================================
+-- The nine columns themselves are declared inline in CREATE TABLE calls
+-- above, without REFERENCES, because campaigns/outreach/call_attempts/contacts
+-- are created later in this file (the §0.1 fold rule for forward references).
+-- These constraint names must match what the migration's inline REFERENCES
+-- produces (Postgres names them <table>_<column>_fkey) so the two databases
+-- schemaParity compares agree, though schemaParity itself does not check FKs
+-- — tests/db/outboundLinks.test.js's pg_constraint assertion is what proves
+-- this fold on the db:reset path.
+ALTER TABLE calls ADD CONSTRAINT calls_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL;
+ALTER TABLE calls ADD CONSTRAINT calls_outreach_id_fkey FOREIGN KEY (outreach_id) REFERENCES outreach(id) ON DELETE SET NULL;
+ALTER TABLE calls ADD CONSTRAINT calls_attempt_id_fkey  FOREIGN KEY (attempt_id)  REFERENCES call_attempts(id) ON DELETE SET NULL;
+ALTER TABLE calls ADD CONSTRAINT calls_contact_id_fkey  FOREIGN KEY (contact_id)  REFERENCES contacts(id) ON DELETE SET NULL;
