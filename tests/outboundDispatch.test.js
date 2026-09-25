@@ -8,6 +8,7 @@ const NOW = new Date("2026-09-28T13:00:00Z");
 function row(over = {}) {
   return {
     id: "o1", business_id: "b1", state: "waiting", attempts_made: 0, created_at: new Date("2026-09-28T12:59:00Z"), hold_until: null,
+    next_attempt_at: NOW, // due (fix C: a row not yet due is skipped before the gate)
     campaign_id: "c1", campaign_version: 1, campaign_status: "active", compliance_class: "solicited", template_key: "speed_to_lead",
     config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055" },
     contact_id: "k1", phone_e164: "+447700900001", first_name: "Sam", contact_timezone: null,
@@ -23,6 +24,7 @@ function fakeDb(r = row()) {
     withTenant: vi.fn(async (_b, fn) => fn()),
     lockCapacity: rec("lockCapacity", undefined),
     claimOutreachForDispatch: rec("claim", r),
+    lockOutreachState: rec("lockState", "dialing"),
     undoAttempt: rec("undoAttempt", undefined),
     isSuppressed: rec("isSuppressed", false),
     listConsents: rec("listConsents", [{ purpose: "enquiry_followup", channels: ["call"], covers_automated: true, captured_at: new Date("2026-09-28T12:58:00Z"), expires_at: null, revoked_at: null }]),
@@ -143,6 +145,160 @@ describe("startOfLocalDay: local midnight as an instant, DST-safe", () => {
   });
   it("in summer London midnight is 23:00Z the previous day", () => {
     expect(startOfLocalDay(new Date("2026-07-01T12:00:00Z"), "Europe/London").toISOString()).toBe("2026-06-30T23:00:00.000Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (review of a615950)
+// ---------------------------------------------------------------------------
+
+/** A Twilio fake with both shapes the real client has: calls.create and calls(sid).update. */
+function twilioWithUpdate(update = vi.fn(async () => ({}))) {
+  const calls = Object.assign(vi.fn(() => ({ update })), { create: vi.fn(async () => ({ sid: "CA123" })) });
+  return { twilio: { calls }, update };
+}
+const noSleep = async () => {};
+
+describe("fix A: the SID write is retried, and a call no callback can route is hung up", () => {
+  it("a SID write that fails twice then succeeds still dials, with ONE calls.create and backoff between writes", async () => {
+    const db = fakeDb();
+    db.setAttemptCallSid = vi.fn()
+      .mockRejectedValueOnce(new Error("conn reset"))
+      .mockRejectedValueOnce(new Error("conn reset"))
+      .mockResolvedValue(undefined);
+    const { twilio, update } = twilioWithUpdate();
+    const sleep = vi.fn(async () => {});
+    const { d } = mk(db, twilio, { sleep });
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toMatchObject({ status: "dialed", callSid: "CA123", attemptId: "a1" });
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+    expect(db.setAttemptCallSid).toHaveBeenCalledTimes(3);
+    expect(db.setAttemptCallSid).toHaveBeenLastCalledWith("a1", "CA123");
+    expect(sleep.mock.calls).toEqual([[100], [300]]);
+    expect(update).not.toHaveBeenCalled();
+    expect(db.failAttempt).not.toHaveBeenCalled();
+  });
+  it("a SID write that always fails cancels the call, fails the attempt, reschedules, and reports dial_failed", async () => {
+    const db = fakeDb(); db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    const { twilio, update } = twilioWithUpdate();
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d, enqueue } = mk(db, twilio, { sleep: noSleep, log });
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "dial_failed", attemptId: "a1" });
+    expect(db.setAttemptCallSid).toHaveBeenCalledTimes(3);
+    expect(twilio.calls).toHaveBeenCalledWith("CA123");
+    expect(update).toHaveBeenCalledWith({ status: "canceled" });
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+    expect(db.rescheduleOutreach).toHaveBeenCalledWith("o1", new Date("2026-09-28T13:10:00Z")); // the next entry, "+10m"
+    expect(enqueue).toHaveBeenCalledWith({ businessId: "b1", outreachId: "o1", at: new Date("2026-09-28T13:10:00Z"), source: "reschedule" });
+    expect(log.error).toHaveBeenCalledWith("outbound_dial_failed", expect.objectContaining({ attemptId: "a1", reason: "sid_write_failed" }));
+  });
+  it("a call already answered cannot be canceled, so it is completed instead", async () => {
+    const db = fakeDb(); db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    const update = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("Call is not in-progress. Cannot redirect."), { status: 400 }))
+      .mockResolvedValue({});
+    const { twilio } = twilioWithUpdate(update);
+    const { d } = mk(db, twilio, { sleep: noSleep });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dial_failed");
+    expect(update.mock.calls).toEqual([[{ status: "canceled" }], [{ status: "completed" }]]);
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+  });
+});
+
+describe("fix B: the failure path reads the outreach state under lock and never reopens a closed one", () => {
+  it("a failed create locks the outreach before writing the attempt", async () => {
+    const db = fakeDb(); const twilio = { calls: { create: vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 400 }); }) } };
+    const { d } = mk(db, twilio);
+    await d({ businessId: "b1", outreachId: "o1" });
+    const failurePath = db.log.map((x) => x[0]).slice(-3);
+    expect(failurePath).toEqual(["lockState", "fail", "reschedule"]);
+    expect(db.lockOutreachState).toHaveBeenCalledWith("o1");
+  });
+  it("an outreach closed during the create window keeps its close: the attempt is failed, nothing rescheduled or enqueued", async () => {
+    const db = fakeDb(); db.lockOutreachState = vi.fn(async () => "closed");
+    const twilio = { calls: { create: vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 400 }); }) } };
+    const { d, enqueue } = mk(db, twilio);
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dial_failed");
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+    expect(db.rescheduleOutreach).not.toHaveBeenCalled();
+    expect(db.closeOutreach).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+  it("the same for a 429: the attempt is given back, the closed outreach is left alone", async () => {
+    const db = fakeDb(); db.lockOutreachState = vi.fn(async () => "closed");
+    const twilio = { calls: { create: vi.fn(async () => { throw Object.assign(new Error("busy"), { status: 429 }); }) } };
+    const { d, enqueue } = mk(db, twilio);
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(db.undoAttempt).toHaveBeenCalledWith("a1", "o1");
+    expect(db.rescheduleOutreach).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("fix C: a task that arrives before its time is skipped before the gate", () => {
+  it("next_attempt_at ten minutes away: skipped as not_due, nothing written, nothing dialed", async () => {
+    const db = fakeDb(row({ next_attempt_at: new Date(NOW.getTime() + 10 * 60_000) })); const { d, twilio } = mk(db);
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "skipped", reason: "not_due" });
+    expect(db.insertCallAttempt).not.toHaveBeenCalled();
+    expect(db.isSuppressed).not.toHaveBeenCalled(); // before the gate
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+  it("a parked outreach (next_attempt_at NULL) is skipped as not_due", async () => {
+    const db = fakeDb(row({ next_attempt_at: null })); const { d, twilio } = mk(db);
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "skipped", reason: "not_due" });
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+  it("a missing or unparseable next_attempt_at fails closed (skipped), like the gate's facts", async () => {
+    for (const bad of [undefined, "not a date"]) {
+      const db = fakeDb(row({ next_attempt_at: bad })); const { d, twilio } = mk(db);
+      expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "skipped", reason: "not_due" });
+      expect(twilio.calls.create).not.toHaveBeenCalled();
+    }
+  });
+  it("one second overdue proceeds, and so does 4 s early (5 s of clock slack); 6 s early does not", async () => {
+    for (const [offsetMs, status] of [[-1_000, "dialed"], [4_000, "dialed"], [6_000, "skipped"]]) {
+      const db = fakeDb(row({ next_attempt_at: new Date(NOW.getTime() + offsetMs) })); const { d } = mk(db);
+      expect((await d({ businessId: "b1", outreachId: "o1" })).status, `offset ${offsetMs}`).toBe(status);
+    }
+  });
+});
+
+describe("fix D: capacity is counted for the claimed row's business", () => {
+  it("activeDialCounts gets the row's business_id, not the payload's spelling of it", async () => {
+    // An upper-case UUID in a task payload still scopes RLS (it casts to uuid),
+    // but compared as a string it matches no directory row: zero live calls,
+    // and the per-business cap would never bite.
+    const db = fakeDb(row({ business_id: "0e0e0000-0000-4000-8000-00000000000a" })); const { d } = mk(db);
+    await d({ businessId: "0E0E0000-0000-4000-8000-00000000000A", outreachId: "o1" });
+    expect(db.activeDialCounts).toHaveBeenCalledWith("0e0e0000-0000-4000-8000-00000000000a");
+  });
+});
+
+describe("fix E: a lost insert race is reported, not silent", () => {
+  beforeEach(() => clearStats());
+  it("a conflict logs outbound_dispatch_conflict and bumps its counter", async () => {
+    const db = fakeDb(); db.insertCallAttempt = vi.fn(async () => ({ conflict: true }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(db, undefined, { log });
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "conflict" });
+    expect(log.error).toHaveBeenCalledWith("outbound_dispatch_conflict", { outreachId: "o1", attemptNo: 1 });
+    expect(getLatencyStats().turnTaking.outbound_dispatch_conflict).toBe(1);
+  });
+});
+
+describe("the backstop clip: a refused store is not reported as a failed render", () => {
+  it("a storeAttemptAudio refusal logs outbound_backstop_store_refused and the call stays dialed", async () => {
+    const db = fakeDb(); db.storeAttemptAudio = vi.fn(async () => { throw new Error("storeAttemptAudio: expected 1 row, got 0"); });
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(db, undefined, { log, renderAudio: async () => ({ opener: Buffer.from([1]) }) });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_store_refused", expect.objectContaining({ attemptId: "a1" }));
+    expect(log.error).not.toHaveBeenCalledWith("outbound_backstop_render_failed", expect.anything());
+  });
+  it("a render that throws is still outbound_backstop_render_failed", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d } = mk(fakeDb(), undefined, { log, renderAudio: async () => { throw new Error("live down"); } });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_failed", expect.objectContaining({ attemptId: "a1" }));
   });
 });
 

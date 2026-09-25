@@ -29,8 +29,11 @@ beforeAll(async () => {
   const k = await admin.query(`INSERT INTO contacts (business_id, phone_e164, first_name) VALUES ($1,'+447700900321','Sam') RETURNING id`, [BIZ]);
   await admin.query(`INSERT INTO consents (business_id,contact_id,purpose,channels,covers_automated,source,captured_at)
                      VALUES ($1,$2,'enquiry_followup','{call}',true,'manual',now())`, [BIZ, k.rows[0].id]);
+  // next_attempt_at on the dispatcher's FIXED clock, not now(): dispatch skips
+  // a row not yet due (fix C), and a real-clock now() is after 13:00:05Z on
+  // 2026-09-28 from that day on -- every dispatch would be not_due.
   outreachId = (await admin.query(`INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key,next_attempt_at)
-                                  VALUES ($1,$2,1,$3,'waiting','{}','race-1',now()) RETURNING id`, [BIZ, c.rows[0].id, k.rows[0].id])).rows[0].id;
+                                  VALUES ($1,$2,1,$3,'waiting','{}','race-1','2026-09-28T12:59:00Z') RETURNING id`, [BIZ, c.rows[0].id, k.rows[0].id])).rows[0].id;
   process.env.DATABASE_URL = APP_URL;
   db = await import("../../services/db.js");
   ({ createDispatcher } = await import("../../lib/outbound/dispatch.js"));
@@ -75,8 +78,10 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
   const PHONES = {
     never: "+447700900401", paused: "+447700900402", failed: "+447700900403",
     busy: "+447700900404", placed: "+447700900405", due: "+447700900406",
+    closedMid: "+447700900407", closedMid429: "+447700900408",
   };
   const FIXED = new Date("2026-09-28T13:00:00Z");
+  const DUE = new Date("2026-09-28T12:59:00Z"); // due on the FIXED clock, whatever the real date
   let cfg;
 
   beforeAll(async () => {
@@ -86,7 +91,7 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
       calling_window: { mon_fri: "08:00-21:00", sat: "08:00-21:00", sun: "08:00-21:00", outside_window: "queue" } };
   });
 
-  async function seed(key, phone, { campaignStatus = "active", nextAttemptAt = new Date() } = {}) {
+  async function seed(key, phone, { campaignStatus = "active", nextAttemptAt = DUE } = {}) {
     const c = await admin.query(`INSERT INTO campaigns (business_id,name,template_key,compliance_class,audience,status,current_version)
                                  VALUES ($1,$2,'speed_to_lead','solicited','business',$3,1) RETURNING id`, [BIZ, key, campaignStatus]);
     await admin.query(`INSERT INTO campaign_versions (campaign_id,business_id,version,config) VALUES ($1,$2,1,$3)`, [c.rows[0].id, BIZ, cfg]);
@@ -162,6 +167,46 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
     const dir = await admin.query(`SELECT attempt_id FROM call_attempt_directory WHERE twilio_call_sid = 'CAplaced0001'`);
     expect(dir.rows[0]?.attempt_id).toBe(a.id);
     expect(await outreachRow(id)).toMatchObject({ state: "dialing", attempts_made: 1 });
+  });
+
+  it("fix A: the SID write is idempotent for the SAME sid (it is retried) and still never overwrites a different one", async () => {
+    const dir = await admin.query(`SELECT attempt_id FROM call_attempt_directory WHERE twilio_call_sid = 'CAplaced0001'`);
+    const attemptId = dir.rows[0].attempt_id;
+    await expect(db.withTenant(BIZ, () => db.setAttemptCallSid(attemptId, "CAplaced0001"))).resolves.toBeUndefined();
+    await expect(db.withTenant(BIZ, () => db.setAttemptCallSid(attemptId, "CAother00001"))).rejects.toThrow(/expected 1 row/);
+    const a = await admin.query(`SELECT twilio_call_sid FROM call_attempts WHERE id = $1`, [attemptId]);
+    expect(a.rows[0].twilio_call_sid).toBe("CAplaced0001");
+  });
+
+  it("fix B: an outreach closed while Twilio was asked still gets its failed attempt recorded, and stays closed", async () => {
+    const { outreachId: id } = await seed("closed-mid-1", PHONES.closedMid);
+    const create = vi.fn(async () => {
+      // Another path (an opt-out, the dashboard) closes it between dispatch's commit and Twilio's answer.
+      await admin.query(`UPDATE outreach SET state = 'closed', close_reason = 'suppressed', closed_at = now() WHERE id = $1`, [id]);
+      throw Object.assign(new Error("twilio 400"), { status: 400 });
+    });
+    expect((await dispatcher(create)({ businessId: BIZ, outreachId: id })).status).toBe("dial_failed");
+    const [a, ...more] = await attemptRows(id);
+    expect(more).toEqual([]);
+    expect(a).toMatchObject({ result: "failed", twilio_status: "failed" });
+    expect(a.ended_at).toBeInstanceOf(Date);
+    const reg = await admin.query(`SELECT count(*)::int AS n FROM dial_registry WHERE attempt_id = $1`, [a.id]);
+    expect(reg.rows[0].n).toBe(0); // not left holding capacity
+    expect(await outreachRow(id)).toMatchObject({ state: "closed", close_reason: "suppressed" });
+    // Only the post-create failure path tolerates a closed row: a plain
+    // reschedule (the gate's "later") still refuses to reopen one.
+    await expect(db.withTenant(BIZ, () => db.rescheduleOutreach(id, new Date()))).rejects.toThrow(/expected 1 row/);
+  });
+
+  it("fix B: the same for a 429 -- the attempt is given back and the closed outreach stays closed", async () => {
+    const { outreachId: id } = await seed("closed-mid-2", PHONES.closedMid429);
+    const create = vi.fn(async () => {
+      await admin.query(`UPDATE outreach SET state = 'closed', close_reason = 'suppressed', closed_at = now() WHERE id = $1`, [id]);
+      throw Object.assign(new Error("twilio 429"), { status: 429 });
+    });
+    expect((await dispatcher(create)({ businessId: BIZ, outreachId: id })).status).toBe("dial_failed");
+    expect(await attemptRows(id)).toEqual([]);
+    expect(await outreachRow(id)).toMatchObject({ state: "closed", close_reason: "suppressed", attempts_made: 0 });
   });
 
   it("the read helpers return exactly the types the gate demands, and the scoped ones refuse to run unscoped", async () => {

@@ -2339,7 +2339,7 @@ function finiteCount(value, operation) {
 export async function claimOutreachForDispatch(outreachId) {
   requireTenantScope("claimOutreachForDispatch");
   const res = await q(
-    `SELECT o.id, o.business_id, o.state, o.attempts_made, o.created_at, o.hold_until,
+    `SELECT o.id, o.business_id, o.state, o.attempts_made, o.created_at, o.hold_until, o.next_attempt_at,
             o.campaign_id, o.campaign_version, c.status AS campaign_status, c.compliance_class, c.template_key,
             v.config, k.id AS contact_id, k.phone_e164, k.first_name, k.timezone AS contact_timezone,
             b.outbound_enabled, b.outbound_max_concurrent, b.timezone AS business_timezone, b.name AS business_name
@@ -2536,15 +2536,18 @@ export async function closeOutreach(outreachId, closeReason, outcome = null) {
 }
 
 /**
- * Store the CallSid Twilio returned. Never overwrites one: the directory
- * trigger (044) routes callbacks by this value.
+ * Store the CallSid Twilio returned. Never overwrites a DIFFERENT one: the
+ * directory trigger (044) routes callbacks by this value. Idempotent for the
+ * same one, because the dispatcher retries this write (a write that committed
+ * but whose reply was lost must not fail its own retry).
  * @param {string} attemptId
  * @param {string} sid
  */
 export async function setAttemptCallSid(attemptId, sid) {
   requireTenantScope("setAttemptCallSid");
   const res = await q(
-    `UPDATE call_attempts SET twilio_call_sid = $2 WHERE id = $1 AND twilio_call_sid IS NULL`,
+    `UPDATE call_attempts SET twilio_call_sid = $2
+      WHERE id = $1 AND (twilio_call_sid IS NULL OR twilio_call_sid = $2)`,
     [attemptId, sid]
   );
   if (res.error) throw res.error;
@@ -2614,6 +2617,22 @@ export async function lockCapacity() {
   requireTenantScope("lockCapacity");
   const res = await q(`SELECT pg_advisory_xact_lock(hashtext('outbound_capacity'))`);
   if (res.error) throw res.error;
+}
+
+/**
+ * Lock an outreach row and read its state, for the dispatcher's post-create
+ * failure path. With the row locked first, nothing can close it between this
+ * read and the path's own writes, so "closed" here is a fact to act on: record
+ * the attempt, leave the outreach closed.
+ * @param {string} outreachId
+ * @returns {Promise<string|null>} the state, or null when the row is not visible
+ */
+export async function lockOutreachState(outreachId) {
+  requireTenantScope("lockOutreachState");
+  const res = await q(`SELECT state FROM outreach WHERE id = $1 FOR UPDATE`, [outreachId]);
+  if (res.error) throw res.error;
+  noteAccess("lockOutreachState", { resourceIds: [outreachId], rowCount: res.rowCount || 0 });
+  return one(res)?.state ?? null;
 }
 
 /**
