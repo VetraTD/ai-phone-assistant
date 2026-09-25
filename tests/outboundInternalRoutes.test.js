@@ -233,6 +233,25 @@ describe("buildOutboundDeps", () => {
     expect(calls).toEqual([]);
   });
 
+  // Checkpoint 2a, M9: the Cloud Tasks SDK is imported on the first enqueue.
+  // A failed load must not be cached, or every later enqueue fails with it.
+  it("a failed Cloud Tasks load is retried on the next enqueue, not cached", async () => {
+    const created = [];
+    const importTasks = vi.fn()
+      .mockRejectedValueOnce(new Error("load failed"))
+      .mockResolvedValue({ CloudTasksClient: class { async createTask(req) { created.push(req); return [req.task]; } } });
+    const deps = buildOutboundDeps({
+      BASE_URL: "https://x.example", OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q", OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+    }, { importTasks });
+    expect(importTasks).not.toHaveBeenCalled();
+    const args = { businessId: "b1", outreachId: "o1", at: new Date("2026-09-28T13:00:00Z"), source: "dispatch" };
+    await expect(deps.enqueue(args)).rejects.toThrow("load failed");
+    expect(await deps.enqueue(args)).toEqual({ created: true });
+    expect(await deps.enqueue({ ...args, outreachId: "o2" })).toEqual({ created: true });
+    expect(importTasks).toHaveBeenCalledTimes(2); // the failure, then one successful load reused
+    expect(created).toHaveLength(2);
+  });
+
   it("does not construct a Twilio or Cloud Tasks client just by being called (no credentials needed to import/build)", () => {
     // No TWILIO_ACCOUNT_SID/TOKEN in this env at all; a real Twilio client
     // built eagerly with a non-"AC" SID throws in its constructor. Building
