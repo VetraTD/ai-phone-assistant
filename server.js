@@ -50,6 +50,7 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
+import { registerOutboundInternalRoutes, buildOutboundDeps } from "./lib/outbound/internalRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1401,6 +1402,20 @@ app.get("/api/debug/probe-results", async (req, res) => {
   const runs = getProbeResults();
   res.json({ calls: runs.length, runs });
 });
+
+// ---------------------------------------------------------------------------
+// Outbound calling: internal Cloud Tasks / Cloud Scheduler routes.
+// Mounted only when buildOutboundDeps() resolves BASE_URL, OUTBOUND_TASKS_QUEUE
+// and OUTBOUND_TASKS_SA -- the posture before Task 22 is "not mounted", which
+// is what keeps these two routes off the live service today.
+// ---------------------------------------------------------------------------
+
+const outboundDeps = buildOutboundDeps();
+if (outboundDeps) {
+  registerOutboundInternalRoutes(app, outboundDeps);
+} else {
+  log.info("outbound_internal_routes_disabled", {});
+}
 
 // ---------------------------------------------------------------------------
 // Centralized error handler — never expose stack traces
