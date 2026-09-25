@@ -105,6 +105,19 @@ describe("dispatch: the gate's verdicts", () => {
     expect(db.closeOutreach).toHaveBeenCalledWith("o1", "suppressed");
     expect(twilio.calls.create).not.toHaveBeenCalled();
   });
+  // Checkpoint 2a, M10: a refusal line with no outreachId cannot be traced
+  // back to the row it refused.
+  it("both gate-refusal log lines carry the outreachId", async () => {
+    const later = fakeDb(); later.activeDialCounts = vi.fn(async () => ({ globalOutbound: 0, businessOutbound: 2 }));
+    const logLater = { info: vi.fn(), error: vi.fn() };
+    await mk(later, undefined, { log: logLater }).d({ businessId: "b1", outreachId: "o1" });
+    expect(logLater.info).toHaveBeenCalledWith("outbound_gate_refused", { reason: "capacity", verdict: "later", outreachId: "o1" });
+
+    const never = fakeDb(); never.isSuppressed = vi.fn(async () => true);
+    const logNever = { info: vi.fn(), error: vi.fn() };
+    await mk(never, undefined, { log: logNever }).d({ businessId: "b1", outreachId: "o1" });
+    expect(logNever.info).toHaveBeenCalledWith("outbound_gate_refused", { reason: "suppressed", verdict: "never", outreachId: "o1" });
+  });
   it("a paused campaign parks the outreach (next_attempt_at NULL, so the sweep stops re-queuing it) with no task", async () => {
     const db = fakeDb(row({ campaign_status: "paused" })); const { d, enqueue } = mk(db);
     expect((await d({ businessId: "b1", outreachId: "o1" })).reason).toBe("campaign_paused");
