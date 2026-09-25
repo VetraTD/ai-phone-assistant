@@ -1,7 +1,7 @@
 # Outbound calling — design spec
 
 **Date:** 2026-09-24
-**Status:** Approved direction, awaiting owner review of this document
+**Status:** Approved direction. **Revised 2026-09-24 (session 1)** with the results of spike A and spike B, and with the owner's decisions on the voice, the first seconds and the situations Ava must handle. The spike data are in §9.8. The changed sections are D6, D7, D8, G2, G3, §9.3, §9.4, §9.5, §15 and §17.
 **Scope of this spec:** Part 1 in full (the generic outbound engine, built before the Digile scoping call). Parts 2 and 3 are outlined only, in §15 and §16, so that Part 1 leaves the right seams. Part 2 gets its own spec after the scoping call (plan step 5.2).
 **Companion page:** https://claude.ai/artifact/3379bzmqHG1gVDSQB2mdrv. It holds the reasoning, research, diagrams, compliance background and the step-by-step plan. This spec is the build contract. Where the two disagree, this spec wins.
 
@@ -29,9 +29,9 @@ The first campaign is Digile Media's speed-to-lead qualifier. In Part 1 it runs 
 | D3 | Recording | No audio recording in Part 1. A per-campaign recording option is a Part 2 item, built only if Digile wants audio. |
 | D4 | False disclosure | Replace "calls are recorded for quality" everywhere it is emitted with **"This call may be transcribed to help us assist you."** This is plan step 0.3. It is independent of outbound and ships first. |
 | D5 | Reactivation | Supported only for contacts holding a recorded consent to automated/AI calls, enforced in code. The `marketing_consented` compliance class is **refused at campaign save in Part 1** and enabled in Part 3. |
-| D6 | Voice and persona | The opener is rendered by the existing `services/googleTts.js` using the Chirp 3 HD voice matching the tenant's Live voice (Live default `Kore`, so `en-GB-Chirp3-HD-Kore`). Spike A generates three British samples for the owner to choose from. The demo persona is "Ava from Digile". |
-| D7 | Test caller ID | `+441372656055` (Digile's number, Twilio account A). A callback to it reaches Digile's inbound tenant, which exercises callback recognition. |
-| D8 | API budget | $10 for Part 1 across Gemini and Twilio test spend. Record spend in the existing meter (`scripts/probes/lib/spendLive.js`) and ask before exceeding. |
+| D6 | Voice and persona | **Revised after spike A.** Ava speaks in the tenant's **Gemini Live voice throughout** (default `Kore`). The owner compared the Chirp 3 HD pre-rendered opener with the Live-spoken one by ear and chose Live: the Chirp handoff "sounds off" in tone and pace. `services/googleTts.js` is **not** used on outbound calls. Any audio made in advance (the silent-pickup backstop line and the voicemail message, §9.3) is rendered by **Gemini Live itself** in that same voice, so there is one voice throughout. The demo persona is "Ava from Digile". |
+| D7 | Test caller ID | `+441372656055` (Digile's number, Twilio account A). A callback to it reaches Digile's inbound tenant, which exercises callback recognition. **Owner, 2026-09-24:** no UK legs for now. Spike B ran from `+18176011171` (account B) to the owner's US mobile. Both accounts are confirmed to own their numbers and to have US and GB dialing permission. |
+| D8 | API budget | $10 for Part 1 across Gemini and Twilio test spend, recorded in `scripts/probes/lib/spendLive.js`. **Implemented:** `CAP_USD` was raised by exactly $10, to $31.73, and `reserveP1(probe, worstUsd)` refuses anything that would take the `P1-` total past $10 (commit `695b4d9`). Session 1 spent **$0.19**, which is an over-estimate. |
 | D9 | Parallel runs | Allowed on the fast schedule, for the dashboard and paperwork. |
 | D10 | Spec location | Committed on `fix/closing-sequence-2026-09-17` (production's branch). Step 0.2 fast-forwards local `main` and `dev` to it. **Nothing is pushed** until the owner confirms whether Railway still auto-deploys `main`. |
 
@@ -51,8 +51,8 @@ Part 1 is done when all of the following hold on the deployed service with outbo
 | # | Criterion | How it's measured |
 |---|---|---|
 | G1 | The AI can place a call to an allow-listed number and hold a normal conversation using the same brain as inbound | Live round 1, scenario 1 |
-| G2 | The person hears the opener within 2,000 ms of answering (or of their first word when they speak first) | `outbound_opener_played.first_audio_ms` at or under 2000 on every live-round call |
-| G3 | The opener always contains the business name and an AI disclosure | Validated at campaign save, and asserted on every played opener |
+| G2 | The person hears Ava **within 2,000 ms of starting to speak**, or within 2,000 ms of answering if they say nothing. These are Ofcom's two limbs (§9.3). | `outbound_first_audio{from_answer_ms, from_speech_ms}` within those limits on every live-round call |
+| G3 | Ava's first turn always contains the business name and an AI disclosure | The backstop line and voicemail are validated at campaign save. A Live-spoken first turn is checked by the first-turn detector, which re-prompts if either element is missing (§9.3). Counted on every live-round call |
 | G4 | Voicemail is detected and handled by policy: message left after the beep, or a clean hang-up | Live round 1, scenario 2; `call_attempts.answered_by` |
 | G5 | No call outside the calling window, to a suppressed number, without the required consent, or beyond attempt caps | Gate unit tests, each shown to fail when its check is removed |
 | G6 | No contact is ever dialled twice for the same attempt | Concurrency test: duplicate dispatch of the same task produces exactly one Twilio call |
@@ -251,6 +251,12 @@ Index: (`state`, `next_attempt_at`).
 
 These are needed because some reads happen before the tenant is known. They mirror `app_lookup_business_by_phone`: each returns the minimum, sets `app.business_id` where a single tenant is involved, and is granted to `vetra_app` only.
 
+> **Amended by the Part 1 plan** (`docs/superpowers/plans/2026-09-24-outbound-part1.md` §0.3):
+> - **C1:** FORCE RLS binds a SECURITY DEFINER function's owner, and Cloud SQL's `postgres` cannot bypass it. So these functions read trigger-maintained, no-RLS directory tables, exactly as migration 033 does, never the tenant tables directly.
+> - **C13:** capacity counts outbound only, from `call_attempts`. No trigger is added to `calls`.
+> - **C2:** `app_open_outreach_by_phone` becomes an ordinary tenant-scoped query.
+> - **C15:** the media route keys on CallSid.
+
 - `app_outbound_attempt_by_call_sid(sid text)` returns `business_id` and the attempt, outreach and campaign-version identifiers, and sets `app.business_id`. The outbound door, the status and AMD callbacks, and the session all use it.
 - `app_outbound_due(limit int)` returns `(business_id, outreach_id)` pairs whose `state = 'waiting'` and `next_attempt_at <= now()`. It is used by the sweep.
 - `app_active_call_counts()` returns `(inbound, outbound)` counts of `calls` rows with `ended_at IS NULL AND started_at > now() - interval '1 hour'`. The one-hour bound stops a call row that was never completed from blocking capacity forever. It is used by the capacity check.
@@ -270,7 +276,7 @@ Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema i
     "mon_fri": "09:00-20:00", "sat": "10:00-16:00", "sun": null,
     "outside_window": "queue"                  // "queue" | "queue_and_text"
   },
-  "opener": "Hi, is that {first_name}? It's {persona_name}, an AI assistant calling from {business_name}. You just asked about {topic}. Have you got two minutes?",
+  "opener": "Hi, is that {first_name}? It's {persona_name}, an AI assistant from {business_name}.",   // the SHORT backstop line and the must-say content of Ava's first turn (§9.3); the reason for the call comes in her next sentence
   "topic": "our clinic systems",               // ≤ 80 chars
   "objective": "Qualify the clinic and book a 30-minute discovery call.",   // ≤ 500 chars
   "notes": "",                                 // free text, ≤ 2000 chars, never truncated silently
@@ -294,7 +300,9 @@ Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema i
 
 **Save-time validation beyond types.** Each rule is a coded rule because ignoring it would hurt, get someone sued, or make them angry.
 
-- The opener must contain `{business_name}` **and** an AI disclosure matching `/\b(AI|artificial intelligence|automated assistant|virtual assistant)\b/i`, and must render to at most 300 characters. The voicemail template has the same requirement.
+- The opener must contain `{business_name}` **and** an AI disclosure matching `/\b(AI|artificial intelligence|automated assistant|virtual assistant)\b/i`, and must render to **at most 120 characters** (about 4 seconds of speech). It is the backstop line, and a person who says nothing must not sit through a speech.
+  - The limit was 300 before spike A. The 138-character demo opener took 9.2–10.3 s to say, and the owner said a long line "spoke over" them.
+- The voicemail template has the same content requirement and renders to at most 300 characters.
 - The calling window must sit inside 08:00–21:00 local on every day.
 - `compliance_class = marketing_consented` and `audience = patient` are refused, with a message that they arrive in Part 3.
 - The retry schedule has at most 6 entries, and `give_up_after_days` is at most 30.
@@ -344,7 +352,7 @@ OIDC verification reuses the existing `jsonwebtoken` + `jwks-rsa` stack (Identit
 ### 9.2 Session start (`lib/voice/live/index.js` `onStart`)
 
 - When `customParameters.direction === "outbound"`, the session resolves context **by CallSid** through `app_outbound_attempt_by_call_sid`. It never trusts stream parameters for identity; the token binds only the CallSid. If there is no match, it logs `outbound_context_missing` and closes the call.
-- It loads the business **by ID** (new `lookupBusinessById` in `services/db.js`, under `withTenant`), runs the existing `loadConfig`, and builds an `outboundContext`:
+- It loads the business **by ID**, under the tenant scope that `app_outbound_attempt_by_call_sid` sets, using the existing `fetchBusinessById` / `fetchBusinessCapabilities`. No new `lookupBusinessById` is needed; see plan correction C7. It then runs the existing `loadConfig` and builds an `outboundContext`:
   - direction and attempt;
   - campaign version config;
   - contact (first name and timezone only in the prompt);
@@ -354,20 +362,44 @@ OIDC verification reuses the existing `jsonwebtoken` + `jwks-rsa` stack (Identit
 - It creates the `calls` row with `direction: 'outbound'` and the link columns, and writes `direction` and `attemptId` to `call_state`.
 - **Inbound code paths are untouched**: an absent `direction` parameter means inbound, exactly as today.
 
-### 9.3 The opener and the first seconds
+### 9.3 The first seconds (revised 2026-09-24 after spikes A and B, owner-approved)
 
-1. The dispatch request renders the opener text, then synthesises it with `googleTts.synthesizeMulaw` (the Chirp 3 HD voice matching the tenant's Live voice), **after** calling Twilio `calls.create`, so the synthesis happens while the phone rings. It stores the audio in `call_attempts.opener_audio`. The voicemail audio is rendered the same way, only on attempts listed in `voicemail_on`.
-2. When the stream starts, the session reads `opener_audio`. It plays it on the first sign of caller speech: an energy threshold on inbound frames, reusing the existing gate/VAD code. If there is no speech within 1,500 ms of the stream starting, it plays anyway. Frames go to Twilio through the existing outbound-media path.
-3. **Gemini Live and the opener.** Spike A decides between two paths:
-   - **Seeded (preferred):** the Live session opens with the opener text seeded as the model's own first turn, so it does not speak again. Model audio is suppressed until the opener finishes playing. Caller audio is forwarded to Live throughout, so it hears whatever the caller said during the opener.
-   - **Fallback:** if seeding is not supported or sounds wrong, no pre-made audio plays for the opener. Live is told to speak the opener verbatim as its first turn, the same mechanism as the inbound greeting (`gemini.js:1551-1557`). G2 is then monitored, not guaranteed, and the spec records that.
-4. If `opener_audio` is missing (a very fast pickup, or a TTS failure), the session takes the fallback path and logs `outbound_opener_fallback`.
-5. `first_audio_ms` (answer to first outbound frame) is logged as `outbound_opener_played`. Over 2,000 ms, the attempt is marked `silent = true` (§13).
-6. Caller speech during the opener does not cut it off. The opener is short and carries the required disclosure.
+**The rule is Ofcom's, and it has two limbs.** The person must hear us no later than **2 seconds after they begin to speak**, or no later than **2 seconds after pickup** if they say nothing (Ofcom, *Revised statement of policy on persistent misuse*). The earlier draft read this as "2 s from pickup, always". Measured on the owner's two answered calls, people say "Hello?" **1.87 s and 2.2 s after answering**, so that reading makes Ava talk over them. The owner reported exactly that on spike B call 1 ("it did not let me say hello").
+
+**Ava responds to what the person says. She does not recite a line at them.**
+
+1. **Rendering while it rings.** After `calls.create`, dispatch opens a short Gemini Live session in the tenant's Live voice (D6) and has it speak two lines verbatim, then stores them as 8 kHz μ-law.
+   - The first is the **backstop line**, the rendered `opener`: at most 120 characters, e.g. "Hi, is that Sam? It's Ava, an AI assistant from Digile Media." It goes in `call_attempts.opener_audio`.
+   - On attempts in `voicemail_on` it also renders the voicemail message, into `voicemail_audio`.
+   - Spike A measured this path: Live spoke a given line verbatim in 3/3 runs, session setup took about 140 ms, and first audio arrived 0.54–0.85 s after the request.
+   - If rendering fails, the call proceeds without a backstop, logs `outbound_backstop_missing`, and the silence path in step 3 prompts Live directly. G2 is then monitored on that call, not guaranteed.
+2. **Listen first.** When the stream starts, the session opens Live with the OUTBOUND CALL prompt (§9.5), forwards the caller's audio from the first frame, and **stays silent**.
+3. **Three ways the first turn happens:**
+   - **The person speaks first.** The existing inbound VAD (`lib/voice/inboundVad.js`) marks speech onset, and Live hears the person and replies in context:
+     - "Hello?" gets "Hi, is that Sam? It's Ava, an AI assistant from Digile Media."
+     - "This is Sam, how can I help?" gets "Hi Sam, it's Ava, an AI assistant from Digile Media. You recently filled in our form about…"
+     - "Who's calling?" gets name, company and reason, then "Is Sam available?"
+
+     Spike A measured the end of the caller's speech to Live's first audio at **0.93–1.06 s**, well inside the 2 s from speech onset.
+   - **Live is slow.** If speech onset was detected but Live has produced no audio **1,600 ms after onset**, the session plays the backstop clip and seeds its text as Live's own first turn. Spike A: seeding is a GO, 6/6 across both seed shapes, with no speech before the caller, no second introduction and a coherent next question. Live then carries on from what the person says next.
+   - **Nobody speaks.** At **2,000 ms after pickup**, the session plays the backstop clip and seeds it the same way.
+     - The pickup time is the stream start minus the measured 320–370 ms offset from answer to stream start, i.e. about 1,650 ms after the stream starts.
+     - Spike B fired at 1,500 ms after stream start, which is 1.83 s after pickup. That caught the owner's hello at 1.87 s by 36 ms.
+4. **The backstop is short and interruptible.** If the person starts talking while it plays, it stops through normal barge-in and Live answers them, the way two people who say hello together sort it out. This replaces the earlier rule that "the opener cannot be cut". That rule only made sense for a 10-second pre-recorded speech.
+5. **First-turn check (G3).** After Ava's first turn, a detector checks her transcript for the business name and an AI disclosure (§7 regex). If either is missing, the session sends Live a one-line note to say it now, and logs `outbound_first_turn_incomplete`. On Live a sentence cannot be blocked before it is spoken, only corrected immediately after, so this is detect-and-correct (see *live-removes-the-text-chokepoint*).
+6. **Measurement.** `outbound_first_audio{from_answer_ms, from_speech_ms, path}`, where `path` is `live_reply`, `backstop_silence` or `backstop_slow`. A human-answered call that breaks the applicable limb is a silent call (§13.4).
+7. **Voicemail greetings sound like speech.** Live may start answering the greeting. That is harmless, because nothing is recorded before the beep, and it ends when the AMD verdict redirects the call (§9.4). The first-turn detector and outcome resolution ignore machine-answered calls.
+8. **The backstop timing is tuned in live round 1** against real hello timings. The two measured hellos straddle 2.0 s, so an occasional overlap is expected, and step 4 is what makes that acceptable.
 
 ### 9.4 Answering machines (async AMD)
 
-`calls.create` uses `MachineDetection=DetectMessageEnd`, `AsyncAmd=true`, `AsyncAmdStatusCallback=/twilio/outbound-amd` and `Timeout=25`. That's at least 15 s of ringing per Ofcom, with Twilio adding about 5 s of buffer. AMD takes one of the four per-call stream forks, alongside the one bidirectional stream.
+`calls.create` uses `MachineDetection=DetectMessageEnd`, `AsyncAmd=true` and `AsyncAmdStatusCallback=/twilio/outbound-amd`. AMD takes one of the four per-call stream forks, alongside the one bidirectional stream.
+
+**`Timeout` is 40 s on attempts listed in `voicemail_on` and 25 s otherwise. This was revised after spike B.** Ofcom needs at least 15 s of ringing and sets no maximum.
+- With `Timeout=25`, the owner's US carrier rang for 24 s and ended `no-answer` (SIP 487) **before voicemail picked up**, so no message could be left.
+- With 45 s, voicemail answered after **26.6 s** of ringing.
+
+**A declined call becomes a voicemail call.** Measured on spike B call 3: pressing decline sent the call to voicemail 7 s after ringing began, followed by `machine_end_beep` and a message left. So "rejected" usually reads as `voicemail_*`, not `busy`, and the retry logic treats it as a voicemail attempt. Carriers differ, and the UK carriers are unmeasured (D7).
 
 On the AMD callback:
 - **`human`, `unknown`:** record the value and change nothing.
@@ -382,13 +414,29 @@ A machine-answered call is excluded from silent-call accounting.
 - **Static prefix identity**, outbound only: "You are {persona_name}, an AI assistant calling on behalf of {business_name}." The inbound identity line stays byte-identical, and G9 is enforced by the golden snapshots.
 - **New dynamic block `OUTBOUND CALL`**, rendered only when direction is outbound:
   - who you are calling (first name), and why (objective, topic, trigger summary);
-  - exactly what has already been said (the opener, verbatim), and not to repeat it;
+  - **the first-turn rule (§9.3):** wait for the person. Your first reply must include your name, that you are an AI assistant, and the business name, and must respond to what they actually said. If the backstop line was already played (it is seeded as your own turn), do not repeat it;
   - that the person's identity is not yet confirmed. For a `business` audience, confirming their name is enough. If it's the wrong person, say who you're calling for, offer to call back, and share nothing else;
   - how to handle a call screener: state your name and reason once, then wait;
   - that you never claim to be human, and if asked, you confirm you are an AI;
   - the allowed actions (the campaign's capabilities), and how to end the call politely.
 - **Direction-aware strings:** sign-off ("Thanks for your time, {first_name}"), silence nudges ("Are you still there?"), and the goodbye detection used by the `end_call` gate. `closingTicRe` and `signOffRe` gain the outbound phrasings. Per the earlier closing-sequence defects, sabotage the **whole** alternation, not one branch.
-- The recorded-call disclosure line is never emitted on outbound. The opener carries the disclosure.
+- The recorded-call disclosure line is never emitted on outbound. Ava's first turn carries the AI disclosure, and the transcription notice (D4) is said on request, or in the first turn if the tenant's disclosure flag is on.
+- **Who picks up: the situations Ava must handle** (owner-approved 2026-09-24). Most of this is prompt guidance in the OUTBOUND CALL block. The tools named are already in §12.2.
+
+  | Who or what answers | What Ava does |
+  |---|---|
+  | The contact | Confirms their name (`confirm_identity`), then gives the reason for the call. |
+  | A receptionist, secretary or gatekeeper | Asks for the contact by first name and gives only a vague reason ("following up on an enquiry {first_name} made"). Waits politely if put through or on hold. Otherwise offers a callback (`schedule_callback`) or leaves a short message. Discloses no enquiry details. |
+  | A child, relative or anyone else | Asks for the contact and shares nothing else. **Never asks a child anything.** Offers to call back and ends kindly. Outcome `wrong_person`, unless a callback is booked. |
+  | A wrong number | Apologises and ends. Adds a suppression with reason `wrong_number`. Outcome `wrong_person`. |
+  | A phone's call-screening assistant (Google Call Screen, iOS) | States name and reason once, then waits. |
+  | "Bad time", driving, busy | Offers a specific callback time (`schedule_callback`). |
+  | "How did you get my number?" | Explains the enquiry or form. Offers to stop calling (`opt_out`). |
+  | "Stop calling" / "take me off your list" | `opt_out` immediately, then confirms (§13.3). |
+  | "Are you a robot / real person?" | Always says it is an AI assistant (§13.2). |
+  | A voicemail greeting | Nothing special. AMD redirects the call (§9.4). |
+
+  Live round 1 (§15) adds a gatekeeper scenario and a "someone else answers" scenario.
 
 ### 9.6 Identity and appointments
 
@@ -401,6 +449,34 @@ The existing `request_transfer` / `redialForTransfer` (`live/index.js:5148-5162`
 - The dialled number carries `<Number url="/twilio/outbound-whisper?attempt=…">`, whose TwiML says "Transfer from {persona_name}: {first_name}{, clinic_name if answered}." before the call is bridged.
 - The allowed window comes from `transfer.when`.
 - If nobody answers the transfer (a `<Dial>` timeout of 20 s), `<Dial action>` returns TwiML that says "{transfer name} will call you back shortly" and hangs up. Post-call records the outcome `callback_requested` with a `transfer_unanswered` note, and the owner notification says so. Resuming the AI session after a failed transfer is out of scope for Part 1.
+
+### 9.8 Spike results (2026-09-24, session 1)
+
+**Spike A** (`scripts/spikes/spike-a-opener.mjs`; `gemini-3.8-live` on AI Studio, voice Kore, en-GB; N=3 per arm; $0.035).
+
+| Arm | Before the caller spoke | Re-introduced itself | Coherent next question | API errors | Caller end to reply |
+|---|---|---|---|---|---|
+| S1: opener seeded as a lone `role:"model"` turn, `turnComplete:false` | 0/3 spoke | 0/3 | 3/3 | 0 | 927–948 ms |
+| S2: `(call connected)` user turn, then the model turn | 0/3 spoke | 0/3 | 3/3 | 0 | 938–946 ms |
+| F: Live speaks the opener itself (system prompt plus kick) | spoke it verbatim 3/3 | 0/3 | 3/3 | 0 | 940–1,057 ms; opener first audio 538–846 ms after the kick |
+
+- **The seeding decision:** the pre-registered rule said GO for seeding, for both shapes. Seeding is used for the backstop path (§9.3).
+- **The voice decision, by ear, the owner's (D6):** Live's voice throughout. The Chirp 3 HD samples (Kore, Aoede, Leda) were rejected for tone and pace. Chirp also runs slow through `buildSayContent`'s 300 ms-per-sentence SSML breaks: the 138-character opener took 9.2–10.3 s.
+- **Session setup** took 134–151 ms warm and 599 ms cold.
+
+**Spike B** (`scripts/spikes/spike-b-dial.mjs`; account B, `+18176011171` to the owner's US mobile; a cloudflared tunnel; async AMD, DetectMessageEnd; a bidirectional `<Connect><Stream>`; five calls; about $0.13, over-estimated).
+
+| Call | What happened | Measured |
+|---|---|---|
+| 1: answer | Clip played at stream start and talked over the owner's "Hello?" | Answer to stream start 334 ms; audio at about 0.39 s; hello at 2.2 s; AMD `unknown` after 5.7 s |
+| 2: let it ring, `Timeout=25` | `no-answer` (SIP 487) before voicemail picked up | Rang 24 s |
+| 2b: let it ring, `Timeout=45` | Voicemail answered; beep detected; REST redirect `<Play>`ed the message. **The owner confirmed the message is there and starts cleanly** | Voicemail answered after 26.6 s of ringing; AMD `machine_end_beep` after 10.6 s; redirect to fetch 114 ms |
+| 3: decline | Went to voicemail; message left | Voicemail after 7 s; beep after 10.5 s |
+| 4: answer and say "Hello?" (clip waits up to 1.5 s after stream start) | The timer fired 36 ms before the owner's hello, so the owner still felt talked over | Answer to stream start 319 ms; hello at 1.87 s; AMD `human` after 3.4 s |
+
+**What changed because of the spikes:** §9.3 (listen first, the two-limb rule, a short interruptible backstop), §9.4 (a 40 s ring on voicemail attempts; decline reads as voicemail), §7 (the opener is at most 120 characters), D6 (the voice) and G2/G3.
+
+**Still unmeasured:** UK carriers (the UK leg is deferred per D7), the real distribution of hello timings (live round 1), and Gemini Live under load.
 
 ## 10. Dispatch, gate, capacity and dialling
 
@@ -560,7 +636,11 @@ The opener and voicemail must name the business and state that this is an AI (§
 
 ### 13.4 Silent calls
 
-`first_audio_ms > 2000` on a human-answered call, or an answered call whose stream never connected, sets `silent = true`. It also sets `outreach.hold_until = answered_at + 72h` and logs `outbound_silent_call`. Machine-answered calls are excluded.
+A human-answered call breaks the two-limb rule (§9.3) when either of these holds:
+- `from_speech_ms > 2000` after the person began to speak;
+- `from_answer_ms > 2000` when they never spoke.
+
+Either case, or an answered call whose stream never connected, sets `silent = true`. It also sets `outreach.hold_until = answered_at + 72h` and logs `outbound_silent_call`. Machine-answered calls are excluded.
 
 ### 13.5 Records
 
@@ -568,7 +648,7 @@ The opener and voicemail must name the business and state that this is an AI (§
 
 ## 14. Observability, flags and deployment
 
-**Log events:** `outbound_dial`, `outbound_dial_failed`, `outbound_gate_refused{reason}`, `outbound_answered`, `outbound_amd{answered_by}`, `outbound_opener_played{first_audio_ms}`, `outbound_opener_fallback`, `outbound_silent_call`, `outbound_voicemail{left|skipped}`, `outbound_attempt_result`, `outbound_outreach_closed{reason}`, `outbound_optout_tool`, `outbound_optout_detector_fired`, `outbound_claimed_human`, `outbound_context_missing`, `outbound_webhook_delivery{status}`, `outbound_callback_recognized`.
+**Log events:** `outbound_dial`, `outbound_dial_failed`, `outbound_gate_refused{reason}`, `outbound_answered`, `outbound_amd{answered_by}`, `outbound_first_audio{from_answer_ms, from_speech_ms, path}`, `outbound_backstop_played`, `outbound_backstop_missing`, `outbound_first_turn_incomplete`, `outbound_silent_call`, `outbound_voicemail{left|skipped}`, `outbound_attempt_result`, `outbound_outreach_closed{reason}`, `outbound_optout_tool`, `outbound_optout_detector_fired`, `outbound_claimed_human`, `outbound_context_missing`, `outbound_webhook_delivery{status}`, `outbound_callback_recognized`.
 
 `live_call_summary` gains `direction`, `attempt_id` and `campaign_id`. Log-based alert policies (in `monitoring.tf`, applied by hand while Terraform is broken locally) cover `outbound_silent_call`, `outbound_dial_failed` bursts and dead webhook deliveries. Event names are checked against real `log.error` call sites, because a metric on a name nothing logs is a permanently green alert.
 
@@ -607,17 +687,27 @@ All of them are recorded for later Terraform import. The deploy itself needs own
   - OIDC verification (a wrong audience or wrong service account is refused).
 - **Database tests (`test:db`):** migrations up; RLS on every new table as `vetra_app`; the definer functions; the double-dial lock under concurrent inserts; the `calls.direction` default preserving inbound rows.
 - **Golden prompt snapshots:** all existing snapshots byte-identical (G9), plus new outbound fixtures (speed-to-lead demo, missed-call callback) reviewed by hand once and then frozen.
-- **Simulated outbound call:** extend the media-stream probe harness to drive `/twilio/live-stream/<token>` with `direction=outbound`. It fakes the Twilio answer, status and AMD callbacks and **echoes marks back, paced**, because without that no latency gets logged. It asserts that the opener plays before any model audio, the `calls` row has `direction = 'outbound'`, and post-call closes or reschedules correctly.
-- **Live round 1 (plan step 2.7),** on a UK handset, calling from `+441372656055`. The scenarios:
-  1. answer normally;
-  2. let it go to voicemail;
-  3. don't answer;
-  4. reject the call;
-  5. hang up during the opener;
-  6. ask for a human;
-  7. say "stop calling me";
-  8. ring back afterwards;
-  9. place one ordinary inbound call during the round.
+- **Simulated outbound call:** extend the media-stream probe harness to drive `/twilio/live-stream/<token>` with `direction=outbound`. It fakes the Twilio answer, status and AMD callbacks and **echoes marks back, paced**, because without that no latency gets logged. It asserts:
+  - with a caller who speaks first, Ava stays silent until speech onset and then replies;
+  - with a silent caller, the backstop plays at about 2.0 s after pickup and is seeded;
+  - the `calls` row has `direction = 'outbound'`;
+  - post-call closes or reschedules correctly.
+- **Live round 1 (plan step 2.7).** Per D7 it runs on the owner's US handset for now, from `+18176011171`. The UK handset from `+441372656055` is deferred. The scenarios:
+  1. answer with "Hello?" (Ava waits for it, then replies in context);
+  2. answer with "This is {name}, how can I help?" (Ava's reply uses it);
+  3. answer and say nothing (the backstop at about 2 s);
+  4. let it go to voicemail;
+  5. don't answer;
+  6. decline the call (expect it to read as voicemail on US carriers, per §9.4);
+  7. hang up during Ava's first line;
+  8. ask for a human;
+  9. say "stop calling me";
+  10. play a gatekeeper ("Digile clinic reception, who's calling?");
+  11. play someone else ("He's not here, I'm his son");
+  12. ring back afterwards;
+  13. place one ordinary inbound call during the round.
+
+  Every answered call records the hello timing. Those timings tune the 2.0 s backstop (§9.3 step 8).
 
   **Pass criteria:** G1, G2, G4, G7, G8 and G9.
 - **Live round 2 (plan step 3.7):** 10–20 calls through the demo qualifier, including 2–3 regional accents and a noisy line. Pass criterion is G10. Report per call, the unit a caller feels, not per gate event.
@@ -648,13 +738,18 @@ All of them are recorded for later Terraform import. The deploy itself needs own
 
 | Risk | Handling |
 |---|---|
-| Live may not accept a seeded first turn cleanly (spike A) | The fallback is fully specified (§9.3). G2 becomes monitored rather than guaranteed, and the page and this spec are updated. |
-| The Chirp 3 HD voice may not sound identical to the Live voice | The owner judges by ear in spike A. If it's jarring, choose a Live voice and Chirp voice pair that match, or use the fallback path. |
-| AMD accuracy and timing on UK mobile voicemail is unmeasured | Spike B measures it. `unknown` is treated as human, which is safe because the AI discloses and a machine hears a normal opener. |
+| ~~Live may not accept a seeded first turn cleanly (spike A)~~ | **Resolved 2026-09-24:** seeding is a GO, 6/6 (§9.8). |
+| ~~The Chirp 3 HD voice may not sound identical to the Live voice~~ | **Resolved:** the owner chose Live's own voice for everything (D6). Pre-rendered clips are made by Live. |
+| People say "Hello?" close to Ofcom's 2 s silence limit (measured 1.87 s and 2.2 s) | Listen first; the two-limb rule; a short, interruptible backstop at about 2.0 s after pickup (§9.3). Tuned in live round 1. |
+| The first turn is model-spoken, so its disclosure cannot be pre-gated | First-turn detector plus a correction note (§9.3 step 5). Counted per call (G3). |
+| AMD accuracy and timing on UK mobile voicemail is unmeasured | US measured in spike B (§9.8). The UK leg is deferred (D7). `unknown` is treated as human, which is safe because the AI discloses. |
+| Whether an AI voice counts as Ofcom's "live operator" is untested | The design meets the stricter reading anyway (§9.3). Flagged for the solicitor with the paperwork (step 0.6). |
 | Twilio account A limits are unknown (profile type) | Gate reason `capacity` handles Twilio's concurrency error. The Business profile follows the LLC. |
 | Gemini Live concurrent-session limit is unmeasured | `OUTBOUND_MAX_CONCURRENT` is kept low (8). A load test is a Part 3 item. |
-| No UK handset | An owner prerequisite. A US phone can run spike B's mechanics only. |
-| `services/googleTts.js` may not be configured on the Live-only deployment | Spike A checks `isConfigured()` against the serving revision's environment. If it isn't configured, adding the Cloud TTS credential or API enablement becomes a stage 2 deploy item. |
+| No UK handset | The owner decided on 2026-09-24: no UK legs for now (D7). Live round 1 runs on the owner's US handset. |
+| `services/googleTts.js` is not configured on the serving revision | **Checked:** `isConfigured()` is false (neither env var is set), and `texttospeech.googleapis.com` is enabled. This is **moot for outbound** now that clips are rendered by Live (D6). Recorded for any future TTS use. |
+| Cloud Tasks API not enabled on `vetra-uk-edc8ca` | A stage 2 deploy item (plan Task 22). |
+| Rendering clips needs a Live session during ringing | About 150 ms setup plus the speaking time, roughly $0.002–0.004 per render. It counts against Gemini Live concurrency, so it is included in `OUTBOUND_MAX_CONCURRENT` headroom. |
 | LLC not yet formed | Blocks go-live (the DPA), not Part 1. |
 | The August appeal said "no outbound" | D2 note, plus consent-only design. |
 
@@ -668,7 +763,7 @@ All of them are recorded for later Terraform import. The deploy itself needs own
   - `lib/voice/live/index.js`: `onStart` at about line 5185, transfer at 5148–5162, and the voice resolution around line 284
   - `services/gemini.js`: `buildStaticSystemPrefix`, and the greeting at 1551–1557
   - `services/db.js`: `lookupBusinessByPhone` at 733, `withTenant` at 2106
-  - `services/googleTts.js`: `synthesizeMulaw`
+  - `services/googleTts.js`: `synthesizeMulaw` (**not used on outbound** after D6's revision; the backstop and voicemail clips are rendered by a short Gemini Live session, see `scripts/spikes/spike-a-opener.mjs` for the proven shape)
   - `lib/callStateStore.js:43`
   - `adapters/scheduling/internal.js`
   - `capabilities/_contract.js`
