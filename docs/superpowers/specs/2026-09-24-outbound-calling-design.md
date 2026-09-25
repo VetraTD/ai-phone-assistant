@@ -361,6 +361,12 @@ OIDC verification reuses the existing `jsonwebtoken` + `jwks-rsa` stack (Identit
   - `party: { phone, source: "dialed", verified: false }`.
 - It creates the `calls` row with `direction: 'outbound'` and the link columns, and writes `direction` and `attemptId` to `call_state`.
 - **Inbound code paths are untouched**: an absent `direction` parameter means inbound, exactly as today.
+- **Amended 2026-09-25 (Task 14, session 2b; owner decision D-b and Ruling P-3).**
+  - **No caller history, no "THIS CALLER'S NUMBER" block on outbound (D-b).** The session does not call `fetchCallerContext` for an outbound call, and the `THIS CALLER'S NUMBER` prompt block (`services/gemini.js`) is not emitted. Inbound is byte-identical.
+  - **`extras.callerPhone` stays empty on outbound (P-3).** `state.callerNumber` is the contact's dialled number, because `calls.caller_number` means "the other party" (§6.2) and `createCall` receives it as `callerNumber`, with the campaign's `caller_id` as `twilioNumber`. With `extras.callerPhone` empty the number block emits nothing, and the phone-keyed tools (`phone_on_file`, `lookupByCaller`, `clientPhone`) fail closed until `ctx.party` (§9.6, Task 18) carries the phone.
+  - **Identity is the token's CallSid.** `ws.authorizedCallSid` (bound by the signed media-stream token) is resolved; `customParameters.businessPhone`/`callerPhone` and the `LIVE_BUSINESS_PHONE` override are not read on the outbound branch. `direction` only selects the branch: a forged `direction` on an inbound call's stream finds no attempt and is closed with 1008 and `outbound_context_missing`. With token enforcement explicitly off (`TWILIO_VALIDATE_SIGNATURE=false`, a local rig) the start frame's CallSid is used; with it on and no CallSid bound, the stream is refused.
+  - **The business config is the inbound one.** The business row plus its capability rows (`fetchBusinessById` + `fetchBusinessCapabilities`, the same shape `lookupBusinessByPhone` returns) go through the same `loadConfig`; the campaign config and the rest of the context live on `state.outboundCall` / `extras.outboundCall` (named for the "outbound means model audio" collision in `lib/voice/live/index.js`).
+  - **The opener is re-rendered at call time** from the current values (O-4). Over 120 characters, the stored clip is not used (`outbound_backstop_render_refused {attemptId, chars}`) and the §9.3 prompt path applies.
 
 ### 9.3 The first seconds (revised 2026-09-24 after spikes A and B, owner-approved)
 

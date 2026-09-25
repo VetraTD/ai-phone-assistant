@@ -763,11 +763,34 @@ export async function lookupBusinessByPhone(twilioNumber) {
  * @param {string} callSid - Twilio Call SID
  * @param {string} callerNumber - From number
  * @param {string} twilioNumber - To number
+ * @param {{direction?: string, campaignId?: string, campaignVersion?: number, outreachId?: string, attemptId?: string, contactId?: string}} [link]
+ *   Outbound only (spec §6.2, Task 14): the call's direction and its links to
+ *   the campaign, outreach, attempt and contact. On outbound `callerNumber` is
+ *   the contact ("the other party") and `twilioNumber` our caller_id, so the
+ *   column meanings do not change. Omitted by every inbound caller, and then
+ *   the statement and its parameters are exactly the four-argument ones.
  * @returns {Promise<string|null>} The new call's UUID or null on failure
  */
-export async function createCall(businessId, callSid, callerNumber, twilioNumber) {
+export async function createCall(businessId, callSid, callerNumber, twilioNumber, link) {
   if (!pool) return null;
-  const res = await q(
+  const res = link
+    ? await q(
+        `INSERT INTO calls (business_id, twilio_call_sid, caller_number, twilio_number, direction, campaign_id, campaign_version, outreach_id, attempt_id, contact_id)
+     VALUES ($1, $2, $3, $4, COALESCE($5::text, 'inbound'), $6, $7, $8, $9, $10) RETURNING id`,
+        [
+          businessId,
+          callSid,
+          callerNumber,
+          twilioNumber,
+          link.direction ?? null,
+          link.campaignId ?? null,
+          link.campaignVersion ?? null,
+          link.outreachId ?? null,
+          link.attemptId ?? null,
+          link.contactId ?? null,
+        ]
+      )
+    : await q(
     `INSERT INTO calls (business_id, twilio_call_sid, caller_number, twilio_number)
      VALUES ($1, $2, $3, $4) RETURNING id`,
     [businessId, callSid, callerNumber, twilioNumber]
@@ -2896,5 +2919,59 @@ export async function outboundAmdContext(attemptId) {
     attemptNo: row.attempt_no,
     complianceClass: row.compliance_class,
     voicemailOn: Array.isArray(row.config?.retries?.voicemail_on) ? row.config.retries.voicemail_on : [],
+  };
+}
+
+/**
+ * Everything the Live session needs about THIS attempt (spec §9.2, Task 14):
+ * the attempt (number, dialled number, the pre-rendered backstop clip), its
+ * outreach (links, trigger), the campaign (class, audience, template), the
+ * PINNED campaign version's config, and the contact (first name, timezone).
+ *
+ * Runs inside `withTenant` -- lib/outbound/callContext.js resolves the tenant
+ * first with `outboundAttemptByCallSid` (the definer that works before the
+ * tenant is known) and scopes to what it found, so RLS shows only this call's
+ * rows. PHI: the contact's number and first name and the trigger payload.
+ *
+ * @param {string} attemptId
+ * @returns {Promise<null | {attemptNo: number, openerAudio: Buffer|null, toNumber: string, outreachId: string,
+ *   campaignId: string, campaignVersion: number, contactId: string, trigger: object, templateKey: string,
+ *   complianceClass: string, audience: string, config: object, firstName: string|null, contactTimezone: string|null}>}
+ */
+export async function outboundCallContext(attemptId) {
+  requireTenantScope("outboundCallContext");
+  const res = await q(
+    `SELECT a.attempt_no, a.opener_audio, a.to_number,
+            o.id AS outreach_id, o.campaign_id, o.campaign_version, o.contact_id, o.trigger,
+            c.template_key, c.compliance_class, c.audience,
+            v.config,
+            k.first_name, k.timezone AS contact_timezone
+       FROM call_attempts a
+       JOIN outreach o ON o.id = a.outreach_id
+       JOIN campaigns c ON c.id = o.campaign_id
+       JOIN campaign_versions v ON v.campaign_id = o.campaign_id AND v.version = o.campaign_version
+       JOIN contacts k ON k.id = o.contact_id
+      WHERE a.id = $1`,
+    [attemptId]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("outboundCallContext", { resourceIds: [attemptId, row?.contact_id].filter(Boolean), rowCount: res.rowCount || 0 });
+  if (!row) return null;
+  return {
+    attemptNo: row.attempt_no,
+    openerAudio: row.opener_audio ?? null,
+    toNumber: row.to_number,
+    outreachId: row.outreach_id,
+    campaignId: row.campaign_id,
+    campaignVersion: row.campaign_version,
+    contactId: row.contact_id,
+    trigger: row.trigger ?? {},
+    templateKey: row.template_key,
+    complianceClass: row.compliance_class,
+    audience: row.audience,
+    config: row.config,
+    firstName: row.first_name ?? null,
+    contactTimezone: row.contact_timezone ?? null,
   };
 }

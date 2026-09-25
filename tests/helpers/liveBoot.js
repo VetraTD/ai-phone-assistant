@@ -30,8 +30,12 @@ export class FakeSocket extends EventEmitter {
     this.readyState = 1;
   }
   send() {}
-  close() {
+  // Records the close code (Task 14): the outbound 1008 path is asserted on
+  // it. `closeCode` stays undefined for a socket nobody closed.
+  close(code, reason) {
     this.readyState = 3;
+    this.closeCode = code;
+    this.closeReason = reason;
   }
   deliver(msg) {
     this.emit("message", Buffer.from(JSON.stringify(msg)));
@@ -89,6 +93,17 @@ const FRAME_MS = 20;
  * @param {Array}  [opts.seedAppointments] - rows already in the diary
  * @param {number} [opts.slotCapacity]
  * @param {object} [opts.env]
+ * @param {object} [opts.customParameters] - Task 14. The stream's
+ *   customParameters, verbatim. Omitted: `{businessPhone, callerPhone}` as
+ *   before.
+ * @param {boolean} [opts.waitForConnect=true] - Task 14. `false` returns once
+ *   the start frame is delivered and settled, without waiting for
+ *   `live.connect` -- the outbound 1008 path never connects.
+ * @param {object} [opts.database] - Task 14. Replaces `fakeDb(config,
+ *   businessId)`; the outbound path needs the by-CallSid resolver on it.
+ * @param {string|null} [opts.authorizedCallSid] - Task 14. What the signed
+ *   stream token bound (server.js sets `ws.authorizedCallSid`). Omitted:
+ *   unset, as before.
  */
 export async function bootLive({
   config,
@@ -99,8 +114,13 @@ export async function bootLive({
   seedAppointments = [],
   slotCapacity = 1,
   env = {},
+  customParameters,
+  waitForConnect = true,
+  database,
+  authorizedCallSid,
 } = {}) {
   const ws = new FakeSocket();
+  if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
   const live = fakeLive();
   const { deps, store } = makeFakeDeps({ seedAppointments, slotCapacity });
 
@@ -116,7 +136,7 @@ export async function bootLive({
   await handleLiveSessionConnection(ws, {}, {
     now: () => clock,
     connect: live.connect,
-    database: fakeDb(config, businessId),
+    database: database ?? fakeDb(config, businessId),
     env,
     capabilityDeps: deps,
   });
@@ -126,14 +146,19 @@ export async function bootLive({
     start: {
       callSid,
       streamSid: "MZ1",
-      customParameters: {
+      customParameters: customParameters ?? {
         businessPhone: businessPhone || config.mainPhone,
         callerPhone,
       },
     },
   });
-  await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
-  await new Promise((r) => setImmediate(r));
+  if (waitForConnect) {
+    await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
+    await new Promise((r) => setImmediate(r));
+  } else {
+    // Let the start handler's awaited lookups run to wherever they stop.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  }
 
   // A tool round is fire-and-forget from the outside -- guards, packForTool, the
   // awaited execute, the effect merge -- so there is nothing to await. 25 ms is
