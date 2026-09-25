@@ -2742,36 +2742,78 @@ export async function outboundAttemptByCallSid(callSid) {
  * on a duplicate terminal callback would move `calls.ended_at` a second time
  * for nothing.
  *
+ * ---------------------------------------------------------------------------
+ * WHY TWO STATEMENTS, NOT ONE CTE (fix round 2, Critical)
+ * ---------------------------------------------------------------------------
+ *
+ * The first version of this function used `WITH before AS (SELECT ... WHERE
+ * id = $1) UPDATE call_attempts a SET ... FROM before WHERE a.id = $1`, on
+ * the theory that a single statement's CTE and target-table row see a
+ * consistent snapshot. They do not, under concurrency: `before` is
+ * materialized ONCE, when the statement starts -- before the UPDATE half
+ * even tries to acquire the row lock. Under READ COMMITTED, when a second,
+ * genuinely concurrent call blocks behind an uncommitted first one,
+ * Postgres's EvalPlanQual recheck (once the lock frees up) re-fetches bare
+ * `a.<column>` references against the now-current row, but does NOT
+ * re-evaluate a CTE that was already computed. So the second call's `before`
+ * stays wrong -- it never learns the first call already landed.
+ *
+ * Reproduced on two real connections (tests/db/outboundDoorAttempt.test.js,
+ * "race-safety" block): two concurrent terminal stamps both came back
+ * firstTerminalStamp:true, and status_completed_at moved to the SECOND
+ * one's time; a stray "ringing" blocked behind an uncommitted "completed"
+ * still landed once unblocked, moving twilio_status backwards.
+ *
+ * The fix is two statements in the SAME transaction (the caller always runs
+ * this inside `withTenant`/`withTenantSafe`'s one open transaction):
+ *   1. `SELECT ... FOR UPDATE` -- blocks until any concurrent stamp on this
+ *      row has committed or rolled back, THEN returns the row as it now
+ *      truly is, and holds the lock.
+ *   2. A plain `UPDATE ... WHERE id = $1` with bare column references,
+ *      using ordinary parameters (not a second read) for the "was already
+ *      terminal" freeze condition -- safe because nothing else can touch
+ *      this row between the two statements: we are the one holding the lock.
+ *
  * @param {string} attemptId
  * @param {{twilioStatus: string, answered?: boolean, terminal?: boolean, result?: string|null}} stamp
  * @returns {Promise<{firstTerminalStamp: boolean, answered: boolean}>}
  */
 export async function stampAttemptStatus(attemptId, { twilioStatus, answered = false, terminal = false, result = null }) {
   requireTenantScope("stampAttemptStatus");
+
+  // Statement 1: lock the row and read its TRUE current state. Blocks here,
+  // not in statement 2, if another stamp on the same attempt is mid-flight.
+  const locked = await q(
+    `SELECT status_completed_at, answered_at FROM call_attempts WHERE id = $1 FOR UPDATE`,
+    [attemptId]
+  );
+  if (locked.error) throw locked.error;
+  const priorRow = one(locked);
+  if (!priorRow) {
+    throw new Error(`stampAttemptStatus: attempt ${attemptId} not found (or not visible under this scope)`);
+  }
+  const wasTerminalAlready = priorRow.status_completed_at !== null;
+  const wasAnswered = priorRow.answered_at !== null;
+  const firstTerminalStamp = terminal && !wasTerminalAlready;
+
+  // Statement 2: an ordinary UPDATE, on the row we already hold the lock on.
+  // Bare column references (COALESCE(answered_at, now()), etc.) are safe
+  // here for the same reason they were never the problem: nothing else can
+  // be racing this specific row between statement 1 and this one.
   const res = await q(
-    `WITH before AS (
-       SELECT status_completed_at, answered_at FROM call_attempts WHERE id = $1
-     )
-     UPDATE call_attempts a
-        SET twilio_status = CASE
-                               WHEN before.status_completed_at IS NOT NULL AND NOT $4 THEN a.twilio_status
-                               ELSE $2
-                             END,
-            answered_at = CASE WHEN $3 THEN COALESCE(before.answered_at, now()) ELSE before.answered_at END,
-            ended_at = CASE WHEN $4 THEN COALESCE(a.ended_at, now()) ELSE a.ended_at END,
-            status_completed_at = CASE WHEN $4 THEN COALESCE(before.status_completed_at, now()) ELSE before.status_completed_at END,
-            result = CASE WHEN $5::text IS NOT NULL THEN COALESCE(a.result, $5::text) ELSE a.result END
-       FROM before
-      WHERE a.id = $1
-      RETURNING (before.status_completed_at IS NULL AND $4) AS first_terminal_stamp,
-                (before.answered_at IS NOT NULL) AS answered`,
-    [attemptId, twilioStatus, answered, terminal, result]
+    `UPDATE call_attempts
+        SET twilio_status = CASE WHEN $6 AND NOT $4 THEN twilio_status ELSE $2 END,
+            answered_at = CASE WHEN $3 THEN COALESCE(answered_at, now()) ELSE answered_at END,
+            ended_at = CASE WHEN $4 THEN COALESCE(ended_at, now()) ELSE ended_at END,
+            status_completed_at = CASE WHEN $4 THEN COALESCE(status_completed_at, now()) ELSE status_completed_at END,
+            result = CASE WHEN $5::text IS NOT NULL THEN COALESCE(result, $5::text) ELSE result END
+      WHERE id = $1`,
+    [attemptId, twilioStatus, answered, terminal, result, wasTerminalAlready]
   );
   if (res.error) throw res.error;
   if (res.rowCount !== 1) throw new Error(`stampAttemptStatus: expected 1 row, got ${res.rowCount}`);
   noteAccess("stampAttemptStatus", { resourceIds: [attemptId], rowCount: res.rowCount });
-  const row = one(res);
-  return { firstTerminalStamp: !!row?.first_terminal_stamp, answered: !!row?.answered };
+  return { firstTerminalStamp, answered: wasAnswered };
 }
 
 /**

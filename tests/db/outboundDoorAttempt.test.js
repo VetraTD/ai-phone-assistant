@@ -243,3 +243,97 @@ d("stampAttemptStatus: twilio_status freezes after a terminal stamp unless the n
     expect(afterSecondStrayRinging.twilio_status).toBe("canceled");
   });
 });
+
+// Fix round 2 (Critical, found on the re-review). The single-statement CTE
+// above (`WITH before AS (SELECT ... FROM call_attempts WHERE id = $1)
+// UPDATE ...`) evaluates `before` ONCE, from the snapshot at statement
+// START -- BEFORE the UPDATE blocks on the row lock. Under READ COMMITTED,
+// when a second concurrent stamp blocks behind an uncommitted first one,
+// Postgres's EvalPlanQual recheck (once the lock is free) refreshes bare
+// `a.<column>` references but does NOT re-evaluate a materialized CTE. So a
+// second, genuinely concurrent call sees the FIRST call's PRE-write state in
+// `before`, not its post-commit state -- reproduced below on two real
+// connections (the shared pool naturally hands out two: `db.withTenant`
+// calls `pool.connect()` per unit of work).
+//
+// This uses a manual gate (a Promise held open inside the first
+// `db.withTenant` unit) to force tx2's write to arrive and block WHILE tx1's
+// write is done but not yet committed -- the exact window the bug lives in.
+d("stampAttemptStatus: race-safety under two genuinely concurrent connections (fix round 2, Critical)", () => {
+  /**
+   * Starts tx1: stamps `first`, signals once the write has happened (lock
+   * held), then blocks on `gate` before committing. Returns
+   * { result: Promise<outcome>, locked: Promise<void>, release: () => void }.
+   */
+  function startHeldStamp(id, stamp) {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let signalLocked;
+    const locked = new Promise((resolve) => { signalLocked = resolve; });
+    const result = db.withTenant(BIZ, async () => {
+      const outcome = await db.stampAttemptStatus(id, stamp);
+      signalLocked();
+      await gate;
+      return outcome;
+    });
+    return { result, locked, release };
+  }
+
+  it("(a) two concurrent terminal stamps: exactly ONE reports firstTerminalStamp=true, and status_completed_at is NOT moved by the second (blocked) one", async () => {
+    const id = await mkAttempt("CAdoorattempt-race-a", 5);
+    const tx1WriteAt = Date.now();
+
+    const tx1 = startHeldStamp(id, { twilioStatus: "completed", answered: false, terminal: true, result: null });
+    await tx1.locked; // tx1 has written and holds the row lock, uncommitted
+
+    // Start tx2 -- its own SELECT/UPDATE will now block on tx1's lock. Give
+    // it time to actually reach Postgres and enter the wait before we hold
+    // tx1 open a good while longer -- if tx2's write lands AFTER a long
+    // enough hold, its own now() would be measurably later than tx1's.
+    const tx2 = db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(id, { twilioStatus: "canceled", answered: false, terminal: true, result: null })
+    );
+    await new Promise((r) => setTimeout(r, 150)); // let tx2's statement actually block
+
+    await new Promise((r) => setTimeout(r, 900)); // hold tx1 open well past tx2's own now(), if the bug lets it write
+    tx1.release();
+
+    const [outcome1, outcome2] = await Promise.all([tx1.result, tx2]);
+
+    // tx1 wrote first and holds the lock throughout -- it is deterministically
+    // the FIRST terminal stamp, not a coin flip.
+    expect(outcome1).toEqual({ firstTerminalStamp: true, answered: false });
+    // THE BUG: on the CTE version this also came back {firstTerminalStamp:true},
+    // because `before` was captured before tx1 even wrote.
+    expect(outcome2).toEqual({ firstTerminalStamp: false, answered: false });
+
+    const row = (await admin.query(`SELECT status_completed_at FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    // status_completed_at must be close to tx1's OWN write time (right at the
+    // top of this test), not ~900ms+ later -- which is what tx2's own now()
+    // would produce if it were allowed to (re-)write it.
+    const ageMs = row.status_completed_at.getTime() - tx1WriteAt;
+    expect(ageMs).toBeGreaterThanOrEqual(0);
+    expect(ageMs).toBeLessThan(600); // well under the 900ms hold; the CTE bug measured ~900ms+
+  });
+
+  it("(b) a non-terminal status blocked behind an uncommitted terminal stamp does not move twilio_status backwards once it lands", async () => {
+    const id = await mkAttempt("CAdoorattempt-race-b", 6);
+
+    const tx1 = startHeldStamp(id, { twilioStatus: "completed", answered: false, terminal: true, result: null });
+    await tx1.locked;
+
+    const tx2 = db.withTenant(BIZ, () =>
+      db.stampAttemptStatus(id, { twilioStatus: "ringing", answered: false, terminal: false, result: null })
+    );
+    await new Promise((r) => setTimeout(r, 150));
+
+    tx1.release();
+    await Promise.all([tx1.result, tx2]);
+
+    const row = (await admin.query(`SELECT twilio_status FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    // THE BUG: on the CTE version this came back "ringing" -- tx2's `before`
+    // CTE was captured before tx1 committed, so it never saw
+    // status_completed_at as set and the freeze condition never engaged.
+    expect(row.twilio_status).toBe("completed");
+  });
+});
