@@ -10,6 +10,13 @@ describe("campaign schema export (the dashboard's copy)", () => {
   });
   it("carries the Part 1 refusals, so the dashboard can grey them out", () => {
     const s = buildCampaignSchemaExport();
-    expect(s.refusedInPart1).toEqual({ compliance_class: ["marketing_consented"], audience: ["patient"] });
+    // Fix round 1 (Important 3, controller ruling): template_key is refused
+    // for every value except speed_to_lead in Part 1 -- reactivation would
+    // otherwise dodge the marketing_consented refusal entirely.
+    expect(s.refusedInPart1).toEqual({
+      compliance_class: ["marketing_consented"],
+      audience: ["patient"],
+      template_key: ["missed_call_callback", "reminder", "no_show", "aftercare", "review_request", "reactivation", "custom"],
+    });
   });
 });

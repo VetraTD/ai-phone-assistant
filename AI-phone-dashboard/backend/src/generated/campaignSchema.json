@@ -13,7 +13,8 @@
     "give_up_after_days": 30,
     "consent_window_days": 90,
     "max_call_minutes": 30,
-    "first_name_worst_case": 30
+    "first_name_worst_case": 30,
+    "booking_length_min": 240
   },
   "enums": {
     "template_key": [
@@ -64,6 +65,7 @@
     "caller_id_spoken"
   ],
   "aiDisclosurePattern": "\\b(AI|artificial intelligence|automated assistant|virtual assistant)\\b",
+  "aiDisclosureFlags": "i",
   "windowBounds": {
     "earliest": "08:00",
     "latest": "21:00"
@@ -74,6 +76,15 @@
     ],
     "audience": [
       "patient"
+    ],
+    "template_key": [
+      "missed_call_callback",
+      "reminder",
+      "no_show",
+      "aftercare",
+      "review_request",
+      "reactivation",
+      "custom"
     ]
   }
 }

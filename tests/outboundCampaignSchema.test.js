@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateCampaign, renderTemplate, spokenNumber, AI_DISCLOSURE_RE } from "../lib/outbound/campaignSchema.js";
+import { validateCampaign, renderTemplate, spokenNumber, AI_DISCLOSURE_RE, buildCampaignSchemaExport } from "../lib/outbound/campaignSchema.js";
 import { TEMPLATES, PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
 
 const META = { name: "Speed to lead", template_key: "speed_to_lead", compliance_class: "solicited", audience: "business" };
@@ -64,4 +64,86 @@ describe("renderTemplate / spokenNumber", () => {
     expect(renderTemplate("Hi {first_name}, {business_name}", { first_name: "Sam", business_name: "Digile" })).toBe("Hi Sam, Digile"));
   it("reads a UK number in national form, grouped for speech", () => expect(spokenNumber("+441372656055")).toBe("01372 656 055"));
   it("AI_DISCLOSURE_RE is the spec's regex", () => expect(AI_DISCLOSURE_RE.source).toBe("\\b(AI|artificial intelligence|automated assistant|virtual assistant)\\b"));
+});
+
+// Fix round 1 (opus review): four silent-pass holes in validateCampaign, each
+// one a bad campaign that used to save with NO error.
+describe("fix round 1 -- IMPORTANT 1: the disclosure check cannot be beaten by gluing AI onto a placeholder", () => {
+  it("{persona_name}AI glued with no space is refused, even though it renders as e.g. 'AvaAI'", () =>
+    expect(errPaths(v({ ...good(), opener: "Hi {first_name}, it's {persona_name}AI from {business_name}." }))).toContain("opener"));
+  it("AI{business_name} glued with no space is refused", () =>
+    expect(errPaths(v({ ...good(), opener: "Hi {first_name}, AI{business_name} calling." }))).toContain("opener"));
+  it("a voicemail with {caller_id_spoken}AI glued is refused", () =>
+    expect(errPaths(v({ ...good(), voicemail: "Hi {first_name}, {business_name} here. Ring {caller_id_spoken}AI now." }))).toContain("voicemail"));
+  it("the shipped template's real 'an AI assistant' (bounded by spaces, not a placeholder) still passes", () => expect(v(good()).ok).toBe(true));
+});
+
+describe("fix round 1 -- IMPORTANT 2: a missing business name cannot pass", () => {
+  it("no businessName argument at all is refused, not silently ok", () => {
+    const r = validateCampaign(META, good());
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.path)).toContain("business_name");
+  });
+  it("a null options argument does not throw, and is refused for a missing business_name", () => {
+    expect(() => validateCampaign(META, good(), null)).not.toThrow();
+    expect(errPaths(validateCampaign(META, good(), null))).toContain("business_name");
+  });
+  it("an empty-string businessName is refused", () => expect(errPaths(validateCampaign(META, good(), { businessName: "" }))).toContain("business_name"));
+  it("a whitespace-only businessName is refused", () => expect(errPaths(validateCampaign(META, good(), { businessName: "   " }))).toContain("business_name"));
+});
+
+describe("fix round 1 -- IMPORTANT 3 (ruling): template_key is validated, and only speed_to_lead ships in Part 1", () => {
+  it("an unknown template_key is refused", () => expect(errPaths(v(good(), { ...META, template_key: "bogus" }))).toContain("template_key"));
+  it("reactivation is a real template_key but refused in Part 1, naming Part 3 (it would otherwise dodge the marketing_consented refusal)", () => {
+    const r = v(good(), { ...META, template_key: "reactivation" });
+    expect(r.errors.find((e) => e.path === "template_key").message).toMatch(/Part 3/);
+  });
+});
+
+describe("fix round 1 -- IMPORTANT 4: unknown nested keys are refused, not silently accepted", () => {
+  it("an unknown calling_window key (sunday) is refused at calling_window.sunday", () =>
+    expect(errPaths(v({ ...good(), calling_window: { ...good().calling_window, sunday: "07:00-23:00" } }))).toContain("calling_window.sunday"));
+  it("the typo mon-fri (hyphen) is an unknown key, not a silently-ignored alias for mon_fri", () =>
+    expect(errPaths(v({ ...good(), calling_window: { ...good().calling_window, "mon-fri": "09:00-18:00" } }))).toContain("calling_window.mon-fri"));
+  it("an unknown retries key (max_attempts) is refused at retries.max_attempts", () =>
+    expect(errPaths(v({ ...good(), retries: { ...good().retries, max_attempts: 50 } }))).toContain("retries.max_attempts"));
+  it("an unknown booking key is refused at booking.x", () => expect(errPaths(v({ ...good(), booking: { ...good().booking, x: 1 } }))).toContain("booking.x"));
+  it("an unknown question key (options) is refused at questions[0].options", () =>
+    expect(errPaths(v({ ...good(), questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", options: ["a", "b"] }] })))
+      .toContain("questions[0].options"));
+});
+
+describe("fix round 1 -- Minor M1: the export derives windowBounds/refusedInPart1 from the same constants the validator reads", () => {
+  it("the export carries the disclosure regex's flags, not just its source", () => expect(buildCampaignSchemaExport().aiDisclosureFlags).toBe("i"));
+});
+
+describe("fix round 1 -- Minor M3: a missing meta object refuses every required meta field, rather than passing", () => {
+  it("meta = {} refuses name, template_key, compliance_class and audience", () => {
+    const paths = errPaths(v(good(), {}));
+    expect(paths).toEqual(expect.arrayContaining(["name", "template_key", "compliance_class", "audience"]));
+  });
+  it("meta = null does the same, without throwing", () => {
+    expect(() => v(good(), null)).not.toThrow();
+    const paths = errPaths(v(good(), null));
+    expect(paths).toEqual(expect.arrayContaining(["name", "template_key", "compliance_class", "audience"]));
+  });
+});
+
+describe("fix round 1 -- Minor M4: bounded fields must be whole numbers, capped, and 'required' when absent", () => {
+  it("a fractional consent_window_days is refused", () => expect(errPaths(v({ ...good(), consent_window_days: 30.5 }))).toContain("consent_window_days"));
+  it("a fractional retries.give_up_after_days is refused", () =>
+    expect(errPaths(v({ ...good(), retries: { ...good().retries, give_up_after_days: 7.5 } }))).toContain("retries.give_up_after_days"));
+  it("a fractional max_call_minutes is refused", () => expect(errPaths(v({ ...good(), max_call_minutes: 10.5 }))).toContain("max_call_minutes"));
+  it("a fractional booking.length_min is refused", () => expect(errPaths(v({ ...good(), booking: { ...good().booking, length_min: 30.5 } }))).toContain("booking.length_min"));
+  it("booking.length_min over the 240-minute cap is refused", () => expect(errPaths(v({ ...good(), booking: { ...good().booking, length_min: 241 } }))).toContain("booking.length_min"));
+  it("a missing consent_window_days gets a 'required' message, not a bound message", () => {
+    const r = v({ ...good(), consent_window_days: undefined });
+    const e = r.errors.find((e) => e.path === "consent_window_days");
+    expect(e.message).toMatch(/required/i);
+    expect(e.message).not.toMatch(/at most/i);
+  });
+});
+
+describe("fix round 1 -- Minor M5: the retry schedule must have at least one entry", () => {
+  it("an empty retry schedule is refused", () => expect(errPaths(v({ ...good(), retries: { ...good().retries, schedule: [] } }))).toContain("retries.schedule"));
 });
