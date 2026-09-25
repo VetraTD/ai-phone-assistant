@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 21.734503,
+  "spent_usd": 21.92898,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -5376,11 +5376,152 @@
       "model": "gemini-3.1-flash-live-preview",
       "usd": 0.0005886791666666666,
       "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:47:38.051Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "tts",
+      "label": "voices",
+      "model": "chirp3-hd",
+      "chars": 440,
+      "usd": 0.0132,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:48:22.159Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S1",
+      "label": "seed-S1-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015203333333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:48:30.135Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S1",
+      "label": "seed-S1-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.001484345833333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:48:38.110Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S1",
+      "label": "seed-S1-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017470125000000002,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:48:46.088Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S2",
+      "label": "seed-S2-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017320125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:48:54.045Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S2",
+      "label": "seed-S2-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0020110125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:49:02.040Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "S2",
+      "label": "seed-S2-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016390125000000002,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-25T01:49:12.073Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "F",
+      "label": "seed-F-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.003665,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-25T01:49:22.299Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "F",
+      "label": "seed-F-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.004037,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-25T01:49:32.168Z",
+      "probe": "P1-SPIKE-A",
+      "arm": "F",
+      "label": "seed-F-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.003941,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-25T02:17:07.456Z",
+      "probe": "P1-SPIKE-B",
+      "arm": "B",
+      "label": "dial-B1",
+      "usd": 0.0255,
+      "estimated": false,
+      "twilio_price": 0.014,
+      "duration_s": 29
+    },
+    {
+      "at": "2026-09-25T02:20:53.906Z",
+      "probe": "P1-SPIKE-B",
+      "arm": "B",
+      "label": "dial-B2",
+      "usd": 0.0575,
+      "estimated": true,
+      "twilio_price": null,
+      "duration_s": 0
+    },
+    {
+      "at": "2026-09-25T02:22:57.324Z",
+      "probe": "P1-SPIKE-B",
+      "arm": "B",
+      "label": "dial-B2b",
+      "usd": 0.0255,
+      "estimated": false,
+      "twilio_price": 0.014,
+      "duration_s": 20
+    },
+    {
+      "at": "2026-09-25T02:24:43.488Z",
+      "probe": "P1-SPIKE-B",
+      "arm": "B",
+      "label": "dial-B3",
+      "usd": 0.0255,
+      "estimated": false,
+      "twilio_price": 0.014,
+      "duration_s": 20
+    },
+    {
+      "at": "2026-09-25T02:26:15.734Z",
+      "probe": "P1-SPIKE-B",
+      "arm": "B",
+      "label": "dial-B4-hello",
+      "usd": 0.0255,
+      "estimated": false,
+      "twilio_price": 0.014,
+      "duration_s": 19
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-16T20:41:13.865Z",
+  "updated_at": "2026-09-25T02:26:15.734Z",
   "cap_history": [
     {
       "cap": 5,
