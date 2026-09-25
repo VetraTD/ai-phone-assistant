@@ -487,4 +487,24 @@ describeDb("outbound-admin: triggerOutreach", () => {
     const consents = await admin.query(`SELECT count(*)::int AS n FROM consents WHERE contact_id = $1`, [r.contactId]);
     expect(consents.rows[0].n).toBe(1);
   });
+
+  // Checkpoint 2a, M8(b): the contact upsert set first_name = EXCLUDED.first_name,
+  // so re-running a trigger without --first-name wiped the name Ava greets by.
+  it("a re-run without --first-name keeps the contact's first_name (M8b)", async () => {
+    const phone = "+447700900601";
+    const first = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: "Sam", consentManual: false, confirm: true }));
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    const again = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: null, consentManual: false, confirm: true }));
+    expect(again.ok, JSON.stringify(again)).toBe(true);
+    const k = await admin.query(`SELECT first_name FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
+    expect(k.rows[0].first_name).toBe("Sam");
+  });
+
+  it("a re-run WITH a new --first-name still updates it", async () => {
+    const phone = "+447700900601";
+    const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: "Samantha", consentManual: false, confirm: true }));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const k = await admin.query(`SELECT first_name FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
+    expect(k.rows[0].first_name).toBe("Samantha");
+  });
 });

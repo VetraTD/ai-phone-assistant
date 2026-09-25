@@ -445,10 +445,12 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       return { ok: true, dryRun: true, wouldWrite };
     }
 
+    // COALESCE (Checkpoint 2a, M8b): a re-run without --first-name keeps the
+    // stored name rather than wiping the one Ava greets the contact by.
     const contactRes = await client.query(
       `INSERT INTO contacts (business_id, phone_e164, first_name)
        VALUES ($1, $2, $3)
-       ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = EXCLUDED.first_name, updated_at = now()
+       ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name), updated_at = now()
        RETURNING id`,
       [business.id, phone, firstName || null]
     );
