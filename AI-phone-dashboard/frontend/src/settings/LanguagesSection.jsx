@@ -17,8 +17,8 @@ export default function LanguagesSection({ value, onChange }) {
 
   return (
     <Panel
-      title="Languages & recording"
-      description="Which languages your receptionist can switch to mid-call, and whether callers are told the call is recorded."
+      title="Languages & call notice"
+      description="Which languages your receptionist can switch to mid-call, and whether callers are told the call may be transcribed."
     >
       <fieldset className="set-fieldset">
         <legend className="set-legend">Languages spoken</legend>
@@ -47,7 +47,7 @@ export default function LanguagesSection({ value, onChange }) {
         onChange={(recording_disclosure_enabled) => onChange({ recording_disclosure_enabled })}
         hint="Some places require this by law. Check what applies where you are."
       >
-        Tell callers the call may be recorded
+        Tell callers the call may be transcribed
       </CheckField>
 
       {value.recording_disclosure_enabled ? (
@@ -58,7 +58,7 @@ export default function LanguagesSection({ value, onChange }) {
               value={value.recording_disclosure_text}
               maxLength={500}
               onChange={(e) => onChange({ recording_disclosure_text: e.target.value })}
-              placeholder="This call may be recorded for quality and training purposes."
+              placeholder="This call may be transcribed to help us assist you."
             />
           )}
         </Field>

@@ -103,7 +103,7 @@ Status means:
 | **LVX85** | password reset email fails silently | **NOT A DELIVERY BUG · P2** — the project contains exactly ONE account and Identity Platform sends from its own `noreply@` (`method: DEFAULT`), both confirmed 2026-09-08. The reset was requested for an address with no account, and `auth.js:193` swallows `auth/user-not-found` as enumeration defence. Telemetry added for every OTHER failure; the swallow stays silent on purpose. |
 | **LVX86** | no way to control pronunciation of a business name | **OPEN · P2** — Gemini Live says "digital" for "Digile". No lexicon, phoneme or SSML support exists anywhere in the codebase, and Live's prebuilt voices accept no pronunciation hints. `custom_instructions` is the only lever and it is a prompt line, so it carries no guarantee and no counter |
 | **LVX87** | the migrate job connects to production as `postgres` | **OPEN · P2** — `db-inspect` reported `current_user: postgres` against `vetra_uk_prod`. If that role carries BYPASSRLS then the tenant scoping in every job-run script is decoration, and the isolation those scripts exist to prove is not being exercised by the path that proves it |
-| **LVX88** | the greeting tells every caller the call is recorded, and it is not | **OPEN · P1** — the opening line says "calls are recorded for quality". On the Live path there is no `<Record>` verb and `addTranscriptEntry` is never called (LVX83), so nothing is recorded and nothing is retained. A statement to callers that is not true, and one that matters the moment anyone asks for their data. Three ways out: record properly, stop saying it, or make it true via LVX83 |
+| **LVX88** | the greeting tells every caller the call is recorded, and it is not | **FIXING (spec D4, 2026-09-24)** — code default, dashboard copy and a lint landed; tenant greetings are rewritten through the migrate job after a `--recording-claims` audit; closes when the new line is deployed and heard on a call. See the section. Original: **OPEN · P1** — the opening line says "calls are recorded for quality". On the Live path there is no `<Record>` verb and `addTranscriptEntry` is never called (LVX83), so nothing is recorded and nothing is retained. A statement to callers that is not true, and one that matters the moment anyone asks for their data. Three ways out: record properly, stop saying it, or make it true via LVX83 |
 | **LVX89** | a write that matched no rows is filed as a successful audit record | **OPEN · P1** — `completeCall` calls `noteAccess` with `rowCount: 0` and nothing complains (`services/db.js:869-871`); an UNSCOPED write files nothing at all outside hipaa mode (`:272`). Nine production calls reported `completed` while their rows never moved, and no instrument said so. |
 | **LVX90** | the four stat tiles counted UTC's day, not the tenant's | **FIXED, UNVERIFIED LIVE · P1** — `started_at::date = CURRENT_DATE` casts both sides in the session timezone. Proved on real Postgres: three calls seeded across one London day, old query counts 2, new counts 3 (`tests/db/dashboardAnalyticsTimezone.test.js`). |
 | **LVX91** | the PRE-MIGRATION stack is still live: Supabase database, public API in front of it | **OPEN · P0** — `ai-phone-assistant-production-1f53.up.railway.app` answers `/health` as `dashboard-backend`, serves `/api/voices` and `/api/integrations/definitions`, and returns a real 401 on `/api/me`. Deployed from GitHub 21 days ago. Vercel's `VITE_API_URL` points at it, so the marketing contact form has been posting there. CONFIRMED 2026-09-08: `DATABASE_URL` is the old Supabase Postgres and the auth is `supabase.auth.getUser()` — this is the stack the GCP migration existed to leave, still reachable from the public internet. |
@@ -8474,6 +8474,53 @@ bypassed by free text that nothing checks.
 `recording_disclosure_enabled` becomes the only route to a recording claim and
 the greeting free-text is checked against it; or audio recording is actually
 implemented with a retention policy behind it. None of these is scheduled.
+
+**Superseded 2026-09-24 by spec decision D4** (`docs/superpowers/specs/2026-09-24-outbound-calling-design.md`).
+The 2026-09-08 "wording stays" decision above no longer holds. An outbound call
+makes the false line a statement to someone who did not ring us, and the owner
+locked D4: replace it everywhere with **"This call may be transcribed to help
+us assist you."** That is true, because the transcript IS kept (LVX83).
+
+What landed:
+- `lib/voice/disclosure.js` holds the sentence and `claimsRecording()`. The
+  regex was settled against a table of real strings. It does not flag "I have
+  your message recorded" or the codebase's many "recorded" comments.
+- The `greeting.js` code default now uses that sentence.
+- The dashboard label, placeholder and field names now say "transcribed" /
+  "Transcription notice". The column names are unchanged.
+- `tests/recordingClaimLint.test.js` scans the whole tree, including the
+  dashboard frontend, where the shipped default lived.
+- `db-inspect --recording-claims` audits EVERY tenant for claims in all of
+  these, reporting field names and never text:
+  - greeting
+  - general_info
+  - custom_instructions
+  - disclosure text
+  - enabled capability config
+  - enabled knowledge entries
+
+  It walks `business_directory`, because an unscoped read of `businesses` under
+  FORCE RLS returns zero rows and would report a clean database. This is proven
+  by sabotage in `tests/db/recordingClaimAudit.test.js`.
+
+Tenant free text is rewritten through `set-business-config.js`, one field per
+job run, each with a `--show` backup taken first. **Closes when** the audit
+reads clean in production and a test call hears the new line.
+
+**Recorded, deliberately NOT built** (from the 2026-09-24 review; outside D4's
+wording, so written down rather than fixed):
+- **Nothing stops a NEW claim after the one-off audit.** An operator can type
+  "calls are recorded" into a greeting tomorrow. The cheapest guard, which fits
+  "count before refusing": log `disclosure_claims_recording:
+  claimsRecording(greetingTextFor(config))` on call start. The stronger one is a
+  save-time warning in the dashboard's `settingsValidation.js`.
+- **The model can claim a recording on its own.** Nothing in the prompt tells
+  it what is true if a caller asks "are you recording this?". A one-line prompt
+  fact would change every golden snapshot, so it needs its own decision.
+  Counting `claimsRecording` on assistant turns is the cheaper first step.
+- **The lint skips `.sql` and `.json`.** A migration defaulting
+  `recording_disclosure_text` to a claim, or an `import-tenant` JSON, would get
+  past it. Adding `.sql` means allow-listing `database/005`'s column COMMENT.
 
 ---
 

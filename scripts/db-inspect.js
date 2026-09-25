@@ -21,6 +21,7 @@
 
 import pg from "pg";
 import { cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
+import { auditRecordingClaims } from "../lib/db/recordingClaimAudit.js";
 
 const cfg = {
   instance: process.env.CLOUD_SQL_INSTANCE,
@@ -63,6 +64,12 @@ const cfg = {
 //                       transcript rows. NO message text. Safe anywhere, and
 //                       the answer to "which rows are not being updated",
 //                       which a count cannot give. --limit N, default 25.
+//   --recording-claims  every ROUTABLE tenant (one with a directory row):
+//                       which fields make a recording claim to callers (spec
+//                       D4 -- nothing is kept as audio). Field names and
+//                       flags, never text. Walks business_directory, so it
+//                       does not need --business and is not fooled by RLS.
+//                       Exits 1 on an empty directory or a partial read.
 //   (no arguments)      the full audit, including the transcript dump.
 //                       STAGING ONLY, unchanged.
 // ---------------------------------------------------------------------------
@@ -115,7 +122,8 @@ const CALLS_LIMIT = Math.min(Math.max(parseInt(argOf("limit") || "25", 10) || 25
 // EVERY new flag belongs in this OR. A flag that is not here leaves AD_HOC
 // false, and the script falls through to the staging-only full audit and exits
 // 1 -- with a message about staging that says nothing about the flag you passed.
-const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS || WANT_APPTS;
+const WANT_CLAIMS = argv.includes("--recording-claims");
+const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS || WANT_APPTS || WANT_CLAIMS;
 
 const looksLikeStaging = /staging/i.test(cfg.database) && /staging/i.test(cfg.instance);
 
@@ -177,6 +185,51 @@ const show = (label, rows) => {
 
 try {
   show("connected as", (await pool.query("SELECT current_user, current_database()")).rows);
+
+  // ---------------------------------------------------------------------
+  // --recording-claims. Spec D4: nothing is kept as audio, so no tenant may
+  // claim a recording. The audit logic and its RLS reasoning live in
+  // lib/db/recordingClaimAudit.js, tested as a non-bypassing role in
+  // tests/db/recordingClaimAudit.test.js.
+  //
+  // An empty directory, or a directory row that read no tenant, is an exit-1,
+  // not a footnote: a partial read printed as a list of clean tenants is the
+  // failure this file keeps meeting.
+  // ---------------------------------------------------------------------
+  if (WANT_CLAIMS) {
+    const client = await pool.connect();
+    try {
+      const r = await auditRecordingClaims(client);
+      show("recording-claims coverage", [
+        { directory_rows: r.directory_rows, tenants_read: r.tenants_read, complete: r.complete },
+      ]);
+      show(
+        "recording-claims tenant",
+        r.tenants.map((t) => ({
+          phone: t.phone_number,
+          claims: t.claims,
+          disclosure_enabled: t.disclosure_enabled,
+        }))
+      );
+      const flagged = r.tenants.filter((t) => t.claims.length);
+      show("recording-claims summary", [{ tenants_with_a_claim: flagged.length, tenants_read: r.tenants_read }]);
+      if (!r.complete) {
+        show("recording-claims INCOMPLETE", [
+          {
+            directory_rows: r.directory_rows,
+            unread: r.unread,
+            hint:
+              r.directory_rows === 0
+                ? "business_directory is empty -- wrong database or a failed backfill; this is not a clean result"
+                : "these directory numbers resolved to no tenant; this is not a clean result",
+          },
+        ]);
+        process.exitCode = 1;
+      }
+    } finally {
+      client.release();
+    }
+  }
 
   // ---------------------------------------------------------------------
   // AD-HOC MODE. Config and counts, never content.

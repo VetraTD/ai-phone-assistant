@@ -25,8 +25,8 @@ export const FIELD_LABELS = {
   live_voice: { label: "Voice", group: "voice" },
   locale: { label: "Accent and language", group: "voice" },
   languages_spoken: { label: "Languages spoken", group: "voice" },
-  recording_disclosure_enabled: { label: "Recording announcement", group: "voice" },
-  recording_disclosure_text: { label: "Recording announcement wording", group: "voice" },
+  recording_disclosure_enabled: { label: "Transcription notice", group: "voice" },
+  recording_disclosure_text: { label: "Transcription notice wording", group: "voice" },
 
   transfer_policy: { label: "When to transfer a caller", group: "capabilities" },
   transfer_phone_number: { label: "Transfer phone number", group: "capabilities" },
