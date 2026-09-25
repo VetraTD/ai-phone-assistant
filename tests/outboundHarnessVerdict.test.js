@@ -1,0 +1,583 @@
+// tests/outboundHarnessVerdict.test.js
+/**
+ * Task 15 (session 2b): the pure half of the harness's --outbound mode,
+ * lib/probe/outboundHarness.js. The CLI owns the socket, the timers and the
+ * database; everything it DECIDES is here, so it can be tested without a call:
+ *
+ *   - the local-database guard (seeding must never reach a non-local database);
+ *   - the dispatch line rendering, proven equal to what the REAL dispatcher
+ *     hands renderAudio (lib/outbound/dispatch.js), so the harness renders the
+ *     clip exactly as dispatch would;
+ *   - the paced mark echo;
+ *   - the client-side clock (onset, first frame, first-audio mark);
+ *   - the server-log parser (UTF-8 or PowerShell's UTF-16);
+ *   - the ONE verdict, per criterion -- and that it can FAIL;
+ *   - spend: priced from usage, or the full reserve when it cannot be priced;
+ *   - the render tap: word_ratio, overlap, render time, and whether
+ *     usageMetadata arrived before turnComplete.
+ */
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../lib/logger.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  log: { debug: () => {}, info: () => {}, error: () => {} },
+}));
+
+import {
+  assertLocalDatabase,
+  isLoopbackBase,
+  dispatchLines,
+  createPlayoutClock,
+  createClientObserver,
+  decodeLogBuffer,
+  parseServerLog,
+  isIntroduction,
+  outboundVerdict,
+  priceHarnessRun,
+  createSpendGuard,
+  createRenderTap,
+  summarizeRenderSessions,
+  pickHarnessNumbers,
+  harnessCallSid,
+  HARNESS_RESERVE_USD,
+} from "../lib/probe/outboundHarness.js";
+import { createDispatcher } from "../lib/outbound/dispatch.js";
+import { renderLines } from "../lib/outbound/liveRender.js";
+import { TEMPLATES } from "../lib/outbound/templates.js";
+import { FIRST_AUDIO_MARK, BACKSTOP_END_MARK } from "../lib/outbound/firstSeconds.js";
+import { priceTokens } from "../scripts/probes/lib/spendLive.js";
+
+// ---------------------------------------------------------------------------
+describe("the local-database guard", () => {
+  it.each([
+    "postgresql://vetra:vetra_local_dev@localhost:55432/vetra",
+    "postgres://vetra:x@127.0.0.1:55432/vetra",
+    "postgresql://vetra:x@[::1]:55432/vetra",
+  ])("accepts the local container: %s", (url) => {
+    expect(() => assertLocalDatabase(url)).not.toThrow();
+  });
+
+  it.each([
+    [undefined, /DATABASE_URL/],
+    ["", /DATABASE_URL/],
+    // The Cloud SQL Auth Proxy listens on loopback too -- 5432 is its default.
+    ["postgresql://vetra:x@localhost:5432/vetra", /55432/],
+    ["postgresql://vetra:x@10.0.0.5:55432/vetra", /loopback/],
+    ["postgresql://vetra:x@localhost.evil.example:55432/vetra", /loopback/],
+    ["postgresql://vetra:x@db.example.com/vetra", /loopback/],
+    ["not a url", /parse/],
+  ])("refuses %s", (url, why) => {
+    expect(() => assertLocalDatabase(url)).toThrow(why);
+  });
+
+  it("isLoopbackBase is the harness's own loopback rule", () => {
+    expect(isLoopbackBase("http://localhost:3000")).toBe(true);
+    expect(isLoopbackBase("http://127.0.0.1:3000")).toBe(true);
+    expect(isLoopbackBase("https://unpolluted.ngrok-free.dev")).toBe(false);
+    expect(isLoopbackBase("http://localhost.evil.example")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("dispatchLines equals what the REAL dispatcher hands renderAudio", () => {
+  // The fixture tests/outboundDispatch.test.js dials with: every gate check
+  // passes at NOW, so the dispatcher reaches the render.
+  const NOW = new Date("2026-09-28T13:00:00Z");
+  const row = (over = {}) => ({
+    id: "o1", business_id: "b1", state: "waiting", attempts_made: 0, created_at: new Date("2026-09-28T12:59:00Z"), hold_until: null,
+    next_attempt_at: NOW, campaign_id: "c1", campaign_version: 1, campaign_status: "active", compliance_class: "solicited", template_key: "speed_to_lead",
+    config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+447700900101" },
+    contact_id: "k1", phone_e164: "+447700900202", first_name: "Sam", contact_timezone: null,
+    outbound_enabled: true, outbound_max_concurrent: 2, business_timezone: "Europe/London", business_name: "Harness Test Clinic",
+    ...over,
+  });
+  const fakeDb = (r) => ({
+    withTenant: async (_b, fn) => fn(),
+    lockCapacity: async () => {},
+    claimOutreachForDispatch: async () => r,
+    isSuppressed: async () => false,
+    listConsents: async () => [{ purpose: "enquiry_followup", channels: ["call"], covers_automated: true, captured_at: new Date("2026-09-28T12:58:00Z"), expires_at: null, revoked_at: null }],
+    hasServiceRelationship: async () => false,
+    countDialsSince: async () => 0,
+    activeDialCounts: async () => ({ globalOutbound: 0, businessOutbound: 0 }),
+    insertCallAttempt: async () => ({ id: "a1" }),
+    markOutreachDialing: async () => {},
+    setAttemptCallSid: async () => {},
+    storeAttemptAudio: async () => {},
+  });
+  const env = { enabled: false, allowlist: new Set(["+447700900202"]), maxConcurrent: 8, inboundReserve: 2, baseUrl: "https://svc.example" };
+
+  async function realLines(r) {
+    const renderAudio = vi.fn(async () => null);
+    const d = createDispatcher({
+      db: fakeDb(r),
+      twilio: { calls: { create: async () => ({ sid: "CA1" }) } },
+      enqueue: async () => ({ created: true }),
+      env,
+      now: () => NOW,
+      rand: () => 0,
+      callerIdValid: async () => true,
+      renderAudio,
+      log: { info() {}, error() {} },
+    });
+    const out = await d({ businessId: "b1", outreachId: "o1" });
+    expect(out.status).toBe("dialed");
+    return renderAudio.mock.calls[0]?.[0]?.lines ?? {};
+  }
+
+  const cfg = (over) => ({ ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+447700900101", ...over });
+  it.each([
+    ["attempt 1 (voicemail due): both lines", row()],
+    ["attempt 2 (no voicemail)", row({ attempts_made: 1 })],
+    ["no first name (O-9): the first-name sentence dropped", row({ first_name: null })],
+    ["an opener over 120 is omitted, never truncated", row({ config: cfg({ opener: "x".repeat(130) }) })],
+    ["a voicemail over 300 is omitted", row({ config: cfg({ voicemail: "It's Ava, an AI assistant from {business_name}. " + "y".repeat(300) }) })],
+  ])("%s", async (_label, r) => {
+    const mine = dispatchLines({ row: r, attemptNo: r.attempts_made + 1 });
+    expect(mine.lines).toEqual(await realLines(r));
+  });
+
+  it("reports what it refused and why", () => {
+    const r = row({ config: cfg({ opener: "x".repeat(130) }) });
+    expect(dispatchLines({ row: r, attemptNo: 1 }).refused).toEqual([{ kind: "opener", chars: 130 }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("the paced mark echo", () => {
+  it("a mark echoes once the audio ahead of it would have played, not before", () => {
+    const p = createPlayoutClock();
+    for (let i = 0; i < 5; i++) p.onMedia(1000);
+    expect(p.markDelay(1000)).toBe(100);
+    expect(p.markDelay(1060)).toBe(40);
+    expect(p.markDelay(1200)).toBe(0);
+  });
+
+  it("a mark with nothing ahead of it echoes at once; a clear drops what was queued", () => {
+    const p = createPlayoutClock();
+    expect(p.markDelay(500)).toBe(0);
+    for (let i = 0; i < 10; i++) p.onMedia(500);
+    p.onClear(520);
+    expect(p.markDelay(520)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+const media = { event: "media", media: { payload: Buffer.alloc(160, 0xff).toString("base64") } };
+const mark = (name) => ({ event: "mark", mark: { name } });
+
+describe("the client-side clock", () => {
+  it("speaks first: onset, first frame, from_speech_ms, and no frame before onset", () => {
+    const o = createClientObserver();
+    o.answered(1000);
+    o.streamStarted(1330);
+    o.helloOnset(2870);
+    o.fromServer(mark(FIRST_AUDIO_MARK), 3900);
+    o.fromServer(media, 3901);
+    o.fromServer(media, 3921);
+    const s = o.snapshot();
+    expect(s).toMatchObject({
+      hello_onset_from_answer_ms: 1870,
+      stream_start_from_answer_ms: 330,
+      from_answer_ms: 2901,
+      from_speech_ms: 1031,
+      first_audio_mark_from_stream_start_ms: 2570,
+      frames_before_onset: 0,
+      media_frames: 2,
+      marks_received: 1,
+    });
+  });
+
+  it("a frame that arrives before the hello is counted", () => {
+    const o = createClientObserver();
+    o.answered(0);
+    o.streamStarted(330);
+    o.fromServer(mark(FIRST_AUDIO_MARK), 1990);
+    o.fromServer(media, 1990);
+    o.fromServer(media, 2010);
+    o.helloOnset(2500);
+    o.fromServer(media, 2520);
+    const s = o.snapshot();
+    expect(s.frames_before_onset).toBe(2);
+    expect(s.first_audio_mark_from_stream_start_ms).toBe(1660);
+    expect(s.from_speech_ms).toBe(-510);
+  });
+
+  it("nothing heard: nulls, not zeros", () => {
+    const o = createClientObserver();
+    o.answered(0);
+    o.streamStarted(300);
+    const s = o.snapshot();
+    expect(s.from_answer_ms).toBeNull();
+    expect(s.from_speech_ms).toBeNull();
+    expect(s.first_audio_mark_from_stream_start_ms).toBeNull();
+    expect(s.hello_onset_from_answer_ms).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+const SID = "CAharness0001";
+const line = (event, fields = {}) => JSON.stringify({ message: event, ts: "2026-09-25T10:00:00.000Z", level: "INFO", event, ...fields });
+
+describe("the server log", () => {
+  const text = [
+    "server listening on 3000",
+    line("live_debug_transcript_enabled", { level: "ERROR" }),
+    line("live_stream_start", { callSid: SID, direction: "outbound" }),
+    line("outbound_backstop_played", { callSid: SID, attemptId: "a1", path: "backstop_silence", source: "stored", seed: "at_fire" }),
+    line("outbound_first_audio", { callSid: SID, attemptId: "a1", from_answer_ms: 2012, from_speech_ms: null, path: "backstop_silence", measured: "playout" }),
+    line("outbound_first_audio", { callSid: "CAother", from_answer_ms: 1, path: "live_reply", measured: "playout" }),
+    line("live_debug_assistant_turn", { callSid: SID, text: "Sorry, are you there?", debug_only: true }),
+    line("live_call_summary", { callSid: SID, model: "gemini-3.1-flash-live-preview", usage: { text_in: 9000, audio_in: 500, text_out: 0, audio_out: 300, cached_in: 0, turns_billed: 2 } }),
+    "{not json",
+  ].join("\n");
+
+  it("keeps only this call's lines, and the session-level debug flag", () => {
+    const s = parseServerLog(text, { callSid: SID });
+    expect(s.firstAudio).toMatchObject({ from_answer_ms: 2012, path: "backstop_silence", measured: "playout" });
+    expect(s.backstopPlayed).toHaveLength(1);
+    expect(s.backstopMissing).toHaveLength(0);
+    expect(s.assistantTurns.map((t) => t.text)).toEqual(["Sorry, are you there?"]);
+    expect(s.debugTranscriptOn).toBe(true);
+    expect(s.summary.usage.turns_billed).toBe(2);
+    expect(s.events.every((e) => e.callSid === SID)).toBe(true);
+  });
+
+  it("decodes PowerShell's UTF-16LE redirect and a UTF-8 BOM", () => {
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")]);
+    expect(parseServerLog(decodeLogBuffer(utf16), { callSid: SID }).firstAudio.from_answer_ms).toBe(2012);
+    const bom8 = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, "utf8")]);
+    expect(decodeLogBuffer(bom8).startsWith("server listening")).toBe(true);
+  });
+});
+
+describe("isIntroduction", () => {
+  it.each([
+    ["Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic.", true],
+    ["This is Ava from Harness Test Clinic.", true],
+    ["I'm an A.I. assistant calling about your enquiry.", true],
+    ["Great, and what's the clinic called?", false],
+    ["Sorry, are you still there?", false],
+    ["Plan A. I wanted to ask about your enquiry.", false],
+  ])("%s -> %s", (text, want) => {
+    expect(isIntroduction(text, { personaName: "Ava" })).toBe(want);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("the verdict", () => {
+  const dbOk = { calls: { direction: "outbound" }, attempt: { answered_at: "t", status_completed_at: "t" } };
+  const speaksClient = {
+    hello_onset_at: 1870,
+    first_media_at: 2900,
+    frames_before_onset: 0,
+    from_speech_ms: 1030,
+    from_answer_ms: 2900,
+    first_audio_mark_from_stream_start_ms: 2550,
+  };
+  const speaksServer = {
+    firstAudio: { from_answer_ms: 2950, from_speech_ms: 980, path: "live_reply", measured: "playout" },
+    backstopPlayed: [],
+    backstopMissing: [],
+    firstTurnIncomplete: [],
+    assistantTurns: [],
+    debugTranscriptOn: true,
+  };
+
+  it("speaks first, clean: PASS on every criterion; post-call is pending Task 20, not passed", () => {
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(v.pass).toBe(true);
+    expect(Object.fromEntries(Object.entries(v.criteria).map(([k, c]) => [k, c.result]))).toEqual({
+      no_frame_before_onset: "PASS",
+      path_live_reply: "PASS",
+      from_speech_ms_le_2000: "PASS",
+      calls_direction_outbound: "PASS",
+      post_call_exactly_once: "pending_task20",
+    });
+  });
+
+  it("an assistant frame BEFORE the hello onset fails no_frame_before_onset, and the run", () => {
+    const client = { ...speaksClient, frames_before_onset: 3, first_media_at: 1650 };
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
+    expect(v.pass).toBe(false);
+  });
+
+  it("a hello that was never sent is not a pass", () => {
+    const client = { ...speaksClient, hello_onset_at: null, frames_before_onset: 0 };
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
+  });
+
+  it("a reply slower than 2,000 ms after onset fails; no reply at all fails", () => {
+    const slow = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, from_speech_ms: 2001 }, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(slow.criteria.from_speech_ms_le_2000.result).toBe("FAIL");
+    const none = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, first_media_at: null, from_speech_ms: null }, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(none.criteria.from_speech_ms_le_2000.result).toBe("FAIL");
+  });
+
+  it("the backstop's slow path is not a live reply", () => {
+    const server = { ...speaksServer, firstAudio: { ...speaksServer.firstAudio, path: "backstop_slow" } };
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.path_live_reply.result).toBe("FAIL");
+  });
+
+  it("a stream that started well after the simulated answer offset is WARNED about, not folded into a criterion", () => {
+    const ok = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, stream_start_from_answer_ms: 340 }, server: speaksServer, db: dbOk, personaName: "Ava", answerToStreamMs: 330 });
+    expect(ok.warnings).toEqual([]);
+    const late = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, stream_start_from_answer_ms: 1650 }, server: speaksServer, db: dbOk, personaName: "Ava", answerToStreamMs: 330 });
+    expect(late.warnings).toHaveLength(1);
+    expect(late.warnings[0]).toMatch(/^stream_start_late: .*1650 ms.*shifted by 1320 ms/);
+    expect(late.pass).toBe(true); // the criteria are unchanged; the warning is what the reader must see
+  });
+
+  it("no server log: the path is UNKNOWN, and UNKNOWN is not a pass", () => {
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: null, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.path_live_reply.result).toBe("UNKNOWN");
+    expect(v.pass).toBe(false);
+  });
+
+  it("calls.direction must read outbound", () => {
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: { calls: { direction: "inbound" } }, personaName: "Ava" });
+    expect(v.criteria.calls_direction_outbound.result).toBe("FAIL");
+    const none = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: { calls: null }, personaName: "Ava" });
+    expect(none.criteria.calls_direction_outbound.result).toBe("FAIL");
+  });
+
+  const silentClient = { hello_onset_at: null, first_media_at: 1995, frames_before_onset: 5, from_speech_ms: null, from_answer_ms: 1995, first_audio_mark_from_stream_start_ms: 1662 };
+  const silentServer = {
+    firstAudio: { from_answer_ms: 2012, from_speech_ms: null, path: "backstop_silence", measured: "playout" },
+    backstopPlayed: [{ path: "backstop_silence", source: "stored", seed: "at_fire" }],
+    backstopMissing: [],
+    firstTurnIncomplete: [],
+    assistantTurns: [{ text: "Sorry, are you still there?" }],
+    debugTranscriptOn: true,
+  };
+
+  it("silent, clean: backstop queued at ~1,650, played out <= 2,500, seeded, no second introduction", () => {
+    const v = outboundVerdict({ mode: "silent", clip: true, client: silentClient, server: silentServer, db: dbOk, personaName: "Ava" });
+    expect(Object.fromEntries(Object.entries(v.criteria).map(([k, c]) => [k, c.result]))).toEqual({
+      path_backstop_silence: "PASS",
+      backstop_queued_at_1650: "PASS",
+      played_out_le_2500: "PASS",
+      seeded: "PASS",
+      no_second_intro: "PASS",
+      calls_direction_outbound: "PASS",
+      post_call_exactly_once: "pending_task20",
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  it("silent: a playout above 2,000 but under 2,500 passes and is RECORDED, not hidden", () => {
+    const server = { ...silentServer, firstAudio: { ...silentServer.firstAudio, from_answer_ms: 2280 } };
+    const v = outboundVerdict({ mode: "silent", clip: true, client: silentClient, server, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.played_out_le_2500).toMatchObject({ result: "PASS", server_from_answer_ms: 2280, above_2000: true });
+  });
+
+  it.each([
+    ["queued 120 ms late", { client: { first_audio_mark_from_stream_start_ms: 1771 } }, "backstop_queued_at_1650"],
+    ["played out after 2,500", { server: { firstAudio: { from_answer_ms: 2501, path: "backstop_silence", measured: "playout" } } }, "played_out_le_2500"],
+    ["no playout echo (measured:enqueue)", { server: { firstAudio: { from_answer_ms: 2010, path: "backstop_silence", measured: "enqueue" } } }, "played_out_le_2500"],
+    ["not seeded", { server: { backstopPlayed: [] } }, "seeded"],
+    ["Live introduced itself again", { server: { assistantTurns: [{ text: "Hi, it's Ava, an AI assistant from Harness Test Clinic." }] } }, "no_second_intro"],
+  ])("silent FAILS when %s", (_l, over, criterion) => {
+    const v = outboundVerdict({
+      mode: "silent",
+      clip: true,
+      client: { ...silentClient, ...(over.client || {}) },
+      server: { ...silentServer, ...(over.server || {}) },
+      db: dbOk,
+      personaName: "Ava",
+    });
+    expect(v.criteria[criterion].result).toBe("FAIL");
+    expect(v.pass).toBe(false);
+  });
+
+  it("no second introduction is UNKNOWN without LIVE_DEBUG_TRANSCRIPT=1 -- silence in the log is not evidence", () => {
+    const v = outboundVerdict({ mode: "silent", clip: true, client: silentClient, server: { ...silentServer, debugTranscriptOn: false, assistantTurns: [] }, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.no_second_intro.result).toBe("UNKNOWN");
+    expect(v.pass).toBe(false);
+  });
+
+  it("--no-render (the prompt path): the backstop is logged missing, Live's own introduction is allowed once", () => {
+    const server = {
+      ...silentServer,
+      firstAudio: { from_answer_ms: 3100, from_speech_ms: null, path: "backstop_silence", measured: "playout" },
+      backstopPlayed: [],
+      backstopMissing: [{ path: "backstop_silence", refetch: "done", line: "yes" }],
+      assistantTurns: [{ text: "Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic." }],
+    };
+    const v = outboundVerdict({ mode: "silent", clip: false, client: { ...silentClient, first_audio_mark_from_stream_start_ms: 2750 }, server, db: dbOk, personaName: "Ava" });
+    expect(v.criteria).not.toHaveProperty("seeded");
+    expect(v.criteria.backstop_missing_logged.result).toBe("PASS");
+    expect(v.criteria.no_second_intro.result).toBe("PASS");
+    expect(v.measurements.server_from_answer_ms).toBe(3100);
+    const twice = outboundVerdict({ mode: "silent", clip: false, client: silentClient, server: { ...server, assistantTurns: [...server.assistantTurns, { text: "It's Ava from Harness Test Clinic again." }] }, db: dbOk, personaName: "Ava" });
+    expect(twice.criteria.no_second_intro.result).toBe("FAIL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("spend: priced from usage, or the full reserve", () => {
+  const usage = { text_in: 10_000, audio_in: 1_000, text_out: 0, audio_out: 500, cached_in: 0, turns_billed: 3 };
+  const model = "gemini-3.1-flash-live-preview";
+
+  it("prices the call's live_call_summary usage plus every render session, on the rate card", () => {
+    const r = priceHarnessRun({
+      sessionOpened: true,
+      callSummary: { model, usage },
+      renderSessions: [{ model, usage: { text_in: 100, audio_in: 0, text_out: 0, audio_out: 200, cached_in: 0, turns_billed: 1 } }],
+    });
+    const { turns_billed: _t, ...u } = usage;
+    const expected = priceTokens(model, u).usd + priceTokens(model, { text_in: 100, audio_out: 200 }).usd;
+    expect(r.basis).toBe("priced");
+    expect(r.usd).toBeCloseTo(expected, 12);
+    expect(r.usd).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["no live_call_summary (no --server-log)", { sessionOpened: true, callSummary: null, renderSessions: [] }],
+    ["a model with no rate card", { sessionOpened: true, callSummary: { model: "gemini-9-live", usage }, renderSessions: [] }],
+    ["a render whose usageMetadata never arrived", { sessionOpened: true, callSummary: { model, usage }, renderSessions: [{ model, usage: { text_in: 0, audio_in: 0, text_out: 0, audio_out: 0, cached_in: 0, turns_billed: 0 } }] }],
+  ])("unpriceable when %s", (_l, args) => {
+    const r = priceHarnessRun(args);
+    expect(r.basis).toBe("unpriceable");
+    expect(r.usd).toBeNull();
+    expect(r.reason).toBeTruthy();
+  });
+
+  it("no session opened and nothing rendered: exactly $0", () => {
+    expect(priceHarnessRun({ sessionOpened: false, callSummary: null, renderSessions: [] })).toMatchObject({ usd: 0, basis: "no_session" });
+  });
+
+  it("the guard reserves before and commits after, always with a numeric usd; unpriceable commits the full reserve", () => {
+    const spend = { reserveP1: vi.fn(), commit: vi.fn() };
+    const g = createSpendGuard({ probe: "P1-HARNESS", spend });
+    g.reserve();
+    expect(spend.reserveP1).toHaveBeenCalledWith("P1-HARNESS", HARNESS_RESERVE_USD);
+    expect(HARNESS_RESERVE_USD).toBe(0.05);
+    g.commit({ usd: null, basis: "unpriceable", reason: "no summary" }, { callSid: SID });
+    expect(spend.commit).toHaveBeenCalledWith(expect.objectContaining({ probe: "P1-HARNESS", usd: 0.05, basis: "full_reserve", reason: "no summary", callSid: SID }));
+    // Once only: the exit hook after a normal commit must not commit again.
+    g.commit({ usd: 0.01, basis: "priced" });
+    expect(spend.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a priced run commits its priced usd; nothing is committed without a reserve", () => {
+    const spend = { reserveP1: vi.fn(), commit: vi.fn() };
+    const g = createSpendGuard({ probe: "P1-HARNESS", spend });
+    g.commit({ usd: 0.012, basis: "priced" });
+    expect(spend.commit).not.toHaveBeenCalled();
+    g.reserve();
+    g.commit({ usd: 0.012, basis: "priced" });
+    expect(spend.commit).toHaveBeenCalledWith(expect.objectContaining({ probe: "P1-HARNESS", usd: 0.012, basis: "priced" }));
+  });
+
+  it("a refused reserve throws and leaves nothing to commit", () => {
+    const spend = {
+      reserveP1: vi.fn(() => {
+        throw new Error("BUDGET");
+      }),
+      commit: vi.fn(),
+    };
+    const g = createSpendGuard({ probe: "P1-HARNESS", spend });
+    expect(() => g.reserve()).toThrow("BUDGET");
+    g.commit({ usd: 0.05, basis: "full_reserve" });
+    expect(spend.commit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("the render tap", () => {
+  function pcm24k(ms) {
+    const samples = Math.round((24000 * ms) / 1000);
+    const buf = Buffer.alloc(samples * 2);
+    for (let i = 0; i < samples; i++) buf.writeInt16LE(i % 2 ? 6000 : -6000, i * 2);
+    return buf.toString("base64");
+  }
+  /** A fake connectLive: audio, a transcript, usage before or after turnComplete. */
+  function fakeConnect({ say = (l) => l, usageAfter = false } = {}) {
+    return vi.fn(async ({ callbacks }) => {
+      const session = {
+        sendClientContent(msg) {
+          const l = msg.turns[0].parts[0].text.replace(/^Say exactly: "/, "").replace(/"$/, "");
+          setImmediate(() => {
+            const u = { promptTokensDetails: [{ modality: "TEXT", tokenCount: 40 }], responseTokensDetails: [{ modality: "AUDIO", tokenCount: 90 }] };
+            callbacks.onmessage({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm24k(400) } }] } } });
+            callbacks.onmessage({ serverContent: { outputTranscription: { text: say(l) } } });
+            if (!usageAfter) callbacks.onmessage({ usageMetadata: u });
+            callbacks.onmessage({ serverContent: { turnComplete: true } });
+            // A later socket message, as it would be on the wire: a separate
+            // macrotask, after the renderer has already resolved and metered.
+            if (usageAfter) setTimeout(() => callbacks.onmessage({ usageMetadata: u }), 5);
+          });
+        },
+        close() {},
+      };
+      return { session, languagePinned: true, surface: "aistudio", model: "gemini-3.1-flash-live-preview" };
+    });
+  }
+  const lines = {
+    opener: "Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic.",
+    voicemail: "Hi Sam, it's Ava, the AI assistant from Harness Test Clinic, about your enquiry. We'll try again later, or call us back on 07700 900 101.",
+  };
+
+  it("records each line's transcript, overlap, word_ratio, render time, model and usage -- through the real renderLines", async () => {
+    let t = 0;
+    const tap = createRenderTap(fakeConnect({ say: (l) => (l.includes("07700") ? l.replace("07700 900 101", "oh seven seven oh oh, nine oh oh, one oh one") : l) }), { now: () => (t += 50) });
+    const events = [];
+    const out = await renderLines({
+      lines,
+      voiceName: "Kore",
+      languageCode: "en-GB",
+      connect: tap.connect,
+      log: { info: (event, f) => events.push({ event, ...f }), error: (event, f) => events.push({ event, ...f }) },
+    });
+    const rows = summarizeRenderSessions(tap.sessions(), lines, events);
+    const byKind = Object.fromEntries(rows.map((r) => [r.kind, r]));
+    expect(byKind.opener).toMatchObject({ kind: "opener", chars: lines.opener.length, overlap: 1, word_ratio: 1, outcome: "accepted", usage_before_turn_complete: true, model: "gemini-3.1-flash-live-preview" });
+    expect(byKind.opener.render_ms).toBeGreaterThan(0);
+    expect(byKind.opener.usage.text_in).toBe(40);
+    expect(byKind.opener.usage.audio_out).toBe(90);
+    // The reviewer's suspicion, made measurable: a spelled-out number reads as
+    // many more words than "07700 900 101" does.
+    expect(byKind.voicemail.word_ratio).toBeGreaterThan(1.15);
+    expect(byKind.voicemail.outcome).toBe("transcript_mismatch");
+    expect(out.voicemail).toBeNull();
+    expect(Buffer.isBuffer(out.opener)).toBe(true);
+  });
+
+  it("usageMetadata arriving AFTER turnComplete is reported as such (M2 metering depends on it)", async () => {
+    const tap = createRenderTap(fakeConnect({ usageAfter: true }));
+    const events = [];
+    await renderLines({ lines: { opener: lines.opener }, voiceName: "Kore", languageCode: "en-GB", connect: tap.connect, log: { info: (e, f) => events.push({ event: e, ...f }), error: () => {} } });
+    await new Promise((r) => setTimeout(r, 30));
+    const [row] = summarizeRenderSessions(tap.sessions(), { opener: lines.opener }, events);
+    expect(row.usage_before_turn_complete).toBe(false);
+    expect(row.usage_messages_after_turn_complete).toBe(1);
+    // What the product meter saw at the moment it logged: nothing.
+    expect(events.find((e) => e.event === "outbound_render_usage")).toMatchObject({ kind: "opener", text_in: 0, audio_out: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("fake numbers and SIDs", () => {
+  it("two distinct numbers in the Ofcom drama range", () => {
+    const { callerId, contact } = pickHarnessNumbers(() => 0.5);
+    expect(callerId).toMatch(/^\+447700900\d{3}$/);
+    expect(contact).toMatch(/^\+447700900\d{3}$/);
+    expect(callerId).not.toBe(contact);
+  });
+
+  it("a CAharness SID the media-stream token can bind (no . / \\)", () => {
+    const sid = harnessCallSid();
+    expect(sid).toMatch(/^CAharness[0-9a-f]+$/);
+    expect(harnessCallSid()).not.toBe(sid);
+  });
+});
+
+// The marks the harness must tell apart are the ones firstSeconds.js exports.
+it("the observer keys on the product's own first-audio mark name", () => {
+  expect(FIRST_AUDIO_MARK).toBe("outbound-first-audio");
+  expect(BACKSTOP_END_MARK).toBe("outbound-backstop-end");
+});

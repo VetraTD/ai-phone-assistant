@@ -107,12 +107,80 @@
  *     --debug-token "$DEBUG_TOKEN" \
  *     --hangup-on-counter consent_agreement_recorded \
  *     --expect-counter recover_booked
+ *
+ * Both modes:
+ *   --dry-run          print the exact requests it WOULD send, and stop: no
+ *                      socket, no render, no reserve/commit
+ *   --p1-probe <name>  outbound Part 1 spend (scripts/probes/lib/spendLive.js):
+ *                      reserveP1(name, 0.05) before, commit({probe, usd}) after,
+ *                      usd priced from the server's live_call_summary usage (and
+ *                      the render sessions' usage) when --server-log is given,
+ *                      otherwise the full 0.05 reserve
+ *   --server-log <f>   the server's stdout, redirected to a file: read after the
+ *                      call for outbound_* events and live_call_summary
+ *
+ * ---------------------------------------------------------------------------
+ * --outbound: a simulated OUTBOUND call (Task 15). LOCAL ONLY.
+ * ---------------------------------------------------------------------------
+ *
+ * The person's side of a call dispatch placed: it seeds an attempt in the
+ * LOCAL database (refused unless DATABASE_URL is localhost:55432), renders the
+ * backstop clip exactly as dispatch would (a paid Gemini Live render), then
+ * POSTs a signed /twilio/outbound-answer, opens the stream with the TwiML's
+ * <Parameter>s, and either says "Hello?" or stays silent -- then reads the
+ * call back from Postgres and prints ONE JSON verdict line
+ * ({"kind":"outbound_harness_verdict",...}) with a PASS/FAIL per criterion.
+ * It cleans up what it seeded.
+ *
+ *   DATABASE_URL=postgresql://vetra:vetra_local_dev@localhost:55432/vetra \
+ *   node scripts/live-call-harness.js --outbound --base http://localhost:3000 \
+ *     --server-log server.log --p1-probe P1-HARNESS [--silent]
+ *
+ *   --outbound         drive /twilio/outbound-answer instead of /twilio/live-voice
+ *   --silent           the person says nothing (default: "Hello?" at --hello-ms)
+ *   --hello-ms <ms>    when the person says "Hello?", from the simulated answer
+ *                      (default 1870, the owner's measured value). The audio is
+ *                      the outbound_hello script: --synth --script outbound_hello
+ *   --answer-to-stream-ms <ms>  when the stream `start` is sent after the answer
+ *                      (default 330: spike B measured 319-334 ms on real calls;
+ *                      a local server would otherwise start the stream ~90 ms
+ *                      after the answer and shift every deadline)
+ *   --amd human|unknown  also POST a signed /twilio/outbound-amd at --amd-ms
+ *                      (default 3000). Machine verdicts are REFUSED: they make
+ *                      the server call Twilio REST on a fake CallSid
+ *   --call-sid <sid>   use an existing attempt instead of seeding one
+ *   --no-render        skip the render: no clip, so the prompt path runs
+ *   --keep-seed        do not delete the seeded rows afterwards
+ *   --hold <ms>        call length from the answer (default 20000)
  */
 import "dotenv/config";
 import { WebSocket } from "ws";
-import twilio from "twilio";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio } from "../lib/probe/script.js";
+import {
+  buildInboundAnswerRequest,
+  buildOutboundAnswerRequest,
+  buildOutboundStatusRequest,
+  buildOutboundAmdRequest,
+  parseAmdFlag,
+  parseTwiml,
+} from "../lib/probe/twilioRequests.js";
+import {
+  assertLocalDatabase,
+  isLoopbackBase,
+  dispatchLines,
+  createPlayoutClock,
+  createClientObserver,
+  decodeLogBuffer,
+  parseServerLog,
+  outboundVerdict,
+  priceHarnessRun,
+  createSpendGuard,
+  pickHarnessNumbers,
+  harnessCallSid,
+  HARNESS_RESERVE_USD,
+} from "../lib/probe/outboundHarness.js";
+import * as spendLive from "./probes/lib/spendLive.js";
 import {
   makeHangupPlan,
   hangupArmed,
@@ -198,6 +266,30 @@ try {
 }
 const AUTH_TOKEN = opt("auth-token", process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH_TOKEN_ALT || "");
 
+// Both modes (Task 15).
+const DRY_RUN = flag("dry-run");
+const SERVER_LOG = opt("server-log", "");
+const P1_PROBE = opt("p1-probe", "");
+// --outbound only.
+const OUTBOUND = flag("outbound");
+const OUTBOUND_SILENT = flag("silent");
+const HELLO_MS = Number.parseInt(opt("hello-ms", "1870"), 10);
+/**
+ * When Twilio's stream `start` arrives after the answer. Spike B measured
+ * 319-334 ms on real calls, and the product's silence deadline assumes it
+ * (FIRST_SECONDS_DEFAULTS.answerToStreamMs, rounded up to 350). A local
+ * server answers and upgrades in ~90 ms, which would put a hello at
+ * answer + 1,870 ms AFTER the stream + 1,650 deadline -- a failure of the
+ * simulation, not of the product. So `start` is held until this offset.
+ */
+const ANSWER_TO_STREAM_MS = Number.parseInt(opt("answer-to-stream-ms", "330"), 10);
+const AMD_MS = Number.parseInt(opt("amd-ms", "3000"), 10);
+const CALL_SID_ARG = opt("call-sid", "");
+const NO_RENDER = flag("no-render");
+const KEEP_SEED = flag("keep-seed");
+/** The AccountSid the webhooks carry, exactly as the inbound mode has always sent it. */
+const HARNESS_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "ACharness0000000000000000000000000";
+
 /** 160 bytes of 0xFF is exactly one 20 ms Twilio frame of mu-law SILENCE. */
 const SILENT_FRAME_BYTES = Buffer.alloc(160, 0xff);
 const FRAME_BYTES = 160;
@@ -235,6 +327,43 @@ if (flag("synth")) {
   console.log(`Caller audio for "${SCRIPT_NAME}": ${written.length} written, ${skipped.length} already cached.`);
   console.log(`${lines.length} lines in test-audio/caller/`);
   process.exit(0);
+}
+
+// --p1-probe names a Part 1 ledger entry; reserveP1 refuses anything else, and
+// that refusal belongs here, before a request is sent, not after a call.
+if (P1_PROBE && !P1_PROBE.startsWith(spendLive.P1_PREFIX)) {
+  die(`--p1-probe ${JSON.stringify(P1_PROBE)} must start with "${spendLive.P1_PREFIX}" (e.g. P1-HARNESS).`);
+}
+
+/** --outbound's own refusals, all before anything is seeded, rendered or spent. */
+let OUTBOUND_AMD = null;
+if (OUTBOUND) {
+  if (SCRIPT_NAME) die(`--outbound says one line ("Hello?") or nothing (--silent); --script is inbound only.`);
+  if (HANGUP_AFTER || HANGUP_ARM_AFTER || HANGUP_ON_COUNTER || EXPECTATIONS.length) {
+    die("--hangup-* and --expect-counter are inbound only.");
+  }
+  if (!isLoopbackBase(BASE)) {
+    die(
+      `--outbound drives a LOCAL server only (got --base ${BASE}).\n\n` +
+        `It seeds the local database and reads the call back from it; a remote server\n` +
+        `could see neither. --confirm does not change this.`
+    );
+  }
+  if (!Number.isFinite(HELLO_MS) || HELLO_MS < 0) die(`--hello-ms must be a whole number of ms (got ${opt("hello-ms", "")}).`);
+  if (!Number.isFinite(AMD_MS) || AMD_MS < 0) die(`--amd-ms must be a whole number of ms (got ${opt("amd-ms", "")}).`);
+  if (!Number.isFinite(ANSWER_TO_STREAM_MS) || ANSWER_TO_STREAM_MS < 0) {
+    die(`--answer-to-stream-ms must be a whole number of ms (got ${opt("answer-to-stream-ms", "")}).`);
+  }
+  try {
+    OUTBOUND_AMD = parseAmdFlag(opt("amd", ""));
+  } catch (err) {
+    die(err.message);
+  }
+  try {
+    assertLocalDatabase(process.env.DATABASE_URL);
+  } catch (err) {
+    die(`${err.message}\n\nSet DATABASE_URL=postgresql://vetra:vetra_local_dev@localhost:55432/vetra for this command.`);
+  }
 }
 
 const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(BASE);
@@ -294,6 +423,8 @@ if ((HANGUP_ON_COUNTER || EXPECTATIONS.length) && !DEBUG_TOKEN) {
 
 const callSid = `CA${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
 const streamSid = `MZ${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+/** Inbound --p1-probe: set when the socket opens -- from then a Live session may be billing. */
+let inboundSocketOpened = false;
 
 if (OUT) writeFileSync(OUT, "");
 const record = (obj) => {
@@ -337,45 +468,83 @@ async function readCounters() {
  * to match what the server believes its own BASE_URL is. A mismatch there is a
  * 403 indistinguishable from a wrong token.
  */
-async function answerCall() {
-  const url = `${BASE}/twilio/live-voice`;
-  const params = {
-    AccountSid: process.env.TWILIO_ACCOUNT_SID || "ACharness0000000000000000000000000",
-    CallSid: callSid,
-    From: FROM,
-    To: TO,
-    CallStatus: "ringing",
-    Direction: "inbound",
-    ApiVersion: "2010-04-01",
-  };
-  const signature = twilio.getExpectedTwilioSignature(AUTH_TOKEN, url, params);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": signature },
-    body: new URLSearchParams(params).toString(),
+/**
+ * The request is built by lib/probe/twilioRequests.js, byte-identical to the
+ * inline construction it replaced (tests/outboundHarnessRequests.test.js).
+ */
+function inboundAnswerRequest() {
+  return buildInboundAnswerRequest({
+    base: BASE,
+    callSid,
+    from: FROM,
+    to: TO,
+    accountSid: HARNESS_ACCOUNT_SID,
+    authToken: AUTH_TOKEN,
   });
+}
+
+async function answerCall() {
+  const req = inboundAnswerRequest();
+  const res = await fetch(req.url, req.init);
   return { status: res.status, body: await res.text() };
 }
 
+// parseTwiml moved, unchanged, to lib/probe/twilioRequests.js: the free outbound
+// test (tests/liveOutboundHarness.test.js) parses the door's TwiML with it.
+
+/** A request as the one printable line --dry-run shows. */
+function printRequest(step, req) {
+  console.log(JSON.stringify({ step, method: req.init.method, url: req.url, headers: req.init.headers, body: req.init.body }));
+}
+
 /**
- * Pull the stream URL and the <Parameter> values out of the TwiML.
+ * Spend accounting for --p1-probe, in either mode. Reserved before anything
+ * can spend; committed once, with a numeric usd, when the run is priced -- or
+ * from the exit hook if the process ends first (a crash, a process.exit on a
+ * refused webhook): the full reserve if a session could have opened, $0 if
+ * none did. commit() is synchronous, which is what makes an exit hook enough.
  *
- * Returns null for any TwiML that is not a <Connect><Stream> -- the refusal and
- * the unrouted-voicemail branches are both valid answers and both mean the call
- * never reaches the assistant, so they are reported rather than parsed.
+ * @param {{mode: string, callSid: () => string, sessionMayHaveOpened: () => boolean}} a
  */
-function parseTwiml(xml) {
-  const stream = xml.match(/<Stream\s+url="([^"]+)"/);
-  if (!stream) return null;
-  const customParameters = {};
-  for (const m of xml.matchAll(/<Parameter\s+name="([^"]+)"\s+value="([^"]*)"\s*\/>/g)) {
-    customParameters[m[1]] = m[2]
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"');
+function startSpend({ mode, callSid: sidOf, sessionMayHaveOpened }) {
+  if (!P1_PROBE) return null;
+  const guard = createSpendGuard({ probe: P1_PROBE, spend: spendLive });
+  try {
+    guard.reserve();
+  } catch (err) {
+    die(`${err.message}\nNothing was sent and nothing was spent.`);
   }
-  return { url: stream[1], customParameters };
+  console.log(`spend      reserved $${HARNESS_RESERVE_USD.toFixed(2)} under ${P1_PROBE}`);
+  process.on("exit", () => {
+    if (guard.committed()) return;
+    const fallback = sessionMayHaveOpened()
+      ? { usd: null, reason: "the run ended before it could be priced" }
+      : { usd: 0, basis: "no_session" };
+    const entry = guard.commit(fallback, { callSid: sidOf(), mode });
+    if (entry) console.log(`spend      committed $${entry.usd.toFixed(4)} (${entry.basis}) under ${P1_PROBE}`);
+  });
+  return guard;
+}
+
+/**
+ * The server's log, re-read until this call's live_call_summary is in it (the
+ * session writes it at teardown, just after our socket closes), or the wait
+ * runs out. null when no --server-log was given.
+ */
+async function readServerLogFor(sid, { waitMs = 6000 } = {}) {
+  if (!SERVER_LOG) return null;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const view = existsSync(SERVER_LOG)
+      ? parseServerLog(decodeLogBuffer(readFileSync(SERVER_LOG)), { callSid: sid })
+      : null;
+    if ((view && view.summary) || Date.now() >= deadline) {
+      if (!view) console.error(`server log ${SERVER_LOG} does not exist`);
+      else if (!view.summary) console.error(`server log: no live_call_summary for ${sid} after ${waitMs} ms`);
+      return view;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 async function main() {
@@ -392,6 +561,16 @@ async function main() {
     console.log(`script     (none) — silent mode, ~1 cent`);
   }
   console.log("");
+
+  // --dry-run (Task 15): the exact request, and nothing else -- no counters,
+  // no socket, no reserve.
+  if (DRY_RUN) {
+    printRequest("answer", inboundAnswerRequest());
+    return;
+  }
+
+  // --p1-probe (Task 15). A session can only have opened once the socket did.
+  const spend = startSpend({ mode: "inbound", callSid: () => callSid, sessionMayHaveOpened: () => inboundSocketOpened });
 
   const before = await readCounters();
 
@@ -593,6 +772,7 @@ async function main() {
   }
 
   ws.on("open", () => {
+    inboundSocketOpened = true; // --p1-probe: from here a Live session may be billing
     stats.connectMs = Date.now() - openedAt;
     ws.send(JSON.stringify({ event: "connected", protocol: "Call", version: "1.0.0" }));
     ws.send(
@@ -861,9 +1041,424 @@ async function main() {
         `remain indicative rather than measurements.`
     );
   }
+
+  // --p1-probe (Task 15): priced from this call's live_call_summary usage when
+  // --server-log is given; the full reserve otherwise.
+  if (spend) {
+    const view = await readServerLogFor(callSid);
+    const priced = priceHarnessRun({ sessionOpened: inboundSocketOpened, callSummary: view?.summary ?? null, renderSessions: [] });
+    const entry = spend.commit(priced, { callSid, mode: "inbound" });
+    console.log(`\nspend      committed $${entry.usd.toFixed(4)} (${entry.basis}${entry.reason ? `: ${entry.reason}` : ""}) under ${P1_PROBE}`);
+  }
 }
 
-main().catch((err) => {
+// ===========================================================================
+// --outbound (Task 15): the person's side of a call dispatch placed.
+// ===========================================================================
+
+/** POST one signed request; the HTTP status, or the transport error as text. */
+async function postSigned(req) {
+  try {
+    const res = await fetch(req.url, req.init);
+    await res.text();
+    return res.status;
+  } catch (err) {
+    return `error: ${err?.cause?.code || err?.message || "request failed"}`;
+  }
+}
+
+/**
+ * The call itself, from the answer POST to the terminal status callback.
+ *
+ * "The answer" is the moment the answer POST is SENT: that is when Twilio
+ * would have seen the pickup, and every client-side time is measured from it.
+ *
+ * @returns {Promise<{observer: ReturnType<typeof createClientObserver>, stats: object}>}
+ */
+async function runOutboundCall({ seed, common, parties, mode, helloFrames }) {
+  const observer = createClientObserver();
+  const playout = createPlayoutClock({ frameMs: FRAME_MS });
+  const stats = {
+    answerStatus: null,
+    answerHttpMs: null,
+    twimlNotStream: null,
+    inProgressStatus: null,
+    amdStatus: null,
+    completedStatus: null,
+    socketOpened: false,
+    connectMs: null,
+    framesSent: 0,
+    speechFramesSent: 0,
+    marksReceived: 0,
+    marksEchoed: 0,
+    clears: 0,
+    wrongStreamSid: 0,
+    hangupReason: null,
+    closeCode: null,
+    closeReason: "",
+    durationSeconds: null,
+  };
+  const outboundStreamSid = `MZ${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+
+  const answeredAt = Date.now();
+  observer.answered(answeredAt);
+  const answerReq = buildOutboundAnswerRequest({ ...common, ...parties });
+  let body = "";
+  try {
+    const res = await fetch(answerReq.url, answerReq.init);
+    stats.answerStatus = res.status;
+    body = await res.text();
+  } catch (err) {
+    stats.answerStatus = `error: ${err?.cause?.code || err?.message}`;
+  }
+  stats.answerHttpMs = Date.now() - answeredAt;
+  console.log(`answer     ${stats.answerStatus} in ${stats.answerHttpMs} ms`);
+  const parsed = stats.answerStatus === 200 ? parseTwiml(body) : null;
+  if (!parsed) {
+    // The door's miss path (a <Say> and a hang-up) is an answer, not a stream.
+    stats.twimlNotStream = body || null;
+    if (stats.answerStatus === 200) console.log(`answer     NOT a <Connect><Stream>:\n${body}`);
+    return { observer, stats };
+  }
+  console.log(`stream     ${parsed.url.replace(/\/[^/]+$/, "/<token>")}`);
+  console.log(`params     ${JSON.stringify(parsed.customParameters)}`);
+
+  // `in-progress` right after the answer, as Twilio sends it -- not awaited
+  // before the socket opens, which would delay the stream by a round trip.
+  const inProgress = postSigned(buildOutboundStatusRequest({ ...common, ...parties, status: "in-progress" })).then((s) => {
+    stats.inProgressStatus = s;
+  });
+  const amdPosts = [];
+
+  const ws = new WebSocket(parsed.url);
+  const timers = new Set();
+  let markTimers = [];
+  const every = (fn, ms) => {
+    const t = setInterval(fn, ms);
+    timers.add(t);
+  };
+  const later = (fn, ms) => {
+    const t = setTimeout(fn, Math.max(0, ms));
+    timers.add(t);
+  };
+  const stopAllTimers = () => {
+    for (const t of timers) {
+      clearInterval(t);
+      clearTimeout(t);
+    }
+    timers.clear();
+    for (const t of markTimers) clearTimeout(t);
+    markTimers = [];
+  };
+  let outQueue = [];
+  let finished = false;
+
+  function hangUp(reason) {
+    if (finished) return;
+    finished = true;
+    stats.hangupReason = reason;
+    stopAllTimers();
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ event: "stop", streamSid: outboundStreamSid, stop: { callSid: seed.callSid } }));
+      setTimeout(() => ws.close(), 500);
+    }
+  }
+
+  ws.on("open", () => {
+    stats.socketOpened = true;
+    stats.connectMs = Date.now() - answeredAt;
+    ws.send(JSON.stringify({ event: "connected", protocol: "Call", version: "1.0.0" }));
+    // `start` at answer + --answer-to-stream-ms, as Twilio's arrives (see
+    // ANSWER_TO_STREAM_MS). Later than that if the socket itself was slower.
+    later(() => startStream(), answeredAt + ANSWER_TO_STREAM_MS - Date.now());
+  });
+
+  function startStream() {
+    if (finished || ws.readyState !== ws.OPEN) return;
+    ws.send(
+      JSON.stringify({
+        event: "start",
+        sequenceNumber: "1",
+        streamSid: outboundStreamSid,
+        start: {
+          streamSid: outboundStreamSid,
+          accountSid: common.accountSid,
+          callSid: seed.callSid,
+          tracks: ["inbound"],
+          customParameters: parsed.customParameters,
+          mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+        },
+      })
+    );
+    observer.streamStarted(Date.now());
+
+    // "Hello?" at --hello-ms after the answer. Its onset is the moment its
+    // first frame actually goes out on the ticker below.
+    if (mode === "speaks_first") later(() => outQueue.push(...helloFrames), answeredAt + HELLO_MS - Date.now());
+
+    // ONE ticker, as the inbound mode: a real line sends a frame every 20 ms.
+    every(() => {
+      if (ws.readyState !== ws.OPEN) return;
+      const frame = outQueue.shift();
+      if (frame) {
+        if (stats.speechFramesSent === 0) observer.helloOnset(Date.now());
+        stats.speechFramesSent += 1;
+      }
+      ws.send(
+        JSON.stringify({
+          event: "media",
+          streamSid: outboundStreamSid,
+          media: {
+            track: "inbound",
+            chunk: String(stats.framesSent + 1),
+            timestamp: String(stats.framesSent * FRAME_MS),
+            payload: (frame || SILENT_FRAME_BYTES).toString("base64"),
+          },
+        })
+      );
+      stats.framesSent += 1;
+    }, FRAME_MS);
+
+    if (OUTBOUND_AMD) {
+      later(() => {
+        amdPosts.push(
+          postSigned(buildOutboundAmdRequest({ ...common, answeredBy: OUTBOUND_AMD, durationMs: AMD_MS })).then((s) => {
+            stats.amdStatus = s;
+          })
+        );
+      }, answeredAt + AMD_MS - Date.now());
+    }
+    later(() => hangUp("hold"), answeredAt + HOLD_MS - Date.now());
+  }
+
+  ws.on("message", (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    if (msg.streamSid && msg.streamSid !== outboundStreamSid) stats.wrongStreamSid += 1;
+    observer.fromServer(msg, now);
+    if (msg.event === "media" && msg.media?.payload) {
+      playout.onMedia(now);
+      return;
+    }
+    if (msg.event === "mark" && msg.mark?.name) {
+      // Paced, exactly as the inbound mode: Twilio echoes a mark once the
+      // audio ahead of it has played. The first-audio mark has nothing ahead
+      // of it, so it echoes at once -- and that echo is what the server
+      // measures from_answer_ms / from_speech_ms at (O-7).
+      stats.marksReceived += 1;
+      markTimers.push(
+        setTimeout(() => {
+          if (ws.readyState !== ws.OPEN) return;
+          ws.send(JSON.stringify({ event: "mark", streamSid: outboundStreamSid, mark: { name: msg.mark.name } }));
+          stats.marksEchoed += 1;
+        }, playout.markDelay(now))
+      );
+      return;
+    }
+    if (msg.event === "clear") {
+      // Twilio drops its buffer and the marks behind it: they never echo.
+      stats.clears += 1;
+      playout.onClear(now);
+      for (const t of markTimers) clearTimeout(t);
+      markTimers = [];
+    }
+  });
+
+  ws.on("error", (err) => console.error(`websocket error: ${err?.message}`));
+  await new Promise((resolve) => {
+    ws.on("close", (code, reason) => {
+      finished = true;
+      stopAllTimers();
+      stats.closeCode = code;
+      stats.closeReason = reason?.toString() || "";
+      resolve();
+    });
+  });
+
+  await inProgress;
+  await Promise.all(amdPosts);
+  stats.durationSeconds = Math.max(0, Math.round((Date.now() - answeredAt) / 1000));
+  stats.completedStatus = await postSigned(
+    buildOutboundStatusRequest({ ...common, ...parties, status: "completed", durationSeconds: stats.durationSeconds })
+  );
+  return { observer, stats };
+}
+
+async function mainOutbound() {
+  const mode = OUTBOUND_SILENT ? "silent" : "speaks_first";
+  const databaseUrl = process.env.DATABASE_URL;
+
+  // The caller's audio, checked before anything is seeded or spent.
+  let helloFrames = [];
+  if (mode === "speaks_first" && !DRY_RUN) {
+    let hello;
+    try {
+      [hello] = buildProbeScript(resolveScriptLines("outbound_hello"));
+    } catch (err) {
+      die(`${err.message}\n\nSynthesise it once (Google TTS, a few characters): node scripts/live-call-harness.js --synth --script outbound_hello`);
+    }
+    for (let i = 0; i < hello.mulaw.length; i += FRAME_BYTES) helloFrames.push(hello.mulaw.subarray(i, i + FRAME_BYTES));
+  }
+
+  const { default: pg } = await import("pg");
+  const db = await import("../services/db.js");
+  const { seedOutboundAttempt, loadOutboundAttempt, renderAttemptClips, openerClipBytes, readBackOutbound, cleanupOutboundSeed, dispatchRowFor } =
+    await import("../lib/probe/outboundSeed.js");
+
+  const admin = new pg.Client({ connectionString: databaseUrl });
+  await admin.connect();
+  let seed = null;
+  let cleanup = null;
+  try {
+    if (CALL_SID_ARG) {
+      seed = await loadOutboundAttempt({ db, callSid: CALL_SID_ARG });
+    } else {
+      const { callerId, contact } = pickHarnessNumbers();
+      seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact });
+    }
+    console.log(`base       ${BASE}`);
+    console.log(`mode       ${mode}${mode === "speaks_first" ? ` ("Hello?" at ${HELLO_MS} ms)` : ""}${OUTBOUND_AMD ? `, AMD ${OUTBOUND_AMD} at ${AMD_MS} ms` : ""}`);
+    console.log(`callSid    ${seed.callSid}   (${seed.seeded ? "seeded" : "existing attempt"})`);
+    console.log(`attempt    ${seed.attemptId} #${seed.attemptNo}, outreach ${seed.outreachId}, campaign ${seed.campaignId} v${seed.campaignVersion}`);
+    console.log(`business   ${seed.businessId} "${seed.businessName}", caller_id ${seed.callerId} -> contact ${seed.contact}`);
+    console.log("");
+
+    const common = { base: BASE, callSid: seed.callSid, accountSid: HARNESS_ACCOUNT_SID, authToken: AUTH_TOKEN };
+    const parties = { callerId: seed.callerId, contact: seed.contact };
+    const plan = dispatchLines({ row: dispatchRowFor(seed), attemptNo: seed.attemptNo });
+
+    if (DRY_RUN) {
+      console.log(`render     ${NO_RENDER ? "SKIPPED (--no-render): the prompt path" : "WOULD render via createLiveRenderAudio (Gemini Live, paid)"}`);
+      console.log(JSON.stringify({ step: "render_lines", lines: plan.lines, refused: plan.refused }));
+      printRequest("answer", buildOutboundAnswerRequest({ ...common, ...parties }));
+      printRequest("status_in_progress", buildOutboundStatusRequest({ ...common, ...parties, status: "in-progress" }));
+      if (OUTBOUND_AMD) printRequest(`amd_at_${AMD_MS}ms`, buildOutboundAmdRequest({ ...common, answeredBy: OUTBOUND_AMD, durationMs: AMD_MS }));
+      console.log(
+        JSON.stringify({
+          step: "stream_start",
+          at_ms_after_answer: ANSWER_TO_STREAM_MS,
+          url: "<the Stream url from the answer's TwiML>",
+          start: {
+            callSid: seed.callSid,
+            tracks: ["inbound"],
+            customParameters: "<the answer TwiML's <Parameter>s, via parseTwiml>",
+            mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+          },
+          caller: mode === "speaks_first" ? `"Hello?" (outbound_hello) at ${HELLO_MS} ms after the answer` : "silence",
+          hang_up_at_ms: HOLD_MS,
+        })
+      );
+      printRequest("status_completed", buildOutboundStatusRequest({ ...common, ...parties, status: "completed", durationSeconds: Math.round(HOLD_MS / 1000) }));
+      if (P1_PROBE) console.log(`spend      --dry-run: no reserveP1, no commit`);
+      return;
+    }
+
+    // Spend: reserved before the first paid step (the render). Anything after
+    // it that ends the process early commits from the exit hook.
+    // `callStarted` is set BEFORE the answer POST: from that moment a Live
+    // session may open server-side, whatever this process then manages to see.
+    const state = { rendered: false, callStarted: false };
+    const spend = startSpend({ mode: `outbound_${mode}`, callSid: () => seed.callSid, sessionMayHaveOpened: () => state.rendered || state.callStarted });
+
+    let render = null;
+    if (!NO_RENDER) {
+      state.rendered = true;
+      render = await renderAttemptClips({ db, seed, env: process.env });
+      for (const s of render.sessions) {
+        console.log(
+          `render     ${s.kind}: ${s.outcome} in ${s.render_ms ?? "?"} ms, overlap ${s.overlap}, word_ratio ${s.word_ratio}, ` +
+            `usage before turnComplete: ${s.usage_before_turn_complete}`
+        );
+      }
+      console.log(`stored     opener ${render.stored.opener ?? "none"} bytes, voicemail ${render.stored.voicemail ?? "none"} bytes`);
+    }
+    // Judged by what the session will FIND, not by what this run did: a
+    // --call-sid attempt may already carry a clip, and a render may not store.
+    const clipBytes = await openerClipBytes({ admin, callSid: seed.callSid });
+    const clip = clipBytes > 0;
+    console.log(`clip       ${clip ? `${clipBytes} bytes stored: the clip path` : "none stored: the prompt path"}`);
+
+    state.callStarted = true;
+    const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, helloFrames });
+
+    // The session writes the calls row's end and its summary at teardown.
+    await new Promise((r) => setTimeout(r, 1500));
+    const dbRead = await readBackOutbound({ admin, callSid: seed.callSid });
+    const server = await readServerLogFor(seed.callSid);
+
+    const verdict = outboundVerdict({
+      mode,
+      clip,
+      client: observer.snapshot(),
+      server,
+      db: dbRead,
+      personaName: seed.personaName,
+      answerToStreamMs: ANSWER_TO_STREAM_MS,
+    });
+
+    const priced = priceHarnessRun({
+      sessionOpened: stats.socketOpened,
+      callSummary: server?.summary ?? null,
+      renderSessions: render?.sessions ?? [],
+    });
+    const committed = spend ? spend.commit(priced, { callSid: seed.callSid, mode: `outbound_${mode}` }) : null;
+
+    if (seed.seeded && !KEEP_SEED) cleanup = await cleanupOutboundSeed({ admin, seed });
+
+    const { events: _events, ...serverView } = server || {};
+    console.log(
+      JSON.stringify({
+        kind: "outbound_harness_verdict",
+        pass: verdict.pass,
+        mode,
+        clip,
+        callSid: seed.callSid,
+        warnings: verdict.warnings,
+        criteria: verdict.criteria,
+        measurements: verdict.measurements,
+        render: render ? { lines: render.lines, refused: render.refused, stored: render.stored, total_ms: render.total_ms, failed: render.failed, sessions: render.sessions } : null,
+        server: server ? { ...serverView, summary_usage: server.summary?.usage ?? null, summary_model: server.summary?.model ?? null, summary: undefined } : null,
+        db: dbRead,
+        requests: {
+          answer: stats.answerStatus,
+          in_progress: stats.inProgressStatus,
+          amd: stats.amdStatus,
+          completed: stats.completedStatus,
+          not_a_stream: stats.twimlNotStream,
+        },
+        socket: {
+          connect_ms: stats.connectMs,
+          frames_sent: stats.framesSent,
+          speech_frames_sent: stats.speechFramesSent,
+          marks_received: stats.marksReceived,
+          marks_echoed: stats.marksEchoed,
+          clears: stats.clears,
+          wrong_stream_sid: stats.wrongStreamSid,
+          hangup: stats.hangupReason,
+          close: `${stats.closeCode} ${stats.closeReason}`.trim(),
+          duration_s: stats.durationSeconds,
+        },
+        spend: P1_PROBE ? { probe: P1_PROBE, reserved_usd: HARNESS_RESERVE_USD, priced, committed } : null,
+        cleanup: seed.seeded ? (KEEP_SEED ? "kept (--keep-seed)" : cleanup) : "not seeded (--call-sid)",
+      })
+    );
+    process.exitCode = verdict.pass ? 0 : 1;
+  } finally {
+    if (seed?.seeded && !KEEP_SEED && !cleanup) {
+      cleanup = await cleanupOutboundSeed({ admin, seed }).catch((err) => ({ clean: false, error: err?.message }));
+      console.log(`cleanup    ${JSON.stringify(cleanup)}`);
+    }
+    await admin.end().catch(() => {});
+    await db.close().catch(() => {});
+  }
+}
+
+(OUTBOUND ? mainOutbound : main)().catch((err) => {
   console.error(err?.stack || err?.message || String(err));
   process.exit(1);
 });
