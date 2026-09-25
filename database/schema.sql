@@ -1351,8 +1351,10 @@ GRANT EXECUTE ON FUNCTION app_call_state_prune(integer)       TO vetra_app;
 -- Migration 042: outbound calling -- the tables (spec §6.1)
 -- ============================================================
 -- Nine tenant tables. All are ENABLE + FORCE row level security with the
--- 029 tenant_isolation idiom. Grants come from 029's ALTER DEFAULT PRIVILEGES
--- (SELECT, INSERT, UPDATE, DELETE to vetra_app), so nothing is granted here.
+-- 029 tenant_isolation idiom. SELECT, INSERT, UPDATE, DELETE are granted to
+-- vetra_app EXPLICITLY at the end (the 030/037 precedent), not left to 029's
+-- ALTER DEFAULT PRIVILEGES: those bind only objects created by the role that
+-- ran 029, which is unproven for whichever role runs this on Cloud SQL.
 --
 -- Cross-tenant reads (the sweep, capacity, resolving a CallSid) do NOT happen
 -- on these tables -- FORCE RLS binds a definer's owner too (033:8-31). They
@@ -1513,6 +1515,8 @@ BEGIN
     EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (business_id = app_current_business_id()) WITH CHECK (business_id = app_current_business_id())', t);
   END LOOP;
 END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON campaigns, campaign_versions, contacts, consents, suppressions, outreach, call_attempts, webhook_endpoints, outbox TO vetra_app;
 
 -- ============================================================
 -- Migration 043: outbound calling -- FK constraints on calls (spec §6.2)
