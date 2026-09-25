@@ -2287,3 +2287,350 @@ export async function currentTenant(client) {
 export async function close() {
   if (pool) await pool.end();
 }
+
+// --- outbound (spec §10) ---------------------------------------------------
+//
+// The dispatcher's data layer (lib/outbound/dispatch.js). Everything below is
+// APPEND-ONLY: no inbound function above changes shape or behaviour.
+//
+// Three rules, the same for every function:
+//   1. Throw on `res.error`. The dispatcher runs inside withTenant, which
+//      rolls the whole unit of work back.
+//   2. Assert rowCount on every UPDATE and DELETE. The service runs as
+//      vetra_app NOBYPASSRLS, so a tenantless write matches zero rows and
+//      reports success; here it throws instead.
+//   3. A PHI function records itself with noteAccess (lib/phiAudit.js).
+//
+// And one for the tenant-scoped ones: they refuse to run outside withTenant.
+// Under FORCE RLS an unscoped read returns NOTHING, and for isSuppressed and
+// countDialsSince "nothing" is the permissive answer ("not on the do-not-call
+// list", "zero dials today"). lockCapacity outside a transaction takes an
+// xact lock that is released the instant its own statement ends. Each of those
+// would fail OPEN silently; requireTenantScope makes the wiring bug loud.
+// activeDialCounts and outboundDue read the no-RLS directories through
+// definer functions (migration 044), so they are correct with or without one.
+
+/** Throw unless a withTenant unit of work is in scope. */
+function requireTenantScope(operation) {
+  if (!tenantContext.getStore()?.client) {
+    throw new Error(`${operation}: must run inside withTenant (an unscoped read under FORCE RLS returns nothing, which here would read as permission)`);
+  }
+}
+
+/** A count column as a finite number, or a TypeError (the gate refuses strings). */
+function finiteCount(value, operation) {
+  const n = Number(value);
+  if (value === null || value === undefined || !Number.isFinite(n)) {
+    throw new TypeError(`${operation}: expected a numeric count, got ${JSON.stringify(value)}`);
+  }
+  return n;
+}
+
+/**
+ * Claim one outreach for dispatch: the row lock half of the double-dial guard
+ * (G6). The outreach row is locked with SKIP LOCKED, so a second dispatcher
+ * running at the same moment gets NO row and skips, instead of queuing behind
+ * the first and dialing after it. Joins the PINNED campaign version's config,
+ * not the campaign's current one.
+ *
+ * @param {string} outreachId
+ * @returns {Promise<object|null>} null when the row is locked elsewhere or not visible
+ */
+export async function claimOutreachForDispatch(outreachId) {
+  requireTenantScope("claimOutreachForDispatch");
+  const res = await q(
+    `SELECT o.id, o.business_id, o.state, o.attempts_made, o.created_at, o.hold_until,
+            o.campaign_id, o.campaign_version, c.status AS campaign_status, c.compliance_class, c.template_key,
+            v.config, k.id AS contact_id, k.phone_e164, k.first_name, k.timezone AS contact_timezone,
+            b.outbound_enabled, b.outbound_max_concurrent, b.timezone AS business_timezone, b.name AS business_name
+       FROM outreach o
+       JOIN campaigns c ON c.id = o.campaign_id
+       JOIN campaign_versions v ON v.campaign_id = o.campaign_id AND v.version = o.campaign_version
+       JOIN contacts k ON k.id = o.contact_id
+       JOIN businesses b ON b.id = o.business_id
+      WHERE o.id = $1
+        FOR UPDATE OF o SKIP LOCKED`,
+    [outreachId]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("claimOutreachForDispatch", { resourceIds: [outreachId, row?.contact_id], rowCount: res.rowCount || 0 });
+  return row;
+}
+
+/**
+ * Is this number on the tenant's do-not-call list (gate check 4)?
+ * @param {string} phone - E.164
+ * @returns {Promise<boolean>}
+ */
+export async function isSuppressed(phone) {
+  requireTenantScope("isSuppressed");
+  const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1`, [phone]);
+  if (res.error) throw res.error;
+  const rows = res.rows || [];
+  noteAccess("isSuppressed", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
+  return rows.length > 0;
+}
+
+/**
+ * The contact's consent evidence (gate check 5), newest first. Revoked and
+ * expired rows are returned too: consentSatisfies decides what counts.
+ * @param {string} contactId
+ * @returns {Promise<Array<{id: string, purpose: string, channels: string[], covers_automated: boolean, captured_at: Date, expires_at: Date|null, revoked_at: Date|null}>>}
+ */
+export async function listConsents(contactId) {
+  requireTenantScope("listConsents");
+  const res = await q(
+    `SELECT id, purpose, channels, covers_automated, captured_at, expires_at, revoked_at
+       FROM consents
+      WHERE contact_id = $1
+      ORDER BY captured_at DESC`,
+    [contactId]
+  );
+  if (res.error) throw res.error;
+  const rows = res.rows || [];
+  noteAccess("listConsents", { resourceIds: [contactId, ...rows.map((r) => r.id)], rowCount: rows.length });
+  return rows;
+}
+
+/**
+ * Does the tenant hold a past or future appointment for this number (spec
+ * §13.1, the `service` class)? appointments.client_phone is normalised on
+ * write by the 026 trigger with normalize_phone_value(), so the lookup
+ * normalises the argument with the SAME function rather than a second copy of
+ * the rule that could drift from it.
+ * @param {string} phone
+ * @returns {Promise<boolean>}
+ */
+export async function hasServiceRelationship(phone) {
+  requireTenantScope("hasServiceRelationship");
+  const res = await q(
+    `SELECT id FROM appointments WHERE client_phone = normalize_phone_value($1) LIMIT 1`,
+    [phone]
+  );
+  if (res.error) throw res.error;
+  const rows = res.rows || [];
+  noteAccess("hasServiceRelationship", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
+  return rows.length > 0;
+}
+
+/**
+ * Dial attempts to this number since `since` (gate check 9, the per-contact
+ * daily cap). TENANT-SCOPED by row-level security: spec §10.3 row 9 says
+ * "across all campaigns", and campaigns are themselves per tenant, so this
+ * counts every campaign of THIS business. Another tenant's dials to the same
+ * person are invisible here by design.
+ * @param {string} phone - E.164, as stored in call_attempts.to_number
+ * @param {Date} since
+ * @returns {Promise<number>}
+ */
+export async function countDialsSince(phone, since) {
+  requireTenantScope("countDialsSince");
+  const res = await q(
+    `SELECT count(*)::int AS n FROM call_attempts WHERE to_number = $1 AND dialed_at >= $2`,
+    [phone, since]
+  );
+  if (res.error) throw res.error;
+  const n = finiteCount(one(res)?.n, "countDialsSince");
+  noteAccess("countDialsSince", { rowCount: n });
+  return n;
+}
+
+/**
+ * Live outbound dials, globally and for this business (gate check 10). Reads
+ * dial_registry through the app_active_dial_counts() definer (migration 044),
+ * which holds ids and timestamps only.
+ * @param {string} businessId
+ * @returns {Promise<{globalOutbound: number, businessOutbound: number}>}
+ */
+export async function activeDialCounts(businessId) {
+  const res = await q(`SELECT business_id, active FROM app_active_dial_counts()`);
+  if (res.error) throw res.error;
+  const rows = (res.rows || []).map((r) => ({ business_id: r.business_id, active: finiteCount(r.active, "activeDialCounts") }));
+  return {
+    globalOutbound: rows.reduce((s, r) => s + r.active, 0),
+    businessOutbound: rows.find((r) => r.business_id === businessId)?.active ?? 0,
+  };
+}
+
+/**
+ * Attempt N+1: the unique-key half of the double-dial guard (G6). If two
+ * dispatchers ever both pass the row lock, UNIQUE (outreach_id, attempt_no)
+ * lets exactly one insert land; the other gets `{conflict: true}` and does
+ * nothing.
+ * @param {{outreachId: string, attemptNo: number, fromNumber: string, toNumber: string}} a
+ * @returns {Promise<{id: string}|{conflict: true}>}
+ */
+export async function insertCallAttempt({ outreachId, attemptNo, fromNumber, toNumber }) {
+  requireTenantScope("insertCallAttempt");
+  const res = await q(
+    `INSERT INTO call_attempts (business_id, outreach_id, attempt_no, from_number, to_number, dialed_at)
+     SELECT o.business_id, o.id, $2, $3, $4, now() FROM outreach o WHERE o.id = $1
+     ON CONFLICT (outreach_id, attempt_no) DO NOTHING
+     RETURNING id`,
+    [outreachId, attemptNo, fromNumber, toNumber]
+  );
+  if (res.error) throw res.error;
+  noteAccess("insertCallAttempt", { resourceIds: [outreachId, res.rows?.[0]?.id], rowCount: res.rowCount || 0 });
+  return res.rowCount === 1 ? { id: res.rows[0].id } : { conflict: true };
+}
+
+/**
+ * waiting -> dialing, and count the attempt. Guarded on state so a row that
+ * moved on cannot be counted twice.
+ * @param {string} outreachId
+ */
+export async function markOutreachDialing(outreachId) {
+  requireTenantScope("markOutreachDialing");
+  const res = await q(
+    `UPDATE outreach SET state = 'dialing', attempts_made = attempts_made + 1, last_attempt_at = now(), updated_at = now()
+      WHERE id = $1 AND state = 'waiting'`,
+    [outreachId]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`markOutreachDialing: expected 1 row, got ${res.rowCount}`); // a tenantless write matches zero rows and must not pass as success
+  noteAccess("markOutreachDialing", { resourceIds: [outreachId], rowCount: res.rowCount });
+}
+
+/**
+ * Back to `waiting` with a new next_attempt_at. `at = null` PARKS the
+ * outreach (a paused campaign): app_outbound_due skips a NULL next_attempt_at,
+ * so the sweep stops re-queuing it. `undefined` is refused rather than stored
+ * as NULL, because it would park an outreach nobody meant to park. A closed
+ * outreach is never reopened.
+ * @param {string} outreachId
+ * @param {Date|null} at
+ */
+export async function rescheduleOutreach(outreachId, at) {
+  requireTenantScope("rescheduleOutreach");
+  if (at !== null && !(at instanceof Date && !Number.isNaN(at.getTime()))) {
+    throw new TypeError(`rescheduleOutreach: at must be a valid Date or null, got ${String(at)}`);
+  }
+  const res = await q(
+    `UPDATE outreach SET state = 'waiting', next_attempt_at = $2, updated_at = now()
+      WHERE id = $1 AND state <> 'closed'`,
+    [outreachId, at]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`rescheduleOutreach: expected 1 row, got ${res.rowCount}`);
+  noteAccess("rescheduleOutreach", { resourceIds: [outreachId], rowCount: res.rowCount });
+}
+
+/**
+ * Close an outreach for good. Only an open one: a closed row keeps the
+ * reason it was closed for.
+ * @param {string} outreachId
+ * @param {string} closeReason - one of outreach.close_reason's CHECK values
+ * @param {string|null} [outcome]
+ */
+export async function closeOutreach(outreachId, closeReason, outcome = null) {
+  requireTenantScope("closeOutreach");
+  const res = await q(
+    `UPDATE outreach SET state = 'closed', close_reason = $2, outcome = $3, closed_at = now(), updated_at = now()
+      WHERE id = $1 AND state <> 'closed'`,
+    [outreachId, closeReason, outcome]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`closeOutreach: expected 1 row, got ${res.rowCount}`);
+  noteAccess("closeOutreach", { resourceIds: [outreachId], rowCount: res.rowCount });
+}
+
+/**
+ * Store the CallSid Twilio returned. Never overwrites one: the directory
+ * trigger (044) routes callbacks by this value.
+ * @param {string} attemptId
+ * @param {string} sid
+ */
+export async function setAttemptCallSid(attemptId, sid) {
+  requireTenantScope("setAttemptCallSid");
+  const res = await q(
+    `UPDATE call_attempts SET twilio_call_sid = $2 WHERE id = $1 AND twilio_call_sid IS NULL`,
+    [attemptId, sid]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`setAttemptCallSid: expected 1 row, got ${res.rowCount}`);
+  noteAccess("setAttemptCallSid", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * calls.create threw: the attempt happened and failed.
+ * @param {string} attemptId
+ * @param {string} [twilioStatus]
+ */
+export async function failAttempt(attemptId, twilioStatus = "failed") {
+  requireTenantScope("failAttempt");
+  // result + ended_at, not just twilio_status: the dial_registry trigger fires
+  // on ended_at/result, and a row left open there blocks capacity for an hour.
+  const res = await q(
+    `UPDATE call_attempts SET twilio_status = $2, result = 'failed', ended_at = now() WHERE id = $1`,
+    [attemptId, twilioStatus]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`failAttempt: expected 1 row, got ${res.rowCount}`);
+  noteAccess("failAttempt", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * The pre-rendered backstop line and voicemail (§9.3), rendered while it
+ * rings. Refused once post-call has started: post-call clears these columns
+ * (spec §11 step 1), and a render that finished after a quick no-answer must
+ * not write the clips back for good.
+ * @param {string} attemptId
+ * @param {{opener?: Buffer|null, voicemail?: Buffer|null}} audio
+ */
+export async function storeAttemptAudio(attemptId, { opener = null, voicemail = null } = {}) {
+  requireTenantScope("storeAttemptAudio");
+  const res = await q(
+    `UPDATE call_attempts SET opener_audio = $2, voicemail_audio = $3
+      WHERE id = $1 AND post_call_started_at IS NULL`,
+    [attemptId, opener, voicemail]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`storeAttemptAudio: expected 1 row, got ${res.rowCount} (missing, unscoped, or post-call already started)`);
+  noteAccess("storeAttemptAudio", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * Outreach due for dispatch, across all tenants (the sweep). Reads the
+ * outreach_schedule directory through app_outbound_due (migration 044): ids
+ * only, so this needs no tenant scope.
+ * @param {number} limit
+ * @param {number} graceSeconds
+ * @returns {Promise<Array<{business_id: string, outreach_id: string}>>}
+ */
+export async function outboundDue(limit, graceSeconds) {
+  const res = await q(`SELECT business_id, outreach_id FROM app_outbound_due($1::int, $2::int)`, [limit, graceSeconds]);
+  if (res.error) throw res.error;
+  return res.rows || [];
+}
+
+/**
+ * The capacity lock. One global transaction-scoped advisory lock, so two
+ * dispatches of DIFFERENT outreach cannot both read "one line free" and both
+ * dial. Released by the unit of work's COMMIT or ROLLBACK, which is why it
+ * refuses to run outside one.
+ */
+export async function lockCapacity() {
+  requireTenantScope("lockCapacity");
+  const res = await q(`SELECT pg_advisory_xact_lock(hashtext('outbound_capacity'))`);
+  if (res.error) throw res.error;
+}
+
+/**
+ * Give an attempt back (C16): Twilio refused with its concurrency error, so no
+ * call was placed, and the attempt must count neither against the schedule
+ * nor against the daily cap. Only an attempt that never got a CallSid.
+ * @param {string} attemptId
+ * @param {string} outreachId
+ */
+export async function undoAttempt(attemptId, outreachId) {
+  requireTenantScope("undoAttempt");
+  const del = await q(`DELETE FROM call_attempts WHERE id = $1 AND twilio_call_sid IS NULL`, [attemptId]);
+  if (del.error) throw del.error;
+  const upd = await q(`UPDATE outreach SET attempts_made = attempts_made - 1, updated_at = now() WHERE id = $1 AND attempts_made > 0`, [outreachId]);
+  if (upd.error) throw upd.error;
+  if (del.rowCount !== 1 || upd.rowCount !== 1) {
+    throw new Error(`undoAttempt: expected 1 row each, got delete ${del.rowCount} / update ${upd.rowCount}`);
+  }
+  noteAccess("undoAttempt", { resourceIds: [attemptId, outreachId], rowCount: 2 });
+}
