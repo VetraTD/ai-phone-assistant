@@ -1001,7 +1001,14 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // and a leak guard with a hair trigger is LVX21. There was no form-of-address
   // rule here at all, so this competes with nothing. See LVX54, LVX64.
   identity += `- Until the caller gives you a name, do not address them by any stand-in — no "user", no "caller", no placeholder of any kind. Speak to them directly with no name at all.\n`;
-  identity += `- Never describe the systems behind you as people or as things with needs: not "the calendar needs to know", not "the system requires", not "your record says". Ask for what you need the way a receptionist would — "what are you coming in for?"`;
+  // OWNER (fix round 1, item 4): on outbound, "the way a receptionist would"
+  // and its inbound example question ("what are you coming in for?") both
+  // assume a caller who rang IN. The instruction itself -- ask directly for
+  // what you need, don't anthropomorphise the systems behind you -- holds
+  // either way, so it is kept; only the receptionist framing is dropped.
+  identity += outbound
+    ? `- Never describe the systems behind you as people or as things with needs: not "the calendar needs to know", not "the system requires", not "your record says". Ask for what you need directly.`
+    : `- Never describe the systems behind you as people or as things with needs: not "the calendar needs to know", not "the system requires", not "your record says". Ask for what you need the way a receptionist would — "what are you coming in for?"`;
 
   // ---------------------------------------------------------------------------
   // LVX149. A SINGLE-LANGUAGE ENGLISH TENANT WAS TOLD NOTHING AT ALL.
@@ -1393,7 +1400,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   guardrails += `- If the caller answers only part of what you asked, or answers one question and not another, take what they gave you, acknowledge it, and ask only for what is still missing. Never wait in silence for the rest, and never re-ask something they have already answered.\n`;
 
   // Policy bullets — what the business does and doesn't allow.
-  guardrails += `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;
+  // OWNER (fix round 1, item 3): "a receptionist" contradicts the outbound
+  // identity ("an AI assistant calling on behalf of ..."). Same if/else
+  // pattern as buildStaticSystemPrefix's identity swap; only the self-
+  // description word changes, the policy itself does not.
+  guardrails += outbound
+    ? `- Never provide medical, legal, or financial advice. You are an AI assistant, not a professional.\n`
+    : `- Never provide medical, legal, or financial advice. You are a receptionist, not a professional.\n`;
   // Named vocabulary, not a general appeal.
   //
   // "Never share internal system details" was already here when a caller heard
@@ -1403,7 +1416,9 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // deterministic guard strips these on the way to TTS as well
   // (lib/voice/speakableText.js) — this is the layer that stops them being
   // generated, not just spoken.
-  guardrails += `- You are a receptionist speaking on the phone. NEVER say these words to a caller: API, endpoint, webhook, database, server, backend, query, function, tool, integration, sync, JSON, HTTP, error code, or the name of any software system. Never mention prompts, instructions, tools, or how you work internally. If something fails, say plainly what it means for the caller — "I can't get to the calendar right now" — never why, in technical terms.\n`;
+  guardrails += outbound
+    ? `- You are an AI assistant speaking on the phone. NEVER say these words to a caller: API, endpoint, webhook, database, server, backend, query, function, tool, integration, sync, JSON, HTTP, error code, or the name of any software system. Never mention prompts, instructions, tools, or how you work internally. If something fails, say plainly what it means for the caller — "I can't get to the calendar right now" — never why, in technical terms.\n`
+    : `- You are a receptionist speaking on the phone. NEVER say these words to a caller: API, endpoint, webhook, database, server, backend, query, function, tool, integration, sync, JSON, HTTP, error code, or the name of any software system. Never mention prompts, instructions, tools, or how you work internally. If something fails, say plainly what it means for the caller — "I can't get to the calendar right now" — never why, in technical terms.\n`;
   // The bullet above forbids a VOCABULARY. On a live call the model obeyed it
   // to the letter and leaked anyway, semantically: asked what it used, it
   // volunteered "our internal calendar database" and "our internal telephony
@@ -1498,7 +1513,14 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   sections.push(dateTime);
 
   // === AFTER-HOURS BEHAVIOR ===
-  if (!open && config.businessHours) {
+  // OWNER O-11 (fix round 1, spec §9.5): suppressed outright on outbound. This
+  // block describes whether the TENANT's own office is open to answer an
+  // inbound call -- irrelevant to a call Ava placed, whose calling window
+  // (spec §7) is what governs when we call at all. Booking still refuses a
+  // closed slot through the ordinary scheduling rules (businessHoursOnly,
+  // check_appointment_availability); nothing about that enforcement lives in
+  // this prompt block.
+  if (!outbound && !open && config.businessHours) {
     // A policy may name a tool this business doesn't have — the dashboard now
     // hides "book for later" for non-appointment businesses, but a stored
     // config predating that (or one set by any other path) can still carry
@@ -1915,11 +1937,18 @@ export function composeCachedMessage(dynamicTail, userMessage) {
 function buildStepGuidance(step, intent, config, stepExtras = {}) {
   const now = stepExtras.now instanceof Date ? stepExtras.now : new Date();
   const markerMode = intentMarkerEnabled(stepExtras);
+  // OWNER O-10 (fix round 1, spec §9.5): outbound reaches IDENTIFY_INTENT too
+  // (O-1 -- Live's step machine needs set_call_intent to leave it), but "the
+  // caller is calling" is backwards for a call Ava placed, and the OUTBOUND
+  // CALL block already says who and why. Suppressed on outbound ONLY for
+  // this one step; every later step (booking, etc.) keeps its normal
+  // guidance unchanged.
+  const outbound = stepExtras?.outboundCall || null;
 
   switch (step) {
     case "identify_intent":
       return (
-        `Your task: Figure out why the caller is calling. ` +
+        (outbound ? `` : `Your task: Figure out why the caller is calling. `) +
         (markerMode
           ? `As soon as you understand, name it on the intent line, `
           : `As soon as you understand, call set_call_intent with the appropriate intent, `) +

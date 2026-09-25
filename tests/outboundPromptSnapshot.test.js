@@ -22,7 +22,7 @@ import {
   buildDynamicTail,
   buildAllDeclarations,
 } from "../services/gemini.js";
-import { OUTBOUND_FIXTURES } from "./fixtures/businessConfigs.js";
+import { OUTBOUND_FIXTURES, WEEKLY_HOURS } from "./fixtures/businessConfigs.js";
 import { claimsRecording, TRANSCRIPTION_DISCLOSURE } from "../lib/voice/disclosure.js";
 
 const FROZEN_NOW = new Date("2026-07-20T15:00:00Z"); // a Monday, inside business hours
@@ -130,6 +130,63 @@ describe("O-9: no first name on file", () => {
     const tail = buildDynamicTail("identify_intent", null, config, extras);
     expect(tail).toMatch(/do not know this person's name/i);
     expect(tail).toMatch(/ask who you are speaking to/i);
+  });
+});
+
+describe("O-10 / O-11 (fix round 1): inbound-only framing suppressed on outbound", () => {
+  it("O-10: IDENTIFY_INTENT drops 'Your task: Figure out why the caller is calling' on outbound, but still calls set_call_intent", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("identify_intent", null, config, extras);
+    expect(tail).not.toMatch(/Your task: Figure out why the caller is calling/i);
+    expect(tail).toMatch(/As soon as you understand, call set_call_intent with the appropriate intent/);
+  });
+
+  it("O-10 control: the SAME step keeps the line on inbound (extras.outboundCall absent)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const tail = buildDynamicTail("identify_intent", null, config, inboundLikeExtras);
+    expect(tail).toMatch(/Your task: Figure out why the caller is calling/i);
+  });
+
+  it("O-10: a later step (booking) keeps its normal guidance on outbound, unaffected", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("gather_details", "book_appointment", config, extras);
+    expect(tail).toMatch(/=== CURRENT TASK AND STATE ===/);
+    // Booking's own step guidance still renders (not suppressed) — a
+    // non-trivial body of scheduling instruction, not just the bare step line.
+    expect(tail.length).toBeGreaterThan(400);
+  });
+
+  it("O-11: AFTER-HOURS BEHAVIOR is suppressed on outbound even when the tenant's own office is closed right now", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const closedConfig = { ...config, businessHours: { ...WEEKLY_HOURS, mon: { open: null, close: null, closed: true } } };
+    const tail = buildDynamicTail("identify_intent", null, closedConfig, extras);
+    expect(tail).not.toMatch(/AFTER-HOURS BEHAVIOR/);
+    expect(tail).not.toMatch(/office is currently CLOSED/i);
+  });
+
+  it("O-11 control: the SAME closed config renders AFTER-HOURS BEHAVIOR on inbound (extras.outboundCall absent)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const closedConfig = { ...config, businessHours: { ...WEEKLY_HOURS, mon: { open: null, close: null, closed: true } } };
+    const tail = buildDynamicTail("identify_intent", null, closedConfig, inboundLikeExtras);
+    expect(tail).toMatch(/=== AFTER-HOURS BEHAVIOR ===/);
+    expect(tail).toMatch(/office is currently CLOSED/i);
+  });
+});
+
+describe("D-b regression guard (fix round 1, item 5): THIS CALLER'S NUMBER stays absent even when extras.callerPhone IS populated", () => {
+  // D-b relied on extras.callerPhone staying "" on outbound (P-3). The
+  // explicit `!outbound` guard added in buildDynamicTail must hold even if
+  // some future wiring bug (or Task 18's ctx.party work) puts a real number
+  // on extras.callerPhone for an outbound call.
+  it("no THIS CALLER'S NUMBER block, and the number itself never appears, when callerPhone is populated on an outbound extras bag", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const withCallerPhone = { ...extras, callerPhone: "+15559876543" };
+    const tail = buildDynamicTail("identify_intent", null, config, withCallerPhone);
+    expect(tail).not.toMatch(/THIS CALLER'S NUMBER/);
+    expect(tail).not.toContain("+15559876543");
+    expect(tail).not.toContain("555 987 6543");
   });
 });
 
