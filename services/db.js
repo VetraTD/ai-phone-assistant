@@ -2657,3 +2657,110 @@ export async function undoAttempt(attemptId, outreachId) {
   }
   noteAccess("undoAttempt", { resourceIds: [attemptId, outreachId], rowCount: 2 });
 }
+
+/**
+ * Resolve a Twilio CallSid to its outbound tenant and attempt (spec §9.1,
+ * §9.2; plan correction C15). The three outbound door routes -- answer,
+ * status and the signed media route -- all need this BEFORE the tenant is
+ * known, which is exactly what `app_outbound_attempt_by_call_sid` (migration
+ * 044) is for: a SECURITY DEFINER function over the no-RLS
+ * call_attempt_directory that adopts `app.business_id` for the REST OF THIS
+ * TRANSACTION, but only when no scope is already declared (the 033 rule --
+ * never repoint a caller that already knows its tenant).
+ *
+ * Runs on its own client and its own short transaction, because businessId is
+ * not known yet: `withTenant` cannot be used (it requires one up front). The
+ * definer's own final SELECT already runs under the freshly adopted scope, so
+ * this is one round trip, not two.
+ *
+ * NON_PHI_EXPORTS (lib/phiAudit.js): the return shape is ids and an int only
+ * -- never a phone number, a name, or anything else that identifies who was
+ * called. Task 14 reuses this to resolve the Live session's outbound context,
+ * which is why the shape stays general rather than trimmed to only what the
+ * door itself reads.
+ *
+ * @param {string} callSid
+ * @returns {Promise<{businessId:string, attemptId:string, outreachId:string, campaignId:string, campaignVersion:number}|null>} null on a miss (including an unusable/empty callSid)
+ */
+export async function outboundAttemptByCallSid(callSid) {
+  if (!pool) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query(
+      `SELECT business_id, attempt_id, outreach_id, campaign_id, campaign_version
+         FROM app_outbound_attempt_by_call_sid($1)`,
+      [callSid]
+    );
+    await client.query("COMMIT");
+    const row = res.rows?.[0];
+    if (!row) return null;
+    return {
+      businessId: row.business_id,
+      attemptId: row.attempt_id,
+      outreachId: row.outreach_id,
+      campaignId: row.campaign_id,
+      campaignVersion: row.campaign_version,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Stamp one Twilio status callback onto a call_attempts row (spec §9.1,
+ * §9.4). Runs inside `withTenant` -- the caller resolves businessId first via
+ * `outboundAttemptByCallSid`.
+ *
+ * Idempotent by construction, because Twilio retries callbacks and a status
+ * can arrive after dispatch already failed the attempt or after AMD already
+ * set a result (Task 13):
+ *   - `result` is written only when it is still NULL (COALESCE), so a later
+ *     callback can never clobber an earlier, more specific verdict.
+ *   - `answered_at`, `ended_at` and `status_completed_at` are each written
+ *     only the first time (COALESCE again), so a duplicate terminal callback
+ *     moves none of them a second time.
+ *   - `twilio_status` is the one field always overwritten -- it is meant to
+ *     read as "the last status Twilio reported", not a first-write record.
+ *
+ * @param {string} attemptId
+ * @param {{twilioStatus: string, answered?: boolean, terminal?: boolean, result?: string|null}} stamp
+ */
+export async function stampAttemptStatus(attemptId, { twilioStatus, answered = false, terminal = false, result = null }) {
+  requireTenantScope("stampAttemptStatus");
+  const res = await q(
+    `UPDATE call_attempts
+        SET twilio_status = $2,
+            answered_at = CASE WHEN $3 THEN COALESCE(answered_at, now()) ELSE answered_at END,
+            ended_at = CASE WHEN $4 THEN COALESCE(ended_at, now()) ELSE ended_at END,
+            status_completed_at = CASE WHEN $4 THEN COALESCE(status_completed_at, now()) ELSE status_completed_at END,
+            result = CASE WHEN $5::text IS NOT NULL THEN COALESCE(result, $5::text) ELSE result END
+      WHERE id = $1`,
+    [attemptId, twilioStatus, answered, terminal, result]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`stampAttemptStatus: expected 1 row, got ${res.rowCount}`);
+  noteAccess("stampAttemptStatus", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * The pre-rendered voicemail clip, for the signed media door
+ * (`GET /media/outbound/:callSid/:kind.wav`). Runs inside `withTenant` -- the
+ * caller resolves businessId first via `outboundAttemptByCallSid`, which is
+ * also what stops this route serving another tenant's audio: RLS only
+ * exposes the row when the scope matches, and the scope came from resolving
+ * THIS request's own CallSid, not from anything the caller supplied.
+ * @param {string} attemptId
+ * @returns {Promise<Buffer|null>} raw mu-law bytes, or null when there is none
+ */
+export async function fetchAttemptVoicemailAudio(attemptId) {
+  requireTenantScope("fetchAttemptVoicemailAudio");
+  const res = await q(`SELECT voicemail_audio FROM call_attempts WHERE id = $1`, [attemptId]);
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("fetchAttemptVoicemailAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  return row?.voicemail_audio ?? null;
+}

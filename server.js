@@ -51,6 +51,7 @@ import {
   sanitizeString,
 } from "./lib/validate.js";
 import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
+import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -609,6 +610,29 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
       );
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Outbound calling: the three door routes every outbound call answers,
+// statuses and (later) plays voicemail through (Task 12, spec §9.1). Mounted
+// unconditionally, next to /twilio/live-voice -- unlike the internal Cloud
+// Tasks routes below (registerOutboundInternalRoutes), these need only
+// services/db.js, not the Cloud Tasks/OIDC configuration Task 22 still owns,
+// and dispatch already points Twilio's statusCallback/answer URLs here
+// (lib/outbound/dispatch.js:189-199) whenever a call IS placed. With no
+// outbound calls in flight they simply see no matching CallSid and answer
+// accordingly (a polite hang-up, or a 200 no-op) -- see doorRoutes.js.
+//
+// `postCall` is Task 20's placeholder: `tryClaim` always resolves false until
+// that task wires the real implementation in.
+// ---------------------------------------------------------------------------
+registerOutboundDoorRoutes(app, {
+  validate: twilioValidationAnyAccount,
+  db,
+  mintToken: mintMediaStreamToken,
+  postCall: { tryClaim: async () => false }, // Task 20 wires postCall
+  log,
+  now: () => Date.now(),
 });
 
 // ---------------------------------------------------------------------------
