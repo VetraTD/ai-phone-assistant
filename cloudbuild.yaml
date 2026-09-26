@@ -121,18 +121,24 @@ steps:
   # Proven against the dashboard image, where the same change turned a passing
   # build into a failing one the moment a source directory went missing.
   # -------------------------------------------------------------------------
-  # X2 (go-live pre-deploy hardening, 2026-09-26): M9 made the
-  # @google-cloud/tasks import LAZY (lib/outbound/internalRoutes.js -- loaded
-  # on the first enqueue, not at module load, to keep it out of every boot
-  # while outbound is unconfigured), so `await import('/app/server.js')` alone
-  # no longer touches it -- a missing or broken install of it in THIS image
-  # would sail through this step. Resolved from `/app` via `createRequire`,
-  # not a bare `import('@google-cloud/tasks')`: Cloud Build overrides the
-  # image's own WORKDIR with `/workspace` for a step's cwd, which has no
-  # node_modules (that directory holds the uploaded SOURCE, not the built
-  # image), and a bare specifier resolves against cwd -- verified locally,
-  # the exact failure this step exists to catch (ERR_MODULE_NOT_FOUND) is
-  # what a bare import produces from a cwd with no node_modules ancestor.
+  # X2 (go-live pre-deploy hardening, 2026-09-26; corrected fix round 1,
+  # Minor 2): M9 made the @google-cloud/tasks import LAZY
+  # (lib/outbound/internalRoutes.js -- loaded on the first enqueue, not at
+  # module load, to keep it out of every boot while outbound is
+  # unconfigured), so `await import('/app/server.js')` alone no longer
+  # touches it -- a missing or broken install of it in THIS image would sail
+  # through this step.
+  #
+  # Calls the SAME lazy importer the service calls
+  # (internalRoutes.js's exported `importCloudTasks`), rather than a separate
+  # resolution of its own. `@google-cloud/tasks` is a DUAL package
+  # (exports["."].require -> the CJS build, .import -> the ESM build), and
+  # the service's own `import("@google-cloud/tasks")` takes the import
+  # condition (the ESM build). An earlier version of this line used
+  # `createRequire('/app/')('@google-cloud/tasks')`, which takes the REQUIRE
+  # condition instead -- a different resolution that could pass while the one
+  # the service actually takes is broken. Verified locally that calling the
+  # exported function resolves and returns a working `CloudTasksClient`.
   - id: smoke
     name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
     entrypoint: node
@@ -143,7 +149,7 @@ steps:
     args:
       - --input-type=module
       - -e
-      - "import { createRequire } from 'node:module'; createRequire('/app/')('@google-cloud/tasks'); await import('/app/server.js'); console.log('module tree loaded, no port bound');"
+      - "const { importCloudTasks } = await import('/app/lib/outbound/internalRoutes.js'); await importCloudTasks(); await import('/app/server.js'); console.log('module tree loaded, no port bound');"
     waitFor: [build]
 
   # The migration runner ships in this image too, so it gets the same treatment.
