@@ -25,6 +25,7 @@ import {
   RENDER_SYSTEM_PROMPT,
   RENDER_MAX_WORD_RATIO,
   wordOverlap,
+  wordRatio,
 } from "../lib/outbound/liveRender.js";
 import { loadConfig } from "../services/db.js";
 
@@ -386,5 +387,49 @@ describe("round 3: the clip check shares the session's dotted-AI fold", () => {
     const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
     expect(out.opener).toBeNull();
     expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", expect.objectContaining({ reason: "transcript_mismatch" }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H1 (2026-09-26 paid harness run): a correct opener clip was refused because
+// Gemini's output transcription glued words together ("isthat", "It'sAva",
+// "AIassistant", "HarnessTest") -- the clip was right, only the transcript's
+// spacing was wrong. Real evidence, used verbatim.
+// ---------------------------------------------------------------------------
+
+describe("H1: a glued transcript token is re-split into the line's own words before scoring", () => {
+  const LINE = "Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic.";
+  // The real transcript from the paid run: overlap was 0.385, word_ratio 0.692,
+  // refused -- with every word actually said correctly.
+  const GLUED_TRANSCRIPT = "Hi, isthat Sam? It'sAva, an AIassistant from HarnessTest Clinic.";
+
+  it("scores as a perfect match once glued tokens are re-split (overlap 1, ratio 1)", () => {
+    expect(wordOverlap(LINE, GLUED_TRANSCRIPT)).toBe(1);
+    expect(wordRatio(LINE, GLUED_TRANSCRIPT)).toBe(1);
+  });
+
+  it("renders and is ACCEPTED end-to-end (the harness's real failure mode)", async () => {
+    const { connect } = fakeConnect({ say: () => GLUED_TRANSCRIPT });
+    const out = await renderLines({ lines: { opener: LINE }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog() });
+    expect(out.opener).not.toBeNull();
+  });
+
+  it("still refused when the SAME gluing also drops the AI disclosure", async () => {
+    const gluedAndDroppedAi = "Hi, isthat Sam? It'sAva, an assistant from HarnessTest Clinic.";
+    const { connect } = fakeConnect({ say: () => gluedAndDroppedAi });
+    const log = quietLog();
+    const out = await renderLines({ lines: { opener: LINE }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    expect(out.opener).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(
+      "outbound_backstop_render_refused",
+      expect.objectContaining({ reason: "transcript_mismatch" })
+    );
+  });
+
+  it("a glued token that is NOT composed of the line's own words stays as-is (still a miss)", () => {
+    // "isthot" cannot be segmented into line words ("thot" is not one), so it
+    // stays a single unmatched token: both "is" and "that" are missed.
+    const brokenGlue = "Hi, isthot Sam? It'sAva, an AIassistant from HarnessTest Clinic.";
+    expect(wordOverlap(LINE, brokenGlue)).toBeCloseTo(11 / 13, 5);
   });
 });
