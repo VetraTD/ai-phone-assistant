@@ -22,6 +22,7 @@
 import pg from "pg";
 import { cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
 import { auditRecordingClaims } from "../lib/db/recordingClaimAudit.js";
+import { outboundPreflight } from "../lib/db/outboundPreflight.js";
 
 const cfg = {
   instance: process.env.CLOUD_SQL_INSTANCE,
@@ -70,6 +71,18 @@ const cfg = {
 //                       flags, never text. Walks business_directory, so it
 //                       does not need --business and is not fooled by RLS.
 //                       Exits 1 on an empty directory or a partial read.
+//   --outbound-preflight  go-live check for outbound calling (Y1), before it
+//                       is switched on in production. Two sections, numbers
+//                       only: a tenant walk (phone, call count, count of any
+//                       integration literally named confirm_identity -- a
+//                       legacy/shadowing webhook, services/tools.js:360-372)
+//                       under each tenant's own scope like --recording-claims;
+//                       and a catalog-only privilege matrix for every table
+//                       migrations 042-045 create, against the grants those
+//                       migrations actually gave (lib/db/outboundPreflight.js).
+//                       Exits 1 on an incomplete tenant read or, once tables
+//                       exist, any MISMATCH -- never on tables that are simply
+//                       absent (this runs once before 042-045 apply too).
 //   (no arguments)      the full audit, including the transcript dump.
 //                       STAGING ONLY, unchanged.
 // ---------------------------------------------------------------------------
@@ -123,7 +136,10 @@ const CALLS_LIMIT = Math.min(Math.max(parseInt(argOf("limit") || "25", 10) || 25
 // false, and the script falls through to the staging-only full audit and exits
 // 1 -- with a message about staging that says nothing about the flag you passed.
 const WANT_CLAIMS = argv.includes("--recording-claims");
-const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS || WANT_APPTS || WANT_CLAIMS;
+// Y1 (go-live pre-deploy, group Y). Read-only, numbers only -- see the header
+// block above and lib/db/outboundPreflight.js.
+const WANT_OUTBOUND_PREFLIGHT = argv.includes("--outbound-preflight");
+const AD_HOC = Boolean(BUSINESS) || WANT_COUNTS || WANT_CALLS || WANT_APPTS || WANT_CLAIMS || WANT_OUTBOUND_PREFLIGHT;
 
 const looksLikeStaging = /staging/i.test(cfg.database) && /staging/i.test(cfg.instance);
 
@@ -223,6 +239,69 @@ try {
                 ? "business_directory is empty -- wrong database or a failed backfill; this is not a clean result"
                 : "these directory numbers resolved to no tenant; this is not a clean result",
           },
+        ]);
+        process.exitCode = 1;
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // --outbound-preflight. Go-live pre-deploy code, group Y (Y1). Read-only,
+  // numbers only -- lib/db/outboundPreflight.js, tested as a non-bypassing
+  // role in tests/db/outboundPreflight.test.js.
+  //
+  // Same exit-1 discipline as --recording-claims for the tenant walk: a
+  // partial read must never print as a clean database. The privilege matrix
+  // adds its own failure mode -- a MISMATCH once a table exists -- but an
+  // ABSENT table (this runs once before migrations 042-045 apply, and once
+  // after) is explicitly not one.
+  // ---------------------------------------------------------------------
+  if (WANT_OUTBOUND_PREFLIGHT) {
+    const client = await pool.connect();
+    try {
+      const { tenantWalk, privileges } = await outboundPreflight(client);
+      show("outbound-preflight tenant coverage", [
+        { directory_rows: tenantWalk.directory_rows, tenants_read: tenantWalk.tenants_read, complete: tenantWalk.complete },
+      ]);
+      show(
+        "outbound-preflight tenant",
+        tenantWalk.tenants.map((t) => ({
+          phone: t.phone_number,
+          calls: t.calls,
+          confirm_identity_integrations: t.confirm_identity_integrations,
+        }))
+      );
+      show("outbound-preflight totals", [tenantWalk.totals]);
+      if (!tenantWalk.complete) {
+        show("outbound-preflight tenant walk INCOMPLETE", [
+          {
+            directory_rows: tenantWalk.directory_rows,
+            unread: tenantWalk.unread,
+            hint:
+              tenantWalk.directory_rows === 0
+                ? "business_directory is empty -- wrong database or a failed backfill; this is not a clean result"
+                : "these directory numbers resolved to no tenant; this is not a clean result",
+          },
+        ]);
+        process.exitCode = 1;
+      }
+
+      show(
+        "outbound-preflight privileges",
+        privileges.tables.map((t) => ({
+          table: t.table,
+          verdict: t.verdict,
+          select: t.select ?? null,
+          insert: t.insert ?? null,
+          update: t.update ?? null,
+          delete: t.delete ?? null,
+        }))
+      );
+      if (privileges.anyMismatch) {
+        show("outbound-preflight privileges MISMATCH", [
+          { hint: "a table migrations 042-045 created has a grant those migrations did not give it -- see lib/db/outboundPreflight.js EXPECTED_OUTBOUND_PRIVILEGES" },
         ]);
         process.exitCode = 1;
       }
