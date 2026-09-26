@@ -147,3 +147,13 @@ describe("fix round 1 -- Minor M4: bounded fields must be whole numbers, capped,
 describe("fix round 1 -- Minor M5: the retry schedule must have at least one entry", () => {
   it("an empty retry schedule is refused", () => expect(errPaths(v({ ...good(), retries: { ...good().retries, schedule: [] } }))).toContain("retries.schedule"));
 });
+
+// O-24/a7 (post-2c): a persona_name that is only the AI disclosure itself
+// (after the shared foldDottedAI fold) must not save -- "It's AI, an AI
+// assistant from..." tells the caller nothing a real name would.
+describe("O-24/a7: persona_name must not double as the AI disclosure", () => {
+  it.each(["AI", "Ai", "A.I.", "a. i."])("persona_name %j is refused", (persona_name) =>
+    expect(errPaths(v({ ...good(), persona_name }))).toContain("persona_name"));
+  it.each(["Aiden", "Aisha", "Kai"])("persona_name %j is allowed", (persona_name) =>
+    expect(v({ ...good(), persona_name }).ok).toBe(true));
+});
