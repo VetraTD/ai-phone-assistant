@@ -3047,8 +3047,14 @@ export async function fetchAttemptOpenerAudio(attemptId) {
  * §6.3, migration 045): a session that died without finishing is claimable
  * once its terminal status is more than 2 minutes old, whether or not it was
  * ever answered.
+ *
+ * Returns the CLAIMED VALUE, not a bare boolean (fix round 1, Owner O-15):
+ * truthy/falsy for "did this call claim it", and useful for logging --
+ * `releasePostCallClaim` below does NOT need it (see its own doc for why an
+ * exact-value comparison there is fragile against a real Postgres
+ * timestamptz's precision).
  * @param {string} attemptId
- * @returns {Promise<boolean>} true iff THIS call claimed it
+ * @returns {Promise<Date|null>} the value written, or null if not claimed
  */
 export async function claimPostCall(attemptId) {
   requireTenantScope("claimPostCall");
@@ -3057,11 +3063,47 @@ export async function claimPostCall(attemptId) {
       WHERE id = $1 AND post_call_started_at IS NULL
         AND status_completed_at IS NOT NULL
         AND (session_finished_at IS NOT NULL OR answered_at IS NULL OR status_completed_at < now() - interval '2 minutes')
-      RETURNING id`,
+      RETURNING post_call_started_at`,
     [attemptId]
   );
   if (res.error) throw res.error;
   noteAccess("claimPostCall", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  return res.rows[0]?.post_call_started_at ?? null;
+}
+
+/**
+ * Release a post-call claim after a failed run (fix round 1, Owner O-15): a
+ * throw between the claim committing and the run finishing must not strand
+ * the attempt forever (invisible to the sweep, and a retried claim would
+ * find `post_call_started_at` already set and refuse). The 045 trigger
+ * re-lists the row in `postcall_pending` the moment this commits, so the
+ * next sweep tick (or a retried caller) claims it again.
+ *
+ * Ruling: the plan's own sketch compares to the EXACT value the caller
+ * claimed (`WHERE post_call_started_at = $2`); measured against real
+ * Postgres this is fragile, not merely stylistic -- `claimPostCall`'s
+ * `RETURNING` value round-trips through node-postgres's JS `Date` (millisecond
+ * precision) while the column itself is a microsecond-precision
+ * `timestamptz`, so the round-tripped value can silently fail to equal the
+ * one actually stored, and the release would then match zero rows (found
+ * empirically: tests/db/outboundPostCallClaim.test.js's own release test
+ * failed against real Postgres with the exact-value form). `WHERE
+ * post_call_started_at IS NOT NULL` is EQUALLY SAFE by construction, not a
+ * loosening: `claimPostCall`'s own guard (`... IS NULL ...`) is the only way
+ * this column ever becomes non-null, so nothing else can be holding a
+ * "different" claim to protect against between our claim and our release --
+ * the column can only be still-ours or already-released, never
+ * someone-else's.
+ * @param {string} attemptId
+ * @returns {Promise<boolean>} true iff a claim was actually released
+ */
+export async function releasePostCallClaim(attemptId) {
+  requireTenantScope("releasePostCallClaim");
+  const res = await q(`UPDATE call_attempts SET post_call_started_at = NULL WHERE id = $1 AND post_call_started_at IS NOT NULL`, [
+    attemptId,
+  ]);
+  if (res.error) throw res.error;
+  noteAccess("releasePostCallClaim", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
   return res.rowCount === 1;
 }
 
