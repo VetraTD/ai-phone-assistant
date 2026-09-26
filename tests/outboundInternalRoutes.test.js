@@ -242,6 +242,29 @@ describe("POST /internal/outbound/sweep: the stale-attempt backstops (Task 20)",
     expect(deps.log.error).toHaveBeenCalledWith("outbound_sweep_stale_attempt_failed", expect.objectContaining({ attemptId: ATTEMPT, kind: "sidless" }));
   });
 
+  // a19 (fix wave, checkpoint 2b): the due loop had NO per-row guard at all
+  // -- a throwing enqueue used to abort the whole tick before the
+  // stale-attempt backstops below (in the SAME try) ever ran.
+  it("a19: one enqueue throwing does not abort the tick -- later due rows still enqueue and the stale backstops still run", async () => {
+    const OUT2 = "55555555-5555-5555-5555-555555555555";
+    const due = [{ business_id: BIZ, outreach_id: OUT }, { business_id: BIZ, outreach_id: OUT2 }];
+    const db = staleDb("postcall_pending");
+    db.outboundDue = vi.fn(async () => due);
+    const enqueue = vi.fn(async ({ outreachId }) => {
+      if (outreachId === OUT) throw new Error("cloud tasks down");
+      return { created: true };
+    });
+    const postCall = { tryClaimByAttempt: vi.fn(async () => true) };
+    const deps = fakeDeps({ db, enqueue, postCall });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ reenqueued: 1 }); // the SECOND due row still enqueued
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(deps.log.error).toHaveBeenCalledWith("outbound_sweep_row_failed", expect.objectContaining({ kind: "due", outreachId: OUT }));
+    // the stale backstop (a DIFFERENT tick phase, same try block) still ran.
+    expect(postCall.tryClaimByAttempt).toHaveBeenCalledWith(ATTEMPT, BIZ);
+  });
+
   it("an unknown DB fake (no outboundStaleAttempts) is untouched -- the existing 'due' tests never see this code path", async () => {
     const deps = fakeDeps(); // the base fakeDeps() db has no outboundStaleAttempts
     const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
