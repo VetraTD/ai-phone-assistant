@@ -3037,16 +3037,49 @@ const OUTCOME_PROMPT =
   "general_inquiry=info only; appointment=book/confirm/reschedule/cancel; sales=quote/pricing/new service; support=complaint or issue; " +
   "message=leave a message; callback=request callback; after_hours=call when closed; emergency=urgent/crisis; transfer=transferred to human; spam=wrong number/spam; unknown=unclear.";
 
+/**
+ * Ruling P-7 / spec §12.2 (Task 20). The outbound outcomes generateSummaryAndSentiment
+ * may classify a TRANSCRIPT into, once the tool, the door and the effects
+ * tiers (P-6) have all had their turn and none of them resolved one.
+ * `booked` and `opted_out` are deliberately absent: those are set by
+ * effects, never guessed at from the transcript by this extractor.
+ */
+export const OUTBOUND_OUTCOME_ENUM = Object.freeze([
+  "qualified_no_booking",
+  "not_interested",
+  "not_a_fit",
+  "callback_requested",
+  "wrong_person",
+  "other",
+]);
+
 // Post-call extractor model. Same family as the live chat default; kept as a
 // named const so the model string and its thinkingConfig stay in sync.
 const SUMMARY_MODEL = "gemini-3.6-flash";
 
 /**
  * Generate summary, sentiment, and outcome for a completed call transcript.
+ *
+ * `outcomeEnum` (Ruling P-7, Task 20) is OPTIONAL and, when given, MUST be a
+ * non-empty array -- passing it switches which outcome vocabulary the model
+ * is asked to classify into (and what a returned value is validated
+ * against), for outbound's own outcome enum (`OUTBOUND_OUTCOME_ENUM` above).
+ * The 1-argument call (server.js's inbound path) is BYTE-IDENTICAL: every
+ * line below that reads `outcomeEnum` takes the `CALL_OUTCOMES`/
+ * `OUTCOME_PROMPT` branch when it is omitted, exactly as this function
+ * behaved before this parameter existed (tests/geminiSummaryOutbound.test.js
+ * asserts the built request is unchanged).
  * @param {Array<{speaker: string, message: string}>} transcript
+ * @param {string[]} [outcomeEnum] - an outcome vocabulary other than CALL_OUTCOMES
  * @returns {Promise<{ summary: string|null, sentiment: string|null, outcome: string }>}
  */
-export async function generateSummaryAndSentiment(transcript) {
+export async function generateSummaryAndSentiment(transcript, outcomeEnum) {
+  const useOutcomeEnum = Array.isArray(outcomeEnum) && outcomeEnum.length > 0;
+  const outcomeChoices = useOutcomeEnum ? outcomeEnum : CALL_OUTCOMES;
+  const outcomePrompt = useOutcomeEnum
+    ? `outcome must be exactly one of: ${outcomeEnum.join(", ")}.`
+    : OUTCOME_PROMPT;
+
   const apiKey = process.env.GEMINI_API_KEY;
   const fallback = { summary: null, sentiment: null, outcome: "unknown" };
   if (!apiKey) return fallback;
@@ -3071,7 +3104,7 @@ export async function generateSummaryAndSentiment(transcript) {
       contents:
         `Analyze this phone call transcript. Respond with ONLY valid JSON, no markdown, no extra text.\n` +
         `Format: {"summary":"1-2 sentence summary","sentiment":"positive|neutral|negative","outcome":"<outcome>"}\n` +
-        `${OUTCOME_PROMPT}\n\nTranscript:\n${transcriptText}`,
+        `${outcomePrompt}\n\nTranscript:\n${transcriptText}`,
       // gemini-3.x thinks by default; without pinning it off, thought tokens
       // eat into maxOutputTokens (512) and can truncate the JSON, silently
       // degrading to the null fallback. Force thinking off for this extractor.
@@ -3106,7 +3139,7 @@ export async function generateSummaryAndSentiment(transcript) {
       ? parsed.sentiment
       : null;
     const rawOutcome = typeof parsed.outcome === "string" ? parsed.outcome.trim().toLowerCase() : "";
-    const outcome = CALL_OUTCOMES.includes(rawOutcome) ? rawOutcome : "unknown";
+    const outcome = outcomeChoices.includes(rawOutcome) ? rawOutcome : "unknown";
 
     return { summary, sentiment, outcome };
   } catch (err) {

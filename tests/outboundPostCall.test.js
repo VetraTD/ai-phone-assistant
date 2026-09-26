@@ -1,0 +1,366 @@
+// tests/outboundPostCall.test.js
+/**
+ * lib/outbound/postCall.js, unit level: a fake db, no Postgres. The DB race
+ * (claimPostCall against real Postgres) is tests/db/outboundPostCallClaim.test.js.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { runPostCall, createPostCall } from "../lib/outbound/postCall.js";
+
+const BIZ = "biz-1";
+const ATTEMPT = "attempt-1";
+const OUTREACH = "outreach-1";
+const CALL_ID = "call-1";
+const CALL_SID = "CAsid1";
+const PHONE = "+447700900202";
+
+const CONFIG = {
+  retries: { schedule: ["now", "+10m", "+3h"] },
+  calling_window: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+};
+
+/** Always inside the calling window: every weekday, midnight to midnight. */
+const NOW = new Date("2026-09-25T12:00:00Z");
+
+function baseCtx(overrides = {}) {
+  return {
+    attemptNo: 1,
+    dialedAt: new Date("2026-09-25T11:59:00Z"),
+    answeredAt: new Date("2026-09-25T11:59:05Z"),
+    endedAt: null,
+    answeredBy: "human",
+    result: null,
+    silent: false,
+    sessionFinishedAt: new Date("2026-09-25T11:59:40Z"),
+    statusCompletedAt: new Date("2026-09-25T11:59:41Z"),
+    twilioCallSid: CALL_SID,
+    outreachId: OUTREACH,
+    outreachState: "dialing",
+    attemptsMade: 1,
+    outreachCreatedAt: new Date("2026-09-20T09:00:00Z"),
+    campaignId: "camp-1",
+    campaignVersion: 1,
+    contactId: "contact-1",
+    complianceClass: "solicited",
+    templateKey: "speed_to_lead",
+    config: CONFIG,
+    phoneE164: PHONE,
+    contactTimezone: "Europe/London",
+    businessTimezone: "Europe/London",
+    callId: CALL_ID,
+    callSid: CALL_SID,
+    outcomeCode: null,
+    answers: null,
+    ...overrides,
+  };
+}
+
+function fakeDb(ctxOverrides = {}, fnOverrides = {}) {
+  const ctx = baseCtx(ctxOverrides);
+  const calls = { finalizeAttemptResult: [], setCallOutcomeCode: [], updateCallSummary: [], setAttemptSilent: [], setOutreachHold: [], applyOutreachResult: [], insertDetectorSuppression: [] };
+  return {
+    calls,
+    ctx,
+    withTenant: vi.fn(async (_biz, fn) => fn()),
+    outboundPostCallContext: vi.fn(async () => ctx),
+    finalizeAttemptResult: vi.fn(async (...a) => calls.finalizeAttemptResult.push(a)),
+    outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })),
+    fetchCallTranscript: vi.fn(async () => []),
+    setCallOutcomeCode: vi.fn(async (...a) => calls.setCallOutcomeCode.push(a)),
+    updateCallSummary: vi.fn(async (...a) => calls.updateCallSummary.push(a)),
+    isSuppressed: vi.fn(async () => false),
+    insertDetectorSuppression: vi.fn(async (...a) => {
+      calls.insertDetectorSuppression.push(a);
+      return true;
+    }),
+    setAttemptSilent: vi.fn(async (...a) => calls.setAttemptSilent.push(a)),
+    setOutreachHold: vi.fn(async (...a) => calls.setOutreachHold.push(a)),
+    applyOutreachResult: vi.fn(async (...a) => {
+      calls.applyOutreachResult.push(a);
+      return true;
+    }),
+    claimPostCall: vi.fn(async () => true),
+    outboundAttemptByCallSid: vi.fn(async () => ({ attemptId: ATTEMPT, businessId: BIZ })),
+    ...fnOverrides,
+  };
+}
+
+const noopSummarize = async () => ({ summary: null, sentiment: null, outcome: "unknown" });
+
+async function run(db, overrides = {}) {
+  await runPostCall({ attemptId: ATTEMPT, businessId: BIZ }, { db, now: () => NOW, rand: () => 0, summarize: noopSummarize, ...overrides });
+}
+
+describe("runPostCall: unanswered attempts run steps 1 and 5-7 only", () => {
+  it.each(["no_answer", "busy", "failed", "canceled"])("result=%s: no outcome resolution, no detectors, no silent-rule writes", async (result) => {
+    const db = fakeDb({ answeredAt: null, result, sessionFinishedAt: null });
+    await run(db);
+
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, null);
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+    expect(db.updateCallSummary).not.toHaveBeenCalled();
+    expect(db.outboundCallEffects).not.toHaveBeenCalled();
+    expect(db.setAttemptSilent).not.toHaveBeenCalled();
+    expect(db.setOutreachHold).not.toHaveBeenCalled();
+    expect(db.applyOutreachResult).toHaveBeenCalledTimes(1);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.outcome).toBeNull(); // a decline is never scored not_interested
+  });
+
+  it.each(["busy", "no_answer"])("%s: the SAME next next_attempt_at as the other", async (result) => {
+    const dbA = fakeDb({ answeredAt: null, result: "busy", sessionFinishedAt: null });
+    const dbB = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null });
+    await run(dbA);
+    await run(dbB);
+    const nextA = dbA.applyOutreachResult.mock.calls[0][2].nextAttemptAt;
+    const nextB = dbB.applyOutreachResult.mock.calls[0][2].nextAttemptAt;
+    expect(nextA).toBeInstanceOf(Date);
+    expect(nextA.getTime()).toBe(nextB.getTime());
+  });
+
+  it("attempts_made not yet exhausted -> reschedules, does not close", async () => {
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 1 });
+    await run(db);
+    const [outreachId, attemptNo, opts] = db.applyOutreachResult.mock.calls[0];
+    expect(outreachId).toBe(OUTREACH);
+    expect(attemptNo).toBe(1);
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("schedule exhausted -> closes with attempts_exhausted", async () => {
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 3 }); // schedule has 3 entries
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(true);
+    expect(opts.closeReason).toBe("attempts_exhausted");
+  });
+});
+
+describe("runPostCall: outcome precedence (Ruling P-6)", () => {
+  it("tier 2 (door-set outcome_code) wins over the summary", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb({ outcomeCode: "callback_requested" });
+    await run(db, { summarize });
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "callback_requested");
+    expect(db.updateCallSummary).not.toHaveBeenCalled();
+  });
+
+  it("tier 3 (effects: booking) wins over the summary", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb({}, { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) });
+    await run(db, { summarize });
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "booked");
+  });
+
+  it("tier 3 (effects: tool opt-out) wins over the summary", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb({}, { outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: true })) });
+    await run(db, { summarize });
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+  });
+
+  it("tier 4 (the summary, extended with the outbound enum) resolves when nothing else did", async () => {
+    const summarize = vi.fn(async (rows, enumArg) => ({ summary: "Not interested.", sentiment: "negative", outcome: "not_interested" }));
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "not interested, thanks" }]) });
+    await run(db, { summarize });
+    expect(summarize).toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "not_interested");
+    expect(db.updateCallSummary).toHaveBeenCalledWith(CALL_SID, "Not interested.", "negative", null);
+  });
+
+  it("tier 5: falls back to unknown when the summary itself falls back", async () => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => []) });
+    await run(db); // noopSummarize returns {outcome: "unknown"}
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "unknown");
+  });
+
+  it("no session finished -> resolves the outcome from the summary ONLY (door/effects skipped) and logs outbound_postcall_without_session", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb(
+      { sessionFinishedAt: null, outcomeCode: "callback_requested" }, // a door-set value that must be IGNORED here
+      { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) } // an effect that must be IGNORED here
+    );
+    await run(db, { summarize, log });
+    expect(db.outboundCallEffects).not.toHaveBeenCalled();
+    expect(summarize).toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "other");
+    expect(log.info).toHaveBeenCalledWith("outbound_postcall_without_session", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+});
+
+describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
+  it.each(["booked", "not_interested", "not_a_fit", "opted_out", "wrong_person"])("%s closes the outreach (terminal_outcome)", async (outcome) => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    await run(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome }) });
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts).toMatchObject({ terminal: true, closeReason: "terminal_outcome", outcome });
+  });
+
+  it("qualified_no_booking is NOT terminal -- reschedules", async () => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    await run(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "qualified_no_booking" }) });
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("callback_requested WITH a requested time schedules at that time", async () => {
+    const requested = "2026-09-30T14:00:00Z";
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: requested } });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(requested).toISOString());
+  });
+
+  it("callback_requested with NO requested time takes the next schedule entry (mechanical ruling)", async () => {
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: null });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    // attemptNo=1 -> entries[1] = "+10m" from NOW.
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  });
+});
+
+describe("runPostCall: no-double-reschedule guard", () => {
+  it("applyOutreachResult returning false (dispatch already rescheduled a LATER attempt) logs and does not throw", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { applyOutreachResult: vi.fn(async () => false), fetchCallTranscript: vi.fn(async () => []) });
+    await expect(run(db, { log })).resolves.toBeUndefined();
+    expect(log.info).toHaveBeenCalledWith("outbound_postcall_reschedule_skipped", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("applyOutreachResult returning true and terminal logs outbound_outreach_closed{reason}", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    await run(db, { log, summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }) });
+    expect(log.info).toHaveBeenCalledWith("outbound_outreach_closed", expect.objectContaining({ reason: "terminal_outcome" }));
+  });
+});
+
+describe("runPostCall: the opt-out detector (spec §13.3)", () => {
+  it("a caller-side hit with no existing suppression inserts one and logs outbound_optout_detector_fired", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "please stop calling me" }]) });
+    await run(db, { log });
+    expect(db.insertDetectorSuppression).toHaveBeenCalledWith({ phone: PHONE, sourceCallId: CALL_ID });
+    expect(log.info).toHaveBeenCalledWith("outbound_optout_detector_fired", expect.objectContaining({ side: "caller" }));
+  });
+
+  it("an EXISTING suppression is not duplicated, and nothing is logged", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb(
+      {},
+      { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "stop calling me" }]), isSuppressed: vi.fn(async () => true) }
+    );
+    await run(db, { log });
+    expect(db.insertDetectorSuppression).not.toHaveBeenCalled();
+    expect(log.info).not.toHaveBeenCalledWith("outbound_optout_detector_fired", expect.anything());
+  });
+
+  it("no hit: no write, no log", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "sounds good, thanks" }]) });
+    await run(db, { log });
+    expect(db.insertDetectorSuppression).not.toHaveBeenCalled();
+  });
+
+  it("claimed-human is logged separately from opt-out", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "Yes, I'm a real person" }]) });
+    await run(db, { log });
+    expect(log.info).toHaveBeenCalledWith("outbound_claimed_human", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+});
+
+describe("runPostCall: the silent-call rule (spec §13.4)", () => {
+  it("silent -> sets the final verdict and the 72h hold, logs outbound_silent_call", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const answeredAt = new Date("2026-09-25T11:59:05Z");
+    const db = fakeDb({ answeredAt, silent: true, answeredBy: "human" });
+    await run(db, { log });
+    expect(db.setAttemptSilent).toHaveBeenCalledWith(ATTEMPT, true);
+    expect(db.setOutreachHold).toHaveBeenCalledWith(OUTREACH, new Date(answeredAt.getTime() + 72 * 3600 * 1000));
+    expect(log.info).toHaveBeenCalledWith("outbound_silent_call", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("not silent -> sets false, no hold", async () => {
+    const db = fakeDb({ silent: false, answeredBy: "human" });
+    await run(db);
+    expect(db.setAttemptSilent).toHaveBeenCalledWith(ATTEMPT, false);
+    expect(db.setOutreachHold).not.toHaveBeenCalled();
+  });
+
+  it("machine_end_beep excludes the silent verdict even though the session flagged it", async () => {
+    const db = fakeDb({ silent: true, answeredBy: "machine_end_beep" });
+    await run(db);
+    expect(db.setAttemptSilent).toHaveBeenCalledWith(ATTEMPT, false);
+    expect(db.setOutreachHold).not.toHaveBeenCalled();
+  });
+
+  it("no session ever finished for an answered attempt -> silent (no stream)", async () => {
+    const db = fakeDb({ sessionFinishedAt: null, silent: false, answeredBy: "human" }, { fetchCallTranscript: vi.fn(async () => []) });
+    await run(db);
+    expect(db.setAttemptSilent).toHaveBeenCalledWith(ATTEMPT, true);
+    expect(db.setOutreachHold).toHaveBeenCalled();
+  });
+});
+
+describe("runPostCall: step 1 (result + ended_at + clear audio)", () => {
+  it("answered attempt: resultIfUnset is 'connected'", async () => {
+    const db = fakeDb({});
+    await run(db);
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, "connected");
+  });
+});
+
+describe("createPostCall: the exactly-once claim wrapper", () => {
+  it("tryClaimByAttempt: claim fails -> runPostCall never runs (context is never even read)", async () => {
+    const db = fakeDb({});
+    db.claimPostCall = vi.fn(async () => false);
+    const pc = createPostCall({ db, summarize: noopSummarize });
+    const claimed = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(claimed).toBe(false);
+    expect(db.outboundPostCallContext).not.toHaveBeenCalled();
+  });
+
+  it("tryClaimByAttempt: claim succeeds -> runs exactly once", async () => {
+    const db = fakeDb({});
+    const pc = createPostCall({ db, summarize: noopSummarize });
+    const claimed = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(claimed).toBe(true);
+    expect(db.claimPostCall).toHaveBeenCalledTimes(1);
+    expect(db.outboundPostCallContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("tryClaim (by CallSid): resolves the attempt first, then claims", async () => {
+    const db = fakeDb({});
+    const pc = createPostCall({ db, summarize: noopSummarize });
+    const claimed = await pc.tryClaim(CALL_SID);
+    expect(claimed).toBe(true);
+    expect(db.outboundAttemptByCallSid).toHaveBeenCalledWith(CALL_SID);
+    expect(db.claimPostCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("tryClaim: an unknown CallSid never claims", async () => {
+    const db = fakeDb({}, { outboundAttemptByCallSid: vi.fn(async () => null) });
+    const pc = createPostCall({ db, summarize: noopSummarize });
+    const claimed = await pc.tryClaim("CAunknown");
+    expect(claimed).toBe(false);
+    expect(db.claimPostCall).not.toHaveBeenCalled();
+  });
+
+  it("a throw inside runPostCall is caught and logged, not propagated (tryClaim still resolves true: it DID claim)", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({}, { outboundPostCallContext: vi.fn(async () => { throw new Error("db down"); }) });
+    const pc = createPostCall({ db, log, summarize: noopSummarize });
+    const claimed = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(claimed).toBe(true);
+    expect(log.error).toHaveBeenCalledWith("outbound_postcall_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+});

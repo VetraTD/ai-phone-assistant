@@ -3036,3 +3036,301 @@ export async function fetchAttemptOpenerAudio(attemptId) {
   noteAccess("fetchAttemptOpenerAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
   return row?.opener_audio ?? null;
 }
+
+// --- outbound post-call (Task 20, spec §11, §13.2-13.4) --------------------
+
+/**
+ * The plan's single atomic UPDATE, verbatim (spec §11): whichever of the two
+ * inputs -- the terminal status callback (`status_completed_at`) and the
+ * session's `finish` (`session_finished_at`) -- arrives SECOND claims the
+ * run. The third disjunct is the sweep's `postcall_pending` backstop (spec
+ * §6.3, migration 045): a session that died without finishing is claimable
+ * once its terminal status is more than 2 minutes old, whether or not it was
+ * ever answered.
+ * @param {string} attemptId
+ * @returns {Promise<boolean>} true iff THIS call claimed it
+ */
+export async function claimPostCall(attemptId) {
+  requireTenantScope("claimPostCall");
+  const res = await q(
+    `UPDATE call_attempts SET post_call_started_at = now()
+      WHERE id = $1 AND post_call_started_at IS NULL
+        AND status_completed_at IS NOT NULL
+        AND (session_finished_at IS NOT NULL OR answered_at IS NULL OR status_completed_at < now() - interval '2 minutes')
+      RETURNING id`,
+    [attemptId]
+  );
+  if (res.error) throw res.error;
+  noteAccess("claimPostCall", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  return res.rowCount === 1;
+}
+
+/**
+ * The Live controller's own half of post-call's two inputs (spec §11, Task
+ * 20): stamps `session_finished_at` once, and persists what only the
+ * controller can know -- `first_audio_ms` (`firstAudio().from_answer_ms`)
+ * and the SESSION's own silent verdict (`isSessionSilent`, the two limbs
+ * only). Post-call may run on another instance and cannot recompute
+ * `from_speech_ms`/`from_answer_ms` after the fact, which is why this is
+ * captured here rather than derived later. It carries no machine exclusion
+ * and no "no stream" case -- lib/outbound/detectors.js's
+ * `resolveSilentVerdict` applies those, once, in post-call, because the AMD
+ * verdict can land after the session finishes.
+ * @param {string} attemptId
+ * @param {{firstAudioMs: number|null, silent: boolean}} o
+ */
+export async function finishAttemptSession(attemptId, { firstAudioMs = null, silent = false } = {}) {
+  requireTenantScope("finishAttemptSession");
+  const res = await q(
+    `UPDATE call_attempts SET session_finished_at = now(), first_audio_ms = $2, silent = $3 WHERE id = $1`,
+    [attemptId, firstAudioMs, silent]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`finishAttemptSession: expected 1 row, got ${res.rowCount}`);
+  noteAccess("finishAttemptSession", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * Everything `runPostCall` (lib/outbound/postCall.js) needs about one
+ * attempt, in one read: the attempt's own fields (including the two
+ * measured timings and the `calls` row it produced, if a session ever
+ * created one -- LEFT JOINed on `calls.attempt_id`, Task 14's link column,
+ * so a session that never started, or the sweep's `postcall_pending`
+ * backstop, still resolves cleanly with `call_id: null`), its outreach
+ * (state, `attempts_made`, `created_at`, for the schedule and the no-double-
+ * reschedule guard), the PINNED campaign version's config (retry schedule,
+ * calling window) and the contact/business timezone (`nextScheduled`,
+ * `contactTimezone`). Runs inside `withTenant`.
+ * @param {string} attemptId
+ * @returns {Promise<null | {
+ *   attemptNo: number, dialedAt: Date|null, answeredAt: Date|null, endedAt: Date|null,
+ *   answeredBy: string|null, result: string|null, silent: boolean,
+ *   sessionFinishedAt: Date|null, statusCompletedAt: Date|null, twilioCallSid: string|null,
+ *   outreachId: string, outreachState: string, attemptsMade: number, outreachCreatedAt: Date,
+ *   campaignId: string, campaignVersion: number, contactId: string,
+ *   complianceClass: string, templateKey: string, config: object,
+ *   phoneE164: string, contactTimezone: string|null, businessTimezone: string,
+ *   callId: string|null, callSid: string|null, outcomeCode: string|null, answers: object|null,
+ * }>}
+ */
+export async function outboundPostCallContext(attemptId) {
+  requireTenantScope("outboundPostCallContext");
+  const res = await q(
+    `SELECT a.attempt_no, a.dialed_at, a.answered_at, a.ended_at, a.answered_by, a.result, a.silent,
+            a.session_finished_at, a.status_completed_at, a.twilio_call_sid,
+            o.id AS outreach_id, o.state AS outreach_state, o.attempts_made, o.created_at AS outreach_created_at,
+            o.campaign_id, o.campaign_version, o.contact_id,
+            c.compliance_class, c.template_key,
+            v.config,
+            k.phone_e164, k.timezone AS contact_timezone,
+            b.timezone AS business_timezone,
+            cl.id AS call_id, cl.twilio_call_sid AS call_sid, cl.outcome_code, cl.answers
+       FROM call_attempts a
+       JOIN outreach o ON o.id = a.outreach_id
+       JOIN campaigns c ON c.id = o.campaign_id
+       JOIN campaign_versions v ON v.campaign_id = o.campaign_id AND v.version = o.campaign_version
+       JOIN contacts k ON k.id = o.contact_id
+       JOIN businesses b ON b.id = o.business_id
+       LEFT JOIN calls cl ON cl.attempt_id = a.id
+      WHERE a.id = $1`,
+    [attemptId]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("outboundPostCallContext", { resourceIds: [attemptId, row?.contact_id].filter(Boolean), rowCount: res.rowCount || 0 });
+  if (!row) return null;
+  return {
+    attemptNo: row.attempt_no,
+    dialedAt: row.dialed_at,
+    answeredAt: row.answered_at,
+    endedAt: row.ended_at,
+    answeredBy: row.answered_by,
+    result: row.result,
+    silent: row.silent,
+    sessionFinishedAt: row.session_finished_at,
+    statusCompletedAt: row.status_completed_at,
+    twilioCallSid: row.twilio_call_sid,
+    outreachId: row.outreach_id,
+    outreachState: row.outreach_state,
+    attemptsMade: row.attempts_made,
+    outreachCreatedAt: row.outreach_created_at,
+    campaignId: row.campaign_id,
+    campaignVersion: row.campaign_version,
+    contactId: row.contact_id,
+    complianceClass: row.compliance_class,
+    templateKey: row.template_key,
+    config: row.config,
+    phoneE164: row.phone_e164,
+    contactTimezone: row.contact_timezone,
+    businessTimezone: row.business_timezone,
+    callId: row.call_id,
+    callSid: row.call_sid,
+    outcomeCode: row.outcome_code,
+    // Forward-compatible seam: `schedule_callback` (stage 3) is what would
+    // populate this, and the transfer-unanswered door path (Task 19) never
+    // does -- so a callback_requested outcome with no answers.callback_
+    // requested_at is the mechanical "next schedule entry" case (spec §11).
+    answers: row.answers ?? null,
+  };
+}
+
+/**
+ * Post-call step 1 (spec §11): set `result` (only if still unset -- an
+ * unanswered attempt already has one from the door/AMD routes, and COALESCE
+ * never clobbers a more specific verdict), `ended_at` (same rule), and clear
+ * the two audio columns unconditionally -- an answered call's clips are no
+ * longer needed, and an unanswered one may already have had them cleared.
+ * @param {string} attemptId
+ * @param {string} resultIfUnset - 'connected' for an answered attempt whose result is still null
+ */
+export async function finalizeAttemptResult(attemptId, resultIfUnset) {
+  requireTenantScope("finalizeAttemptResult");
+  const res = await q(
+    `UPDATE call_attempts
+        SET result = COALESCE(result, $2), ended_at = COALESCE(ended_at, now()),
+            opener_audio = NULL, voicemail_audio = NULL
+      WHERE id = $1`,
+    [attemptId, resultIfUnset]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`finalizeAttemptResult: expected 1 row, got ${res.rowCount}`);
+  noteAccess("finalizeAttemptResult", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * The FINAL silent verdict (spec §13.4), written once by post-call after
+ * `resolveSilentVerdict` has applied the machine exclusion and the "no
+ * stream" case -- overwrites whatever `finishAttemptSession` (or the
+ * column's own default, `false`, for an attempt no session ever touched)
+ * left there.
+ * @param {string} attemptId
+ * @param {boolean} silent
+ */
+export async function setAttemptSilent(attemptId, silent) {
+  requireTenantScope("setAttemptSilent");
+  const res = await q(`UPDATE call_attempts SET silent = $2 WHERE id = $1`, [attemptId, silent]);
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`setAttemptSilent: expected 1 row, got ${res.rowCount}`);
+  noteAccess("setAttemptSilent", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
+ * The silent-call block (spec §13.4): `outreach.hold_until = answered_at +
+ * 72h`. Gate step 6 (`hold_until` has passed) reads this on the NEXT dispatch
+ * attempt for the same outreach.
+ * @param {string} outreachId
+ * @param {Date} holdUntil
+ */
+export async function setOutreachHold(outreachId, holdUntil) {
+  requireTenantScope("setOutreachHold");
+  const res = await q(`UPDATE outreach SET hold_until = $2, updated_at = now() WHERE id = $1`, [outreachId, holdUntil]);
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`setOutreachHold: expected 1 row, got ${res.rowCount}`);
+  noteAccess("setOutreachHold", { resourceIds: [outreachId], rowCount: res.rowCount });
+}
+
+/**
+ * Post-call step 5, the state machine (spec §8, §11) -- ONE atomic UPDATE
+ * that is ALSO the no-double-reschedule guard (carried from the 2a ledger):
+ * dispatch's own `failAndReschedule` can already have rescheduled or closed
+ * this outreach for a LATER attempt (a dial failure, then a status callback
+ * for the SAME attempt arriving after it), and a later status callback or
+ * the sweep must not apply the schedule a second time. The WHERE clause is
+ * the guard: it only fires when the outreach is still `dialing`/`in_call`
+ * AND `attemptNo` is still its latest (`attempts_made = attemptNo`) --
+ * exactly the condition under which THIS attempt's own outcome is the one
+ * that should decide what happens next. No separate read-then-decide: the
+ * guard and the write are the same statement, so nothing can race between
+ * them.
+ * @param {string} outreachId
+ * @param {number} attemptNo - the ATTEMPT's own attempt_no, never outreach.attempts_made
+ * @param {{terminal: boolean, closeReason?: string|null, outcome?: string|null, nextAttemptAt?: Date|null}} o
+ * @returns {Promise<boolean>} true iff the guard passed and the write applied
+ */
+export async function applyOutreachResult(outreachId, attemptNo, { terminal, closeReason = null, outcome = null, nextAttemptAt = null }) {
+  requireTenantScope("applyOutreachResult");
+  const res = await q(
+    `UPDATE outreach
+        SET state = CASE WHEN $3 THEN 'closed' ELSE 'waiting' END,
+            close_reason = CASE WHEN $3 THEN $4 ELSE close_reason END,
+            outcome = CASE WHEN $3 THEN $5 ELSE outcome END,
+            closed_at = CASE WHEN $3 THEN now() ELSE closed_at END,
+            next_attempt_at = CASE WHEN $3 THEN next_attempt_at ELSE $6 END,
+            updated_at = now()
+      WHERE id = $1 AND attempts_made = $2 AND state IN ('dialing','in_call')
+      RETURNING id`,
+    [outreachId, attemptNo, terminal, closeReason, outcome, nextAttemptAt]
+  );
+  if (res.error) throw res.error;
+  noteAccess("applyOutreachResult", { resourceIds: [outreachId], rowCount: res.rowCount || 0 });
+  return res.rowCount === 1;
+}
+
+/**
+ * Effects (spec §11 step 2, P-6 tier 3): did THIS call produce a booking, or
+ * did it already carry a tool-inserted opt-out suppression (the `opt_out`
+ * pack's own immediate write, spec §12.2 -- stage 3, not shipped, so this
+ * branch is a forward-compatible seam more than a live path today)? Both are
+ * cheap, `call_id`-scoped reads; `null` (no `calls` row at all -- the
+ * no-session sweep path) short-circuits to `{booked: false, optedOut:
+ * false}` without a round trip.
+ * @param {string|null} callId
+ * @returns {Promise<{booked: boolean, optedOut: boolean}>}
+ */
+export async function outboundCallEffects(callId) {
+  if (!callId) return { booked: false, optedOut: false };
+  requireTenantScope("outboundCallEffects");
+  const [booking, optOut] = await Promise.all([
+    q(`SELECT id FROM appointments WHERE call_id = $1 LIMIT 1`, [callId]),
+    q(`SELECT id FROM suppressions WHERE source_call_id = $1 AND created_by = 'tool' LIMIT 1`, [callId]),
+  ]);
+  if (booking.error) throw booking.error;
+  if (optOut.error) throw optOut.error;
+  noteAccess("outboundCallEffects", { resourceIds: [callId], rowCount: (booking.rowCount || 0) + (optOut.rowCount || 0) });
+  return { booked: (booking.rowCount || 0) > 0, optedOut: (optOut.rowCount || 0) > 0 };
+}
+
+/**
+ * The opt-out detector's own write (spec §13.3 step 2): a suppression the
+ * DETECTOR found, not the tool. `ON CONFLICT DO NOTHING` -- a business-scoped
+ * unique (business_id, phone_e164) may already hold one (the tool got there
+ * first, or an earlier call's detector did), and that is success, not a
+ * race to report.
+ * @param {{phone: string, sourceCallId: string|null}} o
+ * @returns {Promise<boolean>} true iff THIS call inserted the row
+ */
+export async function insertDetectorSuppression({ phone, sourceCallId = null }) {
+  requireTenantScope("insertDetectorSuppression");
+  const res = await q(
+    `INSERT INTO suppressions (business_id, phone_e164, reason, source_call_id, created_by)
+     SELECT app_current_business_id(), $1, 'opted_out', $2, 'detector'
+     ON CONFLICT (business_id, phone_e164) DO NOTHING
+     RETURNING id`,
+    [phone, sourceCallId]
+  );
+  if (res.error) throw res.error;
+  noteAccess("insertDetectorSuppression", { resourceIds: [res.rows?.[0]?.id].filter(Boolean), rowCount: res.rowCount || 0 });
+  return res.rowCount === 1;
+}
+
+/**
+ * Every kind of stale outbound attempt, across every tenant (the sweep,
+ * spec §6.3, migration 045): ids and a `kind` word only, through
+ * `app_outbound_stale_attempts`. No tenant scope needed -- same reasoning as
+ * `outboundDue`.
+ * @param {number} limit
+ * @param {number} sidlessMinutes
+ * @param {number} lostMinutes
+ * @param {number} postcallSeconds
+ * @returns {Promise<Array<{business_id: string, attempt_id: string, kind: "sidless"|"lost_callback"|"postcall_pending"}>>}
+ */
+export async function outboundStaleAttempts(limit, sidlessMinutes, lostMinutes, postcallSeconds) {
+  const res = await q(`SELECT business_id, attempt_id, kind FROM app_outbound_stale_attempts($1::int, $2::int, $3::int, $4::int)`, [
+    limit,
+    sidlessMinutes,
+    lostMinutes,
+    postcallSeconds,
+  ]);
+  if (res.error) throw res.error;
+  return res.rows || [];
+}
