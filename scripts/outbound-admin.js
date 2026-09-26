@@ -52,6 +52,11 @@
 //     [--consent-manual] [--confirm]
 //   --timezone (an IANA zone) is REQUIRED unless --contact-phone is +44: the
 //   calling window runs on the contact's clock, and only +44 has a default.
+//   node scripts/outbound-admin.js unsuppress --phone +1... --contact-phone +1... [--confirm]
+//   --contact-phone must be on OUTBOUND_TEST_ALLOWLIST (outboundEnv().allowlist)
+//   or this is refused before any transaction opens -- go-live pre-deploy Y3.
+//   This is the only way this script can remove a do-not-call entry, and it
+//   must never work for a real lead.
 // ---------------------------------------------------------------------------
 
 import { pathToFileURL } from "node:url";
@@ -544,6 +549,81 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
 }
 
 // ---------------------------------------------------------------------------
+// unsuppress
+// ---------------------------------------------------------------------------
+/**
+ * Go-live pre-deploy code, group Y (Y3). The only way this script can remove
+ * a do-not-call entry, so it is allow-listed, not merely dry-run-by-default
+ * like the writes above: refused BEFORE any transaction opens, before the
+ * tenant is even looked up, exactly as triggerOutreach's --consent-manual
+ * guard is (~:430-438) -- a suppression can never be fabricated away for a
+ * real lead.
+ *
+ * Tenant-scoped by construction: `suppressions` is FORCE ROW LEVEL SECURITY
+ * (migration 042) and app_lookup_business_by_phone adopts the tenant for the
+ * transaction, so the DELETE below can only ever touch --phone's own rows --
+ * another tenant's suppression of the same number is a different business_id
+ * and is invisible to this scope.
+ *
+ * Dry run by default: counts what it would delete and rolls back. --confirm
+ * deletes, reads the count back INSIDE the same transaction, and commits only
+ * if zero rows remain for this tenant and number -- a mismatch rolls back and
+ * is reported as a failure, never left half-applied (the read-back pattern
+ * every write above uses).
+ */
+export async function unsuppress(client, { businessPhone, contactPhone, confirm }) {
+  if (!E164.test(businessPhone || "")) {
+    return { ok: false, error: "businessPhone must be an E.164 number" };
+  }
+  if (!E164.test(contactPhone || "")) {
+    return { ok: false, error: "contactPhone must be an E.164 number (--contact-phone)" };
+  }
+
+  const { allowlist } = outboundEnv();
+  if (!allowlist.has(contactPhone)) {
+    return { ok: false, error: `unsuppress refused: ${contactPhone} is not on OUTBOUND_TEST_ALLOWLIST` };
+  }
+
+  await client.query("BEGIN");
+  try {
+    const bizRes = await client.query("SELECT * FROM app_lookup_business_by_phone($1)", [businessPhone]);
+    if (bizRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no business has phone_number ${businessPhone}` };
+    }
+    const business = bizRes.rows[0];
+
+    const before = await client.query(
+      "SELECT count(*)::int AS n FROM suppressions WHERE business_id = $1 AND phone_e164 = $2",
+      [business.id, contactPhone]
+    );
+    const wouldRemove = before.rows[0].n;
+
+    if (!confirm) {
+      await client.query("ROLLBACK");
+      return { ok: true, dryRun: true, wouldWrite: { businessId: business.id, phone: contactPhone, wouldRemove } };
+    }
+
+    await client.query("DELETE FROM suppressions WHERE business_id = $1 AND phone_e164 = $2", [business.id, contactPhone]);
+
+    const after = await client.query(
+      "SELECT count(*)::int AS n FROM suppressions WHERE business_id = $1 AND phone_e164 = $2",
+      [business.id, contactPhone]
+    );
+    if (after.rows[0].n !== 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `read-back mismatch: ${after.rows[0].n} suppressions row(s) remain for ${contactPhone}` };
+    }
+
+    await client.query("COMMIT");
+    return { ok: true, businessId: business.id, removed: wouldRemove };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 function argOf(args, name) {
@@ -650,7 +730,14 @@ export function parseArgs(argv) {
     };
   }
 
-  push("command", `must be one of campaign, status, outbound, trigger (got ${JSON.stringify(command ?? null)})`);
+  if (command === "unsuppress") {
+    const contactPhone = argOf(args, "contact-phone");
+    if (!E164.test(contactPhone || "")) push("contact-phone", "must be an E.164 number (--contact-phone)");
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, value: { command, confirm, businessPhone: phone, contactPhone } };
+  }
+
+  push("command", `must be one of campaign, status, outbound, trigger, unsuppress (got ${JSON.stringify(command ?? null)})`);
   return { ok: false, errors };
 }
 
@@ -667,6 +754,7 @@ async function main() {
     if (v.command === "campaign") result = await upsertCampaign(client, v);
     else if (v.command === "status") result = await setCampaignStatus(client, v);
     else if (v.command === "outbound") result = await setBusinessOutbound(client, v);
+    else if (v.command === "unsuppress") result = await unsuppress(client, v);
     else result = await triggerOutreach(client, v);
 
     console.log(JSON.stringify(result));

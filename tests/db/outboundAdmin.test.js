@@ -24,6 +24,7 @@ import {
   setCampaignStatus,
   setBusinessOutbound,
   triggerOutreach,
+  unsuppress,
 } from "../../scripts/outbound-admin.js";
 import { TEMPLATES, PURPOSE_BY_TEMPLATE } from "../../lib/outbound/templates.js";
 import { OPERATOR_TEST_WORDING } from "../../lib/outbound/gate.js";
@@ -153,6 +154,18 @@ describeDb("outbound-admin: parseArgs", () => {
     const base = ["trigger", "--phone", BUSINESS_PHONE, "--campaign-id", "11111111-1111-4111-8111-111111111111", "--contact-phone", ALLOWED_PHONE];
     expect(parseArgs([...base, "--timezone", "America/Chicago"]).value.timezone).toBe("America/Chicago");
     expect(parseArgs(base).value.timezone).toBeNull();
+  });
+
+  it("parses unsuppress", () => {
+    const r = parseArgs(["unsuppress", "--phone", BUSINESS_PHONE, "--contact-phone", ALLOWED_PHONE, "--confirm"]);
+    expect(r.ok).toBe(true);
+    expect(r.value).toMatchObject({ command: "unsuppress", businessPhone: BUSINESS_PHONE, contactPhone: ALLOWED_PHONE, confirm: true });
+  });
+
+  it("unsuppress requires a valid --contact-phone", () => {
+    const r = parseArgs(["unsuppress", "--phone", BUSINESS_PHONE, "--contact-phone", "not-e164"]);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.path)).toContain("contact-phone");
   });
 });
 
@@ -568,5 +581,95 @@ describeDb("outbound-admin: triggerOutreach", () => {
     const r2 = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, consentManual: false, confirm: true }));
     expect(r2.ok, JSON.stringify(r2)).toBe(true);
     expect((await contactRow(phone)).timezone).toBe("Europe/Dublin");
+  });
+});
+
+// Y3 (go-live pre-deploy code, group Y): the only way this script can remove
+// a do-not-call entry, so the allow-list guard mirrors triggerOutreach's
+// --consent-manual check exactly -- refused before any transaction opens,
+// and it must never work for a real lead.
+describeDb("outbound-admin: unsuppress", () => {
+  const OLD_ALLOWLIST = process.env.OUTBOUND_TEST_ALLOWLIST;
+  const OTHER_BUSINESS_PHONE = "+15550199099";
+  let otherBusinessId;
+
+  beforeAll(async () => {
+    process.env.OUTBOUND_TEST_ALLOWLIST = ALLOWED_PHONE;
+    const b = await admin.query(
+      `INSERT INTO businesses (name, phone_number, timezone) VALUES ($1, $2, 'Europe/London') RETURNING id`,
+      ["Other Unsuppress Co", OTHER_BUSINESS_PHONE]
+    );
+    otherBusinessId = b.rows[0].id;
+  });
+
+  afterAll(async () => {
+    if (OLD_ALLOWLIST === undefined) delete process.env.OUTBOUND_TEST_ALLOWLIST;
+    else process.env.OUTBOUND_TEST_ALLOWLIST = OLD_ALLOWLIST;
+    await admin.query(`DELETE FROM businesses WHERE phone_number = $1`, [OTHER_BUSINESS_PHONE]).catch(() => {});
+  });
+
+  async function seedSuppression(bizId, phone, reason = "opted_out") {
+    // created_by IN ('tool','detector','dashboard','api') -- 'dashboard' stands
+    // in for a human-entered row, distinct from `reason`'s own 'manual' value.
+    await admin.query(
+      `INSERT INTO suppressions (business_id, phone_e164, reason, created_by) VALUES ($1, $2, $3, 'dashboard')
+       ON CONFLICT (business_id, phone_e164) DO NOTHING`,
+      [bizId, phone, reason]
+    );
+  }
+  const suppressionCount = async (bizId, phone) =>
+    (await admin.query(`SELECT count(*)::int AS n FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [bizId, phone])).rows[0].n;
+
+  it("is refused when --contact-phone is not on OUTBOUND_TEST_ALLOWLIST, and writes nothing", async () => {
+    await seedSuppression(businessId, NOT_ALLOWED_PHONE);
+    const before = await suppressionCount(businessId, NOT_ALLOWED_PHONE);
+    expect(before).toBeGreaterThan(0);
+
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: BUSINESS_PHONE, contactPhone: NOT_ALLOWED_PHONE, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/OUTBOUND_TEST_ALLOWLIST/);
+    expect(await suppressionCount(businessId, NOT_ALLOWED_PHONE)).toBe(before);
+  });
+
+  it("a dry run (no --confirm) leaves the row and reports what it would remove", async () => {
+    await admin.query(`DELETE FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [businessId, ALLOWED_PHONE]);
+    await seedSuppression(businessId, ALLOWED_PHONE);
+
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: BUSINESS_PHONE, contactPhone: ALLOWED_PHONE, confirm: false }));
+    expect(r).toMatchObject({ ok: true, dryRun: true, wouldWrite: { phone: ALLOWED_PHONE, wouldRemove: 1 } });
+    expect(await suppressionCount(businessId, ALLOWED_PHONE)).toBe(1);
+  });
+
+  it("--confirm removes the row and reports {removed: n}", async () => {
+    await admin.query(`DELETE FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [businessId, ALLOWED_PHONE]);
+    await seedSuppression(businessId, ALLOWED_PHONE);
+
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: BUSINESS_PHONE, contactPhone: ALLOWED_PHONE, confirm: true }));
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, removed: 1 });
+    expect(await suppressionCount(businessId, ALLOWED_PHONE)).toBe(0);
+  });
+
+  it("the 0-row case is reported cleanly, not as an error", async () => {
+    await admin.query(`DELETE FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [businessId, ALLOWED_PHONE]);
+
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: BUSINESS_PHONE, contactPhone: ALLOWED_PHONE, confirm: true }));
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, removed: 0 });
+  });
+
+  it("tenant isolation: another tenant's suppression of the same number is untouched", async () => {
+    await admin.query(`DELETE FROM suppressions WHERE phone_e164 = $1`, [ALLOWED_PHONE]);
+    await seedSuppression(businessId, ALLOWED_PHONE);
+    await seedSuppression(otherBusinessId, ALLOWED_PHONE);
+
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: BUSINESS_PHONE, contactPhone: ALLOWED_PHONE, confirm: true }));
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, removed: 1 });
+    expect(await suppressionCount(businessId, ALLOWED_PHONE)).toBe(0);
+    expect(await suppressionCount(otherBusinessId, ALLOWED_PHONE)).toBe(1);
+  });
+
+  it("refuses a business phone that resolves to nothing, even when the number is allow-listed", async () => {
+    const r = await asProbe((c) => unsuppress(c, { businessPhone: "+19995550000", contactPhone: ALLOWED_PHONE, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/no business has phone_number/);
   });
 });
