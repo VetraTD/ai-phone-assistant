@@ -66,6 +66,18 @@ describe("renderTemplate / spokenNumber", () => {
   it("AI_DISCLOSURE_RE is the spec's regex", () => expect(AI_DISCLOSURE_RE.source).toBe("\\b(AI|artificial intelligence|automated assistant|virtual assistant)\\b"));
 });
 
+// O-24/a8 (post-2c): 02x numbers (020 London, and 023/024/028/029, which
+// share the shape) are spoken 3+4+4, never the generic 5+3+3 grouping.
+describe("O-24/a8: spokenNumber groups UK 02x numbers as 02X XXXX XXXX", () => {
+  it("020 (London)", () => expect(spokenNumber("+442071234567")).toBe("020 7123 4567"));
+  it("029 (Cardiff)", () => expect(spokenNumber("+442920123456")).toBe("029 2012 3456"));
+  it("023 (Southampton/Portsmouth)", () => expect(spokenNumber("+442380123456")).toBe("023 8012 3456"));
+  it("024 (Coventry)", () => expect(spokenNumber("+442476123456")).toBe("024 7612 3456"));
+  it("028 (Northern Ireland)", () => expect(spokenNumber("+442890123456")).toBe("028 9012 3456"));
+  it("a mobile (07x) is unaffected", () => expect(spokenNumber("+447700900333")).toBe("07700 900 333"));
+  it("a standard landline (01x) is unaffected", () => expect(spokenNumber("+441372656055")).toBe("01372 656 055"));
+});
+
 // Fix round 1 (opus review): four silent-pass holes in validateCampaign, each
 // one a bad campaign that used to save with NO error.
 describe("fix round 1 -- IMPORTANT 1: the disclosure check cannot be beaten by gluing AI onto a placeholder", () => {

@@ -300,6 +300,8 @@ Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema i
 }
 ```
 
+`{caller_id_spoken}` (`spokenNumber` in `lib/outbound/campaignSchema.js`) groups a UK number for speech: 020 (London) and the other 02x area codes that share its shape (023, 024, 028, 029) as `02X XXXX XXXX` (amended 2026-09-26, post-2c, owner decision O-24/a8 -- the prior generic grouping read "020 7123 4567" as "02071 234 567"). Every other UK shape (07x mobile, 01x) is unchanged, e.g. `07700 900 333`, `01372 656 055`.
+
 **Save-time validation beyond types.** Each rule is a coded rule because ignoring it would hurt, get someone sued, or make them angry.
 
 - The opener must contain `{business_name}` **and** an AI disclosure matching `/\b(AI|artificial intelligence|automated assistant|virtual assistant)\b/i`, and must render to **at most 120 characters** (about 4 seconds of speech). It is the backstop line, and a person who says nothing must not sit through a speech.
