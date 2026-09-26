@@ -264,6 +264,8 @@ These are needed because some reads happen before the tenant is known. They mirr
 
 The RLS test suite (`test:db`) must prove all of these: every new table refuses a cross-tenant read and write as `vetra_app`; each definer function returns nothing for an unknown key; `app_outbound_due` returns IDs only.
 
+> **Amended 2026-09-25 (Task 20, session 2b; owner decision O-5).** The sweep needed a fourth cross-tenant read that did not exist above: which attempts are STUCK -- dialled with no CallSid ever recorded, dialled with a CallSid but no terminal status in a long time, or completed with no post-call claim -- across every tenant. Migration 045 adds it the same way: one more no-RLS routing table (`postcall_pending`, kept true by a trigger on `call_attempts`) and one more definer, `app_outbound_stale_attempts(p_limit int, p_sidless_minutes int, p_lost_minutes int, p_postcall_seconds int) RETURNS TABLE (business_id uuid, attempt_id uuid, kind text)`, `kind` one of `sidless` (044's `dial_registry` with no `call_attempt_directory` row, §11), `lost_callback` (`dial_registry` WITH a directory SID, older than `p_lost_minutes`) or `postcall_pending` (a `postcall_pending` row older than `p_postcall_seconds`). Ids only, bounded by `LEAST(GREATEST(p_limit,1),500)`, `REVOKE`d from `PUBLIC` and granted to `vetra_app` by name. The sweep enumerates stale attempts through this one function (the C1 pattern), never by reading `call_attempts`/`dial_registry` directly.
+
 ## 7. Campaign config
 
 Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema is exported to the dashboard the same way capability schemas are (`scripts/export-capability-schemas.js` pattern, with a drift test). Unknown keys are rejected at save (strict), unlike the lenient engine-side capability validation.
@@ -566,6 +568,8 @@ Post-call (`lib/outbound/postCall.js`) runs **exactly once per attempt**, even t
 - **Unanswered calls** need only the status callback.
 
 Whichever arrives second claims the run with an atomic `UPDATE call_attempts SET post_call_started_at = now() WHERE id = $1 AND post_call_started_at IS NULL AND <inputs present> RETURNING id`. If a session dies without finishing, the sweep runs post-call for any attempt whose `status_completed_at` is more than 2 minutes old and whose `session_finished_at` is null. It resolves the outcome from the summary only and logs `outbound_postcall_without_session`.
+
+> **Amended 2026-09-25 (Task 20, session 2b).** The sweep finds these attempts (and the `sidless`/`lost_callback` backstops alongside them) through migration 045's `app_outbound_stale_attempts` (§6.3), never by scanning `call_attempts` itself -- it has no tenant, and 042-044 gave it no cross-tenant list to read. A `sidless` row is failed and rescheduled the same way dispatch's own `failAndReschedule` would (never twice: the outreach's `attempts_made`/state guard applies here too). A `lost_callback` row is resolved with one read-only `calls(sid).fetch()` against Twilio, stamped exactly as the status door would on a terminal result, then handed to `postCall.tryClaim`.
 
 The steps:
 

@@ -78,3 +78,50 @@ describe("F2: 042 and 043 bound their lock wait", () => {
     expect(read("schema.sql")).not.toMatch(/lock_timeout/i);
   });
 });
+
+/**
+ * Migration 045 hygiene (session 2b Checkpoint 2a carry, owner decision O-5):
+ * the same lock-wait rule 042/043 follow, and explicit REVOKE/GRANT on the
+ * new definer -- present in BOTH the migration file and its schema.sql fold,
+ * because a DB test alone cannot see whether the grant was explicit or came
+ * from 029's ALTER DEFAULT PRIVILEGES (F1's own reasoning, reused here).
+ */
+describe("045: the sweep's stale-attempt backstop follows the same hygiene", () => {
+  const file045 = "045_outbound_postcall_sweep.sql";
+
+  it("045 starts (after comments) with SET LOCAL lock_timeout = '5s'", () => {
+    expect(stripComments(read(file045)).trimStart().startsWith("SET LOCAL lock_timeout = '5s';")).toBe(true);
+  });
+
+  it("schema.sql does not carry it", () => {
+    expect(read("schema.sql")).not.toMatch(/lock_timeout/i);
+  });
+
+  it("045 explicitly REVOKEs and GRANTs EXECUTE on app_outbound_stale_attempts, in the file and in schema.sql's fold", () => {
+    const schema = read("schema.sql");
+    const start = schema.indexOf("-- Migration 045: outbound -- the sweep's stale-attempt backstop");
+    const fold = schema.slice(start);
+    for (const sql of [stripComments(read(file045)), stripComments(fold)]) {
+      expect(sql).toMatch(/REVOKE ALL ON FUNCTION app_outbound_stale_attempts\(int, int, int, int\) FROM PUBLIC;/);
+      expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION app_outbound_stale_attempts\(int, int, int, int\) TO vetra_app;/);
+    }
+  });
+
+  it("045 explicitly REVOKEs postcall_pending from PUBLIC and from vetra_app, in the file and in schema.sql's fold", () => {
+    const schema = read("schema.sql");
+    const start = schema.indexOf("-- Migration 045: outbound -- the sweep's stale-attempt backstop");
+    const fold = schema.slice(start);
+    for (const sql of [stripComments(read(file045)), stripComments(fold)]) {
+      expect(sql).toMatch(/REVOKE ALL ON postcall_pending FROM PUBLIC;/);
+      expect(sql).toMatch(/REVOKE ALL ON postcall_pending FROM vetra_app;/);
+    }
+  });
+
+  it("045 is idempotent: IF NOT EXISTS / CREATE OR REPLACE / DROP TRIGGER IF EXISTS", () => {
+    const sql = stripComments(read(file045));
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS postcall_pending/);
+    expect(sql).toMatch(/CREATE OR REPLACE FUNCTION app_sync_postcall_pending/);
+    expect(sql).toMatch(/CREATE OR REPLACE FUNCTION app_outbound_stale_attempts/);
+    expect(sql).toMatch(/DROP TRIGGER IF EXISTS postcall_pending_sync ON call_attempts;/);
+  });
+});
