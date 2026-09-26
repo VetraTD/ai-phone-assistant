@@ -121,6 +121,18 @@ steps:
   # Proven against the dashboard image, where the same change turned a passing
   # build into a failing one the moment a source directory went missing.
   # -------------------------------------------------------------------------
+  # X2 (go-live pre-deploy hardening, 2026-09-26): M9 made the
+  # @google-cloud/tasks import LAZY (lib/outbound/internalRoutes.js -- loaded
+  # on the first enqueue, not at module load, to keep it out of every boot
+  # while outbound is unconfigured), so `await import('/app/server.js')` alone
+  # no longer touches it -- a missing or broken install of it in THIS image
+  # would sail through this step. Resolved from `/app` via `createRequire`,
+  # not a bare `import('@google-cloud/tasks')`: Cloud Build overrides the
+  # image's own WORKDIR with `/workspace` for a step's cwd, which has no
+  # node_modules (that directory holds the uploaded SOURCE, not the built
+  # image), and a bare specifier resolves against cwd -- verified locally,
+  # the exact failure this step exists to catch (ERR_MODULE_NOT_FOUND) is
+  # what a bare import produces from a cwd with no node_modules ancestor.
   - id: smoke
     name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
     entrypoint: node
@@ -131,7 +143,7 @@ steps:
     args:
       - --input-type=module
       - -e
-      - "await import('/app/server.js'); console.log('module tree loaded, no port bound');"
+      - "import { createRequire } from 'node:module'; createRequire('/app/')('@google-cloud/tasks'); await import('/app/server.js'); console.log('module tree loaded, no port bound');"
     waitFor: [build]
 
   # The migration runner ships in this image too, so it gets the same treatment.
@@ -161,13 +173,18 @@ steps:
   # tree — including lib/db/schemaFingerprint.js, which c7 needs and which
   # arrives via `COPY lib` rather than by being named — without touching a
   # database.
+  #
+  # X2 (go-live pre-deploy hardening, 2026-09-26): scripts/outbound-admin.js's
+  # own comment already claimed this step smoke-imports it, guarded the same
+  # way (pathToFileURL main guard) -- it did not, until now. Verified locally:
+  # importing it touches no database and does not exit.
   - id: smoke-verifiers
     name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
     entrypoint: node
     args:
       - --input-type=module
       - -e
-      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); await import('/app/scripts/import-tenant.js'); console.log('lane C verifiers + tenant import loaded');"
+      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); await import('/app/scripts/import-tenant.js'); await import('/app/scripts/outbound-admin.js'); console.log('lane C verifiers + tenant import loaded');"
     waitFor: [build]
 
   # The migration files have to BE in the image. A `COPY database ./database`
