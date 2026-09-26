@@ -101,6 +101,22 @@ d("finishAttemptSession: the controller's own half of post-call", () => {
     expect(row.first_audio_ms).toBe(1234);
     expect(row.silent).toBe(true);
   });
+
+  // b38 (fix wave, checkpoint 2b): once post-call has claimed the attempt
+  // (post_call_started_at set), it may already have written the FINAL
+  // silent verdict -- a LATE finish (this call landing after that claim)
+  // must be a no-op, never overwrite it.
+  it("b38: a late finish, after post-call has already claimed the attempt, does not overwrite anything", async () => {
+    const id = await mkAttempt("CAwrite-session-late");
+    await admin.query(`UPDATE call_attempts SET post_call_started_at = now() WHERE id = $1`, [id]);
+    await db.withTenant(BIZ, () => db.finishAttemptSession(id, { firstAudioMs: 4321, silent: true }));
+    const row = (
+      await admin.query(`SELECT session_finished_at, first_audio_ms, silent FROM call_attempts WHERE id = $1`, [id])
+    ).rows[0];
+    expect(row.session_finished_at).toBeNull();
+    expect(row.first_audio_ms).toBeNull();
+    expect(row.silent).toBe(false);
+  });
 });
 
 // I6 (fix wave, checkpoint 2b, = b37): the Live session's own answered_at

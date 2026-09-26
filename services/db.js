@@ -3150,13 +3150,23 @@ export async function releasePostCallClaim(attemptId) {
  */
 export async function finishAttemptSession(attemptId, { firstAudioMs = null, silent = false } = {}) {
   requireTenantScope("finishAttemptSession");
+  // b38 (fix wave, checkpoint 2b): guarded on `post_call_started_at IS NULL`.
+  // Once post-call has claimed the attempt (`claimPostCall`) it may already
+  // have written the FINAL silent verdict (lib/outbound/postCall.js's
+  // `setAttemptSilent`, spec §13.4, `resolveSilentVerdict`'s machine/fax
+  // correction included). A LATE finish -- the session's own `finish()`
+  // landing after that claim, the loser of "whichever input arrives second
+  // claims the run" (spec §11) -- must never overwrite that verdict with its
+  // own, earlier and possibly stale one. A skip here is a normal outcome,
+  // not a fault: post-call already has whatever this call would have
+  // written, so `rowCount` may legitimately be 0.
   const res = await q(
-    `UPDATE call_attempts SET session_finished_at = now(), first_audio_ms = $2, silent = $3 WHERE id = $1`,
+    `UPDATE call_attempts SET session_finished_at = now(), first_audio_ms = $2, silent = $3
+      WHERE id = $1 AND post_call_started_at IS NULL`,
     [attemptId, firstAudioMs, silent]
   );
   if (res.error) throw res.error;
-  if (res.rowCount !== 1) throw new Error(`finishAttemptSession: expected 1 row, got ${res.rowCount}`);
-  noteAccess("finishAttemptSession", { resourceIds: [attemptId], rowCount: res.rowCount });
+  noteAccess("finishAttemptSession", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
 }
 
 /**

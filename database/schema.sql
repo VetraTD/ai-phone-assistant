@@ -1752,26 +1752,39 @@ CREATE TRIGGER postcall_pending_sync
 --                    can legitimately run this long).
 --   postcall_pending -- a postcall_pending row (this migration) older than
 --                    p_postcall_seconds.
+-- b34/O-18 (fix wave, checkpoint 2b, owner decision): ORDER BY the stale
+-- timestamp ASCENDING (oldest first) before the LIMIT, rather than an
+-- unordered UNION ALL clipped by Postgres in whatever order it happens to
+-- produce rows -- a business whose rows sort late in the plan could starve
+-- under load. Each branch projects the SAME timestamp that decided its own
+-- WHERE clause (dial_registry.dialed_at for sidless/lost_callback,
+-- postcall_pending.status_completed_at for postcall_pending), so "oldest"
+-- means the same thing the staleness check itself means. M6 caveat (the
+-- review that asked for this): with oldest-first, >= p_limit PERSISTENTLY
+-- FAILING postcall_pending rows (each released and re-listed every tick)
+-- can starve newer rows -- irrelevant at Part 1 volume, and the ONLY schema
+-- edit this fix wave is allowed to make.
 CREATE OR REPLACE FUNCTION app_outbound_stale_attempts(p_limit int, p_sidless_minutes int, p_lost_minutes int, p_postcall_seconds int)
 RETURNS TABLE (business_id uuid, attempt_id uuid, kind text)
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
   WITH lim AS (SELECT LEAST(GREATEST(p_limit, 1), 500) AS n)
-  SELECT * FROM (
-    SELECT r.business_id, r.attempt_id, 'sidless'::text AS kind
+  SELECT stale.business_id, stale.attempt_id, stale.kind FROM (
+    SELECT r.business_id, r.attempt_id, 'sidless'::text AS kind, r.dialed_at AS stale_since
       FROM dial_registry r
       LEFT JOIN call_attempt_directory d ON d.attempt_id = r.attempt_id
      WHERE d.attempt_id IS NULL
        AND r.dialed_at < now() - make_interval(mins => GREATEST(p_sidless_minutes, 0))
     UNION ALL
-    SELECT r.business_id, r.attempt_id, 'lost_callback'::text AS kind
+    SELECT r.business_id, r.attempt_id, 'lost_callback'::text AS kind, r.dialed_at AS stale_since
       FROM dial_registry r
       JOIN call_attempt_directory d ON d.attempt_id = r.attempt_id
      WHERE r.dialed_at < now() - make_interval(mins => GREATEST(p_lost_minutes, 0))
     UNION ALL
-    SELECT p.business_id, p.attempt_id, 'postcall_pending'::text AS kind
+    SELECT p.business_id, p.attempt_id, 'postcall_pending'::text AS kind, p.status_completed_at AS stale_since
       FROM postcall_pending p
      WHERE p.status_completed_at < now() - make_interval(secs => GREATEST(p_postcall_seconds, 0))
   ) stale
+  ORDER BY stale.stale_since ASC
   LIMIT (SELECT n FROM lim);
 $$;
 

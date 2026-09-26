@@ -180,6 +180,15 @@ describe("POST /internal/outbound/sweep: the stale-attempt backstops (Task 20)",
     expect(res.status).toBe(200);
     expect(db.withTenant).toHaveBeenCalled();
     expect(deps.log.info).toHaveBeenCalledWith("outbound_sweep_sidless_resolved", expect.objectContaining({ attemptId: ATTEMPT }));
+    // b39 (fix wave, checkpoint 2b): a log line alone cannot fail if
+    // failStaleAttempt's own sequence broke -- assert the actual writes and
+    // the enqueue, not only that something got logged.
+    expect(db.failAttempt).toHaveBeenCalledWith(ATTEMPT);
+    expect(db.rescheduleOutreach).toHaveBeenCalledTimes(1);
+    const [outreachId, next] = db.rescheduleOutreach.mock.calls[0];
+    expect(outreachId).toBe(OUTREACH2);
+    expect(next).toBeInstanceOf(Date);
+    expect(enqueue).toHaveBeenCalledWith({ businessId: BIZ, outreachId: OUTREACH2, at: next, source: "reschedule" });
   });
 
   it("sidless: a SID or result already landed -- skipped, not double-failed", async () => {

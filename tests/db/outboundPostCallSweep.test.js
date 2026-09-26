@@ -178,10 +178,39 @@ d("app_outbound_stale_attempts: ids only, per kind", () => {
     await admin.query(`DELETE FROM call_attempts WHERE id = ANY($1::uuid[])`, [[recent, old, claimed]]);
   });
 
-  it("bounded by LEAST(GREATEST(p_limit,1),500)", async () => {
-    const r = await appTx((c) => c.query(`SELECT * FROM app_outbound_stale_attempts(0, 10, 15, 120)`));
-    expect(r.rowCount).toBeLessThanOrEqual(500);
-    await expect(appTx((c) => c.query(`SELECT * FROM app_outbound_stale_attempts(-5, 10, 15, 120)`))).resolves.toBeTruthy();
+  // b39 (fix wave, checkpoint 2b): the OLD version of this test could never
+  // fail below 500 real rows -- rowCount <= 500 and "resolves to something
+  // truthy" both pass on zero rows. Seeded so p_limit really is the only
+  // thing deciding what comes back, and (b34/O-18) that it is the OLDEST.
+  it("b39/b34: p_limit=1 and p_limit=-5 both return exactly one row -- the OLDEST of several qualifying rows", async () => {
+    const mk = async (minutesAgo) =>
+      (
+        await admin.query(
+          `INSERT INTO call_attempts (business_id, outreach_id, attempt_no, from_number, to_number, dialed_at)
+           VALUES ($1,$2,(SELECT COALESCE(MAX(attempt_no),0)+1 FROM call_attempts WHERE outreach_id=$2),'+441372656055','+447700900111', now() - make_interval(mins => $3))
+           RETURNING id`,
+          [BIZ, outreachId, minutesAgo]
+        )
+      ).rows[0].id;
+
+    // Inserted NEWEST first, oldest LAST -- deliberately the opposite of
+    // insertion/physical order, so a plan with no explicit ORDER BY (the
+    // sabotage) is not accidentally bailed out by matching insertion order.
+    const newestId = await mk(20);
+    const middleId = await mk(30);
+    const oldestId = await mk(40);
+
+    try {
+      const r1 = await stale({ limit: 1, sidlessMinutes: 10 });
+      expect(r1.rowCount).toBe(1);
+      expect(r1.rows[0].attempt_id).toBe(oldestId); // b34/O-18: oldest first, not whatever Postgres's plan happened to produce
+
+      const rNeg = await stale({ limit: -5, sidlessMinutes: 10 });
+      expect(rNeg.rowCount).toBe(1);
+      expect(rNeg.rows[0].attempt_id).toBe(oldestId);
+    } finally {
+      await admin.query(`DELETE FROM call_attempts WHERE id = ANY($1::uuid[])`, [[oldestId, middleId, newestId]]);
+    }
   });
 
   it("crosses tenants: a second business's stale attempt is returned too (no tenant scope)", async () => {
