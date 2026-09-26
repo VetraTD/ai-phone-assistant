@@ -35,6 +35,7 @@ vi.mock("../lib/logger.js", async (importOriginal) => {
 import express from "express";
 import request from "supertest";
 import { registerOutboundDoorRoutes } from "../lib/outbound/doorRoutes.js";
+import { createPostCall } from "../lib/outbound/postCall.js";
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { mintMediaStreamToken, verifyMediaStreamToken, tokenFromPath } from "../lib/mediaStreamToken.js";
 import { verifyTwilioSignatureAny } from "../lib/twilioSignature.js";
@@ -79,10 +80,18 @@ const CONFIG = {
 const BUSINESS_ROW = { id: BIZ, name: BUSINESS_NAME, timezone: "Europe/London", phone_number: CALLER_ID };
 const LINKS = { direction: "outbound", campaignId: "camp-1", campaignVersion: 1, outreachId: "out-1", attemptId: "att-1", contactId: "contact-1" };
 
-/** ONE fake database, shared by the door and the session -- as the real one is. */
+/**
+ * ONE fake database, shared by the door and the session -- as the real one
+ * is. Task 20 completion: this now carries a real, in-memory model of
+ * `call_attempts`' post-call columns (`sessionFinishedAt`, `postCallStarted`,
+ * `silent`, `result`) and every function `lib/outbound/postCall.js`'s real
+ * `runPostCall` needs, so `createPostCall` (below) is the REAL orchestration
+ * -- not a stub -- and "post-call runs exactly once" is asserted against
+ * actual claim semantics, not a canned return value.
+ */
 function harnessDb() {
   const base = fakeDb(CONFIG, BIZ);
-  const attempt = { answeredAt: null, completedAt: null, answeredBy: null };
+  const attempt = { answeredAt: null, completedAt: null, answeredBy: null, sessionFinishedAt: null, postCallStarted: false, silent: false, result: null };
   return {
     ...base,
     attempt,
@@ -129,6 +138,66 @@ function harnessDb() {
       attempt.answeredBy = answeredBy;
     }),
     outboundAmdContext: vi.fn(async () => ({ attemptNo: 1, complianceClass: "solicited", voicemailOn: [1, 5] })),
+
+    // -----------------------------------------------------------------
+    // Task 20: the real claim + post-call pipeline's own data layer, as an
+    // in-memory model of the same guard claimPostCall's SQL expresses.
+    // -----------------------------------------------------------------
+    finishAttemptSession: vi.fn(async (_id, { firstAudioMs, silent }) => {
+      attempt.sessionFinishedAt = attempt.sessionFinishedAt ?? "stamped";
+      attempt.firstAudioMs = firstAudioMs;
+      attempt.silent = silent;
+    }),
+    claimPostCall: vi.fn(async () => {
+      if (attempt.postCallStarted) return false;
+      if (attempt.completedAt === null) return false;
+      if (!(attempt.sessionFinishedAt !== null || attempt.answeredAt === null)) return false;
+      attempt.postCallStarted = true;
+      return true;
+    }),
+    outboundPostCallContext: vi.fn(async () => ({
+      attemptNo: 1,
+      dialedAt: new Date(),
+      answeredAt: attempt.answeredAt !== null ? new Date() : null,
+      endedAt: null,
+      answeredBy: attempt.answeredBy,
+      result: attempt.result,
+      silent: attempt.silent,
+      sessionFinishedAt: attempt.sessionFinishedAt !== null ? new Date() : null,
+      statusCompletedAt: attempt.completedAt !== null ? new Date() : null,
+      twilioCallSid: SID,
+      outreachId: "out-1",
+      outreachState: "dialing",
+      attemptsMade: 1,
+      outreachCreatedAt: new Date("2026-09-20T09:00:00Z"),
+      campaignId: "camp-1",
+      campaignVersion: 1,
+      contactId: "contact-1",
+      complianceClass: "solicited",
+      templateKey: "speed_to_lead",
+      config: CAMPAIGN_CONFIG,
+      phoneE164: CONTACT,
+      contactTimezone: null,
+      businessTimezone: "Europe/London",
+      callId: "call-1",
+      callSid: SID,
+      outcomeCode: null,
+      answers: null,
+    })),
+    finalizeAttemptResult: vi.fn(async (_id, resultIfUnset) => {
+      attempt.result = attempt.result ?? resultIfUnset;
+    }),
+    outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })),
+    fetchCallTranscript: vi.fn(async () => []),
+    setCallOutcomeCode: vi.fn(async () => {}),
+    updateCallSummary: vi.fn(async () => {}),
+    isSuppressed: vi.fn(async () => false),
+    insertDetectorSuppression: vi.fn(async () => true),
+    setAttemptSilent: vi.fn(async (_id, silent) => {
+      attempt.silent = silent;
+    }),
+    setOutreachHold: vi.fn(async () => {}),
+    applyOutreachResult: vi.fn(async () => true),
   };
 }
 
@@ -177,7 +246,15 @@ const PARTIES = { callerId: CALLER_ID, contact: CONTACT };
  */
 async function answerAndStart({ env = {} } = {}) {
   const db = harnessDb();
-  const postCall = { tryClaim: vi.fn(async () => false) };
+  // Task 20 completion: the REAL claim + orchestration, shared by the door
+  // (below) and the session (bootLive, below), exactly as server.js shares
+  // ONE instance across both callers. NO log override: this file's own
+  // vi.mock("../lib/logger.js") already captures postCall.js's real log
+  // calls into `logged`, which serverLog()/parseServerLog() reads --
+  // exactly what attemptResultCount (Task 20's verdict criterion) needs.
+  const postCall = createPostCall({ db });
+  vi.spyOn(postCall, "tryClaim");
+  vi.spyOn(postCall, "tryClaimByAttempt");
   const app = doorApp(db, postCall);
 
   const answer = await send(app, buildOutboundAnswerRequest({ ...COMMON, ...PARTIES }));
@@ -202,6 +279,7 @@ async function answerAndStart({ env = {} } = {}) {
     authorizedCallSid: bound.callSid,
     database: db,
     env: { ...ENV, ...env },
+    postCall,
   });
 
   const observer = createClientObserver();
@@ -216,18 +294,30 @@ async function answerAndStart({ env = {} } = {}) {
   return { db, postCall, app, call, observer, toTwilio };
 }
 
-/** Step 6: the caller hangs up, then Twilio's terminal status callback. */
+/**
+ * Step 6: the caller hangs up (the session's own finish() fires first, and
+ * stamps session_finished_at, then tries -- and fails -- to claim, because
+ * status_completed_at is not set yet); then Twilio's terminal status
+ * callback lands (stamps status_completed_at, and its OWN tryClaim call now
+ * finds both inputs present and claims -- "whichever arrives second").
+ */
 async function hangUpAndComplete({ app, call, db, postCall }) {
   await call.hangUp();
+  expect(db.attempt.sessionFinishedAt).not.toBeNull(); // the session's own half landed already
+  expect(db.attempt.postCallStarted).toBe(false); // but status_completed_at had not landed yet: no claim yet
+
   const done = await send(app, buildOutboundStatusRequest({ ...COMMON, ...PARTIES, status: "completed", durationSeconds: 7 }));
   expect(done.status).toBe(200);
   expect(db.completeCall).toHaveBeenCalledTimes(1);
   expect(db.completeCall).toHaveBeenCalledWith(SID, "completed", 7);
   expect(postCall.tryClaim).toHaveBeenCalledWith(SID);
-  // Task 20 completes: "post-call runs exactly once" -- the real postCall
-  // claims once and runs its chain once. Until then tryClaim is the
-  // placeholder the door calls, and the verdict marks this criterion
-  // pending_task20 rather than passing it (see the it.todo below).
+
+  // Task 20 completes: "post-call runs exactly once". Both callers tried to
+  // claim (the session's finish(), then the door's terminal status), and
+  // exactly one of them actually claimed it.
+  expect(db.claimPostCall).toHaveBeenCalledTimes(2);
+  expect(db.attempt.postCallStarted).toBe(true);
+  expect(db.applyOutreachResult).toHaveBeenCalledTimes(1); // runPostCall's own step 5, run exactly once
 }
 
 /** The server's log lines, as the CLI would read them back from --server-log. */
@@ -291,7 +381,7 @@ describe("the simulated outbound call, through the real door and session", () =>
       clip: true,
       client: observer.snapshot(),
       server: serverLog(),
-      db: { calls: { direction: db.createCall.mock.calls[0][4].direction } },
+      db: { calls: { direction: db.createCall.mock.calls[0][4].direction }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
       personaName: "Ava",
     });
     expect(results(v)).toEqual({
@@ -299,7 +389,7 @@ describe("the simulated outbound call, through the real door and session", () =>
       path_live_reply: "PASS",
       from_speech_ms_le_2000: "PASS",
       calls_direction_outbound: "PASS",
-      post_call_exactly_once: "pending_task20",
+      post_call_exactly_once: "PASS",
     });
     expect(v.criteria.from_speech_ms_le_2000.client_from_speech_ms).toBe(280);
     expect(v.pass).toBe(true);
@@ -342,7 +432,7 @@ describe("the simulated outbound call, through the real door and session", () =>
       clip: true,
       client: observer.snapshot(),
       server,
-      db: { calls: { direction: db.createCall.mock.calls[0][4].direction } },
+      db: { calls: { direction: db.createCall.mock.calls[0][4].direction }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
       personaName: "Ava",
     });
     expect(results(v)).toEqual({
@@ -352,7 +442,7 @@ describe("the simulated outbound call, through the real door and session", () =>
       seeded: "PASS",
       no_second_intro: "PASS",
       calls_direction_outbound: "PASS",
-      post_call_exactly_once: "pending_task20",
+      post_call_exactly_once: "PASS",
     });
     expect(v.criteria.backstop_queued_at_1650.client_queued_ms).toBe(1660);
     // Played out at the echo, 1,660 + 350: above 2,000 and recorded as such.
@@ -374,7 +464,7 @@ describe("the simulated outbound call, through the real door and session", () =>
       clip: true,
       client: observer.snapshot(),
       server: serverLog(),
-      db: { calls: { direction: db.createCall.mock.calls[0][4].direction } },
+      db: { calls: { direction: db.createCall.mock.calls[0][4].direction }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
       personaName: "Ava",
     });
     expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
@@ -394,5 +484,44 @@ describe("the simulated outbound call, through the real door and session", () =>
 
   // Task 20 completes: the post-call chain (the real postCall.tryClaim) runs
   // exactly once per call, however many terminal callbacks arrive.
-  it.todo("Task 20 completes: post-call runs exactly once");
+  it("Task 20 completes: post-call runs exactly once, even with a DUPLICATE terminal callback (a Cloud Tasks / Twilio retry)", async () => {
+    const ctx = await answerAndStart();
+    const { db, app, postCall } = ctx;
+
+    await hangUpAndComplete(ctx);
+    expect(db.attempt.postCallStarted).toBe(true);
+    expect(db.claimPostCall).toHaveBeenCalledTimes(2);
+    expect(db.applyOutreachResult).toHaveBeenCalledTimes(1);
+
+    // A duplicate "completed" callback -- Twilio retries a status callback
+    // whose response it never got, and the sweep can also independently
+    // try the same attempt. Both routes ONLY ever call postCall.tryClaim /
+    // tryClaimByAttempt; claimPostCall's own guard (post_call_started_at IS
+    // NULL) is what makes a third+ call a safe no-op.
+    const again = await send(app, buildOutboundStatusRequest({ ...COMMON, ...PARTIES, status: "completed", durationSeconds: 7 }));
+    expect(again.status).toBe(200);
+    expect(postCall.tryClaim).toHaveBeenCalledTimes(2); // once per terminal callback
+    expect(db.claimPostCall).toHaveBeenCalledTimes(3); // the duplicate tried too...
+    expect(db.applyOutreachResult).toHaveBeenCalledTimes(1); // ...but runPostCall did NOT run again
+
+    // The sweep, arriving later still, must also refuse: postcall_pending's
+    // own precondition (post_call_started_at IS NULL) already fails.
+    const sweptAgain = await postCall.tryClaimByAttempt("att-1", BIZ);
+    expect(sweptAgain).toBe(false);
+    expect(db.applyOutreachResult).toHaveBeenCalledTimes(1);
+
+    // Only post_call_exactly_once is under test here; the other speaks_first
+    // criteria are exercised fully by the first test above.
+    const v = outboundVerdict({
+      mode: "speaks_first",
+      clip: true,
+      client: {},
+      server: serverLog(),
+      db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
+      personaName: "Ava",
+    });
+    expect(v.criteria.post_call_exactly_once.result).toBe("PASS");
+    expect(v.criteria.post_call_exactly_once.post_call_started_at).not.toBeNull();
+    expect(v.criteria.post_call_exactly_once.attempt_result_log_count).toBe(1);
+  });
 });

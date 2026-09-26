@@ -266,7 +266,7 @@ describe("isIntroduction", () => {
 
 // ---------------------------------------------------------------------------
 describe("the verdict", () => {
-  const dbOk = { calls: { direction: "outbound" }, attempt: { answered_at: "t", status_completed_at: "t" } };
+  const dbOk = { calls: { direction: "outbound" }, attempt: { answered_at: "t", status_completed_at: "t", post_call_started_at: "2026-09-28T13:05:00Z" } };
   const speaksClient = {
     hello_onset_at: 1870,
     first_media_at: 2900,
@@ -282,9 +282,10 @@ describe("the verdict", () => {
     firstTurnIncomplete: [],
     assistantTurns: [],
     debugTranscriptOn: true,
+    attemptResultCount: 1,
   };
 
-  it("speaks first, clean: PASS on every criterion; post-call is pending Task 20, not passed", () => {
+  it("speaks first, clean: PASS on every criterion, including post_call_exactly_once", () => {
     const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: dbOk, personaName: "Ava" });
     expect(v.pass).toBe(true);
     expect(Object.fromEntries(Object.entries(v.criteria).map(([k, c]) => [k, c.result]))).toEqual({
@@ -292,8 +293,32 @@ describe("the verdict", () => {
       path_live_reply: "PASS",
       from_speech_ms_le_2000: "PASS",
       calls_direction_outbound: "PASS",
-      post_call_exactly_once: "pending_task20",
+      post_call_exactly_once: "PASS",
     });
+  });
+
+  it("post_call_exactly_once fails when the attempt never claimed, or the log shows it ran more than once", () => {
+    const neverClaimed = outboundVerdict({
+      mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer,
+      db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: null } }, personaName: "Ava",
+    });
+    expect(neverClaimed.criteria.post_call_exactly_once).toMatchObject({ result: "FAIL", post_call_started_at: null });
+
+    const ranTwice = outboundVerdict({
+      mode: "speaks_first", clip: true, client: speaksClient, server: { ...speaksServer, attemptResultCount: 2 }, db: dbOk, personaName: "Ava",
+    });
+    expect(ranTwice.criteria.post_call_exactly_once).toMatchObject({ result: "FAIL", attempt_result_log_count: 2 });
+    expect(ranTwice.pass).toBe(false);
+  });
+
+  it("post_call_exactly_once is UNKNOWN (not a pass) with no db read-back or no server log", () => {
+    const noDb = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: null, personaName: "Ava" });
+    expect(noDb.criteria.post_call_exactly_once.result).toBe("UNKNOWN");
+    expect(noDb.pass).toBe(false);
+
+    const noServer = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: null, db: dbOk, personaName: "Ava" });
+    expect(noServer.criteria.post_call_exactly_once.result).toBe("UNKNOWN");
+    expect(noServer.pass).toBe(false);
   });
 
   it("an assistant frame BEFORE the hello onset fails no_frame_before_onset, and the run", () => {
@@ -352,6 +377,7 @@ describe("the verdict", () => {
     firstTurnIncomplete: [],
     assistantTurns: [{ text: "Sorry, are you still there?" }],
     debugTranscriptOn: true,
+    attemptResultCount: 1,
   };
 
   it("silent, clean: backstop queued at ~1,650, played out <= 2,500, seeded, no second introduction", () => {
@@ -363,7 +389,7 @@ describe("the verdict", () => {
       seeded: "PASS",
       no_second_intro: "PASS",
       calls_direction_outbound: "PASS",
-      post_call_exactly_once: "pending_task20",
+      post_call_exactly_once: "PASS",
     });
     expect(v.pass).toBe(true);
   });
