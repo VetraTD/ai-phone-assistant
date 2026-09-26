@@ -87,11 +87,17 @@ async function mkAttempt(sid, overrides = {}) {
   return att.rows[0].id;
 }
 
-/** What a real caller does: claim, and only on a real claim, run its "post-call" (the counter bump). */
+/**
+ * What a real caller does: claim, and only on a real claim, run its
+ * "post-call" (the counter bump). `claimPostCall` returns the claimed
+ * TIMESTAMP (or null), not a bare boolean (fix round 1, Owner O-15:
+ * `releasePostCallClaim` needs the exact value) -- coerced to boolean here
+ * so every existing `.toBe(true)/.toBe(false)` assertion below stays exact.
+ */
 async function claimAndCount(attemptId) {
   const claimed = await db.withTenant(BIZ, () => db.claimPostCall(attemptId));
   if (claimed) await admin.query(`UPDATE postcall_claim_race_counter SET n = n + 1 WHERE attempt_id = $1`, [attemptId]);
-  return claimed;
+  return claimed != null;
 }
 
 d("claimPostCall: the guard conditions", () => {
@@ -140,6 +146,41 @@ d("claimPostCall: the guard conditions", () => {
   });
 });
 
+d("releasePostCallClaim: fix round 1, Owner O-15 -- a failed run must not strand the attempt", () => {
+  it("releases to NULL, and the attempt is claimable again afterwards", async () => {
+    const id = await mkAttempt("CArelease-1", { statusCompletedAt: new Date(), sessionFinishedAt: new Date() });
+    const claimedAt = await db.withTenant(BIZ, () => db.claimPostCall(id));
+    expect(claimedAt).toBeInstanceOf(Date);
+
+    // A second claim attempt refuses while it's held (the exactly-once guard).
+    expect(await db.withTenant(BIZ, () => db.claimPostCall(id))).toBeNull();
+
+    const released = await db.withTenant(BIZ, () => db.releasePostCallClaim(id));
+    expect(released).toBe(true);
+
+    const row = (await admin.query(`SELECT post_call_started_at FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(row.post_call_started_at).toBeNull();
+
+    // Claimable again -- exactly what lets a retried caller (or the sweep's
+    // postcall_pending listing, which the 045 trigger restores the moment
+    // this UPDATE commits) complete the run.
+    const reclaimedAt = await db.withTenant(BIZ, () => db.claimPostCall(id));
+    expect(reclaimedAt).toBeInstanceOf(Date);
+  });
+
+  it("releasing an attempt that was never claimed (post_call_started_at already NULL) is a safe no-op", async () => {
+    const id = await mkAttempt("CArelease-2", { statusCompletedAt: new Date(), sessionFinishedAt: new Date() });
+    // Never claimed at all.
+    expect(await db.withTenant(BIZ, () => db.releasePostCallClaim(id))).toBe(false);
+
+    // Claim, then release once -- a SECOND release (nothing reclaimed it in
+    // between) must not error, just report that there was nothing to do.
+    await db.withTenant(BIZ, () => db.claimPostCall(id));
+    expect(await db.withTenant(BIZ, () => db.releasePostCallClaim(id))).toBe(true);
+    expect(await db.withTenant(BIZ, () => db.releasePostCallClaim(id))).toBe(false);
+  });
+});
+
 d("claimPostCall: two genuinely concurrent connections race for the SAME attempt (fix round 2 technique)", () => {
   /**
    * Starts a claim in its OWN transaction and its OWN connection: runs
@@ -160,7 +201,7 @@ d("claimPostCall: two genuinely concurrent connections race for the SAME attempt
       const claimed = await db.claimPostCall(id);
       signalLocked();
       await gate;
-      return claimed;
+      return claimed != null; // coerce the claimed TIMESTAMP to a boolean
     });
     return { result, locked, release };
   }
@@ -171,7 +212,7 @@ d("claimPostCall: two genuinely concurrent connections race for the SAME attempt
     const tx1 = startHeldClaim(id);
     await tx1.locked; // tx1 has the row lock, uncommitted
 
-    const tx2 = db.withTenant(BIZ, () => db.claimPostCall(id));
+    const tx2 = db.withTenant(BIZ, () => db.claimPostCall(id)).then((v) => v != null);
     await new Promise((r) => setTimeout(r, 150)); // let tx2's UPDATE actually reach Postgres and block
 
     tx1.release();
@@ -203,7 +244,7 @@ d("claimPostCall: two genuinely concurrent connections race for the SAME attempt
 
     const tx1 = startHeldClaim(id);
     await tx1.locked;
-    const tx2 = db.withTenant(BIZ, () => db.claimPostCall(id));
+    const tx2 = db.withTenant(BIZ, () => db.claimPostCall(id)).then((v) => v != null);
     await new Promise((r) => setTimeout(r, 150));
     tx1.release();
     const [claimed1, claimed2] = await Promise.all([tx1.result, tx2]);

@@ -54,9 +54,12 @@ function baseCtx(overrides = {}) {
   };
 }
 
+/** A realistic claimed-timestamp value (fix round 1, item 1): claimPostCall returns the value it wrote, never a bare boolean. */
+const CLAIMED_AT = new Date("2026-09-25T12:00:05Z");
+
 function fakeDb(ctxOverrides = {}, fnOverrides = {}) {
   const ctx = baseCtx(ctxOverrides);
-  const calls = { finalizeAttemptResult: [], setCallOutcomeCode: [], updateCallSummary: [], setAttemptSilent: [], setOutreachHold: [], applyOutreachResult: [], insertDetectorSuppression: [] };
+  const calls = { finalizeAttemptResult: [], setCallOutcomeCode: [], updateCallSummary: [], setAttemptSilent: [], setOutreachHold: [], applyOutreachResult: [], insertDetectorSuppression: [], releasePostCallClaim: [] };
   return {
     calls,
     ctx,
@@ -78,7 +81,11 @@ function fakeDb(ctxOverrides = {}, fnOverrides = {}) {
       calls.applyOutreachResult.push(a);
       return true;
     }),
-    claimPostCall: vi.fn(async () => true),
+    claimPostCall: vi.fn(async () => CLAIMED_AT),
+    releasePostCallClaim: vi.fn(async (...a) => {
+      calls.releasePostCallClaim.push(a);
+      return true;
+    }),
     outboundAttemptByCallSid: vi.fn(async () => ({ attemptId: ATTEMPT, businessId: BIZ })),
     ...fnOverrides,
   };
@@ -319,10 +326,143 @@ describe("runPostCall: step 1 (result + ended_at + clear audio)", () => {
   });
 });
 
+describe("runPostCall: a machine/fax answer never reaches the LLM and is never terminal (fix round 1, item 4)", () => {
+  it.each(["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other"])(
+    "%s: skips tiers 3-4 (no transcript fetch, no summarize, no outcome write), reschedules (never closes) -- but STILL corrects the silent verdict",
+    async (answeredBy) => {
+      const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }));
+      const db = fakeDb({ answeredBy, outcomeCode: null, silent: true }); // the session flagged it BEFORE AMD's verdict landed
+      await run(db, { summarize });
+      expect(db.fetchCallTranscript).not.toHaveBeenCalled();
+      expect(summarize).not.toHaveBeenCalled();
+      expect(db.outboundCallEffects).not.toHaveBeenCalled();
+      expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+      expect(db.updateCallSummary).not.toHaveBeenCalled();
+      // The machine exclusion (spec §13.4) must still run and CORRECT the
+      // session's premature true -- skipping tiers 3-4 does not mean
+      // skipping the silent-rule write too.
+      expect(db.setAttemptSilent).toHaveBeenCalledWith(ATTEMPT, false);
+      expect(db.setOutreachHold).not.toHaveBeenCalled();
+      const [, , opts] = db.applyOutreachResult.mock.calls[0];
+      expect(opts.terminal).toBe(false);
+      expect(opts.outcome).toBeNull();
+    }
+  );
+
+  it("fax: result falls back to 'failed', never 'connected'", async () => {
+    const db = fakeDb({ answeredBy: "fax" });
+    await run(db);
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, "failed");
+  });
+
+  it.each(["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other"])(
+    "%s: result falls back to 'voicemail_skipped', never 'connected'",
+    async (answeredBy) => {
+      const db = fakeDb({ answeredBy });
+      await run(db);
+      expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, "voicemail_skipped");
+    }
+  );
+
+  it("a voicemail decline is rescheduled, exactly like qualified_no_booking would be -- never closed as not_interested", async () => {
+    const db = fakeDb({ answeredBy: "machine_end_beep", attemptNo: 1 });
+    await run(db);
+    const [outreachId, attemptNo, opts] = db.applyOutreachResult.mock.calls[0];
+    expect(outreachId).toBe(OUTREACH);
+    expect(attemptNo).toBe(1);
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("AMD's own result (already written before post-call claimed) is never overwritten by the machine fallback", async () => {
+    const db = fakeDb({ answeredBy: "machine_end_beep", result: "voicemail_left" });
+    await run(db);
+    // finalizeAttemptResult's own COALESCE (services/db.js) protects this in
+    // real SQL; here we assert the CALLER passes the fallback, not the
+    // already-known value, proving the protection is COALESCE's job, not a
+    // JS-side skip that could itself race.
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, "voicemail_skipped");
+  });
+});
+
+describe("runPostCall: summarize runs outside any transaction, in multiple short ones (fix round 1, item 2)", () => {
+  it("summarize is called at transaction depth 0, and more than one separate db.withTenant call is made", async () => {
+    let depth = 0;
+    let sawZeroDepth = null;
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    db.withTenant = vi.fn(async (_biz, fn) => {
+      depth++;
+      try {
+        return await fn();
+      } finally {
+        depth--;
+      }
+    });
+    const summarize = vi.fn(async () => {
+      sawZeroDepth = depth === 0;
+      return { summary: "s", sentiment: "neutral", outcome: "other" };
+    });
+    await run(db, { summarize });
+    expect(summarize).toHaveBeenCalled();
+    expect(sawZeroDepth).toBe(true);
+    expect(db.withTenant.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("a slow summarize() past SUMMARY_TIMEOUT_MS falls back to unknown, and the run still completes", async () => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    const neverResolves = new Promise(() => {}); // simulates a hung Gemini call
+    await run(db, { summarize: () => neverResolves });
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "unknown");
+  }, 8000);
+});
+
+describe("runPostCall: enqueue after a non-terminal reschedule (fix round 1, item 7)", () => {
+  it("rescheduled -> enqueue is called with the same shape dispatch.js uses", async () => {
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 1 });
+    const enqueue = vi.fn(async () => ({ created: true }));
+    await run(db, { enqueue });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const arg = enqueue.mock.calls[0][0];
+    expect(arg).toMatchObject({ businessId: BIZ, outreachId: OUTREACH, source: "reschedule" });
+    expect(arg.at).toBeInstanceOf(Date);
+  });
+
+  it("terminal (closed) -> enqueue is never called", async () => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    const enqueue = vi.fn(async () => ({ created: true }));
+    await run(db, { enqueue, summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }) });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("no-double-reschedule guard fired (applyOutreachResult returned false) -> enqueue is never called", async () => {
+    const db = fakeDb({}, { applyOutreachResult: vi.fn(async () => false), fetchCallTranscript: vi.fn(async () => []) });
+    const enqueue = vi.fn(async () => ({ created: true }));
+    await run(db, { enqueue });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("enqueue unavailable (null/undefined) -> logs and relies on the sweep, does not throw", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null });
+    await expect(run(db, { log, enqueue: null })).resolves.toBeUndefined();
+    expect(log.info).toHaveBeenCalledWith("outbound_postcall_enqueue_unavailable", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("enqueue throws -> logged, never propagated", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null });
+    const enqueue = vi.fn(async () => {
+      throw new Error("cloud tasks down");
+    });
+    await expect(run(db, { log, enqueue })).resolves.toBeUndefined();
+    expect(log.error).toHaveBeenCalledWith("outbound_postcall_enqueue_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+});
+
 describe("createPostCall: the exactly-once claim wrapper", () => {
-  it("tryClaimByAttempt: claim fails -> runPostCall never runs (context is never even read)", async () => {
+  it("tryClaimByAttempt: claim fails (null: not claimed) -> runPostCall never runs (context is never even read)", async () => {
     const db = fakeDb({});
-    db.claimPostCall = vi.fn(async () => false);
+    db.claimPostCall = vi.fn(async () => null);
     const pc = createPostCall({ db, summarize: noopSummarize });
     const claimed = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
     expect(claimed).toBe(false);
@@ -355,12 +495,67 @@ describe("createPostCall: the exactly-once claim wrapper", () => {
     expect(db.claimPostCall).not.toHaveBeenCalled();
   });
 
-  it("a throw inside runPostCall is caught and logged, not propagated (tryClaim still resolves true: it DID claim)", async () => {
+  // Fix round 1, item 1 (Owner O-15). Replaces the old test that treated a
+  // strand as correct ("tryClaim still resolves true: it DID claim", with
+  // nothing checking whether the claim was ever released). A throw after
+  // the claim commits must not strand the attempt: this asserts the
+  // release happens with the EXACT claimed value, and that a SECOND
+  // tryClaimByAttempt call (simulating the sweep's postcall_pending retry,
+  // now that the row is unclaimed again) completes exactly once.
+  it("a throw inside runPostCall releases the claim, logs and counts the failure, and a retry completes exactly once", async () => {
     const log = { info: vi.fn(), error: vi.fn() };
-    const db = fakeDb({}, { outboundPostCallContext: vi.fn(async () => { throw new Error("db down"); }) });
+    let attempt = 0;
+    const db = fakeDb(
+      {},
+      {
+        outboundPostCallContext: vi.fn(async () => {
+          attempt += 1;
+          if (attempt === 1) throw new Error("db down");
+          return baseCtx();
+        }),
+      }
+    );
     const pc = createPostCall({ db, log, summarize: noopSummarize });
-    const claimed = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
-    expect(claimed).toBe(true);
-    expect(log.error).toHaveBeenCalledWith("outbound_postcall_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+
+    const claimed1 = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(claimed1).toBe(true); // it DID claim, however briefly
+    expect(db.releasePostCallClaim).toHaveBeenCalledWith(ATTEMPT);
+    expect(log.error).toHaveBeenCalledWith("outbound_postcall_run_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+
+    // The retry (the sweep's postcall_pending listing it again, or a second
+    // caller): claimPostCall's own guard is what makes this possible in real
+    // SQL (the release cleared post_call_started_at); here the fake always
+    // "succeeds" at claiming, so this proves the SECOND call runs the full
+    // pipeline to completion exactly once.
+    const claimed2 = await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(claimed2).toBe(true);
+    expect(db.applyOutreachResult).toHaveBeenCalledTimes(1); // the retry's own run, once -- the first never got this far
+  });
+
+  it("release itself failing is logged separately and never propagated", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb(
+      {},
+      {
+        outboundPostCallContext: vi.fn(async () => {
+          throw new Error("db down");
+        }),
+        releasePostCallClaim: vi.fn(async () => {
+          throw new Error("release failed too");
+        }),
+      }
+    );
+    const pc = createPostCall({ db, log, summarize: noopSummarize });
+    await expect(pc.tryClaimByAttempt(ATTEMPT, BIZ)).resolves.toBe(true);
+    expect(log.error).toHaveBeenCalledWith("outbound_postcall_release_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("setEnqueue wires a late-resolved enqueue function into subsequent runs (server.js's own ordering)", async () => {
+    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null });
+    const pc = createPostCall({ db, summarize: noopSummarize });
+    const enqueue = vi.fn(async () => ({ created: true }));
+    pc.setEnqueue(enqueue);
+    await pc.tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(enqueue).toHaveBeenCalledTimes(1);
   });
 });
