@@ -1467,6 +1467,14 @@ if (outboundDeps) {
 } else {
   log.info("outbound_internal_routes_disabled", {});
 }
+// Fix round 1, item 7: `outboundPostCall` was built at module load, before
+// `buildOutboundDeps` (above) resolved the real, Cloud-Tasks-backed enqueue
+// function -- wire it in now so a non-terminal post-call reschedule can
+// enqueue the next attempt immediately rather than waiting for the sweep.
+// `outboundDeps` is null when the queue/service-account env is not
+// configured (e.g. local dev); `setEnqueue(null)` is the same as never
+// calling it -- runPostCall logs and relies on the sweep either way.
+outboundPostCall.setEnqueue(outboundDeps?.enqueue ?? null);
 
 // ---------------------------------------------------------------------------
 // Centralized error handler — never expose stack traces
