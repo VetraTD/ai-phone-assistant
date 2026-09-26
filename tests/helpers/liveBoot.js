@@ -68,6 +68,11 @@ export function fakeDb(config, businessId) {
     loadConfig: () => config,
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
+    // b2 (checkpoint 2b fix wave): finish() flushes the transcript on every
+    // call this helper boots, inbound and outbound alike -- an unstubbed
+    // method threw and printed live_transcript_write_failed noise on every
+    // test that never overrides `database`.
+    addTranscriptEntry: async () => {},
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,

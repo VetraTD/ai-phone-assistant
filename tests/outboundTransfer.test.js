@@ -172,6 +172,10 @@ function fakeDb({ transfer } = {}) {
     withTenantSafe: async (_id, fn) => fn(),
     withTenant: async (_id, fn) => fn(),
     createCall: async () => "call-1",
+    // b2 (checkpoint 2b fix wave): teardown flushes the transcript on every
+    // stop, this session included -- an unstubbed method threw and printed
+    // live_transcript_write_failed on every test in this file.
+    addTranscriptEntry: async () => {},
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
