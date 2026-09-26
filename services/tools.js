@@ -357,6 +357,49 @@ const CAPABILITY_DEPS = {
  * }>}
  */
 export async function executeToolCall(fc, ctx) {
+  // Checkpoint 2b review, I1. `confirm_identity` is reserved (services/db.js
+  // BUILTIN_TOOL_NAMES) so it can no longer be CREATED as a tenant
+  // integration, but the reservation does not rename one created before this
+  // branch shipped, and cannot: `confirm_identity` is a plausible name for a
+  // patient-verification webhook. This engine case is a Task 18 addition
+  // (spec §9.6) that exists ONLY for the outbound party-verification flow.
+  // Gating on `ctx?.outboundCall` here, before the switch, is what lets an
+  // inbound call fall straight through to the `default` branch below --
+  // `executeWebhookTool` via `packForTool` returning null -- exactly as it
+  // did at 44e31ba, before this tool existed. Do not add a `case
+  // "confirm_identity"` to the switch: that would re-intercept it on inbound
+  // by construction, which is the exact defect this guard fixes.
+  if (fc.name === "confirm_identity" && ctx?.outboundCall) {
+    // OUTBOUND CALLING, Task 18 (spec §9.6, §9.5 "wrong person"). An engine
+    // tool beside set_call_intent/end_call, declared only on an outbound
+    // call (services/gemini.js buildCallTools). The party starts
+    // unverified; {name_confirmed: true} sets it verified, {false} sets it
+    // (or leaves it) unverified -- the argument is written straight through,
+    // fail-closed by construction: whatever the model asserts last is what
+    // stands, and "false" is where every phone-keyed consumer in
+    // capabilities/*.js already fails closed by default.
+    //
+    // `partyVerified` is read by lib/voice/live/tools.js's handleToolCall
+    // and threaded onto ctx.party for every tool call from here on, and by
+    // lib/voice/live/index.js's dispatchEffects `call.party` for the
+    // deferred capability effects that run after this turn (Ruling: the
+    // effect handlers in capabilities/*.js are gated the same way).
+    const nameConfirmed = fc.args?.name_confirmed === true;
+    const message = nameConfirmed
+      ? "Identity confirmed. Continue helping them with their enquiry."
+      : "This is not the confirmed contact. Share nothing about the enquiry, look nothing up, " +
+        "and do not offer to book or change anything for them. Offer to have someone call back, " +
+        "or end the call politely if that is declined.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+      stateEffects: {
+        partyVerified: nameConfirmed,
+        toolResult: { name: fc.name, success: true, message },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
   switch (fc.name) {
     case "set_call_intent": {
       const intentArgs = fc.args ?? null;
@@ -365,37 +408,6 @@ export async function executeToolCall(fc, ctx) {
         stateEffects: {
           intentArgs,
           toolResult: { name: fc.name, success: true, message: "How can I help you with that?", callerSafe: true },
-          toolCallEvent: { name: fc.name, args: fc.args },
-        },
-      };
-    }
-
-    case "confirm_identity": {
-      // OUTBOUND CALLING, Task 18 (spec §9.6, §9.5 "wrong person"). An engine
-      // tool beside set_call_intent/end_call, declared only on an outbound
-      // call (services/gemini.js buildCallTools). The party starts
-      // unverified; {name_confirmed: true} sets it verified, {false} sets it
-      // (or leaves it) unverified -- the argument is written straight through,
-      // fail-closed by construction: whatever the model asserts last is what
-      // stands, and "false" is where every phone-keyed consumer in
-      // capabilities/*.js already fails closed by default.
-      //
-      // `partyVerified` is read by lib/voice/live/tools.js's handleToolCall
-      // and threaded onto ctx.party for every tool call from here on, and by
-      // lib/voice/live/index.js's dispatchEffects `call.party` for the
-      // deferred capability effects that run after this turn (Ruling: the
-      // effect handlers in capabilities/*.js are gated the same way).
-      const nameConfirmed = fc.args?.name_confirmed === true;
-      const message = nameConfirmed
-        ? "Identity confirmed. Continue helping them with their enquiry."
-        : "This is not the confirmed contact. Share nothing about the enquiry, look nothing up, " +
-          "and do not offer to book or change anything for them. Offer to have someone call back, " +
-          "or end the call politely if that is declined.";
-      return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
-        stateEffects: {
-          partyVerified: nameConfirmed,
-          toolResult: { name: fc.name, success: true, message },
           toolCallEvent: { name: fc.name, args: fc.args },
         },
       };

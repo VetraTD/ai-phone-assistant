@@ -300,6 +300,34 @@ describe("idempotent tool execution", () => {
     expect(g.before({ ...fc, id: "6" }).allow).toBe(true);
   });
 
+  // Checkpoint 2b review, I1. `confirm_identity` (Task 18, spec §9.6) joined
+  // set_call_intent/end_call in ENGINE_OWNED_TOOLS with no direction check, so
+  // a tenant integration created before the name was reserved (services/db.js
+  // BUILTIN_TOOL_NAMES) stopped being deduplicated on INBOUND too, even
+  // though it is a plain webhook write there, not the engine tool.
+  it("a same-named webhook write named confirm_identity IS deduplicated on inbound (no outboundCall) -- 44e31ba behaviour", () => {
+    const g = createToolGuards({ declarations: [], config: { timezone: TZ } });
+    const fc = { id: "7", name: "confirm_identity", args: { name_confirmed: true } };
+    g.before(fc);
+    g.after(fc, { functionResponse: { id: "7", name: "confirm_identity", response: { success: true, message: "verified via webhook" } } });
+
+    const second = g.before({ ...fc, id: "8" });
+    expect(second.allow).toBe(false);
+    expect(second.reason).toBe("duplicate_write");
+    expect(g.counts().duplicate_suppressed).toBe(1);
+  });
+
+  it("confirm_identity is NEVER deduplicated on outbound (outboundCall present) -- each call may carry a different verdict", () => {
+    const g = createToolGuards({ declarations: [], config: { timezone: TZ }, outboundCall: { config: {} } });
+    const fc = { id: "7", name: "confirm_identity", args: { name_confirmed: true } };
+    g.before(fc);
+    g.after(fc, { functionResponse: { id: "7", name: "confirm_identity", response: { success: true } } });
+
+    const second = g.before({ ...fc, id: "8" });
+    expect(second.allow).toBe(true);
+    expect(g.counts().duplicate_suppressed).toBe(0);
+  });
+
   it("lets a read run again", () => {
     // Re-checking availability is a legitimate thing to do twice: the answer
     // can change while the caller is on the line. Only writes are deduped.

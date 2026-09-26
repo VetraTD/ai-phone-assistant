@@ -253,6 +253,20 @@ describe("holdKindForTool — which tools speak at all", () => {
     expect(holdKindForTool("request_transfer")).toBeNull();
   });
 
+  // Checkpoint 2b review, I1. This table is read only by the cascade
+  // (lib/voice/session.js) -- the outbound engine tool (Task 18, spec §9.6)
+  // is Live-only and never reaches holdKindForTool at all, so there is no
+  // "outbound behaviour" for a confirm_identity entry here to preserve. On
+  // the cascade the name can only ever be a tenant's own webhook integration
+  // (a plausible name for a patient-verification tool, and one that may
+  // predate the name being reserved -- services/db.js BUILTIN_TOOL_NAMES),
+  // so it must get the generic filler like any other unrecognised tool,
+  // exactly as at 44e31ba, before this name meant anything special.
+  it("has no special entry for confirm_identity -- falls back to the generic filler, 44e31ba behaviour", async () => {
+    const { holdKindForTool } = await import("../lib/voice/strings.js");
+    expect(holdKindForTool("confirm_identity")).toBe("filler");
+  });
+
   it("speaks on every appointment action", async () => {
     const { holdKindForTool } = await import("../lib/voice/strings.js");
     for (const t of [

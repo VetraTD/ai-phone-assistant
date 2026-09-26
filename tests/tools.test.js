@@ -182,6 +182,45 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     expect(stateEffects.toolCallEvent).toEqual({ name: "some_unregistered_tool", args: {} });
   });
 
+  // Checkpoint 2b review, I1. `confirm_identity` is reserved (services/db.js
+  // BUILTIN_TOOL_NAMES) so it cannot be created as a NEW integration, but the
+  // reservation does not rename one created before this branch shipped. On
+  // INBOUND, that tenant's own webhook must still run — the engine's
+  // confirm_identity case (Task 18, spec §9.6) is outbound-only.
+  it("confirm_identity on INBOUND (no ctx.outboundCall): a same-named tenant webhook runs, the engine case is not reached", async () => {
+    mockExecuteIntegration.mockResolvedValue({ success: true, message: "verified via webhook" });
+    const ctx = {
+      ...baseCtx,
+      integrations: [{ name: "confirm_identity", enabled: true }],
+    };
+    const fc = { id: "fc-inbound-ci", name: "confirm_identity", args: { name_confirmed: true } };
+    const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+    expect(mockExecuteIntegration).toHaveBeenCalledTimes(1);
+    expect(mockExecuteIntegration.mock.calls[0][0]).toEqual({ name: "confirm_identity", enabled: true });
+    expect(mockExecuteIntegration.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ tool: "confirm_identity" })
+    );
+    expect(functionResponse.response).toEqual({ success: true, message: "verified via webhook" });
+    // Not the engine's response shape (no partyVerified state effect at all).
+    expect(stateEffects.partyVerified).toBeUndefined();
+  });
+
+  it("confirm_identity on OUTBOUND (ctx.outboundCall present): the engine case still runs, the webhook is never consulted", async () => {
+    const ctx = {
+      ...baseCtx,
+      integrations: [{ name: "confirm_identity", enabled: true }],
+      outboundCall: { config: { capabilities: [] } },
+    };
+    const fc = { id: "fc-outbound-ci", name: "confirm_identity", args: { name_confirmed: true } };
+    const { functionResponse, stateEffects } = await executeToolCall(fc, ctx);
+
+    expect(mockExecuteIntegration).not.toHaveBeenCalled();
+    expect(functionResponse.response.success).toBe(true);
+    expect(functionResponse.response.message).toMatch(/identity confirmed/i);
+    expect(stateEffects.partyVerified).toBe(true);
+  });
+
   it("book_appointment: success path calls createAppointment and emits a booked effect", async () => {
     mockCreateAppointment.mockResolvedValue("appt-1");
     const args = { scheduled_at: FUTURE_SLOT, client_name: "Jane", service_type: "cleaning" };

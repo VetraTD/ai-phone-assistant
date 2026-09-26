@@ -283,10 +283,14 @@ describe("book_appointment — outbound party gate (spec §9.6)", () => {
 // confirm_identity — the engine tool
 // ---------------------------------------------------------------------------
 describe("confirm_identity — the engine tool (services/tools.js)", () => {
+  // Checkpoint 2b review, I1. The engine case is outbound-only: it must see
+  // ctx.outboundCall or it falls through to the webhook/default branch
+  // (tests/tools.test.js covers that inbound path). An empty {} ctx is no
+  // longer enough to reach here -- it is the INBOUND shape.
   it("name_confirmed: true reports partyVerified: true", async () => {
     const { stateEffects, functionResponse } = await executeToolCall(
       { id: "1", name: "confirm_identity", args: { name_confirmed: true } },
-      {}
+      { outboundCall: { config: { capabilities: [] } } }
     );
     expect(functionResponse.response.success).toBe(true);
     expect(stateEffects.partyVerified).toBe(true);
@@ -295,7 +299,7 @@ describe("confirm_identity — the engine tool (services/tools.js)", () => {
   it("name_confirmed: false reports partyVerified: false and tells the model to share nothing", async () => {
     const { stateEffects, functionResponse } = await executeToolCall(
       { id: "1", name: "confirm_identity", args: { name_confirmed: false } },
-      {}
+      { outboundCall: { config: { capabilities: [] } } }
     );
     expect(functionResponse.response.success).toBe(true);
     expect(stateEffects.partyVerified).toBe(false);
