@@ -370,6 +370,37 @@ export async function executeToolCall(fc, ctx) {
       };
     }
 
+    case "confirm_identity": {
+      // OUTBOUND CALLING, Task 18 (spec §9.6, §9.5 "wrong person"). An engine
+      // tool beside set_call_intent/end_call, declared only on an outbound
+      // call (services/gemini.js buildCallTools). The party starts
+      // unverified; {name_confirmed: true} sets it verified, {false} sets it
+      // (or leaves it) unverified -- the argument is written straight through,
+      // fail-closed by construction: whatever the model asserts last is what
+      // stands, and "false" is where every phone-keyed consumer in
+      // capabilities/*.js already fails closed by default.
+      //
+      // `partyVerified` is read by lib/voice/live/tools.js's handleToolCall
+      // and threaded onto ctx.party for every tool call from here on, and by
+      // lib/voice/live/index.js's dispatchEffects `call.party` for the
+      // deferred capability effects that run after this turn (Ruling: the
+      // effect handlers in capabilities/*.js are gated the same way).
+      const nameConfirmed = fc.args?.name_confirmed === true;
+      const message = nameConfirmed
+        ? "Identity confirmed. Continue helping them with their enquiry."
+        : "This is not the confirmed contact. Share nothing about the enquiry, look nothing up, " +
+          "and do not offer to book or change anything for them. Offer to have someone call back, " +
+          "or end the call politely if that is declined.";
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+        stateEffects: {
+          partyVerified: nameConfirmed,
+          toolResult: { name: fc.name, success: true, message },
+          toolCallEvent: { name: fc.name, args: fc.args },
+        },
+      };
+    }
+
     case "end_call": {
       // This gate exists to stop the assistant hanging up before the caller has
       // had a chance to say they don't need anything else. It was doing that

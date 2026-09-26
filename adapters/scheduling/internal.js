@@ -10,6 +10,7 @@
 
 import { resolveDayHours } from "../../lib/businessHours.js";
 import { zonedComponentsToUtcMs, zonedWeekdayAndMinutes } from "../../lib/capabilities/datetime.js";
+import { partyOf } from "../../lib/capabilities/party.js";
 
 /** Calendar Y/M/D of an instant as read in a timezone. */
 function zonedDateParts(utcMs, timeZone) {
@@ -50,7 +51,14 @@ export default {
    * someone else's appointments by naming a different number.
    */
   async lookupByCaller(ctx) {
-    if (!ctx.businessId || !ctx.callerPhone) return [];
+    // Task 18 (spec §9.6): the VERIFIED party's phone, not merely a present
+    // one. On outbound, party.phone is set from the first call — it is the
+    // number we dialled — so gating on presence alone would look up the
+    // contact's history the instant a receptionist or a child picked up.
+    // Inbound is unchanged: partyOf(ctx) falls back to ctx.callerPhone,
+    // verified true.
+    const party = partyOf(ctx);
+    if (!ctx.businessId || !party.verified || !party.phone) return [];
     // upcomingOnly, and this line is the whole of a live bug.
     //
     // Nothing ever transitions an elapsed appointment out of status
@@ -68,7 +76,7 @@ export default {
     // wants to discuss a visit that already happened is asking the business a
     // question, not managing a booking.
     return ctx.deps.listAppointmentsByCaller(ctx.businessId, {
-      clientPhone: ctx.callerPhone,
+      clientPhone: party.phone,
       upcomingOnly: true,
     });
   },

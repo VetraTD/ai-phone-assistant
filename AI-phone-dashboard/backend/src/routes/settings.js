@@ -232,6 +232,9 @@ const BUILTIN_TOOL_NAMES = [
   // engine-owned
   "set_call_intent",
   "end_call",
+  // OUTBOUND CALLING, Task 18 (spec §9.6): the third engine-owned tool,
+  // declared only on an outbound call.
+  "confirm_identity",
   // appointments pack
   "book_appointment",
   "check_appointment_availability",

@@ -1599,10 +1599,16 @@ export async function fetchBusinessKnowledge(businessId, limit = 15) {
  * Deriving it means the reservation list can no longer drift behind the packs —
  * a new capability's tools are protected the moment the pack is registered.
  *
- * set_call_intent and end_call are engine-owned (they drive the step machine
- * itself, not any capability) so they are named explicitly.
+ * set_call_intent, end_call and confirm_identity are engine-owned (they drive
+ * the step machine itself, or the outbound party's verification state, not
+ * any capability) so they are named explicitly.
  */
-export const BUILTIN_TOOL_NAMES = ["set_call_intent", "end_call", ...allCapabilityToolNames()];
+export const BUILTIN_TOOL_NAMES = [
+  "set_call_intent",
+  "end_call",
+  "confirm_identity",
+  ...allCapabilityToolNames(),
+];
 
 /**
  * List all integrations for a business.

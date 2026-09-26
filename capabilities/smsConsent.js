@@ -35,6 +35,7 @@
 
 import { isValidE164 } from "../lib/validate.js";
 import { SMS_CONSENT_SCRIPT, SMS_CONSENT_SCRIPT_VERSION } from "../lib/smsConsent.js";
+import { partyOf } from "../lib/capabilities/party.js";
 
 const RECORD_SMS_CONSENT_DECLARATION = {
   name: "record_sms_consent",
@@ -185,7 +186,13 @@ export default {
    */
   async execute(fc, ctx = {}) {
     const granted = fc.args?.granted === true;
-    const phone = ctx.callerPhone;
+    // Task 18 (spec §9.6): the party's phone (ctx.party). Inbound is
+    // byte-identical — partyOf(ctx) falls back to ctx.callerPhone. This tool
+    // is not reachable on outbound today (sms_consent is not a legal campaign
+    // capability — see lib/outbound/campaignSchema.js CAMPAIGN_ENUMS), so
+    // party.verified is not additionally checked here; see the Task 18 report
+    // ("Parked") for the reachability finding.
+    const phone = partyOf(ctx).phone;
 
     // The gate that makes always-registering safe. A business with caller text
     // follow-ups switched off sends nothing, so recording a consent for it
@@ -281,12 +288,17 @@ export default {
     if (effect.type !== "answered") return;
     if (!effect.data?.granted) return;
 
-    const { businessId, callerNumber, callSid } = engine.call || {};
+    const { businessId, callSid } = engine.call || {};
+    // Owner decision D-c: releasing a held text IS the text-sending effect
+    // this consent gate exists to gate, so it requires party.verified too.
+    // Inbound is byte-identical — partyOf falls back to engine.call.callerNumber,
+    // verified true.
+    const party = partyOf(engine.call || {});
     const { notifications, log } = engine.deps || {};
-    if (!businessId || !callerNumber || !notifications?.releaseHeldCallerSms) return;
+    if (!businessId || !party.verified || !party.phone || !notifications?.releaseHeldCallerSms) return;
 
     notifications
-      .releaseHeldCallerSms(businessId, callerNumber)
+      .releaseHeldCallerSms(businessId, party.phone)
       .catch((err) => log?.error?.("sms_followup_failed", { callSid, reason: err?.message }));
   },
 };

@@ -244,7 +244,7 @@ describe("capability registry — reserved tool names", () => {
 
   it("the names BUILTIN_TOOL_NAMES does reserve are all real", () => {
     for (const name of BUILTIN_TOOL_NAMES) {
-      const isEngineTool = name === "set_call_intent" || name === "end_call";
+      const isEngineTool = name === "set_call_intent" || name === "end_call" || name === "confirm_identity";
       const isPackTool = packForTool(name) !== null;
       expect(isEngineTool || isPackTool, `${name} is reserved but nothing owns it`).toBe(true);
     }

@@ -41,6 +41,22 @@
     }
   },
   {
+    "name": "confirm_identity",
+    "description": "Call this once you have established who you are speaking to, before sharing any details of the enquiry or looking anything up for them. Pass name_confirmed: true once the person has confirmed their own name (or a business contact has done so on their behalf). Pass name_confirmed: false if this is the wrong person, a gatekeeper, a child, or you could not confirm who you are speaking to -- share nothing further in that case and offer a callback instead.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name_confirmed": {
+          "type": "boolean",
+          "description": "True once the person's identity is confirmed, false otherwise"
+        }
+      },
+      "required": [
+        "name_confirmed"
+      ]
+    }
+  },
+  {
     "name": "book_appointment",
     "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
     "parameters": {
@@ -107,7 +123,7 @@
   },
   {
     "name": "get_caller_appointments_from_db",
-    "description": "Look up the appointments belonging to the person on this call. Takes no arguments — it always uses the number the caller is calling from. It cannot search for anyone else, by name or otherwise. Use when the business does not have an EHR integration.",
+    "description": "Look up the appointments belonging to the person on this call, once their identity has been confirmed with confirm_identity. It cannot search for anyone else, by name or otherwise.",
     "parameters": {
       "type": "object",
       "properties": {},

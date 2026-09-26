@@ -20,6 +20,7 @@ import {
   notesPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
+import { partyOf } from "../lib/capabilities/party.js";
 
 
 /**
@@ -193,8 +194,14 @@ export default {
     // sensible response to a failed insert.
     engine.setStep(engine.STEPS.CONFIRM, "record_customer_request");
 
-    const { callSid, businessId, callId, callerNumber, config } = engine.call;
+    const { callSid, businessId, callId, config } = engine.call;
     if (!businessId) return;
+    // Task 18, owner decision D-c: not reachable on outbound today ("messages"
+    // is not a legal campaign capability — lib/outbound/campaignSchema.js
+    // CAMPAIGN_ENUMS.capabilities), but wired the same way as every other
+    // text-sending effect against the day it might be. Inbound is
+    // byte-identical — partyOf falls back to engine.call.callerNumber.
+    const party = partyOf(engine.call);
 
     const args = effect.data || {};
     const { db, notifications, log, captureException } = engine.deps;
@@ -229,22 +236,26 @@ export default {
           .notifyCustomerRequest({
             businessId,
             customerRequest: args,
-            call: { callerNumber },
+            call: { callerNumber: party.phone },
           })
           .catch((err) => log.error("notify_request_failed", { callSid, reason: err?.message }));
-        notifications
-          .sendCallerSms(config, callerNumber, "message_received", {
-            name_part: args.caller_name ? ` ${args.caller_name}` : "",
-            business: config?.businessName,
-            sla: notifications.MESSAGE_SLA_TEXT,
-          })
-          .catch((err) =>
-            log.error("sms_followup_failed", {
-              callSid,
-              kind: "message_received",
-              reason: err?.message,
+        // Owner decision D-c: every TEXT-SENDING effect on an outbound call
+        // requires party.verified.
+        if (party.verified) {
+          notifications
+            .sendCallerSms(config, party.phone, "message_received", {
+              name_part: args.caller_name ? ` ${args.caller_name}` : "",
+              business: config?.businessName,
+              sla: notifications.MESSAGE_SLA_TEXT,
             })
-          );
+            .catch((err) =>
+              log.error("sms_followup_failed", {
+                callSid,
+                kind: "message_received",
+                reason: err?.message,
+              })
+            );
+        }
       })
       .catch((err) => captureException(err, { callSid }));
   },

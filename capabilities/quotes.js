@@ -35,6 +35,7 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
+import { partyOf } from "../lib/capabilities/party.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -182,8 +183,14 @@ export default {
   onEffect(effect, engine) {
     if (effect.type !== "requested") return;
 
-    const { businessId, callId, callerNumber, config, callSid } = engine.call;
+    const { businessId, callId, config, callSid } = engine.call;
     if (!businessId) return;
+    // Task 18, owner decision D-c: not reachable on outbound today ("quotes"
+    // is not a legal campaign capability — lib/outbound/campaignSchema.js
+    // CAMPAIGN_ENUMS.capabilities), but wired the same way as every other
+    // text-sending effect against the day it might be. Inbound is
+    // byte-identical — partyOf falls back to engine.call.callerNumber.
+    const party = partyOf(engine.call);
 
     const data = effect.data || {};
     engine.setStep(engine.STEPS.CONFIRM, "record_quote_request");
@@ -222,7 +229,7 @@ export default {
             callId,
             requestType: "quote",
             callerName: data.caller_name || null,
-            callbackNumber: data.callback_number || callerNumber || null,
+            callbackNumber: data.callback_number || party.phone || null,
             message: detail,
             preferredTime: null,
           }),
@@ -236,26 +243,30 @@ export default {
             customerRequest: {
               request_type: "quote",
               caller_name: data.caller_name || null,
-              callback_number: data.callback_number || callerNumber || null,
+              callback_number: data.callback_number || party.phone || null,
               message: detail,
             },
-            call: { callerNumber },
+            call: { callerNumber: party.phone },
           })
           .catch((err) =>
             engine.deps.log.error("notify_quote_failed", { reason: err?.message })
           );
-        engine.deps.notifications
-          .sendCallerSms(config, callerNumber, "message_received", {
-            name_part: data.caller_name ? ` ${data.caller_name}` : "",
-            business: config?.businessName,
-            sla: engine.deps.notifications.MESSAGE_SLA_TEXT,
-          })
-          .catch((err) =>
-            engine.deps.log.error("sms_followup_failed", {
-              kind: "quote_request",
-              reason: err?.message,
+        // Owner decision D-c: every TEXT-SENDING effect on an outbound call
+        // requires party.verified.
+        if (party.verified) {
+          engine.deps.notifications
+            .sendCallerSms(config, party.phone, "message_received", {
+              name_part: data.caller_name ? ` ${data.caller_name}` : "",
+              business: config?.businessName,
+              sla: engine.deps.notifications.MESSAGE_SLA_TEXT,
             })
-          );
+            .catch((err) =>
+              engine.deps.log.error("sms_followup_failed", {
+                kind: "quote_request",
+                reason: err?.message,
+              })
+            );
+        }
       })
       .catch((err) => engine.deps.captureException(err));
   },

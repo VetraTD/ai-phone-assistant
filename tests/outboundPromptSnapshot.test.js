@@ -206,9 +206,16 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
     expect(names).not.toContain("record_customer_request");
   });
 
-  it("confirm_identity is absent — Task 18 adds it, not this one", () => {
+  it("confirm_identity is present — Task 18 has landed", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
     const names = buildAllDeclarations(config, extras).map((d) => d.name);
+    expect(names).toContain("confirm_identity");
+  });
+
+  it("confirm_identity is absent on inbound (extras.outboundCall missing)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const names = buildAllDeclarations(config, inboundLikeExtras).map((d) => d.name);
     expect(names).not.toContain("confirm_identity");
   });
 
@@ -231,10 +238,13 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
     expect(outboundNames).not.toContain("open_case_file");
   });
 
-  it("a campaign that lists no implemented capability (missed-call-callback shape) keeps exactly the two engine tools", () => {
+  it("a campaign that lists no implemented capability (missed-call-callback shape) keeps exactly the engine tools", () => {
     const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
     const names = buildAllDeclarations(config, extras).map((d) => d.name);
-    expect(names).toEqual(["set_call_intent", "end_call"]);
+    // confirm_identity (Task 18) is unconditional on outbound, like end_call
+    // and set_call_intent — it never passes through the campaign-capability
+    // filter because it is not a capability pack's tool.
+    expect(names).toEqual(["set_call_intent", "end_call", "confirm_identity"]);
   });
 
   it("without extras.outboundCall, the tool builders are unaffected (inbound-shape control; promptSnapshot.test.js has the byte-identical proof)", () => {
@@ -246,6 +256,25 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
     // above.
     expect(names).toContain("record_customer_request");
     expect(names).toContain("request_transfer");
+  });
+});
+
+describe("Ruling 16-b (carried from Task 16, fulfilled by Task 18): get_caller_appointments_from_db's description", () => {
+  it("does not claim it uses 'the number the caller is calling from' on outbound — that field is deliberately empty (P-3)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const decl = buildAllDeclarations(config, extras).find((d) => d.name === "get_caller_appointments_from_db");
+    expect(decl).toBeTruthy();
+    expect(decl.description).not.toMatch(/the caller is calling from/i);
+    expect(decl.description).toMatch(/confirm_identity/);
+  });
+
+  it("keeps the stock wording on inbound, byte-identical", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const decl = buildAllDeclarations(config, inboundLikeExtras).find(
+      (d) => d.name === "get_caller_appointments_from_db"
+    );
+    expect(decl.description).toMatch(/the number the caller is calling from/i);
   });
 });
 

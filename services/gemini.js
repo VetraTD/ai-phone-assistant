@@ -605,6 +605,40 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
     },
   );
 
+  // OUTBOUND CALLING, Task 18 (spec §9.6, amended §12.2): `confirm_identity`
+  // is an engine tool, like end_call and set_call_intent -- never a capability
+  // pack, so it never passes through filterForOutboundCampaign below. Declared
+  // ONLY on an outbound call: `extras.outboundCall` (Task 14's key) is present
+  // only there, so this is a no-op for inbound and every existing golden
+  // snapshot is untouched.
+  //
+  // ctx.party (lib/voice/live/tools.js) starts `verified: false` on outbound.
+  // Nothing phone-keyed -- phone_on_file, lookupByCaller, clientPhone, any
+  // caller-facing text -- unlocks until this tool has run with
+  // name_confirmed: true (lib/capabilities/party.js, capabilities/*.js).
+  if (extras?.outboundCall) {
+    declarations.push({
+      name: "confirm_identity",
+      description:
+        "Call this once you have established who you are speaking to, before sharing any " +
+        "details of the enquiry or looking anything up for them. Pass name_confirmed: true " +
+        "once the person has confirmed their own name (or a business contact has done so on " +
+        "their behalf). Pass name_confirmed: false if this is the wrong person, a gatekeeper, " +
+        "a child, or you could not confirm who you are speaking to -- share nothing further in " +
+        "that case and offer a callback instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          name_confirmed: {
+            type: "boolean",
+            description: "True once the person's identity is confirmed, false otherwise",
+          },
+        },
+        required: ["name_confirmed"],
+      },
+    });
+  }
+
   // Capability contributions, in registry order:
   //   appointments -> book_appointment (module-gated on allowedTasks)
   //   messages     -> record_customer_request (CORE, always registered)

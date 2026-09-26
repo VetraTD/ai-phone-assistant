@@ -43,6 +43,7 @@ import {
   capabilityConfig,
   isClosedNow,
 } from "../lib/capabilities/requirements.js";
+import { partyOf } from "../lib/capabilities/party.js";
 import { nameSpokenIn } from "../lib/nameQuality.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
@@ -858,7 +859,16 @@ const WHICH_APPOINTMENT_CALLER_LINE = "Just to make sure I change the right one 
 function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) {
   if (!appointment) return false;
 
-  const callerDigits = String(ctx?.callerPhone || "").replace(/\D/g, "");
+  // Task 18 (spec §9.6): on outbound, party.phone is the number WE dialled,
+  // not something the person answering has proven ownership of merely by
+  // picking up. Trusting it for a phone match before confirm_identity has run
+  // would let a phone match alone unlock a change — exactly the phone-keyed
+  // data an unverified outbound party must never get. Blank digits here fall
+  // through to the name+last-4 path below, which is unaffected: that proof
+  // never came from call metadata in the first place. Inbound is unchanged —
+  // partyOf's fallback is always verified.
+  const party = partyOf(ctx);
+  const callerDigits = party.verified ? String(party.phone || "").replace(/\D/g, "") : "";
   const apptDigits = String(appointment.client_phone || "").replace(/\D/g, "");
   const phoneMatches =
     callerDigits.length >= 10 && apptDigits.length >= 10 && callerDigits.slice(-10) === apptDigits.slice(-10);
@@ -1349,9 +1359,26 @@ export default {
       // gating it would stop the receptionist finding the appointment it needs
       // in order to ask about it.
       out.push(
-        ...DB_APPOINTMENT_DECLARATIONS.map((d) =>
-          d.name === "get_caller_appointments_from_db" ? d : withRequirements(d, cfg)
-        )
+        ...DB_APPOINTMENT_DECLARATIONS.map((d) => {
+          if (d.name === "get_caller_appointments_from_db") {
+            // Carried from Task 16 (Ruling 16-b), fulfilled by Task 18: the
+            // stock description says "the number the caller is calling from",
+            // which is false on an outbound call — extras.callerPhone is
+            // deliberately empty there (Ruling P-3) and this tool actually
+            // reads the VERIFIED dialled party (ctx.party, spec §9.6). Reworded
+            // on outbound only; inbound is byte-identical.
+            return ctx.outboundCall
+              ? {
+                  ...d,
+                  description:
+                    "Look up the appointments belonging to the person on this call, once their " +
+                    "identity has been confirmed with confirm_identity. It cannot search for " +
+                    "anyone else, by name or otherwise.",
+                }
+              : d;
+          }
+          return withRequirements(d, cfg);
+        })
       );
     }
     return out;
@@ -1509,8 +1536,13 @@ export default {
     if (effect.type !== "booked") return;
 
     const data = effect.data || {};
-    const { callSid, businessId, callerNumber, twilioNumber, config } = engine.call;
+    const { callSid, businessId, twilioNumber, config } = engine.call;
     if (!businessId) return;
+    // Task 18, owner decision D-c: the party's phone and whether it is
+    // verified. Inbound is byte-identical — partyOf(engine.call) falls back to
+    // engine.call.callerNumber, verified true, so every value below is the
+    // same one this file always used.
+    const party = partyOf(engine.call);
 
     engine.setStep(engine.STEPS.CONFIRM, "book_appointment");
 
@@ -1528,36 +1560,46 @@ export default {
     const { notifications, log } = engine.deps;
     const notes = [data.service_type, data.notes].filter(Boolean).join(" — ") || null;
 
+    // Owner-facing, unconditional: the business finds out a slot was taken
+    // whether or not the caller's identity has been confirmed. This is not a
+    // TEXT-SENDING effect on the party — see D-c — it is an internal alert.
     notifications
       .notifyAppointmentBooked({
         businessId,
         appointment: {
           scheduled_at: data.scheduled_at,
           client_name: data.client_name || null,
-          client_phone: callerNumber || null,
+          client_phone: party.phone || null,
           notes,
         },
-        call: { callerNumber, twilioNumber },
+        call: { callerNumber: party.phone, twilioNumber },
       })
       .catch((err) => log.error("notify_appointment_failed", { callSid, reason: err?.message }));
 
-    notifications
-      .sendCallerSms(config, callerNumber, "appointment_confirmation", {
-        name: data.client_name || "there",
-        business: config?.businessName,
-        // Business timezone, not the server's — `toLocaleString()` with no zone
-        // rendered the confirmation SMS in whatever timezone the process ran in.
-        datetime: data.scheduled_at
-          ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
-          : "your requested time",
-      })
-      .catch((err) =>
-        log.error("sms_followup_failed", {
-          callSid,
-          kind: "appointment_confirmation",
-          reason: err?.message,
+    // Owner decision D-c (spec §9.6/§9.5): every TEXT-SENDING effect on an
+    // outbound call requires party.verified. An unconfirmed outbound party
+    // must never receive a text — a receptionist, a child or a wrong number
+    // could have answered the dialled line. Inbound sends exactly as before:
+    // partyOf's fallback is always verified.
+    if (party.verified) {
+      notifications
+        .sendCallerSms(config, party.phone, "appointment_confirmation", {
+          name: data.client_name || "there",
+          business: config?.businessName,
+          // Business timezone, not the server's — `toLocaleString()` with no zone
+          // rendered the confirmation SMS in whatever timezone the process ran in.
+          datetime: data.scheduled_at
+            ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
+            : "your requested time",
         })
-      );
+        .catch((err) =>
+          log.error("sms_followup_failed", {
+            callSid,
+            kind: "appointment_confirmation",
+            reason: err?.message,
+          })
+        );
+    }
   },
 };
 
@@ -2193,7 +2235,9 @@ async function bookAppointment(fc, ctx) {
           try {
             const { id: dbId, full } = await adapter.book(ctx, {
               clientName: args.client_name || null,
-              clientPhone: ctx.callerPhone || null,
+              // Spec §9.6: "Bookings write clientPhone = party.phone." Inbound
+              // is byte-identical — partyOf(ctx) falls back to ctx.callerPhone.
+              clientPhone: partyOf(ctx).phone || null,
               scheduledAt: anchoredScheduledAt,
               notes,
               lengthMinutes: avail.length,
@@ -2367,16 +2411,19 @@ async function bookAppointment(fc, ctx) {
 }
 
 async function lookupCallerAppointments(fc, ctx) {
-  // Uses ONLY the verified caller phone from call metadata (ctx.callerPhone),
-  // never a model-supplied number, so a caller cannot fish for someone else's
-  // appointments by asking about a different number.
+  // Uses ONLY the verified party phone (ctx.party, Task 18's ctx.callerPhone
+  // successor — see lib/capabilities/party.js), never a model-supplied number,
+  // so a caller cannot fish for someone else's appointments by asking about a
+  // different number. On outbound, party.verified starts false: nothing is
+  // looked up until confirm_identity has run (spec §9.6). Inbound is
+  // unchanged — partyOf(ctx) falls back to ctx.callerPhone, verified true.
   if (!ctx?.businessId) return noBusinessResult(fc);
 
-  const callerPhone = ctx.callerPhone || null;
+  const party = partyOf(ctx);
   let appointments = [];
   let selectedAppointmentId;
 
-  if (callerPhone) {
+  if (party.verified && party.phone) {
     appointments = await schedulingAdapter(ctx.config, ctx.integrations).lookupByCaller(ctx);
     if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
   }
@@ -3150,7 +3197,9 @@ async function executeViaEhr(fc, ctx) {
     arguments: fc.args || {},
     business_id: ctx.businessId || null,
     call_id: ctx.callId || null,
-    caller_phone: ctx.callerPhone || null,
+    // Pre-ruling 6: same substitution as every other phone consumer in this
+    // file. Inbound is byte-identical (partyOf falls back to ctx.callerPhone).
+    caller_phone: partyOf(ctx).phone || null,
   });
   const success = execResult.success === true;
 
