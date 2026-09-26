@@ -22,6 +22,7 @@ import {
   renderLines,
   createLiveRenderAudio,
   RENDER_TIMEOUT_MS,
+  RENDER_TRANSCRIPT_GRACE_MS,
   RENDER_SYSTEM_PROMPT,
   RENDER_MAX_WORD_RATIO,
   wordOverlap,
@@ -125,7 +126,11 @@ describe("renderLines", () => {
   it("REFUSES a clip whose transcript drops 'AI assistant' -- the backstop must say the disclosure verbatim", async () => {
     const { connect } = fakeConnect({ say: (line) => line.replace("an AI assistant ", "") });
     const log = quietLog();
-    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log, logFields: { outreachId: "out-1" } });
+    // graceMs: 5 -- h2 (checkpoint 2b review): this fake connect never sends
+    // anything past turnComplete, so the mismatched transcript is never going
+    // to improve; a small grace keeps this test fast without changing what
+    // it tests (the grace mechanism itself has its own describe block below).
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log, logFields: { outreachId: "out-1" }, graceMs: 5 });
     expect(out.opener).toBeNull();
     expect(log.error).toHaveBeenCalledWith(
       "outbound_backstop_render_refused",
@@ -137,7 +142,7 @@ describe("renderLines", () => {
     const say = (line) => line.replace("an AI assistant", "an assistant");
     expect(wordOverlap(OPENER, say(OPENER))).toBeGreaterThanOrEqual(0.9);
     const { connect } = fakeConnect({ say });
-    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog() });
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log: quietLog(), graceMs: 5 });
     expect(out.opener).toBeNull();
   });
 
@@ -151,7 +156,7 @@ describe("renderLines", () => {
   it("a refused voicemail is logged under its own name and does not take the opener with it", async () => {
     const { connect } = fakeConnect({ say: (line) => (line === VOICEMAIL ? "Hello." : line) });
     const log = quietLog();
-    const out = await renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    const out = await renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log, graceMs: 5 });
     expect(out.opener.length).toBe(8000);
     expect(out.voicemail).toBeNull();
     expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", expect.objectContaining({ reason: "transcript_mismatch" }));
@@ -183,6 +188,138 @@ describe("renderLines", () => {
 
   it("the timeout is the ruled value", () => {
     expect(RENDER_TIMEOUT_MS).toBe(20_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// h2 (checkpoint 2b review). Paid-run evidence, session 2c speaks-first #4:
+// turnComplete fired with an EMPTY outputTranscription although the audio
+// was real (172 audio-out tokens, first audio 1,013 ms) -- refused as
+// transcript_mismatch overlap 0, correctly fail-closed but at the cost of the
+// clip path on a silent pickup. `fakeConnect` above always bundles audio,
+// transcript and turnComplete into one delivery, so it cannot produce this
+// shape; these tests drive the callbacks directly, one message at a time.
+// ---------------------------------------------------------------------------
+describe("h2: trailing outputTranscription can arrive after turnComplete", () => {
+  function splitConnect() {
+    let cb = null;
+    const session = { sent: [], closed: false, sendClientContent(msg) { this.sent.push(msg); }, close() { this.closed = true; } };
+    const connect = vi.fn(async ({ callbacks }) => {
+      cb = callbacks;
+      return { session, languagePinned: true, surface: "aistudio", model: "m" };
+    });
+    return {
+      connect,
+      session,
+      audio: () => cb.onmessage({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm24k(500) } }] } } }),
+      turnComplete: () => cb.onmessage({ serverContent: { turnComplete: true } }),
+      transcript: (text) => cb.onmessage({ serverContent: { outputTranscription: { text } } }),
+      usage: (u) => cb.onmessage({ usageMetadata: u }),
+      close: () => cb.onclose?.(),
+    };
+  }
+
+  /** Two microtask hops: enough for renderOne's `Promise.resolve().then(() => connect(...))` chain to have called connect and set `cb`. */
+  const untilConnected = () => Promise.resolve().then(() => Promise.resolve());
+
+  it("transcription arriving 300 ms after turnComplete is still accepted", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: RENDER_TRANSCRIPT_GRACE_MS });
+    await untilConnected();
+    rig.audio();
+    rig.turnComplete(); // no transcript yet: does not cover the line
+    await vi.advanceTimersByTimeAsync(300);
+    rig.transcript(OPENER);
+    const out = await p;
+    expect(out.opener).not.toBeNull();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("never arriving: refused after the grace, timer bounded (the session is closed, no leak)", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: RENDER_TRANSCRIPT_GRACE_MS });
+    await untilConnected();
+    rig.audio();
+    rig.turnComplete(); // no transcript, ever
+    await vi.advanceTimersByTimeAsync(RENDER_TRANSCRIPT_GRACE_MS - 1);
+    const out = await Promise.race([p, Promise.resolve("pending")]);
+    expect(out).toBe("pending"); // not yet -- the grace has not elapsed
+    await vi.advanceTimersByTimeAsync(1);
+    const settled = await p;
+    expect(settled.opener).toBeNull();
+    expect(rig.session.closed).toBe(true);
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", expect.objectContaining({ reason: "transcript_mismatch", overlap: 0 }));
+  });
+
+  it("covered already at turnComplete: no added delay (resolves with the grace timer never firing)", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    // A grace long enough that a test awaiting it directly would time out --
+    // the point is that this path never starts the timer at all.
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: 10_000 });
+    await untilConnected();
+    rig.audio();
+    rig.transcript(OPENER); // the line's own text, in full, before turnComplete
+    rig.turnComplete();
+    const out = await p; // resolves without any advanceTimersByTimeAsync at all
+    expect(out.opener).not.toBeNull();
+  });
+
+  it("audio after turnComplete is not appended", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: RENDER_TRANSCRIPT_GRACE_MS });
+    await untilConnected();
+    rig.audio(); // 500ms
+    rig.turnComplete();
+    rig.audio(); // arrives during the grace window -- must be dropped
+    await vi.advanceTimersByTimeAsync(50);
+    rig.transcript(OPENER);
+    const out = await p;
+    // One chunk's worth (downsampled 8kHz mu-law, half the 24kHz PCM sample
+    // count), not two -- the second audio() call must not have been appended.
+    expect(out.opener.length).toBe(4000);
+  });
+
+  it("usage arriving during the grace window is still recorded (M2)", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: RENDER_TRANSCRIPT_GRACE_MS });
+    await untilConnected();
+    rig.audio();
+    rig.turnComplete();
+    await vi.advanceTimersByTimeAsync(50);
+    rig.usage({ promptTokenCount: 10, responseTokenCount: 5 });
+    rig.transcript(OPENER);
+    await p;
+    expect(log.info).toHaveBeenCalledWith(
+      "outbound_render_usage",
+      expect.objectContaining({ kind: "opener", outcome: "accepted", text_in: 10, audio_out: 5 })
+    );
+  });
+
+  it("a vendor close arriving during the grace window keeps the already-captured audio (refused on the transcript alone, not as no_audio)", async () => {
+    vi.useFakeTimers();
+    const rig = splitConnect();
+    const log = quietLog();
+    const p = renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect: rig.connect, log, graceMs: RENDER_TRANSCRIPT_GRACE_MS });
+    await untilConnected();
+    rig.audio();
+    rig.turnComplete(); // no transcript yet
+    rig.close(); // the vendor tears the session down mid-grace
+    const out = await p;
+    expect(out.opener).toBeNull();
+    // The distinguishing evidence: audio was retained (a real render that
+    // just lacks transcript confirmation), not discarded as though nothing
+    // had been generated at all.
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", expect.objectContaining({ reason: "transcript_mismatch" }));
   });
 });
 
@@ -225,7 +362,16 @@ describe("createLiveRenderAudio (dispatch's renderAudio)", () => {
   it("a refused line comes back as null for that key", async () => {
     const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB" });
     const { connect } = fakeConnect({ say: (line) => (line === VOICEMAIL ? "nope" : line) });
-    const renderAudio = createLiveRenderAudio({ db, env: {}, connect, log: quietLog() });
+    // graceMs: 5 -- h2 (checkpoint 2b review): see the note on the first
+    // refusal test in this file; a fast grace keeps this test's runtime
+    // unaffected by the (correct) production wait.
+    const renderAudio = createLiveRenderAudio({
+      db,
+      env: {},
+      connect,
+      log: quietLog(),
+      render: (opts) => renderLines({ ...opts, graceMs: 5 }),
+    });
     const audio = await renderAudio({
       row: { id: "out-1", business_id: BIZ, config: { caller_id: "+441372656055" } },
       attemptNo: 1,
@@ -258,7 +404,7 @@ describe("M1: a transcript that says MORE than the line is refused", () => {
     expect(wordOverlap(OPENER, say(OPENER))).toBe(1);
     const { connect } = fakeConnect({ say });
     const log = quietLog();
-    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log, graceMs: 5 });
     expect(out.opener).toBeNull();
     expect(log.error).toHaveBeenCalledWith(
       "outbound_backstop_render_refused",
@@ -315,7 +461,7 @@ describe("M2: every render is metered", () => {
   it("a refused render is metered too -- it was billed", async () => {
     const { connect } = fakeConnect({ usage: USAGE, say: () => "Hello." });
     const log = quietLog();
-    await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log, graceMs: 5 });
     expect(log.info).toHaveBeenCalledWith(
       "outbound_render_usage",
       expect.objectContaining({ kind: "opener", outcome: "transcript_mismatch", audio_out: 140 })
@@ -353,7 +499,7 @@ describe("I4: each verified clip is handed over as soon as its own render finish
     const onLine = vi.fn(async () => {
       throw new Error("store refused");
     });
-    const out = await renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log, onLine });
+    const out = await renderLines({ lines: { opener: OPENER, voicemail: VOICEMAIL }, voiceName: "Kore", languageCode: "en-GB", connect, log, onLine, graceMs: 5 });
     expect(onLine.mock.calls.map((c) => c[0])).toEqual(["opener"]);
     expect(out.opener.length).toBe(8000);
     expect(log.error).toHaveBeenCalledWith("outbound_backstop_store_refused", expect.objectContaining({ kind: "opener", error: "store refused" }));
@@ -384,7 +530,7 @@ describe("round 3: the clip check shares the session's dotted-AI fold", () => {
   it("'A. I' with no dot after the I is two words, not the disclosure: refused", async () => {
     const { connect } = fakeConnect({ say: () => "Hi, is that Sam? It's Ava, an A. I assistant from Digile Media." });
     const log = quietLog();
-    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    const out = await renderLines({ lines: { opener: OPENER }, voiceName: "Kore", languageCode: "en-GB", connect, log, graceMs: 5 });
     expect(out.opener).toBeNull();
     expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", expect.objectContaining({ reason: "transcript_mismatch" }));
   });
@@ -418,7 +564,7 @@ describe("H1: a glued transcript token is re-split into the line's own words bef
     const gluedAndDroppedAi = "Hi, isthat Sam? It'sAva, an assistant from HarnessTest Clinic.";
     const { connect } = fakeConnect({ say: () => gluedAndDroppedAi });
     const log = quietLog();
-    const out = await renderLines({ lines: { opener: LINE }, voiceName: "Kore", languageCode: "en-GB", connect, log });
+    const out = await renderLines({ lines: { opener: LINE }, voiceName: "Kore", languageCode: "en-GB", connect, log, graceMs: 5 });
     expect(out.opener).toBeNull();
     expect(log.error).toHaveBeenCalledWith(
       "outbound_backstop_render_refused",

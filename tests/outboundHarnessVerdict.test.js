@@ -815,6 +815,11 @@ describe("the render tap", () => {
       languageCode: "en-GB",
       connect: tap.connect,
       log: { info: (event, f) => events.push({ event, ...f }), error: (event, f) => events.push({ event, ...f }) },
+      // graceMs: 5 -- h2 (checkpoint 2b review): the voicemail key here is
+      // MEANT to be refused (word_ratio > 1.15, below), and this fake connect
+      // never sends anything past turnComplete, so a small grace keeps this
+      // test's runtime unaffected by the (correct) production wait.
+      graceMs: 5,
     });
     const rows = summarizeRenderSessions(tap.sessions(), lines, events);
     const byKind = Object.fromEntries(rows.map((r) => [r.kind, r]));
