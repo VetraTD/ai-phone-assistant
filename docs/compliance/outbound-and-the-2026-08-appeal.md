@@ -24,7 +24,7 @@ A customer (Digile Media) asked for a speed-to-lead call: ring a lead who has ju
 
 ## Why this is not the robocall pattern the appeal was distinguishing us from
 
-The design is consent-only and operator-gated. Each control below is enforced in code, not in a policy document:
+The design is consent-only and operator-gated. Every control below is enforced in code, except the last row, which is a prompt instruction (marked):
 
 | Control | Where |
 |---|---|
@@ -38,7 +38,7 @@ The design is consent-only and operator-gated. Each control below is enforced in
 | At most 3 dials per number per day, across campaigns | gate check 9 |
 | The caller ID must be a number we own on one of our Twilio accounts | gate check 11 |
 | Every call discloses that it is an AI assistant, and the opening line is refused at save if the disclosure is missing. The disclosure must be **heard**, not just written | spec §7, §9.3 |
-| No audio recording. Every call says "This call may be transcribed to help us assist you." | spec D3/D4 |
+| No audio recording (code: nothing records). The transcription notice ("This call may be transcribed to help us assist you.") is **a prompt instruction, not code**. It is spoken up front only when the tenant has `recordingDisclosureEnabled` on, and otherwise only if the person asks (`lib/outbound/prompt.js`, `services/gemini.js`) | spec D3/D4 |
 
 **One owner-approved exception (2026-09-26).** The 3-per-day cap is not applied while the kill switch is off. In that state only allow-listed operator handsets are reachable, and live test round 1 needs about 11 calls to one handset. The exception switches itself off when outbound is enabled.
 
@@ -55,4 +55,4 @@ The design is consent-only and operator-gated. Each control below is enforced in
 
 This adds new call-origination traffic on Twilio's side, plus two new Google services on this project: Cloud Tasks (queue `outbound-dispatch`) and a Cloud Scheduler job (`outbound-sweep`, every 5 minutes, which POSTs to the service's own OIDC-guarded internal route).
 
-The Cloud Run service's outbound network pattern is unchanged: the same Twilio Media Streams and the same Gemini Live WebSockets as inbound. It adds no new vendor.
+The service now makes two new kinds of outbound request: Twilio REST `calls.create` (to dial) and the Cloud Tasks API (to schedule a dial). Both are existing vendors, Twilio and Google. The media path is the same as inbound: Twilio Media Streams in, Gemini Live WebSockets out. No new vendor is added.
