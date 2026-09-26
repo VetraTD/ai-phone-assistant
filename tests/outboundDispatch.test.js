@@ -63,6 +63,10 @@ describe("dispatch: the happy path", () => {
       timeout: 40, // attempt 1 is in the template's voicemail_on [1,5] -> 40 s (spike B: voicemail answered at 26.6 s)
       url: "https://svc.example/twilio/outbound-answer", statusCallback: "https://svc.example/twilio/outbound-status",
       asyncAmdStatusCallback: "https://svc.example/twilio/outbound-amd",
+      // M1 (fix wave, checkpoint 2b): the template's max_call_minutes (10),
+      // enforced as Twilio's own `timeLimit` (seconds) -- previously
+      // validated at save and never read anywhere.
+      timeLimit: 600,
     });
     expect(args.statusCallbackEvent).toEqual(["initiated", "ringing", "answered", "completed"]);
     expect(db.setAttemptCallSid).toHaveBeenCalledWith("a1", "CA123");
@@ -183,6 +187,28 @@ describe("failStaleAttempt: the sweep's sidless backstop, reusing dispatch's own
     expect(next).toBeNull();
     expect(db.closeOutreach).toHaveBeenCalledWith("o1", "attempts_exhausted");
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  // b32 (fix wave, checkpoint 2b): matching applyOutreachResult's own guard
+  // (state IN ('dialing','in_call')) -- a normal post-call run (or an
+  // earlier stale-attempt pass) already applied the schedule for this
+  // attempt while this backstop was in flight, so re-applying it here would
+  // double-reschedule with a possibly different `next` time.
+  it("b32: the outreach is no longer 'dialing' (already rescheduled elsewhere) -- the attempt still fails, but nothing is rescheduled or enqueued a second time", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    const db = fakeDb();
+    db.lockOutreachState = vi.fn(async () => "waiting"); // already rescheduled by another path
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const r = row({ attempts_made: 1 });
+    const { outreachClosed, next } = await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 1, tz: "Europe/London", now: () => NOW, rand: () => 0,
+    });
+    expect(outreachClosed).toBe(false);
+    expect(next.toISOString()).toBe("2026-09-28T13:10:00.000Z"); // still computed and returned...
+    expect(db.failAttempt).toHaveBeenCalledWith("a1"); // ...the attempt itself is stale either way...
+    expect(db.rescheduleOutreach).not.toHaveBeenCalled(); // ...but never applied a second time...
+    expect(db.closeOutreach).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled(); // ...and never enqueued for a schedule that was never applied here.
   });
 
   it("the outreach was already closed under lock (e.g. an opt-out mid-flight): the attempt still records failed, nothing is rescheduled or enqueued", async () => {
