@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 21.940392,
+  "spent_usd": 22.067822,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -5525,11 +5525,83 @@
       "probe": "P1-HARNESS",
       "usd": 0.011412499999999999,
       "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T06:26:58.990Z",
+      "callSid": "CA1a0dc64f474ac9bddcd",
+      "mode": "inbound",
+      "probe": "P1-HARNESS",
+      "usd": 0.0087955,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T06:27:55.639Z",
+      "callSid": "CAharness1a0dc658855a8152b28",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-HARNESS",
+      "usd": 0.0162895,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:06:18.566Z",
+      "callSid": "CAharness1a0dc88ab4b2432097e",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-HARNESS",
+      "usd": 0.017967499999999997,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:08:23.330Z",
+      "callSid": "CAharness1a0dc8a971bfc6586c5",
+      "mode": "outbound_silent",
+      "probe": "P1-HARNESS",
+      "usd": 0.011025,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:09:11.940Z",
+      "callSid": "CAharness1a0dc8b504f9c3d75e7",
+      "mode": "outbound_silent",
+      "probe": "P1-HARNESS",
+      "usd": 0.011025,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:09:52.928Z",
+      "callSid": "CAharness1a0dc8bf14e9ca934d7",
+      "mode": "outbound_silent",
+      "probe": "P1-HARNESS",
+      "usd": 0.011120999999999999,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:37:22.748Z",
+      "callSid": "CAharness1a0dca521dd57f1f1a1",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-HARNESS",
+      "usd": 0.016975,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:38:11.660Z",
+      "callSid": "CAharness1a0dca5dcc77f42e813",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-HARNESS",
+      "usd": 0.0174065,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-26T07:38:51.855Z",
+      "callSid": "CAharness1a0dca67dcb8a770a60",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-HARNESS",
+      "usd": 0.0168245,
+      "basis": "priced"
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-25T22:22:19.277Z",
+  "updated_at": "2026-09-26T07:38:51.855Z",
   "cap_history": [
     {
       "cap": 5,
