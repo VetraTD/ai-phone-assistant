@@ -51,6 +51,11 @@ data.
 | **Business config** | `businesses`, `business_*` | Life of the contract + 1 year | Not personal data, except the notification address. |
 | **Cloud SQL automated backups** | Google-managed | **35 days** prod / 7 staging | Already set in `cost-controls.tf`. **A backup is a copy of PHI**, so this is a retention decision that was made as a cost decision. |
 | **Application + audit logs** | Cloud Logging sinks | `var.audit_log_retention_days` | Its own description warns against reading six years into it. |
+| **Outbound dial attempts** | `call_attempts` (+ `call_attempt_directory`, `dial_registry`) | **6 months** | Spec §13.5: the record of every dial, answered or not. It is the evidence for Ofcom persistent-misuse questions (silent/abandoned calls, re-dial spacing) and the daily-cap check. The directory rows are routing copies and follow their attempt. |
+| **Outbound contacts** | `contacts` | Life of the last outreach + 1 year | Name, number and timezone of a lead the tenant supplied. No longer needed once the tenant stops contacting them. |
+| **Outbound consents** | `consents` | **The later of: consent withdrawn + 4 years, or the last call made under it + 4 years** | Same reasoning as `sms_consents`: this is the defence to a TCPA claim, and the limitation period is four years. |
+| **Do-not-call list** | `suppressions` | **Kept indefinitely, and it OUTLIVES erasure** | Spec §13.5: erasing someone must not make them callable again. On erasure the phone number is kept only as a hash, as a do-not-call marker. **The exception is deliberate, and erasure does not yet implement it (spec P5, below).** |
+| **Outreach and campaign records** | `outreach`, `campaigns`, `campaign_versions`, `outbox`, `webhook_endpoints`, `outreach_schedule`, `postcall_pending` | Life of the campaign + 1 year | Operational state and tenant configuration. `outbox` rows are delivery attempts and can go sooner once they are delivered. |
 
 ---
 
@@ -66,6 +71,12 @@ UPDATE  calls                    caller-identifying fields cleared, row kept
 UPDATE  appointments             same
 UPDATE  customer_requests        same
 ```
+
+> **NOT YET COVERED — outbound (2026-09-26, spec P5):** `eraseCallerData` does
+> not yet touch `contacts`, `consents`, `suppressions`, `call_attempts.to_number`
+> or `calls.answers`. Outbound is deployed switched OFF, and must stay off until
+> it does. When built, `suppressions` must keep a hashed marker rather than be
+> deleted (see the schedule row).
 
 **Delete versus redact is a deliberate split, and it is the interesting part of
 this document.** The transcript is destroyed because its value is entirely its
