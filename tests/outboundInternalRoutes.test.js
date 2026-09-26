@@ -8,6 +8,7 @@ import {
   createCallerIdValidator,
   createTwilioClientFor,
   isOutboundInternalPath,
+  refuseBadBody,
 } from "../lib/outbound/internalRoutes.js";
 
 const BIZ = "11111111-1111-1111-1111-111111111111";
@@ -333,15 +334,102 @@ describe("M5: an oversized body is answered 413 by the route itself, never the c
     expect(deps.verifier.verify).not.toHaveBeenCalled();
   });
 
-  it("a malformed body still goes on to the next error handler (only entity.too.large is answered here)", async () => {
+  // X1 (go-live hardening, 2026-09-26): malformed JSON used to pass through
+  // to server.js's central handler, which answers 500 and reports to Sentry
+  // for what is unauthenticated junk on an internal-only route. Now answered
+  // locally, same shape as the 413 case above.
+  it("a malformed body is answered locally: 400, and never reaches the next error handler", async () => {
     const deps = fakeDeps();
     const app = express();
     registerOutboundInternalRoutes(app, deps);
     const central = vi.fn((err, req, res, _next) => res.status(418).json({ type: err.type }));
     app.use(central);
     const res = await request(app).post("/internal/outbound/dispatch").set("Content-Type", "application/json").send("{not json");
-    expect(central).toHaveBeenCalledTimes(1);
-    expect(res.body).toEqual({ type: "entity.parse.failed" });
+    expect(res.status).toBe(400);
+    expect(central).not.toHaveBeenCalled();
+    // never echo err.type or the offending bytes
+    expect(JSON.stringify(res.body)).not.toMatch(/entity\.parse\.failed|not json/);
+  });
+
+  // Same rule, a different body-parser 4xx type: an unsupported charset is
+  // 415, answered the same way. (charset=utf-7 is accepted by body-parser's
+  // own isValidCharset -- it starts with "utf-" -- and by iconv-lite, so it is
+  // NOT a case that reaches this code path; iso-8859-1 is, verified against
+  // the installed body-parser@2.3.0 + iconv-lite locally.)
+  it("an unsupported charset is answered locally: 415, and never reaches the next error handler", async () => {
+    const deps = fakeDeps();
+    const app = express();
+    registerOutboundInternalRoutes(app, deps);
+    const central = vi.fn((err, req, res, _next) => res.status(418).json({ type: err.type }));
+    app.use(central);
+    const res = await request(app)
+      .post("/internal/outbound/sweep")
+      .set("Content-Type", "application/json; charset=iso-8859-1")
+      .send('{"a":1}');
+    expect(res.status).toBe(415);
+    expect(central).not.toHaveBeenCalled();
+  });
+});
+
+describe("X1: refuseBadBody -- direct unit coverage of every body-parser 4xx case, plus the pass-through rule", () => {
+  function mockRes() {
+    const res = {};
+    res.status = vi.fn(() => res);
+    res.json = vi.fn(() => res);
+    return res;
+  }
+
+  it.each([
+    ["entity.parse.failed", 400],
+    ["entity.too.large", 413],
+    ["charset.unsupported", 415],
+    ["encoding.unsupported", 415],
+    ["request.aborted", 400],
+    ["request.size.invalid", 400],
+    ["entity.verify.failed", 403],
+  ])("type=%s (status %s) is answered locally with that status; next() is never called; err.message is never echoed", (type, status) => {
+    const err = Object.assign(new Error("do-not-echo-this-message"), { type, status, statusCode: status });
+    const res = mockRes();
+    const next = vi.fn();
+    refuseBadBody(err, {}, res, next);
+    expect(res.status).toHaveBeenCalledWith(status);
+    expect(next).not.toHaveBeenCalled();
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toMatch(/do-not-echo-this-message/);
+  });
+
+  it("entity.too.large's body stays byte-identical to the pre-X1 body", () => {
+    const err = Object.assign(new Error("x"), { type: "entity.too.large", status: 413, statusCode: 413 });
+    const res = mockRes();
+    refuseBadBody(err, {}, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith({ error: "payload too large" });
+  });
+
+  // The pin this test file used to carry (M5): a NON-body-parser error must
+  // still reach `next(err)`, not be swallowed here.
+  it("an error with an unrecognized type still reaches next, even with a 4xx status", () => {
+    const err = Object.assign(new Error("boom"), { type: "some.other.thing", status: 422, statusCode: 422 });
+    const res = mockRes();
+    const next = vi.fn();
+    refuseBadBody(err, {}, res, next);
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("a recognized type WITHOUT a 4xx status still reaches next (a tampered/mismatched error, fails closed)", () => {
+    const err = Object.assign(new Error("boom"), { type: "entity.too.large", status: 500, statusCode: 500 });
+    const res = mockRes();
+    const next = vi.fn();
+    refuseBadBody(err, {}, res, next);
+    expect(next).toHaveBeenCalledWith(err);
+  });
+
+  it("a plain error with neither .type nor a 4xx status reaches next unchanged (e.g. dispatch()'s own 500 path)", () => {
+    const err = new Error("db down");
+    const res = mockRes();
+    const next = vi.fn();
+    refuseBadBody(err, {}, res, next);
+    expect(next).toHaveBeenCalledWith(err);
   });
 });
 

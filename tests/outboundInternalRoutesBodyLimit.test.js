@@ -83,6 +83,60 @@ describe("the outbound internal routes' 4kb body limit, through the real server"
     expect(res.status).toBe(413);
   });
 
+  // X1 (go-live hardening, 2026-09-26): through the REAL stack, a malformed
+  // body used to reach server.js's central handler -- 500, and a captureException
+  // (Sentry) event -- for what is unauthenticated junk on an internal-only
+  // route. Now answered locally, 400, same as the 413 case above.
+  it.each(["/internal/outbound/dispatch", "/internal/outbound/sweep"])(
+    "refuses malformed JSON on %s with 400, not the central handler (spied via the logger)",
+    async (p) => {
+      const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        const res = await request(app).post(p).set("Content-Type", "application/json").send("{not json");
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(res.body)).not.toMatch(/entity\.parse\.failed|not json/);
+        const lines = writeSpy.mock.calls
+          .map(([chunk]) => { try { return JSON.parse(String(chunk)); } catch { return null; } })
+          .filter(Boolean);
+        // server.js's central handler logs exactly this event before its 500.
+        expect(lines.some((l) => l.event === "unhandled_error")).toBe(false);
+      } finally {
+        writeSpy.mockRestore();
+      }
+    }
+  );
+
+  it.each([
+    "/internal/outbound/dispatch/",
+    "/INTERNAL/OUTBOUND/DISPATCH",
+    "/Internal/Outbound/Dispatch/",
+    "/internal/outbound/sweep/",
+    "/INTERNAL/OUTBOUND/SWEEP",
+  ])("refuses malformed JSON on %s (a spelling Express still routes) with 400", async (p) => {
+    const res = await request(app).post(p).set("Content-Type", "application/json").send("{not json");
+    expect(res.status).toBe(400);
+  });
+
+  // charset=utf-7 is accepted by body-parser's own isValidCharset (it starts
+  // with "utf-") and by iconv-lite -- verified locally against the installed
+  // body-parser@2.3.0, it is NOT a charset.unsupported case. iso-8859-1 is.
+  it.each(["/internal/outbound/dispatch", "/internal/outbound/sweep"])(
+    "refuses an unsupported charset on %s with 415, not the central handler",
+    async (p) => {
+      const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        const res = await request(app).post(p).set("Content-Type", "application/json; charset=iso-8859-1").send('{"a":1}');
+        expect(res.status).toBe(415);
+        const lines = writeSpy.mock.calls
+          .map(([chunk]) => { try { return JSON.parse(String(chunk)); } catch { return null; } })
+          .filter(Boolean);
+        expect(lines.some((l) => l.event === "unhandled_error")).toBe(false);
+      } finally {
+        writeSpy.mockRestore();
+      }
+    }
+  );
+
   it("the global parser still accepts a 6KB body on an ordinary path (the exclusion is scoped, not a blanket shrink)", async () => {
     // No inbound route both skips auth/DB and echoes the body back, so a
     // nonexistent path is the cleanest witness available: if the global
