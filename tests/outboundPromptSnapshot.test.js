@@ -319,6 +319,43 @@ describe("D-c extends to prompt TEXT, not only tool declarations", () => {
   });
 });
 
+describe("c3 (checkpoint 2b review, partial FIX) — NON-NEGOTIABLE RULE 4's referent is outbound-only", () => {
+  it("outbound: refers to the person whose identity has been confirmed, not the caller ID", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toContain("Only discuss records belonging to the person whose identity you have confirmed");
+    expect(prefix).not.toContain("the person calling from this number");
+  });
+
+  it("inbound is unaffected, byte-identical wording", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const prefix = buildStaticSystemPrefix(config, inboundLikeExtras);
+    expect(prefix).toContain("Only discuss records belonging to the person calling from this number");
+    expect(prefix).not.toContain("the person whose identity you have confirmed");
+  });
+});
+
+describe("M5 (checkpoint 2b review, Controller Ruling OVERNIGHT) — no phantom 'take a message' on outbound", () => {
+  it("outbound: NNR 1 and the guardrails offer a callback, never a message, as the POSITIVE instruction", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).not.toContain("offer to take a message so someone can follow up");
+    expect(prefix).not.toContain('take their details for follow-up"');
+    expect(prefix).not.toContain("offer to take their details so someone can follow up");
+    expect(prefix).toContain("offer to call them back another time with the right answer");
+    expect(prefix).toContain("offer to call them back another time");
+  });
+
+  it("inbound is unaffected: NNR 1 and the guardrails still offer to take a message / take their details", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const prefix = buildStaticSystemPrefix(config, inboundLikeExtras);
+    expect(prefix).toContain("offer to take a message so someone can follow up");
+    expect(prefix).not.toContain("call them back another time");
+  });
+});
+
 describe("no fixture renders 'undefined' or 'null' into prompt text", () => {
   for (const [name, { config, extras }] of Object.entries(OUTBOUND_FIXTURES)) {
     it(name, () => {

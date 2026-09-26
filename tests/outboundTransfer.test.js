@@ -380,6 +380,36 @@ describe("redialForTransfer — outbound variant (spec §9.7)", () => {
     expect(updates).toHaveLength(0);
   });
 
+  // Checkpoint 2b review, b17. capabilities/transfer.js's execute() refusal
+  // said "Offer to take a message instead" unconditionally -- the same
+  // phantom-tool wording its own prompt() function already avoids for
+  // outbound (ESCALATION_SECTION_OUTBOUND, above this file's own comment on
+  // "the message protocol" not existing there), just reachable at a
+  // different point: EXECUTION time, when transferAllowed() itself refuses.
+  it("b17: the out-of-window refusal offers a callback, never 'take a message', on outbound", async () => {
+    const updates = [];
+    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+    const live = fakeLive();
+    const db = fakeDb({ transfer: { to: TRANSFER_TO, when: OUTSIDE_WINDOW_WHEN, whisper: true } });
+    await boot({ live, db, twilioClientFor });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(OUTSIDE_WINDOW);
+      live.push({ toolCall: { functionCalls: [{ id: "t1", name: "request_transfer", args: { reason: "x" } }] } });
+      await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+    live.push({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+
+    const response = live.sent.toolResponses[0].functionResponses[0].response;
+    expect(response.success).toBe(false);
+    expect(response.message).not.toMatch(/take a message/i);
+    expect(response.message).toMatch(/call.*back/i);
+  });
+
   it("with no campaign transfer target at all, transferNumber() is null and the redial is refused before any client is built", async () => {
     const updates = [];
     const twilioClientFor = vi.fn(() => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) }));

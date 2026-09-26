@@ -582,18 +582,29 @@ const INTENT_PACK_ID = {
  * A no-op when `extras` carries no outbound call context, so inbound and
  * every existing golden snapshot are untouched.
  *
+ * Checkpoint 2b review, c1: EXPORTED for a direct unit test, and never
+ * returns an empty array. An empty `set_call_intent` enum is not a
+ * degraded prompt -- it is a malformed tool declaration, and would fail
+ * EVERY outbound session at connect. `["general_question"]` is the same
+ * fallback the caller (buildCallTools) already uses when the tenant's own
+ * `allowedTasks` is empty; this is the same guarantee applied AFTER the
+ * campaign-capability filter can empty out a non-empty list too (a tenant
+ * offering only appointment-shaped intents, on a campaign whose
+ * capabilities list never includes "appointments").
+ *
  * @param {string[]} intents
  * @param {object} [extras]
- * @returns {string[]}
+ * @returns {string[]} never empty
  */
-function narrowIntentsForOutbound(intents, extras) {
+export function narrowIntentsForOutbound(intents, extras) {
   const outbound = extras?.outboundCall;
   if (!outbound) return intents;
   const campaignCapabilities = Array.isArray(outbound?.config?.capabilities) ? outbound.config.capabilities : [];
-  return intents.filter((intent) => {
+  const narrowed = intents.filter((intent) => {
     const packId = INTENT_PACK_ID[intent];
     return packId ? campaignCapabilities.includes(packId) : true;
   });
+  return narrowed.length > 0 ? narrowed : ["general_question"];
 }
 
 export function buildCallTools(configOrTasks, { markerMode = false, extras } = {}) {
@@ -1173,7 +1184,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     // already here and was not enough: it does not say WHERE a fact may come
     // from, and it does not forbid the words that make an invention sound
     // checked. Both are added. See LVX66, LVX59.
-    `Never invent facts, prices, times, availability, or appointments. Everything you tell a caller about this business — the services it offers and does not offer, what it charges, which insurers or payment methods it takes — must come from BUSINESS INFO, KNOWLEDGE BASE, CUSTOM BUSINESS RULES, or a tool's response on this call. If it is not there, you do not know it: say you will check and offer to take a message so someone can follow up with the right answer. Never say you have confirmed, checked, verified, or looked something up unless a tool actually returned it on this call. When you describe an appointment already on the record, use only what the record holds — the date, the time, and the name it is under; if the caller asks what it is for and the record does not say, tell them it does not say. If a lookup returns nothing, say you cannot find anything under this number — never describe an appointment you were not told about.`,
+    // Checkpoint 2b review, M5 (Controller Ruling, OVERNIGHT). "Offer to take
+    // a message" is a phantom-tool instruction on outbound: `messages` is
+    // never one of a Part 1 campaign's own capabilities (D-c's execution
+    // gate refuses record_customer_request there regardless), so the model
+    // would be told to offer something it cannot do. `outbound` is null on
+    // inbound, so this reduces to the original text there.
+    `Never invent facts, prices, times, availability, or appointments. Everything you tell a caller about this business — the services it offers and does not offer, what it charges, which insurers or payment methods it takes — must come from BUSINESS INFO, KNOWLEDGE BASE, CUSTOM BUSINESS RULES, or a tool's response on this call. If it is not there, you do not know it: say you will check and ${outbound ? "offer to call them back another time with" : "offer to take a message so someone can follow up with"} the right answer. Never say you have confirmed, checked, verified, or looked something up unless a tool actually returned it on this call. When you describe an appointment already on the record, use only what the record holds — the date, the time, and the name it is under; if the caller asks what it is for and the record does not say, tell them it does not say. If a lookup returns nothing, say you cannot find anything under this number — never describe an appointment you were not told about.`,
     `Never claim an action happened unless the tool returned success=true.`,
     // Scoped to details the caller SUPPLIES. An unscoped version made the model
     // solicit a phone number it already had from caller ID, which cost a turn
@@ -1184,7 +1201,17 @@ export function buildStaticSystemPrefix(config, extras = {}) {
     // for a third party's booking by name — and on another it read the name
     // OUT of the record and asked the caller to confirm it, which is
     // verification backwards: it discloses first and checks afterwards.
-    `Only discuss records belonging to the person calling from this number, and only after any identity checks pass. Never read out, confirm, or hint at a name, date, or detail from a record in order to ask the caller to confirm it — ask them to tell you, then check it against what you have. Never confirm or deny whether anyone else has an appointment at all.`,
+    // Checkpoint 2b review, c3 (partial FIX; NO-CHANGE for the _db/EHR tool
+    // parameter descriptions and set_call_intent's "caller" wording -- this
+    // codebase's word for the other party throughout). The referent is wrong
+    // on a call WE placed: nobody dialled in "from this number" -- Ava
+    // dialled the CONTACT, and O-12 already refuses every outbound action
+    // tool until confirm_identity has run, so "the person whose identity you
+    // have confirmed" is the accurate description of who this rule protects
+    // there. `outbound` is null on inbound (buildStaticSystemPrefix's own
+    // extras.outboundCall), so the ternary reduces to the exact original
+    // text and every inbound static-prefix snapshot stays byte-identical.
+    `Only discuss records belonging to ${outbound ? "the person whose identity you have confirmed" : "the person calling from this number"}, and only after any identity checks pass. Never read out, confirm, or hint at a name, date, or detail from a record in order to ask the caller to confirm it — ask them to tell you, then check it against what you have. Never confirm or deny whether anyone else has an appointment at all.`,
   ];
   // OUTBOUND CALLING (spec §9.5, Task 16): availabilityCheckToolName only
   // checks the TENANT's own allowedTasks/adapter, which D-c no longer
@@ -1348,10 +1375,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // (LVX43 notes the reworded spelling gate has never had one either).
   toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too. If the letters produce something that does not look like a name, or they differ from what you heard by a single letter, do not just overwrite it: say the letters back one at a time and ask the caller to confirm those letters, and use what they tell you. Never ask them to spell it a second time from scratch.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
+  // M5 (checkpoint 2b review): "take their details for follow-up" is the
+  // same phantom-tool shape as NNR 1 above, on outbound only.
+  const noResolutionOffer = outbound ? "call them back another time" : `"take their details for follow-up"`;
   if (appointmentsEnabled) {
-    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to "take their details for follow-up" if there is a genuine technical error with no actionable resolution.\n`;
+    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. For booking failures because a slot is taken, say something like "I'm sorry, that time is already taken — would you like to try a different time?" Do NOT offer to take a message for booking failures; instead help the caller find an alternative time. Only offer to ${noResolutionOffer} if there is a genuine technical error with no actionable resolution.\n`;
   } else {
-    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. If there is no actionable resolution, offer to take their details for follow-up.\n`;
+    toolContract += `- If a tool returns success=false, use the tool response to work out WHAT went wrong for the caller, then say it in your own words. Never read a tool message aloud and never quote one: those messages are written for YOU, not for the caller, and can contain internal system details. If there is no actionable resolution, offer to ${outbound ? "call them back another time" : "take their details for follow-up"}.\n`;
   }
   // Mechanism clause only. Everything after the first sentence is byte-identical
   // between the two modes on purpose: the vague-caller guidance is the sentence
@@ -1553,7 +1583,8 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // silent turn; this is its prompt-side complement. Three consecutive turns
   // of "one moment while I update that" with no result is what the caller
   // actually got.
-  guardrails += `- Never tell the caller you are checking or updating something more than once for the same request without giving them a result. If it has not worked twice, stop trying: say plainly that it is not working right now and offer to take their details so someone can follow up.\n`;
+  // M5 (checkpoint 2b review): same phantom-tool rewording, outbound only.
+  guardrails += `- Never tell the caller you are checking or updating something more than once for the same request without giving them a result. If it has not worked twice, stop trying: say plainly that it is not working right now and offer to ${outbound ? "call them back another time" : "take their details so someone can follow up"}.\n`;
   guardrails += `- If the caller is abusive or uses slurs, stay calm and professional, never repeat the language back, and never match their tone. Say once that you will have to end the call if it continues, then offer a transfer or end the call.\n`;
   guardrails += `- Never read back a full card number, full date of birth, or full identification number. Confirm with the last four digits, or the year only.\n`;
   guardrails += `- If the caller has the wrong number, or is selling something, say so politely in one sentence and end the call. Do not take a message.\n`;

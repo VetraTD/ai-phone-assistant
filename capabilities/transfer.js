@@ -99,7 +99,16 @@ export default {
     const reason = fc.args?.reason || null;
 
     if (!ctx.transferAllowed) {
-      const message = "Transfer is not available right now. Offer to take a message instead.";
+      // b17 (checkpoint 2b review). The same phantom-tool wording
+      // ESCALATION_SECTION_OUTBOUND above already avoids in the PROMPT was
+      // still reachable here, at EXECUTION time: "the message protocol"
+      // does not exist on outbound (messages is never a legal outbound
+      // campaign capability), so a refusal that tells the model to offer
+      // one is exactly the class of instruction this file's own header
+      // comment on ESCALATION_SECTION_OUTBOUND already names.
+      const message = ctx.outboundCall
+        ? "Transfer is not available right now. Offer to call them back another time instead."
+        : "Transfer is not available right now. Offer to take a message instead.";
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
         stateEffects: {
