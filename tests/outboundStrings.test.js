@@ -71,44 +71,78 @@ describe("signOffOutbound — O-9, no first name is dropped, never spoken as nul
   });
 });
 
-describe("signOffRe — the new outbound alternation (EN)", () => {
-  const S = getStrings("en");
+// ---------------------------------------------------------------------------
+// Checkpoint 2b review, I2 (Controller Ruling, OVERNIGHT). Task 17 appended
+// this alternation directly onto the SHARED, inbound signOffRe, which armed
+// the inbound goodbye exit on phrasings no inbound caller produces ("...
+// you'll speak soon" is an outbound shape: WE placed the call). It now lives
+// at its own key, OUTBOUND_STRINGS.signOffOutboundRe, and is OR'd into the
+// goodbye-exit readers (lib/voice/live/index.js) only when state.outboundCall
+// is set (tests/outboundSignoffGate.test.js proves that wiring through a real
+// outbound Live session; tests/liveGoodbyeExit.test.js proves these same
+// phrasings do NOT arm on a plain inbound one). This file certifies the
+// regex itself, in isolation, in both languages.
+// ---------------------------------------------------------------------------
+describe("signOffOutboundRe — the outbound-only alternation (EN)", () => {
+  const outboundEn = getOutboundStrings("en");
 
   it.each([
-    ["Thanks for your time, Priya. Bye for now.", getOutboundStrings("en").signOffOutbound("Priya")],
-    ["Thanks for your time. Bye for now.", getOutboundStrings("en").signOffOutbound(null)],
-  ])("the canned signOffOutbound text arms the gate: %s", (_label, text) => {
-    expect(S.signOffRe.test(text)).toBe(true);
+    ["Thanks for your time, Priya. Bye for now.", outboundEn.signOffOutbound("Priya")],
+    ["Thanks for your time. Bye for now.", outboundEn.signOffOutbound(null)],
+  ])("the canned signOffOutbound text arms the OUTBOUND gate: %s", (_label, text) => {
+    expect(outboundEn.signOffOutboundRe.test(text)).toBe(true);
   });
 
   it.each([
     "Thank you for your time, Priya. Speak soon!",
     "It was great chatting with you today. Speak soon.",
     "Thanks so much for your time, Priya. Take care.",
-  ])("a model paraphrase of the outbound close still arms the gate: %s", (text) => {
-    expect(S.signOffRe.test(text)).toBe(true);
+  ])("a model paraphrase of the outbound close arms the OUTBOUND gate: %s", (text) => {
+    expect(outboundEn.signOffOutboundRe.test(text)).toBe(true);
   });
 
   it("does not arm on an ordinary mention of time or speaking again", () => {
-    // Guards against the new alternation being loose enough to catch
-    // ordinary mid-call sentences that merely mention time or a future call.
-    expect(S.signOffRe.test("We really appreciate your time today — can I ask about your schedule?")).toBe(false);
-    expect(S.signOffRe.test("I'll speak to my colleague and call you back soon.")).toBe(false);
+    // Guards against the alternation being loose enough to catch ordinary
+    // mid-call sentences that merely mention time or a future call.
+    expect(
+      outboundEn.signOffOutboundRe.test("We really appreciate your time today — can I ask about your schedule?")
+    ).toBe(false);
+    expect(outboundEn.signOffOutboundRe.test("I'll speak to my colleague and call you back soon.")).toBe(false);
   });
 });
 
-describe("signOffRe — the new outbound alternation (ES)", () => {
-  const S = getStrings("es");
+describe("signOffOutboundRe — the outbound-only alternation (ES)", () => {
+  const outboundEs = getOutboundStrings("es");
 
   it.each([
-    ["Gracias por su tiempo, Priya. Hasta luego.", getOutboundStrings("es").signOffOutbound("Priya")],
-    ["Gracias por su tiempo. Hasta luego.", getOutboundStrings("es").signOffOutbound(null)],
-  ])("the canned signOffOutbound text arms the gate: %s", (_label, text) => {
-    expect(S.signOffRe.test(text)).toBe(true);
+    ["Gracias por su tiempo, Priya. Hasta luego.", outboundEs.signOffOutbound("Priya")],
+    ["Gracias por su tiempo. Hasta luego.", outboundEs.signOffOutbound(null)],
+  ])("the canned signOffOutbound text arms the OUTBOUND gate: %s", (_label, text) => {
+    expect(outboundEs.signOffOutboundRe.test(text)).toBe(true);
   });
 
-  it("a model paraphrase using 'nos hablamos pronto' still arms the gate", () => {
-    expect(S.signOffRe.test("Gracias por su tiempo, Priya. Nos hablamos pronto.")).toBe(true);
+  it("a model paraphrase using 'nos hablamos pronto' arms the OUTBOUND gate", () => {
+    expect(outboundEs.signOffOutboundRe.test("Gracias por su tiempo, Priya. Nos hablamos pronto.")).toBe(true);
+  });
+});
+
+describe("I2 — signOffRe is direction-gated: the outbound alternation does NOT arm the INBOUND gate", () => {
+  it.each([
+    "Thank you for your time, Priya. Speak soon!",
+    "It was great chatting with you today. Speak soon.",
+    "Thanks so much for your time, Priya. Take care.",
+    "Thanks for your time, Priya. Bye for now.",
+    "Thanks for your time. Bye for now.",
+  ])("EN: does not arm getStrings('en').signOffRe: %s", (text) => {
+    expect(getStrings("en").signOffRe.test(text)).toBe(false);
+  });
+
+  it.each([
+    "Gracias por su tiempo, Priya. Hasta luego.",
+    "Gracias por su tiempo. Hasta luego.",
+    "Gracias por su tiempo, Priya. Nos hablamos pronto.",
+  ])("ES: does not arm getStrings('es').signOffRe: %s", (text) => {
+    expect(getStrings("es").signOffRe.test(text)).toBe(false);
   });
 });
 

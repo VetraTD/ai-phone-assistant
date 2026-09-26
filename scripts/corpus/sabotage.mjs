@@ -230,35 +230,35 @@ const SABOTAGES = [
     // widened. A sabotage that does not reproduce the broken state proves
     // nothing, and the script's own rule is what surfaced it.
     //
-    // UPDATED (Task 17, session 2b, batch 2b): Task 17 appended the outbound
-    // alternation (D-a) to this same line, which moved the anchor -- this
-    // row's `find` is byte-exact into strings.js and the census would report
-    // zero matches otherwise (the trap the Task 17/21 brief calls out by
-    // name). The outbound alternation is carried UNCHANGED into `replace`:
-    // this row still narrows only the adjective list, exactly as it always
-    // has. The new alternation gets its OWN row below
-    // ("outbound-signoff-alternation").
+    // RE-POINTED (checkpoint 2b review, I2, Controller Ruling OVERNIGHT):
+    // Task 17's outbound alternation (D-a) was moved OFF this line entirely
+    // -- lib/voice/strings.js's signOffRe is back to its exact 44e31ba text,
+    // byte-for-byte (verified: `git diff 44e31ba -- lib/voice/strings.js`
+    // shows no change on this line). The outbound alternation now lives at
+    // OUTBOUND_STRINGS.signOffOutboundRe and has its own row below
+    // ("outbound-signoff-alternation"), so this row goes back to its
+    // pre-Task-17 find/replace/red, unchanged from before that task existed.
     find:
-      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$|\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+your\\s+time\\b[^!?]{0,60}?\\b(?:good\\s*bye|bye(?:\\s+for\\s+now)?|take\\s+care|speak\\s+soon)\\b|\\bspeak\\s+soon\\b[^a-z]{0,3}$/i,",
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
     replace:
-      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|great\\s+day|good\\s+day|great\\s+weekend|lovely\\s+day|take\\s+care)\\b|\\bhave\\s+a\\s+(?:great|good|lovely)\\s+(?:day|weekend|evening)\\b|\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+your\\s+time\\b[^!?]{0,60}?\\b(?:good\\s*bye|bye(?:\\s+for\\s+now)?|take\\s+care|speak\\s+soon)\\b|\\bspeak\\s+soon\\b[^a-z]{0,3}$/i, // SABOTAGE",
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|great\\s+day|good\\s+day|great\\s+weekend|lovely\\s+day|take\\s+care)\\b|\\bhave\\s+a\\s+(?:great|good|lovely)\\s+(?:day|weekend|evening)\\b/i, // SABOTAGE",
     red: [GOODBYE],
   },
   {
     name: "outbound-signoff-alternation",
     why:
-      "removes the WHOLE outbound signOffRe alternation Task 17 added (D-a): every model paraphrase of the canned outbound close ('Thanks for your time, {first_name}. Bye for now.', 'speak soon') stops arming the end_call gate, so Ava would sign off on an outbound call and never actually hang up.",
+      "guts OUTBOUND_STRINGS.en.signOffOutboundRe (D-a): every model paraphrase of the canned outbound close ('Thanks for your time, {first_name}. Bye for now.', 'speak soon') stops arming the end_call gate on an outbound call, so Ava would sign off and never actually hang up.",
     file: "lib/voice/strings.js",
-    // The WHOLE new alternation, removed at once -- the session brief's own
-    // instruction, mirroring how `farewell-adjective` sabotages its
-    // alternation above rather than narrowing one branch of it. `find` is
-    // this row's OWN post-Task-17 text (identical to the row above's
-    // `find`); `replace` drops everything after the pre-existing bare-day
-    // alternative, restoring the exact pre-Task-17 line.
+    // RE-POINTED (checkpoint 2b review, I2). The alternation no longer sits
+    // inside the shared signOffRe -- it is its OWN key, so this row now
+    // removes the whole regex's matching power at its own line rather than
+    // trimming a branch off signOffRe. A literal that cannot appear in any
+    // fixture, not an empty alternation: `//i` or `/(?:)/i` still matches
+    // every string (a zero-width assertion), which would leave this row
+    // silently passing.
     find:
-      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$|\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+your\\s+time\\b[^!?]{0,60}?\\b(?:good\\s*bye|bye(?:\\s+for\\s+now)?|take\\s+care|speak\\s+soon)\\b|\\bspeak\\s+soon\\b[^a-z]{0,3}$/i,",
-    replace:
-      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i, // SABOTAGE",
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+your\\s+time\\b[^!?]{0,60}?\\b(?:good\\s*bye|bye(?:\\s+for\\s+now)?|take\\s+care|speak\\s+soon)\\b|\\bspeak\\s+soon\\b[^a-z]{0,3}$/i,",
+    replace: "      /\\bZZZ_SABOTAGE_NEVER_MATCHES_ZZZ\\b/i, // SABOTAGE",
     red: [OUTBOUND_STRINGS],
   },
   {

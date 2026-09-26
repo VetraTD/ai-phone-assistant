@@ -212,6 +212,30 @@ describe("a spoken goodbye arms the hang-up", () => {
     expect(c().live_goodbye_armed_exit).toBe(1);
   });
 
+  // Checkpoint 2b review, I2 (Controller Ruling, OVERNIGHT). Task 17 widened
+  // the SHARED signOffRe with an outbound-only alternation ("...for your
+  // time...bye for now/take care/speak soon", and a bare end-anchored "speak
+  // soon"), which armed the INBOUND goodbye exit on phrasings no inbound
+  // caller produces -- "you'll speak soon" is an outbound shape: WE placed
+  // the call. That alternation now lives only in
+  // OUTBOUND_STRINGS.signOffOutboundRe and ORs in at the readers ONLY when
+  // state.outboundCall is set. These are plain inbound sessions (boot() never
+  // sets a direction), so none of these must arm -- 44e31ba behaviour,
+  // restored.
+  it.each([
+    "Thank you for your time, Priya. Speak soon!",
+    "It was great chatting with you today. Speak soon.",
+    "Thanks so much for your time, Priya. Take care.",
+    "Thanks for your time, Priya. Bye for now.",
+    "Thanks for your time. Bye for now.",
+  ])("does NOT arm on an outbound-only farewell phrasing (INBOUND call): %s", async (text) => {
+    const s = await boot();
+    await asked(s);
+    await s.say(text);
+
+    expect(c().live_goodbye_armed_exit).toBe(0);
+  });
+
   it("does not arm on a farewell-shaped phrase in the middle of a sentence", async () => {
     // The anchor earning its keep. An open adjective with no end-anchor would
     // read this as a sign-off and hang up on someone mid-booking.
