@@ -103,6 +103,27 @@ d("finishAttemptSession: the controller's own half of post-call", () => {
   });
 });
 
+// I6 (fix wave, checkpoint 2b, = b37): the Live session's own answered_at
+// stamp, written when it resolves the outbound context -- a second writer
+// for the SAME column stampAttemptStatus (the door) writes from Twilio's own
+// "in-progress" callback, for when that callback is lost or arrives late.
+d("stampAttemptAnswered: I6's session-side answered stamp (COALESCE-protected)", () => {
+  it("sets answered_at when it is still unset", async () => {
+    const id = await mkAttempt("CAwrite-answered-1");
+    await db.withTenant(BIZ, () => db.stampAttemptAnswered(id));
+    const row = (await admin.query(`SELECT answered_at FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(row.answered_at).not.toBeNull();
+  });
+
+  it("never moves an already-set answered_at -- idempotent against the door's own stamp, or a retried onStart", async () => {
+    const id = await mkAttempt("CAwrite-answered-2");
+    await admin.query(`UPDATE call_attempts SET answered_at = '2026-01-01T00:00:00Z' WHERE id = $1`, [id]);
+    await db.withTenant(BIZ, () => db.stampAttemptAnswered(id));
+    const row = (await admin.query(`SELECT answered_at FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    expect(row.answered_at.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
+
 d("setAttemptSilent / setOutreachHold: the final silent verdict (spec §13.4)", () => {
   it("setAttemptSilent overwrites whatever the controller left, to the final verdict", async () => {
     const id = await mkAttempt("CAwrite-silent-1");

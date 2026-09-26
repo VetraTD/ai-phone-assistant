@@ -98,8 +98,13 @@ async function run(db, overrides = {}) {
 }
 
 describe("runPostCall: unanswered attempts run steps 1 and 5-7 only", () => {
+  // I6 (fix wave, checkpoint 2b): a genuinely unanswered attempt (busy/
+  // no_answer/failed/canceled) never gets a `calls` row at all -- Task 14's
+  // onStart only creates one on an answered call (doorRoutes.js's own doc)
+  // -- so `callId: null` here matches what these fixtures were always
+  // MEANT to represent, now that `answered` also falls back to callId.
   it.each(["no_answer", "busy", "failed", "canceled"])("result=%s: no outcome resolution, no detectors, no silent-rule writes", async (result) => {
-    const db = fakeDb({ answeredAt: null, result, sessionFinishedAt: null });
+    const db = fakeDb({ answeredAt: null, callId: null, result, sessionFinishedAt: null });
     await run(db);
 
     expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, null);
@@ -114,8 +119,8 @@ describe("runPostCall: unanswered attempts run steps 1 and 5-7 only", () => {
   });
 
   it.each(["busy", "no_answer"])("%s: the SAME next next_attempt_at as the other", async (result) => {
-    const dbA = fakeDb({ answeredAt: null, result: "busy", sessionFinishedAt: null });
-    const dbB = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null });
+    const dbA = fakeDb({ answeredAt: null, callId: null, result: "busy", sessionFinishedAt: null });
+    const dbB = fakeDb({ answeredAt: null, callId: null, result: "no_answer", sessionFinishedAt: null });
     await run(dbA);
     await run(dbB);
     const nextA = dbA.applyOutreachResult.mock.calls[0][2].nextAttemptAt;
@@ -125,7 +130,7 @@ describe("runPostCall: unanswered attempts run steps 1 and 5-7 only", () => {
   });
 
   it("attempts_made not yet exhausted -> reschedules, does not close", async () => {
-    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 1 });
+    const db = fakeDb({ answeredAt: null, callId: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 1 });
     await run(db);
     const [outreachId, attemptNo, opts] = db.applyOutreachResult.mock.calls[0];
     expect(outreachId).toBe(OUTREACH);
@@ -135,11 +140,39 @@ describe("runPostCall: unanswered attempts run steps 1 and 5-7 only", () => {
   });
 
   it("schedule exhausted -> closes with attempts_exhausted", async () => {
-    const db = fakeDb({ answeredAt: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 3 }); // schedule has 3 entries
+    const db = fakeDb({ answeredAt: null, callId: null, result: "no_answer", sessionFinishedAt: null, attemptNo: 3 }); // schedule has 3 entries
     await run(db);
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
     expect(opts.terminal).toBe(true);
     expect(opts.closeReason).toBe("attempts_exhausted");
+  });
+});
+
+// I6 (fix wave, checkpoint 2b, = b37): a lost/late answered_at stamp must
+// not make a talked-to person read as unanswered. A `calls` row (callId)
+// only ever exists because a session actually started (Task 14's onStart on
+// an answered call) -- so its presence is itself answered evidence, the
+// backstop for `answered_at` never landing at all.
+describe("runPostCall: I6 -- a lost/late answered_at stamp still reads as answered when a session (callId) exists", () => {
+  it("answeredAt null but callId present: the transcript is read, the answered branch runs, result falls back to 'connected'", async () => {
+    const db = fakeDb(
+      { answeredAt: null, answeredBy: "human" },
+      { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "stop calling me" }]) }
+    );
+    await run(db);
+
+    expect(db.fetchCallTranscript).toHaveBeenCalledWith(CALL_ID);
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, "connected");
+    expect(db.setAttemptSilent).toHaveBeenCalled(); // the answered-only silent-verdict step ran
+  });
+
+  it("answeredAt null AND callId null: genuinely never connected -- the unanswered branch, no transcript read", async () => {
+    const db = fakeDb({ answeredAt: null, callId: null, result: "no_answer", sessionFinishedAt: null });
+    await run(db);
+
+    expect(db.fetchCallTranscript).not.toHaveBeenCalled();
+    expect(db.finalizeAttemptResult).toHaveBeenCalledWith(ATTEMPT, null);
+    expect(db.setAttemptSilent).not.toHaveBeenCalled();
   });
 });
 

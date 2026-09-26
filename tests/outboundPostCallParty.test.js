@@ -111,6 +111,8 @@ function fakeDb() {
     fetchBusinessCapabilities: async () => [],
     // Task 20: the outbound finish() hook's own half of post-call.
     finishAttemptSession: async () => {},
+    // I6 (fix wave, checkpoint 2b): the session's own answered stamp.
+    stampAttemptAnswered: async () => {},
   };
 }
 

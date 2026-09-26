@@ -2933,6 +2933,33 @@ export async function stampAttemptAmd(attemptId, { answeredBy, amdDurationMs = n
 }
 
 /**
+ * I6 (fix wave, checkpoint 2b, = b37): stamp `answered_at` the moment the
+ * Live session resolves the outbound context -- the stream only starts
+ * after pickup (spec §9.2), the SAME semantics as Twilio's own "in-progress"
+ * callback (`stampAttemptStatus`'s `answered` flag), machine answers
+ * included. A lost or late "in-progress" callback otherwise leaves
+ * `answered_at` NULL: `claimPostCall`'s own `answered_at IS NULL` disjunct
+ * then claims the attempt as soon as its terminal status lands, before the
+ * session finishes, so `runPostCall` takes the unanswered branch -- neither
+ * the opt-out nor the claimed-human detector ever reads the transcript, and
+ * a person who just said "stop calling me" (or just booked) gets dialled
+ * again.
+ *
+ * COALESCE-only, the same rule `stampAttemptStatus` follows for this exact
+ * column: never moves a timestamp that already exists, so calling this after
+ * the door's own stamp already landed (or calling it twice, e.g. a retried
+ * onStart) is a safe no-op.
+ * @param {string} attemptId
+ */
+export async function stampAttemptAnswered(attemptId) {
+  requireTenantScope("stampAttemptAnswered");
+  const res = await q(`UPDATE call_attempts SET answered_at = COALESCE(answered_at, now()) WHERE id = $1`, [attemptId]);
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`stampAttemptAnswered: expected 1 row, got ${res.rowCount}`);
+  noteAccess("stampAttemptAnswered", { resourceIds: [attemptId], rowCount: res.rowCount });
+}
+
+/**
  * The campaign context `decideAmd` (lib/outbound/amd.js) needs, but
  * `outboundAttemptByCallSid` deliberately does not carry -- that function's
  * shape stays general because Task 14 reuses it for the Live session's own

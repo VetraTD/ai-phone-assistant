@@ -81,6 +81,11 @@ export function fakeDb(config, businessId) {
     // session through this helper, and never asked to exercise post-call
     // itself, does not have to know this call site exists.
     finishAttemptSession: async () => {},
+    // I6 (fix wave, checkpoint 2b): the same rule -- a no-op default so a
+    // test that boots an outbound session and never asked to exercise this
+    // stamp does not get an unexpected outbound_answered_stamp_failed error
+    // log (several tests assert the log is otherwise clean).
+    stampAttemptAnswered: async () => {},
   };
 }
 
