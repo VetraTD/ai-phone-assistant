@@ -179,6 +179,8 @@ import {
   pickHarnessNumbers,
   harnessCallSid,
   HARNESS_RESERVE_USD,
+  detectLeadIn,
+  scheduleCallerClip,
 } from "../lib/probe/outboundHarness.js";
 import * as spendLive from "./probes/lib/spendLive.js";
 import {
@@ -1075,8 +1077,8 @@ async function postSigned(req) {
  *
  * @returns {Promise<{observer: ReturnType<typeof createClientObserver>, stats: object}>}
  */
-async function runOutboundCall({ seed, common, parties, mode, helloFrames }) {
-  const observer = createClientObserver();
+async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadIn = { leadInMs: 0, leadInFrames: 0 } }) {
+  const observer = createClientObserver({ leadInMs: leadIn.leadInMs });
   const playout = createPlayoutClock({ frameMs: FRAME_MS });
   const stats = {
     answerStatus: null,
@@ -1192,16 +1194,22 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames }) {
     );
     observer.streamStarted(Date.now());
 
-    // "Hello?" at --hello-ms after the answer. Its onset is the moment its
-    // first frame actually goes out on the ticker below.
-    if (mode === "speaks_first") later(() => outQueue.push(...helloFrames), answeredAt + HELLO_MS - Date.now());
+    // "Hello?" at --hello-ms after the answer means the person's VOICE
+    // starts then, not the FILE (H2): the clip's own lead-in silence
+    // (leadIn.leadInMs) is sent earlier, so the voiced frame -- the one at
+    // index leadIn.leadInFrames -- lands on the ticker below at --hello-ms.
+    const { fileStartMs } = scheduleCallerClip(HELLO_MS, leadIn.leadInMs);
+    if (mode === "speaks_first") later(() => outQueue.push(...helloFrames), answeredAt + fileStartMs - Date.now());
 
     // ONE ticker, as the inbound mode: a real line sends a frame every 20 ms.
     every(() => {
       if (ws.readyState !== ws.OPEN) return;
       const frame = outQueue.shift();
       if (frame) {
-        if (stats.speechFramesSent === 0) observer.helloOnset(Date.now());
+        // Onset is the first VOICED frame (leadIn.leadInFrames-th sent), not
+        // simply the first frame of the file -- that first frame may be lead-in
+        // silence the clip's own recording carries, not anything the person said.
+        if (stats.speechFramesSent === leadIn.leadInFrames) observer.helloOnset(Date.now());
         stats.speechFramesSent += 1;
       }
       ws.send(
@@ -1295,6 +1303,11 @@ async function mainOutbound() {
 
   // The caller's audio, checked before anything is seeded or spent.
   let helloFrames = [];
+  // H2: the real fixture carries lead-in silence before the voice starts
+  // (Google TTS's own recording latency); leadInFrames/leadInMs let the
+  // schedule and the onset both account for it. { leadInMs: 0, leadInFrames: 0 }
+  // (silent mode, --dry-run) is exactly the OLD behaviour: no adjustment.
+  let leadIn = { leadInMs: 0, leadInFrames: 0 };
   if (mode === "speaks_first" && !DRY_RUN) {
     let hello;
     try {
@@ -1303,6 +1316,11 @@ async function mainOutbound() {
       die(`${err.message}\n\nSynthesise it once (Google TTS, a few characters): node scripts/live-call-harness.js --synth --script outbound_hello`);
     }
     for (let i = 0; i < hello.mulaw.length; i += FRAME_BYTES) helloFrames.push(hello.mulaw.subarray(i, i + FRAME_BYTES));
+    leadIn = detectLeadIn(hello.mulaw, { frameBytes: FRAME_BYTES, frameMs: FRAME_MS });
+    if (!leadIn.voiced) {
+      console.log(`lead_in    WARNING: no frame of outbound_hello.ulaw reached the RMS threshold -- treating lead_in_ms as 0`);
+    }
+    console.log(`lead_in    ${leadIn.leadInMs} ms (${leadIn.leadInFrames} frames of ${leadIn.frames}, voiced=${leadIn.voiced})`);
   }
 
   const { default: pg } = await import("pg");
@@ -1384,7 +1402,7 @@ async function mainOutbound() {
     console.log(`clip       ${clip ? `${clipBytes} bytes stored: the clip path` : "none stored: the prompt path"}`);
 
     state.callStarted = true;
-    const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, helloFrames });
+    const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, helloFrames, leadIn });
 
     // The session writes the calls row's end and its summary at teardown.
     await new Promise((r) => setTimeout(r, 1500));

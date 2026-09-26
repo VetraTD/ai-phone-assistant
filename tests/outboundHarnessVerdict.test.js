@@ -40,6 +40,9 @@ import {
   pickHarnessNumbers,
   harnessCallSid,
   HARNESS_RESERVE_USD,
+  detectLeadIn,
+  scheduleCallerClip,
+  LEAD_IN_RMS_THRESHOLD,
 } from "../lib/probe/outboundHarness.js";
 import { createDispatcher } from "../lib/outbound/dispatch.js";
 import { renderLines } from "../lib/outbound/liveRender.js";
@@ -213,6 +216,59 @@ describe("the client-side clock", () => {
     expect(s.first_audio_mark_from_stream_start_ms).toBeNull();
     expect(s.hello_onset_from_answer_ms).toBeNull();
   });
+
+  it("lead_in_ms is reported verbatim in the snapshot (and so in the verdict's client measurements)", () => {
+    const o = createClientObserver({ leadInMs: 400 });
+    o.answered(0);
+    expect(o.snapshot().lead_in_ms).toBe(400);
+    expect(createClientObserver().snapshot().lead_in_ms).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H2 (2026-09-26 paid harness run): the caller clip `outbound_hello.ulaw`
+// carries ~400 ms of lead-in silence before Google TTS's "Hello?" actually
+// starts. `--hello-ms` names the moment the person's VOICE starts, so the
+// harness must start sending the FILE that much earlier and record onset at
+// the first VOICED frame, not the first FILE frame -- else the verdict's
+// no_frame_before_onset is lenient by the lead-in, and from_speech_ms is
+// inflated by it.
+// ---------------------------------------------------------------------------
+describe("H2: onset is the first VOICED frame, not the first FILE frame", () => {
+  it("the ruled RMS threshold is 500 (above the ~120 noise floor, below real voice's ~2936)", () => {
+    expect(LEAD_IN_RMS_THRESHOLD).toBe(500);
+  });
+
+  it("lead-in detection on a synthetic buffer: silence, then a loud tone", () => {
+    // mu-law 0xff decodes to exact silence (the same byte SILENT_FRAME_BYTES
+    // uses); mu-law 0x00 decodes to a large-magnitude sample -- a loud tone.
+    const silence = Buffer.alloc(160 * 5, 0xff); // 5 frames = 100 ms
+    const tone = Buffer.alloc(160 * 3, 0x00); // 3 frames = 60 ms
+    const buf = Buffer.concat([silence, tone]);
+    expect(detectLeadIn(buf)).toEqual({ leadInMs: 100, leadInFrames: 5, frames: 8, voiced: true });
+  });
+
+  it("an all-silent buffer is never voiced: lead-in fails closed to 0, not to the whole clip", () => {
+    const buf = Buffer.alloc(160 * 4, 0xff);
+    expect(detectLeadIn(buf)).toEqual({ leadInMs: 0, leadInFrames: 0, frames: 4, voiced: false });
+  });
+
+  it("a custom frame size / frameMs / threshold are honoured", () => {
+    const buf = Buffer.concat([Buffer.alloc(80, 0xff), Buffer.alloc(80, 0x00)]);
+    expect(detectLeadIn(buf, { frameBytes: 80, frameMs: 10, rmsThreshold: 500 })).toMatchObject({ leadInMs: 10, leadInFrames: 1, voiced: true });
+  });
+
+  it("schedule math: starts the file lead_in ms earlier so the voiced frame lands at hello_ms", () => {
+    expect(scheduleCallerClip(1870, 400)).toEqual({ fileStartMs: 1470, onsetMs: 1870, clamped: false });
+  });
+
+  it("schedule math: zero lead-in is the old behaviour exactly (file start = onset = hello_ms)", () => {
+    expect(scheduleCallerClip(1870, 0)).toEqual({ fileStartMs: 1870, onsetMs: 1870, clamped: false });
+  });
+
+  it("schedule math: clamps the file start at 0 rather than negative, and says the onset landed late", () => {
+    expect(scheduleCallerClip(300, 400)).toEqual({ fileStartMs: 0, onsetMs: 400, clamped: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -326,6 +382,29 @@ describe("the verdict", () => {
     const v = outboundVerdict({ mode: "speaks_first", clip: true, client, server: speaksServer, db: dbOk, personaName: "Ava" });
     expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
     expect(v.pass).toBe(false);
+  });
+
+  // H2: with the real fixture's ~400 ms lead-in, the window between the file
+  // being sent and the person's real "Hello?" is ~400 ms wide, not ~0 -- and
+  // an assistant frame landing in exactly that window (the caller is still
+  // silent) must still fail the criterion, the same as it always has.
+  it("H2: an assistant frame between file start and the TRUE voice onset still fails no_frame_before_onset", () => {
+    const LEAD_IN_MS = 400;
+    const { fileStartMs, onsetMs } = scheduleCallerClip(1870, LEAD_IN_MS);
+    const earlyReplyAt = fileStartMs + 100; // inside the caller's own lead-in silence
+    // The gap this defect is about: sabotaging onset back to "= file start"
+    // collapses it to <= 0, which is exactly what this guards against.
+    expect(earlyReplyAt).toBeLessThan(onsetMs);
+
+    const o = createClientObserver({ leadInMs: LEAD_IN_MS });
+    o.answered(0);
+    o.streamStarted(330);
+    o.fromServer(media, earlyReplyAt); // the assistant replied while the caller was still silent
+    o.helloOnset(onsetMs); // the caller's real voice only starts now
+    const v = outboundVerdict({ mode: "speaks_first", clip: true, client: o.snapshot(), server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
+    expect(v.pass).toBe(false);
+    expect(v.measurements.client.lead_in_ms).toBe(LEAD_IN_MS);
   });
 
   it("a hello that was never sent is not a pass", () => {
