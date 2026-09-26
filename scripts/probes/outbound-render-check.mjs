@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // ---------------------------------------------------------------------------
 // Y2 -- go-live pre-deploy code, group Y. Local, paid, ~$0.003 per --run.
+// Fix round 1 (review Minors 6-7): the spend ledger no longer records $0 for
+// a failed/unpriced paid run, and voice/language are resolved through the
+// production resolvers instead of being hard-coded.
 //
 // Renders ONE backstop (opener) clip exactly as the dispatcher would, through
 // Gemini Live, before any real dial. Never dials. Never touches a database.
@@ -9,6 +12,20 @@
 // function dispatch.js (the opener/voicemail clip) and callContext.js (the
 // Live session's own seed) both call, so the text this probe renders cannot
 // disagree with what a real call would speak. Never re-implemented here.
+//
+// VOICE + LANGUAGE: resolved exactly as createLiveRenderAudio does
+// (lib/outbound/liveRender.js:445-447), through the SAME two production
+// functions, `resolveLiveLanguage(config, callerId, env)` and
+// `resolveLiveVoice(config, languageCode, env)` (lib/voice/live/index.js),
+// lazily imported the same way createLiveRenderAudio imports them (that
+// module must not load at boot). `config` here is shaped like the tenant's
+// own row: `--locale`/`--live-voice` stand in for `businesses.locale` /
+// `.liveVoice`, and `--caller-id` stands in for the campaign's `caller_id` --
+// production always resolves against the BUSINESS number, never the
+// contact's. Neither resolver is re-implemented; an empty `--locale`/
+// `--live-voice` gets exactly the fallback the dispatcher gets for a tenant
+// with no locale/liveVoice set (the caller-ID's country, then the per-
+// language default voice).
 //
 // AUDIO + VERIFICATION: lib/outbound/liveRender.js's renderLines -- the SAME
 // function dispatch's renderAudio wraps for a real call (spike A: ~140 ms
@@ -20,24 +37,35 @@
 // the very thing being checked).
 //
 // DRY RUN BY DEFAULT: builds and prints the text, its length against the
-// dispatcher's own budget (CAMPAIGN_LIMITS.rendered_opener), and an estimated
-// worst-case spend. Never opens a Live session.
+// dispatcher's own budget (CAMPAIGN_LIMITS.rendered_opener), and the resolved
+// language/voice/source and an estimated worst-case spend. Never opens a
+// Live session.
 //
 // --run actually renders and spends. Reserves against the Part 1 cap first
 // (scripts/probes/lib/spendLive.js:249 reserveP1("P1-DEPLOY", 0.01)) and
-// commits after, win or lose (scripts/spikes/spike-a-opener.mjs's pattern:
-// every paid call reserves before, commits in a `finally`, including a
-// failed render).
+// commits after, win or lose -- and NEVER commits $0 once the reserve has
+// run: a throw commits the reserved worst case, and unpriced usage (no
+// usageMetadata captured, or a LIVE_MODEL with no rate card) falls back to
+// priceGeminiByMinutes on the audio actually measured, or to the worst case
+// if there is nothing to measure at all -- the same shape
+// scripts/spikes/spike-a-opener.mjs:~290-295 uses (that file, not
+// scripts/probes/spike-a-opener.mjs, which does not exist in this repo).
 //
 // Usage (Norton on this machine intercepts TLS; vendor scripts need the CA bundle):
 //   node scripts/probes/outbound-render-check.mjs --persona Ava \
-//     --business-name "Digile Media" --first-name Nithin
+//     --business-name "Digile Media" --first-name Nithin --caller-id +441372656055
 //                                                       # DRY RUN, spends nothing
 //   NODE_EXTRA_CA_CERTS=C:\Users\nithi\.gcloud-vetra2\ca-bundle.pem \
 //     LIVE_MODEL=gemini-3.8-live \
 //     node scripts/probes/outbound-render-check.mjs --persona Ava \
-//       --business-name "Digile Media" --first-name Nithin --run
+//       --business-name "Digile Media" --first-name Nithin \
+//       --caller-id +441372656055 --run
 //                                                       # PAID, ~$0.003
+//   --caller-id is REQUIRED with --run (no default caller-ID exists in
+//   production either); optional otherwise. --locale/--live-voice are the
+//   tenant's own config values -- pass what `db-inspect --business <phone>`
+//   reports, or leave them empty to see the SAME fallback a tenant with no
+//   locale/liveVoice set gets in production.
 //
 // Model from LIVE_MODEL (the production model, e.g. gemini-3.8-live).
 // Needs GEMINI_API_KEY in the environment or .env, read the way every other
@@ -48,19 +76,25 @@ import { pathToFileURL } from "node:url";
 import { renderCampaignLine, CAMPAIGN_LIMITS } from "../../lib/outbound/campaignSchema.js";
 import { TEMPLATES } from "../../lib/outbound/templates.js";
 import { renderLines } from "../../lib/outbound/liveRender.js";
-import { reserveP1, commit, priceTokens } from "./lib/spendLive.js";
+import { reserveP1, commit, priceTokens, priceGeminiByMinutes } from "./lib/spendLive.js";
 
 const PROBE = "P1-DEPLOY";
-const DEFAULT_VOICE = "Kore";
-const DEFAULT_LANGUAGE = "en-GB";
+const E164 = /^\+[1-9]\d{6,14}$/;
 // Spike A measured ~$0.002-0.004 per render (liveRender.js's header); this is
-// the worst-case figure reserved against the Part 1 cap before spending.
+// both the worst-case figure reserved against the Part 1 cap before spending
+// AND the last-resort commit when nothing else can be priced (Minor 6).
 export const WORST_CASE_USD = 0.01;
+// The clip renderLines hands back is already downsampled to the 8 kHz mu-law
+// Twilio plays (lib/voice/resample.js's createDownsampler) -- one byte per
+// sample -- so byte count over 8000 is real seconds of audio actually heard,
+// not an estimate of an estimate.
+const RENDER_SAMPLE_RATE_HZ = 8000;
 
 /**
  * Parses argv (already sliced past `node script.js`) the way scripts/outbound-admin.js does.
  * @returns {{ok: true, value: {persona: string, businessName: string, firstName: string,
- *   voiceName: string, languageCode: string, run: boolean}} | {ok: false, errors: Array<{path: string, message: string}>}}
+ *   callerId: string|null, locale: string, liveVoice: string, run: boolean}} |
+ *   {ok: false, errors: Array<{path: string, message: string}>}}
  */
 export function parseArgs(argv) {
   const all = Array.isArray(argv) ? argv : [];
@@ -74,16 +108,23 @@ export function parseArgs(argv) {
   const persona = argOf("persona");
   const businessName = argOf("business-name");
   const firstName = argOf("first-name");
-  const voiceName = argOf("voice") || DEFAULT_VOICE;
-  const languageCode = argOf("language") || DEFAULT_LANGUAGE;
+  const callerId = argOf("caller-id");
+  const locale = argOf("locale") || "";
+  const liveVoice = argOf("live-voice") || "";
   const run = all.includes("--run");
 
   if (!persona) push("persona", "is required (--persona)");
   if (!businessName) push("business-name", "is required (--business-name)");
   if (!firstName) push("first-name", "is required (--first-name)");
-  if (errors.length) return { ok: false, errors };
+  if (callerId !== null && !E164.test(callerId)) push("caller-id", "must be an E.164 number (--caller-id)");
+  // Minor 7: production always resolves voice/language against a real
+  // business number (the campaign's caller_id). --run without one would
+  // render in whatever this function falls back to for no number at all,
+  // which is not a check of any real tenant's render.
+  if (run && !callerId) push("caller-id", "is required with --run (--caller-id <e164>) -- production always resolves against the campaign's caller_id");
 
-  return { ok: true, value: { persona, businessName, firstName, voiceName, languageCode, run } };
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { persona, businessName, firstName, callerId, locale, liveVoice, run } };
 }
 
 /**
@@ -108,6 +149,12 @@ export async function main({
   reserveP1: reserveP1Fn = reserveP1,
   commit: commitFn = commit,
   priceTokens: priceTokensFn = priceTokens,
+  priceGeminiByMinutes: priceGeminiByMinutesFn = priceGeminiByMinutes,
+  // Injectable so a test can check the resolution without a network call --
+  // both functions are pure (string/table lookups), so production defaults
+  // are safe to exercise in a dry run with no network and no spend.
+  resolveLiveLanguage: resolveLiveLanguageFn,
+  resolveLiveVoice: resolveLiveVoiceFn,
   print = console.log,
   printErr = console.error,
 } = {}) {
@@ -116,7 +163,7 @@ export async function main({
     for (const e of parsed.errors) printErr(`Refusing: ${e.path}: ${e.message}`);
     return { ok: false, ran: false };
   }
-  const { persona, businessName, firstName, voiceName, languageCode, run } = parsed.value;
+  const { persona, businessName, firstName, callerId, locale, liveVoice, run } = parsed.value;
 
   const { text } = buildOpenerText({ persona, businessName, firstName });
   if (text === null) {
@@ -134,12 +181,28 @@ export async function main({
     return { ok: false, ran: false, text };
   }
 
+  // Minor 7: resolved exactly the way createLiveRenderAudio resolves them
+  // (liveRender.js:445-447) -- a tenant-shaped config, the campaign's
+  // caller_id, and the SAME production functions. Lazily imported for the
+  // same reason createLiveRenderAudio imports them lazily: this module must
+  // not load at boot.
+  let resolveLiveLanguage = resolveLiveLanguageFn;
+  let resolveLiveVoice = resolveLiveVoiceFn;
+  if (!resolveLiveLanguage || !resolveLiveVoice) {
+    ({ resolveLiveLanguage, resolveLiveVoice } = await import("../../lib/voice/live/index.js"));
+  }
+  const tenantConfig = { locale: locale || undefined, liveVoice: liveVoice || undefined };
+  const language = resolveLiveLanguage(tenantConfig, callerId || null, env);
+  const voice = resolveLiveVoice(tenantConfig, language.code, env);
+
   print(`text: ${JSON.stringify(text)}`);
   print(`chars: ${text.length}/${CAMPAIGN_LIMITS.rendered_opener}`);
+  print(`language: ${language.code} (source: ${language.source})`);
+  print(`voice: ${voice.name} (source: ${voice.source})`);
 
   if (!run) {
     print(`DRY RUN -- no Live session opened. Re-run with --run to render for real (worst-case ~$${WORST_CASE_USD.toFixed(2)}).`);
-    return { ok: true, ran: false, text };
+    return { ok: true, ran: false, text, language, voice };
   }
 
   const budget = reserveP1Fn(PROBE, WORST_CASE_USD);
@@ -160,23 +223,50 @@ export async function main({
     },
   };
 
+  // Minor 6. The reserve above already committed the Part 1 ledger to
+  // treating this as a real spend, so nothing past this point may report
+  // $0: a throw, missing usage, or an unpriced model must all fall back to a
+  // real (or worst-case) figure, never silently under-record.
   let usd = 0;
+  let estimated = false;
   let byteCount = 0;
   try {
-    const audio = await renderLinesFn({ lines: { opener: text }, voiceName, languageCode, model, env, log });
+    const audio = await renderLinesFn({ lines: { opener: text }, voiceName: voice.name, languageCode: language.code, model, env, log });
     byteCount = audio?.opener?.length || 0;
-    const priced = captured.usage ? priceTokensFn(model || "gemini-3.8-live", captured.usage) : { usd: 0, error: "no usage captured -- outbound_render_usage was not logged" };
-    usd = priced.usd || 0;
+
+    const priced = captured.usage
+      ? priceTokensFn(model || "gemini-3.8-live", captured.usage)
+      : { usd: 0, error: "no usage captured -- outbound_render_usage was not logged" };
+
+    if (priced.usd) {
+      usd = priced.usd;
+    } else {
+      // Unpriced usage (never captured, or LIVE_MODEL has no rate card):
+      // fall back to the audio actually measured -- spike-a-opener.mjs's
+      // pattern -- or the worst case if there is nothing to measure (a
+      // refusal with no audio and no usable usage at all).
+      const byMinutes = priceGeminiByMinutesFn({ inSeconds: 0, outSeconds: byteCount / RENDER_SAMPLE_RATE_HZ });
+      usd = byMinutes.usd || WORST_CASE_USD;
+      estimated = true;
+    }
 
     print(`verdict: ${captured.outcome ?? "unknown"}${captured.refusal ? ` refusal=${JSON.stringify(captured.refusal)}` : ""}`);
     print(`audio bytes: ${byteCount}`);
     print(`usage: ${JSON.stringify(captured.usage)}`);
-    print(`cost: $${usd.toFixed(5)}${priced.error ? ` (${priced.error})` : ""}`);
+    print(`cost: $${usd.toFixed(5)}${estimated ? " (estimated)" : ""}${priced.error ? ` (${priced.error})` : ""}`);
 
-    return { ok: captured.outcome === "accepted", ran: true, text, byteCount, verdict: captured.outcome, refusal: captured.refusal, usage: captured.usage, usd };
+    return { ok: captured.outcome === "accepted", ran: true, text, language, voice, byteCount, verdict: captured.outcome, refusal: captured.refusal, usage: captured.usage, usd, estimated };
+  } catch (err) {
+    // The session was reserved and (as far as this function can tell) opened;
+    // nothing usable came back at all, so the worst case is what gets billed
+    // rather than nothing.
+    usd = WORST_CASE_USD;
+    estimated = true;
+    printErr(`render failed: ${err?.message || err}`);
+    throw err;
   } finally {
-    commitFn({ probe: PROBE, usd });
-    print(`committed $${usd.toFixed(5)} under ${PROBE}`);
+    commitFn({ probe: PROBE, usd, estimated });
+    print(`committed $${usd.toFixed(5)} under ${PROBE}${estimated ? " (estimated)" : ""}`);
   }
 }
 
