@@ -91,14 +91,46 @@ function fakeDb() {
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Digile Media" })),
     loadConfig: () => currentConfig,
     withTenantSafe: async (_id, fn) => fn(),
+    withTenant: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
+    addTranscriptEntry: async () => {},
+    // b9 (checkpoint 2b review): minimal outbound context, reached only by
+    // the one outbound test in this file -- always resolves for "CA_cut",
+    // the one callSid every test here boots with.
+    outboundAttemptByCallSid: async (sid) =>
+      sid === "CA_cut"
+        ? { businessId: "biz-1", attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
+        : null,
+    outboundCallContext: async () => ({
+      attemptNo: 1,
+      openerAudio: null,
+      toNumber: "+15559990000",
+      outreachId: "out-1",
+      campaignId: "camp-1",
+      campaignVersion: 1,
+      contactId: "contact-1",
+      trigger: {},
+      templateKey: "speed_to_lead",
+      complianceClass: "solicited",
+      audience: "business",
+      config: {
+        persona_name: "Ava",
+        caller_id: "+441372656055",
+        capabilities: [],
+        opener: "Hi, is that {first_name}? It's {persona_name}, an AI assistant from {business_name}.",
+      },
+      firstName: "Sam",
+      contactTimezone: "Europe/London",
+    }),
+    fetchBusinessById: async () => ({ id: "biz-1", name: "Digile Media", timezone: "Europe/London" }),
+    fetchBusinessCapabilities: async () => [],
   };
 }
 
-async function boot(env = {}, configOverride = null) {
+async function boot(env = {}, configOverride = null, customParameters = { businessPhone: "+441372656055" }) {
   const ws = new FakeSocket();
   const live = fakeLive();
   if (configOverride) currentConfig = configOverride;
@@ -110,7 +142,7 @@ async function boot(env = {}, configOverride = null) {
   );
   ws.deliver({
     event: "start",
-    start: { callSid: "CA_cut", streamSid: "MZ1", customParameters: { businessPhone: "+441372656055" } },
+    start: { callSid: "CA_cut", streamSid: "MZ1", customParameters },
   });
   await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
   await new Promise((r) => setImmediate(r));
@@ -473,5 +505,39 @@ describe("the opening greeting, re-spoken mid-call", () => {
     expect(c().live_greeting_respoken).toBe(3);
     expect(c().live_greeting_respoken_cut).toBe(2);
     expect(s.cleared).toHaveLength(2);
+  });
+
+  it("b9 (checkpoint 2b review): on OUTBOUND, the tenant's inbound greeting can never cut Ava's own turns", async () => {
+    // state.config is the tenant's INBOUND config on every call, outbound
+    // included -- the campaign's own config lives on state.outboundCall,
+    // never here -- so without the fix this shares a ten-word run with the
+    // business name, "AI receptionist" and "how can I help" and would be cut
+    // as an echoed greeting nobody ever sent on this call. Same shape as
+    // "cuts the greeting spliced onto the end of an ordinary turn" above
+    // (turn 1 ordinary, turn 2 -- after the caller has spoken -- carries the
+    // shared run), so the only variable is direction.
+    const s = await boot({ TWILIO_VALIDATE_SIGNATURE: "false" }, null, { direction: "outbound" });
+    // Carries the AI disclosure itself, so this test's own log stays clean of
+    // the UNRELATED I5 first-turn correction (a different item in this wave).
+    await s.say("Hi, is that Sam? It's Ava, an AI assistant from Digile Media, calling about your enquiry.");
+    await s.caller("Yes, that's me.");
+    s.fragment("Sure, one moment. ");
+    s.fragment(GREETING);
+    await s.endTurn();
+
+    expect(c().live_greeting_respoken).toBeFalsy();
+    expect(s.cleared).toHaveLength(0);
+  });
+
+  it("inbound is unchanged: the SAME shape (a caller turn, then the greeting spliced onto turn 2) still cuts", async () => {
+    const s = await boot({ TWILIO_VALIDATE_SIGNATURE: "false" }, null, { businessPhone: "+441372656055" });
+    await s.say(GREETING); // turn 1 -- the REAL greeting, protected
+    await s.caller("Hi there.");
+    s.fragment("Sure, one moment. ");
+    s.fragment(GREETING);
+    await s.endTurn();
+
+    expect(c().live_greeting_respoken).toBe(1);
+    expect(s.cleared).toHaveLength(1);
   });
 });
