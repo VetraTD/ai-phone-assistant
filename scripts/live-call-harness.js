@@ -181,6 +181,8 @@ import {
   HARNESS_RESERVE_USD,
   detectLeadIn,
   scheduleCallerClip,
+  startMediaTicker,
+  pacingCheck,
 } from "../lib/probe/outboundHarness.js";
 import * as spendLive from "./probes/lib/spendLive.js";
 import {
@@ -626,6 +628,12 @@ async function main() {
     wrongStreamSid: 0,
     closeCode: null,
     closeReason: "",
+    // H3: the media ticker's own wall-clock window (startMediaTicker's
+    // startMs, and Date.now() when stopAllTimers actually stops it) --
+    // the pacing check reads elapsed = mediaTickerEndMs - mediaTickerStartMs,
+    // never a later "now" (the DB read-back wait would inflate it).
+    mediaTickerStartMs: null,
+    mediaTickerEndMs: null,
     // Which side ended the call, and when. Without this a deliberate hangup is
     // indistinguishable in the report from the ceiling cutting the run short,
     // and those two mean opposite things about every counter below.
@@ -671,6 +679,10 @@ async function main() {
     return t;
   };
   const stopAllTimers = () => {
+    // H3: the media ticker stops sending frames HERE (clearInterval, above),
+    // not whenever the socket eventually closes a moment later -- this is the
+    // instant that ends the ticker's own wall-clock window.
+    stats.mediaTickerEndMs = Date.now();
     for (const t of timers) {
       clearInterval(t);
       clearTimeout(t);
@@ -793,33 +805,48 @@ async function main() {
       })
     );
 
-    // ONE ticker. A real line always sends a frame every 20 ms, whether or not
-    // anybody is talking -- so this draws from the caller queue when there is
-    // speech to send and from silence when there is not, rather than starting
-    // and stopping. A stream that goes quiet is a different input to the
-    // vendor's VAD than a stream carrying silence.
+    // Turn-taking decision, on its own timer: whether enough quiet has passed
+    // to speak the next line depends only on the current wall clock against
+    // GAP_MS/REPLY_WAIT_MS, so unlike the media ticker below it does not need
+    // to catch up on missed ticks -- it just re-checks "now" a little less
+    // often than asked for, same as before H3.
     every(() => {
-      if (ws.readyState !== ws.OPEN) return;
-      const now = Date.now();
-      maybeSpeakNext(now);
-
-      const frame = outQueue.shift();
-      const payload = frame ? frame : SILENT_FRAME_BYTES;
-      if (frame) stats.speechFramesSent += 1;
-      ws.send(
-        JSON.stringify({
-          event: "media",
-          streamSid,
-          media: {
-            track: "inbound",
-            chunk: String(stats.framesSent + 1),
-            timestamp: String(stats.framesSent * FRAME_MS),
-            payload: payload.toString("base64"),
-          },
-        })
-      );
-      stats.framesSent += 1;
+      maybeSpeakNext(Date.now());
     }, FRAME_MS);
+
+    // ONE ticker (H3), paced by WALL CLOCK, not by counting ticks: a real
+    // line always sends a frame every 20 ms, whether or not anybody is
+    // talking -- so this draws from the caller queue when there is speech to
+    // send and from silence when there is not, rather than starting and
+    // stopping. A stream that goes quiet is a different input to the
+    // vendor's VAD than a stream carrying silence. `startMediaTicker`
+    // (lib/probe/outboundHarness.js) is the SAME helper the outbound mode
+    // uses below, so this ticker and that one cannot drift apart again.
+    const mediaTicker = startMediaTicker({
+      every,
+      frameMs: FRAME_MS,
+      getSent: () => stats.framesSent,
+      sendFrame: () => {
+        if (ws.readyState !== ws.OPEN) return;
+        const frame = outQueue.shift();
+        const payload = frame ? frame : SILENT_FRAME_BYTES;
+        if (frame) stats.speechFramesSent += 1;
+        ws.send(
+          JSON.stringify({
+            event: "media",
+            streamSid,
+            media: {
+              track: "inbound",
+              chunk: String(stats.framesSent + 1),
+              timestamp: String(stats.framesSent * FRAME_MS),
+              payload: payload.toString("base64"),
+            },
+          })
+        );
+        stats.framesSent += 1;
+      },
+    });
+    stats.mediaTickerStartMs = mediaTicker.startMs;
 
 
     // Silent mode runs for --hold. A script runs until it has said everything
@@ -955,6 +982,17 @@ async function main() {
   console.log(`first audio ${stats.firstMediaMs === null ? "NEVER" : `${stats.firstMediaMs} ms`}`);
   console.log(`audio out  ${stats.mediaFrames} frames, ${stats.mediaBytes} bytes, ~${(outMs / 1000).toFixed(1)} s`);
   console.log(`frames in  ${stats.framesSent} (${stats.speechFramesSent} speech, ${stats.framesSent - stats.speechFramesSent} silence)`);
+  if (stats.mediaTickerStartMs !== null && stats.mediaTickerEndMs !== null) {
+    const pacing = pacingCheck({
+      framesSent: stats.framesSent,
+      elapsedMs: stats.mediaTickerEndMs - stats.mediaTickerStartMs,
+      frameMs: FRAME_MS,
+    });
+    console.log(
+      `pacing     ${stats.framesSent}/${pacing.frames_expected} frames (ratio ${pacing.ratio})` +
+        (pacing.slow ? `  <- PACING_SLOW: caller audio was sent slower than real time` : "")
+    );
+  }
   const deliberate =
     stats.hangupReason && stats.hangupReason !== "ceiling" && stats.hangupReason !== "script_finished";
   if (SCRIPT_NAME) {
@@ -1099,6 +1137,10 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
     closeCode: null,
     closeReason: "",
     durationSeconds: null,
+    // H3: see the matching fields in main()'s stats -- same meaning, same
+    // pacingCheck at report time.
+    mediaTickerStartMs: null,
+    mediaTickerEndMs: null,
   };
   const outboundStreamSid = `MZ${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
 
@@ -1144,6 +1186,9 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
     timers.add(t);
   };
   const stopAllTimers = () => {
+    // H3: same rule as main()'s stopAllTimers -- this is when the media
+    // ticker actually stops sending, not whenever the socket later closes.
+    stats.mediaTickerEndMs = Date.now();
     for (const t of timers) {
       clearInterval(t);
       clearTimeout(t);
@@ -1201,31 +1246,39 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
     const { fileStartMs } = scheduleCallerClip(HELLO_MS, leadIn.leadInMs);
     if (mode === "speaks_first") later(() => outQueue.push(...helloFrames), answeredAt + fileStartMs - Date.now());
 
-    // ONE ticker, as the inbound mode: a real line sends a frame every 20 ms.
-    every(() => {
-      if (ws.readyState !== ws.OPEN) return;
-      const frame = outQueue.shift();
-      if (frame) {
-        // Onset is the first VOICED frame (leadIn.leadInFrames-th sent), not
-        // simply the first frame of the file -- that first frame may be lead-in
-        // silence the clip's own recording carries, not anything the person said.
-        if (stats.speechFramesSent === leadIn.leadInFrames) observer.helloOnset(Date.now());
-        stats.speechFramesSent += 1;
-      }
-      ws.send(
-        JSON.stringify({
-          event: "media",
-          streamSid: outboundStreamSid,
-          media: {
-            track: "inbound",
-            chunk: String(stats.framesSent + 1),
-            timestamp: String(stats.framesSent * FRAME_MS),
-            payload: (frame || SILENT_FRAME_BYTES).toString("base64"),
-          },
-        })
-      );
-      stats.framesSent += 1;
-    }, FRAME_MS);
+    // ONE ticker (H3), as the inbound mode: paced by WALL CLOCK, not by
+    // counting ticks -- see startMediaTicker (lib/probe/outboundHarness.js),
+    // the SAME helper the inbound mode registers above.
+    const mediaTicker = startMediaTicker({
+      every,
+      frameMs: FRAME_MS,
+      getSent: () => stats.framesSent,
+      sendFrame: () => {
+        if (ws.readyState !== ws.OPEN) return;
+        const frame = outQueue.shift();
+        if (frame) {
+          // Onset is the first VOICED frame (leadIn.leadInFrames-th sent), not
+          // simply the first frame of the file -- that first frame may be lead-in
+          // silence the clip's own recording carries, not anything the person said.
+          if (stats.speechFramesSent === leadIn.leadInFrames) observer.helloOnset(Date.now());
+          stats.speechFramesSent += 1;
+        }
+        ws.send(
+          JSON.stringify({
+            event: "media",
+            streamSid: outboundStreamSid,
+            media: {
+              track: "inbound",
+              chunk: String(stats.framesSent + 1),
+              timestamp: String(stats.framesSent * FRAME_MS),
+              payload: (frame || SILENT_FRAME_BYTES).toString("base64"),
+            },
+          })
+        );
+        stats.framesSent += 1;
+      },
+    });
+    stats.mediaTickerStartMs = mediaTicker.startMs;
 
     if (OUTBOUND_AMD) {
       later(() => {
@@ -1409,6 +1462,21 @@ async function mainOutbound() {
     const dbRead = await readBackOutbound({ admin, callSid: seed.callSid });
     const server = await readServerLogFor(seed.callSid);
 
+    // H3: measured over the ticker's own lifetime (mediaTickerStartMs ->
+    // mediaTickerEndMs, set when stopAllTimers actually stopped it) -- never
+    // against "now" here, which is already ~1.5 s later than the call ended.
+    const pacing =
+      stats.mediaTickerStartMs !== null && stats.mediaTickerEndMs !== null
+        ? {
+            frames_sent: stats.framesSent,
+            ...pacingCheck({
+              framesSent: stats.framesSent,
+              elapsedMs: stats.mediaTickerEndMs - stats.mediaTickerStartMs,
+              frameMs: FRAME_MS,
+            }),
+          }
+        : null;
+
     const verdict = outboundVerdict({
       mode,
       clip,
@@ -1417,6 +1485,7 @@ async function mainOutbound() {
       db: dbRead,
       personaName: seed.personaName,
       answerToStreamMs: ANSWER_TO_STREAM_MS,
+      pacing,
     });
 
     const priced = priceHarnessRun({
@@ -1452,6 +1521,7 @@ async function mainOutbound() {
         socket: {
           connect_ms: stats.connectMs,
           frames_sent: stats.framesSent,
+          frames_expected: pacing?.frames_expected ?? null,
           speech_frames_sent: stats.speechFramesSent,
           marks_received: stats.marksReceived,
           marks_echoed: stats.marksEchoed,

@@ -43,6 +43,11 @@ import {
   detectLeadIn,
   scheduleCallerClip,
   LEAD_IN_RMS_THRESHOLD,
+  framesDue,
+  startMediaTicker,
+  MEDIA_TICKER_MAX_BURST,
+  pacingCheck,
+  PACING_MIN_RATIO,
 } from "../lib/probe/outboundHarness.js";
 import { createDispatcher } from "../lib/outbound/dispatch.js";
 import { renderLines } from "../lib/outbound/liveRender.js";
@@ -162,6 +167,162 @@ describe("the paced mark echo", () => {
     for (let i = 0; i < 10; i++) p.onMedia(500);
     p.onClear(520);
     expect(p.markDelay(520)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H3 (2026-09-26, harness fidelity): setInterval(20) fires every ~31.4 ms on
+// this Windows machine (measured: 64 ticks in 2 s), not every 20 ms. A ticker
+// that sent exactly one frame per tick therefore delivered caller audio at
+// ~0.64x real time. framesDue/startMediaTicker pace the ticker by WALL CLOCK
+// instead, and pacingCheck is the regression guard that would catch a return
+// to one-frame-per-tick.
+// ---------------------------------------------------------------------------
+describe("H3: the media ticker is paced by wall clock, not by counting ticks", () => {
+  describe("framesDue", () => {
+    it("a tick exactly on a frame boundary owes exactly one frame", () => {
+      expect(framesDue({ startMs: 0, nowMs: 20, sent: 0, frameMs: 20 })).toBe(1);
+    });
+
+    it("never negative: a tick that fires before the next frame is due owes 0", () => {
+      expect(framesDue({ startMs: 0, nowMs: 15, sent: 0, frameMs: 20 })).toBe(0);
+      // already caught up (or ahead, which should never happen, but must not go negative)
+      expect(framesDue({ startMs: 0, nowMs: 20, sent: 5, frameMs: 20 })).toBe(0);
+    });
+
+    it("a clock that reads before startMs (should never happen) clamps elapsed to 0, not negative", () => {
+      expect(framesDue({ startMs: 1000, nowMs: 990, sent: 0, frameMs: 20 })).toBe(0);
+    });
+
+    it("31 ms ticks (this machine's measured setInterval(20) rate): due tracks elapsed/20 exactly, cumulatively", () => {
+      const startMs = 0;
+      const frameMs = 20;
+      let sent = 0;
+      for (let tick = 1; tick <= 64; tick++) {
+        const nowMs = tick * 31.4; // the defect's own measured rate
+        const due = framesDue({ startMs, nowMs, sent, frameMs, maxBurst: 100 });
+        sent += due;
+      }
+      // 64 ticks * 31.4 ms = 2009.6 ms elapsed -> floor(2009.6 / 20) = 100 frames due.
+      expect(sent).toBe(Math.floor((64 * 31.4) / frameMs));
+      expect(sent).toBe(100);
+      // The OLD, unpaced behaviour would have sent only 64 -- exactly the
+      // defect's own measurement (633-646 frames per 20 s instead of 1000).
+      expect(sent).toBeGreaterThan(64);
+    });
+
+    it("burst cap: a long stall never sends more than maxBurst frames in one tick", () => {
+      const due = framesDue({ startMs: 0, nowMs: 5000, sent: 0, frameMs: 20, maxBurst: 5 });
+      expect(due).toBe(5);
+      expect(framesDue({ startMs: 0, nowMs: 5000, sent: 0, frameMs: 20 })).toBe(MEDIA_TICKER_MAX_BURST);
+    });
+
+    it("the default max burst is 5", () => {
+      expect(MEDIA_TICKER_MAX_BURST).toBe(5);
+    });
+  });
+
+  describe("startMediaTicker", () => {
+    /** A fake `every` that captures the callback instead of registering a real timer. */
+    function fakeRegistrar() {
+      let tick = null;
+      const every = (fn) => {
+        tick = fn;
+      };
+      return { every, fire: () => tick() };
+    }
+
+    it("registers through the caller's own `every`, and returns the wall-clock instant frame 0 was due", () => {
+      const reg = fakeRegistrar();
+      let now = 12345;
+      const sent = { count: 0 };
+      const { startMs } = startMediaTicker({
+        every: reg.every,
+        frameMs: 20,
+        now: () => now,
+        getSent: () => sent.count,
+        sendFrame: () => {
+          sent.count += 1;
+        },
+      });
+      expect(startMs).toBe(12345);
+    });
+
+    it("sends however many frames are due each real fire -- catch-up, not one-per-tick", () => {
+      const reg = fakeRegistrar();
+      let now = 0;
+      const sent = { count: 0 };
+      startMediaTicker({
+        every: reg.every,
+        frameMs: 20,
+        maxBurst: 100,
+        now: () => now,
+        getSent: () => sent.count,
+        sendFrame: () => {
+          sent.count += 1;
+        },
+      });
+      now = 31.4; // first real fire, the measured rate
+      reg.fire();
+      expect(sent.count).toBe(1);
+      now = 62.8; // second real fire
+      reg.fire();
+      expect(sent.count).toBe(3); // caught up: 2 more frames became due
+      now = 94.2;
+      reg.fire();
+      expect(sent.count).toBe(4);
+    });
+
+    it("caps a stall's catch-up at maxBurst per tick", () => {
+      const reg = fakeRegistrar();
+      let now = 0;
+      const sent = { count: 0 };
+      startMediaTicker({
+        every: reg.every,
+        frameMs: 20,
+        maxBurst: 5,
+        now: () => now,
+        getSent: () => sent.count,
+        sendFrame: () => {
+          sent.count += 1;
+        },
+      });
+      now = 5000; // a huge stall: 250 frames would be "due"
+      reg.fire();
+      expect(sent.count).toBe(5);
+      // the remaining backlog catches up gradually over later ticks, never all at once
+      now = 5020;
+      reg.fire();
+      expect(sent.count).toBe(10);
+    });
+  });
+
+  describe("pacingCheck", () => {
+    it("ratio 1, exactly on pace: not slow", () => {
+      expect(pacingCheck({ framesSent: 100, elapsedMs: 2000, frameMs: 20 })).toEqual({ frames_expected: 100, ratio: 1, slow: false });
+    });
+
+    it("PACING_MIN_RATIO is 0.95", () => {
+      expect(PACING_MIN_RATIO).toBe(0.95);
+    });
+
+    it("the OLD one-frame-per-tick defect's own numbers: slow", () => {
+      // 64 ticks sent (the defect's measurement) over the 2,009.6 ms those
+      // 64 real ticks actually spanned -> ratio well under 0.95.
+      const r = pacingCheck({ framesSent: 64, elapsedMs: 2009.6, frameMs: 20 });
+      expect(r.frames_expected).toBe(100);
+      expect(r.ratio).toBeLessThan(0.95);
+      expect(r.slow).toBe(true);
+    });
+
+    it("a ratio just above the floor is not slow; just below is", () => {
+      expect(pacingCheck({ framesSent: 96, elapsedMs: 2000, frameMs: 20 }).slow).toBe(false); // 0.96
+      expect(pacingCheck({ framesSent: 94, elapsedMs: 2000, frameMs: 20 }).slow).toBe(true); // 0.94
+    });
+
+    it("zero elapsed time: frames_expected 0, ratio 1 (never a divide-by-zero), never slow", () => {
+      expect(pacingCheck({ framesSent: 0, elapsedMs: 0, frameMs: 20 })).toEqual({ frames_expected: 0, ratio: 1, slow: false });
+    });
   });
 });
 
@@ -433,6 +594,23 @@ describe("the verdict", () => {
     expect(late.warnings).toHaveLength(1);
     expect(late.warnings[0]).toMatch(/^stream_start_late: .*1650 ms.*shifted by 1320 ms/);
     expect(late.pass).toBe(true); // the criteria are unchanged; the warning is what the reader must see
+  });
+
+  // H3: pacing is a property of THIS harness's clock, never the product --
+  // WARNED about (like stream_start_late), never folded into a criterion.
+  it("H3: a slow-paced ticker is WARNED about (pacing_slow), not folded into a criterion", () => {
+    const clean = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: dbOk, personaName: "Ava", pacing: { frames_sent: 100, frames_expected: 100, ratio: 1, slow: false } });
+    expect(clean.warnings).toEqual([]);
+    expect(clean.measurements.pacing).toEqual({ frames_sent: 100, frames_expected: 100, ratio: 1, slow: false });
+
+    const slow = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: dbOk, personaName: "Ava", pacing: { frames_sent: 64, frames_expected: 100, ratio: 0.64, slow: true } });
+    expect(slow.warnings).toHaveLength(1);
+    expect(slow.warnings[0]).toMatch(/^pacing_slow: .*64 of an expected 100 frames.*ratio 0.64/);
+    expect(slow.pass).toBe(true); // the criteria (including the ones pacing would distort) are unchanged by this warning
+
+    const noMeasurement = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: speaksServer, db: dbOk, personaName: "Ava" });
+    expect(noMeasurement.warnings).toEqual([]);
+    expect(noMeasurement.measurements.pacing).toBeNull();
   });
 
   it("no server log: the path is UNKNOWN, and UNKNOWN is not a pass", () => {
