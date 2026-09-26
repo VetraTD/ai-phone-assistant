@@ -929,12 +929,16 @@ export async function markCallTransferred(callSid) {
 export async function setCallOutcomeCode(callSid, outcomeCode) {
   if (!pool) return;
   const res = await q(`UPDATE calls SET outcome_code = $2 WHERE twilio_call_sid = $1`, [callSid, outcomeCode]);
-  if (res.error) {
-    log.error("db_error", { callSid, operation: "setCallOutcomeCode", error: res.error.message });
-    captureException(new Error(res.error.message), { table: "calls", op: "update_outcome_code" });
-    return;
-  }
-  noteAccess("setCallOutcomeCode", { rowCount: res.rowCount || 0 });
+  // Fix round 1, I6: THROW rather than log-and-return, matching every other
+  // outbound writer keyed by a single row (stampAttemptStatus, stampAttemptAmd,
+  // setAttemptCallSid, ...). A silent return here reported success back to the
+  // door route for a write that never landed -- rowCount 0 (a CallSid this
+  // service never created a `calls` row for) or a DB error both look identical
+  // to "it worked" to a caller that never checks. The door route already runs
+  // this inside withTenantSafe, which logs the throw and degrades safely.
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`setCallOutcomeCode: expected 1 row, got ${res.rowCount}`);
+  noteAccess("setCallOutcomeCode", { rowCount: res.rowCount });
 }
 
 /**

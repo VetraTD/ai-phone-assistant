@@ -784,6 +784,36 @@ export async function executeToolCall(fc, ctx) {
 
     default: {
       const pack = packForTool(fc.name);
+
+      // Fix round 1, I2(b), Controller Ruling 1819-a. An EXECUTION-time
+      // mirror of the D-c declaration filter (services/gemini.js
+      // filterForOutboundCampaign): on outbound, a tool name reaching HERE
+      // must be one the campaign actually lists, exactly like the
+      // declarations the model was given. Without this, an undeclared name
+      // (the model calling a tool from another business's memory, a probe, or
+      // a future capability the campaign never turned on) still dispatched --
+      // packForTool resolves it, execute() runs, and I2's own reviewer probe
+      // is exactly this: record_sms_consent, never declared on outbound,
+      // still wrote granted=true for an unverified party. Inbound is
+      // unaffected: ctx.outboundCall is absent there (lib/voice/live/tools.js
+      // never sets it on inbound), and the cascade/text harness supply
+      // neither field, so this whole block no-ops for them.
+      if (ctx?.outboundCall) {
+        const campaignCapabilities = Array.isArray(ctx.outboundCall?.config?.capabilities)
+          ? ctx.outboundCall.config.capabilities
+          : [];
+        if (!pack || !campaignCapabilities.includes(pack.id)) {
+          const message = "That is not available on this call.";
+          return {
+            functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+            stateEffects: {
+              toolResult: { name: fc.name, success: false, message },
+              toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+            },
+          };
+        }
+      }
+
       if (pack && typeof pack.execute === "function") {
         // Was the answer already sitting in the call-start snapshot?
         //
@@ -806,6 +836,27 @@ export async function executeToolCall(fc, ctx) {
         // receptionist finding the record it needs in order to ask the caller
         // about it — locking the door and the key inside.
         if ((pack.actionTools || []).includes(fc.name)) {
+          // OWNER O-12 (fix round 1). An IMPLICIT phone_on_file on outbound,
+          // regardless of what the tenant opted into: ctx.party is non-null
+          // ONLY on outbound (lib/voice/live/tools.js), so this never fires on
+          // inbound or on the cascade/text harness, which supply no party at
+          // all. Placed above every other action-tool gate below, for the same
+          // reason the consent-agreement check is: there is nothing to check
+          // consent, spelling or requirements FOR until the call knows who it
+          // is speaking to.
+          if (ctx?.party && !ctx.party.verified) {
+            const message =
+              "[not caller speech] You have not confirmed who you are speaking to yet. Call " +
+              "confirm_identity once they have told you their name, then try this again.";
+            return {
+              functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+              stateEffects: {
+                toolResult: { name: fc.name, success: false, message },
+                toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+              },
+            };
+          }
+
           // DID THE CALLER ACTUALLY AGREE TO THIS, AND DID WE HEAR THEM?
           //
           // Above every other gate, because both questions are about whether
@@ -2144,7 +2195,43 @@ export async function executeToolCall(fc, ctx) {
             };
           }
         }
-        return pack.execute(fc, { ...ctx, deps: ctx.depsOverride || CAPABILITY_DEPS });
+        const result = await pack.execute(fc, { ...ctx, deps: ctx.depsOverride || CAPABILITY_DEPS });
+        // OWNER O-13 (fix round 1). Stamp every capability effect with the
+        // party's verification state AT THE MOMENT this tool produced it --
+        // ctx.party, which is immutable here: lib/voice/live/tools.js
+        // REASSIGNS its `party` variable on confirm_identity rather than
+        // mutating the object in place, so this reference can never change
+        // under us. Dispatch (capabilities/*.js onEffect, via
+        // lib/capabilities/party.js's partyOfEffect) reads the STAMP, never
+        // the live value, so a confirm_identity(false) after a legitimate
+        // verified write cannot cancel the text it already earned, and a
+        // confirm_identity(true) after an unverified one (should one ever
+        // reach this far — O-12 above already refuses it for every action
+        // tool) cannot retroactively release one either.
+        //
+        // ONLY on outbound (ctx.party truthy): adding a `party` key at all on
+        // inbound broke the exact `toEqual` shape several existing tests
+        // assert (tests/tools.test.js's booked/recorded/changed effects), and
+        // it does not need to be there -- partyOfEffect's fallback already
+        // treats an ABSENT effect.party exactly like a null one. So inbound
+        // effects are byte-identical, key for key, to before O-13.
+        if (
+          ctx.party &&
+          Array.isArray(result?.stateEffects?.capabilityEffects) &&
+          result.stateEffects.capabilityEffects.length
+        ) {
+          return {
+            ...result,
+            stateEffects: {
+              ...result.stateEffects,
+              capabilityEffects: result.stateEffects.capabilityEffects.map((effect) => ({
+                ...effect,
+                party: ctx.party,
+              })),
+            },
+          };
+        }
+        return result;
       }
       return executeWebhookTool(fc, ctx);
     }

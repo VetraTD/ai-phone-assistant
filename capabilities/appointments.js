@@ -43,7 +43,7 @@ import {
   capabilityConfig,
   isClosedNow,
 } from "../lib/capabilities/requirements.js";
-import { partyOf } from "../lib/capabilities/party.js";
+import { partyOf, partyOfEffect } from "../lib/capabilities/party.js";
 import { nameSpokenIn } from "../lib/nameQuality.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
@@ -1539,10 +1539,14 @@ export default {
     const { callSid, businessId, twilioNumber, config } = engine.call;
     if (!businessId) return;
     // Task 18, owner decision D-c: the party's phone and whether it is
-    // verified. Inbound is byte-identical — partyOf(engine.call) falls back to
-    // engine.call.callerNumber, verified true, so every value below is the
-    // same one this file always used.
-    const party = partyOf(engine.call);
+    // verified. Fix round 1, O-13: read through partyOfEffect, which prefers
+    // this EFFECT's own stamp (the party as it stood when book_appointment
+    // produced it) over engine.call.party's live value — a confirm_identity
+    // call on a LATER turn must not retroactively change what this booking's
+    // own confirmation SMS does. Inbound is byte-identical: the effect's
+    // stamp is always null there, so this falls back to
+    // engine.call.callerNumber, verified true, exactly as before O-13.
+    const party = partyOfEffect(effect, engine.call);
 
     engine.setStep(engine.STEPS.CONFIRM, "book_appointment");
 
@@ -3192,14 +3196,21 @@ async function executeViaEhr(fc, ctx) {
   // No external book configured: the model called a tool it was never offered.
   if (!integration) return unknownToolResult(fc);
 
+  // Fix round 1, I2(a): same fail-closed fix as smsConsent.js's execute() --
+  // the unconditional partyOf(ctx).phone reopened this path for an unverified
+  // outbound party. This route is undeclared on outbound today (only the
+  // `internal` adapter is wired for it — spec §12.6), and I2(b) below adds
+  // the execution-time gate that stops an undeclared tool from reaching here
+  // at all; this is the second, independent layer for the value itself.
+  // Inbound is byte-identical (partyOf falls back to ctx.callerPhone, verified
+  // always true).
+  const party = partyOf(ctx);
   const execResult = await ctx.deps.executeIntegration(integration, {
     tool: fc.name,
     arguments: fc.args || {},
     business_id: ctx.businessId || null,
     call_id: ctx.callId || null,
-    // Pre-ruling 6: same substitution as every other phone consumer in this
-    // file. Inbound is byte-identical (partyOf falls back to ctx.callerPhone).
-    caller_phone: partyOf(ctx).phone || null,
+    caller_phone: party.verified ? party.phone || null : null,
   });
   const success = execResult.success === true;
 

@@ -35,7 +35,7 @@
 
 import { isValidE164 } from "../lib/validate.js";
 import { SMS_CONSENT_SCRIPT, SMS_CONSENT_SCRIPT_VERSION } from "../lib/smsConsent.js";
-import { partyOf } from "../lib/capabilities/party.js";
+import { partyOf, partyOfEffect } from "../lib/capabilities/party.js";
 
 const RECORD_SMS_CONSENT_DECLARATION = {
   name: "record_sms_consent",
@@ -186,13 +186,19 @@ export default {
    */
   async execute(fc, ctx = {}) {
     const granted = fc.args?.granted === true;
-    // Task 18 (spec §9.6): the party's phone (ctx.party). Inbound is
-    // byte-identical — partyOf(ctx) falls back to ctx.callerPhone. This tool
-    // is not reachable on outbound today (sms_consent is not a legal campaign
-    // capability — see lib/outbound/campaignSchema.js CAMPAIGN_ENUMS), so
-    // party.verified is not additionally checked here; see the Task 18 report
-    // ("Parked") for the reachability finding.
-    const phone = partyOf(ctx).phone;
+    // Fix round 1, I2(a). Task 18's unconditional `partyOf(ctx).phone` reopened
+    // the fail-closed path here: this tool is undeclared on outbound today
+    // (sms_consent is not a legal campaign capability), but nothing at the
+    // EXECUTION layer enforced that (see I2(b) below), so a model that called
+    // it anyway on an outbound, unverified party got `phone` = the contact's
+    // dialled number and recorded a consent for it. `party.verified ? phone :
+    // null` closes that: an unverified party's phone reads as absent, and the
+    // existing `!isValidE164(phone)` refusal just below (unchanged) takes it
+    // from there — the same message a withheld caller ID already gets.
+    // Inbound is byte-identical: partyOf(ctx) falls back to ctx.callerPhone
+    // with verified always true.
+    const party = partyOf(ctx);
+    const phone = party.verified ? party.phone : null;
 
     // The gate that makes always-registering safe. A business with caller text
     // follow-ups switched off sends nothing, so recording a consent for it
@@ -291,9 +297,13 @@ export default {
     const { businessId, callSid } = engine.call || {};
     // Owner decision D-c: releasing a held text IS the text-sending effect
     // this consent gate exists to gate, so it requires party.verified too.
-    // Inbound is byte-identical — partyOf falls back to engine.call.callerNumber,
-    // verified true.
-    const party = partyOf(engine.call || {});
+    // Fix round 1, O-13: partyOfEffect prefers this effect's own stamp (the
+    // party as it stood when record_sms_consent produced it) over the live
+    // engine.call.party, so a confirm_identity on a later turn cannot change
+    // whether THIS consent's release goes out. Inbound is byte-identical —
+    // the stamp is always null there, so this falls back to
+    // engine.call.callerNumber, verified true.
+    const party = partyOfEffect(effect, engine.call || {});
     const { notifications, log } = engine.deps || {};
     if (!businessId || !party.verified || !party.phone || !notifications?.releaseHeldCallerSms) return;
 

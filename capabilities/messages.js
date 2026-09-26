@@ -20,7 +20,7 @@ import {
   notesPromptLines,
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
-import { partyOf } from "../lib/capabilities/party.js";
+import { partyOfEffect } from "../lib/capabilities/party.js";
 
 
 /**
@@ -199,9 +199,11 @@ export default {
     // Task 18, owner decision D-c: not reachable on outbound today ("messages"
     // is not a legal campaign capability — lib/outbound/campaignSchema.js
     // CAMPAIGN_ENUMS.capabilities), but wired the same way as every other
-    // text-sending effect against the day it might be. Inbound is
-    // byte-identical — partyOf falls back to engine.call.callerNumber.
-    const party = partyOf(engine.call);
+    // text-sending effect against the day it might be. Fix round 1, O-13:
+    // partyOfEffect prefers the effect's own stamp over the live
+    // engine.call.party. Inbound is byte-identical — the stamp is always null
+    // there, so this falls back to engine.call.callerNumber.
+    const party = partyOfEffect(effect, engine.call);
 
     const args = effect.data || {};
     const { db, notifications, log, captureException } = engine.deps;

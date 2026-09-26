@@ -617,13 +617,25 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
   // caller-facing text -- unlocks until this tool has run with
   // name_confirmed: true (lib/capabilities/party.js, capabilities/*.js).
   if (extras?.outboundCall) {
+    // Fix round 1, I5. The dropped parenthetical ("or a business contact has
+    // done so on their behalf") let a gatekeeper's word stand in for the
+    // contact's own -- exactly what O-12's implicit phone_on_file exists to
+    // prevent. The description now names the person and requires THEIR OWN
+    // confirmation only; a receptionist, secretary or relative confirming on
+    // their behalf is the "wrong person" branch, not this one (spec §9.5's
+    // situations table already tells Ava to ask for the contact by name and
+    // share nothing with a gatekeeper).
+    const contactFirstName = extras.outboundCall?.contact?.firstName || null;
+    const selfConfirmClause = contactFirstName
+      ? `the person THEMSELVES confirms they are ${contactFirstName}`
+      : "the person THEMSELVES confirms their own identity";
     declarations.push({
       name: "confirm_identity",
       description:
         "Call this once you have established who you are speaking to, before sharing any " +
-        "details of the enquiry or looking anything up for them. Pass name_confirmed: true " +
-        "once the person has confirmed their own name (or a business contact has done so on " +
-        "their behalf). Pass name_confirmed: false if this is the wrong person, a gatekeeper, " +
+        "details of the enquiry or looking anything up for them. Pass name_confirmed: true only " +
+        `once ${selfConfirmClause} -- never on a gatekeeper's, receptionist's or relative's word. ` +
+        "Pass name_confirmed: false if this is the wrong person, a gatekeeper, " +
         "a child, or you could not confirm who you are speaking to -- share nothing further in " +
         "that case and offer a callback instead.",
       parameters: {

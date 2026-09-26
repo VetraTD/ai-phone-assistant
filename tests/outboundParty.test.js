@@ -518,3 +518,327 @@ describe("smsConsent onEffect (answered) — outbound party gate on releasing a 
     expect(releaseHeldCallerSms).toHaveBeenCalledWith("biz-outbound-effects", CONTACT_PHONE);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (opus review). OWNER O-12, O-13; I2(a), I2(b).
+// ---------------------------------------------------------------------------
+
+describe("O-12 (fix round 1): implicit phone_on_file for EVERY outbound action tool", () => {
+  it("book_appointment refuses before confirm_identity even with DEFAULT config (no phone_on_file requirement at all)", async () => {
+    const { deps } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-o12",
+      callId: "call-o12-1",
+      integrations: [],
+      capabilityState: {},
+      config: {}, // DEFAULT: no require.identity.builtin configured anywhere
+      spellingSettled: true,
+      party: UNVERIFIED,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc1", name: "book_appointment", args: { client_name: "Priya Shah", scheduled_at: futureIso() } };
+    const { functionResponse } = await executeToolCall(fc, ctx);
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/confirm_identity/i);
+    expect(deps.createAppointmentIfAvailable).not.toHaveBeenCalled();
+  });
+
+  it("books once verified, with DEFAULT config, clientPhone = contact phone", async () => {
+    const { deps, createAppointmentIfAvailable } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-o12",
+      callId: "call-o12-2",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      party: VERIFIED,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc2", name: "book_appointment", args: { client_name: "Priya Shah", scheduled_at: futureIso() } };
+    const { functionResponse } = await executeToolCall(fc, ctx);
+    expect(functionResponse.response.success).toBe(true);
+    expect(createAppointmentIfAvailable).toHaveBeenCalledTimes(1);
+    expect(createAppointmentIfAvailable.mock.calls[0][0].clientPhone).toBe(CONTACT_PHONE);
+  });
+
+  it("cancel_appointment_db is refused unverified too -- not just book_appointment", async () => {
+    const { deps } = makeBookDeps();
+    deps.getAppointmentById = vi.fn(async () => ({ id: "appt-1", client_phone: CONTACT_PHONE, client_name: "Priya Shah" }));
+    const ctx = {
+      businessId: "biz-o12",
+      callId: "call-o12-3",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      party: UNVERIFIED,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc3", name: "cancel_appointment_db", args: { appointment_id: "appt-1" } };
+    const { functionResponse } = await executeToolCall(fc, ctx);
+    expect(functionResponse.response.success).toBe(false);
+    expect(deps.updateAppointmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("inbound (no party field) is unaffected -- the regression proof", async () => {
+    const { deps, createAppointmentIfAvailable } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-o12-inbound",
+      callId: "call-o12-4",
+      callerPhone: "+15551234567",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc4", name: "book_appointment", args: { client_name: "Jane Smith", scheduled_at: futureIso() } };
+    const { functionResponse } = await executeToolCall(fc, ctx);
+    expect(functionResponse.response.success).toBe(true);
+    expect(createAppointmentIfAvailable.mock.calls[0][0].clientPhone).toBe("+15551234567");
+  });
+});
+
+describe("I2(a) (fix round 1): party.verified ? party.phone : null at the two reopened sites", () => {
+  it("smsConsent.execute refuses an unverified outbound party (no consent write)", async () => {
+    const recordSmsConsent = vi.fn(async () => "consent-1");
+    const ctx = {
+      businessId: "biz-i2a",
+      callId: "call-i2a-1",
+      config: { smsFollowupEnabled: true },
+      party: UNVERIFIED,
+      deps: { recordSmsConsent },
+    };
+    const out = await smsConsentPack.execute({ id: "fc1", name: "record_sms_consent", args: { granted: true } }, ctx);
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(recordSmsConsent).not.toHaveBeenCalled();
+  });
+
+  it("smsConsent.execute records the consent once verified", async () => {
+    const recordSmsConsent = vi.fn(async () => "consent-1");
+    const ctx = {
+      businessId: "biz-i2a",
+      callId: "call-i2a-2",
+      config: { smsFollowupEnabled: true },
+      party: VERIFIED,
+      deps: { recordSmsConsent },
+    };
+    const out = await smsConsentPack.execute({ id: "fc1", name: "record_sms_consent", args: { granted: true } }, ctx);
+    expect(out.functionResponse.response.success).toBe(true);
+    expect(recordSmsConsent).toHaveBeenCalledWith(expect.objectContaining({ phoneNumber: CONTACT_PHONE }));
+  });
+
+  it("appointments' EHR caller_phone is null for an unverified party (get_caller_appointments, a READ so O-12 does not gate it)", async () => {
+    const executeIntegration = vi.fn(async () => ({ success: true, message: "ok" }));
+    const ctx = {
+      businessId: "biz-i2a-ehr",
+      callId: "call-i2a-3",
+      config: {},
+      integrations: [{ enabled: true, provider: "athenahealth" }],
+      party: UNVERIFIED,
+      depsOverride: { executeIntegration },
+    };
+    const fc = { id: "fc1", name: "get_caller_appointments", args: { caller_name: "Priya Shah" } };
+    await executeToolCall(fc, ctx);
+    expect(executeIntegration).toHaveBeenCalledTimes(1);
+    expect(executeIntegration.mock.calls[0][1].caller_phone).toBeNull();
+  });
+
+  it("appointments' EHR caller_phone is the contact's phone once verified", async () => {
+    const executeIntegration = vi.fn(async () => ({ success: true, message: "ok" }));
+    const ctx = {
+      businessId: "biz-i2a-ehr",
+      callId: "call-i2a-4",
+      config: {},
+      integrations: [{ enabled: true, provider: "athenahealth" }],
+      party: VERIFIED,
+      depsOverride: { executeIntegration },
+    };
+    const fc = { id: "fc2", name: "get_caller_appointments", args: { caller_name: "Priya Shah" } };
+    await executeToolCall(fc, ctx);
+    expect(executeIntegration.mock.calls[0][1].caller_phone).toBe(CONTACT_PHONE);
+  });
+});
+
+describe("I2(b) (fix round 1, Controller Ruling 1819-a): execution-time gate mirrors the D-c declaration filter", () => {
+  const OUTBOUND_CALL_APPOINTMENTS_ONLY = { config: { capabilities: ["appointments", "transfer"] } };
+
+  it("refuses a tool whose pack the campaign never listed, even though packForTool resolves it", async () => {
+    const ctx = {
+      businessId: "biz-i2b",
+      callId: "call-i2b-1",
+      config: { smsFollowupEnabled: true },
+      party: VERIFIED,
+      outboundCall: OUTBOUND_CALL_APPOINTMENTS_ONLY,
+      deps: { recordSmsConsent: vi.fn(async () => "consent-1") },
+    };
+    // record_sms_consent's pack ("sms_consent") is not in the campaign's list.
+    const out = await executeToolCall({ id: "fc1", name: "record_sms_consent", args: { granted: true } }, ctx);
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(ctx.deps.recordSmsConsent).not.toHaveBeenCalled();
+  });
+
+  it("this is the reviewer's own probe: record_sms_consent no longer writes granted=true for an unverified, undeclared party", async () => {
+    const recordSmsConsent = vi.fn(async () => "consent-1");
+    const ctx = {
+      businessId: "biz-i2b",
+      callId: "call-i2b-2",
+      config: { smsFollowupEnabled: true },
+      party: UNVERIFIED,
+      outboundCall: OUTBOUND_CALL_APPOINTMENTS_ONLY,
+      deps: { recordSmsConsent },
+    };
+    const out = await executeToolCall({ id: "fc1", name: "record_sms_consent", args: { granted: true } }, ctx);
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(recordSmsConsent).not.toHaveBeenCalled();
+  });
+
+  it("allows a tool whose pack IS in the campaign's list", async () => {
+    const { deps, createAppointmentIfAvailable } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-i2b",
+      callId: "call-i2b-3",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      party: VERIFIED,
+      outboundCall: OUTBOUND_CALL_APPOINTMENTS_ONLY,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc1", name: "book_appointment", args: { client_name: "Priya Shah", scheduled_at: futureIso() } };
+    const { functionResponse } = await executeToolCall(fc, ctx);
+    expect(functionResponse.response.success).toBe(true);
+    expect(createAppointmentIfAvailable).toHaveBeenCalledTimes(1);
+  });
+
+  it("inbound (no ctx.outboundCall) is unaffected -- the regression proof", async () => {
+    const recordSmsConsent = vi.fn(async () => "consent-1");
+    const ctx = {
+      businessId: "biz-i2b-inbound",
+      callId: "call-i2b-4",
+      callerPhone: "+15551234567",
+      config: { smsFollowupEnabled: true },
+      depsOverride: { recordSmsConsent },
+    };
+    const out = await executeToolCall({ id: "fc1", name: "record_sms_consent", args: { granted: true } }, ctx);
+    expect(out.functionResponse.response.success).toBe(true);
+    expect(recordSmsConsent).toHaveBeenCalled();
+  });
+});
+
+describe("O-13 (fix round 1): capability effects are stamped with the party at write time, not read live at dispatch", () => {
+  it("stamps the effect with ctx.party at the moment book_appointment produced it", async () => {
+    const { deps } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-o13",
+      callId: "call-o13-1",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      party: VERIFIED,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc1", name: "book_appointment", args: { client_name: "Priya Shah", scheduled_at: futureIso() } };
+    const { stateEffects } = await executeToolCall(fc, ctx);
+    expect(stateEffects.capabilityEffects[0].party).toEqual(VERIFIED);
+  });
+
+  it("a later confirm_identity(false) does not cancel a text a VERIFIED write already earned", async () => {
+    const { deps } = makeBookDeps();
+    const ctx = {
+      businessId: "biz-o13",
+      callId: "call-o13-2",
+      integrations: [],
+      capabilityState: {},
+      config: {},
+      spellingSettled: true,
+      party: VERIFIED,
+      depsOverride: deps,
+    };
+    const fc = { id: "fc2", name: "book_appointment", args: { client_name: "Priya Shah", scheduled_at: futureIso() } };
+    const { stateEffects } = await executeToolCall(fc, ctx);
+    const effect = stateEffects.capabilityEffects[0];
+    expect(effect.party).toEqual(VERIFIED); // the stamp
+
+    // Simulate the LATER confirm_identity(false): the LIVE party is now
+    // unverified, but the effect above already carries its own snapshot.
+    const notifications = { notifyAppointmentBooked: vi.fn(async () => {}), sendCallerSms: vi.fn(async () => {}) };
+    const engine = {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: vi.fn(),
+      addHistoryNote: vi.fn(),
+      call: {
+        callSid: "CA-o13-1",
+        businessId: "biz-o13",
+        party: { ...VERIFIED, verified: false }, // the LIVE (revoked) value
+        config: { timezone: "America/Chicago" },
+      },
+      deps: { log: { error: vi.fn(), info: vi.fn() }, captureException: vi.fn(), notifications },
+    };
+    appointmentsPack.onEffect(effect, engine);
+    await new Promise((r) => setImmediate(r));
+    expect(notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(notifications.sendCallerSms.mock.calls[0][1]).toBe(CONTACT_PHONE);
+  });
+
+  it("a later confirm_identity(true) does not release a text for an effect stamped unverified", async () => {
+    // O-12 refuses the WRITE itself while unverified, so an unverified
+    // capabilityEffect cannot come from book_appointment in practice today.
+    // This proves the DISPATCH side of the guarantee directly: an effect
+    // stamped unverified is never released by a live party that has since
+    // been confirmed, however it arose.
+    const notifications = { notifyAppointmentBooked: vi.fn(async () => {}), sendCallerSms: vi.fn(async () => {}) };
+    const engine = {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: vi.fn(),
+      addHistoryNote: vi.fn(),
+      call: {
+        callSid: "CA-o13-2",
+        businessId: "biz-o13",
+        party: VERIFIED, // the LIVE value: confirmed by now
+        config: { timezone: "America/Chicago" },
+      },
+      deps: { log: { error: vi.fn(), info: vi.fn() }, captureException: vi.fn(), notifications },
+    };
+    const effect = {
+      capability: "appointments",
+      type: "booked",
+      data: { scheduled_at: "2026-09-05T15:00:00.000Z", client_name: "Priya Shah" },
+      party: UNVERIFIED, // the STAMP: unverified at write time
+    };
+    appointmentsPack.onEffect(effect, engine);
+    await new Promise((r) => setImmediate(r));
+    expect(notifications.sendCallerSms).not.toHaveBeenCalled();
+  });
+
+  it("inbound is unaffected: an effect with no stamp falls back to engine.call, exactly as before O-13", async () => {
+    const notifications = { notifyAppointmentBooked: vi.fn(async () => {}), sendCallerSms: vi.fn(async () => {}) };
+    const engine = {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: vi.fn(),
+      addHistoryNote: vi.fn(),
+      call: {
+        callSid: "CA1",
+        businessId: "biz-1",
+        callerNumber: "+15551112222",
+        twilioNumber: null,
+        config: { timezone: "America/Chicago" },
+      },
+      deps: { log: { error: vi.fn(), info: vi.fn() }, captureException: vi.fn(), notifications },
+    };
+    const effect = {
+      capability: "appointments",
+      type: "booked",
+      data: { scheduled_at: "2026-09-05T15:00:00.000Z", client_name: "Jane" },
+      // no `party` field at all -- exactly what an inbound-produced effect
+      // looks like (ctx.party is always null on inbound).
+    };
+    appointmentsPack.onEffect(effect, engine);
+    await new Promise((r) => setImmediate(r));
+    expect(notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(notifications.sendCallerSms.mock.calls[0][1]).toBe("+15551112222");
+  });
+});

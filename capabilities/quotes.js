@@ -35,7 +35,7 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
-import { partyOf } from "../lib/capabilities/party.js";
+import { partyOfEffect } from "../lib/capabilities/party.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -188,9 +188,11 @@ export default {
     // Task 18, owner decision D-c: not reachable on outbound today ("quotes"
     // is not a legal campaign capability — lib/outbound/campaignSchema.js
     // CAMPAIGN_ENUMS.capabilities), but wired the same way as every other
-    // text-sending effect against the day it might be. Inbound is
-    // byte-identical — partyOf falls back to engine.call.callerNumber.
-    const party = partyOf(engine.call);
+    // text-sending effect against the day it might be. Fix round 1, O-13:
+    // partyOfEffect prefers the effect's own stamp over the live
+    // engine.call.party. Inbound is byte-identical — the stamp is always null
+    // there, so this falls back to engine.call.callerNumber.
+    const party = partyOfEffect(effect, engine.call);
 
     const data = effect.data || {};
     engine.setStep(engine.STEPS.CONFIRM, "record_quote_request");

@@ -304,7 +304,9 @@ describe("redialForTransfer — outbound variant (spec §9.7)", () => {
 
     expect(updates).toHaveLength(1);
     expect(updates[0].twiml).toBe(
-      '<Response><Dial timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
+      // O-14 (fix round 1): ringTone, resolved from CONFIG.timezone
+      // (Europe/London) exactly as the inbound branch resolves it -- "uk".
+      '<Response><Dial ringTone="uk" timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
         '<Number url="https://voice.example.com/twilio/outbound-whisper?attempt=att-transfer-1">+15550001111</Number></Dial></Response>'
     );
     // C17 seam: the client came from twilioClientFor(campaign caller_id), not
@@ -329,6 +331,17 @@ describe("redialForTransfer — outbound variant (spec §9.7)", () => {
 
     expect(updates[0].twiml).not.toContain("outbound-whisper");
     expect(updates[0].twiml).toContain(`<Number>${TRANSFER_TO}</Number>`);
+  });
+
+  it("O-14 (fix round 1): carries ringTone, resolved from the business config, same as inbound", async () => {
+    const updates = [];
+    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+    const live = fakeLive();
+    const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
+    await callTool(live, "request_transfer");
+    await driveTransfer(ws, live, updates);
+
+    expect(updates[0].twiml).toContain('ringTone="uk"');
   });
 
   it("outside transfer.when: the tool refuses, no REST update is ever made", async () => {
