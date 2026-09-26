@@ -217,15 +217,50 @@ describe("runPostCall: outcome precedence (Ruling P-6)", () => {
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "unknown");
   });
 
-  it("no session finished -> resolves the outcome from the summary ONLY (door/effects skipped) and logs outbound_postcall_without_session", async () => {
+  // O-23 (post-2c, b29): the no-session path now reads door/tool
+  // outcome_code and effects, with the SAME precedence the session path
+  // uses -- it no longer resolves from the summary alone. A contact who
+  // booked (or was flagged for a door-set outcome) before the session
+  // crashed must not be redialled.
+  it("no session finished + a booking effect -> outcome resolves to booked, and the outreach closes with no reschedule (O-23)", async () => {
     const log = { info: vi.fn(), error: vi.fn() };
     const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
     const db = fakeDb(
-      { sessionFinishedAt: null, outcomeCode: "callback_requested" }, // a door-set value that must be IGNORED here
-      { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) } // an effect that must be IGNORED here
+      { sessionFinishedAt: null, outcomeCode: null },
+      { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) }
     );
     await run(db, { summarize, log });
+    expect(db.outboundCallEffects).toHaveBeenCalledWith(CALL_ID);
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "booked");
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(true);
+    expect(opts.closeReason).toBe("terminal_outcome");
+    expect(opts.nextAttemptAt).toBeNull();
+    expect(log.info).toHaveBeenCalledWith("outbound_postcall_without_session", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("no session finished + a door-set outcome_code -> used ahead of effects and the summary (O-23, same precedence as the session path)", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb(
+      { sessionFinishedAt: null, outcomeCode: "callback_requested" },
+      { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) } // must never be consulted: tier 1 already resolved it
+    );
+    await run(db, { summarize });
     expect(db.outboundCallEffects).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "callback_requested");
+  });
+
+  it("no session finished + no door outcome + no effects -> unchanged: falls back to the summary, and still logs outbound_postcall_without_session (O-23)", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb(
+      { sessionFinishedAt: null, outcomeCode: null },
+      { outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })) }
+    );
+    await run(db, { summarize, log });
+    expect(db.outboundCallEffects).toHaveBeenCalledWith(CALL_ID);
     expect(summarize).toHaveBeenCalled();
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "other");
     expect(log.info).toHaveBeenCalledWith("outbound_postcall_without_session", expect.objectContaining({ attemptId: ATTEMPT }));
