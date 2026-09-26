@@ -912,6 +912,32 @@ export async function markCallTransferred(callSid) {
 }
 
 /**
+ * OUTBOUND CALLING, Task 19 (spec §9.7, Ruling P-6). `calls.outcome_code` has
+ * no dedicated setter yet -- this is the first write to it. Same shape as
+ * markCallTransferred: keyed by CallSid, scoped by the caller (the
+ * transfer-result door runs it inside `withTenantSafe`), and the caller
+ * asserts the row landed via `rowCount`, because a tenantless write under
+ * FORCE RLS matches zero rows and reports success.
+ *
+ * Post-call (Task 20) honours a door-set outcome_code ahead of the effects/
+ * summary ones (precedence: tool > door > effects > summary); Task 25 gives
+ * the underlying note ("transfer_unanswered") a real column.
+ *
+ * @param {string} callSid - Twilio Call SID
+ * @param {string} outcomeCode
+ */
+export async function setCallOutcomeCode(callSid, outcomeCode) {
+  if (!pool) return;
+  const res = await q(`UPDATE calls SET outcome_code = $2 WHERE twilio_call_sid = $1`, [callSid, outcomeCode]);
+  if (res.error) {
+    log.error("db_error", { callSid, operation: "setCallOutcomeCode", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "calls", op: "update_outcome_code" });
+    return;
+  }
+  noteAccess("setCallOutcomeCode", { rowCount: res.rowCount || 0 });
+}
+
+/**
  * Fetch all transcript entries for a call, ordered by sequence.
  * @param {string} callId - DB call UUID
  * @returns {Promise<Array<{speaker: string, message: string, sequence: number}>>}

@@ -1650,7 +1650,11 @@ function attachWebSocket(httpServer) {
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.authorizedCallSid = verdict.callSid;
-        handleLiveSessionConnection(ws, req).catch((err) => {
+        // Task 19, C17 seam: the SAME lazy, account-A-only client the outbound
+        // door routes and dispatcher share (outboundTwilioClientFor above),
+        // rather than a second instance against the same account -- so an
+        // outbound transfer redial uses this one too.
+        handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor }).catch((err) => {
           log.error("live_connection_failed", { reason: err?.message });
           try {
             ws.close();

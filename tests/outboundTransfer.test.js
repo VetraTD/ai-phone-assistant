@@ -1,0 +1,551 @@
+// tests/outboundTransfer.test.js
+/**
+ * The outbound transfer variant (spec §9.7, correction C9, Task 19).
+ *
+ * Three layers, each tested at the level that actually exercises it:
+ *   - lib/outbound/schedule.js's pure parser (parseTransferWhen /
+ *     isInsideTransferWindow) -- no I/O, exact.
+ *   - lib/voice/live/index.js's redialForTransfer, transferNumber and
+ *     transferAllowed, through a real Live session on fakes (the same
+ *     boot()/fakeLive()/callTool() shape tests/liveHangup.test.js already
+ *     uses for the INBOUND transfer -- extended here with an outbound-capable
+ *     fake db, following tests/liveOutboundHarness.test.js's "one fake
+ *     database, shared" shape).
+ *   - lib/outbound/doorRoutes.js's two new routes, through express + supertest
+ *     (tests/outboundDoor.test.js's own harness shape).
+ */
+import { describe, it, expect, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import express from "express";
+import request from "supertest";
+import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
+import { registerOutboundDoorRoutes } from "../lib/outbound/doorRoutes.js";
+import { parseTransferWhen, isInsideTransferWindow } from "../lib/outbound/schedule.js";
+
+// ---------------------------------------------------------------------------
+// Pure parser
+// ---------------------------------------------------------------------------
+describe("parseTransferWhen (pure)", () => {
+  it("parses a day range and a time range", () => {
+    expect(parseTransferWhen("Mon-Fri 09:00-18:00")).toEqual({
+      days: new Set(["mon", "tue", "wed", "thu", "fri"]),
+      time: { start: 9 * 60, end: 18 * 60 },
+    });
+  });
+
+  it("accepts Mon-Sat and Daily", () => {
+    expect(parseTransferWhen("Mon-Sat 10:00-16:00").days).toEqual(
+      new Set(["mon", "tue", "wed", "thu", "fri", "sat"])
+    );
+    expect(parseTransferWhen("Daily 08:00-20:00").days).toEqual(
+      new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
+    );
+  });
+
+  it("throws on a shape campaignSchema.js's TRANSFER_WHEN_RE would also refuse", () => {
+    expect(() => parseTransferWhen("Weekdays 09:00-18:00")).toThrow();
+    expect(() => parseTransferWhen("Mon-Fri 9:00-18:00")).toThrow();
+    expect(() => parseTransferWhen(null)).toThrow();
+  });
+});
+
+describe("isInsideTransferWindow (pure, business timezone)", () => {
+  const WHEN = "Mon-Fri 09:00-18:00";
+  const TZ = "America/Chicago";
+
+  it("true inside the window", () => {
+    // Wed 2026-09-23 12:00 America/Chicago = 17:00Z
+    expect(isInsideTransferWindow(new Date("2026-09-23T17:00:00Z"), WHEN, TZ)).toBe(true);
+  });
+
+  it("false before opening and after closing, same day", () => {
+    expect(isInsideTransferWindow(new Date("2026-09-23T13:00:00Z"), WHEN, TZ)).toBe(false); // 08:00 local
+    expect(isInsideTransferWindow(new Date("2026-09-23T23:30:00Z"), WHEN, TZ)).toBe(false); // 18:30 local
+  });
+
+  it("false on a day outside the range (Saturday)", () => {
+    // 2026-09-26 is a Saturday.
+    expect(isInsideTransferWindow(new Date("2026-09-26T17:00:00Z"), WHEN, TZ)).toBe(false);
+  });
+
+  it("fails closed on a malformed or missing when, rather than throwing", () => {
+    expect(isInsideTransferWindow(new Date(), "garbage", TZ)).toBe(false);
+    expect(isInsideTransferWindow(new Date(), null, TZ)).toBe(false);
+    expect(isInsideTransferWindow(new Date(), undefined, TZ)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redialForTransfer, through a real Live session on fakes
+// ---------------------------------------------------------------------------
+class FakeSocket extends EventEmitter {
+  constructor() {
+    super();
+    this.OPEN = 1;
+    this.readyState = 1;
+    this.sent = [];
+  }
+  send(raw) {
+    this.sent.push(JSON.parse(raw));
+  }
+  close() {
+    this.readyState = 3;
+  }
+  deliver(msg) {
+    this.emit("message", Buffer.from(JSON.stringify(msg)));
+  }
+  marks() {
+    return this.sent.filter((m) => m.event === "mark").map((m) => m.mark?.name);
+  }
+}
+
+function fakeLive() {
+  const sent = { toolResponses: [] };
+  let onmessage = null;
+  const session = {
+    sendRealtimeInput: () => {},
+    sendClientContent: () => {},
+    sendToolResponse: (m) => sent.toolResponses.push(m),
+    close: () => {},
+  };
+  return {
+    sent,
+    connect: vi.fn(async ({ callbacks }) => {
+      onmessage = callbacks.onmessage;
+      return { session, languagePinned: true, surface: "aistudio", model: "m" };
+    }),
+    push: (m) => onmessage?.(m),
+  };
+}
+
+// ONE config for every test, inbound and outbound alike -- the same tenant,
+// the same business. transferPhoneNumber/transferPolicy are read only on the
+// INBOUND branch (state.outboundCall absent); the outbound branch bypasses
+// them entirely (this task's whole point), so their presence here is inert
+// for every outbound test and load-bearing for the inbound ones.
+const CONFIG = {
+  businessName: "Digile Media",
+  timezone: "Europe/London",
+  allowedTasks: ["general_question"],
+  capabilities: {},
+  businessHours: {},
+  transferPhoneNumber: "+441111222333",
+  transferPolicy: "always",
+};
+
+const CALLER_ID = "+441372656055"; // campaign's own number
+const CONTACT_PHONE = "+15559876543";
+const TRANSFER_TO = "+15550001111";
+const ATTEMPT_ID = "att-transfer-1";
+const BIZ = "biz-transfer";
+const OUT_SID = "CAoutTransfer0001";
+
+/**
+ * A Saturday, outside "Mon-Fri 09:00-18:00" in any timezone this file uses --
+ * for the one test that needs the window CLOSED. Every other test uses the
+ * always-open default below, deliberately, so it needs no clock control at
+ * all (real time, whenever the suite happens to run).
+ */
+const OUTSIDE_WINDOW = new Date("2026-09-26T17:00:00Z");
+const OUTSIDE_WINDOW_WHEN = "Mon-Fri 09:00-18:00";
+
+function campaignConfig(overrides = {}) {
+  return {
+    persona_name: "Ava",
+    caller_id: CALLER_ID,
+    capabilities: ["appointments", "transfer"],
+    // Always open, in every timezone: no clock control needed for the happy
+    // path. isInsideTransferWindow still runs for real on every one of these
+    // tests -- it just never has anything to refuse.
+    transfer: { to: TRANSFER_TO, when: "Daily 00:00-23:59", whisper: true },
+    ...overrides,
+  };
+}
+
+/** One fake db, shared by every test: both the inbound branch (lookupBusinessByPhone) and the outbound one (by-CallSid resolution). */
+function fakeDb({ transfer } = {}) {
+  const config = { ...campaignConfig({ transfer: transfer ?? campaignConfig().transfer }) };
+  return {
+    isEnabled: () => true,
+    lookupBusinessByPhone: async () => ({ id: BIZ, name: CONFIG.businessName }),
+    loadConfig: () => CONFIG,
+    withTenantSafe: async (_id, fn) => fn(),
+    withTenant: async (_id, fn) => fn(),
+    createCall: async () => "call-1",
+    listIntegrationsForBusiness: async () => [],
+    fetchBusinessKnowledge: async () => [],
+    fetchCallerContext: async () => null,
+    markCallTransferred: async () => {},
+    outboundAttemptByCallSid: async (sid) =>
+      sid === OUT_SID
+        ? { businessId: BIZ, attemptId: ATTEMPT_ID, outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
+        : null,
+    outboundCallContext: async () => ({
+      attemptNo: 1,
+      openerAudio: null,
+      toNumber: CONTACT_PHONE,
+      outreachId: "out-1",
+      campaignId: "camp-1",
+      campaignVersion: 1,
+      contactId: "contact-1",
+      trigger: {},
+      templateKey: "speed_to_lead",
+      complianceClass: "solicited",
+      audience: "business",
+      config,
+      firstName: "Priya",
+      contactTimezone: "America/Chicago",
+    }),
+    fetchBusinessById: async () => ({ id: BIZ, name: CONFIG.businessName, timezone: CONFIG.timezone }),
+    fetchBusinessCapabilities: async () => [],
+  };
+}
+
+async function boot({
+  live = fakeLive(),
+  db,
+  twilioClient,
+  twilioClientFor,
+  exitFallbackMs,
+  callSid = OUT_SID,
+  customParameters,
+  env = {},
+} = {}) {
+  const ws = new FakeSocket();
+  let clock = 0;
+  await handleLiveSessionConnection(ws, {}, {
+    now: () => clock,
+    connect: live.connect,
+    database: db,
+    env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com", ...env },
+    ...(twilioClient ? { twilioClient } : {}),
+    ...(twilioClientFor ? { twilioClientFor } : {}),
+    ...(exitFallbackMs !== undefined ? { exitFallbackMs } : {}),
+  });
+  ws.deliver({
+    event: "start",
+    start: {
+      callSid,
+      streamSid: "MZ1",
+      customParameters: customParameters ?? { direction: "outbound" },
+    },
+  });
+  await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
+  await new Promise((r) => setImmediate(r));
+  return { ws, live };
+}
+
+/** A tool that reports success and asks for whatever effect the test wants (identical to liveHangup.test.js's own). */
+const toolReturning = (stateEffects) => async (fc) => ({
+  functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+  stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" }, ...stateEffects },
+});
+
+async function callTool(live, name, args = {}) {
+  live.push({ toolCall: { functionCalls: [{ id: "t1", name, args }] } });
+  await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
+}
+
+/** Drives a redial to completion: the announcement, its mark, the REST update. */
+async function driveTransfer(ws, live, updates) {
+  live.push({ serverContent: { outputTranscription: { text: "Putting you through now." }, turnComplete: true } });
+  await new Promise((r) => setImmediate(r));
+  const mark = ws.marks().at(-1);
+  ws.deliver({ event: "mark", mark: { name: mark } });
+  await vi.waitFor(() => expect(updates.length).toBeGreaterThan(0));
+}
+
+describe("redialForTransfer — inbound is byte-for-byte unchanged", () => {
+  it("same client resolution path, same TwiML string as before this task", async () => {
+    const updates = [];
+    const twilioClient = { calls: () => ({ update: async (opts) => updates.push(opts) }) };
+    const live = fakeLive();
+    const { ws } = await boot({
+      live,
+      db: fakeDb(),
+      twilioClient,
+      customParameters: { businessPhone: "+441372656055", callerPhone: "+15559990000" },
+    });
+    await callTool(live, "request_transfer");
+    await driveTransfer(ws, live, updates);
+
+    expect(updates).toHaveLength(1);
+    // Captured exactly: lib/voice/live/index.js's inbound branch, byte for
+    // byte -- resolveRingTone("Europe/London") is "uk", callerId is the
+    // CALLER's number (state.callerNumber), never the campaign's.
+    expect(updates[0].twiml).toBe(
+      '<Response><Dial ringTone="uk" callerId="+15559990000">+441111222333</Dial></Response>'
+    );
+  });
+
+  it("does not transfer a business whose policy forbids it (inbound rule untouched)", async () => {
+    const updates = [];
+    const twilioClient = { calls: () => ({ update: async (opts) => updates.push(opts) }) };
+    const live = fakeLive();
+    const db = fakeDb();
+    db.loadConfig = () => ({ ...CONFIG, transferPolicy: "never" });
+    await boot({ live, db, twilioClient, customParameters: { businessPhone: "+441372656055", callerPhone: "+15559990000" } });
+    await callTool(live, "request_transfer");
+    live.push({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+
+    expect(updates).toHaveLength(0);
+  });
+});
+
+describe("redialForTransfer — outbound variant (spec §9.7)", () => {
+  it("dials from the CAMPAIGN's caller_id, never the contact's number, with the whisper and result URLs", async () => {
+    const updates = [];
+    const twilioClientFor = vi.fn(() => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) }));
+    const live = fakeLive();
+    const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
+    await callTool(live, "request_transfer");
+    await driveTransfer(ws, live, updates);
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0].twiml).toBe(
+      '<Response><Dial timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
+        '<Number url="https://voice.example.com/twilio/outbound-whisper?attempt=att-transfer-1">+15550001111</Number></Dial></Response>'
+    );
+    // C17 seam: the client came from twilioClientFor(campaign caller_id), not
+    // a client built ad hoc or keyed on the contact's number.
+    expect(twilioClientFor).toHaveBeenCalledWith(CALLER_ID);
+  });
+
+  it("transfer.whisper === false omits the url attribute entirely", async () => {
+    const updates = [];
+    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+    const live = fakeLive();
+    const { ws } = await boot({
+      live,
+      // Always-open window (the default), only `whisper` overridden: this test
+      // is about the whisper attribute, not the window, and must not depend
+      // on the real wall-clock time the suite happens to run at.
+      db: fakeDb({ transfer: { ...campaignConfig().transfer, whisper: false } }),
+      twilioClientFor,
+    });
+    await callTool(live, "request_transfer");
+    await driveTransfer(ws, live, updates);
+
+    expect(updates[0].twiml).not.toContain("outbound-whisper");
+    expect(updates[0].twiml).toContain(`<Number>${TRANSFER_TO}</Number>`);
+  });
+
+  it("outside transfer.when: the tool refuses, no REST update is ever made", async () => {
+    const updates = [];
+    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+    const live = fakeLive();
+    const db = fakeDb({ transfer: { to: TRANSFER_TO, when: OUTSIDE_WINDOW_WHEN, whisper: true } });
+    // Booted on REAL timers -- the session's own startup awaits real promises
+    // (tests/liveHangup.test.js's own note: fake timers deadlock vi.waitFor
+    // against them). Only `Date` is faked, and only once boot has finished, so
+    // transferAllowed()'s `new Date()` reads a Saturday while every setTimeout
+    // in the engine (settle, marks, the exit machinery) keeps running for real.
+    await boot({ live, db, twilioClientFor });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(OUTSIDE_WINDOW);
+      // No `execute` override: the REAL tool pipeline runs, so the refusal is
+      // capabilities/transfer.js's own ctx.transferAllowed gate, driven by the
+      // real transferAllowed() closure this task changed.
+      live.push({ toolCall: { functionCalls: [{ id: "t1", name: "request_transfer", args: { reason: "x" } }] } });
+      await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+    live.push({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+
+    const response = live.sent.toolResponses[0].functionResponses[0].response;
+    expect(response.success).toBe(false);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("with no campaign transfer target at all, transferNumber() is null and the redial is refused before any client is built", async () => {
+    const updates = [];
+    const twilioClientFor = vi.fn(() => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) }));
+    const live = fakeLive();
+    const db = fakeDb();
+    const baseCtx = await db.outboundCallContext();
+    db.outboundCallContext = async () => ({ ...baseCtx, config: { ...baseCtx.config, transfer: null } });
+    await boot({ live, db, twilioClientFor });
+    live.push({ toolCall: { functionCalls: [{ id: "t1", name: "request_transfer", args: { reason: "x" } }] } });
+    await vi.waitFor(() => expect(live.sent.toolResponses).toHaveLength(1));
+    live.push({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+
+    expect(updates).toHaveLength(0);
+    expect(twilioClientFor).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two new doors
+// ---------------------------------------------------------------------------
+const DOOR_BIZ = "11111111-1111-1111-1111-111111111111";
+const DOOR_ATTEMPT = "22222222-2222-2222-2222-222222222222";
+const PARENT_SID = "CAparent00000000000000000000000001";
+const CHILD_SID = "CAchild000000000000000000000000001";
+
+function doorFakeDb(over = {}) {
+  return {
+    outboundAttemptByCallSid: vi.fn(async (sid) =>
+      sid === PARENT_SID
+        ? { businessId: DOOR_BIZ, attemptId: DOOR_ATTEMPT, outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
+        : null
+    ),
+    withTenantSafe: vi.fn(async (_id, fn) => fn()),
+    withTenant: vi.fn(async (_id, fn) => fn()),
+    outboundCallContext: vi.fn(async () => ({
+      config: { persona_name: "Ava" },
+      firstName: "Priya",
+    })),
+    fetchBusinessById: vi.fn(async () => ({ id: DOOR_BIZ, name: "Riverside Family Clinic" })),
+    setCallOutcomeCode: vi.fn(async () => {}),
+    ...over,
+  };
+}
+
+function doorApp(db) {
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
+  registerOutboundDoorRoutes(app, {
+    validate: (req, res, next) => next(),
+    db,
+    mintToken: () => "tok",
+    postCall: { tryClaim: async () => false },
+    twilioClientFor: () => ({}),
+    log: { info: vi.fn(), error: vi.fn() },
+    now: () => 1_700_000_000_000,
+    env: { BASE_URL: "https://voice.example.com" },
+  });
+  return app;
+}
+
+describe("POST /twilio/outbound-whisper", () => {
+  it("speaks the persona and first name, resolved by ParentCallSid", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("<Response><Say>Transfer from Ava: Priya.</Say></Response>");
+    expect(db.outboundAttemptByCallSid).toHaveBeenCalledWith(PARENT_SID);
+  });
+
+  it("omits the name clause when the contact has none on file", async () => {
+    const db = doorFakeDb({ outboundCallContext: vi.fn(async () => ({ config: { persona_name: "Ava" }, firstName: null })) });
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
+
+    expect(res.text).toBe("<Response><Say>Transfer from Ava.</Say></Response>");
+  });
+
+  it("XML-escapes the persona/first names", async () => {
+    const db = doorFakeDb({
+      outboundCallContext: vi.fn(async () => ({ config: { persona_name: "Ava & Co" }, firstName: 'Sam "Q"' })),
+    });
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
+
+    expect(res.text).toBe('<Response><Say>Transfer from Ava &amp; Co: Sam &quot;Q&quot;.</Say></Response>');
+  });
+
+  it("Ruling P-5: an ?attempt= mismatch refuses safely rather than trusting the query string", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .query({ attempt: "not-the-real-attempt-id" })
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("<Response><Hangup/></Response>");
+    // Refused before ever reading the campaign context.
+    expect(db.outboundCallContext).not.toHaveBeenCalled();
+  });
+
+  it("an unresolved ParentCallSid (no attempt at all) also refuses safely", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: "CAunknown" });
+
+    expect(res.text).toBe("<Response><Hangup/></Response>");
+  });
+});
+
+describe("POST /twilio/outbound-transfer-result", () => {
+  it("DialCallStatus=completed: empty TwiML, no outcome_code write", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("<Response></Response>");
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+  });
+
+  it("DialCallStatus=no-answer (Ruling P-6): the callback line, outcome_code written, and the log event fires", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe(
+      "<Response><Say>Someone from Riverside Family Clinic will call you back shortly.</Say><Hangup/></Response>"
+    );
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
+  });
+
+  it("busy and failed take the same unanswered path as no-answer", async () => {
+    for (const status of ["busy", "failed", "canceled"]) {
+      const db = doorFakeDb();
+      const res = await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: status });
+      expect(res.text).toContain("will call you back shortly");
+      expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
+    }
+  });
+
+  it("an unresolved CallSid gets the generic (business-less) callback line and writes nothing", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-transfer-result")
+      .type("form")
+      .send({ CallSid: "CAunknown", DialCallStatus: "no-answer" });
+
+    expect(res.text).toBe("<Response><Say>Someone will call you back shortly.</Say><Hangup/></Response>");
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+    expect(db.fetchBusinessById).not.toHaveBeenCalled();
+  });
+
+  it("Ruling P-5: an ?attempt= mismatch takes the unresolved path even though the CallSid itself is real", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: "not-the-real-attempt-id" })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+
+    expect(res.text).toBe("<Response><Say>Someone will call you back shortly.</Say><Hangup/></Response>");
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+  });
+});
