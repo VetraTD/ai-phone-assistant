@@ -1,7 +1,7 @@
 [
   {
     "name": "set_call_intent",
-    "description": "Call this as soon as you understand why the caller is calling. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
+    "description": "Call this as soon as you understand the reason for this call. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -9,8 +9,6 @@
           "type": "string",
           "enum": [
             "general_question",
-            "take_message",
-            "callback_request",
             "transfer_human",
             "book_appointment",
             "check_appointment",
@@ -26,7 +24,7 @@
   },
   {
     "name": "end_call",
-    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up. You MUST write your warm sign-off in the SAME response as this call — thank them for calling, use the business name, and wish them well. Nothing you say after this is heard.",
+    "description": "Signal that the conversation is naturally complete and it is time to end the call. You MUST write your warm sign-off in the SAME response as this call — thank them for their time and wish them well. Nothing you say after this is heard.",
     "parameters": {
       "type": "object",
       "properties": {

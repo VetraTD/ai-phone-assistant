@@ -19,7 +19,7 @@ import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
-import { getStrings } from "../lib/voice/strings.js";
+import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import {
   stripFillers,
@@ -671,10 +671,19 @@ export async function executeToolCall(fc, ctx) {
             // was where a warm ending used to (sometimes) come from, and it was
             // also where the DUPLICATE goodbye came from. Removing it was right;
             // leaving the floor at one cold word was not.
+            // OUTBOUND CALLING (spec §9.5, D-a, session 2b, Task 17): ctx.outboundCall
+            // is present only on an outbound call (lib/voice/live/tools.js) --
+            // inbound and the cascade/text harness supply neither field, so this
+            // branch is a no-op for them and the message below is byte-identical
+            // to before. On outbound, the fallback sign-off is signOffOutbound,
+            // read with the contact's first name (O-9: null when there is none,
+            // never spoken as "null"/"undefined").
             toolResult: {
               name: fc.name,
               success: true,
-              message: getStrings(ctx?.config).signOff(ctx?.config?.businessName || "us"),
+              message: ctx?.outboundCall
+                ? getOutboundStrings(ctx?.config).signOffOutbound(ctx.outboundCall?.contact?.firstName || null)
+                : getStrings(ctx?.config).signOff(ctx?.config?.businessName || "us"),
               callerSafe: true,
             },
             toolCallEvent: { name: fc.name, args: fc.args },

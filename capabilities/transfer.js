@@ -38,6 +38,22 @@ const ESCALATION_SECTION =
   `=== ESCALATION ===\n` +
   `When transferring: tell the caller briefly why and to whom ("Let me get you over to someone who can help with that — one moment."), then use request_transfer. If transfer is unavailable or fails, say so honestly and offer to take a message using the message protocol.`;
 
+/**
+ * OUTBOUND CALLING (carried from Task 16, session 2b, Task 17). "the message
+ * protocol" never exists on outbound: `messages` is not a legal outbound
+ * campaign capability at all (lib/outbound/campaignSchema.js
+ * CAMPAIGN_ENUMS.capabilities has no "messages" entry), so
+ * lib/capabilities/promptAssembler.js's outboundAllowsPack never lets that
+ * pack's MESSAGE PROTOCOL section render on an outbound call -- naming it
+ * here would be the same phantom-tool defect this whole batch keeps finding.
+ * Dropped rather than pointed at a replacement: stage-3's `callback` pack
+ * (schedule_callback) is not built yet, and naming an undeclared tool would
+ * just move the defect rather than fix it.
+ */
+const ESCALATION_SECTION_OUTBOUND =
+  `=== ESCALATION ===\n` +
+  `When transferring: tell the caller briefly why and to whom ("Let me get you over to someone who can help with that — one moment."), then use request_transfer. If transfer is unavailable or fails, say so honestly.`;
+
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "transfer",
@@ -66,7 +82,7 @@ export default {
     return {
       static: {
         capabilities: transferAllowed ? ["transfer the caller to a person when needed"] : [],
-        escalation: [ESCALATION_SECTION],
+        escalation: [ctx.outboundCall ? ESCALATION_SECTION_OUTBOUND : ESCALATION_SECTION],
       },
     };
   },

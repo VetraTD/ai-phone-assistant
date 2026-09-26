@@ -549,15 +549,64 @@ export function intentMarkerEnabled(extras = {}) {
   return process.env.VOICE_INTENT_MARKER === "true";
 }
 
+/**
+ * Which capability pack owns each intent set_call_intent can name. Mirrors
+ * services/db.js's CAPABILITY_MODULE_TASKS (appointments/quotes) plus the two
+ * CORE tasks (take_message/callback_request -> messages, transfer_human ->
+ * transfer) that also map onto a real pack. That map is not exported, and
+ * duplicating four short entries here is smaller than adding a cross-module
+ * dependency for it. "general_question" has no entry: it needs no tool at
+ * all, so it is always safe to offer.
+ */
+const INTENT_PACK_ID = {
+  take_message: "messages",
+  callback_request: "messages",
+  transfer_human: "transfer",
+  book_appointment: "appointments",
+  check_appointment: "appointments",
+  cancel_reschedule: "appointments",
+  quote_request: "quotes",
+};
+
+/**
+ * OUTBOUND CALLING, session 2b owner decision (Task 17 batch, amends D-c).
+ * On outbound, set_call_intent's own enum must not name an intent whose pack
+ * contributes no declared tool on this call: Task 16's reviewer found the
+ * missed-call-callback fixture offering "book_appointment" as an intent with
+ * no booking tool anywhere on that call (its campaign capabilities are
+ * qualification/callback/opt_out/outcome -- stage-3 names no pack implements
+ * yet). Filters the TENANT's allowedTasks down to the CAMPAIGN's own
+ * capability list, the same intersection filterForOutboundCampaign already
+ * applies to the tool declarations themselves.
+ *
+ * A no-op when `extras` carries no outbound call context, so inbound and
+ * every existing golden snapshot are untouched.
+ *
+ * @param {string[]} intents
+ * @param {object} [extras]
+ * @returns {string[]}
+ */
+function narrowIntentsForOutbound(intents, extras) {
+  const outbound = extras?.outboundCall;
+  if (!outbound) return intents;
+  const campaignCapabilities = Array.isArray(outbound?.config?.capabilities) ? outbound.config.capabilities : [];
+  return intents.filter((intent) => {
+    const packId = INTENT_PACK_ID[intent];
+    return packId ? campaignCapabilities.includes(packId) : true;
+  });
+}
+
 export function buildCallTools(configOrTasks, { markerMode = false, extras } = {}) {
   const config = Array.isArray(configOrTasks)
     ? { allowedTasks: configOrTasks }
     : configOrTasks || {};
   const allowedTasks = config.allowedTasks || [];
+  const outbound = extras?.outboundCall || null;
 
-  const intents = Array.isArray(allowedTasks) && allowedTasks.length > 0
-    ? allowedTasks
-    : ["general_question"];
+  const intents = narrowIntentsForOutbound(
+    Array.isArray(allowedTasks) && allowedTasks.length > 0 ? allowedTasks : ["general_question"],
+    extras
+  );
 
   const declarations = [];
 
@@ -569,10 +618,13 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
   if (!markerMode) {
     declarations.push({
       name: "set_call_intent",
-      description:
-        "Call this as soon as you understand why the caller is calling. " +
-        "Do NOT wait — identify the intent and call this immediately, " +
-        "then continue helping in the same response.",
+      description: outbound
+        ? "Call this as soon as you understand the reason for this call. " +
+          "Do NOT wait — identify the intent and call this immediately, " +
+          "then continue helping in the same response."
+        : "Call this as soon as you understand why the caller is calling. " +
+          "Do NOT wait — identify the intent and call this immediately, " +
+          "then continue helping in the same response.",
       parameters: {
         type: "object",
         properties: {
@@ -590,11 +642,19 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
   declarations.push(
     {
       name: "end_call",
-      description:
-        "Signal that the conversation is naturally complete and the caller " +
-        "is ready to hang up. You MUST write your warm sign-off in the SAME " +
-        "response as this call — thank them for calling, use the business name, " +
-        "and wish them well. Nothing you say after this is heard.",
+      // OUTBOUND CALLING (carried from Task 16, Ruling 16-b; session 2b, Task
+      // 17). "the caller is ready to hang up" and "thank them for calling" are
+      // backwards for a call WE placed. Reworded on outbound only; inbound is
+      // byte-identical.
+      description: outbound
+        ? "Signal that the conversation is naturally complete and it is time " +
+          "to end the call. You MUST write your warm sign-off in the SAME " +
+          "response as this call — thank them for their time and wish them " +
+          "well. Nothing you say after this is heard."
+        : "Signal that the conversation is naturally complete and the caller " +
+          "is ready to hang up. You MUST write your warm sign-off in the SAME " +
+          "response as this call — thank them for calling, use the business name, " +
+          "and wish them well. Nothing you say after this is heard.",
       parameters: {
         type: "object",
         properties: {
@@ -1336,7 +1396,17 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   // hold in this codebase — that is a recorded finding, not a suspicion — so the
   // instruction describes WHEN the question belongs and `live_closing_tic`
   // measures whether it worked.
-  toolContract += `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
+  // OUTBOUND CALLING (carried from Task 16, Ruling 16-b; session 2b, Task
+  // 17). "thank them for calling {business}" is backwards for a call WE
+  // placed -- pointed at the outbound sign-off's own wording ("Thanks for
+  // your time...", strings.js signOffOutbound) instead. NOT the contact's
+  // literal first name: this bullet lives in the STATIC (cached) prefix, and
+  // a per-contact name here would bust the cache per contact rather than per
+  // business -- the per-contact facts belong in the dynamic OUTBOUND CALL
+  // block below, not here. Inbound is byte-identical.
+  toolContract += outbound
+    ? `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for their time and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`
+    : `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
     // you" in the same response as a lookup call. That is a two-part
@@ -1422,7 +1492,13 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   }
   guardrails += `- Keep responses concise. State the most important information first. If a confirmation has multiple details (name, date, time, service), deliver them clearly but do not add unnecessary filler.\n`;
   guardrails += `- Always end your response with a complete sentence. Never output text that ends mid-sentence, mid-word, or mid-thought. If you are running low on space, finish the current sentence and stop — do not start a new thought you cannot complete.\n`;
-  guardrails += `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
+  // OUTBOUND CALLING (carried from Task 16, Ruling 16-b; session 2b, Task
+  // 17). "how can I help you today?" presumes the caller called US -- backwards
+  // for a call WE placed. Only the parenthetical example is reworded; the rule
+  // itself is unchanged. Inbound is byte-identical.
+  guardrails += outbound
+    ? `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — what would you like to do next?").\n`
+    : `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
   // Disfluency and correction rules: the messy reality of live phone speech —
   // filler words, false starts, self-corrections. Without them the model may try
   // to reason about partial or contradictory input rather than extracting intent.
@@ -2018,8 +2094,15 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
         // thing the owner heard, appears nowhere in this repository at all, so
         // neither change can explain it.
         `Start with a brief acknowledgement, then ask the first relevant question — ONE question, not two. ` +
-        `In particular, do not pair an open "how can I help you?" with a second, more specific question in ` +
-        `the same turn: if you are going to offer concrete options, offer them on their own.`
+        // Carried from Task 16 (Ruling 16-b; session 2b, Task 17). "how can I
+        // help you?" is the inbound greeting's own question, backwards for a
+        // call Ava placed. The underlying rule (don't stack an open question
+        // with a specific one) still applies on outbound, so it is reworded
+        // rather than dropped; inbound is byte-identical.
+        (outbound
+          ? `Do not pair two questions in the same turn: if you are going to offer concrete options, offer them on their own.`
+          : `In particular, do not pair an open "how can I help you?" with a second, more specific question in ` +
+            `the same turn: if you are going to offer concrete options, offer them on their own.`)
       );
 
     case "gather_details": {
