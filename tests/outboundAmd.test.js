@@ -154,7 +154,7 @@ const NOW = 1_700_000_000_000;
 const SECRET = "outbound-amd-test-secret";
 const ENV = Object.freeze({ BASE_URL: "https://svc.example", OUTBOUND_MEDIA_URL_SECRET: SECRET });
 
-const CTX_DEFAULT = Object.freeze({ attemptNo: 1, complianceClass: "solicited", voicemailOn: [1, 5] });
+const CTX_DEFAULT = Object.freeze({ attemptNo: 1, complianceClass: "solicited", voicemailOn: [1, 5], callerId: "+441372656055" });
 
 function fakeDb(over = {}) {
   return {
@@ -325,6 +325,9 @@ describe("POST /twilio/outbound-amd: voicemail redirect (in voicemail_on, class 
     const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep", MachineDetectionDuration: "4500" });
     expect(res.status).toBe(200);
 
+    // O-26/C17 (post-2c): the campaign's own caller_id (from outboundAmdContext),
+    // not called with no argument -- the owning account's client, not always A.
+    expect(twilio.twilioClientFor).toHaveBeenCalledWith(CTX_DEFAULT.callerId);
     expect(twilio.calls).toHaveBeenCalledWith(CALL_SID);
     const body = twilio.update.mock.calls[0][0];
     expect(body.twiml).toMatch(/^<Response><Play>.*<\/Play><Hangup\/><\/Response>$/);

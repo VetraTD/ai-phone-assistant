@@ -50,7 +50,8 @@ import {
   isValidEmail,
   sanitizeString,
 } from "./lib/validate.js";
-import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath, createTwilioClientFor } from "./lib/outbound/internalRoutes.js";
+import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
+import { createTwilioAccountRouter } from "./lib/outbound/twilioAccounts.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
 import { postCall as outboundPostCall } from "./lib/outbound/postCall.js";
 
@@ -630,14 +631,23 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
 // callers agree on what "already claimed" means.
 //
 // `outboundTwilioClientFor` (Task 13; ONE shared instance, fix round 1 MINOR
-// 3) is the SAME lazy, account-A-only factory passed into `buildOutboundDeps`
-// below for the dispatcher -- one client, not two, against the same account.
-// It stays lazy: the Twilio SDK's constructor throws outright on a SID that
-// doesn't start with "AC", so the client must not be built until either the
-// AMD door or the dispatcher's first real use, independent of whether
-// buildOutboundDeps ever resolves its own (separate) Cloud Tasks config.
+// 3) is passed into `buildOutboundDeps` below for the dispatcher -- one
+// client, not two, against the same account. It stays lazy: the Twilio SDK's
+// constructor throws outright on a SID that doesn't start with "AC", so a
+// client must not be built until either the AMD door or the dispatcher's
+// first real use, independent of whether buildOutboundDeps ever resolves its
+// own (separate) Cloud Tasks config.
+//
+// O-26/C17: `outboundTwilioAccounts` (lib/outbound/twilioAccounts.js) is the
+// account-aware router built from BOTH Twilio account pairs
+// (TWILIO_ACCOUNT_SID/_AUTH_TOKEN, and _ALT for account B, set at go-live).
+// `outboundTwilioClientFor` is now ITS `twilioClientFor` -- the SAME shared
+// instance (and cache) every outbound REST call site uses, whether or not B
+// is actually configured (`createTwilioAccountRouter` falls back to account A
+// alone when it is not, exactly today's behaviour).
 // ---------------------------------------------------------------------------
-const outboundTwilioClientFor = createTwilioClientFor();
+const outboundTwilioAccounts = createTwilioAccountRouter();
+const outboundTwilioClientFor = outboundTwilioAccounts.twilioClientFor;
 registerOutboundDoorRoutes(app, {
   validate: twilioValidationAnyAccount,
   db,
@@ -1461,7 +1471,13 @@ app.get("/api/debug/probe-results", async (req, res) => {
 // whole outbound surface, not one per call site.
 // ---------------------------------------------------------------------------
 
-const outboundDeps = buildOutboundDeps(process.env, { twilioClientFor: outboundTwilioClientFor, postCall: outboundPostCall });
+const outboundDeps = buildOutboundDeps(process.env, {
+  twilioClientFor: outboundTwilioClientFor,
+  // O-26/C17: the SAME router -- the dispatch-time `callerIdValid` gate fact
+  // checks BOTH configured accounts, not just A.
+  twilioAccounts: outboundTwilioAccounts,
+  postCall: outboundPostCall,
+});
 if (outboundDeps) {
   registerOutboundInternalRoutes(app, outboundDeps);
 } else {

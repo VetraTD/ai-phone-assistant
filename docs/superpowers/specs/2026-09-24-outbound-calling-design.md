@@ -534,7 +534,7 @@ The existing `request_transfer` / `redialForTransfer` (`live/index.js:5148-5162`
 2. Run the gate (§10.3). On "later", update `next_attempt_at`, enqueue a new task and return. On "never", close the outreach and return.
 3. `INSERT call_attempts (outreach_id, attempt_no = attempts_made + 1, …)`. A unique violation means another dispatcher won the race: return and do nothing. **This is the double-dial lock.**
 4. Set the outreach to `dialing`, increment `attempts_made`, commit.
-5. Call Twilio `calls.create`, then store the `twilio_call_sid`. If `calls.create` fails, record `result = failed`, return the outreach to `waiting` with the next schedule entry, and log `outbound_dial_failed`.
+5. Resolve the Twilio account that owns `caller_id` (amended 2026-09-26, post-2c, owner decision O-26/C17; `lib/outbound/twilioAccounts.js`) and call ITS `calls.create`, then store the `twilio_call_sid`. If `calls.create` fails, record `result = failed`, return the outreach to `waiting` with the next schedule entry, and log `outbound_dial_failed`. Every other outbound REST call about this attempt -- hanging up an unroutable call, the AMD voicemail update, the transfer redial, the sweep's lost-callback fetch -- resolves the SAME way, from the attempt's own campaign `caller_id`.
 6. Render the opener and voicemail audio (§9.3) and store them. Return 200.
 
 Cloud Tasks retries a non-2xx response up to 3 times. Because of steps 1 and 3, a retry can never produce a second call.
@@ -559,7 +559,7 @@ The first failure decides. Every refusal logs `outbound_gate_refused{reason}`.
 | 8 | Attempts under the schedule length; creation within `give_up_after_days` | never: `attempts_exhausted` or `give_up_window` |
 | 9 | Per contact: at most 3 dial attempts per local day across all campaigns | later (next day): `daily_contact_cap` |
 | 10 | Capacity: global outbound < `OUTBOUND_MAX_CONCURRENT` − `OUTBOUND_INBOUND_RESERVE`, and business outbound < `outbound_max_concurrent` | later (+30 s): `capacity` |
-| 11 | `caller_id` is still an owned number on the account (checked at most once an hour per number) | never: `caller_id_invalid` |
+| 11 | `caller_id` is still an owned number on exactly one CONFIGURED Twilio account (checked at most once an hour per number; amended 2026-09-26, post-2c, owner decision O-26/C17 -- was account A only) | never: `caller_id_invalid` |
 
 The defaults are `OUTBOUND_MAX_CONCURRENT=8` and `OUTBOUND_INBOUND_RESERVE=2`, together with the existing Cloud SQL connection budget (38 of 50). Twilio's own account limit, which is unknown until the console check, may be lower. If `calls.create` returns Twilio's concurrency error, it is treated as `capacity`.
 

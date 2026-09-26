@@ -148,6 +148,23 @@ describe("server.js's real mount: the outbound doors carry the real Twilio signa
     const res = await request(app).post("/twilio/outbound-status").type("form").set("X-Twilio-Signature", sig).send(statusParams);
     expect(res.status).toBe(200);
   });
+
+  // O-26/C17 (post-2c): confirm ONLY -- change nothing about signature
+  // validation itself. twilioValidationAnyAccount (server.js) already
+  // accepts EITHER token; this proves an outbound door callback signed with
+  // account B's token (TWILIO_AUTH_TOKEN_ALT) is accepted exactly as one
+  // signed with account A's is above.
+  it("POST /twilio/outbound-status: signed with account B's token (TWILIO_AUTH_TOKEN_ALT) -> 200 (confirm only, nothing changed here)", async () => {
+    const ALT_TOKEN = "outbound-door-mount-token-B";
+    process.env.TWILIO_AUTH_TOKEN_ALT = ALT_TOKEN;
+    try {
+      const sig = twilioSignature(BASE + "/twilio/outbound-status", statusParams, ALT_TOKEN);
+      const res = await request(app).post("/twilio/outbound-status").type("form").set("X-Twilio-Signature", sig).send(statusParams);
+      expect(res.status).toBe(200);
+    } finally {
+      delete process.env.TWILIO_AUTH_TOKEN_ALT;
+    }
+  });
 });
 
 describe("server.js's real mount: /twilio/live-voice is untouched by the outbound mount", () => {

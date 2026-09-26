@@ -217,6 +217,26 @@ describe("POST /internal/outbound/sweep: the stale-attempt backstops (Task 20)",
     expect(postCall.tryClaimByAttempt).toHaveBeenCalledWith(ATTEMPT, BIZ);
   });
 
+  // O-26/C17 (post-2c): the fetch uses the ATTEMPT's own campaign caller_id
+  // (already loaded by outboundPostCallContext -- no new read), not always
+  // account A.
+  it("lost_callback: the fetch uses twilioClientFor(campaign caller_id), from data already loaded", async () => {
+    const db = staleDb("lost_callback", {
+      outboundPostCallContext: vi.fn(async () => ({
+        twilioCallSid: "CAlost0003",
+        answeredAt: new Date(),
+        config: { caller_id: "+18176011171" },
+      })),
+    });
+    const fetch = vi.fn(async () => ({ status: "completed", duration: "10" }));
+    const twilioClientFor = vi.fn(() => ({ calls: vi.fn(() => ({ fetch })) }));
+    const postCall = { tryClaimByAttempt: vi.fn(async () => true) };
+    const deps = fakeDeps({ db, twilioClientFor, postCall });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(twilioClientFor).toHaveBeenCalledWith("+18176011171");
+  });
+
   it("lost_callback: still in progress -- left alone, logged, no claim", async () => {
     const db = staleDb("lost_callback", {
       outboundPostCallContext: vi.fn(async () => ({ twilioCallSid: "CAlost0002", answeredAt: new Date() })),
@@ -440,6 +460,27 @@ describe("buildOutboundDeps", () => {
       OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
     });
     expect(deps).not.toBeNull();
+  });
+
+  // O-26/C17 (post-2c): accepting a twilioAccounts router must not change
+  // either of the two properties above -- still lazy, still buildable with no
+  // ambient Twilio credentials. The multi-account callerIdValid behaviour
+  // itself is tests/outboundTwilioAccounts.test.js's job (resolveAccountFor
+  // directly) and tests/outboundDispatch.test.js's (createDispatcher wired to
+  // a twilioClientFor); this only proves buildOutboundDeps wires it in
+  // without eagerly touching it.
+  it("accepts an injected twilioAccounts router without calling it, and without needing its own credentials", () => {
+    const twilioAccounts = { resolveAccountFor: vi.fn(async () => "A"), twilioClientFor: vi.fn(async () => ({})) };
+    const deps = buildOutboundDeps(
+      {
+        BASE_URL: "https://x.example/",
+        OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q",
+        OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+      },
+      { twilioAccounts }
+    );
+    expect(deps).not.toBeNull();
+    expect(twilioAccounts.resolveAccountFor).not.toHaveBeenCalled();
   });
 });
 

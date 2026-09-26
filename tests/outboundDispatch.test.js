@@ -317,6 +317,56 @@ describe("fix A: the SID write is retried, and a call no callback can route is h
   });
 });
 
+// O-26/C17 (post-2c): dial from either Twilio account. `twilioClientFor` is
+// the account-aware resolver (lib/outbound/twilioAccounts.js in production);
+// `twilio` (used by every test above) is the older, already-resolved-client
+// shape, still supported as a fallback with no signature break.
+describe("dispatch: C17 -- twilioClientFor(callerId) resolves the account, when given", () => {
+  it("calls.create uses the client twilioClientFor(campaign caller_id) returns", async () => {
+    const db = fakeDb();
+    const bClient = { calls: { create: vi.fn(async () => ({ sid: "CAfromB" })) } };
+    const twilioClientFor = vi.fn(async (callerId) => (callerId === "+441372656055" ? bClient : null));
+    const { d } = mk(db, undefined, { twilioClientFor });
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(r).toMatchObject({ status: "dialed", callSid: "CAfromB" });
+    expect(twilioClientFor).toHaveBeenCalledWith("+441372656055");
+    expect(bClient.calls.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("hangUp (the SID-write-failure path) uses the SAME resolved client, not the legacy `twilio` fallback", async () => {
+    const db = fakeDb();
+    db.setAttemptCallSid = vi.fn(async () => { throw new Error("db down"); });
+    const update = vi.fn(async () => ({ status: "canceled" }));
+    const bCalls = Object.assign(vi.fn(() => ({ update })), { create: vi.fn(async () => ({ sid: "CAfromB" })) });
+    const bClient = { calls: bCalls };
+    const legacyTwilio = { calls: { create: vi.fn(async () => ({ sid: "CAlegacy" })) } }; // must never be used once twilioClientFor is given
+    const twilioClientFor = vi.fn(async () => bClient);
+    const { d } = mk(db, legacyTwilio, { sleep: noSleep, twilioClientFor });
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dial_failed");
+    expect(legacyTwilio.calls.create).not.toHaveBeenCalled();
+    expect(bCalls).toHaveBeenCalledWith("CAfromB");
+    expect(update).toHaveBeenCalledWith({ status: "canceled" });
+  });
+
+  it("twilioClientFor resolving null (neither account owns it) does not throw dispatch itself -- the create attempt fails and reschedules like any other dial failure", async () => {
+    const db = fakeDb();
+    const twilioClientFor = vi.fn(async () => null);
+    const { d, enqueue } = mk(db, undefined, { twilioClientFor });
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(r.status).toBe("dial_failed");
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+    expect(enqueue).toHaveBeenCalled();
+  });
+
+  it("no twilioClientFor given -- falls back to the legacy `twilio` client (every test above this block)", async () => {
+    const db = fakeDb();
+    const { d, twilio } = mk(db);
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(r).toMatchObject({ status: "dialed", callSid: "CA123" });
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+  });
+});
+
 // Checkpoint 2a, M2. On a DB outage the SID write fails AND the reschedule
 // that follows it throws. The log line and the counter used to come after the
 // reschedule, so the one failure worth an alert left no trace at all.

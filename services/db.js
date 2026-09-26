@@ -2967,7 +2967,7 @@ export async function stampAttemptAnswered(attemptId) {
  * caller needs. Runs inside `withTenant`/`withTenantSafe`, the same caller
  * pattern as the rest of this block.
  * @param {string} attemptId
- * @returns {Promise<{attemptNo: number, complianceClass: string, voicemailOn: number[]}|null>}
+ * @returns {Promise<{attemptNo: number, complianceClass: string, voicemailOn: number[], callerId: string|null}|null>}
  */
 export async function outboundAmdContext(attemptId) {
   requireTenantScope("outboundAmdContext");
@@ -2988,6 +2988,11 @@ export async function outboundAmdContext(attemptId) {
     attemptNo: row.attempt_no,
     complianceClass: row.compliance_class,
     voicemailOn: Array.isArray(row.config?.retries?.voicemail_on) ? row.config.retries.voicemail_on : [],
+    // O-26/C17: the campaign's own caller_id, already loaded via `v.config`
+    // above -- the smallest read (no new query) that lets the AMD door's
+    // REST update (lib/outbound/doorRoutes.js) resolve the OWNING Twilio
+    // account instead of always assuming account A.
+    callerId: row.config?.caller_id ?? null,
   };
 }
 
