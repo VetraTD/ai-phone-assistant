@@ -153,6 +153,55 @@ describe("dispatch: Twilio failures", () => {
   });
 });
 
+// Task 20, migration 045: the sweep's `sidless` backstop reuses this rather
+// than duplicating dispatch's own fail -> reschedule -> enqueue sequence.
+describe("failStaleAttempt: the sweep's sidless backstop, reusing dispatch's own sequence", () => {
+  it("fails the attempt and reschedules the outreach, then enqueues", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const r = row({ attempts_made: 1 });
+    const { outreachClosed, next } = await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 1, tz: "Europe/London", now: () => NOW, rand: () => 0,
+    });
+    expect(outreachClosed).toBe(false);
+    expect(next.toISOString()).toBe("2026-09-28T13:10:00.000Z");
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+    expect(db.rescheduleOutreach).toHaveBeenCalledWith("o1", next);
+    expect(enqueue).toHaveBeenCalledWith({ businessId: "b1", outreachId: "o1", at: next, source: "reschedule" });
+  });
+
+  it("schedule exhausted: closes with attempts_exhausted, never enqueues", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const r = row({ attempts_made: 5 }); // five schedule entries: nothing after attempt 5
+    const { outreachClosed, next } = await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 5, tz: "Europe/London", now: () => NOW, rand: () => 0,
+    });
+    expect(outreachClosed).toBe(false); // closeOutreach ran, but this return value only tracks the LOCKED-closed case below
+    expect(next).toBeNull();
+    expect(db.closeOutreach).toHaveBeenCalledWith("o1", "attempts_exhausted");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("the outreach was already closed under lock (e.g. an opt-out mid-flight): the attempt still records failed, nothing is rescheduled or enqueued", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    const db = fakeDb();
+    db.lockOutreachState = vi.fn(async () => "closed");
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const r = row({ attempts_made: 1 });
+    const { outreachClosed } = await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 1, tz: "Europe/London", now: () => NOW, rand: () => 0,
+    });
+    expect(outreachClosed).toBe(true);
+    expect(db.failAttempt).toHaveBeenCalledWith("a1");
+    expect(db.rescheduleOutreach).not.toHaveBeenCalled();
+    expect(db.closeOutreach).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
 describe("startOfLocalDay: local midnight as an instant, DST-safe", () => {
   it("on the spring-forward day London midnight is still GMT (the clocks change at 01:00)", () => {
     expect(startOfLocalDay(new Date("2026-03-29T12:00:00Z"), "Europe/London").toISOString()).toBe("2026-03-29T00:00:00.000Z");

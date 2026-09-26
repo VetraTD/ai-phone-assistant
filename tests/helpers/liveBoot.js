@@ -71,7 +71,19 @@ export function fakeDb(config, businessId) {
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
+    // Task 20: the outbound finish() hook's own half of post-call. A no-op
+    // here so every existing (inbound AND outbound) test that boots a
+    // session through this helper, and never asked to exercise post-call
+    // itself, does not have to know this call site exists.
+    finishAttemptSession: async () => {},
   };
+}
+
+/** Task 20: a safe default so booting a session never reaches the REAL,
+ * wired-up postCall singleton (which would try the real services/db.js pool).
+ * Tests that care about the exactly-once claim inject their own. */
+export function fakePostCall() {
+  return { tryClaim: async () => false, tryClaimByAttempt: async () => false };
 }
 
 /** Counters, by the same names the production logs carry. */
@@ -118,6 +130,7 @@ export async function bootLive({
   waitForConnect = true,
   database,
   authorizedCallSid,
+  postCall,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
@@ -139,6 +152,7 @@ export async function bootLive({
     database: database ?? fakeDb(config, businessId),
     env,
     capabilityDeps: deps,
+    postCall: postCall ?? fakePostCall(),
   });
 
   ws.deliver({

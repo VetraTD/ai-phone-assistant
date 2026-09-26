@@ -52,6 +52,7 @@ import {
 } from "./lib/validate.js";
 import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath, createTwilioClientFor } from "./lib/outbound/internalRoutes.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
+import { postCall as outboundPostCall } from "./lib/outbound/postCall.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -623,8 +624,10 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
 // outbound calls in flight they simply see no matching CallSid and answer
 // accordingly (a polite hang-up, or a 200 no-op) -- see doorRoutes.js.
 //
-// `postCall` is Task 20's placeholder: `tryClaim` always resolves false until
-// that task wires the real implementation in.
+// `outboundPostCall` (Task 20) is the ONE shared instance -- the same
+// singleton passed into `buildOutboundDeps` below (the sweep) and into the
+// Live session's own upgrade handler (its `finish()` hook), so all three
+// callers agree on what "already claimed" means.
 //
 // `outboundTwilioClientFor` (Task 13; ONE shared instance, fix round 1 MINOR
 // 3) is the SAME lazy, account-A-only factory passed into `buildOutboundDeps`
@@ -639,7 +642,7 @@ registerOutboundDoorRoutes(app, {
   validate: twilioValidationAnyAccount,
   db,
   mintToken: mintMediaStreamToken,
-  postCall: { tryClaim: async () => false }, // Task 20 wires postCall
+  postCall: outboundPostCall,
   twilioClientFor: outboundTwilioClientFor,
   log,
   now: () => Date.now(),
@@ -1458,7 +1461,7 @@ app.get("/api/debug/probe-results", async (req, res) => {
 // whole outbound surface, not one per call site.
 // ---------------------------------------------------------------------------
 
-const outboundDeps = buildOutboundDeps(process.env, { twilioClientFor: outboundTwilioClientFor });
+const outboundDeps = buildOutboundDeps(process.env, { twilioClientFor: outboundTwilioClientFor, postCall: outboundPostCall });
 if (outboundDeps) {
   registerOutboundInternalRoutes(app, outboundDeps);
 } else {
@@ -1654,7 +1657,7 @@ function attachWebSocket(httpServer) {
         // door routes and dispatcher share (outboundTwilioClientFor above),
         // rather than a second instance against the same account -- so an
         // outbound transfer redial uses this one too.
-        handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor }).catch((err) => {
+        handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor, postCall: outboundPostCall }).catch((err) => {
           log.error("live_connection_failed", { reason: err?.message });
           try {
             ws.close();

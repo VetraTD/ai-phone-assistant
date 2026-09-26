@@ -105,6 +105,8 @@ function fakeDb() {
     }),
     fetchBusinessById: async () => ({ id: BIZ, name: CONFIG.businessName, timezone: CONFIG.timezone }),
     fetchBusinessCapabilities: async () => [],
+    // Task 20: the outbound finish() hook's own half of post-call.
+    finishAttemptSession: async () => {},
   };
 }
 
@@ -141,6 +143,8 @@ async function boot() {
     verify,
     recover,
     judge,
+    // Task 20: never the REAL, wired-up singleton.
+    postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },
   });
   ws.deliver({
     event: "start",

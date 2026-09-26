@@ -198,6 +198,8 @@ function fakeDb({ transfer } = {}) {
     }),
     fetchBusinessById: async () => ({ id: BIZ, name: CONFIG.businessName, timezone: CONFIG.timezone }),
     fetchBusinessCapabilities: async () => [],
+    // Task 20: the outbound finish() hook's own half of post-call.
+    finishAttemptSession: async () => {},
   };
 }
 
@@ -218,6 +220,9 @@ async function boot({
     connect: live.connect,
     database: db,
     env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com", ...env },
+    // Task 20: never the REAL, wired-up singleton (it would try services/
+    // db.js's real pool -- unconfigured in every test here).
+    postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },
     ...(twilioClient ? { twilioClient } : {}),
     ...(twilioClientFor ? { twilioClientFor } : {}),
     ...(exitFallbackMs !== undefined ? { exitFallbackMs } : {}),

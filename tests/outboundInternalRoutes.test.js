@@ -139,6 +139,117 @@ describe("POST /internal/outbound/sweep", () => {
   });
 });
 
+// Task 20, migration 045: the sweep's three stale-attempt backstops.
+describe("POST /internal/outbound/sweep: the stale-attempt backstops (Task 20)", () => {
+  const ATTEMPT = "33333333-3333-3333-3333-333333333333";
+  const OUTREACH2 = "44444444-4444-4444-4444-444444444444";
+
+  function staleDb(kind, overrides = {}) {
+    return {
+      outboundDue: vi.fn(async () => []),
+      outboundStaleAttempts: vi.fn(async () => [{ business_id: BIZ, attempt_id: ATTEMPT, kind }]),
+      withTenant: vi.fn(async (_biz, fn) => fn()),
+      withTenantSafe: vi.fn(async (_biz, fn) => fn()),
+      outboundPostCallContext: vi.fn(async () => ({
+        attemptNo: 1,
+        outreachId: OUTREACH2,
+        outreachCreatedAt: new Date("2026-09-20T09:00:00Z"),
+        config: { retries: { schedule: ["now", "+10m"] }, calling_window: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" } },
+        contactTimezone: "Europe/London",
+        businessTimezone: "Europe/London",
+        phoneE164: "+447700900202",
+        twilioCallSid: null,
+        result: null,
+        answeredAt: null,
+      })),
+      stampAttemptStatus: vi.fn(async () => ({ firstTerminalStamp: true, answered: true })),
+      completeCall: vi.fn(async () => {}),
+      lockOutreachState: vi.fn(async () => "dialing"),
+      failAttempt: vi.fn(async () => {}),
+      rescheduleOutreach: vi.fn(async () => {}),
+      closeOutreach: vi.fn(async () => {}),
+      ...overrides,
+    };
+  }
+
+  it("sidless: re-checked (still no SID, no result), failed and rescheduled via failStaleAttempt -- never twice for the same row", async () => {
+    const db = staleDb("sidless");
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const deps = fakeDeps({ db, enqueue, now: () => new Date("2026-09-25T12:00:00Z") });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(db.withTenant).toHaveBeenCalled();
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_sweep_sidless_resolved", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("sidless: a SID or result already landed -- skipped, not double-failed", async () => {
+    const db = staleDb("sidless", {
+      outboundPostCallContext: vi.fn(async () => ({ twilioCallSid: "CAalreadyresolved", result: null })),
+    });
+    const deps = fakeDeps({ db });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_sweep_sidless_skipped", expect.objectContaining({ reason: "already_resolved" }));
+  });
+
+  it("lost_callback: a terminal Twilio status stamps the attempt (completeCall included) then claims post-call", async () => {
+    const db = staleDb("lost_callback", {
+      outboundPostCallContext: vi.fn(async () => ({ twilioCallSid: "CAlost0001", answeredAt: new Date() })),
+    });
+    const fetch = vi.fn(async () => ({ status: "completed", duration: "42" }));
+    const twilioClientFor = vi.fn(() => ({ calls: vi.fn(() => ({ fetch })) }));
+    const postCall = { tryClaimByAttempt: vi.fn(async () => true) };
+    const deps = fakeDeps({ db, twilioClientFor, postCall });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(db.stampAttemptStatus).toHaveBeenCalledWith(ATTEMPT, { twilioStatus: "completed", answered: false, terminal: true, result: null });
+    expect(db.completeCall).toHaveBeenCalledWith("CAlost0001", "completed", 42);
+    expect(postCall.tryClaimByAttempt).toHaveBeenCalledWith(ATTEMPT, BIZ);
+  });
+
+  it("lost_callback: still in progress -- left alone, logged, no claim", async () => {
+    const db = staleDb("lost_callback", {
+      outboundPostCallContext: vi.fn(async () => ({ twilioCallSid: "CAlost0002", answeredAt: new Date() })),
+    });
+    const fetch = vi.fn(async () => ({ status: "in-progress" }));
+    const twilioClientFor = vi.fn(() => ({ calls: vi.fn(() => ({ fetch })) }));
+    const postCall = { tryClaimByAttempt: vi.fn(async () => false) };
+    const deps = fakeDeps({ db, twilioClientFor, postCall });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(db.stampAttemptStatus).not.toHaveBeenCalled();
+    expect(postCall.tryClaimByAttempt).not.toHaveBeenCalled();
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_sweep_lost_callback_in_progress", expect.objectContaining({ status: "in-progress" }));
+  });
+
+  it("postcall_pending: hands straight to postCall.tryClaimByAttempt", async () => {
+    const db = staleDb("postcall_pending");
+    const postCall = { tryClaimByAttempt: vi.fn(async () => true) };
+    const deps = fakeDeps({ db, postCall });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(postCall.tryClaimByAttempt).toHaveBeenCalledWith(ATTEMPT, BIZ);
+  });
+
+  it("one bad row cannot abort the tick: a throwing handler is caught, logged, and the response is still 200", async () => {
+    const db = staleDb("sidless", {
+      outboundPostCallContext: vi.fn(async () => { throw new Error("db blip"); }),
+    });
+    const deps = fakeDeps({ db });
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(deps.log.error).toHaveBeenCalledWith("outbound_sweep_stale_attempt_failed", expect.objectContaining({ attemptId: ATTEMPT, kind: "sidless" }));
+  });
+
+  it("an unknown DB fake (no outboundStaleAttempts) is untouched -- the existing 'due' tests never see this code path", async () => {
+    const deps = fakeDeps(); // the base fakeDeps() db has no outboundStaleAttempts
+    const res = await request(buildApp(deps)).post("/internal/outbound/sweep").set("Authorization", "Bearer good").send({});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ reenqueued: 0 });
+  });
+});
+
 // Checkpoint 2a, M5. server.js skips its global 100kb parser for exactly the
 // requests these routes will serve. Express 5 routes them case-insensitively
 // with ONE optional trailing slash (measured: `//`, `%64`, `.json` 404), so
