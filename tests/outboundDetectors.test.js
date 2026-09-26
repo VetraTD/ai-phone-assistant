@@ -6,6 +6,7 @@ import {
   isSessionSilent,
   isMachineOrFaxAnswer,
   resolveSilentVerdict,
+  sessionEndSilent,
 } from "../lib/outbound/detectors.js";
 
 describe("detectOptOut (spec §13.3)", () => {
@@ -40,6 +41,16 @@ describe("detectOptOut (spec §13.3)", () => {
   it.each([["take me off"], ["remove me"]])("caller pattern: %s", (phrase) => {
     expect(detectOptOut({ callerText: `Please ${phrase} your list.` })).toEqual({ hit: true, side: "caller" });
   });
+
+  // Fix round 1, item 6: curly apostrophes/quotes (a model or a
+  // transcription service routinely uses them) folded before matching.
+  it("curly apostrophe: ‘don’t call me’ (caller) is a hit", () => {
+    expect(detectOptOut({ callerText: "please don’t call me again" })).toEqual({ hit: true, side: "caller" });
+  });
+
+  it("curly apostrophe: “I’ve made sure we won’t call you again” (assistant) is a hit", () => {
+    expect(detectOptOut({ assistantText: "I’ve made sure we won’t call you again." })).toEqual({ hit: true, side: "assistant" });
+  });
 });
 
 describe("detectClaimedHuman (spec §13.2)", () => {
@@ -70,6 +81,15 @@ describe("detectClaimedHuman (spec §13.2)", () => {
   it("empty/null input is not claimed-human", () => {
     expect(detectClaimedHuman("")).toBe(false);
     expect(detectClaimedHuman(null)).toBe(false);
+  });
+
+  // Fix round 1, item 6.
+  it("curly apostrophe: “Yes, I’m a real person” is claimed-human", () => {
+    expect(detectClaimedHuman("Yes, I’m a real person")).toBe(true);
+  });
+
+  it("curly apostrophe negation still retracts: “I’m human, not really” is not claimed-human", () => {
+    expect(detectClaimedHuman("I’m human, not really, I’m an AI assistant.")).toBe(false);
   });
 });
 
@@ -124,5 +144,39 @@ describe("isMachineOrFaxAnswer / resolveSilentVerdict", () => {
 
   it("no session, but machine answered by the time AMD landed -> still excluded", () => {
     expect(resolveSilentVerdict({ hasSession: false, sessionSilent: false, answeredBy: "machine_end_silence" })).toBe(false);
+  });
+});
+
+// Fix round 1, item 3: the session-end-bounded fallback, for when
+// firstAudio() could not confirm a real playout (nothing ever queued, or a
+// mark that never echoed -- by finish() time a late echo is impossible).
+describe("sessionEndSilent (fix round 1, item 3)", () => {
+  it("nothing ever queued, never spoke: bounded by (session end - answer)", () => {
+    // streamStartAtMs=0, answerToStreamMs=350 -> "answer" was at -350.
+    // atMs=2500 -> from_answer_ms = 2500 - 0 + 350 = 2850 > 2000: silent.
+    expect(sessionEndSilent({ onsetAt: null, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 2500 })).toBe(true);
+  });
+
+  it("nothing ever queued, never spoke, ended quickly: not silent", () => {
+    // from_answer_ms = 1000 - 0 + 350 = 1350 <= 2000.
+    expect(sessionEndSilent({ onsetAt: null, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 1000 })).toBe(false);
+  });
+
+  it("they spoke (onsetAt known): bounded by (session end - onset), NOT by the answer time", () => {
+    // onset at 1870ms; session ends at 4200ms -> 4200-1870 = 2330 > 2000: silent,
+    // even though from-answer alone (4200-0+350=4550) would also read silent --
+    // the point is which clock governs when they DID speak.
+    expect(sessionEndSilent({ onsetAt: 1870, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 4200 })).toBe(true);
+  });
+
+  it("they spoke, session ended soon after (within 2s of onset): not silent", () => {
+    expect(sessionEndSilent({ onsetAt: 1870, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 3500 })).toBe(false);
+  });
+
+  it("an enqueue-only measurement (mark never echoed) is superseded: the session-end bound is what runs, not the understated enqueue time", () => {
+    // Mirrors the reviewer's concern directly: an enqueue time of, say,
+    // 1700ms would read "not silent" on its own, but the session actually
+    // ran another 2000ms+ with no confirmed playout.
+    expect(sessionEndSilent({ onsetAt: null, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 3800 })).toBe(true);
   });
 });

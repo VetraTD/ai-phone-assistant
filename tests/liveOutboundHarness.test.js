@@ -92,14 +92,21 @@ const LINKS = { direction: "outbound", campaignId: "camp-1", campaignVersion: 1,
 function harnessDb() {
   const base = fakeDb(CONFIG, BIZ);
   const attempt = { answeredAt: null, completedAt: null, answeredBy: null, sessionFinishedAt: null, postCallStarted: false, silent: false, result: null };
+  // Fix round 1, item 5: a REAL in-memory transcript, so a test can prove
+  // the FINAL turn (written right before hangup) is still there when
+  // runPostCall's own transcript read (after transcriptSettled) happens.
+  const transcript = [];
   return {
     ...base,
     attempt,
+    transcript,
     lookupBusinessByPhone: vi.fn(base.lookupBusinessByPhone),
     loadConfig: vi.fn(() => CONFIG),
     createCall: vi.fn(async () => "call-1"),
     fetchCallerContext: vi.fn(async () => null),
-    addTranscriptEntry: vi.fn(async () => {}),
+    addTranscriptEntry: vi.fn(async (_callId, speaker, message, sequence) => {
+      transcript.push({ speaker, message, sequence });
+    }),
     fetchAttemptOpenerAudio: vi.fn(async () => null),
     withTenant: vi.fn(async (_id, fn) => fn()),
     withTenantSafe: vi.fn(async (_id, fn) => fn()),
@@ -188,7 +195,7 @@ function harnessDb() {
       attempt.result = attempt.result ?? resultIfUnset;
     }),
     outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })),
-    fetchCallTranscript: vi.fn(async () => []),
+    fetchCallTranscript: vi.fn(async () => transcript.slice().sort((a, b) => a.sequence - b.sequence)),
     setCallOutcomeCode: vi.fn(async () => {}),
     updateCallSummary: vi.fn(async () => {}),
     isSuppressed: vi.fn(async () => false),
@@ -198,6 +205,10 @@ function harnessDb() {
     }),
     setOutreachHold: vi.fn(async () => {}),
     applyOutreachResult: vi.fn(async () => true),
+    releasePostCallClaim: vi.fn(async () => {
+      attempt.postCallStarted = false;
+      return true;
+    }),
   };
 }
 
@@ -523,5 +534,67 @@ describe("the simulated outbound call, through the real door and session", () =>
     expect(v.criteria.post_call_exactly_once.result).toBe("PASS");
     expect(v.criteria.post_call_exactly_once.post_call_started_at).not.toBeNull();
     expect(v.criteria.post_call_exactly_once.attempt_result_log_count).toBe(1);
+  });
+
+  // Fix round 1, item 5: finish() now chains session_finished_at (and so
+  // the post-call claim) AFTER transcriptSettled, exactly like the verify/
+  // recover readers already did. Proven directly: the assistant's LAST
+  // turn -- spoken right before hangup, where an opt-out confirmation
+  // ("we won't call you again") most often lives -- must still be visible
+  // to the detector once post-call runs.
+  it("Task 20 fix round 1, item 5: the FINAL turn (right before hangup) reaches the opt-out detector", async () => {
+    const ctx = await answerAndStart();
+    const { call, db, app } = ctx;
+
+    // A deterministic ORDER log of WHEN each event actually happened,
+    // checked only after BOTH are guaranteed to have occurred (an explicit
+    // extra wait below) -- not a race decided by how fast the assertion
+    // happens to run. The final turn's own write is delayed past
+    // `call.assistantTurn()`'s own settle time (2x25ms), so it is STILL
+    // PENDING at the exact moment `finish()` fires (synchronously, inside
+    // `call.hangUp()`'s `ws.deliver({event:"stop"})`, before hangUp's own
+    // settles) -- only a finish() that genuinely waits for transcriptSettled
+    // can see this write land before reading the transcript.
+    const order = [];
+    db.addTranscriptEntry.mockImplementationOnce(
+      (_callId, speaker, message, sequence) =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            db.transcript.push({ speaker, message, sequence });
+            order.push("transcript_write");
+            resolve();
+          }, 150);
+        })
+    );
+    const realFetch = db.fetchCallTranscript.getMockImplementation();
+    db.fetchCallTranscript.mockImplementation(async (...args) => {
+      order.push("fetch_call_transcript");
+      return realFetch(...args);
+    });
+
+    // The assistant's very last words before the caller hangs up.
+    await call.assistantTurn("I've made sure we won't call you again.");
+
+    // NOT the shared hangUpAndComplete(): its own assertions assume
+    // session_finished_at lands within call.hangUp()'s ordinary settle
+    // time, which the delayed write above deliberately violates (that is
+    // the whole point -- finish() must wait for it). Same two real steps,
+    // without that timing assumption.
+    await call.hangUp();
+    const done = await send(app, buildOutboundStatusRequest({ ...COMMON, ...PARTIES, status: "completed", durationSeconds: 7 }));
+    expect(done.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 300)); // both events are guaranteed to have happened by now
+
+    expect(order).toEqual(["transcript_write", "fetch_call_transcript"]);
+
+    // The transcript runPostCall actually read (captured by the wrapper
+    // above, the ONE real read during hangUpAndComplete) included the final
+    // turn...
+    const rows = await db.fetchCallTranscript("call-1");
+    expect(rows.map((r) => r.message)).toContain("I've made sure we won't call you again.");
+    // ...and it reached the detector: the suppression was inserted, proving
+    // post-call did not run (and read the transcript) before this turn's
+    // row had landed.
+    expect(db.insertDetectorSuppression).toHaveBeenCalledWith({ phone: CONTACT, sourceCallId: "call-1" });
   });
 });
