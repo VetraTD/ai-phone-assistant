@@ -69,6 +69,14 @@ describe("finish(): inbound is byte-identical (Task 20's outbound hook never run
     // an inbound call's record.
     expect(summaries[0]).not.toHaveProperty("silent");
     expect(summaries[0]).not.toHaveProperty("outboundCall");
+    // Task 21 (spec §14): direction gets an explicit VALUE on inbound too --
+    // the one key this change adds to every call. attempt_id/campaign_id
+    // stay ABSENT (Ruling: undefined, which JSON.stringify drops) rather
+    // than null, so the inbound record equals today's shape plus exactly
+    // that one key, not three.
+    expect(summaries[0].direction).toBe("inbound");
+    expect(summaries[0]).not.toHaveProperty("attempt_id");
+    expect(summaries[0]).not.toHaveProperty("campaign_id");
   });
 
   it("no outbound_finish_postcall_failed (or any Task 20 event) is ever logged for an inbound call", async () => {

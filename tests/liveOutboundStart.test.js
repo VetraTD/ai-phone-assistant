@@ -685,3 +685,15 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     await call.hangUp();
   });
 });
+
+describe("live_call_summary carries direction/attempt_id/campaign_id (spec §14, Task 21)", () => {
+  it("outbound: direction, attempt_id and campaign_id are all present and correct", async () => {
+    const call = await bootOutbound();
+    await call.hangUp();
+    const [summary] = events("live_call_summary");
+    expect(summary).toBeTruthy();
+    expect(summary.direction).toBe("outbound");
+    expect(summary.attempt_id).toBe("att-1");
+    expect(summary.campaign_id).toBe("camp-1");
+  });
+});
