@@ -91,8 +91,12 @@ describe("evaluateGate: cheap pinning gaps", () => {
     const f = base(); f.env.enabled = true; f.contact.phone_e164 = "+447700900999";
     expect(gate(f)).toEqual({ verdict: "allow" });
   });
-  it("dialsToday=2 still allows (below the cap of 3)", () => {
-    const f = base(); f.dialsToday = 2;
+  // Fix round 1, Minor 3: this ran on base() (OFF + allow-listed), so once
+  // X3's exemption existed it passed BECAUSE of the exemption, not because
+  // 2 < 3 -- the cap's own below-cap behaviour went unpinned. ON, so the
+  // exemption (env.enabled:false-only) cannot be the reason this allows.
+  it("ON: dialsToday=2 still allows (below the cap of 3)", () => {
+    const f = base(); f.env.enabled = true; f.dialsToday = 2;
     expect(gate(f)).toEqual({ verdict: "allow" });
   });
 });
