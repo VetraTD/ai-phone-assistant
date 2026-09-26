@@ -149,6 +149,28 @@ const OUT_SID = "CAoutTransfer0001";
 const OUTSIDE_WINDOW = new Date("2026-09-26T17:00:00Z");
 const OUTSIDE_WINDOW_WHEN = "Mon-Fri 09:00-18:00";
 
+/**
+ * b22 (fix wave, checkpoint 2b): every test below that relies on the
+ * DEFAULT "Daily 00:00-23:59" transfer window used the REAL wall clock --
+ * isInsideTransferWindow's end bound is exclusive-by-minute, so a run that
+ * happens to land in the last minute of the day (23:59:00-23:59:59.999,
+ * local to Europe/London) would read the "always open" window as CLOSED and
+ * fail once in roughly 1,440 runs. Pinned to a fixed midday instant so the
+ * window check can never itself be what closes it.
+ */
+const SAFE_INSTANT = new Date("2026-09-23T12:00:00Z"); // Wednesday noon UTC
+
+/** Runs `fn` with Date pinned to SAFE_INSTANT (b22), restoring real timers after. */
+async function withPinnedClock(fn) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(SAFE_INSTANT);
+  try {
+    await fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function campaignConfig(overrides = {}) {
   return {
     persona_name: "Ava",
@@ -204,6 +226,8 @@ function fakeDb({ transfer } = {}) {
     fetchBusinessCapabilities: async () => [],
     // Task 20: the outbound finish() hook's own half of post-call.
     finishAttemptSession: async () => {},
+    // I6 (fix wave, checkpoint 2b): the session's own answered stamp.
+    stampAttemptAnswered: async () => {},
   };
 }
 
@@ -305,52 +329,61 @@ describe("redialForTransfer — inbound is byte-for-byte unchanged", () => {
 describe("redialForTransfer — outbound variant (spec §9.7)", () => {
   it("dials from the CAMPAIGN's caller_id, never the contact's number, with the whisper and result URLs", async () => {
     const updates = [];
-    const twilioClientFor = vi.fn(() => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) }));
-    const live = fakeLive();
-    const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
-    await callTool(live, "request_transfer");
-    await driveTransfer(ws, live, updates);
+    // b22: pinned clock -- see SAFE_INSTANT's own doc.
+    await withPinnedClock(async () => {
+      const twilioClientFor = vi.fn(() => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) }));
+      const live = fakeLive();
+      const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
+      await callTool(live, "request_transfer");
+      await driveTransfer(ws, live, updates);
 
-    expect(updates).toHaveLength(1);
-    expect(updates[0].twiml).toBe(
-      // O-14 (fix round 1): ringTone, resolved from CONFIG.timezone
-      // (Europe/London) exactly as the inbound branch resolves it -- "uk".
-      '<Response><Dial ringTone="uk" timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
-        '<Number url="https://voice.example.com/twilio/outbound-whisper?attempt=att-transfer-1">+15550001111</Number></Dial></Response>'
-    );
-    // C17 seam: the client came from twilioClientFor(campaign caller_id), not
-    // a client built ad hoc or keyed on the contact's number.
-    expect(twilioClientFor).toHaveBeenCalledWith(CALLER_ID);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].twiml).toBe(
+        // O-14 (fix round 1): ringTone, resolved from CONFIG.timezone
+        // (Europe/London) exactly as the inbound branch resolves it -- "uk".
+        '<Response><Dial ringTone="uk" timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
+          '<Number url="https://voice.example.com/twilio/outbound-whisper?attempt=att-transfer-1">+15550001111</Number></Dial></Response>'
+      );
+      // C17 seam: the client came from twilioClientFor(campaign caller_id), not
+      // a client built ad hoc or keyed on the contact's number.
+      expect(twilioClientFor).toHaveBeenCalledWith(CALLER_ID);
+    });
   });
 
   it("transfer.whisper === false omits the url attribute entirely", async () => {
     const updates = [];
-    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
-    const live = fakeLive();
-    const { ws } = await boot({
-      live,
-      // Always-open window (the default), only `whisper` overridden: this test
-      // is about the whisper attribute, not the window, and must not depend
-      // on the real wall-clock time the suite happens to run at.
-      db: fakeDb({ transfer: { ...campaignConfig().transfer, whisper: false } }),
-      twilioClientFor,
-    });
-    await callTool(live, "request_transfer");
-    await driveTransfer(ws, live, updates);
+    // b22: pinned clock -- this test is about the whisper attribute, not the
+    // window, and must not depend on the real wall-clock time the suite
+    // happens to run at.
+    await withPinnedClock(async () => {
+      const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+      const live = fakeLive();
+      const { ws } = await boot({
+        live,
+        // Always-open window (the default), only `whisper` overridden.
+        db: fakeDb({ transfer: { ...campaignConfig().transfer, whisper: false } }),
+        twilioClientFor,
+      });
+      await callTool(live, "request_transfer");
+      await driveTransfer(ws, live, updates);
 
-    expect(updates[0].twiml).not.toContain("outbound-whisper");
-    expect(updates[0].twiml).toContain(`<Number>${TRANSFER_TO}</Number>`);
+      expect(updates[0].twiml).not.toContain("outbound-whisper");
+      expect(updates[0].twiml).toContain(`<Number>${TRANSFER_TO}</Number>`);
+    });
   });
 
   it("O-14 (fix round 1): carries ringTone, resolved from the business config, same as inbound", async () => {
     const updates = [];
-    const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
-    const live = fakeLive();
-    const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
-    await callTool(live, "request_transfer");
-    await driveTransfer(ws, live, updates);
+    // b22: pinned clock -- see SAFE_INSTANT's own doc.
+    await withPinnedClock(async () => {
+      const twilioClientFor = () => ({ calls: () => ({ update: async (opts) => updates.push(opts) }) });
+      const live = fakeLive();
+      const { ws } = await boot({ live, db: fakeDb(), twilioClientFor });
+      await callTool(live, "request_transfer");
+      await driveTransfer(ws, live, updates);
 
-    expect(updates[0].twiml).toContain('ringTone="uk"');
+      expect(updates[0].twiml).toContain('ringTone="uk"');
+    });
   });
 
   it("outside transfer.when: the tool refuses, no REST update is ever made", async () => {
@@ -485,7 +518,7 @@ describe("POST /twilio/outbound-whisper", () => {
       .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
 
     expect(res.status).toBe(200);
-    expect(res.text).toBe("<Response><Say>Transfer from Ava: Priya.</Say></Response>");
+    expect(res.text).toBe('<Response><Say voice="Polly.Joanna">Transfer from Ava: Priya.</Say></Response>');
     expect(db.outboundAttemptByCallSid).toHaveBeenCalledWith(PARENT_SID);
   });
 
@@ -496,7 +529,7 @@ describe("POST /twilio/outbound-whisper", () => {
       .type("form")
       .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
 
-    expect(res.text).toBe("<Response><Say>Transfer from Ava.</Say></Response>");
+    expect(res.text).toBe('<Response><Say voice="Polly.Joanna">Transfer from Ava.</Say></Response>');
   });
 
   it("XML-escapes the persona/first names", async () => {
@@ -508,7 +541,19 @@ describe("POST /twilio/outbound-whisper", () => {
       .type("form")
       .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID });
 
-    expect(res.text).toBe('<Response><Say>Transfer from Ava &amp; Co: Sam &quot;Q&quot;.</Say></Response>');
+    expect(res.text).toBe('<Response><Say voice="Polly.Joanna">Transfer from Ava &amp; Co: Sam &quot;Q&quot;.</Say></Response>');
+  });
+
+  // b19 (fix wave, checkpoint 2b): Ruling 12-b's country-based selection
+  // (missCallProfile), read from the SAME From/To the miss path reads.
+  it("b19: a GB From/To pair speaks in the en-GB voice, not the default", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-whisper")
+      .type("form")
+      .send({ CallSid: CHILD_SID, ParentCallSid: PARENT_SID, From: "+441372656055", To: "+447700900311" });
+
+    expect(res.text).toBe('<Response><Say voice="Polly.Amy">Transfer from Ava: Priya.</Say></Response>');
   });
 
   it("Ruling P-5: an ?attempt= mismatch refuses safely rather than trusting the query string", async () => {
@@ -550,6 +595,10 @@ describe("POST /twilio/outbound-transfer-result", () => {
     expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
   });
 
+  // I7 (Controller Ruling, OVERNIGHT, fix wave checkpoint 2b): the line no
+  // longer promises a callback from "someone at the business" -- Part 1 has
+  // no owner-notification wiring, so the only follow-up that actually
+  // happens is the AI's own retry.
   it("DialCallStatus=no-answer (Ruling P-6): the callback line, outcome_code written, and the log event fires", async () => {
     const db = doorFakeDb();
     const res = await request(doorApp(db))
@@ -559,10 +608,10 @@ describe("POST /twilio/outbound-transfer-result", () => {
       .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
 
     expect(res.status).toBe(200);
-    expect(res.text).toBe(
-      "<Response><Say>Someone from Riverside Family Clinic will call you back shortly.</Say><Hangup/></Response>"
-    );
+    expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
+    // I7: no longer needs the business's name at all.
+    expect(db.fetchBusinessById).not.toHaveBeenCalled();
   });
 
   it("busy and failed take the same unanswered path as no-answer", async () => {
@@ -572,19 +621,19 @@ describe("POST /twilio/outbound-transfer-result", () => {
         .post("/twilio/outbound-transfer-result")
         .type("form")
         .send({ CallSid: PARENT_SID, DialCallStatus: status });
-      expect(res.text).toContain("will call you back shortly");
+      expect(res.text).toContain("We&apos;ll call you back shortly");
       expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
     }
   });
 
-  it("an unresolved CallSid gets the generic (business-less) callback line and writes nothing", async () => {
+  it("an unresolved CallSid gets the SAME callback line (I7: no longer business-specific) and writes nothing", async () => {
     const db = doorFakeDb();
     const res = await request(doorApp(db))
       .post("/twilio/outbound-transfer-result")
       .type("form")
       .send({ CallSid: "CAunknown", DialCallStatus: "no-answer" });
 
-    expect(res.text).toBe("<Response><Say>Someone will call you back shortly.</Say><Hangup/></Response>");
+    expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
     expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
     expect(db.fetchBusinessById).not.toHaveBeenCalled();
   });
@@ -597,7 +646,20 @@ describe("POST /twilio/outbound-transfer-result", () => {
       .type("form")
       .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
 
-    expect(res.text).toBe("<Response><Say>Someone will call you back shortly.</Say><Hangup/></Response>");
+    expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
     expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+  });
+
+  // b19 (fix wave, checkpoint 2b): same GB/US selection as the whisper leg,
+  // read from THIS leg's own From/To (the original outbound call).
+  it("b19: a GB From/To pair speaks in the en-GB voice, not the default", async () => {
+    const db = doorFakeDb();
+    const res = await request(doorApp(db))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer", From: "+441372656055", To: "+447700900311" });
+
+    expect(res.text).toBe("<Response><Say voice=\"Polly.Amy\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
   });
 });
