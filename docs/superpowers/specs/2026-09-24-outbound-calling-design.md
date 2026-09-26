@@ -307,7 +307,7 @@ Validated on save by a schema in `lib/outbound/campaignSchema.js`. That schema i
 - The opener must contain `{business_name}` **and** an AI disclosure matching `/\b(AI|artificial intelligence|automated assistant|virtual assistant)\b/i`, and must render to **at most 120 characters** (about 4 seconds of speech). It is the backstop line, and a person who says nothing must not sit through a speech.
   - The limit was 300 before spike A. The 138-character demo opener took 9.2–10.3 s to say, and the owner said a long line "spoke over" them.
 - The voicemail template has the same content requirement and renders to at most 300 characters.
-- The calling window must sit inside 08:00–21:00 local on every day.
+- The calling window must sit inside 08:00–21:00 local on every day, and each open day's entry must be **at least 30 minutes** long (amended 2026-09-26, post-2c, owner decision O-24/a9; `CAMPAIGN_LIMITS.min_window_minutes`) -- e.g. "20:59-21:00" and "09:00-09:29" are refused, "09:00-09:30" is allowed. The refusal names the entry.
 - `compliance_class = marketing_consented` and `audience = patient` are refused, with a message that they arrive in Part 3.
 - The retry schedule has at most 6 entries, and `give_up_after_days` is at most 30.
 - `caller_id` must be an owned number, looked up through the Twilio API at save.

@@ -35,6 +35,14 @@ describe("validateCampaign: every refusal (each one is a coded rule because igno
     expect(errPaths(v({ ...good(), calling_window: { ...good().calling_window, sat: "10:00-21:30" } }))).toContain("calling_window.sat"));
   it("a window with no open day at all is refused", () =>
     expect(errPaths(v({ ...good(), calling_window: { mon_fri: null, sat: null, sun: null, outside_window: "queue" } }))).toContain("calling_window"));
+  // O-24/a9 (post-2c): a calling-window entry under 30 minutes is refused.
+  it("a 1-minute window (20:59-21:00) is refused", () =>
+    expect(errPaths(v({ ...good(), calling_window: { ...good().calling_window, sat: "20:59-21:00" } }))).toContain("calling_window.sat"));
+  it("a 29-minute window (09:00-09:29) is refused", () =>
+    expect(errPaths(v({ ...good(), calling_window: { ...good().calling_window, sat: "09:00-09:29" } }))).toContain("calling_window.sat"));
+  it("exactly 30 minutes (09:00-09:30) is allowed", () =>
+    expect(v({ ...good(), calling_window: { ...good().calling_window, sat: "09:00-09:30" } }).ok).toBe(true));
+  it("the shipped speed_to_lead template's own windows (11h, 6h) are still valid", () => expect(v(good()).ok).toBe(true));
   it("marketing_consented is refused in Part 1 with a message naming Part 3", () => {
     const r = v(good(), { ...META, compliance_class: "marketing_consented" });
     expect(r.errors.find((e) => e.path === "compliance_class").message).toMatch(/Part 3/);

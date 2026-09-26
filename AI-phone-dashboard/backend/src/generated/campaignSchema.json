@@ -14,7 +14,8 @@
     "consent_window_days": 90,
     "max_call_minutes": 30,
     "first_name_worst_case": 30,
-    "booking_length_min": 240
+    "booking_length_min": 240,
+    "min_window_minutes": 30
   },
   "enums": {
     "template_key": [
