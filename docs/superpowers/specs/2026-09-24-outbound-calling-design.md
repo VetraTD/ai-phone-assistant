@@ -557,7 +557,7 @@ The first failure decides. Every refusal logs `outbound_gate_refused{reason}`.
 | 6 | `hold_until` has passed (the silent-call block) | later: `silent_hold` |
 | 7 | Inside the calling window in the contact's timezone | later: `outside_window` |
 | 8 | Attempts under the schedule length; creation within `give_up_after_days` | never: `attempts_exhausted` or `give_up_window` |
-| 9 | Per contact: at most 3 dial attempts per local day across all campaigns | later (next day): `daily_contact_cap` |
+| 9 | Per contact: at most 3 dial attempts per local day across all campaigns (amended 2026-09-26, owner: not applied while OUTBOUND_ENABLED=false — only allow-listed test numbers are reachable then) | later (next day): `daily_contact_cap` |
 | 10 | Capacity: global outbound < `OUTBOUND_MAX_CONCURRENT` − `OUTBOUND_INBOUND_RESERVE`, and business outbound < `outbound_max_concurrent` | later (+30 s): `capacity` |
 | 11 | `caller_id` is still an owned number on exactly one CONFIGURED Twilio account (checked at most once an hour per number; amended 2026-09-26, post-2c, owner decision O-26/C17 -- was account A only) | never: `caller_id_invalid` |
 

@@ -3321,6 +3321,10 @@ Render the Live-voiced backstop line **once per lead** and reuse it across that
 lead's attempts, rather than once per attempt. It is small (about $0.003) but
 multiplied by every retry.
 
+Outbound daily cap counts per calendar day in the contact's zone; Florida FTSA
+/ Oklahoma TSA limits are 3 calls per rolling 24 h — revisit before any US
+marketing campaign.
+
 ---
 
 ## §3 Latency

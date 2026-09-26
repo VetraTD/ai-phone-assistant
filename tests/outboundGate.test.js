@@ -36,7 +36,7 @@ describe("evaluateGate: each check refuses on its own (11 reasons)", () => {
     ["outside_window", "later", (f) => { f.now = new Date("2026-09-28T20:30:00Z"); f.outreach.created_at = new Date("2026-09-28T20:00:00Z"); f.consents[0].captured_at = f.outreach.created_at; }],
     ["attempts_exhausted", "never", (f) => { f.outreach.attempts_made = 5; }],
     ["give_up_window", "never", (f) => { f.outreach.created_at = new Date("2026-09-10T12:00:00Z"); f.consents[0].captured_at = new Date("2026-09-27T12:00:00Z"); }],
-    ["daily_contact_cap", "later", (f) => { f.dialsToday = 3; }],
+    ["daily_contact_cap", "later", (f) => { f.env.enabled = true; f.dialsToday = 3; }],
     ["capacity", "later", (f) => { f.active.businessOutbound = 2; }],
     ["caller_id_invalid", "never", (f) => { f.callerIdValid = false; }],
   ];
@@ -66,7 +66,7 @@ describe("evaluateGate: 'later' carries a time", () => {
     expect(gate(f).at.toISOString()).toBe("2026-09-29T08:00:00.000Z"); // Tue 09:00 BST
   });
   it("daily cap retries at tomorrow's opening", () => {
-    const f = base(); f.dialsToday = 3;
+    const f = base(); f.env.enabled = true; f.dialsToday = 3;
     expect(gate(f).at.toISOString()).toBe("2026-09-29T08:00:00.000Z");
   });
   it("a paused campaign holds without a time -- resuming re-enqueues", () => {
@@ -130,6 +130,38 @@ describe("evaluateGate: an operator-test consent counts only while the number is
   it("a consent with no wording_version at all (the column is nullable) is not an error", () => {
     const f = base(); const c = { ...base().consents[0] }; delete c.wording_version; f.consents = [c];
     expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+});
+
+// X3 (owner decision, 2026-09-26). While OUTBOUND_ENABLED=false, check 1
+// already refuses every number that is not on the allow-list -- so this
+// exemption can only ever reach the operator's own test handsets, and it
+// becomes inert the instant outbound is switched on. Live round 1 needs ~11
+// dials to one handset in one day.
+describe("evaluateGate: the daily-cap exemption while outbound is OFF (owner decision, 2026-09-26)", () => {
+  it("OFF + allow-listed + dialsToday 5 -> allow (the cap does not apply)", () => {
+    const f = base(); f.dialsToday = 5; // base() is already env.enabled:false, allow-listed
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+
+  it("ON + allow-listed + dialsToday 3 -> still daily_contact_cap (the exemption is OFF-only)", () => {
+    const f = base(); f.env.enabled = true; f.dialsToday = 3;
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "daily_contact_cap" });
+  });
+
+  it("OFF + NOT allow-listed + dialsToday 3 -> never/global_disabled (check 9 is never reached)", () => {
+    const f = base(); f.contact.phone_e164 = "+447700900999"; f.dialsToday = 3;
+    expect(gate(f)).toEqual({ verdict: "never", reason: "global_disabled" });
+  });
+
+  it("missing dialsToday still throws even OFF + allow-listed (the exemption never bypasses fact validation)", () => {
+    const f = base(); delete f.dialsToday;
+    expect(() => gate(f)).toThrow(/gate fact/);
+  });
+
+  it("NaN dialsToday still throws even OFF + allow-listed", () => {
+    const f = base(); f.dialsToday = NaN;
+    expect(() => gate(f)).toThrow(/gate fact/);
   });
 });
 
