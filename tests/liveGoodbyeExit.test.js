@@ -72,11 +72,11 @@ const CONFIG = {
   businessHours: {},
 };
 
-function fakeDb() {
+function fakeDb(config = CONFIG) {
   return {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Digile Media" })),
-    loadConfig: () => CONFIG,
+    loadConfig: () => config,
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
@@ -85,13 +85,13 @@ function fakeDb() {
   };
 }
 
-async function boot(env = {}) {
+async function boot(env = {}, config = CONFIG) {
   const ws = new FakeSocket();
   const live = fakeLive();
   await handleLiveSessionConnection(
     ws,
     {},
-    { now: () => 0, connect: live.connect, database: fakeDb(), env, execute: vi.fn() }
+    { now: () => 0, connect: live.connect, database: fakeDb(config), env, execute: vi.fn() }
   );
   ws.deliver({
     event: "start",
@@ -501,5 +501,41 @@ describe("a spoken goodbye is not a way around the ask gate", () => {
 
     expect(c().live_goodbye_armed_exit).toBe(1);
     expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Since 732f6ed (2026-09-06), es.signOffRe in lib/voice/strings.js carried six
+// literal backspace bytes (0x08) where `\b` belonged, so it matched a literal
+// backspace character -- something that never appears in a transcript -- and
+// no Spanish spoken farewell ever armed this exit on an inbound call. Fixed
+// byte-for-byte; this is the live-session proof that a Spanish-configured
+// business now arms the exact same way the English config above does.
+// ---------------------------------------------------------------------------
+const ES_CONFIG = { ...CONFIG, languagesSpoken: ["es"] };
+
+describe("the Spanish sign-off detector arms the hang-up like the English one", () => {
+  beforeEach(() => clearStats());
+
+  it("arms an exit when the model signs off in Spanish without calling end_call", async () => {
+    const s = await boot({}, ES_CONFIG);
+    // closingTicRe's "algo más" is what sets askedAnythingElseThisCall (LVX146's
+    // precondition), same role asked() plays for the English suite above.
+    await s.say("Todo listo. ¿Hay algo más en lo que pueda ayudarle hoy?");
+    await s.caller("No, eso es todo.");
+    await s.say(
+      "Perfecto. Hemos reservado su llamada de estrategia y he anotado sus datos. " +
+        "Gracias por llamar a Digile Media, y que tenga un buen día."
+    );
+
+    expect(c().live_goodbye_armed_exit).toBe(1);
+  });
+
+  it("does not arm on an ordinary Spanish turn", async () => {
+    const s = await boot({}, ES_CONFIG);
+    await s.say("El lunes a las 4:30 de la tarde funciona. ¿Cuál es su nombre completo?");
+
+    expect(c().live_goodbye_armed_exit).toBe(0);
+    expect(c().live_goodbye_checked).toBeGreaterThan(0);
   });
 });
