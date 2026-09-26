@@ -182,6 +182,7 @@ import {
   detectLeadIn,
   scheduleCallerClip,
   startMediaTicker,
+  markMediaTickerEnd,
   pacingCheck,
 } from "../lib/probe/outboundHarness.js";
 import * as spendLive from "./probes/lib/spendLive.js";
@@ -682,7 +683,12 @@ async function main() {
     // H3: the media ticker stops sending frames HERE (clearInterval, above),
     // not whenever the socket eventually closes a moment later -- this is the
     // instant that ends the ticker's own wall-clock window.
-    stats.mediaTickerEndMs = Date.now();
+    //
+    // t1 (review of 049cd83): first-write-wins (lib/probe/outboundHarness.js's
+    // markMediaTickerEnd has the full rationale) -- a deliberate hang-up
+    // calls this TWICE, and the second call must not push the window's end
+    // later than the ticker actually stopped.
+    markMediaTickerEnd(stats);
     for (const t of timers) {
       clearInterval(t);
       clearTimeout(t);
@@ -1188,7 +1194,9 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
   const stopAllTimers = () => {
     // H3: same rule as main()'s stopAllTimers -- this is when the media
     // ticker actually stops sending, not whenever the socket later closes.
-    stats.mediaTickerEndMs = Date.now();
+    // t1: first-write-wins (see main()'s own stopAllTimers doc) -- a
+    // deliberate hang-up calls this twice.
+    markMediaTickerEnd(stats);
     for (const t of timers) {
       clearInterval(t);
       clearTimeout(t);

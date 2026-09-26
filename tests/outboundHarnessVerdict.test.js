@@ -46,6 +46,7 @@ import {
   framesDue,
   startMediaTicker,
   MEDIA_TICKER_MAX_BURST,
+  markMediaTickerEnd,
   pacingCheck,
   PACING_MIN_RATIO,
 } from "../lib/probe/outboundHarness.js";
@@ -322,6 +323,34 @@ describe("H3: the media ticker is paced by wall clock, not by counting ticks", (
 
     it("zero elapsed time: frames_expected 0, ratio 1 (never a divide-by-zero), never slow", () => {
       expect(pacingCheck({ framesSent: 0, elapsedMs: 0, frameMs: 20 })).toEqual({ frames_expected: 0, ratio: 1, slow: false });
+    });
+  });
+
+  // t1 (review of 049cd83, Important): scripts/live-call-harness.js's
+  // stopAllTimers() used to write stats.mediaTickerEndMs on EVERY call, and
+  // a deliberate hang-up calls it twice -- once inside hangUp(), then again
+  // ~500 ms later from the deferred ws.close() -> close handler -- inflating
+  // the pacing window by ~500 ms and risking a false pacing_slow warning on
+  // an otherwise clean run.
+  describe("markMediaTickerEnd: first-write-wins", () => {
+    it("the first call stamps mediaTickerEndMs", () => {
+      const stats = { mediaTickerEndMs: null };
+      markMediaTickerEnd(stats, () => 1000);
+      expect(stats.mediaTickerEndMs).toBe(1000);
+    });
+
+    it("a second call (the double stopAllTimers/close shape) leaves the value UNCHANGED", () => {
+      const stats = { mediaTickerEndMs: null };
+      markMediaTickerEnd(stats, () => 1000);
+      markMediaTickerEnd(stats, () => 1500); // ~500ms later, e.g. the deferred close handler
+      expect(stats.mediaTickerEndMs).toBe(1000);
+    });
+
+    it("defaults to Date.now when no clock is injected", () => {
+      const stats = { mediaTickerEndMs: null };
+      const before = Date.now();
+      markMediaTickerEnd(stats);
+      expect(stats.mediaTickerEndMs).toBeGreaterThanOrEqual(before);
     });
   });
 });
