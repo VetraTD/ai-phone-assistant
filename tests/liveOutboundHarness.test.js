@@ -461,6 +461,26 @@ describe("the simulated outbound call, through the real door and session", () =>
     expect(v.pass).toBe(true);
   });
 
+  it("b7 (checkpoint 2b review): the silent-path backstop's own line lands in the tenant transcript, once, with the AI disclosure", async () => {
+    // persistTranscriptRows, not persistTurnTranscript: the real first turn
+    // (the model's own reply once the person eventually speaks) must still
+    // get its own row later, undropped by this one.
+    const ctx = await answerAndStart();
+    const { call, db } = ctx;
+
+    await call.feed(1660); // the silence deadline: the backstop fires and is seeded AT ONCE (O-8 is the slow path only)
+
+    expect(OPENER).toMatch(/\bAI\b/i); // the line this session is actually verifying carries the disclosure
+    const backstopRows = db.transcript.filter((r) => r.message === OPENER);
+    expect(backstopRows).toHaveLength(1);
+    expect(backstopRows[0].speaker).toBe("ai");
+
+    await hangUpAndComplete(ctx);
+    // Still exactly once after the real turn and teardown: not re-written by
+    // a later flush, and the real turn's own row was not dropped by it.
+    expect(db.transcript.filter((r) => r.message === OPENER)).toHaveLength(1);
+  });
+
   it("the sim can FAIL: a hello AFTER the silence deadline hears the backstop first -- speaks-first fails no_frame_before_onset and the path", async () => {
     const ctx = await answerAndStart();
     const { call, observer, db } = ctx;
