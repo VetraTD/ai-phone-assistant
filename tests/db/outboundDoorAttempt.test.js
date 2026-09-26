@@ -270,18 +270,26 @@ d("stampAttemptStatus: race-safety under two genuinely concurrent connections (f
     const gate = new Promise((resolve) => { release = resolve; });
     let signalLocked;
     const locked = new Promise((resolve) => { signalLocked = resolve; });
-    const result = db.withTenant(BIZ, async () => {
+    // `db.withTenant`'s callback receives the checked-out client (services/
+    // db.js's `fn(client)`), so tx1 can read ITS OWN write back on the SAME,
+    // still-open transaction before signalling and waiting on the gate --
+    // that is what "the value tx1 committed" means: not a second read after
+    // the fact (racing tx2's own completion), and not the host's Date.now()
+    // (container/host clock skew plus load flaked this once under load;
+    // controller Ruling, session 2b "Pulled in").
+    const result = db.withTenant(BIZ, async (client) => {
       const outcome = await db.stampAttemptStatus(id, stamp);
+      const row = await client.query(`SELECT status_completed_at FROM call_attempts WHERE id = $1`, [id]);
+      const committedStatusCompletedAt = row.rows[0].status_completed_at;
       signalLocked();
       await gate;
-      return outcome;
+      return { ...outcome, committedStatusCompletedAt };
     });
     return { result, locked, release };
   }
 
   it("(a) two concurrent terminal stamps: exactly ONE reports firstTerminalStamp=true, and status_completed_at is NOT moved by the second (blocked) one", async () => {
     const id = await mkAttempt("CAdoorattempt-race-a", 5);
-    const tx1WriteAt = Date.now();
 
     const tx1 = startHeldStamp(id, { twilioStatus: "completed", answered: false, terminal: true, result: null });
     await tx1.locked; // tx1 has written and holds the row lock, uncommitted
@@ -302,18 +310,16 @@ d("stampAttemptStatus: race-safety under two genuinely concurrent connections (f
 
     // tx1 wrote first and holds the lock throughout -- it is deterministically
     // the FIRST terminal stamp, not a coin flip.
-    expect(outcome1).toEqual({ firstTerminalStamp: true, answered: false });
+    expect(outcome1).toMatchObject({ firstTerminalStamp: true, answered: false });
     // THE BUG: on the CTE version this also came back {firstTerminalStamp:true},
     // because `before` was captured before tx1 even wrote.
     expect(outcome2).toEqual({ firstTerminalStamp: false, answered: false });
 
     const row = (await admin.query(`SELECT status_completed_at FROM call_attempts WHERE id = $1`, [id])).rows[0];
-    // status_completed_at must be close to tx1's OWN write time (right at the
-    // top of this test), not ~900ms+ later -- which is what tx2's own now()
-    // would produce if it were allowed to (re-)write it.
-    const ageMs = row.status_completed_at.getTime() - tx1WriteAt;
-    expect(ageMs).toBeGreaterThanOrEqual(0);
-    expect(ageMs).toBeLessThan(600); // well under the 900ms hold; the CTE bug measured ~900ms+
+    // status_completed_at must be EXACTLY what tx1 itself committed -- proof
+    // tx2 (blocked, then unblocked by tx1's commit) never moved it, without
+    // depending on the host clock at all.
+    expect(row.status_completed_at.getTime()).toBe(outcome1.committedStatusCompletedAt.getTime());
   });
 
   it("(b) a non-terminal status blocked behind an uncommitted terminal stamp does not move twilio_status backwards once it lands", async () => {
