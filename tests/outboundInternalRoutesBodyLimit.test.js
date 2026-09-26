@@ -137,6 +137,36 @@ describe("the outbound internal routes' 4kb body limit, through the real server"
     }
   );
 
+  // Fix round 1, Finding 1: body-parser/raw-body wrap a corrupt compressed
+  // stream (a claimed Content-Encoding that the bytes don't match) as a
+  // typeless 400 (read.js:125 -- `createError(400, error)`, no `.type`
+  // property at all). Before this fix, refuseBadBody required a recognized
+  // `.type`, so this fell through to the central handler: 500 + Sentry.
+  // Verified locally what the error shape actually is: `{ status: 400,
+  // statusCode: 400, code: "Z_DATA_ERROR", type: undefined }`.
+  it.each(["/internal/outbound/dispatch", "/internal/outbound/sweep"])(
+    "refuses a corrupt gzip body on %s with a 4xx, not the central handler (typeless body-parser error, Finding 1)",
+    async (p) => {
+      const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        const res = await request(app)
+          .post(p)
+          .set("Content-Type", "application/json")
+          .set("Content-Encoding", "gzip")
+          .send(Buffer.from("garbage-not-gzip-bytes"));
+        expect(res.status).toBeGreaterThanOrEqual(400);
+        expect(res.status).toBeLessThan(500);
+        expect(JSON.stringify(res.body)).not.toMatch(/Z_DATA_ERROR|incorrect header check/);
+        const lines = writeSpy.mock.calls
+          .map(([chunk]) => { try { return JSON.parse(String(chunk)); } catch { return null; } })
+          .filter(Boolean);
+        expect(lines.some((l) => l.event === "unhandled_error")).toBe(false);
+      } finally {
+        writeSpy.mockRestore();
+      }
+    }
+  );
+
   it("the global parser still accepts a 6KB body on an ordinary path (the exclusion is scoped, not a blanket shrink)", async () => {
     // No inbound route both skips auth/DB and echoes the body back, so a
     // nonexistent path is the cleanest witness available: if the global

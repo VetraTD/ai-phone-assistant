@@ -405,15 +405,40 @@ describe("X1: refuseBadBody -- direct unit coverage of every body-parser 4xx cas
     expect(res.json).toHaveBeenCalledWith({ error: "payload too large" });
   });
 
-  // The pin this test file used to carry (M5): a NON-body-parser error must
-  // still reach `next(err)`, not be swallowed here.
-  it("an error with an unrecognized type still reaches next, even with a 4xx status", () => {
+  // Fix round 1, Finding 1: only `jsonBody` can ever hand an error to
+  // `refuseBadBody` (Express 5 skips route layers once an error is pending,
+  // and a handler's own error goes forward, never back into an earlier
+  // route-scoped error handler) -- so the error's POSITION already proves
+  // where it came from, and there is no such thing as a "non-body-parser"
+  // error reaching here in the real stack. This used to assert the opposite
+  // (pass-through); flipped to match the general rule the brief always
+  // stated: ANY integer 4xx status is answered locally. An unrecognized
+  // `.type` gets a generic body rather than a per-type one.
+  it("an error with an unrecognized type but a 4xx status is still answered locally, with a generic body", () => {
     const err = Object.assign(new Error("boom"), { type: "some.other.thing", status: 422, statusCode: 422 });
     const res = mockRes();
     const next = vi.fn();
     refuseBadBody(err, {}, res, next);
-    expect(next).toHaveBeenCalledWith(err);
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(next).not.toHaveBeenCalled();
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toMatch(/boom/);
+  });
+
+  // The concrete Finding 1 case: body-parser/raw-body wrap every
+  // zlib/raw-body stream error (a corrupt gzip/deflate/br body) as
+  // `createError(400, error)` with NO `.type` at all (read.js:125). Before
+  // this fix, refuseBadBody required a recognized `.type`, so this typeless
+  // 400 fell through to `next(err)` and became a 500 + a Sentry event.
+  it("a TYPELESS 4xx error (the corrupt-gzip shape) is still answered locally, not passed to next", () => {
+    const err = Object.assign(new Error("Z_DATA_ERROR"), { status: 400, statusCode: 400, code: "Z_DATA_ERROR", expose: true });
+    const res = mockRes();
+    const next = vi.fn();
+    refuseBadBody(err, {}, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).not.toHaveBeenCalled();
+    const body = res.json.mock.calls[0][0];
+    expect(JSON.stringify(body)).not.toMatch(/Z_DATA_ERROR/);
   });
 
   it("a recognized type WITHOUT a 4xx status still reaches next (a tampered/mismatched error, fails closed)", () => {
