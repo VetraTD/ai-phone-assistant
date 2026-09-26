@@ -44,8 +44,18 @@ beforeAll(async () => {
   campaignId = camp.rows[0].id;
   await admin.query(
     `INSERT INTO campaign_versions (campaign_id, business_id, version, config) VALUES ($1,$2,3,$3::jsonb)`,
-    [campaignId, BIZ, JSON.stringify({ retries: { voicemail_on: [1, 5] } })]
+    [campaignId, BIZ, JSON.stringify({ retries: { voicemail_on: [1, 5] }, caller_id: "+441372656055" })]
   );
+  // O-26/C17 fix round 1: a version NEWER than the one this outreach is
+  // pinned to (version 3), with a DIFFERENT caller_id -- current_version
+  // moves to 4, but outreach.campaign_version stays 3. Proves
+  // outboundAmdContext reads the PINNED version's config, not whatever the
+  // campaign's current_version happens to be.
+  await admin.query(
+    `INSERT INTO campaign_versions (campaign_id, business_id, version, config) VALUES ($1,$2,4,$3::jsonb)`,
+    [campaignId, BIZ, JSON.stringify({ retries: { voicemail_on: [1, 5] }, caller_id: "+18176011171" })]
+  );
+  await admin.query(`UPDATE campaigns SET current_version = 4 WHERE id = $1`, [campaignId]);
   const con = await admin.query(`INSERT INTO contacts (business_id, phone_e164) VALUES ($1,'+447700900299') RETURNING id`, [BIZ]);
   contactId = con.rows[0].id;
   const out = await admin.query(
@@ -108,9 +118,19 @@ d("stampAttemptAmd, as vetra_app inside withTenant", () => {
 });
 
 d("outboundAmdContext, as vetra_app inside withTenant", () => {
-  it("reads attempt_no, compliance_class and voicemail_on from the PINNED campaign version", async () => {
+  it("reads attempt_no, compliance_class, voicemail_on and caller_id from the PINNED campaign version", async () => {
     const ctx = await db.withTenant(BIZ, () => db.outboundAmdContext(attemptId));
-    expect(ctx).toEqual({ attemptNo: 1, complianceClass: "solicited", voicemailOn: [1, 5] });
+    expect(ctx).toEqual({ attemptNo: 1, complianceClass: "solicited", voicemailOn: [1, 5], callerId: "+441372656055" });
+  });
+
+  // O-26/C17 fix round 1: explicit proof callerId comes from the PINNED
+  // version (3), not the campaign's current_version (4, seeded with a
+  // DIFFERENT caller_id in beforeAll above).
+  it("callerId comes from the PINNED version's config, not the campaign's current_version", async () => {
+    const current = (await admin.query(`SELECT current_version FROM campaigns WHERE id = $1`, [campaignId])).rows[0].current_version;
+    expect(current).toBe(4); // current_version has moved past this outreach's pinned version
+    const ctx = await db.withTenant(BIZ, () => db.outboundAmdContext(attemptId));
+    expect(ctx.callerId).toBe("+441372656055"); // version 3's caller_id, never version 4's "+18176011171"
   });
 
   it("a different tenant's scope cannot read this attempt's context (RLS)", async () => {
