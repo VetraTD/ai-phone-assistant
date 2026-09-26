@@ -23,10 +23,12 @@ import {
   createFirstSecondsController,
   BACKSTOP_END_MARK,
   FIRST_AUDIO_MARK,
+  FIRST_TURN_END_MARK,
   FIRST_SECONDS_DEFAULTS,
   BACKSTOP_MARK_GRACE_MS,
   BACKSTOP_REFETCH_LEAD_MS,
   ONSET_CONFIRM_DEFER_MS,
+  firstTurnComplete,
 } from "../lib/outbound/firstSeconds.js";
 import { createVad } from "../lib/voice/inboundVad.js";
 
@@ -711,5 +713,109 @@ describe("round 3: deferred_ms is reported only for a real deferral", () => {
     const { ctl, events } = rig({ backstopAudio: null });
     run(ctl, 0, 1710, (t) => t >= 1600 && t <= 1700);
     expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_silence", deferred_ms: 60 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Checkpoint 2b review, I5 + M3.
+// ---------------------------------------------------------------------------
+
+describe("M3 (checkpoint 2b review): firstTurnComplete tolerates a glued transcript (H1's re-split, reused)", () => {
+  it("a glued disclosure AND a glued business name both recover -- the render check's own H1 fixture, applied to the session's first-turn check", () => {
+    expect(
+      firstTurnComplete("Hi, isthat Sam? It'sAva, an AIassistant from HarnessTest Clinic.", "Harness Test Clinic")
+    ).toBe(true);
+  });
+
+  it("still incomplete when the SAME gluing also drops the disclosure entirely", () => {
+    expect(
+      firstTurnComplete("Hi, isthat Sam? It'sAva, an assistant from HarnessTest Clinic.", "Harness Test Clinic")
+    ).toBe(false);
+  });
+
+  it("a glued token that cannot be segmented from the vocab stays a miss, but does not block the OTHER tokens that can", () => {
+    expect(firstTurnComplete("Hi, isthot Sam. AIassistant HarnessTest Clinic.", "Harness Test Clinic")).toBe(true);
+  });
+
+  it("round 3's fail-open guard survives the re-split: 'A. I wanted' is still two words, not the disclosure", () => {
+    expect(firstTurnComplete("Plan A. I wanted to check in, from Digile Media.", "Digile Media")).toBe(false);
+  });
+});
+
+describe("I5 (checkpoint 2b review): Live's own first turn is confirmed HEARD, not merely generated", () => {
+  const NOTE = "Tell them now, briefly: you are Ava, an AI assistant from Digile Media.";
+  const COMPLETE_TEXT = "Hi Sam, it's Ava, an AI assistant from Digile Media.";
+  const INCOMPLETE_TEXT = "Hi, is that Sam?";
+
+  it("an INTERRUPTED turn with the full disclosure never satisfies the check: no note, no mark queued, still armed for the next turn", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT, false);
+    expect(rec.notes).toEqual([]);
+    expect(rec.marks).toEqual([]);
+    // Still armed: the NEXT (complete) turn is judged on its own text, and
+    // this one has no disclosure at all -- proof the interrupted turn's
+    // content was never credited.
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, true);
+    expect(rec.notes).toEqual([NOTE]);
+  });
+
+  it("an INTERRUPTED turn that lacks the disclosure does not correct either -- an interrupted turn never corrects, only re-arms", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, false);
+    expect(rec.notes).toEqual([]);
+    // Still armed: a later COMPLETE turn is checked fresh and queues its mark.
+    ctl.onAssistantTurnText(COMPLETE_TEXT, true);
+    expect(rec.marks).toEqual([FIRST_TURN_END_MARK]);
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("a COMPLETE turn that passes the text check queues FIRST_TURN_END_MARK and is not yet satisfied", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT, true);
+    expect(rec.marks).toEqual([FIRST_TURN_END_MARK]);
+    expect(rec.notes).toEqual([]);
+
+    // Undecided, not satisfied: a second turn arriving before the mark echoes
+    // is neither corrected nor re-checked -- it is ignored until the mark
+    // resolves one way or the other.
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, true);
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("the check is satisfied only once FIRST_TURN_END_MARK echoes -- a later incomplete turn then does not correct", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT, true);
+    ctl.onMark(FIRST_TURN_END_MARK);
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, true);
+    expect(rec.notes).toEqual([]);
+  });
+
+  it("audio cleared BEFORE the mark echoes re-arms the check silently -- no note fires for the clear itself", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT, true);
+    expect(rec.marks).toEqual([FIRST_TURN_END_MARK]);
+
+    ctl.onAudioCleared(); // the barge cut it before the mark echoed
+    expect(rec.notes).toEqual([]);
+
+    // Re-armed: the NEXT complete turn is judged fresh, and this one fails.
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, true);
+    expect(rec.notes).toEqual([NOTE]);
+  });
+
+  it("a mark that HAS already echoed is not undone by a later, unrelated clear", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT, true);
+    ctl.onMark(FIRST_TURN_END_MARK);
+    ctl.onAudioCleared(); // some later, unrelated barge on a subsequent turn
+    ctl.onAssistantTurnText(INCOMPLETE_TEXT, true);
+    expect(rec.notes).toEqual([]); // already satisfied; not re-armed
+  });
+
+  it("onAssistantTurnText with no second argument defaults to complete (every pre-I5 call site)", () => {
+    const { ctl, rec } = rig();
+    ctl.onAssistantTurnText(COMPLETE_TEXT);
+    expect(rec.marks).toEqual([FIRST_TURN_END_MARK]);
+    expect(rec.notes).toEqual([]);
   });
 });

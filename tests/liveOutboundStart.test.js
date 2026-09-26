@@ -480,6 +480,39 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  it("I5 (checkpoint 2b review): a barge into LIVE'S OWN first reply -- not the backstop -- never corrects on that interrupted turn itself, only re-arms", async () => {
+    allowErrors("outbound_first_turn_incomplete");
+    const call = await bootOutbound();
+    // Speech onset with no clip yet: the slow-Live path, so Live's own reply
+    // is the first audio and there is no backstop in play at all.
+    await call.feed(400, { voiced: true });
+    // The person barges before Live has said anything of the disclosure --
+    // the vendor's own `interrupted`, not a local clearAudio on our clip.
+    await call.assistantSays("Hi, is that Sam?");
+    call.live.push({ serverContent: { interrupted: true } });
+    await call.settle();
+
+    const isNote = (m) =>
+      m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly: you are Ava, an AI assistant from Digile Media.");
+    // The interrupted turn never corrects itself -- an in-flight barge is not
+    // the moment to talk over the caller a second time -- although its own
+    // text plainly lacks the disclosure. (Without I5's guard, `clearAudio`'s
+    // unconditional call on every interrupted turn happens to re-arm a
+    // wrongly-queued mark too, which is why this assertion, not a chained
+    // one, is what actually distinguishes the fixed wire from the broken
+    // one.)
+    expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(0);
+    expect(events("outbound_first_turn_incomplete")).toHaveLength(0);
+
+    // Still armed: Live's NEXT (complete) turn is judged on its own merits,
+    // and this one also carries no disclosure -- proof the check was never
+    // silently spent by the interrupted turn.
+    await call.assistantTurn("Great, what's the clinic called?");
+    expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(1);
+    expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
+    await call.hangUp();
+  });
+
   it("I4: a clip stored AFTER pickup is re-read once before the deadline and played", async () => {
     const LATE = Buffer.alloc(4000, 0x55);
     const database = outboundDb({ openerAudio: null, lateOpenerAudio: LATE });

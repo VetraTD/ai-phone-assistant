@@ -122,6 +122,10 @@ const POSTCALLWIRE = "tests/livePostCall.test.js";
 // The byte-locked prompt. A language instruction that vanishes is invisible to
 // every behavioural suite -- the model simply drifts on calls nobody is running.
 const PROMPTS = "tests/promptSnapshot.test.js";
+// Checkpoint 2b review, I5. The first-seconds controller's own suite -- the
+// mark-echo confirmation has no wire into any OTHER suite, so this is the
+// only place a broken re-arm can be seen at all.
+const FIRSTSECONDS = "tests/outboundFirstSeconds.test.js";
 
 const SABOTAGES = [
   {
@@ -826,6 +830,18 @@ const SABOTAGES = [
     find: "          typeof state.askedAnythingElseAtAction === \"number\"",
     replace: "          false // SABOTAGE",
     red: [RECOVERY],
+  },
+  // -------------------------------------------------------------------------
+  // Checkpoint 2b review, I5. The first-seconds controller.
+  // -------------------------------------------------------------------------
+  {
+    name: "first-turn-heard-mark",
+    why:
+      "treats an INTERRUPTED first turn as satisfying the disclosure check on its TEXT alone, which is the state I5 fixed. Live generates faster than audioOut plays: a barge into 'Hi, is that Priya?' -- before 'It's Ava, an AI assistant...' has been heard -- still hands the FULL sentence to onAssistantTurnText, so the check would pass on words nobody heard.",
+    file: "lib/outbound/firstSeconds.js",
+    find: '    if (!complete) return; // I5: interrupted -- never satisfies, never corrects here',
+    replace: "    // SABOTAGE",
+    red: [FIRSTSECONDS],
   },
 ];
 
