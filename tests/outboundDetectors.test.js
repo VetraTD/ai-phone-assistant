@@ -42,6 +42,17 @@ describe("detectOptOut (spec §13.3)", () => {
     expect(detectOptOut({ callerText: `Please ${phrase} your list.` })).toEqual({ hit: true, side: "caller" });
   });
 
+  // Checkpoint 2b review, b40. `/remove me/` matched "remove medication" as a
+  // bare substring ("remove me" is literally the first nine characters of
+  // "remove medication"). A word boundary after "me" fixes it without
+  // narrowing the real caller phrasing above.
+  it("does NOT match 'remove medication' -- a false opt-out would lose a real lead", () => {
+    expect(detectOptOut({ callerText: "Can you remove medication from what we're discussing?" })).toEqual({
+      hit: false,
+      side: null,
+    });
+  });
+
   // Fix round 1, item 6: curly apostrophes/quotes (a model or a
   // transcription service routinely uses them) folded before matching.
   it("curly apostrophe: ‘don’t call me’ (caller) is a hit", () => {
@@ -90,6 +101,17 @@ describe("detectClaimedHuman (spec §13.2)", () => {
 
   it("curly apostrophe negation still retracts: “I’m human, not really” is not claimed-human", () => {
     expect(detectClaimedHuman("I’m human, not really, I’m an AI assistant.")).toBe(false);
+  });
+
+  // Checkpoint 2b review, b40. \b treats the hyphen in "human-like" as a word
+  // boundary (a hyphen is a non-word character), so the old regex's trailing
+  // \b was satisfied by "human" alone and read a compound word as the claim.
+  it("'I'm human-like' (compound word via hyphen) is NOT claimed-human", () => {
+    expect(detectClaimedHuman("I'm human-like, but actually an AI assistant.")).toBe(false);
+  });
+
+  it("a genuine claim still matches right up against a hyphenated word later in the sentence", () => {
+    expect(detectClaimedHuman("I'm a real person -- not a bot.")).toBe(true);
   });
 });
 
