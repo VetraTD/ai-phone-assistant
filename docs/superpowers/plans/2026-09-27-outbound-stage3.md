@@ -57,7 +57,7 @@ Every task implicitly includes these. The full lists are in `.superpowers/sdd/20
 | **S3-D6** | A UK caller ID for UK leads (Ilija setup session, not code) |
 | **S3-D7** | Keep the 14 R1 test campaigns paused until round 2 ends, then delete them with a script |
 
-**Proposed in this plan, pending the owner's OK (see the session summary):**
+**Owner-approved 2026-09-27 (all four):**
 - **(P-a) Silence timer 1.75 s, not 1.5 s.** Round-1 hellos started at 1.54 s and 1.68 s. At 1.5 s the clip would start on top of 2 of 3 hellos. At 1.75 s the clip still plays by about 1.85 s (measured playout lag 89–111 ms), under the 2.0 s limit.
 - **(P-b) US floor v1 is one conservative envelope for every US number:** 08:00–20:00 Monday–Saturday and 12:00–20:00 Sunday on the contact's clock. It covers the strict states (FL/OK 8–20, TX Sunday noon) without an area-code→state table. A US contact with no timezone must be inside the window in BOTH America/New_York and America/Los_Angeles. UK: 08:00–21:00 every day. Everything else is refused. A per-state table comes later, once counsel confirms it.
 - **(P-c) C3: the webhook secret** is stored AES-256-GCM in-app, with a 32-byte key from a new Secret Manager secret `connections-webhook-key` (`CONNECTIONS_WEBHOOK_KEY`).
@@ -289,7 +289,7 @@ Half 2 does not depend on the first-seconds code, so the phone check runs after 
 - [ ] **Sabotage:** drop `transfer_miss` from the kind allow-list. Expected RED: the `<Play>` URL test (404 from the media route). Revert.
 - [ ] Commit.
 
-### Task S3-5: situation sims on the real Live model (the harness) — ~1 h, PAID (≈$1.00; the owner's YES before running)
+### Task S3-5: situation sims on the real Live model (the harness) — ~1 h, PAID (≈$1.00; PRE-APPROVED by the owner 2026-09-27, cap $1.50)
 
 **Files:**
 - Modify: `scripts/live-call-harness.js`. Lift the `--outbound` + `--script` refusal at `:346`. Outbound scripts are allowed LOCAL ONLY (the existing base-URL refusal stays).
@@ -318,7 +318,7 @@ Half 2 does not depend on the first-seconds code, so the phone check runs after 
 
 - [ ] Write the verdict unit tests first (`tests/outboundHarnessVerdict.test.js`): each script's pass rule over a recorded fake result, plus one failing fixture per rule, so the verdict can fail.
 - [ ] Implement the harness changes and synthesise the audio.
-- [ ] **Controller:** state the cost (24 runs × ≈$0.04 + TTS ≈ $1.00, `reserveP1("P1-SIM-S3", 1.50)`) and get the owner's YES.
+- [ ] **Controller:** state the cost (24 runs × ≈$0.04 + TTS ≈ $1.00, `reserveP1("P1-SIM-S3", 1.50)`) in the ledger. The owner pre-approved up to $1.50 on 2026-09-27, so no new YES is needed unless the cap would be exceeded.
 - [ ] Run, record k/3 per script in the ledger, and commit the spend.
 - [ ] A failing script is triaged: a prompt fix inside S3-1's files is allowed, up to 2 rounds. Anything bigger goes to the owner.
 - [ ] Commit.

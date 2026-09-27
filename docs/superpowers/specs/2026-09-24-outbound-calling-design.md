@@ -847,7 +847,7 @@ The decisions and the tasks that implement them are in `docs/superpowers/plans/2
   - `caller_id` defaults to the business number.
   - The `custom` template is allowed for `asked_to_be_contacted` (solicited) and `existing_customer` (service); `selling` is refused until Part 3.
 - **Amends §10.3 and §13 (S3-D5):**
-  - A per-country legal floor sits beneath the campaign window. US v1 (P-b, pending the owner's OK): Mon–Sat 08:00–20:00, Sun 12:00–20:00; with no contact timezone, the call must be inside the window in both NY and LA. GB: 08:00–21:00.
+  - A per-country legal floor sits beneath the campaign window. US v1 (P-b, owner-approved 2026-09-27): Mon–Sat 08:00–20:00, Sun 12:00–20:00; with no contact timezone, the call must be inside the window in both NY and LA. GB: 08:00–21:00.
   - Any other country (including non-US NANP) is refused with `no_legal_floor`. Counsel confirms the values.
 - **Amends §12.5 (S3-D3):**
   - The results channel is direction-neutral (`lib/connections/`, `"direction"` in the payload). Its key is `CONNECTIONS_WEBHOOK_KEY` (C3, P-c).
