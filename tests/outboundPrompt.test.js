@@ -145,7 +145,11 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     ['"are you a robot?"', /Are you a robot\?/i, /AI assistant/i],
     ["a bad time or driving", /A bad time or driving/i, /callback/i],
     ['"email me instead"', /Email me instead/i, /will follow up by email/i],
-    ['"is this a sales call?"', /Is this a sales call\?/i, /follow-up/i],
+    [
+      '"is this a sales call?" / "how did you get my number?" (fix round 1, controller ruling)',
+      /Is this a sales call\?.*How did you get my number\?/i,
+      /never invent a source/i,
+    ],
     ['"already booked" / "already a customer"', /Already booked.*already a customer/i, /apologise/i],
     ["hostile", /^- Hostile/im, /offer to stop calling/i],
     ["a bad line or an unusable reply", /A bad line or an unusable reply/i, /ask once/i],
@@ -184,5 +188,39 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     const householdLine = lines.find((l) => /^- A household member/i.test(l));
     expect(householdLine).toBeTruthy();
     expect(householdLine.toLowerCase()).not.toContain(WITH_FIRST_NAME.config.topic.toLowerCase());
+  });
+
+  // Fix round 1 (review finding, IMPORTANT): the brief's contract item 1
+  // spells out "record the outcome `other`[, note ...]" as PLAIN-ENGLISH
+  // behaviour for these two situations -- not a tool call (no pack exists
+  // yet), but the instruction to note the outcome must still be present.
+  it('fix round 1: "email me instead" also records the outcome as other, noting the email request', () => {
+    const line = lines.find((l) => /^- "Email me instead"/i.test(l));
+    expect(line).toBeTruthy();
+    expect(line).toMatch(/record the outcome as other/i);
+    expect(line).toMatch(/asked for email/i);
+    // Still plain English -- no tool name.
+    expect(line).not.toMatch(/\brecord_outcome\b/);
+  });
+
+  it('fix round 1: "already booked" / "already a customer" also records the outcome as other', () => {
+    const line = lines.find((l) => /^- "Already booked"/i.test(l));
+    expect(line).toBeTruthy();
+    expect(line).toMatch(/record the outcome as other/i);
+    expect(line).not.toMatch(/\brecord_outcome\b/);
+  });
+
+  // Fix round 1 (controller ruling, not from the review): "How did you get
+  // my number?" is folded back in, as an alternative phrasing on the "is
+  // this a sales call?" line, so the list stays at 13 rows and Ava never
+  // improvises a source when a caller asks this on an outbound call.
+  it('fix round 1: "how did you get my number?" is folded into the "is this a sales call?" line, still 13 rows', () => {
+    const line = lines.find((l) => /^- "Is this a sales call\?"/i.test(l));
+    expect(line).toBeTruthy();
+    expect(line).toMatch(/How did you get my number\?/i);
+    expect(line).toMatch(/never invent a source/i);
+    const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
+    const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
+    expect(situationRows.length).toBe(13);
   });
 });
