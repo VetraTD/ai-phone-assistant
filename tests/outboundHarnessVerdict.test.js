@@ -655,7 +655,10 @@ describe("the verdict", () => {
     expect(none.criteria.calls_direction_outbound.result).toBe("FAIL");
   });
 
-  const silentClient = { hello_onset_at: null, first_media_at: 1995, frames_before_onset: 5, from_speech_ms: null, from_answer_ms: 1995, first_audio_mark_from_stream_start_ms: 1662 };
+  // CHANGED (S3-2, P-a): 1662 (1650 + 12 ms) -> 1412 (1400 + 12 ms) --
+  // SILENT_QUEUE_TARGET_MS moved with FIRST_SECONDS_DEFAULTS.silenceBackstopMs
+  // (2,000 -> 1,750).
+  const silentClient = { hello_onset_at: null, first_media_at: 1995, frames_before_onset: 5, from_speech_ms: null, from_answer_ms: 1995, first_audio_mark_from_stream_start_ms: 1412 };
   const silentServer = {
     firstAudio: { from_answer_ms: 2012, from_speech_ms: null, path: "backstop_silence", measured: "playout" },
     backstopPlayed: [{ path: "backstop_silence", source: "stored", seed: "at_fire" }],

@@ -28,6 +28,8 @@ import {
   BACKSTOP_MARK_GRACE_MS,
   BACKSTOP_REFETCH_LEAD_MS,
   ONSET_CONFIRM_DEFER_MS,
+  CLIP_BARGE_MIN_MS,
+  STALE_GENERATION_GRACE_MS,
   firstTurnComplete,
 } from "../lib/outbound/firstSeconds.js";
 import { createVad } from "../lib/voice/inboundVad.js";
@@ -49,8 +51,20 @@ const AUDIO = Buffer.alloc(8000, 0x7f); // one second of 8 kHz mu-law
 
 const vads = new WeakMap();
 
+/**
+ * S3-2 (spec §19, S3-D2): this rig defaults `firstSpeaker` to "live" -- the
+ * OLD race every test below `rig()`'s original section (1-7, fix rounds 1-3,
+ * checkpoint 2b review) was written against, and the brief's contract item 6
+ * requires those tests to keep passing UNCHANGED. Rather than touch every one
+ * of those call sites, the default carries the "live" mode forward and only
+ * the NEW S3-2 describe blocks (below the fix-round-3/checkpoint-2b-review
+ * sections) opt into `firstSpeaker: "clip"` explicitly -- clip mode is the
+ * PRODUCTION default (the controller's own constructor default, asserted
+ * directly, without going through this rig, in "S3-2: clip is the
+ * production default").
+ */
 function rig(overrides = {}) {
-  const rec = { marks: [], seeds: [], notes: [], prompts: [], spoken: [], logs: [], wire: [] };
+  const rec = { marks: [], seeds: [], notes: [], prompts: [], spoken: [], logs: [], wire: [], counters: [] };
   // `wire` is the ORDER things were handed over: marks and audio interleaved.
   const enqueue = vi.fn((buf) => rec.wire.push({ audio: buf.length }));
   const clear = vi.fn();
@@ -63,7 +77,9 @@ function rig(overrides = {}) {
     backstopAudio: AUDIO,
     backstopText: BACKSTOP_TEXT,
     // `clear` is offered and must never be called: the controller has no
-    // business protecting its clip from the normal barge path.
+    // business protecting its clip from the normal barge path -- ONLY its
+    // own onCallerFrame's `clipBarge` verdict (S3-2) reports a recommendation;
+    // index.js is what actually calls audioOut.clear.
     audioOut: { enqueue, clear },
     sendMark: (name) => {
       rec.marks.push(name);
@@ -73,6 +89,8 @@ function rig(overrides = {}) {
     noteToModel: (text) => rec.notes.push(text),
     promptModel: (text) => rec.prompts.push(text),
     noteSpoken: (text, atMs) => rec.spoken.push({ text, atMs }),
+    bumpCounter: (name) => rec.counters.push(name),
+    firstSpeaker: "live",
     streamStartAtMs: 0,
     businessName: "Digile Media",
     personaName: "Ava",
@@ -96,59 +114,91 @@ function run(ctl, fromMs, toMs, voiced = () => false) {
   const vad = vads.get(ctl);
   for (let t = fromMs; t <= toMs; t += 10) {
     const v = vad.processFrame(voiced(t) ? LOUD : QUIET, t);
-    ctl.onCallerFrame({ voiced: v.voiced, voiceActive: v.voiceActive, atMs: t });
+    // voicedRunMs (S3-2): the same value index.js's own vad.voicedRunMs(atMs)
+    // would report, passed through so the clip-barge threshold (onCallerFrame's
+    // OWN concern, gated on clipPlaying) can be exercised through this shared
+    // helper too. It is 0 whenever the caller is not both active and mid-run,
+    // so every pre-S3-2 test above (which never checks onCallerFrame's return
+    // value) is unaffected by its presence.
+    ctl.onCallerFrame({ voiced: v.voiced, voiceActive: v.voiceActive, atMs: t, voicedRunMs: vad.voicedRunMs(t) });
     ctl.tick(t);
   }
 }
 
 describe("defaults are spec §9.3's numbers", () => {
-  it("2,000 ms after pickup, 350 ms answer->stream, 1,600 ms slow-Live net", () => {
-    expect(FIRST_SECONDS_DEFAULTS).toEqual({ answerToStreamMs: 350, silenceBackstopMs: 2000, slowLiveMs: 1600 });
+  // CHANGED (S3-2, P-a): silenceBackstopMs 2,000 -> 1,750 -- live round 1's T1
+  // found the clip PLAYING OUT at 2.09-2.11 s (queue time + mark-echo
+  // latency), breaching Ofcom's 2.0 s limb even though the clip did fire.
+  // helloEndGapMs is new: the clip mode default's third timer.
+  it("1,750 ms after pickup, 350 ms answer->stream, 1,600 ms slow-Live net, 350 ms hello-end gap", () => {
+    expect(FIRST_SECONDS_DEFAULTS).toEqual({ answerToStreamMs: 350, silenceBackstopMs: 1750, slowLiveMs: 1600, helloEndGapMs: 350 });
+  });
+
+  // T1's own margin, pinned: the OLD 2,000 ms queue deadline left no room at
+  // all for mark-echo latency before crossing Ofcom's 2.0 s line; this pins
+  // that the new default leaves at least 150 ms of it.
+  it("T1's margin: silenceBackstopMs + 150 <= 2000", () => {
+    expect(FIRST_SECONDS_DEFAULTS.silenceBackstopMs + 150).toBeLessThanOrEqual(2000);
   });
 });
 
 describe("1. listen first", () => {
-  it("plays nothing while the person is silent, then the backstop at 1,650 ms (2,000 - 350), seeded once", () => {
+  // CHANGED (S3-2, P-a): 1,650/2,000 -> 1,400/1,750 -- silenceBackstopMs's
+  // default moved from 2,000 to 1,750 (T1), so the stream-clock fire time
+  // (silenceBackstopMs - answerToStreamMs) moved with it. The mechanism under
+  // test (nothing plays while silent, then the clip fires once, seeded) is
+  // unchanged; only the deadline's own number is.
+  it("plays nothing while the person is silent, then the backstop at 1,400 ms (1,750 - 350), seeded once", () => {
     const { ctl, enqueue, rec, events } = rig();
 
-    run(ctl, 0, 1640);
+    run(ctl, 0, 1390);
     expect(enqueue).not.toHaveBeenCalled();
     expect(rec.seeds).toEqual([]);
     expect(ctl.firstAudio()).toBeNull();
 
-    run(ctl, 1650, 1650);
+    run(ctl, 1400, 1400);
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(enqueue.mock.calls[0]).toEqual([AUDIO]);
     // The playout mark right before the clip (O-7), the end mark right after.
     expect(rec.wire).toEqual([{ mark: FIRST_AUDIO_MARK }, { audio: AUDIO.length }, { mark: BACKSTOP_END_MARK }]);
     expect(rec.seeds).toEqual([BACKSTOP_TEXT]); // the SILENCE path seeds at fire time
-    expect(rec.spoken).toEqual([{ text: BACKSTOP_TEXT, atMs: 1650 }]);
+    expect(rec.spoken).toEqual([{ text: BACKSTOP_TEXT, atMs: 1400 }]);
     // Queued, not yet heard to play: the queue-time value, flagged as such.
-    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 2000, from_speech_ms: null, path: "backstop_silence", measured: "enqueue" });
+    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 1750, from_speech_ms: null, path: "backstop_silence", measured: "enqueue" });
     expect(events("outbound_backstop_played")).toHaveLength(1);
     expect(events("outbound_first_audio")).toHaveLength(0);
 
-    ctl.onMark(FIRST_AUDIO_MARK, 1650);
+    ctl.onMark(FIRST_AUDIO_MARK, 1400);
     expect(events("outbound_first_audio")[0].fields).toMatchObject({
       callSid: "CA1",
       attemptId: "att-1",
-      from_answer_ms: 2000,
+      from_answer_ms: 1750,
       from_speech_ms: null,
       path: "backstop_silence",
       measured: "playout",
     });
 
     // Once. The rest of the call never replays it.
-    run(ctl, 1660, 6000);
+    run(ctl, 1410, 6000);
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(rec.seeds).toHaveLength(1);
   });
 });
 
 describe("2. the person speaks and Live answers", () => {
-  it("the owner's measured hello (1,870 ms after pickup) is not talked over; Live's reply is the first audio", () => {
+  // CHANGED (S3-2, P-a): the hello moved from fromPickup(1870) to
+  // fromPickup(1200) -- see the P-a trade-off test right below this one. With
+  // silenceBackstopMs now 1,750 (was 2,000), a hello starting at 1,870 ms
+  // after pickup arrives AFTER the (lowered) silence deadline, so the
+  // deferral mechanism (O-6) never gets a run to hold back: nothing has been
+  // said yet AT ALL when the deadline itself fires. A faster hello (1,200 ms
+  // after pickup, comfortably inside the new deadline) is what this test
+  // needs to keep demonstrating the mechanism it is actually about: onset
+  // backdating and Live's reply measured at playout, in `live` mode's kept
+  // race. `from_speech_ms` is recomputed for the new hello time.
+  it("a hello well inside the (lowered) silence deadline is not talked over; Live's reply is the first audio", () => {
     const { ctl, enqueue, rec } = rig();
-    const hello = fromPickup(1870); // 1,520 on the stream clock
+    const hello = fromPickup(1200); // 850 on the stream clock
     const queuedAt = fromPickup(2800);
     const playedAt = fromPickup(2900);
 
@@ -161,11 +211,31 @@ describe("2. the person speaks and Live answers", () => {
     expect(rec.marks).toEqual([FIRST_AUDIO_MARK]);
     ctl.onMark(FIRST_AUDIO_MARK, playedAt);
     // Measured at PLAYOUT (O-7), from the start of the hello.
-    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 2900, from_speech_ms: 1030, path: "live_reply", measured: "playout" });
+    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 2900, from_speech_ms: 1700, path: "live_reply", measured: "playout" });
 
     run(ctl, queuedAt, 8000);
     expect(enqueue).not.toHaveBeenCalled();
     expect(rec.seeds).toEqual([]);
+  });
+
+  // S3-2, P-a's named trade-off (findings for the report, not just a test):
+  // the owner's TWO measured hellos (1.87 s and 2.2 s after pickup) both now
+  // arrive AFTER the lowered silence deadline (1.75 s), in EITHER
+  // `firstSpeaker` mode -- silenceBackstopMs is not mode-gated (T1's false
+  // "silent call" flag is a two-limb-rule/playout-timing problem, not a
+  // clip-vs-live one). The backstop fires anyway at the deadline, exactly as
+  // it does on a truly silent pickup; what makes THIS survivable and not a
+  // repeat of D1 is step 4's interruptibility (I1) -- the person's actual
+  // hello either barges the clip (a run past CLIP_BARGE_MIN_MS, clip mode
+  // only) or, in `live` mode, is simply what Live hears and answers next,
+  // same as any barge on assistant audio always has been.
+  it("P-a's trade-off: the owner's 1.87 s hello now arrives AFTER the deadline -- the backstop still fires (relies on interruptibility, not avoidance)", () => {
+    const { ctl, enqueue } = rig();
+    const hello = fromPickup(1870); // 1,520 on the stream clock -- AFTER 1,400
+    run(ctl, 0, 1390, (t) => t >= hello && t <= hello + 300); // nobody has spoken yet by 1,390
+    expect(enqueue).not.toHaveBeenCalled();
+    run(ctl, 1400, 1400);
+    expect(enqueue).toHaveBeenCalledTimes(1); // fired anyway: backstop_silence, not backstop_hello_end (live mode has no hello-end timer)
   });
 });
 
@@ -295,10 +365,10 @@ describe("7. no backstop audio (render failed or refused)", () => {
   it("the silence path prompts Live with the line instead, and logs outbound_backstop_missing", () => {
     const { ctl, enqueue, rec, events } = rig({ backstopAudio: null });
 
-    run(ctl, 0, 1640);
+    run(ctl, 0, 1390);
     expect(rec.prompts).toEqual([]);
 
-    run(ctl, 1650, 1650);
+    run(ctl, 1400, 1400);
     expect(enqueue).not.toHaveBeenCalled();
     expect(rec.seeds).toEqual([]); // Live will say it itself; nothing to seed
     expect(rec.prompts).toEqual([`The person hasn't spoken. Say: ${BACKSTOP_TEXT}`]);
@@ -312,13 +382,13 @@ describe("7. no backstop audio (render failed or refused)", () => {
     ctl.onMark(FIRST_AUDIO_MARK, 2400);
     expect(ctl.firstAudio()).toEqual({ from_answer_ms: 2750, from_speech_ms: null, path: "backstop_silence", measured: "playout" });
 
-    run(ctl, 1660, 6000);
+    run(ctl, 1410, 6000);
     expect(rec.prompts).toHaveLength(1);
   });
 
   it("an empty buffer is the same as none", () => {
     const { ctl, enqueue, rec } = rig({ backstopAudio: Buffer.alloc(0) });
-    run(ctl, 0, 1650);
+    run(ctl, 0, 1400);
     expect(enqueue).not.toHaveBeenCalled();
     expect(rec.prompts).toHaveLength(1);
   });
@@ -412,8 +482,8 @@ describe("M3: dotted spellings of AI count as the disclosure", () => {
 describe("M9: the suppression has a safety lift", () => {
   it("a mark that never echoes lifts it at clip length + BACKSTOP_MARK_GRACE_MS, logged", () => {
     const { ctl, events } = rig();
-    run(ctl, 0, 1650); // 8,000 bytes = 1,000 ms of clip, fired at 1,650
-    const liftAt = 1650 + 1000 + BACKSTOP_MARK_GRACE_MS;
+    run(ctl, 0, 1650); // 8,000 bytes = 1,000 ms of clip, fired at 1,400 (S3-2: silenceBackstopMs 1,750)
+    const liftAt = 1400 + 1000 + BACKSTOP_MARK_GRACE_MS;
     expect(BACKSTOP_MARK_GRACE_MS).toBe(1500);
 
     expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
@@ -430,7 +500,7 @@ describe("M9: the suppression has a safety lift", () => {
   it("model audio alone (no frames) also sees the deadline", () => {
     const { ctl } = rig();
     run(ctl, 0, 1650);
-    expect(ctl.onModelAudio(1650 + 1000 + BACKSTOP_MARK_GRACE_MS)).toBe(true);
+    expect(ctl.onModelAudio(1400 + 1000 + BACKSTOP_MARK_GRACE_MS)).toBe(true);
   });
 
   it("an echoed mark lifts it first, and the timeout then logs nothing", () => {
@@ -448,19 +518,21 @@ describe("I4: no clip at stream start -- the stored clip is re-read once, before
     const refetch = vi.fn(async () => LATE);
     const { ctl, enqueue, rec, events } = rig({ backstopAudio: null, refetchBackstopAudio: refetch });
 
-    run(ctl, 0, 1650 - BACKSTOP_REFETCH_LEAD_MS - 10);
+    // S3-2: the deadline this races against is now 1,400 (silenceBackstopMs
+    // 1,750, was 2,000), so the refetch-lead trigger point moves with it.
+    run(ctl, 0, 1400 - BACKSTOP_REFETCH_LEAD_MS - 10);
     expect(refetch).not.toHaveBeenCalled();
-    run(ctl, 1650 - BACKSTOP_REFETCH_LEAD_MS, 1650 - BACKSTOP_REFETCH_LEAD_MS);
+    run(ctl, 1400 - BACKSTOP_REFETCH_LEAD_MS, 1400 - BACKSTOP_REFETCH_LEAD_MS);
     expect(refetch).toHaveBeenCalledTimes(1);
     await flush();
 
-    run(ctl, 1260, 1650);
+    run(ctl, 1010, 1400);
     expect(enqueue).toHaveBeenCalledWith(LATE);
     expect(rec.prompts).toEqual([]);
     expect(rec.seeds).toEqual([BACKSTOP_TEXT]);
     expect(events("outbound_backstop_played")[0].fields).toMatchObject({ source: "refetched" });
     expect(events("outbound_backstop_missing")).toHaveLength(0);
-    run(ctl, 1660, 4000);
+    run(ctl, 1410, 4000);
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
@@ -504,22 +576,31 @@ describe("I4: no clip at stream start -- the stored clip is re-read once, before
 // ---------------------------------------------------------------------------
 
 describe("O-6: onset is confirmed speech (the VAD's sustained flag), backdated to where it began", () => {
-  it("a single loud frame at pickup + 1.51 s, nobody speaking: the backstop still goes at the silence deadline (no 3.1 s breach)", () => {
+  // CHANGED (S3-2, P-a): 1,510/1,160/1,640/1,650 -> shifted by the same -250
+  // ms the deadline itself moved (1,650 -> 1,400).
+  it("a single loud frame at pickup + 1.26 s, nobody speaking: the backstop still goes at the silence deadline (no 2.85 s breach)", () => {
     const { ctl, enqueue, events } = rig();
-    const click = fromPickup(1510); // 1,160 on the stream clock
-    run(ctl, 0, 1640, (t) => t === click);
+    const click = fromPickup(1260); // 910 on the stream clock
+    run(ctl, 0, 1390, (t) => t === click);
     expect(ctl.onsetAt()).toBeNull();
     expect(enqueue).not.toHaveBeenCalled();
-    run(ctl, 1650, 1650);
+    run(ctl, 1400, 1400);
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_silence" });
     // Nothing held it back, so no deferral is reported (fix round 3).
     expect(events("outbound_backstop_played")[0].fields).not.toHaveProperty("deferred_ms");
   });
 
-  it("a real hello at pickup + 1.87 s is caught, and from_speech_ms runs from the start of the hello", () => {
+  // CHANGED (S3-2, P-a): the hello moved from fromPickup(1870) to
+  // fromPickup(1200) for the same reason as section 2's replacement test --
+  // 1,870 ms after pickup now arrives AFTER the lowered silence deadline
+  // (see "P-a's trade-off", section 2), so it can no longer demonstrate
+  // "caught before the deadline". The mechanism under test (onsetAt backdated
+  // to the hello's true start; from_speech_ms measured from there) is
+  // unaffected by which hello time is used.
+  it("a real hello at pickup + 1.2 s is caught, and from_speech_ms runs from the start of the hello", () => {
     const { ctl, enqueue } = rig();
-    const hello = fromPickup(1870);
+    const hello = fromPickup(1200); // 850 on the stream clock
     run(ctl, 0, 2400, (t) => t >= hello && t <= hello + 400);
     expect(enqueue).not.toHaveBeenCalled();
     expect(ctl.onsetAt()).toBe(hello);
@@ -530,37 +611,37 @@ describe("O-6: onset is confirmed speech (the VAD's sustained flag), backdated t
 
   it("a run in progress but unconfirmed at the deadline DEFERS the backstop; it confirms, and nothing is played over it", () => {
     const { ctl, enqueue } = rig();
-    // Voice from 1,600: at the 1,650 deadline it is 50 ms old, unconfirmed.
-    run(ctl, 0, 1650, (t) => t >= 1600);
+    // Voice from 1,350: at the 1,400 deadline it is 50 ms old, unconfirmed.
+    run(ctl, 0, 1400, (t) => t >= 1350);
     expect(enqueue).not.toHaveBeenCalled();
-    run(ctl, 1660, 2200, (t) => t >= 1600 && t <= 2000);
-    expect(ctl.onsetAt()).toBe(1600); // confirmed at 1,800, backdated
+    run(ctl, 1410, 1950, (t) => t >= 1350 && t <= 1750);
+    expect(ctl.onsetAt()).toBe(1350); // confirmed at 1,550, backdated
     expect(enqueue).not.toHaveBeenCalled();
     // From here it is the slow-Live clock: onset + 1,600.
-    run(ctl, 2210, 3190);
+    run(ctl, 1960, 2940);
     expect(enqueue).not.toHaveBeenCalled();
-    run(ctl, 3200, 3200);
+    run(ctl, 2950, 2950);
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
   it("a run in progress at the deadline that DIES fires the moment it dies, inside the deferral cap", () => {
     const { ctl, enqueue, events } = rig();
-    run(ctl, 0, 1700, (t) => t >= 1600 && t <= 1700);
+    run(ctl, 0, 1450, (t) => t >= 1350 && t <= 1450);
     expect(enqueue).not.toHaveBeenCalled();
-    run(ctl, 1710, 1710); // the first quiet frame
+    run(ctl, 1460, 1460); // the first quiet frame
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_silence", deferred_ms: 60 });
-    expect(1710).toBeLessThanOrEqual(1650 + ONSET_CONFIRM_DEFER_MS);
+    expect(1460).toBeLessThanOrEqual(1400 + ONSET_CONFIRM_DEFER_MS);
   });
 
   it("never holds past the cap, whatever the VAD does", () => {
     // A VAD that keeps calling frames voiced and never confirms.
     const { ctl, enqueue } = rig();
     expect(ONSET_CONFIRM_DEFER_MS).toBe(200);
-    for (let t = 1600; t <= 2000; t += 10) {
+    for (let t = 1350; t <= 1750; t += 10) {
       ctl.onCallerFrame({ voiced: true, voiceActive: false, atMs: t });
       ctl.tick(t);
-      if (t < 1650 + ONSET_CONFIRM_DEFER_MS) expect(enqueue).not.toHaveBeenCalled();
+      if (t < 1400 + ONSET_CONFIRM_DEFER_MS) expect(enqueue).not.toHaveBeenCalled();
     }
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
@@ -569,10 +650,10 @@ describe("O-6: onset is confirmed speech (the VAD's sustained flag), backdated t
 describe("O-7: the G2 metric is taken at PLAYOUT, on every path", () => {
   it("the metric equals the playout time (the first-audio mark's echo), not the queue time", () => {
     const { ctl, events } = rig();
-    run(ctl, 0, 1650); // queued at 1,650 = pickup + 2,000
-    ctl.onMark(FIRST_AUDIO_MARK, 1830); // started playing 180 ms later
-    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 2180, from_speech_ms: null, path: "backstop_silence", measured: "playout" });
-    expect(events("outbound_first_audio").map((e) => e.fields.from_answer_ms)).toEqual([2180]);
+    run(ctl, 0, 1650); // queued at 1,400 = pickup + 1,750 (S3-2)
+    ctl.onMark(FIRST_AUDIO_MARK, 1580); // started playing 180 ms later
+    expect(ctl.firstAudio()).toEqual({ from_answer_ms: 1930, from_speech_ms: null, path: "backstop_silence", measured: "playout" });
+    expect(events("outbound_first_audio").map((e) => e.fields.from_answer_ms)).toEqual([1930]);
   });
 
   it("the mark goes on the wire BEFORE the first frame of our first audio", () => {
@@ -589,24 +670,24 @@ describe("O-7: the G2 metric is taken at PLAYOUT, on every path", () => {
     ctl.onSessionEnd();
     const logged = events("outbound_first_audio");
     expect(logged).toHaveLength(1);
-    expect(logged[0].fields).toMatchObject({ from_answer_ms: 2000, measured: "enqueue" });
+    expect(logged[0].fields).toMatchObject({ from_answer_ms: 1750, measured: "enqueue" });
   });
 
   it("an echo logs once, and session end then adds nothing", () => {
     const { ctl, events } = rig();
     run(ctl, 0, 1650);
-    ctl.onMark(FIRST_AUDIO_MARK, 1700);
-    ctl.onMark(FIRST_AUDIO_MARK, 1900);
+    ctl.onMark(FIRST_AUDIO_MARK, 1450);
+    ctl.onMark(FIRST_AUDIO_MARK, 1650);
     ctl.onSessionEnd();
     expect(events("outbound_first_audio").map((e) => e.fields.measured)).toEqual(["playout"]);
-    expect(ctl.firstAudio().from_answer_ms).toBe(2050);
+    expect(ctl.firstAudio().from_answer_ms).toBe(1800);
   });
 
-  it("the queue deadline itself is unchanged: queued at pickup + 2.0 s", () => {
+  it("the queue deadline itself is unchanged: queued at pickup + 1.75 s (S3-2)", () => {
     const { ctl, enqueue } = rig();
-    run(ctl, 0, 1640);
+    run(ctl, 0, 1390);
     expect(enqueue).not.toHaveBeenCalled();
-    run(ctl, 1650, 1650);
+    run(ctl, 1400, 1400);
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 });
@@ -698,11 +779,12 @@ describe("round 3: the dotted-AI fold only folds a TRUE acronym (the G3 check mu
 });
 
 describe("round 3: deferred_ms is reported only for a real deferral", () => {
+  // CHANGED (S3-2, P-a): shifted by the same -250 ms as the deadline itself.
   it("a run that CONFIRMED during the deferral leaves no deferred_ms on the later slow-path fire", () => {
     const { ctl, events } = rig();
-    // The reviewer's probe shape: voice from 1,560 -- unconfirmed at the 1,650
-    // deadline (deferral starts), confirmed at 1,760, slow fire at 3,160.
-    run(ctl, 0, 3160, (t) => t >= 1560 && t <= 1900);
+    // The reviewer's probe shape: voice from 1,310 -- unconfirmed at the 1,400
+    // deadline (deferral starts), confirmed at 1,510, slow fire at 2,910.
+    run(ctl, 0, 2910, (t) => t >= 1310 && t <= 1650);
     const played = events("outbound_backstop_played");
     expect(played).toHaveLength(1);
     expect(played[0].fields).toMatchObject({ path: "backstop_slow" });
@@ -711,7 +793,7 @@ describe("round 3: deferred_ms is reported only for a real deferral", () => {
 
   it("a deferral that ended in a silence fire is reported, on the missing-clip line too", () => {
     const { ctl, events } = rig({ backstopAudio: null });
-    run(ctl, 0, 1710, (t) => t >= 1600 && t <= 1700);
+    run(ctl, 0, 1460, (t) => t >= 1350 && t <= 1450);
     expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_silence", deferred_ms: 60 });
   });
 });
@@ -817,5 +899,240 @@ describe("I5 (checkpoint 2b review): Live's own first turn is confirmed HEARD, n
     ctl.onAssistantTurnText(COMPLETE_TEXT);
     expect(rec.marks).toEqual([FIRST_TURN_END_MARK]);
     expect(rec.notes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S3-2 (spec §19, S3-D2, live round 1): the clip ALWAYS plays first.
+//
+// Every test below opts into `firstSpeaker: "clip"` explicitly even though it
+// is the constructor's own default (see the very first test in this section),
+// so each one reads as a deliberate choice rather than an accident of what
+// `rig()` happens to default to.
+// ---------------------------------------------------------------------------
+
+describe("S3-2: clip mode is the production default", () => {
+  it("createFirstSecondsController with no firstSpeaker option never lets Live speak first", () => {
+    // Built directly (not through rig(), whose OWN default is "live" -- see
+    // that function's docstring) so this is a true test of the constructor's
+    // default, matching how lib/voice/live/index.js constructs it when
+    // OUTBOUND_FIRST_SPEAKER is unset.
+    const enqueue = vi.fn();
+    const ctl = createFirstSecondsController({
+      now: () => 0,
+      backstopAudio: AUDIO,
+      backstopText: BACKSTOP_TEXT,
+      audioOut: { enqueue, clear: vi.fn() },
+      sendMark: () => {},
+      seed: () => {},
+      noteToModel: () => {},
+      streamStartAtMs: 0,
+      businessName: "Digile Media",
+      personaName: "Ava",
+    });
+    // A chunk arriving before ANY backstop decision: in "live" mode this
+    // would be forwarded (path=live_reply). Here it is discarded.
+    expect(ctl.onModelAudio(10)).toBe(false);
+  });
+});
+
+describe("S3-2: the clip always plays first, at the FIRST of three timers", () => {
+  it("nobody speaks: the clip is queued at 1,750 ms after pickup (backstop_silence), same as live mode", () => {
+    const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1390);
+    expect(enqueue).not.toHaveBeenCalled();
+    run(ctl, 1400, 1400);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_silence" });
+  });
+
+  it("short hello: onset at 1,100 ms, voice to 1,550 ms -> the clip at 1,900 ms (helloEndGapMs after the run ends), backstop_hello_end", () => {
+    const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1890, (t) => t >= 1100 && t <= 1550);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(ctl.onsetAt()).toBe(1100);
+    run(ctl, 1900, 1900);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_hello_end" });
+  });
+
+  it("long talk: onset at 1,000 ms, voice continuing (no end) -> the clip at 2,600 ms (onset + slowLiveMs), backstop_slow", () => {
+    const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 2590, (t) => t >= 1000);
+    expect(enqueue).not.toHaveBeenCalled();
+    run(ctl, 2600, 2600);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_slow" });
+  });
+
+  it("Live's reply is never waited for and never played: audio arriving before the clip decision is discarded, not raced", () => {
+    const { ctl, enqueue, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1100, (t) => t >= 500 && t <= 700); // a hello, then quiet
+    expect(ctl.onModelAudio(1150)).toBe(false); // Live's reply: discarded
+    run(ctl, 1110, 1900); // the hello-end timer still fires the clip regardless
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(rec.seeds).toHaveLength(0); // hello-end path: seed deferred to the end mark (O-8)
+  });
+});
+
+describe("S3-2: clip barge threshold (CLIP_BARGE_MIN_MS)", () => {
+  it(`a ${CLIP_BARGE_MIN_MS - 200} ms caller run during the clip never reports clipBarge`, () => {
+    const { ctl } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1400); // the silence backstop fires and starts playing
+    const vad = vads.get(ctl);
+    let sawBarge = false;
+    for (let t = 1410; t <= 1410 + (CLIP_BARGE_MIN_MS - 200); t += 10) {
+      const v = vad.processFrame(LOUD, t);
+      const { clipBarge } = ctl.onCallerFrame({ voiced: v.voiced, voiceActive: v.voiceActive, atMs: t, voicedRunMs: vad.voicedRunMs(t) });
+      if (clipBarge) sawBarge = true;
+      ctl.tick(t);
+    }
+    expect(sawBarge).toBe(false);
+    expect(ctl.clipPlaying()).toBe(true); // still playing -- never cleared
+  });
+
+  it(`a ${CLIP_BARGE_MIN_MS + 300} ms run reports clipBarge exactly once; index.js's clearAudio (onAudioCleared) then re-arms the first-turn check`, () => {
+    const { ctl, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1400); // the clip's full text already passed the first-turn check when it fired
+    expect(rec.notes).toEqual([]);
+    const vad = vads.get(ctl);
+    let bargeCount = 0;
+    for (let t = 1410; t <= 1410 + (CLIP_BARGE_MIN_MS + 300); t += 10) {
+      const v = vad.processFrame(LOUD, t);
+      const { clipBarge } = ctl.onCallerFrame({ voiced: v.voiced, voiceActive: v.voiceActive, atMs: t, voicedRunMs: vad.voicedRunMs(t) });
+      if (clipBarge) bargeCount += 1;
+      ctl.tick(t);
+    }
+    expect(bargeCount).toBe(1);
+    // The controller only RECOMMENDS; index.js is what actually clears the
+    // audio and calls onAudioCleared -- simulated directly here.
+    ctl.onAudioCleared();
+    ctl.onAssistantTurnText("Great, thanks Sam. I'm calling about your enquiry.");
+    expect(rec.notes).toEqual(["Tell them now, briefly: you are Ava, an AI assistant from Digile Media."]);
+  });
+});
+
+describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
+  it("6 chunks from the pre-clip generation -- some during the clip, some after its end mark -- never reach the socket; the shadow log counts all 6 and measures the first one", () => {
+    const { ctl, enqueue, rec, events } = rig({ firstSpeaker: "clip" });
+    // Onset at 1,000, hello ends at 1,200 -> backstop_hello_end at 1,550
+    // (before the 2,600 slow deadline).
+    run(ctl, 0, 1290, (t) => t >= 1000 && t <= 1200);
+    // A generation is already in flight when the clip queues: chunk 1, BEFORE
+    // the clip has even fired (clip mode discards it on that ground alone).
+    expect(ctl.onModelAudio(1300)).toBe(false);
+    run(ctl, 1310, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(enqueue).toHaveBeenCalledTimes(1); // fired: backstop_hello_end
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_hello_end" });
+
+    // Chunks 2-3: DURING the clip's own playback.
+    expect(ctl.onModelAudio(1700)).toBe(false);
+    expect(ctl.onModelAudio(1900)).toBe(false);
+
+    // The clip's end mark echoes (~1,000 ms of clip audio after 1,550): the
+    // seed goes, but the generation open when the clip queued has not closed.
+    ctl.onMark(BACKSTOP_END_MARK, 2600);
+    expect(rec.seeds).toHaveLength(1);
+    expect(ctl.clipPlaying()).toBe(false);
+
+    // Chunks 4-6: AFTER the end mark, BEFORE the stale generation's own
+    // turnComplete/interrupted -- named risk 1's exact probe. Still dropped.
+    expect(ctl.onModelAudio(2700)).toBe(false);
+    expect(ctl.onModelAudio(2900)).toBe(false);
+    expect(ctl.onModelAudio(3100)).toBe(false);
+
+    // Only now does the stale generation report its own close.
+    ctl.onAssistantTurnText("stale reply the person never heard", false, 3200);
+
+    // A NEW generation's chunk, after both conditions are met, is forwarded.
+    expect(ctl.onModelAudio(3300)).toBe(true);
+
+    ctl.onSessionEnd();
+    const shadow = events("outbound_live_shadow");
+    expect(shadow).toHaveLength(1);
+    expect(shadow[0].fields).toMatchObject({
+      callSid: "CA1",
+      attemptId: "att-1",
+      discarded_chunks: 6,
+      from_speech_ms: 1300 - 1000, // the FIRST discarded chunk (1,300), from onset (1,000)
+      from_speech_end_ms: 1300 - 1200, // ...and from the hello's own end (1,200)
+    });
+    expect(rec.counters).toContain("outbound_live_shadow");
+  });
+
+  it("the seed's own resulting `interrupted` (onAudioCleared) does not clear the clip's frames or lift condition (i) early", () => {
+    const { ctl, enqueue, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1190, (t) => t >= 1000); // a hello that keeps going -- no hello-end
+    // Live already has a generation open when the clip fires later.
+    expect(ctl.onModelAudio(1200)).toBe(false);
+    run(ctl, 1200, 2600, (t) => t >= 1000); // through the slow deadline (1,000 + 1,600)
+    expect(enqueue).toHaveBeenCalledTimes(1); // backstop_slow fired
+    expect(ctl.onModelAudio(2650)).toBe(false); // still stale, clip playing
+
+    ctl.onMark(BACKSTOP_END_MARK, 3700); // the clip's own end mark echoes; the seed goes
+    expect(rec.seeds).toHaveLength(1);
+
+    // The seed just interrupted Live's STALE generation. index.js's own
+    // `sc.interrupted` handler calls clearAudio unconditionally (lib/voice/
+    // live/index.js:5263), which calls onAudioCleared -- simulated directly.
+    ctl.onAudioCleared();
+    expect(enqueue).toHaveBeenCalledTimes(1); // the clip's own frames: untouched
+    expect(ctl.onModelAudio(3750)).toBe(false); // still discarded: the clear did not satisfy condition (i)
+
+    // Only the REAL turn-boundary event -- never the clear -- lifts it.
+    ctl.onAssistantTurnText("stale reply text", false, 3800);
+    expect(ctl.onModelAudio(3850)).toBe(true);
+  });
+
+  it("named risk 4: a turnComplete that never arrives does not mute Live forever -- STALE_GENERATION_GRACE_MS after the seed, the discard lifts anyway, logged", () => {
+    const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1190, (t) => t >= 1000);
+    expect(ctl.onModelAudio(1200)).toBe(false); // a generation in flight, never to close
+    run(ctl, 1200, 2600, (t) => t >= 1000);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    ctl.onMark(BACKSTOP_END_MARK, 3700); // seed sent at 3,700; the grace clock starts here
+    const liftAt = 3700 + STALE_GENERATION_GRACE_MS;
+
+    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
+    ctl.tick(liftAt - 10);
+    expect(ctl.onModelAudio(liftAt)).toBe(true); // never muted forever
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ callSid: "CA1", attemptId: "att-1", waited_ms: STALE_GENERATION_GRACE_MS });
+  });
+
+  it("a call with no discarded chunk still logs the shadow line, with from_speech_end_ms and from_speech_ms null -- never skipped", () => {
+    const { ctl, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1890, (t) => t >= 1100 && t <= 1550); // a hello, nothing ever discarded
+    run(ctl, 1900, 1900);
+    ctl.onSessionEnd();
+    expect(events("outbound_live_shadow")).toHaveLength(1);
+    expect(events("outbound_live_shadow")[0].fields).toMatchObject({
+      discarded_chunks: 0,
+      from_speech_ms: null,
+      from_speech_end_ms: null,
+    });
+  });
+
+  it("a truly silent call (no onset at all) never logs the shadow line", () => {
+    const { ctl, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1400);
+    ctl.onSessionEnd();
+    expect(events("outbound_live_shadow")).toHaveLength(0);
+  });
+});
+
+describe("S3-2: OUTBOUND_FIRST_SPEAKER=live keeps the old race (contract item 6)", () => {
+  // The whole rest of this file (every describe block above this one) IS
+  // that contract: rig()'s own default is "live", and every pre-S3-2 test
+  // passes unchanged (bar the deliberate default-number updates, listed in
+  // the S3-2 task report). This block adds only what those tests could not
+  // already show: rule 6's OWN claim, that a stale generation cannot exist
+  // when a live-mode clip fires at all.
+  it("rule 6 is automatically satisfied: in live mode, ANY Live audio before a backstop decision already IS the first audio (live_reply), so a clip only ever fires when nothing was in flight", () => {
+    const { ctl, enqueue } = rig({ firstSpeaker: "live" });
+    run(ctl, 0, 990, (t) => t >= 500 && t <= 700); // a hello, unconfirmed... no, confirmed and died
+    expect(ctl.onModelAudio(950)).toBe(true); // Live's own reply -- forwarded, not discarded
+    run(ctl, 1000, 6000);
+    expect(enqueue).not.toHaveBeenCalled(); // the backstop can never fire now: queued !== null
   });
 });

@@ -338,11 +338,14 @@ describe("outbound: LIVE_PROMPT=minimal is ignored (spec §13.2, mechanical ruli
 });
 
 describe("outbound: the first seconds through the real session", () => {
-  it("silence: the backstop clip is queued at 1,650 ms and seeded as Live's own turn (S1)", async () => {
+  // CHANGED (S3-2, P-a): 1,640/1,650 -> 1,380/1,400 -- silenceBackstopMs's
+  // default moved from 2,000 to 1,750, so the stream-clock fire time moved
+  // with it (silenceBackstopMs - answerToStreamMs).
+  it("silence: the backstop clip is queued at 1,400 ms and seeded as Live's own turn (S1)", async () => {
     const call = await bootOutbound();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
-    await call.feed(1640);
+    await call.feed(1380);
     expect(enqueue).not.toHaveBeenCalled();
     expect(call.live.sent.clientContent).toEqual([]);
 
@@ -354,24 +357,42 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  it("the person says hello first: no backstop, Live's reply plays", async () => {
+  // CHANGED (S3-2, S3-D2): this used to test the OLD race (Live's own reply
+  // preempts the backstop). Clip mode (the new default) never lets Live speak
+  // first: the reply above is now discarded, and the clip still plays, at the
+  // hello-end timer (helloEndGapMs after the hello ends). The stale-discard
+  // wait (named risk 1) is proven here too -- a SECOND model-audio message,
+  // pushed after the clip's own end mark echoes, is STILL discarded, because
+  // the first one's generation never reported turnComplete/interrupted.
+  it("the person says hello first: Live's reply is discarded (never played); the clip still plays via the hello-end timer", async () => {
     const call = await bootOutbound();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    await call.feed(1100);
-    await call.feed(300, { voiced: true });
+    await call.feed(400, { voiced: true }); // a hello; onset backdated to ~20 ms
     call.live.push(modelAudioMsg());
     await call.settle();
-    expect(enqueue).toHaveBeenCalled();
-    expect(enqueue.mock.calls.every(([buf]) => buf !== OPENER_AUDIO)).toBe(true);
-    await call.feed(3000);
-    expect(enqueue.mock.calls.every(([buf]) => buf !== OPENER_AUDIO)).toBe(true);
+    expect(enqueue).not.toHaveBeenCalled(); // discarded, not played
     expect(call.live.sent.clientContent).toEqual([]);
+
+    await call.feed(400); // the hello ends; helloEndGapMs (350 ms) later, the clip fires
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+    expect(call.live.sent.clientContent).toEqual([]); // not seeded yet -- O-8, deferred to the end mark
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false },
+    ]);
+
+    // The FIRST reply's generation never closed (no turnComplete/interrupted
+    // was ever sent for it), so it is still stale: nothing new plays.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1);
     await call.hangUp();
   });
 
   it("model audio while the backstop plays is dropped until the backstop-end mark echoes, then plays", async () => {
     const call = await bootOutbound();
-    await call.feed(1660);
+    await call.feed(1400);
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
     call.live.push(modelAudioMsg());
@@ -385,9 +406,9 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  it("the backstop is interruptible: a barge clears it like any assistant audio, the mark never echoes, and Live's answer PLAYS", async () => {
+  it("the backstop is interruptible: a barge past CLIP_BARGE_MIN_MS clears it like any assistant audio, the mark never echoes, and Live's answer PLAYS", async () => {
     const call = await bootOutbound();
-    await call.feed(1660);
+    await call.feed(1400);
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
@@ -396,9 +417,10 @@ describe("outbound: the first seconds through the real session", () => {
     await call.settle();
     expect(enqueue).not.toHaveBeenCalled();
 
-    // The person talks over the clip: a sustained voiced run past the gate's
-    // barge threshold, while our audio is playing.
-    await call.feed(600, { voiced: true });
+    // The person talks over the clip: a sustained voiced run past
+    // CLIP_BARGE_MIN_MS (600 ms, S3-2 -- higher than the ordinary 300 ms
+    // threshold while our own clip is playing), with margin.
+    await call.feed(900, { voiced: true });
     expect(clear).toHaveBeenCalled();
 
     // No `outbound-backstop-end` mark is ever delivered. Live answers them.
@@ -408,9 +430,20 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // The SAME barge, but shorter than CLIP_BARGE_MIN_MS: a "hello" said back at
+  // the clip must not stop it (S3-2).
+  it("a short caller run (under CLIP_BARGE_MIN_MS) during the clip does not clear it", async () => {
+    const call = await bootOutbound();
+    await call.feed(1400);
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(400, { voiced: true }); // well under 600 ms
+    expect(clear).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
   it("the vendor's `interrupted` lifts the suppression too", async () => {
     const call = await bootOutbound();
-    await call.feed(1660);
+    await call.feed(1400);
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
     call.live.push(modelAudioMsg());
@@ -429,7 +462,7 @@ describe("outbound: the first seconds through the real session", () => {
     allowErrors("outbound_backstop_missing");
     const call = await bootOutbound({ database: outboundDb({ openerAudio: null }) });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    const { events } = await logsDuring(() => call.feed(1660));
+    const { events } = await logsDuring(() => call.feed(1400));
     expect(enqueue).not.toHaveBeenCalled();
     expect(call.live.sent.clientContent).toHaveLength(1);
     expect(call.live.sent.clientContent[0].turnComplete).toBe(true);
@@ -439,9 +472,13 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // Live mode (contract item 6): this specifically tests Live's OWN first
+  // turn arriving BEFORE any clip exists -- a scenario clip mode (the new
+  // default) no longer allows (Live never speaks first, S3-D2). Numbers
+  // unchanged from before S3-2.
   it("first-turn check: an incomplete first reply gets one correction note", async () => {
     allowErrors("outbound_first_turn_incomplete");
-    const call = await bootOutbound();
+    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     await call.feed(400, { voiced: true });
     call.live.push(modelAudioMsg());
     await call.settle();
@@ -462,8 +499,8 @@ describe("outbound: the first seconds through the real session", () => {
     allowErrors("outbound_first_turn_incomplete");
     const call = await bootOutbound();
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
-    await call.feed(1660); // backstop fires at 1,650 and is playing
-    // "Yes, speaking" -- 800 ms of speech over the clip.
+    await call.feed(1400); // backstop fires at 1,400 (S3-2) and is playing
+    // "Yes, speaking" -- 800 ms of speech over the clip, past CLIP_BARGE_MIN_MS (600 ms).
     await call.feed(800, { voiced: true });
     expect(clear).toHaveBeenCalled();
     await call.feed(200);
@@ -480,9 +517,12 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // Live mode (contract item 6): "not the backstop" is the whole point of
+  // this test -- Live's own reply IS the first audio, which clip mode (the
+  // new default) no longer permits.
   it("I5 (checkpoint 2b review): a barge into LIVE'S OWN first reply -- not the backstop -- never corrects on that interrupted turn itself, only re-arms", async () => {
     allowErrors("outbound_first_turn_incomplete");
-    const call = await bootOutbound();
+    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     // Speech onset with no clip yet: the slow-Live path, so Live's own reply
     // is the first audio and there is no backstop in play at all.
     await call.feed(400, { voiced: true });
@@ -513,20 +553,23 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // CHANGED (S3-2, P-a): 1,240/1,260/1,660 -> 990/1,010/1,410 -- shifted by
+  // the same -250 ms the deadline itself moved (BACKSTOP_REFETCH_LEAD_MS is
+  // unchanged at 400 ms; the deadline it counts back from moved).
   it("I4: a clip stored AFTER pickup is re-read once before the deadline and played", async () => {
     const LATE = Buffer.alloc(4000, 0x55);
     const database = outboundDb({ openerAudio: null, lateOpenerAudio: LATE });
     const call = await bootOutbound({ database });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
-    await call.feed(1240); // before deadline - lead
+    await call.feed(980); // before deadline - lead (990 is not a frame multiple of 20; bootLive's feed() rounds)
     expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
-    await call.feed(20); // 1,260: past 1,650 - 400
+    await call.feed(20); // 1,000: past 1,400 - 400
     expect(database.fetchAttemptOpenerAudio).toHaveBeenCalledTimes(1);
     expect(database.fetchAttemptOpenerAudio).toHaveBeenCalledWith("att-1");
     expect(database.withTenant.mock.calls.at(-1)[0]).toBe(BIZ);
 
-    await call.feed(400); // through 1,660
+    await call.feed(400); // through 1,400
     expect(enqueue).toHaveBeenCalledWith(LATE);
     expect(call.live.sent.clientContent).toEqual([
       { turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false },
@@ -541,7 +584,7 @@ describe("outbound: the first seconds through the real session", () => {
     database.fetchBusinessById.mockResolvedValue({ ...BUSINESS_ROW, name: "N".repeat(100) });
     const call = await bootOutbound({ database });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    await call.feed(1660);
+    await call.feed(1400);
     expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
     expect(events("outbound_backstop_render_refused")).toHaveLength(1);
@@ -624,53 +667,63 @@ describe("inbound unchanged", () => {
 describe("outbound fix round 2: the owner decisions through the real session", () => {
   const isSeed = (m) => m.turns?.[0]?.role === "model" && m.turnComplete === false;
 
-  it("O-6: one loud frame near pickup + 1.5 s is not speech -- the backstop is queued at the silence deadline and seeded", async () => {
+  // CHANGED (S3-2, P-a): 1,160/1,180/1,640/1,660 -> shifted by the same -250
+  // ms the deadline itself moved.
+  it("O-6: one loud frame near pickup + 1.26 s is not speech -- the backstop is queued at the silence deadline and seeded", async () => {
     const call = await bootOutbound();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    await call.feed(1160);
-    await call.feed(20, { voiced: true }); // 1,180: a click
-    await call.feed(460); // 1,640
+    await call.feed(900); // 910 is not a frame multiple of 20; bootLive's feed() rounds
+    await call.feed(20, { voiced: true }); // 920: a click
+    await call.feed(460); // 1,380
     expect(enqueue).not.toHaveBeenCalled();
-    await call.feed(20); // 1,660
+    await call.feed(20); // 1,400
     expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
     expect(call.live.sent.clientContent.filter(isSeed)).toHaveLength(1);
     expect(call.ws.liveDialFirstSeconds.onsetAt()).toBeNull();
     await call.hangUp();
   });
 
+  // CHANGED (S3-2, P-a): the deadline itself is now 1,400 (a multiple of the
+  // 20 ms frame size, unlike the old 1,650), so it is hit EXACTLY rather than
+  // overshot to 1,660 -- from_answer_ms recomputed accordingly (1,400 + 350 =
+  // 1,750 at enqueue; +140 ms to the mark echo = 1,890 at playout).
   it("O-7: the first-audio mark reaches the wire before the first frame, and the metric is taken at its echo", async () => {
     const call = await bootOutbound();
     const sent = [];
     vi.spyOn(call.ws, "send").mockImplementation((raw) => sent.push(JSON.parse(raw)));
-    await call.feed(1660); // queued at 1,660
+    await call.feed(1400); // queued at 1,400
     const firstMark = sent.findIndex((m) => m.event === "mark" && m.mark.name === FIRST_AUDIO_MARK);
     const firstMedia = sent.findIndex((m) => m.event === "media");
     expect(firstMark).toBeGreaterThanOrEqual(0);
     expect(firstMedia).toBeGreaterThan(firstMark);
 
-    expect(call.ws.liveDialFirstSeconds.firstAudio()).toMatchObject({ from_answer_ms: 2010, measured: "enqueue" });
-    await call.feed(140); // 1,800: Twilio echoes the mark as the clip starts to play
+    expect(call.ws.liveDialFirstSeconds.firstAudio()).toMatchObject({ from_answer_ms: 1750, measured: "enqueue" });
+    await call.feed(140); // 1,540: Twilio echoes the mark as the clip starts to play
     call.ws.deliver({ event: "mark", mark: { name: FIRST_AUDIO_MARK } });
     expect(call.ws.liveDialFirstSeconds.firstAudio()).toEqual({
-      from_answer_ms: 2150,
+      from_answer_ms: 1890,
       from_speech_ms: null,
       path: "backstop_silence",
       measured: "playout",
     });
-    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 2150, measured: "playout" })]);
+    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 1890, measured: "playout" })]);
     await call.hangUp();
     expect(events("outbound_first_audio")).toHaveLength(1);
   });
 
   it("O-7: no echo before the hang-up -- the queue-time value is logged, flagged measured:'enqueue'", async () => {
     const call = await bootOutbound();
-    await call.feed(1660);
+    await call.feed(1400);
     await call.hangUp();
-    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 2010, measured: "enqueue" })]);
+    expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 1750, measured: "enqueue" })]);
   });
 
+  // Live mode (contract item 6): kept as continuous voice (rather than a
+  // short hello) so the clip mode default's hello-end timer (which would
+  // otherwise fire first, before onset + slowLiveMs) cannot interfere -- this
+  // test is specifically about the SLOW path's own seed deferral.
   it("O-8: the slow-path clip is NOT seeded when it fires -- only when its end mark echoes", async () => {
-    const call = await bootOutbound();
+    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
     await call.feed(400, { voiced: true }); // onset at 20 (confirmed at ~220)
     await call.feed(1240); // 1,640: past onset + 1,600
@@ -683,11 +736,11 @@ describe("outbound fix round 2: the owner decisions through the real session", (
   });
 
   it("O-8: a slow-path clip cut by a barge is never seeded", async () => {
-    const call = await bootOutbound();
+    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     await call.feed(400, { voiced: true });
     await call.feed(1240);
-    await call.feed(600, { voiced: true }); // talks over the clip
+    await call.feed(900, { voiced: true }); // talks over the clip, past CLIP_BARGE_MIN_MS (600 ms, S3-2)
     expect(clear).toHaveBeenCalled();
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
     expect(call.live.sent.clientContent.filter(isSeed)).toEqual([]);
@@ -696,7 +749,7 @@ describe("outbound fix round 2: the owner decisions through the real session", (
 
   it("O-9: no first name -- the seed is the opener without its first-name sentence", async () => {
     const call = await bootOutbound({ database: outboundDb({ firstName: null }) });
-    await call.feed(1660);
+    await call.feed(1400);
     expect(call.live.sent.clientContent).toEqual([
       { turns: [{ role: "model", parts: [{ text: "It's Ava, an AI assistant from Digile Media." }] }], turnComplete: false },
     ]);
@@ -709,7 +762,7 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     const database = outboundDb({ firstName: null, campaignConfig });
     const call = await bootOutbound({ database });
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    await call.feed(1660);
+    await call.feed(1400);
     expect(enqueue).not.toHaveBeenCalled();
     expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
     const [prompt] = call.live.sent.clientContent;

@@ -1,6 +1,6 @@
 // tests/outboundDispatch.test.js
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createDispatcher, startOfLocalDay } from "../lib/outbound/dispatch.js";
+import { createDispatcher, startOfLocalDay, RENDER_BEFORE_DIAL_MAX_MS } from "../lib/outbound/dispatch.js";
 import { TEMPLATES } from "../lib/outbound/templates.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { renderTemplate, spokenNumber } from "../lib/outbound/campaignSchema.js";
@@ -635,12 +635,18 @@ describe("dispatch: the opener is stored before a slow voicemail render finishes
 
     releaseVoicemail();
     expect((await done).status).toBe("dialed");
-    // One write per clip, each carrying only its own column. The returned
-    // object does not trigger a second opener write.
-    expect(db.storeAttemptAudio.mock.calls).toEqual([
-      ["a1", { opener }],
-      ["a1", { voicemail }],
-    ]);
+    // D10 (S3-2): the render -- and so the voicemail's own write -- is no
+    // longer awaited by dispatch() itself (only the OPENER was ever on that
+    // critical path), so the voicemail's write is polled for rather than
+    // assumed synchronous with `done` resolving.
+    await vi.waitFor(() =>
+      // One write per clip, each carrying only its own column. The returned
+      // object does not trigger a second opener write.
+      expect(db.storeAttemptAudio.mock.calls).toEqual([
+        ["a1", { opener }],
+        ["a1", { voicemail }],
+      ])
+    );
   });
 
   it("a renderer that only RETURNS its clips (no onClip) still gets them stored, one column per write", async () => {
@@ -649,6 +655,115 @@ describe("dispatch: the opener is stored before a slow voicemail render finishes
     const { d } = mk(db, undefined, { renderAudio: async () => ({ opener, voicemail: null }) });
     await d({ businessId: "b1", outreachId: "o1" });
     expect(db.storeAttemptAudio.mock.calls).toEqual([["a1", { opener }]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D10 (spec §19, S3-D2, live round 1): the opener renders and is STORED
+// BEFORE calls.create, racing against RENDER_BEFORE_DIAL_MAX_MS. The
+// voicemail (and a still-pending opener past the deadline) keeps rendering
+// after the dial, unawaited by dispatch()'s own return -- a hung render must
+// never hang the dial OR the dispatch call itself.
+// ---------------------------------------------------------------------------
+describe("D10: render before dial", () => {
+  it("the render resolves well inside the deadline -- calls.create is called only after storeAttemptAudio(opener)", async () => {
+    const db = fakeDb();
+    const opener = Buffer.from([1, 2, 3]);
+    const order = [];
+    db.storeAttemptAudio = vi.fn(async (...a) => {
+      order.push("store");
+      return undefined;
+    });
+    let releaseOpener;
+    const openerReady = new Promise((r) => (releaseOpener = r));
+    const renderAudio = vi.fn(async ({ onClip }) => {
+      await openerReady;
+      await onClip("opener", opener);
+      return { opener };
+    });
+    const twilio = { calls: { create: vi.fn(async () => { order.push("dial"); return { sid: "CA123" }; }) } };
+    const { d } = mk(db, twilio, { renderAudio });
+
+    const done = d({ businessId: "b1", outreachId: "o1" });
+    await new Promise((r) => setImmediate(r));
+    expect(twilio.calls.create).not.toHaveBeenCalled(); // still waiting on the opener specifically
+
+    releaseOpener();
+    expect((await done).status).toBe("dialed");
+    expect(order).toEqual(["store", "dial"]);
+  });
+
+  it("the render hangs -- dials anyway at RENDER_BEFORE_DIAL_MAX_MS and logs outbound_render_late", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = fakeDb();
+      const renderAudio = vi.fn(() => new Promise(() => {})); // never resolves, never rejects
+      const log = { info: vi.fn(), error: vi.fn() };
+      const { d, twilio } = mk(db, undefined, { renderAudio, log });
+
+      const done = d({ businessId: "b1", outreachId: "o1" });
+      await vi.advanceTimersByTimeAsync(RENDER_BEFORE_DIAL_MAX_MS);
+      expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+      expect(log.error).toHaveBeenCalledWith(
+        "outbound_render_late",
+        expect.objectContaining({ attemptId: "a1", waited_ms: RENDER_BEFORE_DIAL_MAX_MS, severity: "warn" })
+      );
+      expect((await done).status).toBe("dialed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the render throws -- dials at once, never waiting for the timeout", async () => {
+    const db = fakeDb();
+    const renderAudio = vi.fn(async () => {
+      throw new Error("live down");
+    });
+    const log = { info: vi.fn(), error: vi.fn() };
+    const { d, twilio } = mk(db, undefined, { renderAudio, log });
+
+    const start = Date.now();
+    const result = await d({ businessId: "b1", outreachId: "o1" });
+    expect(Date.now() - start).toBeLessThan(1000); // nowhere near RENDER_BEFORE_DIAL_MAX_MS (8 s)
+    expect(result.status).toBe("dialed");
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_failed", expect.objectContaining({ attemptId: "a1" }));
+    expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
+  });
+
+  it("no line was ever safe to render -- dials at once (nothing to wait for)", async () => {
+    const db = fakeDb(
+      row({
+        config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", opener: "x".repeat(130), voicemail: "y".repeat(310) },
+      })
+    );
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d, twilio } = mk(db, undefined, { renderAudio, log });
+    const start = Date.now();
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(renderAudio).not.toHaveBeenCalled();
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+    expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
+  });
+
+  // Controller ruling: the stale-`dialing` thresholds (lib/outbound/
+  // internalRoutes.js) must exceed RENDER_BEFORE_DIAL_MAX_MS plus the longest
+  // ring timeout (40 s, voicemail_on), so a dial merely running late is never
+  // mistaken by the sweep for a dial that never happened. Same values as
+  // before extraction (100, 10, 15, 120); this only asserts the relationship.
+  it("the stale-dialing thresholds (sidless, lost-callback) exceed RENDER_BEFORE_DIAL_MAX_MS + the 40 s ring timeout", async () => {
+    const { OUTBOUND_STALE_SIDLESS_MINUTES, OUTBOUND_STALE_LOST_CALLBACK_MINUTES, OUTBOUND_STALE_ATTEMPTS_LIMIT, OUTBOUND_STALE_POSTCALL_PENDING_SECONDS } =
+      await import("../lib/outbound/internalRoutes.js");
+    const floorMs = RENDER_BEFORE_DIAL_MAX_MS + 40_000;
+    expect(OUTBOUND_STALE_SIDLESS_MINUTES * 60_000).toBeGreaterThan(floorMs);
+    expect(OUTBOUND_STALE_LOST_CALLBACK_MINUTES * 60_000).toBeGreaterThan(floorMs);
+    // Unchanged values (no schema/behaviour change from extracting them).
+    expect(OUTBOUND_STALE_ATTEMPTS_LIMIT).toBe(100);
+    expect(OUTBOUND_STALE_SIDLESS_MINUTES).toBe(10);
+    expect(OUTBOUND_STALE_LOST_CALLBACK_MINUTES).toBe(15);
+    expect(OUTBOUND_STALE_POSTCALL_PENDING_SECONDS).toBe(120);
   });
 });
 

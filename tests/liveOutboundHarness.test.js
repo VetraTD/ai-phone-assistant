@@ -350,8 +350,12 @@ beforeEach(() => {
 });
 
 describe("the simulated outbound call, through the real door and session", () => {
+  // Live mode (contract item 6): this scenario IS the pre-S3-2 race by
+  // definition (mode: "speaks_first" -- Live's own reply is the first audio).
+  // Clip mode (the new default) never lets Live speak first at all, so this
+  // needs the explicit env override to keep testing the race it names.
   it("SPEAKS FIRST: 'Hello?' -> no assistant frame before the onset, Live's reply is the first audio (live_reply) within 2 s; calls row outbound; terminal status claims post-call", async () => {
-    const ctx = await answerAndStart();
+    const ctx = await answerAndStart({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     const { call, observer, toTwilio, db, app } = ctx;
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
@@ -406,16 +410,20 @@ describe("the simulated outbound call, through the real door and session", () =>
     expect(v.pass).toBe(true);
   });
 
-  it("SILENT: the backstop is queued 1,650 ms after stream start (2,000 - 350), seeded, backstop_silence; Live does not introduce itself again", async () => {
+  // CHANGED (S3-2, P-a): 1,640/1,660/1,650 -> 1,380/1,400 -- silenceBackstopMs
+  // moved from 2,000 to 1,750, and the new deadline (1,400) is itself a
+  // multiple of the 20 ms frame size, so it is hit EXACTLY rather than
+  // overshot.
+  it("SILENT: the backstop is queued 1,400 ms after stream start (1,750 - 350, S3-2), seeded, backstop_silence; Live does not introduce itself again", async () => {
     const ctx = await answerAndStart({ env: { LIVE_DEBUG_TRANSCRIPT: "1" } });
     const { call, observer, toTwilio, db } = ctx;
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
-    await call.feed(1640);
+    await call.feed(1380);
     expect(toTwilio.filter((m) => m.event === "media" || m.event === "mark")).toEqual([]);
     expect(call.live.sent.clientContent).toEqual([]);
 
-    await call.feed(20); // 1,660: the first frame at or past 1,650
+    await call.feed(20); // 1,400: the deadline, landed on exactly
     expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
     expect(toTwilio[0]).toMatchObject({ event: "mark", mark: { name: FIRST_AUDIO_MARK } });
     expect(toTwilio[1]).toMatchObject({ event: "media" });
@@ -455,9 +463,15 @@ describe("the simulated outbound call, through the real door and session", () =>
       calls_direction_outbound: "PASS",
       post_call_exactly_once: "PASS",
     });
-    expect(v.criteria.backstop_queued_at_1650.client_queued_ms).toBe(1660);
-    // Played out at the echo, 1,660 + 350: above 2,000 and recorded as such.
-    expect(v.criteria.played_out_le_2500).toMatchObject({ server_from_answer_ms: 2010, measured: "playout", above_2000: true });
+    // The key name (backstop_queued_at_1650) is a stale label from before
+    // S3-2 -- the underlying target (SILENT_QUEUE_TARGET_MS) already
+    // recomputes from FIRST_SECONDS_DEFAULTS and is checked correctly here;
+    // only the identifier's own number is out of date (lib/probe/
+    // outboundHarness.js, parked -- not this task's file).
+    expect(v.criteria.backstop_queued_at_1650.client_queued_ms).toBe(1400);
+    // Played out at the echo, 1,400 + 350: T1's own fix -- this is now UNDER
+    // 2,000, where it used to read 2,010 (above_2000: true) before P-a.
+    expect(v.criteria.played_out_le_2500).toMatchObject({ server_from_answer_ms: 1750, measured: "playout", above_2000: false });
     expect(v.pass).toBe(true);
   });
 
@@ -468,7 +482,7 @@ describe("the simulated outbound call, through the real door and session", () =>
     const ctx = await answerAndStart();
     const { call, db } = ctx;
 
-    await call.feed(1660); // the silence deadline: the backstop fires and is seeded AT ONCE (O-8 is the slow path only)
+    await call.feed(1660); // past the silence deadline (1,400, S3-2): the backstop fires and is seeded AT ONCE (O-8 is the slow path only)
 
     expect(OPENER).toMatch(/\bAI\b/i); // the line this session is actually verifying carries the disclosure
     const backstopRows = db.transcript.filter((r) => r.message === OPENER);
@@ -485,7 +499,7 @@ describe("the simulated outbound call, through the real door and session", () =>
     const ctx = await answerAndStart();
     const { call, observer, db } = ctx;
 
-    await call.feed(1700); // the backstop fired at 1,660
+    await call.feed(1700); // the backstop already fired (silence deadline 1,400, S3-2)
     observer.helloOnset(call.clock() + 20);
     await call.feed(300, { voiced: true });
     await hangUpAndComplete(ctx);
