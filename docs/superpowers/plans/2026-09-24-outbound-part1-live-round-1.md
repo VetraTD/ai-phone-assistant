@@ -1,4 +1,4 @@
-# Outbound Part 1: live round 1, day 1 (2026-09-26, America/Chicago evening)
+# Outbound Part 1: live round 1, days 1–2 (2026-09-26 and 2026-09-27, America/Chicago)
 
 Production `voice-uk-prod-00094-87t` (image `96e356b`), `OUTBOUND_ENABLED=false`, allow-list `+14699338887` (the owner's US handset). Caller ID `+18176011171` (Twilio account B) on tenant `2083c6a4…` ("Digile Media", America/Chicago). Model `gemini-3.8-live`, voice Kore, en-US.
 
@@ -7,7 +7,7 @@ Setup:
 - Each campaign was paused straight after its call. **All 14 campaigns are paused now.**
 - Trigger: `outbound-admin trigger --consent-manual`, then the sweep was forced about 2 min later.
 
-**Spend:** P1-LIVE-R1 $0.3410 (9 outbound calls + 19 clip renders + 1 test inbound call, priced from logged usage). P1-DEPLOY $0.00244. P1 total $0.7133 of $10. Twilio minutes are extra, about $0.03 per call.
+**Spend:** P1-LIVE-R1 $0.3410 on day 1 (9 outbound calls + 19 clip renders + 1 test inbound call, priced from logged usage), plus $0.0502 for scenario 9 on day 2, for $0.3912 in total. P1-DEPLOY $0.00244. P1 total $0.7635 of $10. Twilio minutes are extra, about $0.03 per call.
 
 ## Results, per call, in the unit a caller feels
 
@@ -25,7 +25,7 @@ Setup:
 | 8 | Asks for a human | Identity asked twice after the clip. The reply was transcribed as non-Latin script. Then contact number and spelling were asked. "Can I speak to a real person, please?" got "Of course… One moment while I connect you." The transfer rang the handset (call waiting), which the owner ignored. After about 25 s: **a robotic Twilio voice, "…call you back", then the line ended** | **PASS** on mechanics (transfer, unanswered branch, outcome `callback_requested`). **FAIL** on voice (D6) |
 | 10 | Gatekeeper "Reception, who's calling?" | "I'm following up on an enquiry **Nithin made regarding marketing systems**" (said twice). "I'm not able to share specific details — could you please put Nithin on the line?" On "Let me put you through": "Thank you, I will wait." On "call back another time": agreed, then "Is there anything else I can help you with today?" | **MOSTLY PASS.** It over-disclosed, and the topic was wrong: the campaign says "clinic systems" (D8). Inbound closing phrase (D7). Silent flag (T1) |
 | 11 | "He's not here, I'm his son" | "Thank you for letting me know. I will call back another time. Is there anything else I can assist you with today?" On "What is this about?": "I'll make sure to call back another time." Then it ended. `callback_requested` | **PASS** (shared nothing, asked the son nothing). D7 phrase |
-| 9 | "Stop calling me" | **Not run.** The owner's "ready" came at 00:54 local. The gate refused with `outside_window` (the calling window was **verified live**), and the campaign was paused before the morning re-dial | Next session, then `unsuppress` with the owner's YES |
+| 9 | "Stop calling me" (day 2, 2026-09-27 ~14:09 CDT; S09 resumed, not re-triggered) | **Attempt 1** (18:58Z): the owner was on another call, so the carrier sent it straight to voicemail. It was answered 1.2 s after the dial, before the opener clip existed (`outbound_backstop_missing` ERROR, D10). AMD `machine_end_beep`, voicemail left, retry +10 min. S09 was paused, then resumed. **Attempt 2** (19:08Z): the clip played at 2.11 s (T1 again). Then "Could you please confirm if I am speaking with Nithin?" (D1). The owner said "Yeah, please stop calling me." and heard "Of course — we won't call you again. Thank you for your time, and I wish you well." Then "Is there anything else I can assist you with today?" (D7), then the goodbye again (`live_repeated_phrase`), then end_call. Post-call: `outbound_optout_detector_fired side=caller`, the suppression row was written (unsuppress dry run `wouldRemove: 1`), outreach closed `terminal_outcome`, outcome **`not_interested`** (D9) | **PASS** (G7: the confirmation was said and the suppression row exists). D1/D7/T1 were seen again. New D9, D10. S09 paused afterwards; `unsuppress --confirm` with the owner's YES returned `{removed: 1}` |
 
 ## Measurements (carry items 14-16 and the hello timing)
 
@@ -74,9 +74,11 @@ Setup:
 | **D4** | Live's own first reply is slow (up to 6.9 s), or never beats the 1.6 s net | All human calls | Latency, plus a tool call before speaking; the design of §9.3 |
 | **D5** | Asks you to spell a name the campaign already has | S02 (twice), S08 | `live_spelling_ask_nudged` fires on outbound |
 | **D6** | After an unanswered transfer, a robotic Twilio voice says "…call you back" and hangs up abruptly | S08 | The transfer-unanswered `<Say>` uses Twilio TTS, not the Live voice (spec D6: one voice) |
-| **D7** | "Is there anything else I can help you with today?" on a call Ava placed | S01, S10, S11 | Inbound closing phrase on outbound |
+| **D7** | "Is there anything else I can help you with today?" on a call Ava placed | S01, S10, S11, S09 (after the opt-out confirmation) | Inbound closing phrase on outbound. **S09 evidence:** `end_call_refusals={"generic":1,"no_ask":1}`. The inbound LVX132 ask-gate refused Ava's first `end_call` because no "anything else?" had been asked, so she asked it and then repeated her goodbye. The gate is the driver, not only the prompt text (`gemini.js` gather_details/confirm fallbacks are also ungated) |
 | **D8** | Tells a receptionist "an enquiry Nithin made regarding **marketing** systems" | S10 | Gatekeeper disclosure level, plus a topic drift from the campaign's "clinic systems" |
-| **T1** | Every silent pickup is flagged as a silent call (72 h hold) | 4 of 4 silent-path calls | The 2.0 s backstop timer plus about 90 ms playout breaks the 2,000 ms limb. O-28 |
+| **T1** | Every silent pickup is flagged as a silent call (72 h hold) | 4 of 4 silent-path calls on day 1, and 5 of 5 after S09 attempt 2 (2,111 ms) | The 2.0 s backstop timer plus about 90 ms playout breaks the 2,000 ms limb. O-28 |
+| **D9** | Nothing the caller hears. The person who said "stop calling me" is recorded as `not_interested`, not `opted_out` | S09 attempt 2 | `postCall.js` writes the outcome (tier 4, the summary) BEFORE the opt-out detector runs (step 3). The detector's suppression is real, but the outcome never sees it. The stage-3 `opt_out` tool writes during the call, so the effects tier (tier 3) catches it |
+| **D10** | A person (or voicemail) who answers within about 1–5 s gets no stored opener. The clip renders 5–6 s after the dial | S09 attempt 1: a carrier voicemail answered 1.2 s after the dial, `outbound_backstop_missing` (ERROR) with `refetch=done` | The render starts at the dial and takes 5–6 s. Nothing covers an answer that fast. It was a known risk (9/9 day-1 answers were ≥8.1 s); now seen live |
 
 Observations, not defects:
 - The `stacked_questions` counter counted a transcript artefact: the owner heard the question once in S01.
@@ -92,7 +94,12 @@ Observations, not defects:
   2. Build it into stage 3, which already brings the callback, outcome and opt-out tools. D1–D8 and T1 get fixed in the same pass.
   3. Round 2 re-tests with accent testers.
 
+## Day 2 (2026-09-27): scenario 9 and unsuppress, DONE
+- Scenario 9 PASS (see the table). Round 1 is **13 of 13 scenarios run**.
+- S09 was resumed twice with `status --status active --confirm` (never re-triggered) and paused after each attempt. **All 14 campaigns are paused again.**
+- Unsuppress: the dry run showed `wouldRemove: 1`, then `--confirm` with the owner's YES returned `{removed: 1}`. The owner's handset is callable again for round 2.
+- **Spend:** scenario 9 cost $0.0502 (2 calls + 3 clip renders, priced from logged usage). P1-LIVE-R1 is now $0.3912 of the $1.50 reserve, and P1 in total $0.7635 of $10.
+- Lesson: the owner being on another call sends the dial straight to carrier voicemail. That is correct behaviour (voicemail on attempt 1, then a retry), but it costs a round trip. Before a live call, ask the tester to keep the line free and DND off.
+
 ## Still to do from round 1
-- **Scenario 9** ("stop calling me"), inside 08:00–21:00 CDT. Check that a suppression row is written at post-call (detector; the stage-3 tool is not built).
-- Then `outbound-admin unsuppress --phone +18176011171 --contact-phone +14699338887`, with the owner's YES.
-- **Spike #9** (Twilio `canceled` on an answered call): docs-only, not done this session.
+- **Spike #9** (Twilio `canceled` on an answered call): docs-only, not done.
