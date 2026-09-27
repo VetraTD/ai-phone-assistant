@@ -40,7 +40,7 @@
   },
   {
     "name": "confirm_identity",
-    "description": "Call this once you have established who you are speaking to, before sharing any details of the enquiry or looking anything up for them. Pass name_confirmed: true only once the person THEMSELVES confirms their own identity -- never on a gatekeeper's, receptionist's or relative's word. Pass name_confirmed: false if this is the wrong person, a gatekeeper, a child, or you could not confirm who you are speaking to -- share nothing further in that case and offer a callback instead.",
+    "description": "Call this once you have established who you are speaking to, before sharing any details of the enquiry or looking anything up for them. Pass name_confirmed: true only once the person THEMSELVES confirms their own identity -- never on a gatekeeper's, receptionist's or relative's word. Pass name_confirmed: false if this is the wrong person, a gatekeeper, a child, or you could not confirm who you are speaking to -- share nothing further in that case: ask them to put you through, or offer a callback instead.",
     "parameters": {
       "type": "object",
       "properties": {

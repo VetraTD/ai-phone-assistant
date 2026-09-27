@@ -27,9 +27,11 @@ import { outboundCallBlock } from "../lib/outbound/prompt.js";
 import { ASSISTANT_OPT_OUT_PATTERNS } from "../lib/outbound/detectors.js";
 import { OUTBOUND_FIXTURES } from "./fixtures/businessConfigs.js";
 
+const BUSINESS_NAME = OUTBOUND_FIXTURES["speed-to-lead"].config.businessName;
+
 /** Mirrors services/gemini.js's own call shape exactly (buildDynamicTail). */
-function renderBlock(outboundCall, disclosure = { enabled: false, text: null }) {
-  return outboundCallBlock({ ...outboundCall, disclosure });
+function renderBlock(outboundCall, disclosure = { enabled: false, text: null }, businessName = BUSINESS_NAME) {
+  return outboundCallBlock({ ...outboundCall, disclosure }, businessName);
 }
 
 const WITH_FIRST_NAME = OUTBOUND_FIXTURES["speed-to-lead"].extras.outboundCall;
@@ -90,5 +92,97 @@ describe("M2 (checkpoint 2b review) — the identity-not-confirmed bullet names 
       .split("\n")
       .find((l) => l.startsWith("You have not confirmed"));
     expect(line).toMatch(/confirm_identity/i);
+  });
+});
+
+describe("S3-1 (spec §19, S3-D1) — the outbound closing rule (D7)", () => {
+  it("D7 verbatim: confirm the next step, thank by name, say goodbye, then end -- never ask 'anything else'", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).toContain(
+      "To end the call: confirm the next step in one sentence, thank them by name, say goodbye, then end the call. " +
+        "You placed this call, so never ask whether there is anything else you can help with."
+    );
+  });
+
+  it("still tells the model to call end_call in the same reply as the sign-off", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).toMatch(/call end_call in the same reply as your sign-off/i);
+  });
+
+  it("never contains the inbound ask-gate phrasing", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).not.toMatch(/anything else (?:that )?(?:I|we) can (?:help|assist)/i);
+  });
+});
+
+describe("S3-1 — the number rule (D3)", () => {
+  it("with a first name on file: 'You dialled Priya's number...'", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).toContain("You dialled Priya's number, so you already have it. Never ask for a phone number.");
+  });
+
+  it("with no first name on file: a name-free variant, still never-ask-for-a-number", () => {
+    const text = renderBlock(WITHOUT_FIRST_NAME);
+    expect(text).toMatch(/you dialled this number yourself, so you already have it/i);
+    expect(text).toMatch(/never ask for a phone number/i);
+  });
+});
+
+describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", () => {
+  const text = renderBlock(WITH_FIRST_NAME);
+  const lines = text.split("\n");
+
+  it("has the SITUATIONS heading", () => {
+    expect(text).toContain("=== SITUATIONS ===");
+  });
+
+  const rows = [
+    ["the person themselves", /the person themselves/i, /explain why you are calling/i],
+    ["a gatekeeper (S3-D1a)", /A gatekeeper/i, /never the topic/i],
+    ["a household member or possible child (S3-D1b)", /household member or a possible child/i, /one availability question/i],
+    ["a wrong number", /A wrong number/i, /apologise/i],
+    ['"stop calling"', /"Stop calling"/i, /take me off your list/i],
+    ['"are you a robot?"', /Are you a robot\?/i, /AI assistant/i],
+    ["a bad time or driving", /A bad time or driving/i, /callback/i],
+    ['"email me instead"', /Email me instead/i, /will follow up by email/i],
+    ['"is this a sales call?"', /Is this a sales call\?/i, /follow-up/i],
+    ['"already booked" / "already a customer"', /Already booked.*already a customer/i, /apologise/i],
+    ["hostile", /^- Hostile/im, /offer to stop calling/i],
+    ["a bad line or an unusable reply", /A bad line or an unusable reply/i, /ask once/i],
+    ["call screening", /Call screening/i, /say your name and the reason.*once/i],
+  ];
+
+  for (const [label, whoRe, moveRe] of rows) {
+    it(`covers: ${label}`, () => {
+      expect(text).toMatch(whoRe);
+      expect(text).toMatch(moveRe);
+    });
+  }
+
+  it("is exactly 13 situation rows (lines starting with '- ')", () => {
+    const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
+    expect(situationsIdx).toBeGreaterThanOrEqual(0);
+    const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
+    expect(situationRows.length).toBe(13);
+  });
+
+  it("no situation line names a tool that is not declared on the call (spec §9.5 D-c) -- plain English only", () => {
+    const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
+    const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
+    for (const row of situationRows) {
+      expect(row).not.toMatch(/\b(schedule_callback|opt_out|record_outcome|wrong_person)\b/);
+    }
+  });
+
+  it("named risk 4: the gatekeeper line contains no topic text (real config, real topic)", () => {
+    const gatekeeperLine = lines.find((l) => /^- A gatekeeper/i.test(l));
+    expect(gatekeeperLine).toBeTruthy();
+    expect(gatekeeperLine.toLowerCase()).not.toContain(WITH_FIRST_NAME.config.topic.toLowerCase());
+  });
+
+  it("named risk 4b: the household-member line also contains no topic text", () => {
+    const householdLine = lines.find((l) => /^- A household member/i.test(l));
+    expect(householdLine).toBeTruthy();
+    expect(householdLine.toLowerCase()).not.toContain(WITH_FIRST_NAME.config.topic.toLowerCase());
   });
 });

@@ -28,7 +28,8 @@ import {
 } from "./geminiCache.js";
 import { collectTools, collectAdapterTools, actionToolNames, getPack, packForTool } from "../capabilities/index.js";
 import { assertVendorAllowed } from "../lib/compliance.js";
-import { outboundIdentityLine, outboundCallBlock } from "../lib/outbound/prompt.js";
+import { outboundIdentityLine, outboundCallBlock, OUTBOUND_CLOSING_RULE } from "../lib/outbound/prompt.js";
+import { skipOnOutbound } from "../lib/outbound/policy.js";
 import {
   collectStaticFragments,
   collectStepGuidance,
@@ -702,13 +703,18 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
       : "the person THEMSELVES confirms their own identity";
     declarations.push({
       name: "confirm_identity",
+      // S3-1 (spec §19, S3-D1a) contract item 4: this description agrees with
+      // the SITUATIONS gatekeeper line (lib/outbound/prompt.js), which is the
+      // one source for that wording -- never the topic, and the same two
+      // moves (put the caller through, or offer a callback) on the false
+      // branch here.
       description:
         "Call this once you have established who you are speaking to, before sharing any " +
         "details of the enquiry or looking anything up for them. Pass name_confirmed: true only " +
         `once ${selfConfirmClause} -- never on a gatekeeper's, receptionist's or relative's word. ` +
         "Pass name_confirmed: false if this is the wrong person, a gatekeeper, " +
         "a child, or you could not confirm who you are speaking to -- share nothing further in " +
-        "that case and offer a callback instead.",
+        "that case: ask them to put you through, or offer a callback instead.",
       parameters: {
         type: "object",
         properties: {
@@ -1844,13 +1850,16 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // takes no `config` of its own — see lib/outbound/prompt.js for why.
   if (outbound) {
     sections.push(
-      outboundCallBlock({
-        ...outbound,
-        disclosure: {
-          enabled: !!config.recordingDisclosureEnabled,
-          text: config.recordingDisclosureText || null,
+      outboundCallBlock(
+        {
+          ...outbound,
+          disclosure: {
+            enabled: !!config.recordingDisclosureEnabled,
+            text: config.recordingDisclosureText || null,
+          },
         },
-      })
+        config.businessName
+      )
     );
   }
 
@@ -2144,6 +2153,15 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
       const owned = collectStepGuidance(config, { ...stepExtras, now })[intent];
       if (owned) return owned;
 
+      // S3-1 (spec §19, S3-D1, D7). "Ask if there's anything else" is the
+      // inbound ask-gate habit skipOnOutbound("gatherDetailsFallback", ...)
+      // exists to keep off an outbound call -- Ava placed this call, so the
+      // closing rule (lib/outbound/prompt.js, the OUTBOUND CALL block's own
+      // ending instruction) replaces it rather than sitting beside it.
+      if (skipOnOutbound("gatherDetailsFallback", Boolean(outbound))) {
+        return `Your task: help with what they need on this call. Be concise and accurate. ${OUTBOUND_CLOSING_RULE}`;
+      }
+
       return (
         `Your task: Help the caller with their question. Be concise and accurate. ` +
         `When you've answered, ask if there's anything else you can help with.`
@@ -2154,7 +2172,11 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
       return (
         `The action was just completed. Confirm the details to the caller — ` +
         `read back key information (dates, times, phone numbers). Read phone numbers digit by digit. ` +
-        `Then explicitly ask if there's anything else they need help with. ` +
+        // S3-1 (spec §19, S3-D1, D7): the same swap as gather_details above,
+        // for the step that follows a completed write instead of a question.
+        (skipOnOutbound("gatherDetailsFallback", Boolean(outbound))
+          ? `${OUTBOUND_CLOSING_RULE} `
+          : `Then explicitly ask if there's anything else they need help with. `) +
         // The sentence eval/scenarios/25-intent-switch-midcall.js guards. Same
         // instruction, different mechanism — a caller must still be able to
         // abandon a booking and ask for something else instead of hanging up.

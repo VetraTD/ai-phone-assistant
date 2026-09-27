@@ -7,6 +7,8 @@ import {
   isMachineOrFaxAnswer,
   resolveSilentVerdict,
   sessionEndSilent,
+  foldCase,
+  detectOutboundTurn,
 } from "../lib/outbound/detectors.js";
 
 describe("detectOptOut (spec §13.3)", () => {
@@ -200,5 +202,76 @@ describe("sessionEndSilent (fix round 1, item 3)", () => {
     // 1700ms would read "not silent" on its own, but the session actually
     // ran another 2000ms+ with no confirmed playout.
     expect(sessionEndSilent({ onsetAt: null, streamStartAtMs: 0, answerToStreamMs: 350, atMs: 3800 })).toBe(true);
+  });
+});
+
+describe("foldCase (S3-1)", () => {
+  it("lower-cases, folds curly quotes, and collapses whitespace", () => {
+    expect(foldCase("About Your   Clinic Systems Enquiry")).toBe("about your clinic systems enquiry");
+  });
+
+  it("curly apostrophe folds the same as the straight one", () => {
+    expect(foldCase("It’s about your enquiry")).toBe(foldCase("It's about your enquiry"));
+  });
+
+  it("empty/null input is an empty string", () => {
+    expect(foldCase("")).toBe("");
+    expect(foldCase(null)).toBe("");
+    expect(foldCase(undefined)).toBe("");
+  });
+});
+
+describe("detectOutboundTurn (S3-1, spec §19 S3-D1)", () => {
+  it("'What's the best contact number for you?' -> askedContactNumber", () => {
+    const r = detectOutboundTurn({ assistantText: "What's the best contact number for you?", partyVerified: true, topic: "" });
+    expect(r.askedContactNumber).toBe(true);
+    expect(r.inboundClosing).toBe(false);
+  });
+
+  it("'Is there anything else I can assist you with today?' -> inboundClosing", () => {
+    const r = detectOutboundTurn({
+      assistantText: "Is there anything else I can assist you with today?",
+      partyVerified: true,
+      topic: "",
+    });
+    expect(r.inboundClosing).toBe(true);
+    expect(r.askedContactNumber).toBe(false);
+  });
+
+  it("topic 'clinic systems', party unverified, 'about your clinic systems enquiry' -> topicToUnverified", () => {
+    const r = detectOutboundTurn({
+      assistantText: "I'm calling about your clinic systems enquiry.",
+      partyVerified: false,
+      topic: "clinic systems",
+    });
+    expect(r.topicToUnverified).toBe(true);
+  });
+
+  it("same text, party VERIFIED -> topicToUnverified is false", () => {
+    const r = detectOutboundTurn({
+      assistantText: "I'm calling about your clinic systems enquiry.",
+      partyVerified: true,
+      topic: "clinic systems",
+    });
+    expect(r.topicToUnverified).toBe(false);
+  });
+
+  it("no topic configured -> topicToUnverified is false even when unverified", () => {
+    const r = detectOutboundTurn({ assistantText: "Just following up on an enquiry.", partyVerified: false, topic: "" });
+    expect(r.topicToUnverified).toBe(false);
+  });
+
+  it("ordinary reply with none of the three habits -> all false", () => {
+    const r = detectOutboundTurn({
+      assistantText: "Thanks for your time -- I'll let them know. Bye for now.",
+      partyVerified: false,
+      topic: "clinic systems",
+    });
+    expect(r).toEqual({ askedContactNumber: false, inboundClosing: false, topicToUnverified: false });
+  });
+
+  it("missing fields default safely (no assistantText/topic) -- never throws", () => {
+    expect(() => detectOutboundTurn({})).not.toThrow();
+    expect(detectOutboundTurn({})).toEqual({ askedContactNumber: false, inboundClosing: false, topicToUnverified: false });
   });
 });

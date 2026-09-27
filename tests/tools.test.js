@@ -2146,6 +2146,26 @@ describe("end_call refuses while the caller is still thinking", () => {
     expect(stateEffects.toolResult.callerSafe).toBe(true);
   });
 
+  // S3-1 (spec §19, S3-D1, D7). Ava placed this call, so there is no
+  // "anything else" to ask about -- lib/outbound/prompt.js's closing rule
+  // tells her never to ask, and this gate must not contradict it. The
+  // inbound test right above this one is UNCHANGED and must stay refused.
+  it("S3-1: on an outbound call, the SAME no-ask situation is ALLOWED (skipOnOutbound)", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "e4b", name: "end_call", args: {} },
+      {
+        ...baseCtx,
+        step: "confirm",
+        callerTurnCount: 4,
+        lastCallerText: "no thanks",
+        askedAnythingElse: false,
+        anythingElseRefusalSpent: false,
+        outboundCall: { config: {}, contact: {}, campaign: {} },
+      }
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
   it("allows the hang-up once the latch reports the refusal already spent", async () => {
     const { functionResponse } = await executeToolCall(
       { id: "e5", name: "end_call", args: {} },

@@ -20,6 +20,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
+import { skipOnOutbound } from "../lib/outbound/policy.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import {
   stripFillers,
@@ -635,39 +636,54 @@ export async function executeToolCall(fc, ctx) {
         if (!askedAnythingElse) bumpCounter("end_call_would_refuse_no_ask");
       }
       if (allowedByExistingGates && !askedAnythingElse && !noAskRefusalSpent) {
-        bumpCounter("end_call_refused_no_ask");
-        return {
-          functionResponse: {
-            id: fc.id,
-            name: fc.name,
-            response: {
-              success: false,
-              message:
-                "[not caller speech] NOT A FAILURE — whatever you just did went through and the " +
-                "call is still open. You have not yet asked this caller whether there is anything " +
-                "else they need. Do NOT say goodbye again and do NOT repeat what you just did. Say " +
-                "ONE short sentence asking whether there is anything else you can help with, then " +
-                "stop and wait for their answer. Once they answer, call end_call again and it will " +
-                "go through.",
-            },
-          },
-          stateEffects: {
-            // "no_ask" reaches the Live front-end two ways: the per-call
-            // summary, because a process-global counter cannot say which call
-            // refused, and endCallRefusedThisTurn -- which is what stops the
-            // sign-off detector arming an exit on the farewell this refusal
-            // itself caused the model to speak. Without that, LVX96 route A
-            // reverses this guard inside the same turn.
-            endCallRefusal: "no_ask",
-            endCallNoAskRefusal: true,
-            toolResult: {
+        // S3-1 (spec §19, S3-D1, D7). Ava placed this call, so there is no
+        // "anything else" to ask about -- lib/outbound/prompt.js's closing
+        // rule tells her never to ask, and this gate must not contradict
+        // that instruction on the very call it governs. A NESTED check
+        // rather than a fifth conjunct on the `if` line above, so that
+        // line -- scripts/corpus/sabotage.mjs's "hangup-without-asking"
+        // anchor -- stays byte-identical. skipOnOutbound throws on a
+        // typo'd name instead of failing open. No early return when it
+        // skips: falling out of this block with nothing done lets the
+        // ordinary success path just below construct the real
+        // stateEffects (including the outbound sign-off), rather than a
+        // bare, effect-free success this block would otherwise have to
+        // duplicate.
+        if (!skipOnOutbound("askBeforeHangup", Boolean(ctx?.outboundCall))) {
+          bumpCounter("end_call_refused_no_ask");
+          return {
+            functionResponse: {
+              id: fc.id,
               name: fc.name,
-              success: false,
-              message: "Is there anything else I can help you with?",
-              callerSafe: true,
+              response: {
+                success: false,
+                message:
+                  "[not caller speech] NOT A FAILURE — whatever you just did went through and the " +
+                  "call is still open. You have not yet asked this caller whether there is anything " +
+                  "else they need. Do NOT say goodbye again and do NOT repeat what you just did. Say " +
+                  "ONE short sentence asking whether there is anything else you can help with, then " +
+                  "stop and wait for their answer. Once they answer, call end_call again and it will " +
+                  "go through.",
+              },
             },
-          },
-        };
+            stateEffects: {
+              // "no_ask" reaches the Live front-end two ways: the per-call
+              // summary, because a process-global counter cannot say which call
+              // refused, and endCallRefusedThisTurn -- which is what stops the
+              // sign-off detector arming an exit on the farewell this refusal
+              // itself caused the model to speak. Without that, LVX96 route A
+              // reverses this guard inside the same turn.
+              endCallRefusal: "no_ask",
+              endCallNoAskRefusal: true,
+              toolResult: {
+                name: fc.name,
+                success: false,
+                message: "Is there anything else I can help you with?",
+                callerSafe: true,
+              },
+            },
+          };
+        }
       }
 
       if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation)) {

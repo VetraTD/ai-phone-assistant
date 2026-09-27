@@ -58,26 +58,34 @@ describe("outbound prompt snapshots (pending owner review)", () => {
   }
 });
 
-describe("situations table (spec §9.5) — one guidance line per row", () => {
+describe("SITUATIONS section (spec §19, S3-D1) — one guidance line per row, integration check via buildDynamicTail", () => {
+  // The authoritative, table-driven coverage of all 13 rows lives in
+  // tests/outboundPrompt.test.js (direct unit test of outboundCallBlock).
+  // This describe block is the lighter INTEGRATION check: the same content
+  // still reaches a real assembled prompt through buildDynamicTail.
   const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
   const block = buildDynamicTail("identify_intent", null, config, extras);
 
-  it("contains the OUTBOUND CALL heading", () => {
+  it("contains the SITUATIONS heading (replaces the old spec §9.5 table wholesale, per §19)", () => {
     expect(block).toContain("=== OUTBOUND CALL ===");
+    expect(block).toContain("=== SITUATIONS ===");
   });
 
   const rows = [
-    ["a gatekeeper gets the vague reason only", /gatekeeper/i],
-    ["Ava waits if put through", /wait patiently/i],
-    ["a child or anyone else: share nothing", /share nothing about why you/i],
-    ["never ask a child anything", /never ask a child/i],
-    ["offer a callback", /offer to call back/i],
-    ["a wrong number: apologise", /wrong number.*apologise/is],
+    ["the person themselves", /the person themselves/i],
+    ["a gatekeeper (S3-D1a) gets the vague reason only, never the topic", /A gatekeeper.*never the topic/is],
+    ["a household member or possible child (S3-D1b): one availability question only", /one availability question only/i],
+    ["never ask a child anything else", /never ask a child anything else/i],
+    ["a wrong number: apologise", /A wrong number.*apologise/is],
     ["a call screener: name and reason once, then wait", /call-screening assistant/i],
-    ['"bad time" gets a specific callback offer', /isn't a good time.*offer a specific/is],
-    ['"how did you get my number" gets the form explanation plus the offer to stop', /how did you get my number/i],
-    ['"stop calling" is honoured immediately', /stop calling.*take me off your list/i],
-    ['"are you a robot" gets "yes, an AI assistant"', /are you a robot.*an ai assistant/is],
+    ["a bad time or driving gets a specific callback offer", /A bad time or driving.*callback/is],
+    ['"email me instead" -> someone will email, ends kindly', /Email me instead.*follow up by email/is],
+    ['"is this a sales call?" -> honest follow-up reason', /Is this a sales call\?.*follow-up/is],
+    ['"already booked" \/ "already a customer" -> apologise and end', /Already booked.*already a customer.*apologise/is],
+    ["hostile -> apologise once, offer to stop calling, end", /Hostile.*offer to stop calling/is],
+    ["a bad line or unusable reply -> ask once, then offer a callback", /A bad line or an unusable reply.*callback/is],
+    ['"stop calling" is honoured immediately', /Stop calling.*take me off your list/i],
+    ['"are you a robot" gets "yes, an AI assistant"', /Are you a robot.*an AI assistant/is],
   ];
   for (const [label, re] of rows) {
     it(`covers: ${label}`, () => {
@@ -87,6 +95,21 @@ describe("situations table (spec §9.5) — one guidance line per row", () => {
 
   it("the voicemail row is ABSENT — AMD (spec §9.4) handles it, not the prompt", () => {
     expect(block).not.toMatch(/voicemail/i);
+  });
+
+  it("no inbound ask-gate phrasing ('anything else I can help/assist')", () => {
+    expect(block).not.toMatch(/anything else (?:that )?(?:I|we) can (?:help|assist)/i);
+  });
+
+  it("D3: the number rule is present", () => {
+    expect(block).toMatch(/never ask for a phone number/i);
+  });
+
+  it("D7: the closing rule is present, verbatim", () => {
+    expect(block).toContain(
+      "To end the call: confirm the next step in one sentence, thank them by name, say goodbye, then end the call. " +
+        "You placed this call, so never ask whether there is anything else you can help with."
+    );
   });
 });
 
@@ -364,4 +387,100 @@ describe("no fixture renders 'undefined' or 'null' into prompt text", () => {
       expect(full).not.toMatch(/\bnull\b/);
     });
   }
+});
+
+describe("S3-1 contract item 6 — D3's real source", () => {
+  // A word-bounded scan: "phone numbers digit by digit" (the read-back
+  // instruction, unconditional on both directions) must NOT count as an ask,
+  // because \bphone number\b requires a boundary right after "number" and
+  // "numbers" has a word character ("s") there instead.
+  const ASK_RE = /\b(best|contact|phone)\s+number\b/i;
+
+  // Scoped to buildDynamicTail (CURRENT TASK AND STATE + OUTBOUND CALL +
+  // SITUATIONS + step guidance) rather than the full assembled
+  // buildSystemInstruction: the STATIC prefix's own universal, direction-
+  // agnostic guardrail -- "a phone number digit by digit" (services/
+  // gemini.js's write-order read-back rule, shared byte-for-byte with
+  // inbound) -- is a READ-BACK instruction for digits the caller already
+  // volunteered, not an ask, and would otherwise read as a false positive
+  // no outbound-only fix could ever remove.
+  it("the assembled outbound DYNAMIC TAIL (identify_intent, R1 speed_to_lead) asks for a phone number NOWHERE outside the new number rule -- D3 is a model habit, not a prompt leak", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("identify_intent", null, config, extras);
+    const numberRuleLine = tail.split("\n").find((l) => l.includes("Never ask for a phone number."));
+    expect(numberRuleLine).toBeTruthy();
+    const withoutRule = tail.split("\n").filter((l) => l !== numberRuleLine).join("\n");
+    expect(withoutRule).not.toMatch(ASK_RE);
+  });
+
+  it("control: the phrase IS present, confirming the scan can see it at all", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("identify_intent", null, config, extras);
+    expect(tail).toMatch(ASK_RE);
+  });
+
+  it("the STATIC prefix's universal read-back guardrail is untouched and out of scope for this rule -- it is confirming digits already given, not asking for any", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toMatch(/a phone number digit by digit/i);
+  });
+});
+
+describe("S3-1 contract item 5 — gather_details/confirm ask-gate fallback replaced by the closing rule on outbound", () => {
+  it("gather_details: an intent no capability pack owns falls back to the closing rule on outbound, not 'ask if anything else'", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("gather_details", "general_question", config, extras);
+    expect(tail).not.toMatch(/ask if there's anything else you can help with/i);
+    expect(tail).toMatch(
+      /confirm the next step in one sentence, thank them by name, say goodbye, then end the call/i
+    );
+    expect(tail).toMatch(/never ask whether there is anything else you can help with/i);
+  });
+
+  it("gather_details control: the SAME unowned intent keeps the ask-gate fallback on inbound", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const tail = buildDynamicTail("gather_details", "general_question", config, inboundLikeExtras);
+    expect(tail).toMatch(/ask if there's anything else you can help with/i);
+  });
+
+  it("confirm: reads back details, then the closing rule instead of 'ask if anything else', on outbound", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("confirm", "book_appointment", config, extras);
+    expect(tail).toMatch(/read back key information/i);
+    expect(tail).not.toMatch(/explicitly ask if there's anything else they need help with/i);
+    expect(tail).toMatch(
+      /confirm the next step in one sentence, thank them by name, say goodbye, then end the call/i
+    );
+    expect(tail).toMatch(/never ask whether there is anything else you can help with/i);
+  });
+
+  it("confirm control: inbound keeps the ask-gate fallback, byte-identical wording", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const tail = buildDynamicTail("confirm", "book_appointment", config, inboundLikeExtras);
+    expect(tail).toMatch(/explicitly ask if there's anything else they need help with/i);
+  });
+
+  it("confirm: the mid-call intent-switch instruction survives on outbound too (a caller can still ask for something else)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const tail = buildDynamicTail("confirm", "book_appointment", config, extras);
+    expect(tail).toMatch(/call set_call_intent for the new request instead of ending the call/i);
+  });
+});
+
+describe("S3-1 contract item 4 — confirm_identity's gatekeeper wording agrees with prompt.js's one source (S3-D1a)", () => {
+  it("confirm_identity's description never mentions the topic, matching the SITUATIONS gatekeeper line", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const decl = buildAllDeclarations(config, extras).find((d) => d.name === "confirm_identity");
+    expect(decl).toBeTruthy();
+    expect(decl.description.toLowerCase()).not.toContain(extras.outboundCall.config.topic.toLowerCase());
+  });
+
+  it("confirm_identity's false-branch agrees with the gatekeeper move: share nothing further, offer a callback -- never the caller's own word standing in", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const decl = buildAllDeclarations(config, extras).find((d) => d.name === "confirm_identity");
+    expect(decl.description).toMatch(/share nothing further/i);
+    expect(decl.description).toMatch(/callback/i);
+  });
 });
