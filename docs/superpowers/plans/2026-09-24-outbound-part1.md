@@ -3045,6 +3045,8 @@ Every harness run with a real Live session is a paid run. It needs `reserveP1("P
 
 # STAGE 3: follow-through (branch `feat/outbound-stage3`)
 
+> **SUPERSEDED 2026-09-27.** Stage 3 and stage 4 are re-planned in `docs/superpowers/plans/2026-09-27-outbound-stage3.md`, after live round 1 and the owner's decisions (spec §19). The task text below is kept for history and for the contracts the new plan copies. Do not execute it from here.
+
 ### Task 0 (3): refresh
 
 Re-anchor the lines, record the baselines, and read the round 1 report.
@@ -3251,6 +3253,8 @@ Same as Checkpoint 2a:
 ---
 
 # STAGE 4: dashboard and demo (branch `feat/outbound-stage4`)
+
+> **SUPERSEDED 2026-09-27:** the trimmed stage 4 is at the end of `docs/superpowers/plans/2026-09-27-outbound-stage3.md`. The conventions paragraph below still applies.
 
 The dashboard backend is CommonJS Express 5:
 - routers are mounted with full paths (`server.js:142-148`);

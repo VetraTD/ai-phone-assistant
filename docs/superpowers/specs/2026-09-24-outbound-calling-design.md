@@ -828,3 +828,30 @@ All of them are recorded for later Terraform import. The deploy itself needs own
   - `integrations/webhook.js`: the SSRF guard
   - `services/notifications.js`: SMS
 - **Compliance background:** PECR regs 19, 21, 24; ICO telephone marketing guidance and the 2025 avatar-call penalties; Ofcom persistent misuse statement (2016); Twilio Voice Services Policy; Google Cloud AUP and the Generative AI Prohibited Use Policy. Links are on the companion page.
+
+## 19. Amendments 2026-09-27 (stage-3 decisions, owner-approved after live round 1)
+
+The decisions and the tasks that implement them are in `docs/superpowers/plans/2026-09-27-outbound-stage3.md` ("Owner decisions" table, S3-D1 to S3-D7). Where they conflict with an earlier section, this section wins.
+
+- **Supersedes §9.3 steps 2–3 (S3-D2):**
+  - The stored opener clip ALWAYS plays first: at the end of the person's hello (`path=backstop_hello_end`), at onset + 1,600 ms (`backstop_slow`), or at the silence timer (`backstop_silence`).
+  - Live never speaks first. Its stale reply is discarded; it is seeded with the opener and continues from what the person says next.
+  - `path=live_reply` survives only behind `OUTBOUND_FIRST_SPEAKER=live`, for a later switch once `outbound_live_shadow` shows Live reliably under about 1 s.
+  - The opener renders BEFORE the dial (D10).
+- **Supersedes §9.5's situations table (S3-D1):**
+  - Outbound has its own conversation layer. Inbound-only guards (the LVX132 ask-before-hangup gate, the spelling nudge, the gather-details fallbacks) are skipped on outbound.
+  - Gatekeepers are told name + company + "returning {first_name}'s enquiry", never the topic. A possible child is asked one availability question only.
+  - `outcome`, `callback` and `opt_out` are PLATFORM packs, always declared on outbound. They are not action tools.
+- **Amends §7 (S3-D4):**
+  - New keys: `goal`, `details_fields`, `language`, `why_allowed`, `review_url`, `message_text` and `custom_basis`.
+  - `caller_id` defaults to the business number.
+  - The `custom` template is allowed for `asked_to_be_contacted` (solicited) and `existing_customer` (service); `selling` is refused until Part 3.
+- **Amends §10.3 and §13 (S3-D5):**
+  - A per-country legal floor sits beneath the campaign window. US v1 (P-b, pending the owner's OK): Mon–Sat 08:00–20:00, Sun 12:00–20:00; with no contact timezone, the call must be inside the window in both NY and LA. GB: 08:00–21:00.
+  - Any other country (including non-US NANP) is refused with `no_legal_floor`. Counsel confirms the values.
+- **Amends §12.5 (S3-D3):**
+  - The results channel is direction-neutral (`lib/connections/`, `"direction"` in the payload). Its key is `CONNECTIONS_WEBHOOK_KEY` (C3, P-c).
+  - Inbound is not wired in stage 3.
+- **Amends §13.5:** on erasure a suppression keeps only `phone_hash = HMAC-SHA256(SUPPRESSION_HASH_KEY, phone)`.
+- **§12.3 callback recognition** moves to stage 4. It is still required before `OUTBOUND_ENABLED=true`.
+- **§12.4, the text after a missed call,** moves to the Ilija setup session (P-d).
