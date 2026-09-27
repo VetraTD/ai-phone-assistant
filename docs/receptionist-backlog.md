@@ -3325,6 +3325,44 @@ Outbound daily cap counts per calendar day in the contact's zone; Florida FTSA
 / Oklahoma TSA limits are 3 calls per rolling 24 h — revisit before any US
 marketing campaign.
 
+**Live round 1 (2026-09-26), defects.** Evidence per call is in
+`docs/superpowers/plans/2026-09-24-outbound-part1-live-round-1.md`. All of these
+are to be fixed in stage 3, alongside the situation-playbook redesign the owner
+asked for. None blocked the round.
+- **D1 · P0 · Wrong person / identity re-asked after the opener.** Live's late
+  first reply lands straight after a `backstop_slow` clip. On S01b it said "I
+  seem to have the wrong person" over "it's me" → outcome `wrong_person`
+  (closes the lead). It must be fixed before `OUTBOUND_ENABLED=true`.
+- **D2 · Caller English transcribed as Turkish or non-Latin script** (S01b, S08).
+  This is a known Live limitation (no input-language pin). Mitigate in the
+  playbook: on an unusable transcript, re-ask; never infer.
+- **D3 · "What's the best contact number to reach you at?"** asked on outbound
+  (S01, S01b, S08). The inbound gather-details flow leaks into the outbound
+  prompt.
+- **D4 · Live never beat the 1.6 s slow net** (`path=live_reply` 0 of 3). Its
+  first reply took 1.5-1.9 s after the caller stopped, and 6.9 s when it called
+  `confirm_identity` first. Revisit the §9.3 design with D1.
+- **D5 · Spelling nudge on outbound** (S02, S08) asks for a name the campaign
+  already supplied.
+- **D6 · The unanswered-transfer message plays in Twilio's robotic voice** and
+  hangs up abruptly (S08). Spec D6 says one voice throughout.
+- **D7 · Inbound closing phrase on outbound**: "Is there anything else I can
+  help you with today?" (S01, S10, S11).
+- **D8 · Gatekeeper over-disclosure and topic drift**: "an enquiry Nithin made
+  regarding marketing systems" (the campaign topic is clinic systems) (S10).
+- **T1 · P0 · The 2.0 s silence backstop plays out at 2,089-2,111 ms**, so every
+  silent pickup is flagged `outbound_silent_call` (4 of 4) and gets a 72 h hold.
+  Owner O-28: tune from the round-1 hello timings. Human onsets were 1,179 /
+  1,536 / 1,675 ms, plus 1.87 s and 2.2 s in the spike.
+- **Parked from the go-live review (pre-existing):** the global
+  `express.urlencoded` parser runs before the internal-route JSON skip
+  (`server.js:178`), so a form body of more than 4 KB is read before auth, and
+  one of 120 KB or with 1,100 params returns a 500. Fix before
+  `OUTBOUND_ENABLED=true`.
+- **Not yet built, and must hold before `OUTBOUND_ENABLED=true`:** an alert on
+  outreach rows stuck in `dialing` for more than 1 h (checkpoint M4). No
+  alert-policy notification channel exists (memory *gcp-notices-go-nowhere*).
+
 ---
 
 ## §3 Latency
