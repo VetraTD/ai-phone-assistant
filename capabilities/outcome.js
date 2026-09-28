@@ -114,24 +114,49 @@ export default {
     // -- the call itself is recorded as wrong_person (spec §12.2).
     const recordedOutcome = outcome === "wrong_number" ? "wrong_person" : outcome;
 
-    if (callSid) {
-      await ctx.deps?.setCallOutcomeCode?.(callSid, recordedOutcome);
-    }
-
     if (outcome === "wrong_number") {
+      // Fix round 1 (review Important #1). Checked and, if needed, refused
+      // BEFORE any write -- including before setCallOutcomeCode -- mirroring
+      // capabilities/smsConsent.js's own precedent for exactly this shape (an
+      // unusable phone number): a "must-hold" write must never silently
+      // no-op while the tool still claims the guarantee ("they will not be
+      // called again").
+      //
       // The dialled number, even while the party is unverified (party.js:
       // unverified still carries the number WE dialled) -- there is no
       // caller-proven identity needed to know which number this call is on.
       const phone = partyOf(ctx).phone;
-      if (isValidE164(phone)) {
-        const inserted = await ctx.deps?.insertSuppression?.({
-          phone,
-          reason: "wrong_number",
-          sourceCallId: ctx.callId || null,
-          createdBy: "tool",
-        });
-        if (inserted) bumpCounter("outbound_wrong_number_suppressed");
+      if (!isValidE164(phone)) {
+        return refusal(
+          fc,
+          "There is no usable phone number on this call, so the wrong-number report could not be recorded. " +
+            "Do not tell them they will not be called again."
+        );
       }
+      const inserted = await ctx.deps?.insertSuppression?.({
+        phone,
+        reason: "wrong_number",
+        sourceCallId: ctx.callId || null,
+        createdBy: "tool",
+      });
+      // insertSuppression (services/db.js) returns a plain boolean: `true`
+      // when THIS call's own INSERT landed, `false` when `ON CONFLICT DO
+      // NOTHING` fired because a suppression already covered this number
+      // (any reason, any writer) -- the guarantee already held before this
+      // call ran. Anything else (`undefined` -- the deps wire itself missing
+      // or broken) must NOT read as success: memory "?. hiding a missing
+      // wire" -- a required write's absence must never look like it happened.
+      if (inserted !== true && inserted !== false) {
+        return refusal(
+          fc,
+          "The wrong-number report could not be recorded. Do not tell them they will not be called again."
+        );
+      }
+      if (inserted) bumpCounter("outbound_wrong_number_suppressed");
+    }
+
+    if (callSid) {
+      await ctx.deps?.setCallOutcomeCode?.(callSid, recordedOutcome);
     }
 
     const message = "Noted.";

@@ -147,6 +147,42 @@ describe("set_call_outcome", () => {
     expect(res.functionResponse.response.success).toBe(true);
     expect(deps.insertSuppression).toHaveBeenCalled();
   });
+
+  // Fix round 1 (review Important #1): a must-hold write must never
+  // silently no-op while the tool still claims the guarantee.
+  describe("wrong_number: the guarantee is never claimed without the row (fix round 1)", () => {
+    it("no usable phone at all (null): refused, no write attempted, outcome_code never written", async () => {
+      const deps = fakeDeps();
+      const res = await outcome.execute(fc({ outcome: "wrong_number" }), makeOutboundCtx({ deps, phone: null }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.message).toMatch(/do not tell them/i);
+      expect(deps.insertSuppression).not.toHaveBeenCalled();
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("an invalid (non-E.164) phone: refused the same way", async () => {
+      const deps = fakeDeps();
+      const res = await outcome.execute(fc({ outcome: "wrong_number" }), makeOutboundCtx({ deps, phone: "anonymous" }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(deps.insertSuppression).not.toHaveBeenCalled();
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("insertSuppression reports neither true nor false (the deps wire itself missing) -- refused, outcome_code never written", async () => {
+      const deps = fakeDeps({ insertSuppression: vi.fn(async () => undefined) });
+      const res = await outcome.execute(fc({ outcome: "wrong_number" }), makeOutboundCtx({ deps }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.message).toMatch(/do not tell them/i);
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("insertSuppression reports false (ON CONFLICT -- already suppressed): still success, the guarantee already held", async () => {
+      const deps = fakeDeps({ insertSuppression: vi.fn(async () => false) });
+      const res = await outcome.execute(fc({ outcome: "wrong_number" }), makeOutboundCtx({ deps }));
+      expect(res.functionResponse.response.success).toBe(true);
+      expect(deps.setCallOutcomeCode).toHaveBeenCalledWith("CAsid1", "wrong_person");
+    });
+  });
 });
 
 describe("opt_out", () => {
@@ -177,6 +213,42 @@ describe("opt_out", () => {
     await expect(optOut.execute(fc(), makeOutboundCtx({ deps }))).resolves.toBeTruthy();
     await expect(optOut.execute(fc(), makeOutboundCtx({ deps }))).resolves.toBeTruthy();
     expect(deps.insertSuppression).toHaveBeenCalledTimes(2);
+  });
+
+  // Fix round 1 (review Important #1): a must-hold write must never
+  // silently no-op while the tool still claims the guarantee.
+  describe("the guarantee is never claimed without the row (fix round 1)", () => {
+    it("no usable phone at all (null): refused, no write attempted, outcome_code never written", async () => {
+      const deps = fakeDeps();
+      const res = await optOut.execute(fc(), makeOutboundCtx({ deps, phone: null }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.message).toMatch(/do not tell them/i);
+      expect(deps.insertSuppression).not.toHaveBeenCalled();
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("an invalid (non-E.164) phone: refused the same way", async () => {
+      const deps = fakeDeps();
+      const res = await optOut.execute(fc(), makeOutboundCtx({ deps, phone: "anonymous" }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(deps.insertSuppression).not.toHaveBeenCalled();
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("insertSuppression reports neither true nor false (the deps wire itself missing) -- refused, outcome_code never written", async () => {
+      const deps = fakeDeps({ insertSuppression: vi.fn(async () => undefined) });
+      const res = await optOut.execute(fc(), makeOutboundCtx({ deps }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.message).toMatch(/do not tell them/i);
+      expect(deps.setCallOutcomeCode).not.toHaveBeenCalled();
+    });
+
+    it("insertSuppression reports false (ON CONFLICT -- already suppressed): still success -- a second/duplicate opt_out is still a success", async () => {
+      const deps = fakeDeps({ insertSuppression: vi.fn(async () => false) });
+      const res = await optOut.execute(fc(), makeOutboundCtx({ deps }));
+      expect(res.functionResponse.response.success).toBe(true);
+      expect(deps.setCallOutcomeCode).toHaveBeenCalledWith("CAsid1", "opted_out");
+    });
   });
 });
 

@@ -66,14 +66,49 @@ export default {
     const phone = partyOf(ctx).phone;
     const callSid = ctx.callSid || null;
 
-    if (isValidE164(phone)) {
-      await ctx.deps?.insertSuppression?.({
-        phone,
-        reason: "opted_out",
-        sourceCallId: ctx.callId || null,
-        createdBy: "tool",
-      });
+    // Fix round 1 (review Important #1). Refused BEFORE any write, mirroring
+    // capabilities/smsConsent.js's own precedent for exactly this shape (an
+    // unusable phone number): a "must-hold" write must never silently no-op
+    // while the tool still claims the guarantee.
+    if (!isValidE164(phone)) {
+      const message =
+        "There is no usable phone number on this call, so the do-not-call request could not be recorded. " +
+        "Do not tell them they will not be called again.";
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+        stateEffects: {
+          toolResult: { name: fc.name, success: false, message },
+          toolCallEvent: { name: fc.name, args: fc.args ?? {}, silent: true },
+        },
+      };
     }
+
+    const inserted = await ctx.deps?.insertSuppression?.({
+      phone,
+      reason: "opted_out",
+      sourceCallId: ctx.callId || null,
+      createdBy: "tool",
+    });
+    // insertSuppression (services/db.js) returns a plain boolean: `true` when
+    // THIS call's own INSERT landed, `false` when `ON CONFLICT DO NOTHING`
+    // fired because a suppression already covered this number (any reason,
+    // any writer) -- the guarantee already held before this call ran, so a
+    // second/duplicate opt_out is still a success. Anything else (`undefined`
+    // -- the deps wire itself missing or broken) must NOT read as success:
+    // memory "?. hiding a missing wire" -- a required write's absence must
+    // never look like it happened.
+    if (inserted !== true && inserted !== false) {
+      const message =
+        "The do-not-call request could not be recorded. Do not tell them they will not be called again.";
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+        stateEffects: {
+          toolResult: { name: fc.name, success: false, message },
+          toolCallEvent: { name: fc.name, args: fc.args ?? {}, silent: true },
+        },
+      };
+    }
+
     if (callSid) {
       await ctx.deps?.setCallOutcomeCode?.(callSid, "opted_out");
     }
