@@ -405,6 +405,32 @@ describe("7. no backstop audio (render failed or refused)", () => {
   });
 });
 
+// M3 (fix round 1): the legacy no-clip/silence-path scenarios, run in CLIP
+// mode too -- the rig() default is "live" (see its own docstring), so
+// without this the production default never exercised these at all. Both
+// scenarios here have no onset ever confirmed, so they behave identically
+// in either mode (no generation can be open at fire; M3's own new behaviour
+// only bites on the SLOW path, covered separately above in "S3-2:
+// stale-audio discard").
+describe("7 in clip mode: the silence-path no-clip scenarios are unaffected by mode", () => {
+  it("the silence path prompts Live with the line instead, and logs outbound_backstop_missing", () => {
+    const { ctl, enqueue, rec, events } = rig({ backstopAudio: null, firstSpeaker: "clip" });
+    run(ctl, 0, 1400);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(rec.seeds).toEqual([]);
+    expect(rec.prompts).toEqual([`The person hasn't spoken. Say: ${BACKSTOP_TEXT}`]);
+    expect(events("outbound_backstop_missing")).toHaveLength(1);
+    expect(ctl.onModelAudio(2300)).toBe(true); // no generation was ever open: forwarded, same as live mode
+  });
+
+  it("an empty buffer is the same as none", () => {
+    const { ctl, enqueue, rec } = rig({ backstopAudio: Buffer.alloc(0), firstSpeaker: "clip" });
+    run(ctl, 0, 1400);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(rec.prompts).toHaveLength(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Fix round 1.
 // ---------------------------------------------------------------------------
@@ -1010,6 +1036,27 @@ describe("S3-2: clip barge threshold (CLIP_BARGE_MIN_MS)", () => {
     ctl.onAssistantTurnText("Great, thanks Sam. I'm calling about your enquiry.");
     expect(rec.notes).toEqual(["Tell them now, briefly: you are Ava, an AI assistant from Digile Media."]);
   });
+
+  // M2 (fix round 1): CLIP_BARGE_MIN_MS is clip-mode-only. `live` mode is the
+  // pre-S3-2 race verbatim, including its ORDINARY (lower, gate-driven)
+  // barge threshold -- this file's own 600 ms carve-out must not leak into
+  // it, or "pass under live unchanged" (contract item 6) is false for this
+  // one behaviour.
+  it(`live mode: clipBarge never fires, however long the run, and clipPlaying() reads false even while the clip is on the wire`, () => {
+    const { ctl, enqueue } = rig({ firstSpeaker: "live" });
+    run(ctl, 0, 1400); // the silence backstop fires and starts playing (live mode fires a clip too, rule 6)
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(ctl.clipPlaying()).toBe(false); // gated off in live mode, even though the clip IS playing
+    const vad = vads.get(ctl);
+    let sawBarge = false;
+    for (let t = 1410; t <= 1410 + (CLIP_BARGE_MIN_MS + 300); t += 10) {
+      const v = vad.processFrame(LOUD, t);
+      const { clipBarge } = ctl.onCallerFrame({ voiced: v.voiced, voiceActive: v.voiceActive, atMs: t, voicedRunMs: vad.voicedRunMs(t) });
+      if (clipBarge) sawBarge = true;
+      ctl.tick(t);
+    }
+    expect(sawBarge).toBe(false); // never -- index.js's ordinary (300 ms) gate threshold governs instead
+  });
 });
 
 describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
@@ -1060,28 +1107,94 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(rec.counters).toContain("outbound_live_shadow");
   });
 
-  it("the seed's own resulting `interrupted` (onAudioCleared) does not clear the clip's frames or lift condition (i) early", () => {
-    const { ctl, enqueue, rec } = rig({ firstSpeaker: "clip" });
-    run(ctl, 0, 1190, (t) => t >= 1000); // a hello that keeps going -- no hello-end
-    // Live already has a generation open when the clip fires later.
-    expect(ctl.onModelAudio(1200)).toBe(false);
-    run(ctl, 1200, 2600, (t) => t >= 1000); // through the slow deadline (1,000 + 1,600)
-    expect(enqueue).toHaveBeenCalledTimes(1); // backstop_slow fired
-    expect(ctl.onModelAudio(2650)).toBe(false); // still stale, clip playing
+  // C1 (fix round 1). Every test above this one feeds its first stale chunk
+  // BEFORE the clip fires, which the queue-time snapshot alone already
+  // catches. The REALISTIC hello timing is the other order: Live's
+  // voice-to-voice latency is normally longer than helloEndGapMs (350 ms),
+  // so on the typical hello call the clip queues FIRST and Live's reply to
+  // that same hello only starts generating afterwards -- still before the
+  // seed, since the seed itself waits for the end-mark echo.
+  it("C1: a chunk that arrives AFTER the clip is queued but BEFORE the seed is sent is still stale -- the realistic hello timing", () => {
+    const { ctl, enqueue, rec, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // hello ends at 1,200; clip queues at 1,550
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(events("outbound_backstop_played")[0].fields).toMatchObject({ path: "backstop_hello_end" });
+    expect(rec.seeds).toHaveLength(0); // deferred to the end mark
 
-    ctl.onMark(BACKSTOP_END_MARK, 3700); // the clip's own end mark echoes; the seed goes
+    // Nothing was open AT QUEUE TIME (1,550) -- the OLD snapshot-only check
+    // would have lifted the discard the instant the seed went. Live's reply
+    // to the hello only starts generating now.
+    expect(ctl.onModelAudio(1700)).toBe(false);
+
+    ctl.onMark(BACKSTOP_END_MARK, 2600); // the end mark echoes; the seed goes
     expect(rec.seeds).toHaveLength(1);
+    expect(ctl.onModelAudio(2700)).toBe(false); // still stale: the seed did not close this generation
+    expect(ctl.onModelAudio(2900)).toBe(false);
 
-    // The seed just interrupted Live's STALE generation. index.js's own
-    // `sc.interrupted` handler calls clearAudio unconditionally (lib/voice/
-    // live/index.js:5263), which calls onAudioCleared -- simulated directly.
-    ctl.onAudioCleared();
-    expect(enqueue).toHaveBeenCalledTimes(1); // the clip's own frames: untouched
-    expect(ctl.onModelAudio(3750)).toBe(false); // still discarded: the clear did not satisfy condition (i)
+    ctl.onAssistantTurnText("stale reply the person never heard", false, 3000);
+    expect(ctl.onModelAudio(3100)).toBe(true); // a NEW generation, now trusted
+  });
 
-    // Only the REAL turn-boundary event -- never the clear -- lifts it.
-    ctl.onAssistantTurnText("stale reply text", false, 3800);
-    expect(ctl.onModelAudio(3850)).toBe(true);
+  it("C1's G variant: a stale generation closes DURING the clip, and a NEW one opens before the seed -- also discarded until IT closes", () => {
+    const { ctl, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(ctl.onModelAudio(1700)).toBe(false); // generation A opens
+    ctl.onAssistantTurnText("generation A", false, 2000); // A closes, mid-clip
+    expect(ctl.onModelAudio(2100)).toBe(false); // generation B opens, still before the seed
+
+    ctl.onMark(BACKSTOP_END_MARK, 2600); // seed goes; B is still open
+    expect(rec.seeds).toHaveLength(1);
+    expect(ctl.onModelAudio(2700)).toBe(false); // B is still stale
+
+    ctl.onAssistantTurnText("generation B", false, 2800); // B closes
+    expect(ctl.onModelAudio(2900)).toBe(true);
+  });
+
+  // I1 (fix round 1). The pure controller's own half of I1: if onAudioCleared
+  // is ever invoked while the clip is STILL PLAYING (clipPlaying() true) --
+  // whatever the reason -- M4 says only condition (ii) is abandoned; a
+  // generation genuinely open keeps the discard, on its own grace clock
+  // started at the clear. (index.js's own half -- that a vendor `interrupted`
+  // no longer reaches this call at all while the clip plays -- is
+  // liveOutboundStart.test.js's "I1: a vendor `interrupted` does not clear
+  // the clip" below.)
+  it("M4: onAudioCleared while the clip is STILL PLAYING drops only condition (ii) -- a generation still open keeps the discard, on a fresh grace clock", () => {
+    const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // backstop_hello_end fires and starts playing
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(ctl.onModelAudio(1700)).toBe(false); // a generation is open
+    expect(ctl.clipPlaying()).toBe(true); // the clip's own audio is still on the wire
+
+    ctl.onAudioCleared(2000); // e.g. a genuine >= CLIP_BARGE_MIN_MS barge, before the end mark
+    expect(ctl.clipPlaying()).toBe(false); // the clip itself is gone
+    expect(ctl.onModelAudio(2050)).toBe(false); // but the OPEN generation still has not closed
+
+    // Its own grace clock, started at the clear (2,000) -- there is no seed
+    // instant to anchor it to any more, since the seed was never sent.
+    const liftAt = 2000 + STALE_GENERATION_GRACE_MS;
+    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
+    ctl.tick(liftAt);
+    expect(ctl.onModelAudio(liftAt)).toBe(true);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+  });
+
+  it("M4: the M9 mark-echo timeout also drops only condition (ii) -- a generation still open keeps the discard, on a fresh grace clock", () => {
+    const { ctl, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(ctl.onModelAudio(1700)).toBe(false); // a generation is open
+    const clipMs = 1000; // AUDIO is 8,000 bytes = 1,000 ms of clip
+    const markTimeoutAt = 1550 + clipMs + BACKSTOP_MARK_GRACE_MS; // the mark never echoes
+
+    expect(ctl.onModelAudio(markTimeoutAt - 10)).toBe(false);
+    ctl.tick(markTimeoutAt);
+    expect(events("outbound_backstop_mark_timeout")).toHaveLength(1);
+    expect(ctl.onModelAudio(markTimeoutAt + 10)).toBe(false); // condition (i) alone did not lift it
+
+    const liftAt = markTimeoutAt + STALE_GENERATION_GRACE_MS;
+    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
+    ctl.tick(liftAt);
+    expect(ctl.onModelAudio(liftAt)).toBe(true);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
   });
 
   it("named risk 4: a turnComplete that never arrives does not mute Live forever -- STALE_GENERATION_GRACE_MS after the seed, the discard lifts anyway, logged", () => {
@@ -1098,6 +1211,32 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(ctl.onModelAudio(liftAt)).toBe(true); // never muted forever
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
     expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ callSid: "CA1", attemptId: "att-1", waited_ms: STALE_GENERATION_GRACE_MS });
+  });
+
+  // M3 (fix round 1, Ruling): no clip (the render failed or refused), clip
+  // mode, on the slow path -- a generation open at the moment of decision
+  // must be dropped WHOLE, never partially (its HEAD was already dropped by
+  // the never-let-Live-speak-first rule; forwarding its TAIL from here on
+  // would play a sentence starting mid-way through). Ruling: drop the whole
+  // thing and let the NEXT generation speak, rather than buffer-and-replay
+  // the dropped head -- replaying unvetted content would risk exactly the
+  // D1 overlap this file exists to prevent.
+  it("M3: no clip, clip mode, slow path -- a generation open at the decision is dropped WHOLE, not partially", () => {
+    const { ctl, enqueue, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    run(ctl, 0, 1190, (t) => t >= 1000); // onset confirmed; continuous hello (slow path)
+    expect(ctl.onModelAudio(1200)).toBe(false); // pre-decision: never let Live speak first (head dropped)
+    run(ctl, 1200, 2600, (t) => t >= 1000); // through the slow deadline (1,000 + 1,600)
+    expect(enqueue).not.toHaveBeenCalled(); // no clip to play
+    expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_slow" });
+    expect(rec.prompts).toEqual([]); // slow path: no prompt -- Live is already replying
+
+    // Past the decision (backstopFired is now true): the SAME generation is
+    // still dropped, not resumed mid-sentence.
+    expect(ctl.onModelAudio(2650)).toBe(false);
+    expect(ctl.onModelAudio(2900)).toBe(false);
+
+    ctl.onAssistantTurnText("the reply the person only half-heard", false, 3000);
+    expect(ctl.onModelAudio(3100)).toBe(true); // a NEW generation is trusted from here
   });
 
   it("a call with no discarded chunk still logs the shadow line, with from_speech_end_ms and from_speech_ms null -- never skipped", () => {

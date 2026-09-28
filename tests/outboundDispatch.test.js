@@ -635,18 +635,16 @@ describe("dispatch: the opener is stored before a slow voicemail render finishes
 
     releaseVoicemail();
     expect((await done).status).toBe("dialed");
-    // D10 (S3-2): the render -- and so the voicemail's own write -- is no
-    // longer awaited by dispatch() itself (only the OPENER was ever on that
-    // critical path), so the voicemail's write is polled for rather than
-    // assumed synchronous with `done` resolving.
-    await vi.waitFor(() =>
-      // One write per clip, each carrying only its own column. The returned
-      // object does not trigger a second opener write.
-      expect(db.storeAttemptAudio.mock.calls).toEqual([
-        ["a1", { opener }],
-        ["a1", { voicemail }],
-      ])
-    );
+    // I2 (fix round 1, reverting ruling 4): dispatch() awaits the render
+    // again after the dial (bounded by the ring's own cap), so its returned
+    // promise resolving still means every clip that WILL render is on the
+    // row -- restored to its pre-D10 synchronous contract.
+    // One write per clip, each carrying only its own column. The returned
+    // object does not trigger a second opener write.
+    expect(db.storeAttemptAudio.mock.calls).toEqual([
+      ["a1", { opener }],
+      ["a1", { voicemail }],
+    ]);
   });
 
   it("a renderer that only RETURNS its clips (no onClip) still gets them stored, one column per write", async () => {
@@ -708,7 +706,60 @@ describe("D10: render before dial", () => {
         "outbound_render_late",
         expect.objectContaining({ attemptId: "a1", waited_ms: RENDER_BEFORE_DIAL_MAX_MS, severity: "warn" })
       );
+      // I2 (fix round 1): the SAME hung render is then awaited again, post-dial,
+      // bounded by the ring's own cap -- 40 s here (attempt 1 is in
+      // voicemail_on) -- rather than left detached.
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(log.error).toHaveBeenCalledWith(
+        "outbound_render_incomplete",
+        expect.objectContaining({ attemptId: "a1", waited_ms: 40_000, severity: "warn" })
+      );
       expect((await done).status).toBe("dialed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("I2 (fix round 1): the opener wins the pre-dial race, but the voicemail render then hangs -- dispatch() releases at the ring's own cap, logged", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = fakeDb();
+      const opener = Buffer.from([1]);
+      const renderAudio = vi.fn(async ({ onClip }) => {
+        await onClip("opener", opener); // resolves the opener race quickly
+        await new Promise(() => {}); // the voicemail render then hangs forever
+      });
+      const log = { info: vi.fn(), error: vi.fn() };
+      const { d, twilio } = mk(db, undefined, { renderAudio, log }); // attempt 1: voicemail_on -> 40 s ring cap
+
+      const done = d({ businessId: "b1", outreachId: "o1" });
+      await vi.advanceTimersByTimeAsync(0); // let the opener's own microtasks settle
+      expect(twilio.calls.create).toHaveBeenCalledTimes(1); // the dial was never held up
+      expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
+
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(log.error).toHaveBeenCalledWith(
+        "outbound_render_incomplete",
+        expect.objectContaining({ attemptId: "a1", waited_ms: 40_000, severity: "warn" })
+      );
+      expect((await done).status).toBe("dialed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("M5: neither race leaves a dangling timer once dispatch() has resolved", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = fakeDb();
+      const opener = Buffer.from([1]);
+      const renderAudio = vi.fn(async ({ onClip }) => {
+        await onClip("opener", opener);
+        return { opener };
+      });
+      const { d } = mk(db, undefined, { renderAudio });
+      await d({ businessId: "b1", outreachId: "o1" });
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }

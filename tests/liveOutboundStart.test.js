@@ -441,20 +441,48 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  it("the vendor's `interrupted` lifts the suppression too", async () => {
+  // CHANGED (I1, fix round 1): this test used to assert the OPPOSITE --
+  // that a vendor `interrupted` lifts the suppression and Live's next audio
+  // plays. That is exactly the defect I1 fixes: index.js:5286's own
+  // `sc.interrupted` handler called `clearAudio` unconditionally, so a
+  // "hello?" the gate forwarded to Live (below CLIP_BARGE_MIN_MS) or the
+  // seed's own resulting `interrupted` could cut the clip before the
+  // disclosure. Controller ruling: the vendor's `interrupted` must not clear
+  // clip frames; only our own barge (clipBarge, >= CLIP_BARGE_MIN_MS) may.
+  it("I1: the vendor's `interrupted` does NOT clear the clip -- only our own barge (clipBarge) can", async () => {
     const call = await bootOutbound();
-    await call.feed(1400);
+    await call.feed(1400); // the silence backstop fires and is playing
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
-    call.live.push(modelAudioMsg());
+    call.live.push(modelAudioMsg()); // a generation opens while the clip plays
     await call.settle();
     expect(enqueue).not.toHaveBeenCalled();
 
-    call.live.push({ serverContent: { interrupted: true } });
+    call.live.push({ serverContent: { interrupted: true } }); // Live's own detector fires
     await call.settle();
+    expect(clear).not.toHaveBeenCalled(); // the clip's audio is untouched
+
     call.live.push(modelAudioMsg());
     await call.settle();
-    expect(enqueue).toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled(); // still stale -- clipPlaying() is still true
+    await call.hangUp();
+  });
+
+  it("I1: the silence path defers the seed when a generation is already open at fire (Live replying to something our own VAD never confirmed)", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400); // silence so far; nothing our own onset detector confirms
+    call.live.push(modelAudioMsg()); // Live is already generating a reply to SOMETHING
+    await call.settle();
+    await call.feed(1000); // through the silence deadline (1,400)
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO); // the clip still fires, on time
+    expect(call.live.sent.clientContent).toEqual([]); // NOT seeded yet -- deferred (I1)
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false },
+    ]);
     await call.hangUp();
   });
 
@@ -588,6 +616,23 @@ describe("outbound: the first seconds through the real session", () => {
     expect(database.fetchAttemptOpenerAudio).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
     expect(events("outbound_backstop_render_refused")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  // M1 (fix round 1): an unrecognised OUTBOUND_FIRST_SPEAKER value fails
+  // safe to "clip" (never "live"), logged once.
+  it("M1: an unknown OUTBOUND_FIRST_SPEAKER value ('lvie') behaves as clip mode and logs outbound_first_speaker_invalid", async () => {
+    allowErrors("outbound_first_speaker_invalid");
+    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "lvie" } });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400, { voiced: true }); // a hello
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).not.toHaveBeenCalled(); // clip behaviour: Live never speaks first, not "live" mode's race
+    expect(events("outbound_first_speaker_invalid")).toHaveLength(1);
+    expect(events("outbound_first_speaker_invalid")[0]).toMatchObject({ value: "lvie" });
+    await call.feed(400); // the hello ends; the clip still plays via the hello-end timer
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
     await call.hangUp();
   });
 });
@@ -735,12 +780,16 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     await call.hangUp();
   });
 
+  // M2 (fix round 1): reverted to its ORIGINAL 600 ms -- CLIP_BARGE_MIN_MS is
+  // clip-mode-only (the ordinary 300 ms gate threshold governs in `live`
+  // mode, exactly as before S3-2), so this barge only needs to clear the
+  // gate's own 300 ms threshold, not the 600 ms one.
   it("O-8: a slow-path clip cut by a barge is never seeded", async () => {
     const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     await call.feed(400, { voiced: true });
     await call.feed(1240);
-    await call.feed(900, { voiced: true }); // talks over the clip, past CLIP_BARGE_MIN_MS (600 ms, S3-2)
+    await call.feed(600, { voiced: true }); // talks over the clip
     expect(clear).toHaveBeenCalled();
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
     expect(call.live.sent.clientContent.filter(isSeed)).toEqual([]);
