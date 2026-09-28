@@ -49,6 +49,38 @@
  * QUESTION_KEY_RE), which REQUIRES the first character to be a lowercase
  * letter, so a question key can never collide with a leading-underscore key
  * regardless of what any campaign ever names a question.
+ *
+ * `prompt(cfg, ctx)` (fix round 1, controller Ruling R-S3-10-prompt: the full
+ * Task 24 contract binds). `lib/outbound/prompt.js:44`'s `qualify_then_book`
+ * goal line ("Ask the questions, then offer a time to talk") names no
+ * questions of its own -- record_answer's `key` enum is the only OTHER place
+ * a question could reach the model, and it carries keys ("clinic_name"),
+ * never the human `ask` text a receptionist would actually say out loud.
+ * Without this, the model has been told WHAT TO DO but never WHAT TO ASK.
+ *
+ * Follows capabilities/transfer.js:75-88's shape (the brief's own template):
+ * a `static.capabilities` clause, gated the same way `tools()` above is --
+ * nothing at all with no `ctx.outboundCall` (inbound), and nothing when the
+ * campaign's own capabilities list omits `"qualification"`. This mirrors
+ * `outboundAllowsPack` in lib/capabilities/promptAssembler.js (`!outbound`
+ * returns `true`, i.e. EVERY pack's `prompt()` runs unconditionally on
+ * inbound) -- exactly the same shape `tools()`'s own comment already
+ * documents for services/gemini.js's `collectTools`/`filterForOutboundCampaign`,
+ * so the self-gate here is not optional, it is the ONLY gate on inbound.
+ *
+ * `static.capabilities` entries are joined into ONE sentence by
+ * services/gemini.js (`clauses.join(", ")`, "You can: ..."), so each
+ * question becomes its OWN array entry -- a short clause, not a multi-line
+ * block -- rather than one giant string with embedded newlines that would
+ * read as broken prose once spliced into that sentence.
+ *
+ * Never touches the opener or the voicemail: `renderCampaignLine`
+ * (lib/outbound/campaignSchema.js) only ever sees the fixed placeholder set
+ * (`first_name`, `persona_name`, `business_name`, `topic`,
+ * `caller_id_spoken`) and has no access to `config.questions` at all, so
+ * there is no code path for a question to leak into either render -- this
+ * pack does not change that, and tests/qualificationPack.test.js asserts it
+ * stays true.
  */
 import { bumpCounter } from "../lib/voice/metrics.js";
 
@@ -59,6 +91,21 @@ function campaignQuestions(ctx) {
 
 function validKeys(questions) {
   return questions.map((q) => q?.key).filter((k) => typeof k === "string" && k);
+}
+
+/** Questions with both a usable `key` and a non-empty `ask` -- the two fields `prompt()` renders. */
+function askableQuestions(questions) {
+  return questions.filter(
+    (q) => q && typeof q.key === "string" && q.key && typeof q.ask === "string" && q.ask.trim()
+  );
+}
+
+/** Is this campaign's qualification capability turned on for this outbound call? */
+function qualificationEnabled(ctx) {
+  const outbound = ctx?.outboundCall;
+  if (!outbound) return false; // named risk 3: inbound never reaches past here
+  const capabilities = Array.isArray(outbound.config?.capabilities) ? outbound.config.capabilities : [];
+  return capabilities.includes("qualification");
 }
 
 function recordAnswerDeclaration(questions) {
@@ -117,11 +164,28 @@ export default {
     // Named risk 3: no ctx.outboundCall at all means inbound (or the cascade/
     // text harness, which supply neither field) -- return nothing, full stop.
     // Task 26 (inbound callback recognition) is the only place this widens.
-    const outbound = ctx?.outboundCall;
-    if (!outbound) return [];
-    const capabilities = Array.isArray(outbound.config?.capabilities) ? outbound.config.capabilities : [];
-    if (!capabilities.includes("qualification")) return [];
+    if (!qualificationEnabled(ctx)) return [];
     return [recordAnswerDeclaration(campaignQuestions(ctx))];
+  },
+
+  /**
+   * `static.capabilities`: one clause per askable question, each naming its
+   * key, its required/optional status, and the `ask` text a receptionist
+   * would actually say -- see the file header for why this exists and how it
+   * is shaped. Gated identically to `tools()` above (named risk 3): `{}` with
+   * no `ctx.outboundCall`, or when the campaign never turned qualification
+   * on, or when the campaign has no question with both a key and an `ask`.
+   */
+  prompt(cfg, ctx = {}) {
+    if (!qualificationEnabled(ctx)) return { static: { capabilities: [] } };
+    const questions = askableQuestions(campaignQuestions(ctx));
+    if (questions.length === 0) return { static: { capabilities: [] } };
+
+    const lead = "ask the campaign's qualification questions, recording each answer with record_answer";
+    const perQuestion = questions.map(
+      (q) => `${q.key} (${q.required ? "required" : "optional"}): "${q.ask}"`
+    );
+    return { static: { capabilities: [lead, ...perQuestion] } };
   },
 
   async execute(fc, ctx = {}) {

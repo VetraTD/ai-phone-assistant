@@ -399,6 +399,56 @@ describe("D-c extends to prompt TEXT, not only tool declarations", () => {
   });
 });
 
+// S3-10 fix round 1 (controller Ruling R-S3-10-prompt): the full Task 24
+// contract binds -- capabilities/qualification.js's prompt() must put the
+// campaign's questions into the CAPABILITIES line, marked required/optional.
+// Both existing OUTBOUND_FIXTURES campaigns list "qualification" and carry
+// the shipped speed_to_lead template's one question (clinic_name, required),
+// so "speed-to-lead" alone is enough for the positive case; the negative case
+// builds a variant with "qualification" filtered out of the campaign's own
+// capabilities list, the same technique the D-c intersection tests above use.
+describe("S3-10 fix round 1 (Ruling R-S3-10-prompt): the CAPABILITIES line lists the campaign's qualification questions", () => {
+  it("a qualify_then_book-shaped campaign's prompt contains every question's ask text, key and required/optional mark", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const prefix = buildStaticSystemPrefix(config, extras);
+    expect(prefix).toContain("What's the clinic called?");
+    expect(prefix).toContain("clinic_name");
+    expect(prefix).toMatch(/clinic_name \(required\)/);
+  });
+
+  it("a campaign without the qualification capability gets none of it", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const withoutQualification = {
+      ...extras,
+      outboundCall: {
+        ...extras.outboundCall,
+        config: {
+          ...extras.outboundCall.config,
+          capabilities: extras.outboundCall.config.capabilities.filter((c) => c !== "qualification"),
+        },
+      },
+    };
+    const prefix = buildStaticSystemPrefix(config, withoutQualification);
+    expect(prefix).not.toContain("What's the clinic called?");
+    expect(prefix).not.toContain("clinic_name");
+  });
+
+  it("the opener text and the voicemail template never contain the question text", () => {
+    const { extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    expect(extras.outboundCall.openerText).not.toContain("What's the clinic called?");
+    expect(extras.outboundCall.config.voicemail).not.toContain("What's the clinic called?");
+    expect(extras.outboundCall.config.voicemail).not.toContain("clinic_name");
+  });
+
+  it("inbound is unaffected: no question text reaches the prompt without ctx.outboundCall", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    const prefix = buildStaticSystemPrefix(config, inboundLikeExtras);
+    expect(prefix).not.toContain("What's the clinic called?");
+    expect(prefix).not.toContain("clinic_name");
+  });
+});
+
 describe("c3 (checkpoint 2b review, partial FIX) — NON-NEGOTIABLE RULE 4's referent is outbound-only", () => {
   it("outbound: refers to the person whose identity has been confirmed, not the caller ID", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];

@@ -63,6 +63,66 @@ describe("qualification.tools() -- declaration gating", () => {
 });
 
 // ---------------------------------------------------------------------------
+// qualification.prompt() -- fix round 1 (controller Ruling R-S3-10-prompt):
+// the full Task 24 contract binds. static.capabilities must list every
+// askable question, marked required or optional, gated exactly like tools().
+// ---------------------------------------------------------------------------
+const TWO_QUESTIONS = [
+  { key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text" },
+  { key: "referral_source", ask: "How did you hear about us?", required: false, type: "text" },
+];
+
+describe("qualification.prompt() -- static.capabilities lists the questions, marked required/optional", () => {
+  it("renders nothing at all with no ctx.outboundCall (inbound shape)", () => {
+    expect(qualification.prompt({}, {})).toEqual({ static: { capabilities: [] } });
+    expect(qualification.prompt({}, undefined)).toEqual({ static: { capabilities: [] } });
+  });
+
+  it("renders nothing when the campaign's capabilities list omits qualification", () => {
+    const ctx = { outboundCall: outboundCallWithQuestions(TWO_QUESTIONS, ["appointments"]) };
+    expect(qualification.prompt({}, ctx)).toEqual({ static: { capabilities: [] } });
+  });
+
+  it("renders nothing when qualification is listed but the campaign has no questions", () => {
+    const ctx = { outboundCall: outboundCallWithQuestions([]) };
+    expect(qualification.prompt({}, ctx)).toEqual({ static: { capabilities: [] } });
+  });
+
+  it("lists every question's ask text and key, marked required or optional", () => {
+    const ctx = { outboundCall: outboundCallWithQuestions(TWO_QUESTIONS) };
+    const { static: stat } = qualification.prompt({}, ctx);
+    const joined = stat.capabilities.join(" | ");
+    expect(joined).toContain("What's the clinic called?");
+    expect(joined).toContain("clinic_name");
+    expect(joined).toMatch(/clinic_name \(required\)/);
+    expect(joined).toContain("How did you hear about us?");
+    expect(joined).toContain("referral_source");
+    expect(joined).toMatch(/referral_source \(optional\)/);
+  });
+
+  it("every entry is a single line -- no embedded newlines that would break the comma-joined CAPABILITIES sentence", () => {
+    const ctx = { outboundCall: outboundCallWithQuestions(TWO_QUESTIONS) };
+    const { static: stat } = qualification.prompt({}, ctx);
+    for (const clause of stat.capabilities) {
+      expect(clause).not.toMatch(/\n/);
+    }
+  });
+
+  it("skips a question missing an ask or a key, but still renders the others", () => {
+    const ctx = {
+      outboundCall: outboundCallWithQuestions([
+        { key: "no_ask", ask: "", required: true, type: "text" },
+        { key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text" },
+      ]),
+    };
+    const { static: stat } = qualification.prompt({}, ctx);
+    const joined = stat.capabilities.join(" | ");
+    expect(joined).toContain("What's the clinic called?");
+    expect(joined).not.toContain("no_ask");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // record_answer -- execute()
 // ---------------------------------------------------------------------------
 describe("qualification.execute() -- record_answer", () => {
