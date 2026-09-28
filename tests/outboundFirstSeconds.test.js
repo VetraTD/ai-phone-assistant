@@ -276,7 +276,18 @@ describe("4. the backstop is interruptible", () => {
 });
 
 describe("5. seeded suppression", () => {
-  it("model audio before the backstop-end mark echoes is dropped; after the echo it plays", () => {
+  // CHANGED (NB3, fix round 3, re-review 2): this test used to call
+  // `ctl.onMark(BACKSTOP_END_MARK)` with NO `atMs`, which defaults to
+  // `now()` -- 0 in this rig -- rather than a realistic echo time. That put
+  // `catchMidClipGeneration`'s own grace deadline (item 3, fix round 2) at
+  // 0 + STALE_GENERATION_GRACE_MS = 2,000, BEFORE the next chunk at 2,700 --
+  // so the chunk passed via a SPURIOUS outbound_stale_discard_timeout, not
+  // because the mark echoed and the generation genuinely closed, which is
+  // what this test is named for. (The re-review also found the report had
+  // mis-cited a DIFFERENT test, "a clear ... lifts it", as the one relying
+  // on this bound; that test calls onAudioCleared, not onMark, so it can
+  // never reach catchMidClipGeneration at all -- this is the one.)
+  it("model audio before the backstop-end mark echoes is dropped; after the echo AND the generation closes, it plays", () => {
     const { ctl } = rig();
     run(ctl, 0, 1650);
 
@@ -284,7 +295,14 @@ describe("5. seeded suppression", () => {
     ctl.onMark("some-other-mark");
     expect(ctl.onModelAudio(1800)).toBe(false);
 
-    ctl.onMark(BACKSTOP_END_MARK);
+    // A realistic echo time (the clip's own ~1,000 ms after its 1,400 ms
+    // fire), not atMs=0.
+    ctl.onMark(BACKSTOP_END_MARK, 2400);
+    // Still dropped: the mark echoing is not the signal on its own (S3-2's
+    // own point) -- the generation opened by the two chunks above has not
+    // yet reported its own end (condition (i)).
+    expect(ctl.onModelAudio(2500)).toBe(false);
+    ctl.onAssistantTurnText("hello", true, 2600); // NOW it closes, for real
     expect(ctl.onModelAudio(2700)).toBe(true);
     // The first audio is still the backstop; a later reply does not rewrite it.
     expect(ctl.firstAudio().path).toBe("backstop_silence");
@@ -1292,6 +1310,42 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
     expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
     expect(rec.prompts).toHaveLength(1);
+  });
+
+  // NB1 (fix round 3, re-review 2). Re-review 2's probe P3: the caller
+  // speaking again, before the armed no-clip generation (A) ever reports its
+  // own end, must cancel the reprompt -- in production A usually closes
+  // BECAUSE the caller spoke (Live's `interrupted` fires on hearing them),
+  // so reprompting at that instant makes Live talk over them.
+  it("NB1: the caller speaking again after the drop cancels the reprompt -- Live's reply to them is coming anyway", () => {
+    const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    expect(ctl.onModelAudio(300)).toBe(false); // Live already generating (A), before any onset
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // a hello, then quiet: hello-end fires at 1,550 (1,200 + 350), arming the reprompt
+    expect(rec.prompts).toEqual([]); // not yet -- A has not resolved
+
+    // The caller speaks AGAIN -- a new, sustained voiced run, after the
+    // original hello's own hangover has expired.
+    run(ctl, 1650, 1900, (t) => t >= 1650);
+
+    ctl.onAssistantTurnText("A's reply, now moot", false, 2000); // A finally closes
+    expect(rec.prompts).toEqual([]); // NOT reprompted: the caller is not in dead air
+    expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
+  });
+
+  // NB2 (fix round 3, re-review 2). Re-review 2's probe P4: the SILENCE
+  // path's own no-clip case already prompts Live itself (fireBackstop, a few
+  // lines above the M3 arm) -- arming the SAME reprompt there too fired it a
+  // second time, exactly as A (the dropped generation) closed answering
+  // prompt 1. Scoped away from this one path.
+  it("NB2: the silence path with no clip and a generation already open prompts Live only once, not twice", () => {
+    const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    expect(ctl.onModelAudio(300)).toBe(false); // Live already replying to something our own VAD never confirmed (I1 route (a))
+    run(ctl, 0, 1400); // nobody speaks: the silence deadline fires -- backstop_silence, no clip
+    expect(rec.prompts).toEqual([`The person hasn't spoken. Say: ${BACKSTOP_TEXT}`]); // prompt #1, the silence path's own line
+
+    ctl.onAssistantTurnText("whatever that reply was", false, 1600); // the dropped generation finally closes
+    expect(rec.prompts).toHaveLength(1); // NOT prompted again
+    expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
   });
 
   // Item 3 (fix round 2, re-review out-of-scope observation 1). Silence

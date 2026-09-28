@@ -28,6 +28,7 @@ vi.mock("../lib/logger.js", async (importOriginal) => {
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
 import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK } from "../lib/outbound/firstSeconds.js";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -518,6 +519,31 @@ describe("outbound: the first seconds through the real session", () => {
     // wire.
     await call.assistantSays("We have a slot available on Monday at 9 AM.");
     expect(clear).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
+  // NB4 (fix round 3, re-review 2). clearAudio no-ops while the clip
+  // protects itself (just above) -- nothing was cut, so the guard's OWN
+  // bookkeeping must say so too: an honest `cut: false` in the log, the
+  // "missed" counter rather than the "cut" one, and the per-call cut budget
+  // left unspent.
+  it("NB4: the offer guard does not log a cut, bump the cut counter, or spend its budget when the clip protects the audio", async () => {
+    allowErrors("live_offer_unverified");
+    clearStats();
+    const call = await bootOutbound();
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(1400); // the silence backstop fires and is playing
+
+    await call.assistantSays("We have a slot available on Monday at 9 AM.");
+    expect(clear).not.toHaveBeenCalled();
+
+    const logged1 = events("live_offer_unverified")[0];
+    expect(logged1.cut).toBe(false); // honest: nothing was actually cut
+    expect(logged1.cuts).toBe(0); // the per-call budget was not spent
+
+    const counters = getLatencyStats().turnTaking;
+    expect(counters.live_offer_cuts).toBe(0);
+    expect(counters.live_offer_cut_missed).toBe(1); // "we would have, but didn't", not "we cut"
     await call.hangUp();
   });
 
