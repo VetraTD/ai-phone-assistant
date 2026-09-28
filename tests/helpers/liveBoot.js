@@ -300,6 +300,19 @@ export async function bootLive({
     },
 
     /**
+     * Final wave W1: like feed(), but with the caller's own 20 ms mu-law
+     * payloads -- one Buffer per frame, in order -- so a test can tell every
+     * frame apart when it reaches Live (frame-order and loss assertions).
+     */
+    async feedFrames(frames) {
+      for (const frame of frames) {
+        clock += FRAME_MS;
+        ws.deliver({ event: "media", media: { payload: Buffer.from(frame).toString("base64") } });
+      }
+      await settle();
+    },
+
+    /**
      * The LVX131 case: time passes and NO frame arrives. The socket is not
      * closed and Twilio sends no `stop` -- from the engine's side nothing
      * happens at all, which is precisely the state CAdfeb9d was left in.

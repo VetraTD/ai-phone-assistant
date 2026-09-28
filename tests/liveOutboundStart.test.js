@@ -27,10 +27,11 @@ vi.mock("../lib/logger.js", async (importOriginal) => {
 
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
-import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS } from "../lib/outbound/firstSeconds.js";
+import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS, CLIP_HOLD_DELAY_LINE_MS } from "../lib/outbound/firstSeconds.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { detectOptOut } from "../lib/outbound/detectors.js";
 import { createPostCall } from "../lib/outbound/postCall.js";
+import { mulaw8kToPcm16k } from "../lib/voice/resample.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -197,6 +198,9 @@ function armServerVadReply(call, { silenceMs = LIVE_VAD_SILENCE_MS, msg = () => 
       setImmediate(() => call.live.push(msg()));
     }
   };
+  // Final wave W1: a handle, so a test can ask whether Live's end-of-turn
+  // fired (and when, on the session clock) -- ignored by the older callers.
+  return { fired: () => fired };
 }
 
 const KICK = {
@@ -655,10 +659,14 @@ describe("outbound: the first seconds through the real session", () => {
 
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
     expect(call.live.sent.clientContent.length).toBe(1); // the seed still went
-    // Released, but never more than the cap's own worth of frames.
+    // Released, but never more than the cap's own worth of HELD frames.
+    // CHANGED (final wave W1, A15): after a latch the silence between voiced
+    // runs goes through the delay line, not the hold, and the release
+    // flushes that line after the hold -- at most CLIP_HOLD_DELAY_LINE_MS
+    // more (its own, separate bound), never unbounded.
     const released = call.live.sent.audioIn.length - beforeHold;
     expect(released).toBeGreaterThan(0);
-    expect(released).toBeLessThanOrEqual(capFrames);
+    expect(released).toBeLessThanOrEqual(capFrames + Math.ceil(CLIP_HOLD_DELAY_LINE_MS / 20));
     await call.hangUp();
   });
 
@@ -1778,6 +1786,236 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
     expect(call.live.sent.clientContent.length).toBe(notesBefore); // no note to Live
     await call.turnEnds();
     expect(rows.filter((r) => r.speaker === "ai" && r.message !== OPENER)).toEqual([]);
+    await call.hangUp();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W1 A15 / A18 / A20 / A28: what the clip hold withholds from Live.
+// ---------------------------------------------------------------------------
+
+/**
+ * A 20 ms mu-law frame that is UNIQUE by `id`, so a test can say exactly
+ * which frame reached Live and in what order: digital silence (0xff) or
+ * full-scale voice (0x00), with the id stamped into three bytes the VAD
+ * cannot hear (silence codes 0xf0-0xff stay ~16 RMS, far under the 700
+ * floor; voice codes 0x00-0x0f stay near full scale).
+ */
+function uniqueFrame(id, voiced) {
+  const f = Buffer.alloc(160, voiced ? 0x00 : 0xff);
+  const base = voiced ? 0x00 : 0xf0;
+  f[0] = base + (id & 15);
+  f[1] = base + ((id >> 4) & 15);
+  f[2] = base + ((id >> 8) & 15);
+  return f;
+}
+/** Frames for a pattern: [[ms, voiced], ...] -> unique frames + a lookup from what Live receives back to the id. */
+function patternFrames(pattern, startId = 1) {
+  const frames = [];
+  let id = startId;
+  for (const [ms, voiced] of pattern) {
+    for (let t = 0; t < ms; t += 20) frames.push({ id: id++, voiced, buf: uniqueFrame(id - 1, voiced) });
+  }
+  const byPcm = new Map(frames.map((f) => [mulaw8kToPcm16k(f.buf).toString("base64"), f]));
+  return { frames, byPcm };
+}
+/** The seed's own index in audioIn: how many audio frames Live had received when the seed went out. */
+function watchSeedIndex(call) {
+  const at = [];
+  const cc = call.live.sent.clientContent;
+  const realPush = cc.push.bind(cc);
+  cc.push = (m) => {
+    at.push(call.live.sent.audioIn.length);
+    return realPush(m);
+  };
+  return at;
+}
+
+describe("W1 A15: after a confirmed latch only VOICED runs (+ pre-roll) are withheld; silence keeps flowing", () => {
+  // Final review A15 (F-R2 re-review 1 m1, re-review 2 m2): a sustained
+  // (>= 220 ms) second "Hello?" early in the clip, or two short bursts inside
+  // the 800 ms confirm window, latched the hold -- and a latched hold used to
+  // withhold EVERY later frame, silence included. Live's own end-of-turn for
+  // the pre-clip hello then never fired during the clip; the whole hold went
+  // out at the seed and Live answered the stale hello AFTER the opener (the
+  // D1 re-ask/repeat F-R2 exists to prevent). armServerVadReply is the fake
+  // server VAD: it replies once it has RECEIVED 700 ms of trailing silence.
+  it.each([
+    ["a sustained 300 ms second 'Hello?'", [[100, false], [300, true]]],
+    ["two short bursts inside the confirm window (120 ms, 300 ms gap, 120 ms)", [[100, false], [120, true], [300, false], [120, true]]],
+  ])("%s early in the clip: Live's reply to the PRE-clip hello is generated DURING the clip and discarded -- nothing stale plays after the opener", async (_label, inClip) => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    const seedAt = watchSeedIndex(call);
+    const liveVad = armServerVadReply(call);
+    await call.feed(400, { voiced: true }); // hello #1
+    await call.feed(400); // the hello ends; the clip queues (hello-end)
+    const atFire = call.live.sent.audioIn.length;
+    const { frames } = patternFrames(inClip);
+    await call.feedFrames(frames.map((f) => f.buf));
+    await call.feed(1500); // quiet: the rest of the clip
+    // Live's own end-of-turn for the PRE-clip hello fired while the clip was
+    // still playing -- the silence after the held second hello reached it.
+    expect(call.ws.liveDialFirstSeconds.clipPlaying()).toBe(true);
+    expect(liveVad.fired()).toBe(true);
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // the seed goes
+    await call.feed(20);
+    await call.settle();
+    call.live.push({ serverContent: { turnComplete: true } }); // the stale generation's own close
+    await call.settle();
+    await call.feed(200);
+    await call.settle();
+
+    // Nothing stale reached the caller: the clip's own single enqueue only.
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    // C1 still holds: no voiced frame reached Live between the fire and the seed...
+    const voicedBeforeSeed = call.live.sent.audioIn.slice(atFire, seedAt[0]).filter((a) => pcmPeak(a.data) > 4000);
+    expect(voicedBeforeSeed).toHaveLength(0);
+    // ...and the held speech reached it after the seed.
+    const voicedAfterSeed = call.live.sent.audioIn.slice(seedAt[0]).filter((a) => pcmPeak(a.data) > 4000);
+    expect(voicedAfterSeed.length).toBeGreaterThanOrEqual(frames.filter((f) => f.voiced).length);
+    await call.hangUp();
+  });
+
+  // The F-R2 re-review 2 Q1 click/blip probe, through the real session: a
+  // click (20 ms), a blip (40 ms) or a sub-threshold burst (200 ms) at points
+  // across the clip never brings the stale hello reply back.
+  it.each([
+    ["a 20 ms click at +100", 100, 20],
+    ["a 20 ms click at +500", 500, 20],
+    ["a 20 ms click at +1000", 1000, 20],
+    ["a 40 ms blip at +300", 300, 40],
+    ["a 40 ms blip at +900", 900, 40],
+    ["a 200 ms burst at +200", 200, 200],
+  ])("I1 probe shape: %s -- no stale reply chunk reaches the caller", async (_label, atMs, burstMs) => {
+    const call = await bootOutbound({ database: outboundDb({ openerAudio: Buffer.alloc(8 * 3000, 0x7f) }) }); // a 3 s clip
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    armServerVadReply(call);
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    await call.feed(atMs);
+    await call.feed(burstMs, { voiced: true });
+    await call.feed(2600 - atMs - burstMs); // the rest of the clip, quiet
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    await call.settle();
+    call.live.push({ serverContent: { turnComplete: true } }); // whatever Live had open closes
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1); // the clip alone
+    await call.hangUp();
+  });
+
+  it("frame order: the held stream is released in arrival order, the forwarded stream is in arrival order, nothing lost or duplicated", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    const atFire = call.live.sent.audioIn.length;
+    const { frames, byPcm } = patternFrames([
+      [100, false],
+      [300, true], // latches (sustained)
+      [700, false], // silence: flows (the part beyond the 500 ms delay line)
+      [160, true], // a later voiced run: held, with its pre-roll
+      [600, false],
+    ]);
+    await call.feedFrames(frames.map((f) => f.buf));
+    const beforeRelease = call.live.sent.audioIn.length;
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // seed + release
+    await call.settle();
+
+    const idsOf = (from, to) => call.live.sent.audioIn.slice(from, to).map((a) => byPcm.get(a.data)).filter(Boolean);
+    const forwarded = idsOf(atFire, beforeRelease); // what flowed to Live while the clip played
+    const released = idsOf(beforeRelease); // what the release delivered after the seed
+    const ids = [...forwarded, ...released].map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicates
+    expect(ids.slice().sort((a, b) => a - b)).toEqual(frames.map((f) => f.id)); // nothing lost
+    // Silence kept flowing after the latch (the A15 rule) -- and none of it was speech.
+    expect(forwarded.length).toBeGreaterThan(0);
+    expect(forwarded.every((f) => !f.voiced)).toBe(true);
+    // Each stream in arrival order.
+    expect(forwarded.map((f) => f.id)).toEqual(forwarded.map((f) => f.id).sort((a, b) => a - b));
+    expect(released.map((f) => f.id)).toEqual(released.map((f) => f.id).sort((a, b) => a - b));
+    await call.hangUp();
+  });
+});
+
+describe("W1 A18: the pre-clip-tail phase is bounded", () => {
+  // F-R2 re-review 1 m7: phase 1 (the caller already mid-utterance when the
+  // clip fires -- the backstop_slow shape) ended only when voiceActive
+  // dropped, so a talker whose gaps stay under the VAD's 300 ms hangover was
+  // never held: every in-clip voiced frame reached Live before the seed (R2:
+  // 120 frames on a 3 s tail), and none of it got a reply the caller heard.
+  it("a gappy talker who never pauses 300 ms: only a bounded head of the in-clip speech reaches Live before the seed; the rest is held", async () => {
+    const LONG_CLIP = Buffer.alloc(8 * 5000, 0x7f); // 5 s clip, so the tail runs inside it
+    const call = await bootOutbound({ database: outboundDb({ openerAudio: LONG_CLIP }) });
+    const seedAt = watchSeedIndex(call);
+    const gappy = async (ms) => {
+      for (let t = 0; t < ms; t += 300) {
+        await call.feed(260, { voiced: true }); // unbroken runs past the VAD's 200 ms activation, well under CLIP_BARGE_MIN_MS
+        await call.feed(40); // gaps well under the VAD's 300 ms hangover: voiceActive never drops
+      }
+    };
+    await gappy(1800); // onset, then on through the slow deadline (onset + 1,600): backstop_slow fires mid-utterance
+    expect(events("outbound_backstop_played")[0]).toMatchObject({ path: "backstop_slow" });
+    const atFire = call.live.sent.audioIn.length;
+    await gappy(3000); // the talker keeps going over the clip
+    const reachedPreSeed = call.live.sent.audioIn.slice(atFire).filter((a) => pcmPeak(a.data) > 4000).length;
+    // Bounded by CLIP_PRE_CLIP_TAIL_MAX_MS (600 ms) less the 500 ms delay line: a handful of frames.
+    expect(reachedPreSeed).toBeLessThanOrEqual(10);
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    expect(seedAt).toHaveLength(1);
+    const afterSeed = call.live.sent.audioIn.slice(seedAt[0]).filter((a) => pcmPeak(a.data) > 4000).length;
+    expect(afterSeed).toBeGreaterThan(50); // the held rest of it, delivered after the seed
+    await call.hangUp();
+  });
+});
+
+describe("W1 A20 / A28: the un-latch instruments", () => {
+  // A20 (F-R2 re-review 2 m1): a provisional latch still pending when the
+  // clip's own end releases it is NOT an un-latch of noise -- the counter's
+  // alarm ("a high rate means the confirm threshold is miscalibrated") must
+  // not count it. Logged with a reason; counted only for the window timeout.
+  it("A20: a provisional latch released by the clip's end logs reason clip_release and does not bump the un-latch counter", async () => {
+    clearStats();
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    await call.feed(60, { voiced: true }); // a fresh onset, 80 ms before the mark: provisional, unconfirmed
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    const lines = events("outbound_clip_provisional_unlatched");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].reason).toBe("clip_release");
+    expect(getLatencyStats().turnTaking.outbound_clip_provisional_unlatched ?? 0).toBe(0);
+    await call.hangUp();
+  });
+
+  // A28 (F-R2 re-review 3 m2/m3): the un-latch log counted only the
+  // provisional frames (40 when 65 went out), and the N1 test checked only
+  // that SOME silence preceded the click -- a partial flush would pass it.
+  it("A28: a window un-latch logs every frame it sent (delay line + provisional) and they arrive in full arrival order", async () => {
+    clearStats();
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    const atFire = call.live.sent.audioIn.length;
+    const { frames, byPcm } = patternFrames([
+      [100, false],
+      [20, true], // a click: provisional, never confirms
+      [900, false], // past CLIP_CONFIRM_WINDOW_MS: the window un-latch
+    ]);
+    await call.feedFrames(frames.map((f) => f.buf));
+    const lines = events("outbound_clip_provisional_unlatched");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].reason).toBe("window");
+    expect(lines[0].frames).toBe(lines[0].provisional_frames + lines[0].delay_line_frames);
+    expect(getLatencyStats().turnTaking.outbound_clip_provisional_unlatched).toBe(1);
+
+    const ids = call.live.sent.audioIn.slice(atFire).map((a) => byPcm.get(a.data)?.id).filter((x) => x !== undefined);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicates
+    expect(ids).toEqual(ids.slice().sort((a, b) => a - b)); // FULL arrival order, not just a boundary
+    expect(ids[0]).toBe(frames[0].id); // nothing older left behind
     await call.hangUp();
   });
 });
