@@ -761,7 +761,18 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
   // D-c + O-1 (spec §9.6/§12.2): on outbound, only the pack tools the
   // CAMPAIGN itself lists survive -- see filterForOutboundCampaign. A no-op
   // when `extras` carries no outbound call context.
-  declarations.push(...filterForOutboundCampaign(collectTools(config), extras));
+  //
+  // S3-10: `collectTools`'s OWN ctx argument now carries `outboundCall` too
+  // (previously omitted -- every pack's `tools()` before qualification.js
+  // either ignored its ctx argument entirely or read only `ctx.integrations`,
+  // so nothing needed it). qualification.js's `tools()` is the first pack
+  // that must know, AT THIS CALL SITE, whether this is an outbound call at
+  // all -- without it, `filterForOutboundCampaign`'s downstream intersection
+  // check has nothing to filter, because the pack itself already returned
+  // nothing (named risk 3's inbound gate lives in the pack, not only in the
+  // filter -- see capabilities/qualification.js's file header). A no-op for
+  // every other pack: none of them reads `ctx.outboundCall`.
+  declarations.push(...filterForOutboundCampaign(collectTools(config, { outboundCall: outbound }), extras));
 
   return { functionDeclarations: declarations };
 }

@@ -19,7 +19,7 @@ import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
-import { checkRequirements, capabilityConfig } from "../lib/capabilities/requirements.js";
+import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
@@ -2256,6 +2256,37 @@ export async function executeToolCall(fc, ctx) {
               },
             };
           }
+
+          // S3-10 (spec §12.2, Task 24): the qualification booking gate --
+          // ONE refusal naming the campaign's still-missing REQUIRED
+          // questions, then book_appointment proceeds regardless (a missing
+          // answer never costs a booking). A no-op for every other action
+          // tool, and for book_appointment itself whenever the campaign has
+          // no required question outstanding (checkQualificationBookingGate
+          // is a no-op on inbound too -- named risk 3). Placed here, after
+          // O-12's party check, the consent probe and the spelling gate
+          // above: there is nothing to ask a qualification question of until
+          // the call knows who it is speaking to and has heard them agree.
+          if (fc.name === "book_appointment") {
+            const qGate = checkQualificationBookingGate(ctx);
+            if (!qGate.ok) {
+              bumpCounter("qualification_booking_gate_refused");
+              return {
+                functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: qGate.message } },
+                stateEffects: {
+                  toolResult: { name: fc.name, success: false, message: qGate.message },
+                  toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+                  capabilityState: { qualification: { bookingGateRefusals: 1 } },
+                },
+              };
+            }
+            if (qGate.missing.length && ctx?.callSid) {
+              bumpCounter("qualification_booking_gate_missing_flagged");
+              const deps = ctx.depsOverride || CAPABILITY_DEPS;
+              await deps.mergeCallAnswers(ctx.callSid, { _missing_required: qGate.missing });
+            }
+          }
+
           const cfg = capabilityConfig(ctx?.config, pack.id);
           const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {

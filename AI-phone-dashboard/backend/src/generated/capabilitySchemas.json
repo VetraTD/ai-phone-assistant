@@ -146,6 +146,14 @@
       "configSchema": null
     },
     {
+      "id": "qualification",
+      "label": "Qualification questions",
+      "description": "Ask the campaign's qualification questions and record each answer. Only available on an outbound call whose campaign lists it; never used on inbound.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
       "id": "outcome",
       "label": "Call outcome",
       "description": "Record how an outbound call ended (qualified, not interested, wrong number, ...). Always available on an outbound call; never used on inbound.",

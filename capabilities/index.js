@@ -36,6 +36,15 @@
  * from every inbound call by that same filter (lib/outbound/policy.js's
  * PLATFORM_PACKS). Their registry position only ever matters for the order
  * their tools reach the model on an outbound call.
+ *
+ * S3-10 (spec §12.2): qualification is a CAMPAIGN pack, not a platform one --
+ * unlike outcome/callback/opt_out it is declared only when the campaign's own
+ * `capabilities` list names it (its own `tools()` gates on that, so it
+ * contributes nothing to inbound even without the filter's help; see
+ * capabilities/qualification.js). Placed alongside the platform packs here
+ * because it shares their "outbound-only, never a tenant setting" shape, not
+ * because its registry position is load-bearing the way the five tenant
+ * packs' is.
  */
 
 import appointments from "./appointments.js";
@@ -43,6 +52,7 @@ import messages from "./messages.js";
 import transfer from "./transfer.js";
 import quotes from "./quotes.js";
 import smsConsent from "./smsConsent.js";
+import qualification from "./qualification.js";
 import outcome from "./outcome.js";
 import callback from "./callback.js";
 import optOut from "./optOut.js";
@@ -55,13 +65,13 @@ import optOut from "./optOut.js";
  *  - the order clauses appear in the CAPABILITIES line
  *
  * Both are asserted byte-for-byte by tests/promptSnapshot.test.js -- for the
- * FIVE tenant packs above; outcome/callback/opt_out never reach an inbound
- * call at all (see the S3-3 note above), so appending them here cannot move
- * anything an inbound snapshot asserts.
+ * FIVE tenant packs above; qualification/outcome/callback/opt_out never reach
+ * an inbound call at all (see the S3-3/S3-10 notes above), so appending them
+ * here cannot move anything an inbound snapshot asserts.
  *
  * @type {import("./_contract.js").CapabilityPack[]}
  */
-const PACKS = [appointments, messages, quotes, transfer, smsConsent, outcome, callback, optOut];
+const PACKS = [appointments, messages, quotes, transfer, smsConsent, qualification, outcome, callback, optOut];
 
 const BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 

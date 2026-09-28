@@ -262,6 +262,9 @@ const BUILTIN_TOOL_NAMES = [
   "set_call_outcome",
   "schedule_callback",
   "opt_out",
+  // S3-10: qualification pack -- a campaign pack, declared only when the
+  // campaign lists it, never on inbound.
+  "record_answer",
 ];
 
 router.get("/api/integrations/definitions", (req, res) => {

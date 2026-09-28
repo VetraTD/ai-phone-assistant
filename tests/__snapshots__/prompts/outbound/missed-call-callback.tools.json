@@ -51,6 +51,30 @@
     }
   },
   {
+    "name": "record_answer",
+    "description": "Record the caller's answer to one of this call's qualification questions. Call this right after they answer each one -- do not wait until the end of the call to record several at once, and do not invent an answer they did not give.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "clinic_name"
+          ],
+          "description": "Which question this answers. One of: clinic_name."
+        },
+        "value": {
+          "type": "string",
+          "description": "The caller's answer, in their own words, at most 500 characters."
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    }
+  },
+  {
     "name": "set_call_outcome",
     "description": "Record how this outbound call ended. Call this once, near the end of the call, choosing whichever option best matches what actually happened. Never call this for a booking (book_appointment already records that), an opt-out request (use the opt_out tool instead), or a transfer (request_transfer already records that) -- this tool refuses all three.",
     "parameters": {

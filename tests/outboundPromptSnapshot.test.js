@@ -261,31 +261,58 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
     expect(outboundNames).not.toContain("open_case_file");
   });
 
-  // S3-3 supersedes this item's old name and assertion: `qualification`
-  // still has no pack, but `callback`/`opt_out`/`outcome` shipped real ones
-  // in S3-3, and this fixture's own campaign config lists all three (see
+  // S3-3 supersedes this item's old name and assertion; S3-10 supersedes it
+  // again now that `qualification` has a real pack too. `callback`/
+  // `opt_out`/`outcome` shipped in S3-3, `qualification` in S3-10, and this
+  // fixture's own campaign config lists all four (see
   // tests/fixtures/businessConfigs.js) -- so "keeps exactly the engine
   // tools" is no longer true even without the PLATFORM_PACKS union, since
   // the campaign names them itself.
-  it("a campaign that lists only qualification plus the S3-3 platform capabilities gets the engine tools plus the three platform tools, nothing else", () => {
+  it("a campaign that lists only qualification plus the S3-3 platform capabilities gets the engine tools plus record_answer and the three platform tools, nothing else", () => {
     const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
     const names = buildAllDeclarations(config, extras).map((d) => d.name);
     // confirm_identity (Task 18) is unconditional on outbound, like end_call
     // and set_call_intent — it never passes through the campaign-capability
-    // filter because it is not a capability pack's tool. set_call_outcome/
-    // schedule_callback/opt_out (S3-3) are PLATFORM_PACKS -- declared
-    // regardless of what the campaign's own capabilities list says, and this
-    // fixture's config also lists them explicitly (a harmless, idempotent
-    // union either way). Order is registry order (capabilities/index.js):
-    // outcome, callback, opt_out.
+    // filter because it is not a capability pack's tool. record_answer
+    // (S3-10) is a CAMPAIGN pack: declared because this fixture's own
+    // campaign capabilities list names "qualification" (unlike the three
+    // below, it is NOT unioned in when the campaign omits it — see the next
+    // test). set_call_outcome/schedule_callback/opt_out (S3-3) are
+    // PLATFORM_PACKS -- declared regardless of what the campaign's own
+    // capabilities list says, and this fixture's config also lists them
+    // explicitly (a harmless, idempotent union either way). Order is
+    // registry order (capabilities/index.js): qualification, outcome,
+    // callback, opt_out.
     expect(names).toEqual([
       "set_call_intent",
       "end_call",
       "confirm_identity",
+      "record_answer",
       "set_call_outcome",
       "schedule_callback",
       "opt_out",
     ]);
+  });
+
+  // S3-10, named risk 3/companion to the test above: unlike the three
+  // PLATFORM_PACKS, qualification is never unioned in when the campaign
+  // omits it -- its own tools() gates on config.capabilities directly (see
+  // capabilities/qualification.js), so leaving "qualification" off the list
+  // must leave record_answer off the declarations too.
+  it("record_answer is absent when the campaign's own capabilities list omits qualification", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
+    const withoutQualification = {
+      ...extras,
+      outboundCall: {
+        ...extras.outboundCall,
+        config: {
+          ...extras.outboundCall.config,
+          capabilities: extras.outboundCall.config.capabilities.filter((c) => c !== "qualification"),
+        },
+      },
+    };
+    const names = buildAllDeclarations(config, withoutQualification).map((d) => d.name);
+    expect(names).not.toContain("record_answer");
   });
 
   it("PLATFORM_PACKS survive even when a campaign's own capabilities list omits them entirely", () => {
