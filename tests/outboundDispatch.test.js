@@ -658,10 +658,13 @@ describe("dispatch: the opener is stored before a slow voicemail render finishes
 
 // ---------------------------------------------------------------------------
 // D10 (spec §19, S3-D2, live round 1): the opener renders and is STORED
-// BEFORE calls.create, racing against RENDER_BEFORE_DIAL_MAX_MS. The
-// voicemail (and a still-pending opener past the deadline) keeps rendering
-// after the dial, unawaited by dispatch()'s own return -- a hung render must
-// never hang the dial OR the dispatch call itself.
+// BEFORE calls.create, racing against RENDER_BEFORE_DIAL_MAX_MS -- a hung
+// render must never hang the DIAL. I2 (fix round 1) reverted the ORIGINAL
+// "unawaited by dispatch()'s own return" design: voice-uk-prod's
+// cpu-throttling means a render detached from the request after it returns
+// can stall for the whole ring, so dispatch() now awaits the render AGAIN
+// after the dial, capped at the ring's own timeout (25 s / 40 s
+// voicemail_on) -- never past that, and never on the dial-failed paths.
 // ---------------------------------------------------------------------------
 describe("D10: render before dial", () => {
   it("the render resolves well inside the deadline -- calls.create is called only after storeAttemptAudio(opener)", async () => {

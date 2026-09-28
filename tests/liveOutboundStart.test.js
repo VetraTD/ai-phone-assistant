@@ -390,7 +390,54 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  it("model audio while the backstop plays is dropped until the backstop-end mark echoes, then plays", async () => {
+  // C1, item 5 (fix round 2, re-review's remaining gap). The test above
+  // pushes Live's chunk BEFORE the clip is queued -- the narrow case even
+  // the queue-time-only snapshot already caught. This is the REALISTIC
+  // hello timing the re-review's own probe used: NOTHING is open at the
+  // moment the clip queues (Live's voice-to-voice latency is normally
+  // longer than helloEndGapMs), and Live's reply only starts generating
+  // afterwards, still before the seed (which the hello-end path defers to
+  // the end-mark echo). Through the REAL session this time, not just the
+  // pure controller.
+  it("C1: a real session -- Live's first chunk arrives AFTER the clip is queued (before the seed); zero stale chunks reach the socket", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues via the hello-end timer
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+    expect(call.live.sent.clientContent).toEqual([]); // not seeded yet -- deferred to the end mark (O-8)
+
+    // Live's reply to the hello starts generating only NOW -- nothing was
+    // open at the instant the clip queued.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1); // discarded, not forwarded
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // the seed goes now; C1 re-checks fresh
+    call.live.push(modelAudioMsg()); // more of the SAME generation, after the mark too
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1); // still zero stale chunks reached the socket
+
+    await call.turnEnds(); // it finally closes
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    // A NEW generation, now trusted -- forwarded as many small framer-sized
+    // enqueue calls (200 ms of audio), on top of the clip's own single call.
+    expect(enqueue.mock.calls.length).toBeGreaterThan(1);
+    await call.hangUp();
+  });
+
+  // CHANGED (item 3, fix round 2): a turnEnds() now sits between the mark
+  // echo and the second push. Before item 3, the first chunk's generation
+  // was simply forgotten the instant the mark echoed, so a SECOND push of
+  // the SAME (never-closed) generation played -- indistinguishable, at the
+  // controller level, from the exact partial-generation defect item 3 fixes
+  // (a caller's "yes" mid-clip, dropped head, forwarded tail). Closing the
+  // first generation before the second one arrives is what a real session
+  // does (Gemini always bounds a generation with turnComplete/interrupted
+  // before starting the next), and is what now makes the second push
+  // trusted.
+  it("model audio while the backstop plays is dropped until the backstop-end mark echoes AND that generation closes, then a NEW one plays", async () => {
     const call = await bootOutbound();
     await call.feed(1400);
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
@@ -400,7 +447,12 @@ describe("outbound: the first seconds through the real session", () => {
     expect(enqueue).not.toHaveBeenCalled();
 
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
-    call.live.push(modelAudioMsg());
+    call.live.push(modelAudioMsg()); // the SAME generation continuing: still stale
+    await call.settle();
+    expect(enqueue).not.toHaveBeenCalled();
+
+    await call.turnEnds(); // it closes
+    call.live.push(modelAudioMsg()); // a NEW generation
     await call.settle();
     expect(enqueue).toHaveBeenCalled();
     await call.hangUp();
@@ -437,6 +489,34 @@ describe("outbound: the first seconds through the real session", () => {
     await call.feed(1400);
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     await call.feed(400, { voiced: true }); // well under 600 ms
+    expect(clear).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
+  // Item 4 (fix round 2, re-review out-of-scope observation 2). Four
+  // TEXT-triggered cutters (greeting-respoken, repeat-cut, offer-unverified,
+  // the leak guard) all route through clearAudio, and all four judge Live's
+  // OWN output transcription -- which can belong to a generation whose audio
+  // is being discarded while our clip is still on the wire (the cut-window
+  // check, aiAudioPlayingUntil, counts the clip same as any other assistant
+  // audio). None of them are judging the CLIP, so none of them may clear it.
+  // The offer-unverified guard is the simplest to reach on an outbound call
+  // (no caller-turn-count carve-out, unlike the greeting-echo guard, which
+  // is disabled outright on outbound; the repeat-cut guard needs a prior
+  // caller turn).
+  it("item 4: a text-triggered cutter (the unverified-offer guard) does not clear the outbound clip", async () => {
+    allowErrors("live_offer_unverified");
+    const call = await bootOutbound();
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(1400); // the silence backstop fires and is playing
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+
+    // A stale generation's own transcription arrives while the clip plays --
+    // it matches the unverified-offer pattern (nothing has been verified on
+    // this fresh session), which would otherwise clear whatever is on the
+    // wire.
+    await call.assistantSays("We have a slot available on Monday at 9 AM.");
     expect(clear).not.toHaveBeenCalled();
     await call.hangUp();
   });

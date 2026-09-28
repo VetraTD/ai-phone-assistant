@@ -1239,6 +1239,90 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(ctl.onModelAudio(3100)).toBe(true); // a NEW generation is trusted from here
   });
 
+  // N1 (fix round 2, re-review). The ORIGINAL M3 fix (fix round 1) armed
+  // `staleDiscard` on the no-clip path but never set staleDiscardFrom/
+  // staleDiscardDeadline, so named risk 4 (a turnComplete that never
+  // arrives) was NOT actually bounded here -- the re-review's own probe saw
+  // chunks still dropped at 20, 30 and 60 s with no timeout ever logged.
+  // This proves the bound directly: the SAME STALE_GENERATION_GRACE_MS the
+  // has-clip paths use.
+  it("N1: the no-clip M3 discard is bounded too -- if the generation never closes, it lifts at STALE_GENERATION_GRACE_MS after the decision, logged", () => {
+    const { ctl, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    run(ctl, 0, 1190, (t) => t >= 1000);
+    expect(ctl.onModelAudio(1200)).toBe(false);
+    run(ctl, 1200, 2600, (t) => t >= 1000); // the slow-path decision fires at 2,600, no clip
+    const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+
+    expect(ctl.onModelAudio(liftAt - 10)).toBe(false); // still discarded, well past 20/30/60 s in real terms
+    ctl.tick(liftAt - 10);
+    expect(ctl.onModelAudio(liftAt)).toBe(true); // never muted forever
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ waited_ms: STALE_GENERATION_GRACE_MS });
+  });
+
+  // N2/item 2 (fix round 2). Unlike every has-clip path, the no-clip M3
+  // scenario has NOTHING else said to the caller -- dropping Live's only
+  // reply whole left them in real silence until they spoke again. A one-off
+  // nudge, reusing the SAME prompt mechanism the silence path's own no-clip
+  // case already uses, fires once the dropped generation resolves.
+  it("N2: after the whole no-clip generation closes for real, Live is re-prompted once so the caller is not left in dead air", () => {
+    const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    run(ctl, 0, 1190, (t) => t >= 1000);
+    expect(ctl.onModelAudio(1200)).toBe(false);
+    run(ctl, 1200, 2600, (t) => t >= 1000);
+    expect(rec.prompts).toEqual([]); // not yet -- the drop has not resolved
+
+    ctl.onAssistantTurnText("the dropped reply", false, 3000); // it finally closes
+    expect(rec.prompts).toEqual([`The person hasn't heard you yet. Say: ${BACKSTOP_TEXT}`]);
+    expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+    expect(rec.counters).toContain("outbound_no_clip_reprompt");
+
+    // Once only: a later, unrelated turn does not reprompt again.
+    ctl.onAssistantTurnText("something else entirely", true, 3500);
+    expect(rec.prompts).toHaveLength(1);
+  });
+
+  it("N2: the grace-timeout resolution ALSO re-prompts Live once (named risk 4's bound is one of the two ways this can resolve)", () => {
+    const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+    run(ctl, 0, 1190, (t) => t >= 1000);
+    expect(ctl.onModelAudio(1200)).toBe(false);
+    run(ctl, 1200, 2600, (t) => t >= 1000);
+    const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+    ctl.tick(liftAt);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+    expect(rec.prompts).toHaveLength(1);
+  });
+
+  // Item 3 (fix round 2, re-review out-of-scope observation 1). Silence
+  // path: nothing open at fire, so the seed goes at once and the discard
+  // lifts trivially -- but the caller then answers "yes" mid-clip and Live
+  // starts replying. Its head is dropped by `clipPlaying` alone; without
+  // catchMidClipGeneration, its tail played mid-sentence the instant the
+  // clip's own end mark echoed. The SAME whole-or-nothing rule M3 applies
+  // on the no-clip path now applies here too.
+  it("item 3: silence path, a generation opens mid-clip (the caller answers 'yes') -- dropped WHOLE, not partially, once the clip ends normally", () => {
+    const { ctl, enqueue, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1400); // silence path fires; seed sent AT FIRE (nothing was open)
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(rec.seeds).toEqual([BACKSTOP_TEXT]);
+
+    expect(ctl.onModelAudio(1700)).toBe(false); // dropped: the clip is still on the wire
+
+    ctl.onMark(BACKSTOP_END_MARK, 2600); // the clip's own end mark echoes normally
+    expect(ctl.onModelAudio(2700)).toBe(false); // NOT forwarded mid-sentence -- caught, still stale
+
+    ctl.onAssistantTurnText("yes, I can help with that", false, 2900); // the generation closes
+    expect(ctl.onModelAudio(3000)).toBe(true); // a NEW generation, now trusted
+  });
+
+  // Scoping ruling (fix round 2): a BARGE or the M9 mark-timeout must NOT
+  // extend the discard this way -- both are pre-existing tests (section 5,
+  // "M9") this file already pins, and both represent the caller (or a lost
+  // event) actively ending the clip, not it finishing on its own schedule.
+  // Extending item 3's catch to those paths regressed both (RED-confirmed
+  // below); scoped to the NORMAL end-mark-echo path only.
+
   it("a call with no discarded chunk still logs the shadow line, with from_speech_end_ms and from_speech_ms null -- never skipped", () => {
     const { ctl, events } = rig({ firstSpeaker: "clip" });
     run(ctl, 0, 1890, (t) => t >= 1100 && t <= 1550); // a hello, nothing ever discarded
