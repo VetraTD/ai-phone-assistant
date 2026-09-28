@@ -29,6 +29,7 @@ import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
 import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS } from "../lib/outbound/firstSeconds.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+import { detectOptOut } from "../lib/outbound/detectors.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -1068,7 +1069,14 @@ describe("outbound: the first seconds through the real session", () => {
   // already use), still never reaches the caller. Together these are the
   // reviewer's own P1 probe shape without depending on precisely
   // reconstructing when a fake Live would perceive the blip.
-  it("F-R2 fix round 1, I1: one loud frame early in the clip does not latch the hold (a click, not speech)", async () => {
+  //
+  // Fix round 2 (NB2): a raw voiced frame now latches PROVISIONALLY (a
+  // SEPARATE buffer, not the delay line) for up to CLIP_CONFIRM_WINDOW_MS
+  // (800 ms) before un-latching if it never confirms -- so both tests feed
+  // enough silence AFTER the blip/burst to cross that window (not just
+  // CLIP_HOLD_DELAY_LINE_MS, which no longer governs a voiced frame's own
+  // fate at all) and observe the un-latch release.
+  it("F-R2 fix round 1/2, I1/NB2: one loud frame early in the clip does not latch the hold (a click, not speech)", async () => {
     const call = await bootOutbound();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
@@ -1079,15 +1087,15 @@ describe("outbound: the first seconds through the real session", () => {
     await call.feed(100); // some silence into the clip
     const beforeBlip = call.live.sent.audioIn.length;
     await call.feed(20, { voiced: true }); // ONE loud 20 ms frame -- a click, not speech
-    await call.feed(600); // more silence: still flowing through the delay line, not captured whole
+    // The provisional window starts AT the blip frame, not after the earlier
+    // silence: 20 ms (the blip itself) + 800 ms more silence = 820 ms since
+    // the provisional latch, comfortably past CLIP_CONFIRM_WINDOW_MS (800 ms)
+    // -- the provisional latch times out unconfirmed and releases back to Live.
+    await call.feed(800);
 
-    // Proof the click never latched the hold: silence AFTER it still reaches
-    // Live (delayed, through the line) rather than being held whole -- the
-    // pre-fix defect starved Live of everything from this point on.
-    // Not held whole: the delay line's own rolling ~500 ms window
-    // (CLIP_HOLD_DELAY_LINE_MS) means growth lags what was fed, but ANY
-    // growth at all after 620 ms of feeding proves this is still flowing,
-    // not stuck -- a genuine latch (the pre-fix defect) forwards nothing.
+    // Proof the click never latched the whole-clip hold: it un-latched and
+    // released instead -- the pre-fix defect starved Live of everything from
+    // this point on, forever, with nothing ever un-latching.
     expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBlip);
 
     // Live's reply to the STALE hello, generated only now, is still
@@ -1103,7 +1111,7 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  it("F-R2 fix round 1, I1: a cough-length voiced burst (under activeMs) does not latch the hold either", async () => {
+  it("F-R2 fix round 1/2, I1/NB2: a cough-length voiced burst (under the confirm threshold) does not latch the hold either", async () => {
     const call = await bootOutbound();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
 
@@ -1113,8 +1121,10 @@ describe("outbound: the first seconds through the real session", () => {
 
     await call.feed(200); // some silence into the clip
     const beforeBurst = call.live.sent.audioIn.length;
-    await call.feed(100, { voiced: true }); // a 100 ms burst -- a cough, under activeMs (200 ms)
-    await call.feed(600);
+    await call.feed(100, { voiced: true }); // a 100 ms (5-frame) burst -- a cough, under CLIP_CONFIRM_VOICED_FRAMES (11)
+    // 750 ms more silence: 100 + 750 = 850 ms since the burst started,
+    // comfortably past CLIP_CONFIRM_WINDOW_MS (800 ms).
+    await call.feed(750);
 
     expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBurst);
 
@@ -1195,6 +1205,148 @@ describe("outbound: the first seconds through the real session", () => {
     await call.assistantSays("We have a slot available on Monday at 9 AM.");
 
     expect(events("live_offer_unverified")).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 2 (opus re-review). NB1: gating the WHOLE
+  // persistTurnTranscript call on `heard` dropped the CALLER's own words
+  // too, on a turn whose reply happened to be discarded -- the caller's
+  // words are never stale (they came from the caller's own microphone),
+  // and losing them silenced lib/outbound/detectors.js's detectOptOut, read
+  // by lib/outbound/postCall.js -- a missing caller row means the person
+  // gets called again after asking to be left alone.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 2, NB1: a discarded turn whose user text is an opt-out phrase still writes the caller row, and the post-call detector sees it", async () => {
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+
+    // The stale generation: audio discarded, so this turn's REPLY is unheard.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    // The caller's own words -- never stale, whatever the reply's fate.
+    await call.callerSays("Stop calling me.");
+    await call.turnEnds(); // turnComplete for the STALE generation
+
+    const callerRows = database.addTranscriptEntry.mock.calls.filter(([, speaker]) => speaker === "caller");
+    expect(callerRows).toHaveLength(1);
+    expect(callerRows[0][2]).toBe("Stop calling me.");
+    const aiRows = database.addTranscriptEntry.mock.calls.filter(([, speaker]) => speaker === "ai");
+    expect(aiRows).toHaveLength(0); // the AI half is still correctly gated
+
+    // The post-call opt-out detector, run over exactly what got persisted.
+    expect(detectOptOut({ callerText: callerRows[0][2] })).toEqual({ hit: true, side: "caller" });
+    await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 2 (opus re-review). NB2: latching on voiceActive let
+  // GENUINE in-clip speech reach Live before the seed -- a real utterance
+  // with natural micro-gaps never satisfies voiceActive's own strict
+  // "consecutive frames, resets on ANY gap" rule, so it stayed in the
+  // (unlatched) delay line the whole time. Fixed: a raw voiced frame latches
+  // PROVISIONALLY at once (zero onset lag, matching the very first, pre-C1
+  // design), and confirms on a COUNT of voiced frames within a window --
+  // which gaps do not reset. Proven here with speech broken into four 80 ms
+  // runs (320 ms of real voice, over CLIP_CONFIRM_VOICED_FRAMES) separated
+  // by 40 ms gaps -- no single run ever reaches voiceActive's own 200 ms
+  // activeMs, so the OLD mechanism would never have confirmed this at all.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 2, NB2: gappy in-clip speech (no run reaching activeMs) still confirms and stays held, not leaked", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+    const beforeHold = call.live.sent.audioIn.length;
+
+    // Four 80 ms voiced runs / 40 ms gaps: 320 ms of real voice, but no
+    // single unbroken run ever reaches 200 ms (activeMs).
+    for (let i = 0; i < 4; i++) {
+      await call.feed(80, { voiced: true });
+      if (i < 3) await call.feed(40);
+    }
+    // Held whole: nothing of this gappy speech reached Live while the clip
+    // still plays -- proof the count-based confirm (not voiceActive) caught
+    // it, well within CLIP_CONFIRM_WINDOW_MS.
+    expect(call.live.sent.audioIn.length).toBe(beforeHold);
+
+    // The clip finishes; the seed goes now. The held speech reaches Live
+    // only after it, never before (C1's own invariant, still intact).
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeHold);
+    await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 2 (opus re-review). NB3: droppedSinceTurnText survived
+  // the stale-discard timeout (the abandoned generation never reports
+  // turnComplete/interrupted, so onAssistantTurnText -- the only place that
+  // clears it -- never runs for it), silently poisoning the NEXT
+  // generation's own `heard` read. Real Gemini sims hit the timeout on 3 of
+  // 23 calls. Fixed: checkStaleDiscardTimeout clears the flag itself.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 2, NB3: the discarded generation never reports its end, and the next heard reply's rows and guards still work", async () => {
+    // live_offer_unverified is expected to fire, legitimately, for the
+    // second (heard) turn -- that IS this test's own point.
+    allowErrors("outbound_stale_discard_timeout", "live_offer_unverified");
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+
+    // A generation opens (audio discarded) and NEVER closes -- no
+    // turnComplete, no interrupted, ever, for this one.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // seed sent; staleDiscardDeadline armed
+
+    // Past staleGenerationGraceMs (2,000 ms) with no media frame in between,
+    // so tick() -- not onModelAudio -- is what fires the timeout on the next
+    // ordinary frame, same shape as the N1 fix test above.
+    await call.starve(2100);
+    await call.feed(20); // fires checkStaleDiscardTimeout via tick()
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+
+    // The NEXT generation: genuinely heard (nothing discarded for it --
+    // clipPlaying and staleDiscard are both false by now).
+    await call.assistantSays("We have a slot available on Monday at 9 AM.");
+    await call.turnEnds();
+
+    // Its guard fired -- droppedSinceTurnText did not silently carry over
+    // from the abandoned generation.
+    expect(events("live_offer_unverified")).toHaveLength(1);
+    // Its AI row was written -- heard read true for this turn.
+    // Filtered to THIS turn's own text: the seed callback also legitimately
+    // writes an "ai" row (the disclosure record, unrelated to NB3) when the
+    // mark fires a few lines up, so the raw ai-row count is 2, correctly.
+    const offerRows = database.addTranscriptEntry.mock.calls.filter(
+      ([, speaker, message]) => speaker === "ai" && message === "We have a slot available on Monday at 9 AM."
+    );
+    expect(offerRows).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 2 (opus re-review). I2 residual (out-of-scope in the
+  // first review, same class through a sink it did not cite): auditTurn()
+  // -- the claim ledger, the promise-only-turn guard, the sign-off exit
+  // arming -- still consumed unheard stale text. Fixed with the reviewer's
+  // own suggested line: `if (heardThisTurn) auditTurn();`.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 2, I2 residual: a discarded stale generation never trips auditTurn()'s own guards (live_promise_only_turn)", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    // The reviewer's own R11 phrase: matches promisedAction/S.promiseRe.
+    await call.assistantSays("One moment, let me check that for you.");
+    await call.turnEnds();
+
+    expect(events("live_promise_only_turn")).toHaveLength(0);
     await call.hangUp();
   });
 });
