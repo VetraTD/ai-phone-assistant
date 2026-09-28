@@ -1438,7 +1438,7 @@ CREATE TABLE IF NOT EXISTS outreach (
   last_attempt_at  timestamptz,
   hold_until       timestamptz,
   outcome          text,
-  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid')),
+  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal')),
   trigger          jsonb NOT NULL DEFAULT '{}'::jsonb,
   idempotency_key  text NOT NULL,
   created_at       timestamptz NOT NULL DEFAULT now(),

@@ -131,6 +131,50 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
     expect(await attemptRows(id)).toEqual([]);
   });
 
+  // S3-6 fix round 1 (Critical, review finding 2026-09-28): named risk 5's
+  // dispatch-time refusal (lib/outbound/dispatch.js) writes close_reason
+  // 'missing_goal' -- fakeDb's unconstrained vi.fn() let that ship without
+  // ever checking the DATABASE's own CHECK on outreach.close_reason actually
+  // allows the value. Real Postgres, real services/db.js: this is the wire
+  // test fakeDb could not be.
+  it("S3-6 fix round 1: a campaign version with no goal refuses cleanly against REAL Postgres -- outreach closes with close_reason missing_goal, no attempt written, no throw", async () => {
+    const noGoalCfg = {
+      ...structuredClone(TEMPLATES.speed_to_lead),
+      caller_id: "+441372656055",
+      calling_window: { mon_fri: "08:00-21:00", sat: "08:00-21:00", sun: "08:00-21:00", outside_window: "queue" },
+    };
+    delete noGoalCfg.goal; // the pre-S3-6 shape: a stored campaign_versions row saved before `goal` existed
+    const phone = "+447700900410";
+    const c = await admin.query(
+      `INSERT INTO campaigns (business_id,name,template_key,compliance_class,audience,status,current_version)
+       VALUES ($1,'no-goal-1','speed_to_lead','solicited','business','active',1) RETURNING id`,
+      [BIZ]
+    );
+    await admin.query(`INSERT INTO campaign_versions (campaign_id,business_id,version,config) VALUES ($1,$2,1,$3)`, [c.rows[0].id, BIZ, noGoalCfg]);
+    const k = await admin.query(`INSERT INTO contacts (business_id, phone_e164, first_name) VALUES ($1,$2,'Sam') RETURNING id`, [BIZ, phone]);
+    await admin.query(
+      `INSERT INTO consents (business_id,contact_id,purpose,channels,covers_automated,source,captured_at)
+       VALUES ($1,$2,'enquiry_followup','{call}',true,'manual',now())`,
+      [BIZ, k.rows[0].id]
+    );
+    const o = await admin.query(
+      `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key,next_attempt_at)
+       VALUES ($1,$2,1,$3,'waiting','{}','no-goal-1',$4) RETURNING id`,
+      [BIZ, c.rows[0].id, k.rows[0].id, DUE]
+    );
+    const id = o.rows[0].id;
+
+    const create = vi.fn();
+    const r = await dispatcher(create)({ businessId: BIZ, outreachId: id }); // must not throw (the crash the CHECK constraint gap caused)
+    expect(r).toEqual({ status: "closed", reason: "missing_goal" });
+    expect(create).not.toHaveBeenCalled();
+
+    const row = await outreachRow(id);
+    expect(row).toMatchObject({ state: "closed", close_reason: "missing_goal", attempts_made: 0 });
+    expect(row.closed_at).toBeInstanceOf(Date);
+    expect(await attemptRows(id)).toEqual([]);
+  });
+
   it("a paused campaign parks the outreach: still waiting, next_attempt_at NULL", async () => {
     const { outreachId: id } = await seed("paused-1", PHONES.paused, { campaignStatus: "paused" });
     expect(await dispatcher(vi.fn())({ businessId: BIZ, outreachId: id })).toMatchObject({ status: "later", reason: "campaign_paused" });
