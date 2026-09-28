@@ -17,6 +17,7 @@
  *     usageMetadata arrived before turnComplete.
  */
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 vi.mock("../lib/logger.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -50,12 +51,13 @@ import {
   markMediaTickerEnd,
   pacingCheck,
   PACING_MIN_RATIO,
+  HELLO_MS_DEFAULT,
 } from "../lib/probe/outboundHarness.js";
 import { OUTBOUND_SITUATION_SCRIPTS, resolveScriptLines } from "../lib/probe/script.js";
 import { createDispatcher } from "../lib/outbound/dispatch.js";
 import { renderLines } from "../lib/outbound/liveRender.js";
 import { TEMPLATES } from "../lib/outbound/templates.js";
-import { FIRST_AUDIO_MARK, BACKSTOP_END_MARK } from "../lib/outbound/firstSeconds.js";
+import { FIRST_AUDIO_MARK, BACKSTOP_END_MARK, FIRST_SECONDS_DEFAULTS } from "../lib/outbound/firstSeconds.js";
 import { computeAttemptAt } from "../lib/outbound/schedule.js";
 import { priceTokens } from "../scripts/probes/lib/spendLive.js";
 
@@ -823,6 +825,56 @@ describe("S3-5: outbound situation scripts", () => {
     });
   });
 
+  // ---------------------------------------------------------------------
+  // TRIAGE ROUND 2, Important finding (a): round 1's plain wordOverlap did
+  // no stopword filtering, so a caller line built mostly of common words
+  // (outbound_robot's last line, "Are you a robot?" -> ["are","you","a",
+  // "robot"]) could be matched by ANY earlier turn merely sharing "are" +
+  // "you" -- turning a TRUNCATED call (the robot question never actually
+  // asked or heard) into a false turns_reached PASS. The fixture below is
+  // built from the real live_debug_assistant_turn SHAPE (text/user_text
+  // pairs, exactly what parseServerLog/serverViewFromEvents produce from
+  // the real log across all 24 S3-5 paid runs) with a CONSTRUCTED user_text
+  // chosen to demonstrate the named coincidence (no real run happened to
+  // produce this exact ASR artifact; the field shape is real, this specific
+  // string is a plausible one per the review's own example).
+  // ---------------------------------------------------------------------
+  describe("triage round 2: stopword filtering closes the coincidental-match false PASS", () => {
+    it("FAILS turns_reached on a truncated outbound_robot call, even though an EARLIER turn's user_text coincidentally contains \"are\" + \"you\"", () => {
+      // Only ONE real turn exists at all -- a reply to "Hello?" -- and the
+      // call ended there. "Are you a robot?" was never asked or heard. The
+      // turn's OWN user_text (what the ASR heard the caller say) happens to
+      // contain "are" and "you" -- exactly the review's named coincidence.
+      const truncated = [turn("Hi there, is that Sam?", "Are you there? Hello?")];
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: truncated }), db: dbFor({}) });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Are you a robot?" });
+      expect(v.pass).toBe(false);
+      // The same coincidence must not let ai_disclosure_after_question read
+      // a stray "afterLast" starting at the wrong turn either.
+      expect(v.criteria.ai_disclosure_after_question.result).not.toBe("PASS");
+    });
+
+    it("still PASSES on the real, correctly-behaving outbound_robot-1 transcript (no regression)", () => {
+      const real = [
+        turn("Is that Sam?Is that Sam?", "Hello?"),
+        turn("Yes, I'm an AI assistant calling on behalf of Harness Test Clinic. Am I speaking to Sam?And am I speaking to Sam?", "Are you a robot?"),
+      ];
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: real }), db: dbFor({}) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      expect(v.criteria.ai_disclosure_after_question.result).toBe("PASS");
+    });
+
+    it("a coincidental match on an UNRELATED earlier turn also fails for outbound_gatekeeper_fetch (\"Hi, this is Sam.\" shares only stopwords with an early aside)", () => {
+      // "Hi, this is Sam." -> significant word after filtering: only "sam".
+      // An early turn merely containing "hi"/"this"/"is" (all stopwords)
+      // must not be mistaken for the reply to the last line.
+      const truncated = [turn("Understood, one moment please.", "Hi, is this the right number?")];
+      const v = verdictFor("outbound_gatekeeper_fetch", { server: serverFor({ assistantTurns: truncated }), db: dbFor({}) });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Hi, this is Sam." });
+      expect(v.pass).toBe(false);
+    });
+  });
+
   function dbFor({ outcome_code = null, summary = null, answers = null, silent = false, suppression = null, outreach = null } = {}) {
     return {
       calls: { direction: "outbound", outcome_code, summary, answers },
@@ -1307,6 +1359,35 @@ describe("S3-5: outbound situation scripts", () => {
 
   it("an unknown situation name throws rather than silently running no criteria", () => {
     expect(() => verdictFor("outbound_not_a_real_script", { server: serverFor({}), db: dbFor({}) })).toThrow(/unknown situation/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TRIAGE ROUND 2, Important finding (b): --hello-ms's old default (1870ms,
+// scripts/live-call-harness.js) landed AFTER S3-2's own silence deadline
+// (FIRST_SECONDS_DEFAULTS.silenceBackstopMs, measured ~1750-1800ms from
+// answer on all 24 real S3-5 paid runs) -- every speaks-first run produced
+// backstop_silence regardless of --hello-ms, never hello_end/slow. Pins the
+// new default safely below the CURRENT S3-2 constant, not a hardcoded
+// number, so a future change to silenceBackstopMs is what this test (and
+// HELLO_MS_DEFAULT's own module-load guard) would catch, not silence.
+// ---------------------------------------------------------------------------
+describe("triage round 2: HELLO_MS_DEFAULT stays below the silence deadline", () => {
+  it("HELLO_MS_DEFAULT is comfortably below FIRST_SECONDS_DEFAULTS.silenceBackstopMs", () => {
+    expect(HELLO_MS_DEFAULT).toBeLessThan(FIRST_SECONDS_DEFAULTS.silenceBackstopMs);
+    // "Comfortably" -- some real margin, not just technically under it (a
+    // 1-ms margin would still trip on this machine's own measured timer
+    // jitter, H3).
+    expect(FIRST_SECONDS_DEFAULTS.silenceBackstopMs - HELLO_MS_DEFAULT).toBeGreaterThanOrEqual(500);
+  });
+
+  it("is the value scripts/live-call-harness.js actually uses when --hello-ms is not passed", () => {
+    // Regression guard against the exact trap the review found: the CLI's
+    // own string default must be built from this constant, not a literal
+    // "1870" (or any other magic number) re-typed in that file.
+    const harnessSource = readFileSync("scripts/live-call-harness.js", "utf8");
+    expect(harnessSource).toMatch(/opt\("hello-ms",\s*String\(HELLO_MS_DEFAULT\)\)/);
+    expect(harnessSource).not.toMatch(/opt\("hello-ms",\s*"1870"\)/);
   });
 });
 

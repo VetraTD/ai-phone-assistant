@@ -149,8 +149,14 @@
  *                      (default 900 ms), the same turn-taking --script uses inbound.
  *                      Synthesise once: --synth --script <name>
  *   --hello-ms <ms>    when the person says their FIRST line, from the simulated answer
- *                      (default 1870, the owner's measured value). With no --script the
- *                      audio is the outbound_hello script: --synth --script outbound_hello
+ *                      (default HELLO_MS_DEFAULT -- 1100, lib/probe/outboundHarness.js.
+ *                      CHANGED from 1870 (S3-5 triage round 2, Important finding (b)):
+ *                      1870 lands AFTER S3-2's own silence deadline (~1750ms, measured on
+ *                      all 24 real paid runs), so it always produced backstop_silence,
+ *                      never hello_end/slow -- the "owner's measured value" was measured
+ *                      on real phone calls before that deadline was tightened, and now
+ *                      postdates it on every run). With no --script the audio is the
+ *                      outbound_hello script: --synth --script outbound_hello
  *   --answer-to-stream-ms <ms>  when the stream `start` is sent after the answer
  *                      (default 330: spike B measured 319-334 ms on real calls;
  *                      a local server would otherwise start the stream ~90 ms
@@ -196,6 +202,7 @@ import {
   startMediaTicker,
   markMediaTickerEnd,
   pacingCheck,
+  HELLO_MS_DEFAULT,
 } from "../lib/probe/outboundHarness.js";
 import * as spendLive from "./probes/lib/spendLive.js";
 import {
@@ -290,7 +297,7 @@ const P1_PROBE = opt("p1-probe", "");
 // --outbound only.
 const OUTBOUND = flag("outbound");
 const OUTBOUND_SILENT = flag("silent");
-const HELLO_MS = Number.parseInt(opt("hello-ms", "1870"), 10);
+const HELLO_MS = Number.parseInt(opt("hello-ms", String(HELLO_MS_DEFAULT)), 10);
 /**
  * When Twilio's stream `start` arrives after the answer. Spike B measured
  * 319-334 ms on real calls, and the product's silence deadline assumes it
