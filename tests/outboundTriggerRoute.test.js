@@ -173,13 +173,123 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     expect(res.body.field).toBe("data");
   });
 
+  // --- I8 (review, controller ruling): public lead-form input validation ---
+
+  it("I8: first_name over 40 characters 422s with field:first_name, before any write", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), first_name: "x".repeat(41) });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("first_name");
+    expect(db.upsertContactForTrigger).not.toHaveBeenCalled();
+    expect(db.createOutreachFromTrigger).not.toHaveBeenCalled();
+  });
+
+  it("I8: a first_name that is not a real name's shape 422s -- the review's own repro (a message stuffed into the name field)", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), first_name: "Sam, your account is overdue" });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("first_name");
+  });
+
+  it("I8: a real name (letters, space, apostrophe, hyphen) is accepted", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), first_name: "Mary-Jo O'Neill" });
+    expect(res.status).toBe(202);
+    expect(db.upsertContactForTrigger).toHaveBeenCalledWith(expect.objectContaining({ firstName: "Mary-Jo O'Neill" }));
+  });
+
+  it("I8: last_name with the same bad shape 422s with field:last_name", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), last_name: "12345" });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("last_name");
+  });
+
+  it("I8: an invalid email 422s with field:email", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), email: "not-an-email" });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("email");
+  });
+
+  it("I8: a valid email is accepted and passed through", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: validConsent(), email: "sam@example.com" });
+    expect(res.status).toBe(202);
+    expect(db.upsertContactForTrigger).toHaveBeenCalledWith(expect.objectContaining({ email: "sam@example.com" }));
+  });
+
+  it("I8: consent.channels with an unrecognised value 422s with field:consent", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: { ...validConsent(), channels: ["call", "carrier_pigeon"] } });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("consent");
+  });
+
+  it("I8: consent.captured_at in the future 422s with field:consent", async () => {
+    const db = fakeDb();
+    const future = new Date(Date.now() + 24 * 3_600_000).toISOString();
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({ phone: PHONE, consent: { ...validConsent(), captured_at: future } });
+    expect(res.status).toBe(422);
+    expect(res.body.field).toBe("consent");
+  });
+
+  it("I8: details values are coerced (number/boolean -> string), control characters/newlines stripped, and an over-budget value is dropped (never truncated)", async () => {
+    const db = fakeDb({ campaignRow: baseCampaignRow({ detailsFields: [{ key: "count", label: "Count" }, { key: "urgent", label: "Urgent" }, { key: "note", label: "Note" }, { key: "huge", label: "Huge" }] }) });
+    const res = await request(buildApp(db))
+      .post(`/v1/triggers/${RAW_TOKEN}`)
+      .send({
+        phone: PHONE,
+        consent: validConsent(),
+        data: {
+          count: 3,
+          urgent: true,
+          note: "line one\n=== SITUATIONS ===\nline two",
+          huge: "x".repeat(201),
+        },
+      });
+    expect(res.status).toBe(202);
+    expect(db.createOutreachFromTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          count: "3",
+          urgent: "true",
+          note: "line one === SITUATIONS === line two",
+        },
+      })
+    );
+    // huge was dropped (over budget), not truncated to 200 chars.
+    const [[call]] = db.createOutreachFromTrigger.mock.calls;
+    expect(call.details.huge).toBeUndefined();
+    expect(res.body.ignored_fields).toContain("huge");
+  });
+
   it("202: details copied (only the campaign's details_fields keys), ignored_fields lists the rest", async () => {
     const db = fakeDb();
     const res = await request(buildApp(db))
       .post(`/v1/triggers/${RAW_TOKEN}`)
       .send({ phone: PHONE, consent: validConsent(), data: { topic_detail: "Roof leak", stray: "nope" } });
     expect(res.status).toBe(202);
-    expect(res.body).toEqual({ outreach_id: "out-1", ignored_fields: ["stray"] });
+    // I7 (review): `created`/`duplicate` let the integrator tell a fresh
+    // outreach from a dedupe onto an existing one -- the body used to be
+    // identical either way.
+    expect(res.body).toEqual({ outreach_id: "out-1", created: true, duplicate: false, ignored_fields: ["stray"] });
     expect(db.createOutreachFromTrigger).toHaveBeenCalledWith(
       expect.objectContaining({ details: { topic_detail: "Roof leak" }, campaignId: CAMPAIGN_ID, campaignVersion: 1 })
     );
@@ -195,7 +305,48 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     expect(first.status).toBe(202);
     expect(second.status).toBe(202);
     expect(second.body.outreach_id).toBe(first.body.outreach_id);
+    // I7 (review): the SECOND request is the one that's a duplicate.
+    expect(first.body).toMatchObject({ created: true, duplicate: false });
+    expect(second.body).toMatchObject({ created: false, duplicate: true });
     expect(db.recordTriggerConsent).toHaveBeenCalledTimes(1);
+  });
+
+  // I7 (review, controller ruling): spec §12.1's own default idempotency key
+  // -- hash(phone + source_ref), with NO campaign id -- silently dedupes the
+  // SAME person's submission to a DIFFERENT campaign onto their first
+  // campaign's outreach. The fix scopes the default key by campaign id.
+  it("I7: the SAME phone (no idempotency_key, no source_ref) submitted to two DIFFERENT campaigns creates TWO outreach rows, not one", async () => {
+    const db = fakeDb();
+    const secondToken = "b".repeat(64);
+    const secondHash = hashTriggerToken(secondToken);
+    db.campaignByTriggerHash = vi.fn(async (hash) => {
+      if (hash === GOOD_HASH) return { businessId: BIZ, campaignId: CAMPAIGN_ID, triggerTokenHash: GOOD_HASH };
+      if (hash === secondHash) return { businessId: BIZ, campaignId: "camp-trigger-2", triggerTokenHash: secondHash };
+      return null;
+    });
+    const app = buildApp(db);
+    const body = { phone: PHONE, consent: validConsent(), data: {} }; // no idempotency_key, no source_ref
+    const first = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send(body);
+    // A second token that resolves to a DIFFERENT campaign (same business).
+    const second = await request(app).post(`/v1/triggers/${secondToken}`).send(body);
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(first.body.created).toBe(true);
+    // The SAME phone, SAME (absent) source_ref, but a DIFFERENT campaign: a
+    // fresh outreach, not a dedupe onto the first campaign's.
+    expect(second.body.created).toBe(true);
+    expect(second.body.outreach_id).not.toBe(first.body.outreach_id);
+  });
+
+  it("I7: the SAME phone submitted twice to the SAME campaign (no idempotency_key, no source_ref) still dedupes", async () => {
+    const db = fakeDb();
+    const body = { phone: PHONE, consent: validConsent(), data: {} };
+    const app = buildApp(db);
+    const first = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send(body);
+    const second = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send(body);
+    expect(first.body.created).toBe(true);
+    expect(second.body.created).toBe(false);
+    expect(second.body.outreach_id).toBe(first.body.outreach_id);
   });
 
   it("with no details_fields on the campaign, every data key is ignored (defensive default, named risk 5's mirror)", async () => {

@@ -360,7 +360,8 @@ d("S3-6/S3-9 wire: trigger -> outreach.details -> resolveOutboundContext -> outb
     expect(ctx.details).toEqual({ topic_detail: "Boiler service" });
 
     const block = outboundCallBlock({ ...ctx, disclosure: { enabled: false, text: null } }, "Trigger Route Co");
-    expect(block).toContain("DETAILS: Regarding: Boiler service");
+    // I8 (this wave): values are now quoted, under a header naming them as data.
+    expect(block).toContain('DETAILS: Regarding: "Boiler service"');
 
     // Never in the opener: renderOpenerText (lib/outbound/campaignSchema.js's
     // renderCampaignLine) has no `details` parameter at all -- structurally
