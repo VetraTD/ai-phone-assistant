@@ -137,6 +137,66 @@ function modelAudioMsg(ms = 200) {
   return { serverContent: { modelTurn: { parts: [{ inlineData: { data: buf.toString("base64") } }] } } };
 }
 
+// ---------------------------------------------------------------------------
+// F-R2 (half-2 controller analysis). A minimal model of Gemini Live's OWN
+// server-side VAD/end-of-turn detection, for the "the stale hello's reply
+// escapes the clip discard" tests below. It decides a turn is over, and
+// replies, only once it has RECEIVED -- via the REAL sendRealtimeInput call
+// index.js makes, never a test-driven push -- at least LIVE_VAD_SILENCE_MS
+// of TRAILING non-voiced audio since the last voiced chunk. This is the one
+// thing every existing test in this file does NOT model: they all push
+// modelAudioMsg() at a moment the TEST chooses, decoupled from what audio
+// Live actually received, which is exactly why none of them could catch
+// F-R2 (Live's reply to the hello is driven by what reaches its own ASR/VAD,
+// not by test timing).
+// ---------------------------------------------------------------------------
+const LIVE_VAD_SILENCE_MS = 700;
+
+/** Decode one sendAudio chunk (PCM16 LE, 16 kHz -- sendAudio's own encoding) to a peak amplitude. */
+function pcmPeak(base64) {
+  const buf = Buffer.from(base64, "base64");
+  let peak = 0;
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    const v = Math.abs(buf.readInt16LE(i));
+    if (v > peak) peak = v;
+  }
+  return peak;
+}
+
+/**
+ * Arms `call.live` to behave like Live's own server-side VAD. Reads ONLY
+ * `call.live.sent.audioIn` (every real sendRealtimeInput({audio}) call, in
+ * order -- see fakeLive()'s own doc comment in tests/helpers/liveBoot.js),
+ * never the test's own {voiced} intent -- the whole point is to prove what
+ * lib/voice/live/index.js's hold/delay-line/gate routing ACTUALLY delivered.
+ *
+ * The synthesized reply fires on a LATER tick (setImmediate), deliberately
+ * never reentrant in the same call stack as the audio that crossed the
+ * threshold: a real network round trip is never synchronous with the send
+ * that triggers it, and a same-stack push would, by chance, dodge the exact
+ * race this test exists to reproduce -- firstSeconds.js's own C1
+ * refreshStaleSnapshot (the seed callback) re-checks `generationOpen` at the
+ * instant the seed callback RETURNS, not before, so a reentrant push from
+ * inside that same callback would win a race a real (asynchronous) vendor
+ * reply cannot win.
+ */
+function armServerVadReply(call, { silenceMs = LIVE_VAD_SILENCE_MS, msg = () => modelAudioMsg() } = {}) {
+  let trailingSilenceMs = 0;
+  let fired = false;
+  const audioIn = call.live.sent.audioIn;
+  const realPush = audioIn.push.bind(audioIn);
+  audioIn.push = (audio) => {
+    realPush(audio);
+    if (fired) return;
+    const voiced = pcmPeak(audio.data) > 4000; // VOICED_FRAME decodes to ~32124; SILENCE_FRAME to 0
+    trailingSilenceMs = voiced ? 0 : trailingSilenceMs + 20; // one 20 ms mu-law frame per chunk
+    if (trailingSilenceMs >= silenceMs) {
+      fired = true;
+      setImmediate(() => call.live.push(msg()));
+    }
+  };
+}
+
 const KICK = {
   turns: [{ role: "user", parts: [{ text: "(The caller has just connected. Open the call now.)" }] }],
   turnComplete: true,
@@ -926,6 +986,65 @@ describe("outbound: the first seconds through the real session", () => {
     await call.feed(400); // the hello ends; the clip still plays via the hello-end timer
     expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
     await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 (half-2 controller analysis, superseding the investigation's "6 s
+  // dead air" reading). Round-1's D1 double-talk/re-ask is back, reintroduced
+  // by checkpoint-A's clip hold, through a different door: the hold withholds
+  // the caller's TRAILING SILENCE after a hello, not just their speech, so
+  // Live's OWN end-of-turn VAD for the hello never fires DURING the clip --
+  // only once the whole hold releases in one synchronous burst at the seed,
+  // by which point the local stale-discard state has already lifted
+  // (nothing was ever `generationOpen` for refreshStaleSnapshot to catch).
+  // Live's reply to the STALE hello then reaches the caller right after the
+  // clip, on top of them already answering it.
+  // -------------------------------------------------------------------
+  it("F-R2: Live's reply to the STALE hello never reaches the Twilio side after the clip", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    armServerVadReply(call);
+
+    await call.feed(400, { voiced: true }); // a hello; onset confirmed
+    await call.feed(400); // the hello ends; the clip queues via the hello-end timer (deferred seed, O-8)
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO); // the clip is playing
+    expect(call.live.sent.clientContent).toEqual([]); // not seeded yet
+
+    // The caller says nothing more: 1 s of silence while the clip plays --
+    // comfortably inside clipPlayingUntil (clip length 1,000 ms + markGraceMs
+    // 1,500 ms = 2,500 ms from fire).
+    await call.feed(1000);
+
+    // The clip finishes; the seed goes now (O-8's own end-mark timing).
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20); // let the deferred (setImmediate) reply, if any, settle
+    await call.settle();
+
+    // Live's reply to the STALE "Hello?" must never reach the caller: only
+    // the clip's own single enqueue call, nothing after it.
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    await call.hangUp();
+  });
+
+  // Invariant 4 (F-R2): the shadow line must measure again on a hello-end
+  // call -- spec S3-D2's "logged on every call", currently dead (the
+  // investigation's own finding) because the hold prevents Live from ever
+  // generating DURING the window logShadow measures.
+  it("F-R2 invariant 4: a hello-end call logs a real outbound_live_shadow.from_speech_ms, not null", async () => {
+    const call = await bootOutbound();
+    armServerVadReply(call);
+
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+    await call.feed(1000); // the caller says nothing more while the clip plays
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    await call.settle();
+    await call.hangUp(); // onSessionEnd() -> logShadow()
+
+    const shadow = events("outbound_live_shadow");
+    expect(shadow).toHaveLength(1);
+    expect(shadow[0].from_speech_ms).not.toBeNull();
   });
 });
 
