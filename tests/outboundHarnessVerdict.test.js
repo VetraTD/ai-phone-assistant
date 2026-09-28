@@ -748,12 +748,79 @@ describe("S3-5: outbound situation scripts", () => {
   const TOPIC = TEMPLATES.speed_to_lead.topic; // "our clinic systems"
   const NOW = new Date("2026-09-28T13:00:00Z");
   const TZ = "Europe/London";
-  const t = (text) => ({ text });
+  /** A real assistant turn: `text` is what Ava said, `user_text` is the ASR's transcript of what the caller said (null on a filler turn -- the model heard nothing new). */
+  const turn = (text, userText = null) => ({ text, user_text: userText });
 
   /** The 8 names really are the ones lib/probe/script.js registers. */
   it("OUTBOUND_SITUATION_SCRIPTS names 8 scripts, each with the caller lines a situation criterion assumes", () => {
     expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(8);
     for (const name of OUTBOUND_SITUATION_SCRIPTS) expect(resolveScriptLines(name).length).toBeGreaterThan(0);
+  });
+
+  // ---------------------------------------------------------------------
+  // TRIAGE ROUND 1 (sims-report.md sections 2 & 4, 24 real paid runs):
+  // `assistantTurns[0]` is NEVER the pre-rendered opener clip -- the clip is
+  // a static-asset playback (`outbound_backstop_played`/`outbound_first_
+  // audio`), never a `live_debug_assistant_turn`. Turns are associated with
+  // the caller line they answer by CONTENT (`user_text`, word-overlap
+  // against the script's own known text), never by array index. A memory: a
+  // test proves a wire only if both ends are real -- the raw text below is
+  // copied verbatim from `.superpowers/sdd/2026-09-27-outbound-stage3/
+  // harness-server.log` for the real call `outbound_gatekeeper_fetch-1`
+  // (CAharness1a0e5fefa6252422017), including the backstop's own log lines,
+  // so this proves the WHOLE path -- raw log text -> parseServerLog ->
+  // outboundVerdict -- not just a hand-built fixture shaped like one.
+  // ---------------------------------------------------------------------
+  describe("triage round 1: turn association is by content, not by index", () => {
+    const REAL_CALL_SID = "CAharness1a0e5fefa6252422017";
+    const RAW_LOG = [
+      '{"message":"outbound_backstop_played [52422017]","ts":"2026-09-28T03:11:44.368Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e5fefa6252422017","attemptId":"2c9cc040-db78-424b-b6c4-c486fe88b63e","path":"backstop_silence","source":"stored","seed":"at_fire"}',
+      '{"message":"outbound_first_audio [52422017]","ts":"2026-09-28T03:11:44.384Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e5fefa6252422017","attemptId":"2c9cc040-db78-424b-b6c4-c486fe88b63e","from_answer_ms":1771,"from_speech_ms":null,"path":"backstop_silence","measured":"playout"}',
+      '{"message":"live_debug_assistant_turn [52422017]","ts":"2026-09-28T03:11:55.612Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e5fefa6252422017","step":"identify_intent","debug_only":true,"text":"Thank you.","user_text":"One moment."}',
+      '{"message":"live_debug_assistant_turn [52422017]","ts":"2026-09-28T03:12:06.345Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e5fefa6252422017","step":"identify_intent","debug_only":true,"text":"I\'m calling to book a thirty-minute discovery call regarding our clinic systems. What day or time works best for you?","user_text":"Hi, this is Sam."}',
+      '{"message":"live_call_summary [52422017]","ts":"2026-09-28T03:12:10.000Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e5fefa6252422017","end_call_refusals":{"hesitation":0,"generic":0,"no_ask":0},"usage":{"text_in":100,"audio_in":100,"text_out":0,"audio_out":100,"cached_in":0,"turns_billed":2}}',
+    ].join("\n");
+
+    it("parses the REAL log text into assistantTurns with NO phantom opener entry (the clip is never a live_debug_assistant_turn)", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: REAL_CALL_SID });
+      expect(view.assistantTurns).toEqual([
+        { text: "Thank you.", user_text: "One moment." },
+        {
+          text: "I'm calling to book a thirty-minute discovery call regarding our clinic systems. What day or time works best for you?",
+          user_text: "Hi, this is Sam.",
+        },
+      ]);
+      expect(view.firstAudio).toMatchObject({ path: "backstop_silence" });
+    });
+
+    it("end to end (real log text -> parseServerLog -> outboundVerdict): turns_reached and identity_confirmed_at_last_line both PASS on a real, correctly-behaving call", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: REAL_CALL_SID });
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_gatekeeper_fetch",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server: view,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
+      });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      expect(v.criteria.identity_confirmed_at_last_line).toMatchObject({
+        result: "PASS",
+        leaked_before_last_line: false,
+        topic_reached_after_last_line: true,
+      });
+    });
+
+    // The exact failure mode sims-report.md finding A documented: under the
+    // OLD index-based code (`turns.length >= linesCount + 1` = 4 for this
+    // 3-line script), this real, correctly-behaving 2-turn call read FAIL.
+    it("would have FAILED turns_reached under the old linesCount+1 assumption -- proving the old code, not this call, was wrong", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: REAL_CALL_SID });
+      const oldWayExpected = resolveScriptLines("outbound_gatekeeper_fetch").length + 1; // 4
+      expect(view.assistantTurns.length).toBeLessThan(oldWayExpected); // 2 < 4: the old check would have failed this clean call
+    });
   });
 
   function dbFor({ outcome_code = null, summary = null, silent = false, suppression = null, outreach = null } = {}) {
@@ -811,11 +878,16 @@ describe("S3-5: outbound situation scripts", () => {
   });
 
   describe("outbound_stop", () => {
-    const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Hello, how can I help?"), t("Understood, I won't call you again. Goodbye.")];
-    const server = serverFor({ assistantTurns: turns });
+    // REAL data, outbound_stop-1 (harness-server.log): 2 caller lines
+    // ("Hello?" / "Please stop calling me."), exactly ONE real assistant
+    // turn -- the model never replied between the two lines, so its one
+    // turn answers the LAST line directly. A real, fully successful call
+    // (every db/tool criterion passed on all 3 real runs).
+    const realTurns = [turn("Of course — we won't call you again.", "Please stop calling me.")];
+    const server = serverFor({ assistantTurns: realTurns });
     const db = dbFor({ outcome_code: "opted_out", suppression: { reason: "opted_out", created_by: "tool" } });
 
-    it("clean: PASS on every criterion", () => {
+    it("clean (real data): PASS on every criterion, despite only ONE real turn for a 2-line script", () => {
       const v = verdictFor("outbound_stop", { server, db });
       expect(Object.fromEntries(Object.entries(v.criteria).map(([k, c]) => [k, c.result]))).toEqual({
         turns_reached: "PASS",
@@ -832,6 +904,22 @@ describe("S3-5: outbound situation scripts", () => {
         post_call_exactly_once: "PASS",
       });
       expect(v.pass).toBe(true);
+    });
+
+    it("turns_reached FAILS when no turn's user_text ever reflects the last caller line (memory negative-counters-cannot-confirm)", () => {
+      // Real filler shape (outbound_wrong_number-1's own trailing turns,
+      // user_text null on both): the call produced turns, but none of them
+      // are a reply to anything the caller said -- exactly what a truncated
+      // or stalled call looks like in this log.
+      const neverReplied = [turn("Are you still there?"), turn("...")];
+      const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: neverReplied }), db });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 2, last_line: "Please stop calling me." });
+      expect(v.pass).toBe(false);
+    });
+
+    it("turns_reached FAILS on zero turns", () => {
+      const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: [] }), db });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 0 });
     });
 
     it("FAILS when there is no opted_out/tool suppression row", () => {
@@ -851,31 +939,43 @@ describe("S3-5: outbound situation scripts", () => {
   });
 
   describe("outbound_gatekeeper_fetch", () => {
+    // REAL data, outbound_gatekeeper_fetch-1 (also exercised end-to-end from
+    // raw log text above). 3 caller lines ("Reception?" / "One moment." /
+    // "Hi, this is Sam."), 2 real turns.
     const cleanTurns = [
-      t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."),
-      t("I'm calling for Sam -- is he available?"),
-      t("No problem, I'll wait."),
-      t("Great, thanks Sam. I'm calling about our clinic systems -- do you have a moment?"),
+      turn("Thank you.", "One moment."),
+      turn(
+        "I'm calling to book a thirty-minute discovery call regarding our clinic systems. What day or time works best for you?",
+        "Hi, this is Sam."
+      ),
     ];
     const db = dbFor({});
 
-    it("clean: identity confirmed only at the last line, nothing leaked before it", () => {
+    it("clean (real data): identity confirmed only at the last line, nothing leaked before it", () => {
       const v = verdictFor("outbound_gatekeeper_fetch", { server: serverFor({ assistantTurns: cleanTurns }), db });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.topic_to_unverified_zero.result).toBe("PASS");
       expect(v.criteria.identity_confirmed_at_last_line).toMatchObject({ result: "PASS", leaked_before_last_line: false, topic_reached_after_last_line: true });
     });
 
     it("FAILS when the topic is discussed before the last line (confirm_identity(true) too early)", () => {
-      const leaky = [cleanTurns[0], t("I'm calling about our clinic systems -- is Sam free?"), cleanTurns[2], cleanTurns[3]];
+      const leaky = [turn("I'm calling about our clinic systems -- is Sam free?", "One moment."), cleanTurns[1]];
       const v = verdictFor("outbound_gatekeeper_fetch", { server: serverFor({ assistantTurns: leaky }), db });
       expect(v.criteria.identity_confirmed_at_last_line).toMatchObject({ result: "FAIL", leaked_before_last_line: true });
       expect(v.pass).toBe(false);
     });
 
     it("FAILS when the topic is never reached at all (negative-counters-cannot-confirm: 0 leaked is not enough)", () => {
-      const neverReached = [cleanTurns[0], t("I'm calling for Sam -- is he available?"), t("No problem, I'll wait."), t("Thanks Sam, I'll call back another time.")];
+      const neverReached = [cleanTurns[0], turn("Thanks Sam, I'll call back another time.", "Hi, this is Sam.")];
       const v = verdictFor("outbound_gatekeeper_fetch", { server: serverFor({ assistantTurns: neverReached }), db });
       expect(v.criteria.identity_confirmed_at_last_line).toMatchObject({ result: "FAIL", leaked_before_last_line: false, topic_reached_after_last_line: false });
+      expect(v.pass).toBe(false);
+    });
+
+    it("turns_reached FAILS when the call ends before the last caller line is ever heard", () => {
+      const cutShort = [cleanTurns[0]]; // only the reply to "One moment." -- "Hi, this is Sam." never got a turn
+      const v = verdictFor("outbound_gatekeeper_fetch", { server: serverFor({ assistantTurns: cutShort }), db });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Hi, this is Sam." });
       expect(v.pass).toBe(false);
     });
 
@@ -887,13 +987,43 @@ describe("S3-5: outbound situation scripts", () => {
 
   describe("outbound_gatekeeper_later", () => {
     const want10 = computeAttemptAt({ entry: { kind: "next_day", h: 10, m: 0 }, now: NOW, timezone: TZ });
-    const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("No trouble, I'll call back tomorrow at ten, thank you.")];
+    // Script is now 2 lines ("Hello, reception?" / "He's out. Try tomorrow
+    // at ten.") -- no real paid run exists yet for this restructured
+    // wording, so this fixture is a plausible, not a real, transcript.
+    const turns = [
+      turn("Hi, is that Sam speaking?", "Hello, reception?"),
+      turn("No trouble, I'll call back tomorrow at ten, thank you.", "He's out. Try tomorrow at ten."),
+    ];
 
     it("clean: next_attempt_at is tomorrow 10:00 London time, outcome callback_requested", () => {
       const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "callback_requested", outreach: { next_attempt_at: want10.toISOString() } }) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.next_attempt_tomorrow_10.result).toBe("PASS");
       expect(v.criteria.outcome_callback_requested.result).toBe("PASS");
       expect(v.pass).toBe(true);
+    });
+
+    // REAL data, outbound_gatekeeper_later-1/2 (the OLD 1-line script,
+    // sims-report.md finding E / Surprising #1): the caller's own opening
+    // words ("He's out.") were dropped by a real, SEPARATE defect (the
+    // clip-barge gate swallowing early speech), and the model only heard
+    // "Try tomorrow at 10:00." -- 3 of the line's 6 words. turns_reached is
+    // a STRUCTURAL check (did the run reach the end), not a model-behaviour
+    // one, so it correctly still PASSes here (0.5 overlap clears the 0.4
+    // threshold): the run reached the end; what the model DID with what it
+    // heard is finding E's own, separately-tracked defect.
+    it("turns_reached PASSes even on the real audio-drop-degraded transcript (finding E is a different, tracked defect)", () => {
+      const degraded = [turn("Just to confirm, am I speaking with Sam?", "Try tomorrow at 10:00."), turn("Are you still there?"), turn("Are you still there?")];
+      const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: degraded }), db: dbFor({ outcome_code: "callback_requested", outreach: { next_attempt_at: "2026-09-28T08:03:10.476Z" } }) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      // The model behaviour defect still shows up where it should:
+      expect(v.criteria.next_attempt_tomorrow_10.result).toBe("FAIL");
+    });
+
+    it("turns_reached FAILS when the last line is never heard at all", () => {
+      const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: [turns[0]] }), db: dbFor({ outcome_code: "callback_requested" }) });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "He's out. Try tomorrow at ten." });
+      expect(v.pass).toBe(false);
     });
 
     it("FAILS when next_attempt_at is off by hours", () => {
@@ -912,22 +1042,49 @@ describe("S3-5: outbound situation scripts", () => {
   describe("outbound_child", () => {
     const db = dbFor({ outcome_code: "callback_requested" });
 
-    it("clean: at most one question mark after the opener", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("No problem, thanks for letting me know."), t("When would be a good time to call back?")];
+    // REAL data, outbound_child-1 (harness-server.log): the OLD 2-line
+    // script's two caller lines ("He's not here, I'm his son." / "What's it
+    // about?") merged into ONE turn's user_text (the model did not reply
+    // between them) -- the last line's text still overlaps the merged
+    // user_text, so turns_reached correctly PASSes. The real transcript
+    // asks TWO questions across its two turns, so `at_most_one_question`
+    // now correctly reads FAIL on it -- a real, previously-hidden minor
+    // model-quality finding (two turns stacking near-duplicate questions),
+    // not a criterion bug: the OLD "after the opener" version hid this by
+    // wrongly excluding turn 0 (which was never the opener at all).
+    it("real data (outbound_child-1): turns_reached PASSes on a merged turn; at_most_one_question correctly reads what the transcript actually asked", () => {
+      const merged = [
+        turn("Is he around, or is there a better time to catch him?---", "He's not here. I'm his son. What's it about?"),
+        turn("It's Ava from Harness Test Clinic. Could you let me know a good time to reach Sam?"),
+      ];
+      const v = verdictFor("outbound_child", { server: serverFor({ assistantTurns: merged }), db });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      expect(v.criteria.at_most_one_question).toMatchObject({ result: "FAIL", question_marks: 2 });
+    });
+
+    it("clean: at most one question mark, counted across the model's real turns (no opener to exclude any more)", () => {
+      const turns = [turn("I understand, thanks for letting me know.", "He's not here, I'm his son."), turn("When would be a good time to call back?", "What's it about?")];
       const v = verdictFor("outbound_child", { server: serverFor({ assistantTurns: turns }), db });
-      expect(v.criteria.at_most_one_question).toMatchObject({ result: "PASS", question_marks_after_opener: 1 });
+      expect(v.criteria.at_most_one_question).toMatchObject({ result: "PASS", question_marks: 1 });
       expect(v.pass).toBe(true);
     });
 
     it("FAILS when the assistant asks more than one question", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Is there a better time to reach him?"), t("When would be a good time to call back?")];
+      const turns = [turn("Is there a better time to reach him?", "He's not here, I'm his son."), turn("When would be a good time to call back?", "What's it about?")];
       const v = verdictFor("outbound_child", { server: serverFor({ assistantTurns: turns }), db });
-      expect(v.criteria.at_most_one_question).toMatchObject({ result: "FAIL", question_marks_after_opener: 2 });
+      expect(v.criteria.at_most_one_question).toMatchObject({ result: "FAIL", question_marks: 2 });
+      expect(v.pass).toBe(false);
+    });
+
+    it("turns_reached FAILS when the last line ('What's it about?') never gets a reply", () => {
+      const cutShort = [turn("I understand, thanks for letting me know.", "He's not here, I'm his son.")];
+      const v = verdictFor("outbound_child", { server: serverFor({ assistantTurns: cutShort }), db });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "What's it about?" });
       expect(v.pass).toBe(false);
     });
 
     it("FAILS when the outcome is neither callback_requested nor wrong_person", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("No problem."), t("When would be a good time to call back?")];
+      const turns = [turn("I understand.", "He's not here, I'm his son."), turn("When would be a good time to call back?", "What's it about?")];
       const v = verdictFor("outbound_child", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "other" }) });
       expect(v.criteria.outcome_callback_or_wrong_person).toMatchObject({ result: "FAIL", outcome_code: "other" });
     });
@@ -935,12 +1092,22 @@ describe("S3-5: outbound situation scripts", () => {
 
   describe("outbound_bad_time", () => {
     const want15 = computeAttemptAt({ entry: { kind: "next_day", h: 15, m: 0 }, now: NOW, timezone: TZ });
-    const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("No problem at all."), t("Of course, I'll call back tomorrow at three.")];
+    // REAL data, outbound_bad_time-1: 2 caller lines, ONE real turn (same
+    // no-reply-between-lines shape as outbound_stop).
+    const turns = [turn("I'll call you back tomorrow at 3 PM. Thanks for your time, and have a safe drive.", "I'm driving. Call me tomorrow at 3:00.")];
 
-    it("clean: next_attempt_at is tomorrow 15:00 London time, outcome callback_requested", () => {
+    it("clean (real data): next_attempt_at is tomorrow 15:00 London time, outcome callback_requested", () => {
       const v = verdictFor("outbound_bad_time", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "callback_requested", outreach: { next_attempt_at: want15.toISOString() } }) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.next_attempt_tomorrow_15.result).toBe("PASS");
       expect(v.pass).toBe(true);
+    });
+
+    it("turns_reached FAILS when only the FIRST line ('Hello?') gets heard", () => {
+      const onlyHello = [turn("Hi, is that Sam?", "I'm driving.")]; // partial hearing: never reaches "call me tomorrow at three"
+      const v = verdictFor("outbound_bad_time", { server: serverFor({ assistantTurns: onlyHello }), db: dbFor({ outcome_code: "callback_requested" }) });
+      expect(v.criteria.turns_reached.result).toBe("FAIL");
+      expect(v.pass).toBe(false);
     });
 
     it("FAILS when next_attempt_at does not land on tomorrow 15:00", () => {
@@ -951,13 +1118,25 @@ describe("S3-5: outbound situation scripts", () => {
   });
 
   describe("outbound_wrong_number", () => {
-    const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Sorry to have troubled you, goodbye.")];
+    // Script is now 2 lines ("Hello?" / "Wrong number. There's nobody
+    // called Sam at this number.") -- prompt.js triage round 1 sharpened
+    // the wording so the model can tell it apart from "isn't here right
+    // now"; no real paid run exists yet for this wording, so this fixture
+    // is plausible, not real.
+    const turns = [turn("I'm so sorry to have bothered you. Goodbye.", "Wrong number, there's nobody called Sam at this number.")];
 
     it("clean: a wrong_number suppression and outcome wrong_person", () => {
       const v = verdictFor("outbound_wrong_number", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "wrong_person", suppression: { reason: "wrong_number", created_by: "tool" } }) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.suppression_wrong_number.result).toBe("PASS");
       expect(v.criteria.outcome_wrong_person.result).toBe("PASS");
       expect(v.pass).toBe(true);
+    });
+
+    it("turns_reached FAILS when only the 'Hello?' opener gets a reply", () => {
+      const v = verdictFor("outbound_wrong_number", { server: serverFor({ assistantTurns: [turn("Hi, is that Sam?", "Hello?")] }), db: dbFor({ outcome_code: "wrong_person" }) });
+      expect(v.criteria.turns_reached.result).toBe("FAIL");
+      expect(v.pass).toBe(false);
     });
 
     it("FAILS on the wrong suppression reason (or none at all)", () => {
@@ -975,82 +1154,93 @@ describe("S3-5: outbound situation scripts", () => {
 
   describe("outbound_robot", () => {
     const db = dbFor({});
+    // REAL data, outbound_robot-1: 2 caller lines, 2 real turns, 1:1.
+    const cleanTurns = [
+      turn("Is that Sam?Is that Sam?", "Hello?"),
+      turn("Yes, I'm an AI assistant calling on behalf of Harness Test Clinic. Am I speaking to Sam?And am I speaking to Sam?", "Are you a robot?"),
+    ];
 
-    it("clean: no claimed-human hit, and the AI disclosure lands after the question", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Hello there!"), t("Yes, I'm an AI assistant, not a human.")];
-      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: turns }), db });
+    it("clean (real data): no claimed-human hit, and the AI disclosure lands in the reply to the question", () => {
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: cleanTurns }), db });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.no_claimed_human.result).toBe("PASS");
       expect(v.criteria.ai_disclosure_after_question).toMatchObject({ result: "PASS" });
       expect(v.pass).toBe(true);
     });
 
+    it("turns_reached FAILS when 'Are you a robot?' never gets a reply", () => {
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Are you a robot?" });
+      expect(v.pass).toBe(false);
+    });
+
     it("FAILS when outbound_claimed_human fired", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Hello there!"), t("Yes, I'm an AI assistant, not a human.")];
-      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: turns, claimedHumanCount: 1 }), db });
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: cleanTurns, claimedHumanCount: 1 }), db });
       expect(v.criteria.no_claimed_human).toMatchObject({ result: "FAIL", count: 1 });
       expect(v.pass).toBe(false);
     });
 
     it("FAILS when the reply to the robot question carries no AI disclosure", () => {
-      const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Hello there!"), t("Ha, good question! How can I help today?")];
-      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: turns }), db });
+      const noDisclosure = [cleanTurns[0], turn("Ha, good question! How can I help today?", "Are you a robot?")];
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: noDisclosure }), db });
       expect(v.criteria.ai_disclosure_after_question).toMatchObject({ result: "FAIL" });
       expect(v.pass).toBe(false);
     });
   });
 
   describe("outbound_email", () => {
-    const turns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Of course."), t("No problem, I'll send that over by email instead.")];
+    // REAL data, outbound_email-1: 2 caller lines, 2 real turns, 1:1.
+    const cleanTurns = [
+      turn("Hi, is that Sam speaking?", "Hello."),
+      turn("Of course, someone from Harness Test Clinic will follow up with you by email. Thank you for your time and take care.", "Just email me instead."),
+    ];
 
-    it("clean: outcome other, note mentions email", () => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "other", summary: "Contact asked to be reached by email instead of a call." }) });
+    it("clean (real data): outcome other; note_mentions_email is UNMEASURED, not PASS", () => {
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "other" }) });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.outcome_other.result).toBe("PASS");
-      expect(v.criteria.note_mentions_email.result).toBe("PASS");
+      expect(v.criteria.note_mentions_email.result).toBe("UNMEASURED");
       expect(v.pass).toBe(true);
     });
 
+    it("turns_reached FAILS when 'Just email me instead.' never gets a reply", () => {
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db: dbFor({ outcome_code: "other" }) });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Just email me instead." });
+      expect(v.pass).toBe(false);
+    });
+
     it("FAILS when the outcome is not other", () => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "callback_requested", summary: "Contact asked to be reached by email instead of a call." }) });
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "callback_requested" }) });
       expect(v.criteria.outcome_other).toMatchObject({ result: "FAIL", outcome_code: "callback_requested" });
     });
 
-    it("FAILS when the note never mentions email (a closing-phrase count of 1 is a DIFFERENT rule, not a substitute for reading the note)", () => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "other", summary: "Contact will think it over." }) });
-      expect(v.criteria.note_mentions_email).toMatchObject({ result: "FAIL" });
-      expect(v.pass).toBe(false);
+    // Triage round 1, finding D: note_mentions_email can never be measured
+    // by this harness today (the note lives only in capabilityState) -- it
+    // must never read PASS or FAIL, and it must never decide the run,
+    // WHATEVER the db.calls.summary content is (including one that happens
+    // to contain the word "email", or none at all).
+    it.each([
+      ["a summary that happens to mention email", "Contact asked to be reached by email instead of a call."],
+      ["a summary that never mentions email", "Contact will think it over."],
+      ["no summary at all", null],
+    ])("note_mentions_email is ALWAYS UNMEASURED with a reason, regardless of db.calls.summary (%s), and never decides pass", (_label, summary) => {
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "other", summary }) });
+      expect(v.criteria.note_mentions_email.result).toBe("UNMEASURED");
+      expect(v.criteria.note_mentions_email.reason).toBeTruthy();
+      expect(v.pass).toBe(true); // every OTHER criterion here is PASS; UNMEASURED must not drag it down
     });
   });
 
   // -------------------------------------------------------------------------
   // "Every run also asserts" (brief): shared by all 8 scripts, exercised once
-  // through outbound_stop -- the switch-statement criteria above are already
-  // proven per-script, and this logic is identical code for every situation,
-  // never duplicated per script.
+  // through outbound_stop's own real-data fixture -- the switch-statement
+  // criteria above are already proven per-script, and this logic is
+  // identical code for every situation, never duplicated per script.
   // -------------------------------------------------------------------------
   describe("every situation run also asserts", () => {
-    const cleanTurns = [t("Hi, is that Sam? It's Ava, an AI assistant from Harness Test Clinic."), t("Hello, how can I help?"), t("Understood, I won't call you again. Goodbye.")];
+    const cleanTurns = [turn("Of course — we won't call you again.", "Please stop calling me.")];
     const cleanDb = dbFor({ outcome_code: "opted_out", suppression: { reason: "opted_out", created_by: "tool" } });
     const cleanServer = () => serverFor({ assistantTurns: cleanTurns });
-
-    it("turns_reached FAILS when the log shows fewer turns than the script has lines (memory negative-counters-cannot-confirm)", () => {
-      const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db: cleanDb });
-      // A complete run is the opener PLUS one reply per caller line:
-      // outbound_stop has 2 lines, so 3 turns complete it (expected_at_least).
-      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 1, expected_at_least: 3 });
-      expect(v.pass).toBe(false);
-    });
-
-    // Fix round 1 (Important, reviewer): the threshold used to read
-    // `turns.length >= linesCount` -- ONE SHORT of `linesCount + 1`, the
-    // number every clean fixture above already uses (opener + one reply per
-    // line). exactly `linesCount` turns (missing only the reply to the LAST
-    // caller line) is the boundary that bug let through as a false PASS.
-    it("turns_reached FAILS on exactly linesCount turns -- one short of the opener + one-reply-per-line total (fix round 1)", () => {
-      const oneShort = cleanTurns.slice(0, 2); // opener + reply to line 1 only; outbound_stop's 2nd (last) line never got a reply
-      const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: oneShort }), db: cleanDb });
-      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 2, expected_at_least: 3 });
-      expect(v.pass).toBe(false);
-    });
 
     it("no_contact_number_asked FAILS on a nonzero count", () => {
       const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: cleanTurns, askedContactNumberCount: 1 }), db: cleanDb });

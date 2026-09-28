@@ -186,6 +186,32 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     expect(text).not.toMatch(/\brecord_outcome\b/);
   });
 
+  // Triage round 1 (S3-5 real paid-run evidence, sims-report.md finding F):
+  // the model confused "There's no Sam here" (wrong number) with "Sam isn't
+  // here right now" (right number, bad time) on 2 of 3 real calls, calling
+  // confirm_identity and offering a callback instead of set_call_outcome
+  // wrong_number. The wrong-number line must name BOTH phrasings and say
+  // explicitly that "isn't here right now" is the OTHER (gatekeeper) move.
+  it('triage round 1: "A wrong number" tells the two cases apart from "isn\'t here right now"', () => {
+    const line = lines.find((l) => /^- A wrong number/i.test(l));
+    expect(line).toBeTruthy();
+    expect(line).toMatch(/nobody called Priya at this number/i);
+    expect(line).toMatch(/you have the wrong number/i);
+    expect(line).toMatch(/isn't here right now/i);
+    expect(line).toMatch(/DIFFERENT case/i);
+    expect(line).toMatch(/never as a wrong number/i);
+    expect(line).toMatch(/\bset_call_outcome\b/);
+    expect(line).toMatch(/\bschedule_callback\b/);
+  });
+
+  it("triage round 1: the wrong-number disambiguation still renders sensibly with no first name on file", () => {
+    const text = renderBlock(WITHOUT_FIRST_NAME);
+    const line = text.split("\n").find((l) => /^- A wrong number/i.test(l));
+    expect(line).toBeTruthy();
+    expect(line).toMatch(/nobody called that at this number/i);
+    expect(line).toMatch(/the person you're calling isn't here right now/i);
+  });
+
   it("named risk 4: the gatekeeper line contains no topic text (real config, real topic)", () => {
     const gatekeeperLine = lines.find((l) => /^- A gatekeeper/i.test(l));
     expect(gatekeeperLine).toBeTruthy();
