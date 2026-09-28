@@ -111,7 +111,7 @@ export default {
     const note = typeof fc.args?.note === "string" ? fc.args.note.slice(0, 500) : null;
     const callSid = ctx.callSid || null;
     // wrong_number is a suppression reason, never a calls.outcome_code value
-    // -- the call itself is recorded as wrong_person (spec §12.2).
+    // -- the call's outcome is set to wrong_person (spec §12.2).
     const recordedOutcome = outcome === "wrong_number" ? "wrong_person" : outcome;
 
     if (outcome === "wrong_number") {
