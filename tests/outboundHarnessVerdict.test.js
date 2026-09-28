@@ -1034,7 +1034,21 @@ describe("S3-5: outbound situation scripts", () => {
 
     it("turns_reached FAILS when the log shows fewer turns than the script has lines (memory negative-counters-cannot-confirm)", () => {
       const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db: cleanDb });
-      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 1, expected_at_least: 2 });
+      // A complete run is the opener PLUS one reply per caller line:
+      // outbound_stop has 2 lines, so 3 turns complete it (expected_at_least).
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 1, expected_at_least: 3 });
+      expect(v.pass).toBe(false);
+    });
+
+    // Fix round 1 (Important, reviewer): the threshold used to read
+    // `turns.length >= linesCount` -- ONE SHORT of `linesCount + 1`, the
+    // number every clean fixture above already uses (opener + one reply per
+    // line). exactly `linesCount` turns (missing only the reply to the LAST
+    // caller line) is the boundary that bug let through as a false PASS.
+    it("turns_reached FAILS on exactly linesCount turns -- one short of the opener + one-reply-per-line total (fix round 1)", () => {
+      const oneShort = cleanTurns.slice(0, 2); // opener + reply to line 1 only; outbound_stop's 2nd (last) line never got a reply
+      const v = verdictFor("outbound_stop", { server: serverFor({ assistantTurns: oneShort }), db: cleanDb });
+      expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", turns: 2, expected_at_least: 3 });
       expect(v.pass).toBe(false);
     });
 
