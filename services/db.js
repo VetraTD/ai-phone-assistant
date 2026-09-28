@@ -947,9 +947,11 @@ export async function setCallOutcomeCode(callSid, outcomeCode) {
  * outboundPostCallContext's own doc names it). `calls.answers` has no
  * dedicated writer either -- this is the first one. `schedule_callback`
  * (capabilities/callback.js) is the only caller today, merging
- * `{callback_requested_at}` in; a shallow JSONB merge (`||`) rather than a
- * full overwrite so a later write never has to know what an earlier one
- * already stored. Same shape as setCallOutcomeCode immediately above: keyed
+ * `{_callback_requested_at}` in (renamed, review minor: the plain key could
+ * collide with a campaign question of the same name); a shallow JSONB merge
+ * (`||`) rather than a full overwrite so a later write never has to know
+ * what an earlier one already stored. Same shape as setCallOutcomeCode
+ * immediately above: keyed
  * by CallSid, THROWS rather than logs-and-returns on a DB error or a missing
  * row -- a tenantless write under FORCE RLS matches zero rows and reports
  * success, which here would silently drop the callback time a caller was
@@ -2123,8 +2125,12 @@ export async function eraseCallerData(businessId, phone) {
       ? await client.query(`DELETE FROM call_transcripts WHERE call_id = ANY($1)`, [callIds])
       : { rowCount: 0 };
 
+    // I3 (review, controller ruling): `answers` (S3-3/S3-10's qualification
+    // pack -- the caller's own words, `_outcome_note` free text,
+    // `callback_requested_at`) is a PII sink the pre-fix erasure never
+    // touched at all.
     const c = callIds.length
-      ? await client.query(`UPDATE calls SET caller_number = NULL, summary = NULL WHERE id = ANY($1)`, [callIds])
+      ? await client.query(`UPDATE calls SET caller_number = NULL, summary = NULL, answers = NULL WHERE id = ANY($1)`, [callIds])
       : { rowCount: 0 };
 
     const a = await client.query(
@@ -2159,17 +2165,52 @@ export async function eraseCallerData(businessId, phone) {
       ? await client.query(`DELETE FROM consents WHERE contact_id = ANY($1)`, [contactIds])
       : { rowCount: 0 };
 
+    // I3 (review, controller ruling): last_name/email/external_ids/timezone
+    // join first_name/attributes -- the ledger named last_name/email;
+    // external_ids are CRM ids (S3-9's trigger upsert), and a contact's
+    // timezone (resolved from a form's browser-detected value, S3-9) is
+    // itself PII about where the person was when they filled in the form.
+    // phone_e164 is deliberately NOT in this list -- see the file header
+    // (OWNER decision, not changed here).
     const ct = contactIds.length
       ? await client.query(
-          `UPDATE contacts SET first_name = NULL, attributes = '{}'::jsonb WHERE id = ANY($1)`,
+          `UPDATE contacts
+              SET first_name = NULL, last_name = NULL, email = NULL, timezone = NULL,
+                  external_ids = '{}'::jsonb, attributes = '{}'::jsonb
+            WHERE id = ANY($1)`,
           [contactIds]
         )
       : { rowCount: 0 };
 
+    // I3 (review, controller ruling): widened on two axes from the pre-fix
+    // version.
+    //   1. `details` (S3-9's per-person facts from the lead form) and
+    //      `trigger` (S3-9's `{source, data}` -- `data` is the WHOLE posted
+    //      lead-form payload) are cleared on EVERY one of the contact's
+    //      outreach rows, not just the ones this erasure is now closing.
+    //      Plan P5 said "closes open outreach with erased and clears
+    //      details" -- the code only ever did the first half, and never
+    //      touched an ALREADY-closed row's details/trigger at all (S3-9
+    //      shipped after S3-11, and nobody went back). `trigger` is reduced
+    //      to `{source}`, not wiped to `{}` -- `source` (e.g. "webhook") is
+    //      not personal, and losing it would make an already-thin audit
+    //      trail (spec §13.5) thinner for no privacy gain.
+    //   2. The state/close_reason/closed_at flip is now conditional (CASE),
+    //      because the UPDATE itself no longer filters on `state <> 'closed'`
+    //      -- an ALREADY-closed row must still get its details/trigger
+    //      cleared, but must NOT have its own close_reason overwritten (the
+    //      "leave an existing close_reason alone" rule the pre-fix WHERE
+    //      clause enforced structurally; here it moves into the CASE).
     const oc = contactIds.length
       ? await client.query(
-          `UPDATE outreach SET state = 'closed', close_reason = 'erased', closed_at = now(), updated_at = now()
-            WHERE business_id = $1 AND contact_id = ANY($2) AND state <> 'closed'`,
+          `UPDATE outreach
+              SET details = '{}'::jsonb,
+                  trigger = jsonb_build_object('source', trigger->>'source'),
+                  state = CASE WHEN state <> 'closed' THEN 'closed' ELSE state END,
+                  close_reason = CASE WHEN state <> 'closed' THEN 'erased' ELSE close_reason END,
+                  closed_at = CASE WHEN state <> 'closed' THEN now() ELSE closed_at END,
+                  updated_at = now()
+            WHERE business_id = $1 AND contact_id = ANY($2)`,
           [businessId, contactIds]
         )
       : { rowCount: 0 };
@@ -2688,7 +2729,12 @@ export async function isSuppressed(phone) {
     );
   }
   const hash = suppressionHash(canonicalPhone);
-  const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1 OR phone_hash = $2`, [phone, hash]);
+  // E5 (review): the canonical phone, not the raw argument -- suppressions
+  // rows are always written canonical (insertSuppression's callers already
+  // normalize), so a raw, differently-punctuated spelling of the SAME
+  // number would silently miss the `phone_e164 = $1` arm and fall back to
+  // matching by hash alone (fail OPEN if the hash arm ever mismatches too).
+  const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1 OR phone_hash = $2`, [canonicalPhone, hash]);
   if (res.error) throw res.error;
   const rows = res.rows || [];
   noteAccess("isSuppressed", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
@@ -3688,6 +3734,34 @@ export async function outboundCallEffects(callId) {
  * @param {{phone: string, reason: string, sourceCallId: string|null, createdBy: string}} o
  */
 async function writeSuppressionRow({ phone, reason, sourceCallId, createdBy }) {
+  // I3 minor (review): a phone already erased/hashed (suppressions row has
+  // phone_e164 = NULL, phone_hash set) is invisible to `ON CONFLICT
+  // (business_id, phone_e164)` below -- a cleartext phone never conflicts
+  // with a NULL one, so a second suppression write for the SAME number would
+  // re-create it in the clear, undoing the point of hashing it away.
+  // Ruling: the smallest safe fix is a best-effort PRE-CHECK by hash, not a
+  // hard requirement on SUPPRESSION_HASH_KEY for every suppression write
+  // (unlike eraseCallerData/isSuppressed, this function runs on the
+  // ordinary opt-out/wrong-number path on every outbound call, and forcing
+  // the key here would widen the I10 blast radius to a path that never
+  // needed it before). If the phone will not normalize, or the key is
+  // missing/short, this cannot rule out a hash-only match and falls through
+  // to the plain insert -- the function's pre-fix behaviour for every case
+  // it has always handled.
+  try {
+    const canonical = normalizePhoneNumber(phone);
+    if (canonical) {
+      const hash = suppressionHash(canonical);
+      const existing = await q(`SELECT id FROM suppressions WHERE business_id = app_current_business_id() AND phone_hash = $1`, [hash]);
+      if (existing.error) throw existing.error;
+      if ((existing.rows || []).length > 0) {
+        // Already suppressed, by hash -- success, no cleartext row written.
+        return { rowCount: 0, rows: [] };
+      }
+    }
+  } catch {
+    // Missing/short key, or a non-normalizing phone: fall through.
+  }
   const res = await q(
     `INSERT INTO suppressions (business_id, phone_e164, reason, source_call_id, created_by)
      SELECT app_current_business_id(), $1, $2, $3, $4
@@ -4163,12 +4237,15 @@ export async function recordTriggerConsent({
  * for the id either way -- a replay of the SAME idempotency_key returns the
  * SAME outreach_id rather than a second row (or an error).
  * `next_attempt_at = now()`: `app_outbound_due` (migration 044) and the
- * dispatcher both treat a NULL as "not due", and the 5-minute sweep is what
- * actually dials it -- this route does not enqueue a Cloud Task itself
- * (Ruling S3-9b, this task's report). `details` carries only the keys the
- * caller (lib/outbound/triggerRoute.js) already filtered against the
- * campaign's `details_fields` -- this function does not re-filter. Runs
- * inside `withTenant`.
+ * dispatcher both treat a NULL as "not due". C13 (review): this function
+ * itself still does not enqueue anything (it is a plain DB write, no I/O
+ * beyond SQL) -- but the CALLER (lib/outbound/triggerRoute.js, fix round 1
+ * I2, controller ruling) now DOES enqueue a dispatch task right after a
+ * first creation, superseding Ruling S3-9b's "no enqueue at all, the
+ * 5-minute sweep is the only trigger" -- the sweep remains the fail-soft
+ * backstop for that enqueue, not the sole path. `details` carries only the
+ * keys the caller already filtered against the campaign's `details_fields`
+ * -- this function does not re-filter. Runs inside `withTenant`.
  * @param {{campaignId:string, campaignVersion:number, contactId:string, trigger:object, idempotencyKey:string, details:object}} o
  * @returns {Promise<{id:string, created:boolean}>}
  */

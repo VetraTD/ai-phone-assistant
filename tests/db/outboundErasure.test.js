@@ -54,9 +54,21 @@ async function seedContact(business, phone, name) {
     `INSERT INTO campaign_versions (campaign_id, business_id, version, config) VALUES ($1,$2,1,$3)`,
     [campaignId, business, JSON.stringify({ retries: { schedule: ["+0m"] } })]
   );
+  // I3 (review, controller ruling): last_name/email/timezone/external_ids
+  // join first_name/attributes as personal fields this erasure must reach.
   const con = await admin.query(
-    `INSERT INTO contacts (business_id, phone_e164, first_name, attributes) VALUES ($1,$2,$3,$4) RETURNING id`,
-    [business, phone, name, JSON.stringify({ note: `${name}'s attribute` })]
+    `INSERT INTO contacts (business_id, phone_e164, first_name, last_name, email, timezone, external_ids, attributes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [
+      business,
+      phone,
+      name,
+      `${name}Last`,
+      `${name.toLowerCase()}@example.com`,
+      "Europe/London",
+      JSON.stringify({ crm_id: `crm-${name}` }),
+      JSON.stringify({ note: `${name}'s attribute` }),
+    ]
   );
   const contactId = con.rows[0].id;
   await admin.query(
@@ -64,11 +76,16 @@ async function seedContact(business, phone, name) {
      VALUES ($1,$2,'enquiry_followup','{call}',true,'manual',now())`,
     [business, contactId]
   );
-  // The OPEN outreach this erasure must close.
+  // The OPEN outreach this erasure must close. I3 (review): `details` and
+  // `trigger.data` both carry the lead-form's own facts -- populated here so
+  // the erasure test can prove they are actually cleared, not just the
+  // pre-fix fields.
+  const openTrigger = JSON.stringify({ source: "webhook", data: { situation: `${name}'s boiler is broken` } });
+  const openDetails = JSON.stringify({ topic_detail: `${name}'s enquiry` });
   const openOut = await admin.query(
-    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key)
-     VALUES ($1,$2,1,$3,'dialing','{}',$4) RETURNING id`,
-    [business, campaignId, contactId, `erasure-open-${phone}`]
+    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,details,idempotency_key)
+     VALUES ($1,$2,1,$3,'dialing',$4,$5,$6) RETURNING id`,
+    [business, campaignId, contactId, openTrigger, openDetails, `erasure-open-${phone}`]
   );
   const openOutreachId = openOut.rows[0].id;
   await admin.query(
@@ -76,11 +93,28 @@ async function seedContact(business, phone, name) {
      VALUES ($1,$2,1,'+441372656055',$3,now(),'\\x01'::bytea,'\\x02'::bytea,'\\x03'::bytea)`,
     [business, openOutreachId, phone]
   );
-  // An ALREADY-closed outreach -- erasure must leave its close_reason alone.
+  // An ALREADY-closed outreach -- erasure must leave close_reason/state
+  // alone but STILL clear details/trigger.data (I3: the pre-fix code never
+  // touched an already-closed row at all).
+  const closedTrigger = JSON.stringify({ source: "webhook", data: { situation: `${name}'s old enquiry` } });
+  const closedDetails = JSON.stringify({ topic_detail: `${name}'s old enquiry` });
   const closedOut = await admin.query(
-    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,idempotency_key,close_reason,closed_at)
-     VALUES ($1,$2,1,$3,'closed','{}',$4,'terminal_outcome',now()) RETURNING id`,
-    [business, campaignId, contactId, `erasure-closed-${phone}`]
+    `INSERT INTO outreach (business_id,campaign_id,campaign_version,contact_id,state,trigger,details,idempotency_key,close_reason,closed_at)
+     VALUES ($1,$2,1,$3,'closed',$4,$5,$6,'terminal_outcome',now()) RETURNING id`,
+    [business, campaignId, contactId, closedTrigger, closedDetails, `erasure-closed-${phone}`]
+  );
+  // A calls row (I3): `answers` (S3-3/S3-10's qualification pack) is a PII
+  // sink the pre-fix erasure never touched at all.
+  await admin.query(
+    `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, summary, answers)
+     VALUES ($1,$2,$3,'completed',$4,$5)`,
+    [
+      business,
+      `CA-erasure-${name}`,
+      phone,
+      `Spoke with ${name} about their enquiry.`,
+      JSON.stringify({ clinic_name: `${name}'s clinic`, _outcome_note: `${name} said call back Tuesday` }),
+    ]
   );
 
   // I4 (S3-8 fix round 1, controller ruling): one outbox row per status, a
@@ -164,10 +198,15 @@ beforeEach(async () => {
 });
 
 async function contactRow(id) {
-  return (await admin.query(`SELECT first_name, attributes FROM contacts WHERE id = $1`, [id])).rows[0];
+  return (
+    await admin.query(`SELECT first_name, last_name, email, timezone, external_ids, attributes FROM contacts WHERE id = $1`, [id])
+  ).rows[0];
 }
 async function outreachRow(id) {
-  return (await admin.query(`SELECT state, close_reason, closed_at FROM outreach WHERE id = $1`, [id])).rows[0];
+  return (await admin.query(`SELECT state, close_reason, closed_at, details, trigger FROM outreach WHERE id = $1`, [id])).rows[0];
+}
+async function callRow(twilioCallSid) {
+  return (await admin.query(`SELECT caller_number, summary, answers FROM calls WHERE twilio_call_sid = $1`, [twilioCallSid])).rows[0];
 }
 async function attemptAudio(outreachId) {
   return (await admin.query(
@@ -192,6 +231,17 @@ async function suppressionByHash(business) {
 async function consentCount(contactId) {
   return (await admin.query(`SELECT count(*)::int AS n FROM consents WHERE contact_id = $1`, [contactId])).rows[0].n;
 }
+/** The row seedContact(business, phone, name) writes -- matched against an UNTOUCHED contact. */
+function seededContactRow(name) {
+  return {
+    first_name: name,
+    last_name: `${name}Last`,
+    email: `${name.toLowerCase()}@example.com`,
+    timezone: "Europe/London",
+    external_ids: { crm_id: `crm-${name}` },
+    attributes: { note: `${name}'s attribute` },
+  };
+}
 
 d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
   it("deletes consents, anonymises the contact, closes the OPEN outreach, nulls call_attempts audio -- for the subject only", async () => {
@@ -199,27 +249,54 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
 
     expect(counts.consents).toBe(1);
     expect(counts.contacts).toBe(1);
-    expect(counts.outreach).toBe(1); // only the open one -- the already-closed row is untouched
+    // I3 (this wave): BOTH outreach rows now count -- the widened UPDATE
+    // clears details/trigger on every one of the contact's rows, not just
+    // the ones it is newly closing. The already-closed row is touched for
+    // details/trigger but its close_reason stays 'terminal_outcome' (see
+    // below).
+    expect(counts.outreach).toBe(2);
     expect(counts.callAttempts).toBe(1);
     expect(counts.outbox).toBe(2); // pending + dead, deleted outright
     expect(counts.outboxRedacted).toBe(1); // delivered, kept and redacted
     expect(counts.suppressions).toBe(1);
 
     expect(await consentCount(subject.contactId)).toBe(0);
-    expect(await contactRow(subject.contactId)).toEqual({ first_name: null, attributes: {} });
+    // I3 (this wave): last_name/email/timezone/external_ids join
+    // first_name/attributes.
+    expect(await contactRow(subject.contactId)).toEqual({
+      first_name: null,
+      last_name: null,
+      email: null,
+      timezone: null,
+      external_ids: {},
+      attributes: {},
+    });
 
     const open = await outreachRow(subject.openOutreachId);
     expect(open.state).toBe("closed");
     expect(open.close_reason).toBe("erased");
     expect(open.closed_at).not.toBeNull();
+    // I3 (this wave): details cleared, trigger reduced to {source} -- the
+    // lead-form's own facts (`data.situation`) are gone.
+    expect(open.details).toEqual({});
+    expect(open.trigger).toEqual({ source: "webhook" });
 
-    // The already-closed row is UNCHANGED -- erasure must not overwrite an
-    // existing close_reason with 'erased'.
+    // The already-closed row's state/close_reason is UNCHANGED -- erasure
+    // must not overwrite an existing close_reason with 'erased' -- but I3
+    // (this wave) its details/trigger ARE cleared, the fix's whole point.
     const alreadyClosed = await outreachRow(subject.closedOutreachId);
+    expect(alreadyClosed.state).toBe("closed");
     expect(alreadyClosed.close_reason).toBe("terminal_outcome");
+    expect(alreadyClosed.details).toEqual({});
+    expect(alreadyClosed.trigger).toEqual({ source: "webhook" });
 
     const audio = await attemptAudio(subject.openOutreachId);
     expect(audio).toEqual({ opener_audio: null, voicemail_audio: null, transfer_miss_audio: null });
+
+    // I3 (this wave): calls.answers -- the qualification pack's own PII
+    // sink -- is nulled alongside caller_number/summary.
+    const call = await callRow("CA-erasure-Jane");
+    expect(call).toEqual({ caller_number: null, summary: null, answers: null });
   });
 
   it("keeps the suppression row, hashes the phone, nulls phone_e164 -- matching an independently computed hash", async () => {
@@ -258,9 +335,13 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
   it("does not touch another contact at the same business (BYSTANDER)", async () => {
     await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
 
-    expect(await contactRow(bystander.contactId)).toEqual({ first_name: "Bystander", attributes: { note: "Bystander's attribute" } });
+    expect(await contactRow(bystander.contactId)).toEqual(seededContactRow("Bystander"));
     expect(await consentCount(bystander.contactId)).toBe(1);
-    expect((await outreachRow(bystander.openOutreachId)).state).toBe("dialing");
+    const bystanderOpen = await outreachRow(bystander.openOutreachId);
+    expect(bystanderOpen.state).toBe("dialing");
+    // I3 (this wave): the bystander's own outreach.details/trigger untouched too.
+    expect(bystanderOpen.details).toEqual({ topic_detail: "Bystander's enquiry" });
+    expect(bystanderOpen.trigger).toEqual({ source: "webhook", data: { situation: "Bystander's boiler is broken" } });
     const rows = await suppressionByPhone(BUSINESS, BYSTANDER);
     expect(rows[0].phone_e164).toBe(BYSTANDER);
     expect(rows[0].phone_hash).toBeNull();
@@ -275,12 +356,11 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
   it("does not touch the same number at another tenant (OTHER_BUSINESS) -- named risk 3", async () => {
     await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
 
-    expect(await contactRow(otherSubject.contactId)).toEqual({
-      first_name: "SameNumberOtherTenant",
-      attributes: { note: "SameNumberOtherTenant's attribute" },
-    });
+    expect(await contactRow(otherSubject.contactId)).toEqual(seededContactRow("SameNumberOtherTenant"));
     expect(await consentCount(otherSubject.contactId)).toBe(1);
-    expect((await outreachRow(otherSubject.openOutreachId)).state).toBe("dialing");
+    const otherOpen = await outreachRow(otherSubject.openOutreachId);
+    expect(otherOpen.state).toBe("dialing");
+    expect(otherOpen.details).toEqual({ topic_detail: "SameNumberOtherTenant's enquiry" });
     const rows = await suppressionByPhone(OTHER_BUSINESS, SUBJECT);
     expect(rows[0].phone_e164).toBe(SUBJECT);
     expect(rows[0].phone_hash).toBeNull();
@@ -344,9 +424,19 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
     await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
     const second = await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
     expect(second.suppressions).toBe(0);
-    expect(second.outreach).toBe(0); // the outreach row is already closed
+    // I3 (this wave): the outreach UPDATE no longer filters on
+    // `state <> 'closed'` (it must reach an already-closed row's
+    // details/trigger too), so BOTH rows still match the WHERE clause on a
+    // replay -- Postgres counts a row as affected whenever it matches, even
+    // when every assigned value equals what was already there. Idempotent
+    // in EFFECT (content unchanged, asserted below), not in reported count.
+    expect(second.outreach).toBe(2);
     const rows = await suppressionByHash(BUSINESS);
     expect(rows).toHaveLength(1); // still exactly one row -- never duplicated
+    const open = await outreachRow(subject.openOutreachId);
+    expect(open.details).toEqual({});
+    expect(open.trigger).toEqual({ source: "webhook" });
+    expect(open.close_reason).toBe("erased"); // unchanged by the replay
   });
 });
 
@@ -411,5 +501,112 @@ d("Art. 17 erasure reaches outbox (S3-8 fix round 1, I4)", () => {
     const row = await outboxRow(otherSubject.outboxIds.pending);
     expect(row).toBeDefined(); // untouched -- different tenant
     expect(row.payload.contact.first_name).toBe("SameNumberOtherTenant");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E6 (review, I3's own fix direction): the schema-walking redaction-drift
+// test. Rather than hardcoding "these are the columns erasure clears" --
+// exactly the kind of list that went stale between S3-11 (P5 shipped first)
+// and S3-9 (added outreach.details/trigger.data and never told P5 about it)
+// -- this asks the DATABASE what text/jsonb columns actually exist on the
+// four tables eraseCallerData touches, and fails if any column outside a
+// small, DOCUMENTED allowlist still holds content for an erased subject. Add
+// a new personal-data column to one of these tables without updating
+// eraseCallerData (or without adding it to ALLOWED, if it is genuinely
+// structural), and THIS test goes red.
+// ---------------------------------------------------------------------------
+d("E6: schema-walking redaction-drift test", () => {
+  // Columns an erased row is ALLOWED to keep content in -- either structural
+  // (an id, a status enum, a timestamp, a foreign key) or an explicit OWNER
+  // decision (services/db.js's eraseCallerData file header: the cleartext
+  // phone survives in contacts.phone_e164 and call_attempts.to_number on
+  // purpose -- not changed by this wave; reported to the owner, not fixed).
+  const ALLOWED = Object.freeze({
+    contacts: new Set(["id", "business_id", "phone_e164", "created_at", "updated_at"]),
+    outreach: new Set([
+      "id", "business_id", "campaign_id", "campaign_version", "contact_id", "state",
+      "attempts_made", "next_attempt_at", "last_attempt_at", "hold_until", "outcome",
+      "close_reason", "idempotency_key", "created_at", "updated_at", "closed_at",
+    ]),
+    calls: new Set([
+      "id", "business_id", "twilio_call_sid", "twilio_number", "status", "started_at",
+      "ended_at", "duration_seconds", "sentiment", "outcome", "avg_turn_latency_ms",
+      "p95_turn_latency_ms", "direction", "campaign_id", "campaign_version", "outreach_id",
+      "attempt_id", "contact_id", "answered_by", "outcome_code",
+    ]),
+    call_attempts: new Set([
+      "id", "business_id", "outreach_id", "attempt_no", "twilio_call_sid", "from_number",
+      "to_number", "dialed_at", "answered_at", "ended_at", "twilio_status", "answered_by",
+      "amd_duration_ms", "first_audio_ms", "silent", "result", "call_id",
+      "status_completed_at", "session_finished_at", "post_call_started_at", "created_at",
+    ]),
+  });
+
+  // A per-column exception to "must be fully empty": outreach.trigger is
+  // reduced to `{source}`, not wiped to `{}` -- `source` (e.g. "webhook") is
+  // not personal, and losing it would thin an already-thin audit trail
+  // (spec §13.5) for no privacy gain. Any OTHER key surviving here (in
+  // particular `data`, the whole posted lead-form payload) is still a leak.
+  function isEmptyEnough(table, column, value) {
+    if (value === null) return true;
+    if (table === "outreach" && column === "trigger") {
+      return typeof value === "object" && Object.keys(value).every((k) => k === "source");
+    }
+    if (typeof value === "object") return Object.keys(value).length === 0; // '{}'::jsonb
+    return false;
+  }
+
+  async function textAndJsonColumns(table) {
+    const { rows } = await admin.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1
+          AND data_type IN ('text', 'character varying', 'jsonb', 'json')`,
+      [table]
+    );
+    return rows.map((r) => r.column_name);
+  }
+
+  it("no personal text/jsonb column outside the documented allowlist survives an erasure", async () => {
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+
+    const rowsByTable = {
+      contacts: (await admin.query(`SELECT * FROM contacts WHERE id = $1`, [subject.contactId])).rows,
+      outreach: (await admin.query(`SELECT * FROM outreach WHERE contact_id = $1`, [subject.contactId])).rows,
+      calls: (await admin.query(`SELECT * FROM calls WHERE twilio_call_sid = $1`, ["CA-erasure-Jane"])).rows,
+      call_attempts: (await admin.query(`SELECT * FROM call_attempts WHERE outreach_id = $1`, [subject.openOutreachId])).rows,
+    };
+
+    const findings = [];
+    for (const [table, allowed] of Object.entries(ALLOWED)) {
+      const columns = await textAndJsonColumns(table);
+      const rows = rowsByTable[table];
+      expect(rows.length, `expected at least one seeded ${table} row for this subject`).toBeGreaterThan(0);
+      for (const column of columns) {
+        if (allowed.has(column)) continue;
+        for (const row of rows) {
+          if (!isEmptyEnough(table, column, row[column])) {
+            findings.push(`${table}.${column} still holds content after erasure: ${JSON.stringify(row[column])}`);
+          }
+        }
+      }
+    }
+    expect(findings, findings.join("\n")).toEqual([]);
+  });
+
+  it("the allowlist itself does not silently grow -- a column neither this test's own list nor a real table column is a typo, not a pass", async () => {
+    // Guards the guard: if a column gets renamed/removed, ALLOWED above
+    // would otherwise just silently stop matching anything and this test
+    // would still pass (nothing to check is not the same as nothing found).
+    for (const [table, allowed] of Object.entries(ALLOWED)) {
+      const { rows } = await admin.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+        [table]
+      );
+      const realColumns = new Set(rows.map((r) => r.column_name));
+      for (const column of allowed) {
+        expect(realColumns.has(column), `${table}.${column} (in ALLOWED) does not exist in the real schema`).toBe(true);
+      }
+    }
   });
 });

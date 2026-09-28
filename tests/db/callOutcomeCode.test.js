@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
 import outcomePack from "../../capabilities/outcome.js";
+import qualificationPack from "../../capabilities/qualification.js";
 
 const url = process.env.DATABASE_URL;
 const describeDb = url ? describe : describe.skip;
@@ -141,5 +142,134 @@ describeDb("capabilities/outcome.js's note persistence, on real Postgres (I2)", 
       callback_requested_at: "2026-10-01T15:00:00.000Z",
       _outcome_note: "wants a follow-up call",
     });
+  });
+});
+
+// B2 (review): no DB-real E2E of the wrong_number suppression path existed
+// -- tests/db/outboundSuppression.test.js exercises db.insertSuppression
+// directly (the primitive), but never through the TOOL's own execute(), the
+// must-hold write the file header calls out. Real db.insertSuppression
+// requires an active tenant scope (requireTenantScope), so this runs inside
+// db.withTenant the same way a live call's executeToolCallGuarded would.
+describeDb("capabilities/outcome.js's wrong_number branch, on real Postgres, end to end (B2)", () => {
+  const PHONE = "+447700900601";
+
+  async function suppressionRow(phone) {
+    const { rows } = await admin.query(`SELECT reason, created_by, phone_e164 FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [
+      BUSINESS,
+      phone,
+    ]);
+    return rows[0] || null;
+  }
+
+  beforeEach(async () => {
+    if (!url) return;
+    await admin.query(`DELETE FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [BUSINESS, PHONE]);
+  });
+
+  it("inserts a real suppression row AND records the call's outcome as wrong_person, through the tool's own execute()", async () => {
+    const fc = { id: "fc-b2a", name: "set_call_outcome", args: { outcome: "wrong_number" } };
+    const ctx = {
+      callSid: SID,
+      callId: null,
+      party: { phone: PHONE, source: "dialed", verified: false },
+      deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers, insertSuppression: db.insertSuppression },
+    };
+
+    const result = await db.withTenant(BUSINESS, () => outcomePack.execute(fc, ctx));
+
+    expect(result.functionResponse.response.success).toBe(true);
+    // The CALL's own recorded outcome is wrong_person, never the literal
+    // suppression reason (the file header's own distinction).
+    expect((await row()).outcome_code).toBe("wrong_person");
+    expect(await suppressionRow(PHONE)).toEqual({ reason: "wrong_number", created_by: "tool", phone_e164: PHONE });
+  });
+
+  it("a second wrong_number report for the SAME number is still a success (ON CONFLICT DO NOTHING), no duplicate row", async () => {
+    const fc = { id: "fc-b2b", name: "set_call_outcome", args: { outcome: "wrong_number" } };
+    const ctx = {
+      callSid: SID,
+      callId: null,
+      party: { phone: PHONE, source: "dialed", verified: false },
+      deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers, insertSuppression: db.insertSuppression },
+    };
+
+    await db.withTenant(BUSINESS, () => outcomePack.execute(fc, ctx));
+    const second = await db.withTenant(BUSINESS, () => outcomePack.execute(fc, ctx));
+
+    expect(second.functionResponse.response.success).toBe(true);
+    const { rows } = await admin.query(`SELECT count(*)::int AS n FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [
+      BUSINESS,
+      PHONE,
+    ]);
+    expect(rows[0].n).toBe(1);
+  });
+
+  it("no usable phone on the call: refuses BEFORE any write -- no suppression row, no outcome_code change", async () => {
+    const fc = { id: "fc-b2c", name: "set_call_outcome", args: { outcome: "wrong_number" } };
+    const ctx = {
+      callSid: SID,
+      callId: null,
+      party: { phone: "anonymous", source: "dialed", verified: false },
+      deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers, insertSuppression: db.insertSuppression },
+    };
+
+    const result = await db.withTenant(BUSINESS, () => outcomePack.execute(fc, ctx));
+
+    expect(result.functionResponse.response.success).toBe(false);
+    expect(await suppressionRow("anonymous")).toBeNull();
+    expect((await row()).outcome_code).toBeNull();
+  });
+});
+
+// F20 (review): no real-DB test of record_answer's write existed --
+// tests/qualificationPack.test.js is unit-level, a fake mergeCallAnswers.
+// This is the real wire, the same shape as capabilities/outcome.js's own I2
+// coverage above: the pack's execute() called with db.mergeCallAnswers as
+// ctx.deps, against real Postgres.
+describeDb("capabilities/qualification.js's record_answer, on real Postgres (F20)", () => {
+  const QUESTIONS = [{ key: "clinic_name", ask: "What clinic?", required: true, type: "text" }];
+
+  function ctxFor(overrides = {}) {
+    return {
+      callSid: SID,
+      callId: null,
+      outboundCall: { config: { capabilities: ["qualification"], questions: QUESTIONS } },
+      deps: { mergeCallAnswers: db.mergeCallAnswers },
+      ...overrides,
+    };
+  }
+
+  it("a valid answer lands in calls.answers, under the campaign's own key", async () => {
+    const fc = { id: "fc-f20a", name: "record_answer", args: { key: "clinic_name", value: "Riverside Clinic" } };
+    const result = await qualificationPack.execute(fc, ctxFor());
+    expect(result.functionResponse.response.success).toBe(true);
+    expect((await row()).answers).toEqual({ clinic_name: "Riverside Clinic" });
+  });
+
+  it("a SECOND answer (a different key) merges alongside the first, not overwriting it", async () => {
+    await qualificationPack.execute(
+      { id: "fc-f20b1", name: "record_answer", args: { key: "clinic_name", value: "Riverside Clinic" } },
+      ctxFor({ outboundCall: { config: { capabilities: ["qualification"], questions: [...QUESTIONS, { key: "urgent", ask: "Urgent?", required: false, type: "text" }] } } })
+    );
+    await qualificationPack.execute(
+      { id: "fc-f20b2", name: "record_answer", args: { key: "urgent", value: "yes" } },
+      ctxFor({ outboundCall: { config: { capabilities: ["qualification"], questions: [...QUESTIONS, { key: "urgent", ask: "Urgent?", required: false, type: "text" }] } } })
+    );
+    expect((await row()).answers).toEqual({ clinic_name: "Riverside Clinic", urgent: "yes" });
+  });
+
+  it("an unknown key never reaches the database at all -- refused before any write", async () => {
+    const fc = { id: "fc-f20c", name: "record_answer", args: { key: "not_a_real_key", value: "x" } };
+    const result = await qualificationPack.execute(fc, ctxFor());
+    expect(result.functionResponse.response.success).toBe(false);
+    expect((await row()).answers).toBeNull();
+  });
+
+  it("a missing mergeCallAnswers wire refuses, real deps object with the key simply absent", async () => {
+    const fc = { id: "fc-f20d", name: "record_answer", args: { key: "clinic_name", value: "Riverside Clinic" } };
+    const result = await qualificationPack.execute(fc, ctxFor({ deps: {} }));
+    expect(result.functionResponse.response.success).toBe(false);
+    expect((await row()).answers).toBeNull();
   });
 });
