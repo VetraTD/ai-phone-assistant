@@ -19,6 +19,8 @@ const BIZ_A = "0d0d0000-0000-4000-8000-0000000000a1";
 const BIZ_B = "0d0d0000-0000-4000-8000-0000000000a2";
 let admin, db;
 
+const OPT_OUT_SID = "CA-optout-before-finish-0001";
+
 beforeAll(async () => {
   if (!url) return;
   admin = new pg.Client({ connectionString: url });
@@ -26,6 +28,10 @@ beforeAll(async () => {
   await admin.query(`ALTER ROLE vetra_app LOGIN PASSWORD 'probe_only'`);
   await admin.query(`DELETE FROM businesses WHERE id IN ($1, $2)`, [BIZ_A, BIZ_B]);
   await admin.query(`INSERT INTO businesses (id, name) VALUES ($1,'Suppression Co A'), ($2,'Suppression Co B')`, [BIZ_A, BIZ_B]);
+  await admin.query(
+    `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, direction) VALUES ($1, $2, '+447700900410', 'in-progress', 'outbound')`,
+    [BIZ_A, OPT_OUT_SID]
+  );
   process.env.DATABASE_URL = APP_URL;
   db = await import("../../services/db.js");
 });
@@ -116,5 +122,33 @@ d("insertDetectorSuppression: unchanged wrapper behaviour (regression, this task
     const detectorInserted = await db.withTenant(BIZ_A, () => db.insertDetectorSuppression({ phone, sourceCallId: null }));
     expect(detectorInserted).toBe(false);
     expect((await suppressionRow(BIZ_A, phone)).created_by).toBe("tool"); // unchanged
+  });
+});
+
+d("opt_out (capabilities/optOut.js), end to end against real Postgres: the row before finish() (this task's sabotage target)", () => {
+  it("the suppression row exists immediately after execute() resolves -- there is no session teardown here at all, and the row is already there", async () => {
+    const optOut = (await import("../../capabilities/optOut.js")).default;
+    const phone = "+447700900410";
+    const ctx = {
+      businessId: BIZ_A,
+      callId: null,
+      callSid: OPT_OUT_SID,
+      party: { phone, source: "dialed", verified: false },
+      deps: {
+        // The REAL writers, run inside the SAME tenant scope
+        // executeToolCallGuarded would open for the whole tool call --
+        // exactly what the sabotage below removes.
+        insertSuppression: (o) => db.insertSuppression(o),
+        setCallOutcomeCode: (sid, code) => db.setCallOutcomeCode(sid, code),
+      },
+    };
+
+    await db.withTenant(BIZ_A, () => optOut.execute({ id: "fc1", name: "opt_out", args: {} }, ctx));
+
+    // "Before finish()": nothing here ever calls finish() or any post-call
+    // step -- execute() alone is what must have landed the row.
+    expect(await suppressionRow(BIZ_A, phone)).toEqual({ reason: "opted_out", created_by: "tool", source_call_id: null });
+    const callRow = (await admin.query(`SELECT outcome_code FROM calls WHERE twilio_call_sid = $1`, [OPT_OUT_SID])).rows[0];
+    expect(callRow.outcome_code).toBe("opted_out");
   });
 });
