@@ -481,7 +481,18 @@ function doorFakeDb(over = {}) {
         ? { businessId: DOOR_BIZ, attemptId: DOOR_ATTEMPT, outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
         : null
     ),
-    withTenantSafe: vi.fn(async (_id, fn) => fn()),
+    // S3-4 fix round 2 (review): mirrors the REAL withTenantSafe's contract
+    // (services/db.js) -- it swallows a throw from `fn` itself and resolves
+    // to `opts.fallback` (default null), logging its own generic `db_error`.
+    // The earlier bare `(_id, fn) => fn()` shape propagated a throw, which
+    // is what let a dead try/catch in doorRoutes.js look load-bearing.
+    withTenantSafe: vi.fn(async (_id, fn, opts = {}) => {
+      try {
+        return await fn();
+      } catch {
+        return opts.fallback ?? null;
+      }
+    }),
     withTenant: vi.fn(async (_id, fn) => fn()),
     outboundCallContext: vi.fn(async () => ({
       config: { persona_name: "Ava" },
@@ -723,6 +734,13 @@ describe("POST /twilio/outbound-transfer-result", () => {
       expect(db.fetchAttemptTransferMissAudio).not.toHaveBeenCalled();
     });
 
+    // S3-4 fix round 2 (review): `withTenantSafe` itself swallows the throw
+    // from `fetchAttemptTransferMissAudio` and resolves to `null` (its own
+    // fallback, services/db.js) -- doorRoutes.js has no try/catch of its own
+    // around this call any more (matching every other withTenantSafe site in
+    // the file). `missAudio` ends up null exactly as it would for "no clip
+    // stored", so this must go RED if the `if (missAudio)` gate below it is
+    // ever weakened to treat a falsy value as playable.
     it("a read failure falls back to <Say> rather than 500ing (its failure must never affect the call)", async () => {
       const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => { throw new Error("db down"); }) });
       const res = await request(doorApp(db))
@@ -733,6 +751,10 @@ describe("POST /twilio/outbound-transfer-result", () => {
 
       expect(res.status).toBe(200);
       expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
+      // The throw was swallowed by withTenantSafe's own fallback, not by a
+      // dead outer catch in doorRoutes.js -- proven by fetchAttemptTransferMissAudio
+      // having actually been called (the fake's fn() ran and threw).
+      expect(db.fetchAttemptTransferMissAudio).toHaveBeenCalledWith(DOOR_ATTEMPT);
     });
 
     it("a stored clip but no signing secret configured falls back to <Say> rather than 500ing", async () => {
