@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
+import outcomePack from "../../capabilities/outcome.js";
 
 const url = process.env.DATABASE_URL;
 const describeDb = url ? describe : describe.skip;
@@ -94,5 +95,51 @@ describeDb("mergeCallAnswers, on real Postgres", () => {
       /expected 1 row, got 0/
     );
     expect(await row(MISSING_SID)).toBeNull();
+  });
+});
+
+// I2 (Important, checkpoint-A review). capabilities/outcome.js's `note`
+// used to live only in an in-memory scratchpad (stateEffects.capabilityState),
+// never reaching the DB at all. This is the real wire, end to end: the pack's
+// own execute() called with the REAL db.js functions as ctx.deps (not a
+// mock), against real Postgres, tenant-scoped by twilio_call_sid the same
+// way setCallOutcomeCode/mergeCallAnswers already are above.
+describeDb("capabilities/outcome.js's note persistence, on real Postgres (I2)", () => {
+  it("a note present: persisted under _outcome_note, a key no campaign question can ever collide with", async () => {
+    const fc = { id: "fc-i2a", name: "set_call_outcome", args: { outcome: "other", note: "asked to be contacted by email instead" } };
+    const ctx = { callSid: SID, callId: null, deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers } };
+
+    const result = await outcomePack.execute(fc, ctx);
+
+    expect(result.functionResponse.response.success).toBe(true);
+    const r = await row();
+    expect(r.outcome_code).toBe("other");
+    expect(r.answers).toEqual({ _outcome_note: "asked to be contacted by email instead" });
+  });
+
+  it("no note: outcome_code still lands, but answers stays untouched (never written to)", async () => {
+    const fc = { id: "fc-i2b", name: "set_call_outcome", args: { outcome: "not_interested" } };
+    const ctx = { callSid: SID, callId: null, deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers } };
+
+    const result = await outcomePack.execute(fc, ctx);
+
+    expect(result.functionResponse.response.success).toBe(true);
+    const r = await row();
+    expect(r.outcome_code).toBe("not_interested");
+    expect(r.answers).toBeNull();
+  });
+
+  it("a note alongside a campaign-style answer key: both survive (the shallow JSONB merge, not an overwrite)", async () => {
+    await db.mergeCallAnswers(SID, { callback_requested_at: "2026-10-01T15:00:00.000Z" });
+    const fc = { id: "fc-i2c", name: "set_call_outcome", args: { outcome: "qualified_no_booking", note: "wants a follow-up call" } };
+    const ctx = { callSid: SID, callId: null, deps: { setCallOutcomeCode: db.setCallOutcomeCode, mergeCallAnswers: db.mergeCallAnswers } };
+
+    await outcomePack.execute(fc, ctx);
+
+    const r = await row();
+    expect(r.answers).toEqual({
+      callback_requested_at: "2026-10-01T15:00:00.000Z",
+      _outcome_note: "wants a follow-up call",
+    });
   });
 });

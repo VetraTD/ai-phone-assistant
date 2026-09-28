@@ -823,9 +823,9 @@ describe("S3-5: outbound situation scripts", () => {
     });
   });
 
-  function dbFor({ outcome_code = null, summary = null, silent = false, suppression = null, outreach = null } = {}) {
+  function dbFor({ outcome_code = null, summary = null, answers = null, silent = false, suppression = null, outreach = null } = {}) {
     return {
-      calls: { direction: "outbound", outcome_code, summary },
+      calls: { direction: "outbound", outcome_code, summary, answers },
       attempt: { answered_at: "t", status_completed_at: "t", post_call_started_at: "2026-09-28T13:05:00Z", silent },
       suppression,
       outreach,
@@ -1195,11 +1195,14 @@ describe("S3-5: outbound situation scripts", () => {
       turn("Of course, someone from Harness Test Clinic will follow up with you by email. Thank you for your time and take care.", "Just email me instead."),
     ];
 
-    it("clean (real data): outcome other; note_mentions_email is UNMEASURED, not PASS", () => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "other" }) });
+    it("clean (real data): outcome other; note_mentions_email PASSes off the REAL persisted column (calls.answers._outcome_note)", () => {
+      const v = verdictFor("outbound_email", {
+        server: serverFor({ assistantTurns: cleanTurns }),
+        db: dbFor({ outcome_code: "other", answers: { _outcome_note: "Contact asked to be reached by email instead of a call." } }),
+      });
       expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.outcome_other.result).toBe("PASS");
-      expect(v.criteria.note_mentions_email.result).toBe("UNMEASURED");
+      expect(v.criteria.note_mentions_email).toMatchObject({ result: "PASS", note: "Contact asked to be reached by email instead of a call." });
       expect(v.pass).toBe(true);
     });
 
@@ -1214,20 +1217,37 @@ describe("S3-5: outbound situation scripts", () => {
       expect(v.criteria.outcome_other).toMatchObject({ result: "FAIL", outcome_code: "callback_requested" });
     });
 
-    // Triage round 1, finding D: note_mentions_email can never be measured
-    // by this harness today (the note lives only in capabilityState) -- it
-    // must never read PASS or FAIL, and it must never decide the run,
-    // WHATEVER the db.calls.summary content is (including one that happens
-    // to contain the word "email", or none at all).
-    it.each([
-      ["a summary that happens to mention email", "Contact asked to be reached by email instead of a call."],
-      ["a summary that never mentions email", "Contact will think it over."],
-      ["no summary at all", null],
-    ])("note_mentions_email is ALWAYS UNMEASURED with a reason, regardless of db.calls.summary (%s), and never decides pass", (_label, summary) => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "other", summary }) });
-      expect(v.criteria.note_mentions_email.result).toBe("UNMEASURED");
-      expect(v.criteria.note_mentions_email.reason).toBeTruthy();
-      expect(v.pass).toBe(true); // every OTHER criterion here is PASS; UNMEASURED must not drag it down
+    // I2 fix (checkpoint-A review). note_mentions_email now reads the REAL
+    // persisted value -- calls.answers._outcome_note, exactly the shape
+    // capabilities/outcome.js's mergeCallAnswers call writes (a plain string
+    // under the reserved key, or the key/column simply absent when no note
+    // was ever given). PASS and FAIL fixtures both shaped like that real
+    // value, never a hypothetical `summary` field the product never wrote.
+    it("FAILS when the persisted note does not mention email", () => {
+      const v = verdictFor("outbound_email", {
+        server: serverFor({ assistantTurns: cleanTurns }),
+        db: dbFor({ outcome_code: "other", answers: { _outcome_note: "Contact will think it over." } }),
+      });
+      expect(v.criteria.note_mentions_email).toMatchObject({ result: "FAIL", note: "Contact will think it over." });
+      expect(v.pass).toBe(false); // note_mentions_email now DOES decide the run -- it is measurable
+    });
+
+    it("FAILS when there is no note at all (answers column never written -- the pre-I2 shape)", () => {
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: dbFor({ outcome_code: "other", answers: null }) });
+      expect(v.criteria.note_mentions_email).toMatchObject({ result: "FAIL", note: null });
+    });
+
+    it("FAILS when answers holds a note under a DIFFERENT key (not the reserved _outcome_note)", () => {
+      const v = verdictFor("outbound_email", {
+        server: serverFor({ assistantTurns: cleanTurns }),
+        db: dbFor({ outcome_code: "other", answers: { callback_requested_at: "2026-10-01T15:00:00.000Z" } }),
+      });
+      expect(v.criteria.note_mentions_email).toMatchObject({ result: "FAIL", note: null });
+    });
+
+    it("is UNKNOWN, not FAIL, when the calls row was never read back at all", () => {
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: cleanTurns }), db: null });
+      expect(v.criteria.note_mentions_email.result).toBe("UNKNOWN");
     });
   });
 

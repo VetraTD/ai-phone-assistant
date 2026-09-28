@@ -122,6 +122,47 @@ describe("set_call_outcome", () => {
     }
   );
 
+  // I2 (Important, checkpoint-A review). The note used to live only in
+  // stateEffects.capabilityState.outcome.note -- an in-memory scratchpad
+  // never serialised anywhere -- so "email me instead" left no trace a
+  // future results webhook (S3-8) or the business could read. Persisted via
+  // mergeCallAnswers, the same pattern schedule_callback already uses, under
+  // a leading-underscore key that cannot collide with a campaign question
+  // key (those match /^[a-z][a-z0-9_]{0,31}$/ -- a lowercase-letter start is
+  // required, so `_outcome_note` can never match).
+  describe("the optional note is persisted (I2 fix)", () => {
+    it("a note present: mergeCallAnswers is called with it under _outcome_note", async () => {
+      const deps = fakeDeps();
+      const res = await outcome.execute(
+        fc({ outcome: "other", note: "asked to be contacted by email instead" }),
+        makeOutboundCtx({ deps })
+      );
+      expect(res.functionResponse.response.success).toBe(true);
+      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", {
+        _outcome_note: "asked to be contacted by email instead",
+      });
+    });
+
+    it("no note: mergeCallAnswers is never called", async () => {
+      const deps = fakeDeps();
+      const res = await outcome.execute(fc({ outcome: "not_interested" }), makeOutboundCtx({ deps }));
+      expect(res.functionResponse.response.success).toBe(true);
+      expect(deps.mergeCallAnswers).not.toHaveBeenCalled();
+    });
+
+    it("wrong_number with a note still persists it (the note is independent of the suppression write)", async () => {
+      const deps = fakeDeps();
+      const res = await outcome.execute(
+        fc({ outcome: "wrong_number", note: "answered by a different household" }),
+        makeOutboundCtx({ deps, phone: "+15551234567" })
+      );
+      expect(res.functionResponse.response.success).toBe(true);
+      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", {
+        _outcome_note: "answered by a different household",
+      });
+    });
+  });
+
   it("wrong_number writes a suppression reason wrong_number AND records the call's own outcome as wrong_person", async () => {
     const deps = fakeDeps();
     const res = await outcome.execute(fc({ outcome: "wrong_number" }), makeOutboundCtx({ deps, phone: "+15551234567" }));

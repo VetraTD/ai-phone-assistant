@@ -157,6 +157,25 @@ export default {
 
     if (callSid) {
       await ctx.deps?.setCallOutcomeCode?.(callSid, recordedOutcome);
+      // I2 fix (checkpoint-A review). The note used to live only in
+      // stateEffects.capabilityState.outcome.note -- a per-session, in-memory
+      // scratchpad (lib/voice/live/tools.js) never serialised as a whole to
+      // the DB -- so "email me instead" left no trace anywhere a future
+      // results webhook (S3-8) or the business could read. Persisted the way
+      // schedule_callback already persists (capabilities/callback.js's
+      // mergeCallAnswers pattern): calls.answers jsonb, keyed on
+      // `_outcome_note`. Ruling: the LEADING UNDERSCORE, not a plain word
+      // like `outcome_note` -- a campaign question key matches
+      // /^[a-z][a-z0-9_]{0,31}$/, which REQUIRES the first character to be a
+      // lowercase letter, so a key starting with `_` can never match that
+      // pattern regardless of what any campaign ever names a question. Cost
+      // if wrong (a plain-word key instead): a campaign author naming a
+      // question `outcome_note` would silently overwrite this value (or vice
+      // versa) with no error either way, since a shallow JSONB merge has no
+      // conflict detection.
+      if (note) {
+        await ctx.deps?.mergeCallAnswers?.(callSid, { _outcome_note: note });
+      }
     }
 
     const message = "Noted.";
