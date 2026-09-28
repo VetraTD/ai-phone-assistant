@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { validateCampaign, renderTemplate, spokenNumber, AI_DISCLOSURE_RE, buildCampaignSchemaExport } from "../lib/outbound/campaignSchema.js";
+import {
+  validateCampaign,
+  renderTemplate,
+  spokenNumber,
+  AI_DISCLOSURE_RE,
+  buildCampaignSchemaExport,
+  REFUSED_IN_PART1,
+  TEMPLATE_PLACEHOLDERS,
+} from "../lib/outbound/campaignSchema.js";
 import { TEMPLATES, PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
 
 const META = { name: "Speed to lead", template_key: "speed_to_lead", compliance_class: "solicited", audience: "business" };
@@ -176,4 +184,187 @@ describe("O-24/a7: persona_name must not double as the AI disclosure", () => {
     expect(errPaths(v({ ...good(), persona_name }))).toContain("persona_name"));
   it.each(["Aiden", "Aisha", "Kai"])("persona_name %j is allowed", (persona_name) =>
     expect(v({ ...good(), persona_name }).ok).toBe(true));
+});
+
+// ---------------------------------------------------------------------------
+// S3-6 (spec §19, S3-D4): goal-driven campaign fields + the `custom` template.
+// ---------------------------------------------------------------------------
+
+describe("S3-6: goal is required, and each goal needs its capabilities (named risk 2)", () => {
+  it("goal is required", () => expect(errPaths(v({ ...good(), goal: undefined }))).toContain("goal"));
+  it("an unknown goal value is refused, naming the real ones", () => {
+    const r = v({ ...good(), goal: "sell_stuff" });
+    const e = r.errors.find((e) => e.path === "goal");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/book/);
+  });
+
+  it("book requires the appointments capability, and is refused naming it when missing", () => {
+    const r = v({ ...good(), goal: "book", capabilities: ["opt_out"] });
+    const e = r.errors.find((e) => e.path === "capabilities");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/\bappointments\b/);
+  });
+  it("book with appointments (and opt_out) passes", () =>
+    expect(v({ ...good(), goal: "book", capabilities: ["appointments", "opt_out"] }).ok).toBe(true));
+
+  it("qualify_then_book requires BOTH qualification and appointments, naming both when missing", () => {
+    const r = v({ ...good(), goal: "qualify_then_book", capabilities: ["opt_out"] });
+    const e = r.errors.find((e) => e.path === "capabilities");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/qualification/);
+    expect(e.message).toMatch(/appointments/);
+  });
+  it("qualify_then_book missing only appointments names only appointments", () => {
+    const r = v({ ...good(), goal: "qualify_then_book", capabilities: ["qualification", "opt_out"] });
+    const e = r.errors.find((e) => e.path === "capabilities");
+    expect(e.message).toMatch(/appointments/);
+    expect(e.message).not.toMatch(/qualification/);
+  });
+  it("the shipped speed_to_lead template (qualify_then_book) already carries both capabilities", () =>
+    expect(v(good()).ok).toBe(true));
+
+  it("confirm_or_move requires appointments", () =>
+    expect(errPaths(v({ ...good(), goal: "confirm_or_move", capabilities: ["opt_out"] }))).toContain("capabilities"));
+  it("confirm_or_move with appointments passes", () =>
+    expect(v({ ...good(), goal: "confirm_or_move", capabilities: ["appointments", "opt_out"] }).ok).toBe(true));
+
+  it("get_review needs no extra capability, just its own required field", () =>
+    expect(v({ ...good(), goal: "get_review", review_url: "https://example.test/review", capabilities: ["opt_out"] }).ok).toBe(true));
+  it("pass_message needs no extra capability, just its own required field", () =>
+    expect(v({ ...good(), goal: "pass_message", message_text: "They called about their invoice.", capabilities: ["opt_out"] }).ok).toBe(true));
+  it("find_need needs no extra capability at all", () =>
+    expect(v({ ...good(), goal: "find_need", capabilities: ["opt_out"] }).ok).toBe(true));
+});
+
+describe("S3-6: why_allowed is required, <= 300 characters, never spoken", () => {
+  it("why_allowed is required", () => expect(errPaths(v({ ...good(), why_allowed: undefined }))).toContain("why_allowed"));
+  it("an empty why_allowed is refused", () => expect(errPaths(v({ ...good(), why_allowed: "   " }))).toContain("why_allowed"));
+  it("why_allowed over 300 characters is refused", () => expect(errPaths(v({ ...good(), why_allowed: "x".repeat(301) }))).toContain("why_allowed"));
+  it("exactly 300 characters is allowed", () => expect(v({ ...good(), why_allowed: "x".repeat(300) }).ok).toBe(true));
+});
+
+describe("S3-6: language is optional, en-GB or en-US when set", () => {
+  it("absent is fine -- the tenant's own default applies at runtime", () => expect(v(good()).ok).toBe(true));
+  it("an unrecognised language is refused", () => expect(errPaths(v({ ...good(), language: "fr-FR" }))).toContain("language"));
+  it("en-US is allowed", () => expect(v({ ...good(), language: "en-US" }).ok).toBe(true));
+  it("en-GB is allowed", () => expect(v({ ...good(), language: "en-GB" }).ok).toBe(true));
+});
+
+describe("S3-6: review_url (https only, required iff goal get_review) and message_text (<=300, required iff goal pass_message)", () => {
+  it("review_url is required when goal is get_review", () => expect(errPaths(v({ ...good(), goal: "get_review" }))).toContain("review_url"));
+  it("review_url must be https, not http", () =>
+    expect(errPaths(v({ ...good(), goal: "get_review", review_url: "http://example.test/review" }))).toContain("review_url"));
+  it("a well-formed https review_url passes", () =>
+    expect(v({ ...good(), goal: "get_review", review_url: "https://example.test/review" }).ok).toBe(true));
+  it("review_url, if present on a non-get_review campaign, is still validated for shape", () =>
+    expect(errPaths(v({ ...good(), review_url: "not-a-url" }))).toContain("review_url"));
+
+  it("message_text is required when goal is pass_message", () => expect(errPaths(v({ ...good(), goal: "pass_message" }))).toContain("message_text"));
+  it("message_text over 300 characters is refused", () =>
+    expect(errPaths(v({ ...good(), goal: "pass_message", message_text: "x".repeat(301) }))).toContain("message_text"));
+  it("a well-formed message_text passes", () =>
+    expect(v({ ...good(), goal: "pass_message", message_text: "Please call the office back." }).ok).toBe(true));
+});
+
+describe("S3-6: details_fields (<=10 entries of {key, label}), and never a placeholder the opener/voicemail can reach (named risk 3)", () => {
+  it("absent is fine", () => expect(v(good()).ok).toBe(true));
+  it("a valid entry passes", () => expect(v({ ...good(), details_fields: [{ key: "appt_date", label: "Appointment date" }] }).ok).toBe(true));
+  it("more than 10 entries is refused", () => {
+    const fields = Array.from({ length: 11 }, (_, i) => ({ key: `field_${i}`, label: `Field ${i}` }));
+    expect(errPaths(v({ ...good(), details_fields: fields }))).toContain("details_fields");
+  });
+  it("a key that is not snake_case is refused", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "Appt Date", label: "Appointment date" }] }))).toContain("details_fields[0].key"));
+  it("a key over 32 characters is refused", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "a".repeat(33), label: "x" }] }))).toContain("details_fields[0].key"));
+  it("a duplicate key is refused", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "appt_date", label: "A" }, { key: "appt_date", label: "B" }] }))).toContain("details_fields[1].key"));
+  it("a label over 40 characters is refused", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "appt_date", label: "x".repeat(41) }] }))).toContain("details_fields[0].label"));
+  it("an unknown nested key is refused, not silently accepted", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "appt_date", label: "Date", extra: 1 }] }))).toContain("details_fields[0].extra"));
+
+  // Named risk 3's structural half: renderCampaignLine (the ONE function that
+  // renders the opener/voicemail) only ever fills TEMPLATE_PLACEHOLDERS, so a
+  // details_fields key can never reach the opener/voicemail even if someone
+  // writes {appt_date} into one -- it is refused at save as an unknown
+  // placeholder, the same as any other made-up token.
+  it("a details_fields key used as an opener placeholder is refused as unknown -- it can never reach the spoken line", () =>
+    expect(errPaths(v({ ...good(), details_fields: [{ key: "appt_date", label: "Appointment date" }], opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}. Your date: {appt_date}." })))
+      .toContain("opener"));
+  it("TEMPLATE_PLACEHOLDERS never includes a details-shaped name", () => {
+    expect(TEMPLATE_PLACEHOLDERS).not.toContain("details");
+    expect(TEMPLATE_PLACEHOLDERS.some((p) => p.startsWith("detail"))).toBe(false);
+  });
+});
+
+describe("S3-6: caller_id becomes optional (defaults to the business number at dispatch; named risk 6)", () => {
+  it("absent is fine at save -- dispatch.js fills in the business's own number", () => {
+    const cfg = good();
+    delete cfg.caller_id;
+    expect(v(cfg).ok).toBe(true);
+  });
+  it("present, it is still validated as a real E.164 number", () => expect(errPaths(v({ ...good(), caller_id: "01372 656055" }))).toContain("caller_id"));
+  it("the shipped template's own blank placeholder (\"\") is still refused -- optional means absent, not blank", () =>
+    expect(errPaths(v({ ...good(), caller_id: "" }))).toContain("caller_id"));
+});
+
+describe("S3-6: unknown-key strictness still holds with the 7 new keys added", () => {
+  it("a near-miss of a real key (goals, plural) is still rejected", () => expect(errPaths(v({ ...good(), goals: ["book"] }))).toContain("goals"));
+  it("ALLOWED_KEYS strictness is unchanged in kind -- ALL 7 new keys accepted, one bogus key still refused", () => {
+    const cfg = {
+      ...good(),
+      details_fields: [{ key: "appt_date", label: "Appointment date" }],
+      language: "en-US",
+      review_url: "https://example.test/review", // unused outside get_review, but shape-valid
+      message_text: "A message.",
+      bogus_field: 1,
+    };
+    expect(errPaths(v(cfg))).toEqual(["bogus_field"]);
+  });
+});
+
+describe("S3-6: the custom template is allowed, and custom_basis maps to compliance_class at save (3 cases)", () => {
+  const customMeta = (complianceClass) => ({ name: "Custom outreach", template_key: "custom", compliance_class: complianceClass, audience: "business" });
+
+  it("custom is no longer in REFUSED_IN_PART1.template_key", () => expect(REFUSED_IN_PART1.template_key).not.toContain("custom"));
+  it("every other template_key is still refused (the filter did not over-widen)", () => {
+    expect(REFUSED_IN_PART1.template_key).toEqual(
+      expect.arrayContaining(["missed_call_callback", "reminder", "no_show", "aftercare", "review_request", "reactivation"])
+    );
+    expect(REFUSED_IN_PART1.template_key).toHaveLength(6);
+  });
+  it("custom_basis is required when template_key is custom", () =>
+    expect(errPaths(v(good(), customMeta("solicited")))).toContain("custom_basis"));
+  it("custom_basis is irrelevant (unchecked) for other template_keys", () => expect(v(good()).ok).toBe(true));
+
+  it("case 1: asked_to_be_contacted + compliance_class solicited passes, and maps to purpose enquiry_followup", () => {
+    expect(v({ ...good(), custom_basis: "asked_to_be_contacted" }, customMeta("solicited")).ok).toBe(true);
+    expect(PURPOSE_BY_TEMPLATE.custom).toBe("enquiry_followup");
+  });
+  it("asked_to_be_contacted with any other compliance_class is refused, naming the required class", () => {
+    const r = v({ ...good(), custom_basis: "asked_to_be_contacted" }, customMeta("service"));
+    const e = r.errors.find((e) => e.path === "compliance_class");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/solicited/);
+  });
+
+  it("case 2: existing_customer + compliance_class service passes", () =>
+    expect(v({ ...good(), custom_basis: "existing_customer" }, customMeta("service")).ok).toBe(true));
+  it("existing_customer with any other compliance_class is refused, naming the required class", () => {
+    const r = v({ ...good(), custom_basis: "existing_customer" }, customMeta("solicited"));
+    const e = r.errors.find((e) => e.path === "compliance_class");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/service/);
+  });
+
+  it('case 3: selling is refused outright, naming "Part 3", regardless of compliance_class', () => {
+    const r = v({ ...good(), custom_basis: "selling" }, customMeta("solicited"));
+    const e = r.errors.find((e) => e.path === "custom_basis");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/Part 3/);
+  });
+  it("an unknown custom_basis value is refused", () =>
+    expect(errPaths(v({ ...good(), custom_basis: "bogus" }, customMeta("solicited")))).toContain("custom_basis"));
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
+import { handleLiveSessionConnection, resolveLiveLanguage } from "../lib/voice/live/index.js";
 
 // ---------------------------------------------------------------------------
 // Which language the Live voice is pinned to, and where that comes from.
@@ -163,5 +163,40 @@ describe("the Live voice follows the tenant's locale", () => {
   it("still pins a voice name, so the accent is the only thing that moved", async () => {
     const config = await connectConfig({ ...BASE, locale: "en-US" });
     expect(config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S3-6 (spec §19, S3-D4): the campaign's own `language`, when an outbound
+// call sets one, outranks the tenant's own locale -- direct unit coverage of
+// resolveLiveLanguage's new 4th parameter (the precedence ladder itself is
+// exercised end-to-end in tests/outboundLiveRender.test.js and by the real
+// session boot above, both of which stay silent on this rung because none of
+// their fixtures set a campaign language).
+// ---------------------------------------------------------------------------
+describe("S3-6: the campaign's own language wins over the tenant's, reported as language_source campaign", () => {
+  it("a campaign language overrides the tenant's own locale", () => {
+    const r = resolveLiveLanguage({ locale: "en-GB" }, "+441372656055", {}, "en-US");
+    expect(r).toEqual({ code: "en-US", source: "campaign" });
+  });
+
+  it("a campaign language overrides the from-number derivation too (no tenant locale at all)", () => {
+    const r = resolveLiveLanguage({ locale: null }, "+441372656055", {}, "en-US");
+    expect(r).toEqual({ code: "en-US", source: "campaign" });
+  });
+
+  it("no campaign language given (inbound, or an outbound campaign that never set one): unchanged -- falls through to the tenant's locale", () => {
+    const r = resolveLiveLanguage({ locale: "en-GB" }, "+18176011171", {}, undefined);
+    expect(r).toEqual({ code: "en-GB", source: "tenant" });
+  });
+
+  it("the env override still wins over a campaign language -- the rig seam outranks everything", () => {
+    const r = resolveLiveLanguage({ locale: "en-GB" }, "+441372656055", { LIVE_LANGUAGE_CODE: "es-US" }, "en-US");
+    expect(r).toEqual({ code: "es-US", source: "env" });
+  });
+
+  it("a blank-string campaign language (e.g. an old outboundCall shape) is treated as absent, not as a language", () => {
+    const r = resolveLiveLanguage({ locale: "en-GB" }, "+441372656055", {}, "   ");
+    expect(r).toEqual({ code: "en-GB", source: "tenant" });
   });
 });

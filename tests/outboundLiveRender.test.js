@@ -359,6 +359,38 @@ describe("createLiveRenderAudio (dispatch's renderAudio)", () => {
     expect(audio.voicemail).toBeNull();
   });
 
+  // S3-6 (spec §19, S3-D4): the campaign's own `language`, when set, renders
+  // the clip in that language -- the SAME rung the live session itself reads
+  // (lib/voice/live/index.js resolveLiveLanguage), so the pre-rendered clip
+  // and the live call can never disagree about which language they are in.
+  it("the campaign's own language overrides the tenant's own locale/number-derived default", async () => {
+    // Tenant locale says en-GB (and the business number is UK too), but the
+    // campaign itself asked for en-US.
+    const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB" });
+    const { connect } = fakeConnect();
+    const renderAudio = createLiveRenderAudio({ db, env: {}, connect, log: quietLog() });
+
+    const row = {
+      id: "out-1",
+      business_id: BIZ,
+      phone_e164: "+15551230000",
+      config: { caller_id: "+441372656055", language: "en-US" },
+    };
+    await renderAudio({ row, attemptNo: 1, lines: { opener: OPENER } });
+
+    const { config } = connect.mock.calls[0][0];
+    expect(config.speechConfig.languageCode).toBe("en-US");
+  });
+
+  it("no campaign language set: falls through to the tenant's own locale exactly as before this task", async () => {
+    const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB" });
+    const { connect } = fakeConnect();
+    const renderAudio = createLiveRenderAudio({ db, env: {}, connect, log: quietLog() });
+    const row = { id: "out-1", business_id: BIZ, phone_e164: "+15551230000", config: { caller_id: "+441372656055" } };
+    await renderAudio({ row, attemptNo: 1, lines: { opener: OPENER } });
+    expect(connect.mock.calls[0][0].config.speechConfig.languageCode).toBe("en-GB");
+  });
+
   it("a refused line comes back as null for that key", async () => {
     const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB" });
     const { connect } = fakeConnect({ say: (line) => (line === VOICEMAIL ? "nope" : line) });

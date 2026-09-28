@@ -13,10 +13,14 @@ describe("campaign schema export (the dashboard's copy)", () => {
     // Fix round 1 (Important 3, controller ruling): template_key is refused
     // for every value except speed_to_lead in Part 1 -- reactivation would
     // otherwise dodge the marketing_consented refusal entirely.
+    //
+    // S3-6 (spec §19, S3-D4): `custom` joins speed_to_lead as allowed --
+    // deliberately updated here (controller ruling), not a drift the test
+    // caught by accident.
     expect(s.refusedInPart1).toEqual({
       compliance_class: ["marketing_consented"],
       audience: ["patient"],
-      template_key: ["missed_call_callback", "reminder", "no_show", "aftercare", "review_request", "reactivation", "custom"],
+      template_key: ["missed_call_callback", "reminder", "no_show", "aftercare", "review_request", "reactivation"],
     });
   });
 });

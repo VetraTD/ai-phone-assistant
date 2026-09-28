@@ -258,3 +258,107 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     expect(situationRows.length).toBe(13);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S3-6 (spec §19, S3-D4): the goal line + per-person DETAILS lines.
+//
+// WITH_FIRST_NAME's own config (tests/fixtures/businessConfigs.js) carries no
+// `goal`/`details_fields` -- these tests override `config` inline rather than
+// touching the shared fixture, so the snapshot suite (outboundPromptSnapshot)
+// and every other consumer of OUTBOUND_FIXTURES are untouched by this task.
+// ---------------------------------------------------------------------------
+
+describe("S3-6: the GOAL line", () => {
+  it("qualify_then_book renders the brief's own example verbatim", () => {
+    const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: "qualify_then_book" } };
+    expect(renderBlock(outboundCall)).toContain("GOAL: Ask the questions, then offer a time to talk.");
+  });
+
+  it.each([
+    ["book", "GOAL: Offer them a time to book."],
+    ["confirm_or_move", "GOAL: Confirm the appointment, or offer to move it to a time that works better."],
+    ["get_review", "GOAL: Ask them for a review."],
+    ["pass_message", "GOAL: Pass on the message."],
+    ["find_need", "GOAL: Find out what they need."],
+  ])("%s renders its own goal line", (goal, expectedLine) => {
+    const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal } };
+    expect(renderBlock(outboundCall)).toContain(expectedLine);
+  });
+
+  it("no goal set at all (named risk 5's prompt-side shape -- dispatch.js already refuses to dial this): no GOAL line, never a blank or 'undefined' one", () => {
+    const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: undefined } };
+    expect(renderBlock(outboundCall)).not.toMatch(/^GOAL:/m);
+  });
+
+  it("an unrecognised goal value also renders no line, rather than guessing at one", () => {
+    const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: "sell_stuff" } };
+    expect(renderBlock(outboundCall)).not.toMatch(/^GOAL:/m);
+  });
+});
+
+describe("S3-6: DETAILS lines -- per-person details from campaign details_fields + ctx.outboundCall.details", () => {
+  const detailsFields = [
+    { key: "appt_date", label: "Appointment date" },
+    { key: "appt_time", label: "Appointment time" },
+    { key: "unused_field", label: "Unused" },
+  ];
+
+  it("renders one DETAILS line per matched, present field, using the campaign's own labels", () => {
+    const outboundCall = {
+      ...WITH_FIRST_NAME,
+      config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields },
+      details: { appt_date: "12 March", appt_time: "10am", ignored_key: "should never appear" },
+    };
+    const text = renderBlock(outboundCall);
+    expect(text).toContain("DETAILS: Appointment date: 12 March");
+    expect(text).toContain("DETAILS: Appointment time: 10am");
+    // unused_field has no value in `details` -- no line at all, not "DETAILS: Unused: ".
+    expect(text).not.toContain("DETAILS: Unused:");
+    // ignored_key is not a details_fields key -- never rendered under any label.
+    expect(text).not.toContain("should never appear");
+  });
+
+  it("no `details` on the call at all: no DETAILS lines, and no throw (S3-9 has not wired it yet on most calls)", () => {
+    const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields } };
+    expect(() => renderBlock(outboundCall)).not.toThrow();
+    expect(renderBlock(outboundCall)).not.toMatch(/^DETAILS:/m);
+  });
+
+  it("no details_fields on the campaign: details are ignored even when outbound.details carries values", () => {
+    const outboundCall = { ...WITH_FIRST_NAME, details: { appt_date: "12 March" } };
+    expect(renderBlock(outboundCall)).not.toMatch(/^DETAILS:/m);
+  });
+
+  it("a blank value is skipped, not rendered as 'DETAILS: label: '", () => {
+    const outboundCall = {
+      ...WITH_FIRST_NAME,
+      config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields },
+      details: { appt_date: "   ", appt_time: "10am" },
+    };
+    const text = renderBlock(outboundCall);
+    expect(text).not.toContain("DETAILS: Appointment date:");
+    expect(text).toContain("DETAILS: Appointment time: 10am");
+  });
+
+  it("a value over the render budget (CAMPAIGN_LIMITS.details_value) is left out, never truncated", () => {
+    const outboundCall = {
+      ...WITH_FIRST_NAME,
+      config: { ...WITH_FIRST_NAME.config, details_fields: [{ key: "appt_date", label: "Appointment date" }] },
+      details: { appt_date: "x".repeat(201) },
+    };
+    expect(renderBlock(outboundCall)).not.toContain("DETAILS: Appointment date:");
+  });
+
+  it("named risk 3: DETAILS never reach the opener/voicemail -- outboundCallBlock never renders that text at all (it is rendered separately by renderCampaignLine, which is never given `details`; see tests/outboundCampaignSchema.test.js)", () => {
+    const outboundCall = {
+      ...WITH_FIRST_NAME,
+      config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields },
+      details: { appt_date: "12 March" },
+    };
+    const text = renderBlock(outboundCall);
+    // outbound.openerText (the rendered backstop line) is never read by this
+    // function at all -- so a DETAILS value can only ever show up on its own
+    // labelled line, never spliced into the opener sentence.
+    expect(text).not.toContain(outboundCall.openerText);
+  });
+});

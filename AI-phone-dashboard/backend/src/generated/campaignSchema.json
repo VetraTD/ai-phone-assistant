@@ -15,7 +15,11 @@
     "max_call_minutes": 30,
     "first_name_worst_case": 30,
     "booking_length_min": 240,
-    "min_window_minutes": 30
+    "min_window_minutes": 30,
+    "why_allowed": 300,
+    "message_text": 300,
+    "details_fields": 10,
+    "details_value": 200
   },
   "enums": {
     "template_key": [
@@ -56,6 +60,23 @@
     ],
     "booking_adapter": [
       "internal"
+    ],
+    "goal": [
+      "book",
+      "qualify_then_book",
+      "confirm_or_move",
+      "get_review",
+      "pass_message",
+      "find_need"
+    ],
+    "language": [
+      "en-GB",
+      "en-US"
+    ],
+    "custom_basis": [
+      "asked_to_be_contacted",
+      "existing_customer",
+      "selling"
     ]
   },
   "placeholders": [
@@ -84,8 +105,7 @@
       "no_show",
       "aftercare",
       "review_request",
-      "reactivation",
-      "custom"
+      "reactivation"
     ]
   }
 }

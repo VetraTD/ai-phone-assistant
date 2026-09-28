@@ -131,6 +131,75 @@ describe("dispatch: the gate's verdicts", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// S3-6 (spec §19, S3-D4): named risk 5 (a stored campaign_versions row saved
+// before `goal` existed must never dial) and named risk 6 (caller_id
+// defaults to the business's own number, still run through callerIdValid).
+// ---------------------------------------------------------------------------
+describe("S3-6 named risk 5: a campaign version with no valid goal is refused at dispatch, never dialled", () => {
+  it("goal absent (an old stored version): closes with reason missing_goal, before the gate, never calls Twilio", async () => {
+    const cfg = { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055" };
+    delete cfg.goal;
+    const db = fakeDb(row({ config: cfg }));
+    const { d, twilio } = mk(db);
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(r).toEqual({ status: "closed", reason: "missing_goal" });
+    expect(db.closeOutreach).toHaveBeenCalledWith("o1", "missing_goal");
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+    // Reuses the SAME log/counter path evaluateGate's own "never" verdict
+    // does (dispatch() treats every "closed" phase identically) -- no bespoke
+    // wiring to forget to register.
+  });
+
+  it("goal present but not a real enum value (a typo, or garbage data): same refusal", async () => {
+    const db = fakeDb(row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", goal: "sell_everything" } }));
+    const { d, twilio } = mk(db);
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "closed", reason: "missing_goal" });
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+
+  it("the happy-path row's own goal (inherited from TEMPLATES.speed_to_lead) still dials -- this is not a blanket refusal", async () => {
+    const db = fakeDb(); const { d, twilio } = mk(db);
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(twilio.calls.create).toHaveBeenCalled();
+  });
+});
+
+describe("S3-6 named risk 6: caller_id defaults to the business's own number, and is still run through callerIdValid (never a bypass)", () => {
+  it("caller_id absent from the campaign config: dials FROM the business's own number", async () => {
+    const cfg = { ...structuredClone(TEMPLATES.speed_to_lead) };
+    delete cfg.caller_id;
+    const db = fakeDb(row({ config: cfg, business_phone_number: "+18176011171" }));
+    const { d, twilio } = mk(db);
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(r.status).toBe("dialed");
+    expect(twilio.calls.create.mock.calls[0][0].from).toBe("+18176011171");
+    expect(db.insertCallAttempt).toHaveBeenCalledWith(expect.objectContaining({ fromNumber: "+18176011171" }));
+  });
+
+  it("the default is run through the SAME callerIdValid ownership check as an explicit caller_id -- never a bypass", async () => {
+    const cfg = { ...structuredClone(TEMPLATES.speed_to_lead) };
+    delete cfg.caller_id;
+    const db = fakeDb(row({ config: cfg, business_phone_number: "+18176011171" }));
+    const callerIdValid = vi.fn(async () => true);
+    const { d } = mk(db, undefined, { callerIdValid });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(callerIdValid).toHaveBeenCalledWith("+18176011171");
+  });
+
+  it("the business has no number either (an unresolvable default): callerIdValid sees the gap and the call is refused, not dialled with an empty from", async () => {
+    const cfg = { ...structuredClone(TEMPLATES.speed_to_lead) };
+    delete cfg.caller_id;
+    const db = fakeDb(row({ config: cfg, business_phone_number: null }));
+    const callerIdValid = vi.fn(async () => false); // "" is never owned
+    const { d, twilio } = mk(db, undefined, { callerIdValid });
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    expect(callerIdValid).toHaveBeenCalledWith("");
+    expect(r).toMatchObject({ status: "closed", reason: "caller_id_invalid" });
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("dispatch: Twilio failures", () => {
   it("a failed calls.create records the attempt failed and schedules the NEXT entry", async () => {
     const db = fakeDb(); const twilio = { calls: { create: vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 400 }); }) } };
