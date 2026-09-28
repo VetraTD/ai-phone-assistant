@@ -1196,6 +1196,16 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
     // pacingCheck at report time.
     mediaTickerStartMs: null,
     mediaTickerEndMs: null,
+    // F-R2 harness-fix round 2 (review Important #2): assistant audio the
+    // CLIENT actually received -- not elapsed wall time -- between the
+    // pre-clip greeting's own line and the caller's first post-clip
+    // (substantive) line. Set once, the first time maybeSpeakNext actually
+    // sends line index 1, from the SAME assistantFramesThisTurn counter the
+    // console's own "heard X.Xs back" line already prints (so this can never
+    // disagree with what the operator sees). Null for a single-line script
+    // (mode "speaks_first" with no --script), where there is no second line
+    // to wait for.
+    heardBeforeFirstPostClipLineMs: null,
   };
   const outboundStreamSid = `MZ${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
 
@@ -1284,6 +1294,11 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
     const assistantQuiet = heardSomething && now - lastAssistantMediaAt >= GAP_MS;
     const gaveUp = !heardSomething && waitedSinceTurnStart >= REPLY_WAIT_MS;
     if (!assistantQuiet && !gaveUp) return;
+
+    // F-R2 harness-fix round 2: cursor is still 1 here on the FIRST call that
+    // actually sends a line -- exactly "the caller's first post-clip line" --
+    // so this is the one place to capture what the console is about to print.
+    if (cursor === 1) stats.heardBeforeFirstPostClipLineMs = assistantFramesThisTurn * FRAME_MS;
 
     const nextLine = scriptLines[cursor];
     cursor += 1;
@@ -1657,7 +1672,13 @@ async function mainOutbound() {
           }
         : {}),
       clip,
-      client: observer.snapshot(),
+      // F-R2 harness-fix round 2: the opener clip's own known length,
+      // independent of the product's clip-hold internals (review Important
+      // #1) -- `clipBytes` is already read above to decide `clip` itself,
+      // reused rather than re-derived so the two can never disagree about
+      // whether/how big the stored clip is.
+      clipBytes,
+      client: { ...observer.snapshot(), heard_before_first_post_clip_line_ms: stats.heardBeforeFirstPostClipLineMs },
       server,
       db: dbExtra,
       personaName: seed.personaName,

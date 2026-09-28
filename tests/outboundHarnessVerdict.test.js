@@ -976,7 +976,8 @@ describe("S3-5: outbound situation scripts", () => {
         topic: TOPIC,
         timezone: TZ,
         now: NOW,
-        client: {},
+        clipBytes: 38481, // real "clip 38481 bytes stored" (sims-r2/outbound_gatekeeper_fetch-3.txt)
+        client: { heard_before_first_post_clip_line_ms: 4800 }, // real "speak gk_fetch_wait (heard 4.8 s back)"
         server: view,
         db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
       });
@@ -988,15 +989,26 @@ describe("S3-5: outbound situation scripts", () => {
       });
       // backstop_silence: the caller's own line opens DURING the clip by
       // design (playing_at_open:true on utterance 1 above) -- exempted, not a
-      // stale-reply collision (harness-fix-brief item 2's own scoping).
-      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({ result: "PASS", collision_playing_at_open: false });
+      // stale-reply collision (harness-fix-brief item 2's own scoping). The
+      // exemption applies even though clip_ms/heard_ms are both real and
+      // available here -- stale_audio_ms stays null, never computed on this path.
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "PASS",
+        collision_playing_at_open: false,
+        stale_audio_ms: null,
+      });
     });
   });
 
-  // F-R2 fix (harness-fix-brief item 2). The clip-hold defect: real round-2
-  // raw log text, copied verbatim (memory a-test-proves-a-wire-only-if-both-
-  // ends-are-real) -- see STALE_REPLY_EXTRA_WAIT_MS's own doc for the replay
-  // numbers behind the threshold.
+  // F-R2 fix (harness-fix-brief item 2, harness-fix round 2). The clip-hold
+  // defect: real round-2 raw log text, copied verbatim (memory a-test-
+  // proves-a-wire-only-if-both-ends-are-real) -- see STALE_REPLY_AUDIO_MS's
+  // own doc for the replay numbers behind the threshold. `clipBytes`/
+  // `client.heard_before_first_post_clip_line_ms` below are each run's own
+  // real "clip <N> bytes stored" / "speak ... (heard X.Xs back)" console
+  // values (round 2 predates this field's structured capture, harness-fix
+  // round 2's own report -- these are the same real numbers, just read from
+  // the saved console text instead of a JSON field that did not exist yet).
   describe("no_stale_reply_after_clip", () => {
     // REAL data, outbound_stop-1 (harness-server-r2.log, callSid
     // CAharness1a0e68e5336976c94e9): signal (A) -- Live speaks a WHOLE turn
@@ -1023,7 +1035,8 @@ describe("S3-5: outbound situation scripts", () => {
         topic: TOPIC,
         timezone: TZ,
         now: NOW,
-        client: {},
+        clipBytes: 42641, // real "clip 42641 bytes stored" (sims-r2/outbound_stop-1.txt)
+        client: { heard_before_first_post_clip_line_ms: 7800 }, // real "speak stop_ask (heard 7.8 s back)"
         server: view,
         db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
       });
@@ -1032,6 +1045,8 @@ describe("S3-5: outbound situation scripts", () => {
         path: "backstop_hello_end",
         audible_stale_reply: { text: "Just to confirm, am I speaking with Sam?", user_text: "Hello?" },
       });
+      expect(v.criteria.no_stale_reply_after_clip.clip_ms).toBeCloseTo(5330.125, 3);
+      expect(v.criteria.no_stale_reply_after_clip.stale_audio_ms).toBeCloseTo(2469.875, 3);
       // The rest of the call is otherwise clean -- this criterion, not
       // turns_reached/suppression/outcome, is what must catch the defect.
       expect(v.criteria.turns_reached.result).toBe("PASS");
@@ -1042,10 +1057,11 @@ describe("S3-5: outbound situation scripts", () => {
     // CAharness1a0e69b5dd9c5070159): signal (C) ONLY -- no separate stale
     // turn was ever logged (only one, real turn exists) and no playing_at_
     // open collision (the caller started clean, after everything had gone
-    // quiet) -- but the gap between the greeting utterance and the caller's
-    // real line (12,340ms) still runs 6,840ms longer than the clip's own
-    // known length (275 frames x 20ms = 5,500ms), far past
-    // STALE_REPLY_EXTRA_WAIT_MS. Proves signal (C) catches what (A)/(B) miss.
+    // quiet) -- but the assistant audio the caller actually received before
+    // that line (real "heard 9.6 s back") runs 4,149.875ms longer than the
+    // clip's own real byte-derived length (43,601 bytes / 8 = 5,450.125ms),
+    // far past STALE_REPLY_AUDIO_MS. Proves signal (C) catches what (A)/(B)
+    // miss -- on genuine RECEIVED audio, not a wall-clock gap.
     const BADTIME2_CALL_SID = "CAharness1a0e69b5dd9c5070159";
     const BADTIME2_RAW_LOG = [
       '{"message":"outbound_backstop_played [c5070159]","ts":"2026-09-28T06:02:33.961Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e69b5dd9c5070159","attemptId":"286e85e4-bda0-4835-8b99-58b21e9e4ae1","path":"backstop_hello_end","source":"stored","seed":"at_end_mark"}',
@@ -1057,7 +1073,7 @@ describe("S3-5: outbound situation scripts", () => {
       '{"message":"live_call_summary [c5070159]","ts":"2026-09-28T06:02:55.903Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e69b5dd9c5070159","turns":2,"usage":{"text_in":18608,"audio_in":1141,"text_out":0,"audio_out":325,"cached_in":0,"turns_billed":2},"close_reason":"end_call_mark"}',
     ].join("\n");
 
-    it("REAL data (outbound_bad_time-2): FAILs on extra_wait alone -- no audible stale turn, no playing_at_open collision", () => {
+    it("REAL data (outbound_bad_time-2): FAILs on stale_audio alone -- no audible stale turn, no playing_at_open collision", () => {
       const view = parseServerLog(BADTIME2_RAW_LOG, { callSid: BADTIME2_CALL_SID });
       const v = outboundVerdict({
         mode: "speaks_first",
@@ -1065,7 +1081,8 @@ describe("S3-5: outbound situation scripts", () => {
         topic: TOPIC,
         timezone: TZ,
         now: NOW,
-        client: {},
+        clipBytes: 43601, // real "clip 43601 bytes stored" (sims-r2/outbound_bad_time-2.txt)
+        client: { heard_before_first_post_clip_line_ms: 9600 }, // real "speak bad_time_driving (heard 9.6 s back)"
         server: view,
         db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
       });
@@ -1073,10 +1090,10 @@ describe("S3-5: outbound situation scripts", () => {
         result: "FAIL",
         audible_stale_reply: null,
         collision_playing_at_open: false,
-        clip_ms: 5500,
-        gap_ms: 12340,
-        extra_wait_ms: 6840,
+        heard_ms: 9600,
       });
+      expect(v.criteria.no_stale_reply_after_clip.clip_ms).toBeCloseTo(5450.125, 3);
+      expect(v.criteria.no_stale_reply_after_clip.stale_audio_ms).toBeCloseTo(4149.875, 3);
       expect(v.pass).toBe(false);
     });
 
@@ -1107,7 +1124,8 @@ describe("S3-5: outbound situation scripts", () => {
         topic: TOPIC,
         timezone: TZ,
         now: NOW,
-        client: {},
+        clipBytes: 41281, // real "clip 41281 bytes stored" (sims-r2/outbound_child-2.txt)
+        client: { heard_before_first_post_clip_line_ms: 7800 }, // real "speak child_not_here (heard 7.8 s back)"
         server: view,
         db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false }, outreach: null },
       });
@@ -1120,18 +1138,17 @@ describe("S3-5: outbound situation scripts", () => {
     });
 
     // No real round-2 run happens to be clean on this path (the tax was
-    // near-universal this round -- STALE_REPLY_EXTRA_WAIT_MS's own doc) --
-    // this fixture is plausible, not real, shaped like a fixed run: the
-    // caller's real line opens GAP_MS-ish after the clip's own known length,
-    // nothing else plays in between.
-    it("a clean hello-end call (plausible, not real -- no stale turn, no collision, gap within the clip's own length + tolerance) PASSes", () => {
+    // near-universal this round -- STALE_REPLY_AUDIO_MS's own doc) -- this
+    // fixture is plausible, not real, shaped like a fixed run: the caller's
+    // real line follows the clip and nothing else plays in between, so the
+    // audio actually received equals the clip's own known length exactly.
+    it("a clean hello-end call (plausible, not real -- no stale turn, no collision, no audio received beyond the clip) PASSes", () => {
       const server = {
         firstAudio: { path: "backstop_hello_end", from_answer_ms: 1800, from_speech_ms: 650, measured: "playout" },
         assistantTurns: [{ text: "No trouble, I'll call back tomorrow at ten, thank you.", user_text: "He's out. Try tomorrow at ten." }],
-        clipHoldReleased: { frames: 260, dropped: 0, reason: "seed_sent" },
         liveUtterances: [
           { utterance: 1, opened_ms: 10000, duration_ms: 400, playing_at_open: false, held: 0, forwarded: 20 },
-          { utterance: 2, opened_ms: 15900, duration_ms: 1200, playing_at_open: false, held: 0, forwarded: 60 }, // gap 5900 - clip 5200 = 700ms extra, under the 1500ms tolerance
+          { utterance: 2, opened_ms: 15900, duration_ms: 1200, playing_at_open: false, held: 0, forwarded: 60 },
         ],
       };
       const v = outboundVerdict({
@@ -1140,7 +1157,8 @@ describe("S3-5: outbound situation scripts", () => {
         topic: TOPIC,
         timezone: TZ,
         now: NOW,
-        client: {},
+        clipBytes: 41600, // 41,600 / 8 = 5,200ms exactly
+        client: { heard_before_first_post_clip_line_ms: 5200 }, // the client received exactly the clip's own audio, nothing more
         server,
         db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false }, outreach: { next_attempt_at: tomorrowAtForTest(10, 0) } },
       });
@@ -1149,8 +1167,48 @@ describe("S3-5: outbound situation scripts", () => {
         audible_stale_reply: null,
         collision_playing_at_open: false,
         clip_ms: 5200,
-        gap_ms: 5900,
-        extra_wait_ms: 700,
+        heard_ms: 5200,
+        stale_audio_ms: 0,
+      });
+    });
+
+    // harness-fix round 2, review Important #2: the threshold must not
+    // conflate "Ava's stale airtime" with "the caller's own longer pause".
+    // Here the caller waits a full 15s longer than the clip (opened_ms gap
+    // 15,000ms -- under the OLD wall-clock signal this would have FAILed
+    // decisively, extra ~9,800ms) and there is still no playing_at_open
+    // collision -- but the client received NO audio beyond the clip itself
+    // (heard_before_first_post_clip_line_ms equals the clip's own length
+    // exactly, since scripts/live-call-harness.js only increments it when
+    // the server actually sends a media frame). A slow caller adds silence,
+    // not assistant audio, and cannot trip this signal.
+    it("a slow caller who simply pauses longer (plausible, not real) PASSes -- audio received, not elapsed wall time, decides it", () => {
+      const server = {
+        firstAudio: { path: "backstop_hello_end", from_answer_ms: 1800, from_speech_ms: 650, measured: "playout" },
+        assistantTurns: [{ text: "No trouble, I'll call back tomorrow at ten, thank you.", user_text: "He's out. Try tomorrow at ten." }],
+        liveUtterances: [
+          { utterance: 1, opened_ms: 10000, duration_ms: 400, playing_at_open: false, held: 0, forwarded: 20 },
+          // A huge wall-clock gap (15,000ms) from a caller who just took their
+          // time -- would have false-FAILed the old signal, must not FAIL this one.
+          { utterance: 2, opened_ms: 25000, duration_ms: 1200, playing_at_open: false, held: 0, forwarded: 60 },
+        ],
+      };
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_gatekeeper_later",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        clipBytes: 41600, // 5,200ms
+        client: { heard_before_first_post_clip_line_ms: 5200 }, // same audio as the clean case -- the caller's own pause added no audio
+        server,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false }, outreach: { next_attempt_at: tomorrowAtForTest(10, 0) } },
+      });
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "PASS",
+        audible_stale_reply: null,
+        collision_playing_at_open: false,
+        stale_audio_ms: 0,
       });
     });
 
