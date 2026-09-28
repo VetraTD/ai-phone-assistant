@@ -1362,6 +1362,49 @@ describe("outbound: the first seconds through the real session", () => {
     expect(events("live_promise_only_turn")).toHaveLength(0);
     await call.hangUp();
   });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 3 (opus re-review 2). N1: unlatchClipProvisional sent the
+  // provisional buffer straight to Live while the delay line could still
+  // hold up to 500 ms of OLDER frames -- an un-latch inverted order every
+  // time it ran. Usually only silence got reordered, but the delay line can
+  // hold a quiet caller's own sub-threshold onset, so their real speech
+  // could arrive at Live out of order. Fixed: unlatchClipProvisional flushes
+  // the delay line FIRST, then the provisional buffer, both still direct
+  // and immediate.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 3, N1: after an un-latch, frames reach Live in arrival order -- delay-line frames ahead of the provisional ones", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+
+    const beforeDelayContent = call.live.sent.audioIn.length;
+    // 5 OLDER frames sit in the delay line, unflushed (well under its own
+    // 25-frame cap) -- these must reach Live BEFORE anything from the
+    // provisional episode that follows.
+    await call.feed(100);
+    // ONE raw voiced frame: a click, not speech -- latches PROVISIONALLY.
+    // The delay line's own 5 frames are now frozen (phase 3 stops feeding
+    // it; see routeClipFrame's own phase comment).
+    await call.feed(20, { voiced: true });
+    // 800 ms more silence: comfortably past CLIP_CONFIRM_WINDOW_MS since the
+    // provisional latch -- it times out unconfirmed and un-latches.
+    await call.feed(800);
+
+    const arrived = call.live.sent.audioIn.slice(beforeDelayContent);
+    const voiced = arrived.map((a) => pcmPeak(a.data) > 4000);
+    // The delay line's older (silent) frames -- whatever their exact count
+    // (the hello-end sequence's own tail can leave a frame or two already
+    // sitting there before the 100 ms feed above even starts) -- must all
+    // reach Live BEFORE the single voiced (click) frame that starts the
+    // provisional episode. Under the pre-fix order the click is sent alone,
+    // first, with the delay line's own content left behind (never flushed
+    // in this same burst) -- so the click would be entries[0], not later.
+    const firstVoicedIdx = voiced.indexOf(true);
+    expect(firstVoicedIdx).toBeGreaterThan(0);
+    expect(voiced.slice(0, firstVoicedIdx).every((v) => v === false)).toBe(true);
+    await call.hangUp();
+  });
 });
 
 describe("inbound unchanged", () => {
