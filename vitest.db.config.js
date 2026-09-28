@@ -26,5 +26,17 @@ export default {
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    env: {
+      // S3-11: isSuppressed (the gate's do-not-call check) now throws
+      // without this (Ruling S3-11b, fail closed) -- so every DB test that
+      // exercises the real dispatch/gate path (tests/db/outboundDispatch.test.js
+      // and friends) needs SOME value, the same way vitest.config.js's own
+      // `env` block supplies a shared GEMINI_API_KEY etc. for the root suite.
+      // >= 32 characters (services/db.js's own floor). Individual tests that
+      // need to prove the fail-closed behaviour override/delete this at
+      // `process.env.SUPPRESSION_HASH_KEY` for the duration of one test and
+      // restore it afterwards.
+      SUPPRESSION_HASH_KEY: "vitest-db-suite-fixed-suppression-hash-key-32chars-min",
+    },
   },
 };

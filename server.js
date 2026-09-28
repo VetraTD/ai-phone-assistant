@@ -175,7 +175,23 @@ const CALL_MAX_DURATION_MS =
 // ---------------------------------------------------------------------------
 
 app.use(helmet());
-app.use(express.urlencoded({ extended: false }));
+
+// S3-11: excluded from the two outbound internal routes, the SAME way the
+// JSON parser below already is and for the identical reason. Those routes
+// declare their own express.json({limit:"4kb"}) (lib/outbound/
+// internalRoutes.js), and body-parser skips re-parsing a request whose body
+// stream is already drained -- so an UNexcluded global urlencoded parser
+// ahead of it would silently consume a form-encoded body (any
+// Content-Type: application/x-www-form-urlencoded POST, whatever its size)
+// before the route-scoped parser, or its 4kb limit, ever ran. The route only accepts
+// JSON, so the correct behaviour for a urlencoded body is that NEITHER
+// parser touches it (req.body stays empty) and the route's own OIDC check
+// still refuses it -- never that a stranger's form fields land in req.body.
+const defaultUrlencodedParser = express.urlencoded({ extended: false });
+app.use((req, res, next) => {
+  if (isOutboundInternalPath(req.path)) return next();
+  return defaultUrlencodedParser(req, res, next);
+});
 
 // Default JSON body parsing, at express's 100kb default — deliberately left
 // tight. The one route that needs more (the probe caller-audio upload, a few

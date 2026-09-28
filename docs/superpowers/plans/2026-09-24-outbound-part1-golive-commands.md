@@ -171,3 +171,67 @@ Tenant `+18176011171` ("Digile Media", America/Chicago).
    - after 2 minutes, `gcloud scheduler jobs run outbound-sweep --location=$R --project=$P` so it dials in about 3 minutes instead of up to 7.
 4. After each call: `status --status paused` on that scenario's campaign, so no retry ever dials.
 5. After scenario 9 only, with its own YES: `unsuppress --phone +18176011171 --contact-phone +14699338887`.
+
+## Section C: Stage 3 additions (DRAFT, YES-gated)
+
+Written by the S3-11 implementer, not run. Every command below needs its own explicit YES —
+this section is a draft for the controller/owner to review and refine, not a rehearsed sequence
+like Sections A/B. Uses the SAME workaround as every other GCP command in this repo (memory
+gcp-notices-go-nowhere: `admin@vetratd.com` is Account Restricted, and no Essential Contacts
+existed before that memory's fix):
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+P=vetra-uk-edc8ca; R=europe-west2
+SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
+```
+
+**C1. Create the `suppression-hash-key` secret and mount it on `voice-uk-prod` as `SUPPRESSION_HASH_KEY`.**
+- 32 random bytes, base64 (services/db.js's own floor is 32 *characters*; base64-of-32-bytes is
+  44, comfortably over it). Never printed, piped straight from `openssl` to `gcloud`.
+- Same replication style as `twilio-account-sid-alt` (Section A5): user-managed, europe-west2.
+- Rotating this later invalidates every previously-erased suppression's hash (a phone erased
+  under the old key stops being findable by the gate) -- a one-way loss of protection, not a
+  routine rotation.
+```bash
+openssl rand -base64 32 | gcloud secrets create suppression-hash-key --project=$P --replication-policy=user-managed --locations=$R --data-file=-
+gcloud secrets add-iam-policy-binding suppression-hash-key --project=$P --member=serviceAccount:$SA_APP --role=roles/secretmanager.secretAccessor
+gcloud run services update voice-uk-prod --region=$R --project=$P --update-secrets=SUPPRESSION_HASH_KEY=suppression-hash-key:latest
+```
+**STOP and ask the owner first:** this makes `SUPPRESSION_HASH_KEY` load-bearing for EVERY future
+Art. 17 erasure request that finds a matching suppression row (Ruling S3-11b, fail closed) --
+confirm this deploy step runs before, or together with, the next Art. 17 request this tenant
+might receive, not after.
+
+**C2. The stuck-dialing alert (`lib/outbound/dispatch.js`'s `failStaleAttempt`, counter
+`outbound_stuck_dialing`), with an EXPLICIT email notification channel.** Memory
+gcp-notices-go-nowhere: no Essential Contacts existed on this org until that fix, and Cloud
+Monitoring alerts need their own channel regardless -- create it explicitly rather than assuming
+one exists.
+```bash
+# Confirm the destination address with the owner before running -- this draft uses the
+# Essential Contact address from that memory (nithin.dodla@vetratd.com), which may not be
+# the address the owner wants paged for an operational alert.
+gcloud alpha monitoring channels create --project=$P \
+  --display-name="Outbound stuck-dialing alert" \
+  --type=email --channel-labels=email_address=nithin.dodla@vetratd.com
+# Note the returned channel resource name (projects/.../notificationChannels/NNNNNN) as $CHANNEL.
+
+gcloud logging metrics create outbound_stuck_dialing --project=$P \
+  --description="failStaleAttempt (lib/outbound/dispatch.js): a dial that never got a CallSid inside OUTBOUND_STALE_SIDLESS_MINUTES" \
+  --log-filter='resource.type="cloud_run_revision" jsonPayload.event="outbound_stuck_dialing"'
+
+gcloud alpha monitoring policies create --project=$P \
+  --display-name="Outbound stuck dialing" \
+  --notification-channels=$CHANNEL \
+  --condition-display-name="outbound_stuck_dialing logged" \
+  --condition-filter='resource.type="cloud_run_revision" AND metric.type="logging.googleapis.com/user/outbound_stuck_dialing"' \
+  --condition-threshold-comparison=COMPARISON_GT --condition-threshold-value=0 \
+  --condition-threshold-duration=0s \
+  --aggregation-alignment-period=300s --aggregation-per-series-aligner=ALIGN_COUNT
+```
+**STOP and ask the owner:** the exact `gcloud alpha monitoring policies create` flags above are a
+DRAFT, not verified against a real Cloud Monitoring API call (this task never ran a gcloud
+command, per instruction) -- read them back against `gcloud alpha monitoring policies create
+--help` before running, and confirm the alert threshold (fires on ANY occurrence in a 5-minute
+window) is the sensitivity the owner wants, given `outbound_stuck_dialing` is expected near zero
+in production (lib/voice/metrics.js's own comment on the counter).

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHmac } from "node:crypto";
 import pg from "pg";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
@@ -1802,6 +1803,40 @@ function phoneMatch(col, param) {
 }
 
 /**
+ * S3-11 (spec §13.5 amendment): HMAC-SHA256(SUPPRESSION_HASH_KEY, the
+ * canonical E.164 phone), hex. The ONE place this is computed, because
+ * eraseCallerData (write, below) and isSuppressed (read, gate check 4) must
+ * derive the identical digest for the identical number or a suppression that
+ * survives erasure silently stops protecting anyone (named risk 2).
+ *
+ * THROWS on a missing or too-short key, deliberately (Ruling S3-11b, memory
+ * plan-verbatim-code-fails-open): a do-not-call check that cannot compute a
+ * trustworthy hash must never read as "not suppressed", and an erasure that
+ * cannot compute one must never silently drop the phone without it. Callers
+ * are: isSuppressed (the gate fails the whole dispatch closed -- Cloud Tasks
+ * retries, never dials) and eraseCallerData (the whole erasure transaction
+ * rolls back before any write, via the same throw-and-rollback path every
+ * other failure in that function already takes).
+ *
+ * 32 is a floor, not a real strength check -- it rejects an obviously-unset
+ * placeholder ("x", "test") while accepting any real secret. Generate the
+ * real value with `openssl rand -base64 32` (44 chars); see .env.example.
+ *
+ * @param {string} canonicalE164
+ * @returns {string} 64 hex characters
+ */
+function suppressionHash(canonicalE164) {
+  const key = process.env.SUPPRESSION_HASH_KEY || "";
+  if (key.length < 32) {
+    throw new Error(
+      "suppressionHash: SUPPRESSION_HASH_KEY is missing or too short (need >= 32 characters) -- " +
+        "refusing rather than silently skipping the do-not-call hash check"
+    );
+  }
+  return createHmac("sha256", key).update(canonicalE164).digest("hex");
+}
+
+/**
  * Every PHI-bearing row this system holds about one caller, for one tenant.
  *
  * Tenant-scoped unconditionally. A phone number is not a secret and neither is
@@ -1971,9 +2006,45 @@ export async function exportCallerData(businessId, phone) {
  *                     opposite directions here, and that is not a developer's
  *                     call to make.
  *
- * ONE TRANSACTION. A partial erasure is the worst outcome available: it reports
- * success, satisfies nobody, and leaves the controller believing a request was
- * honoured.
+ * P5 (S3-11, spec §13.5): outbound calling's own tables, on the SAME
+ * businessId+phone this function already erases.
+ *
+ *   consents          DELETED outright, for every contact this phone matches.
+ *                     A consent row IS the decision plus the number it was
+ *                     given about; nulling it out leaves nothing.
+ *   contacts          KEPT, first_name and attributes nulled. `phone_e164`
+ *                     itself is left alone — it is the row's own key
+ *                     (UNIQUE(business_id, phone_e164)) and is not in this
+ *                     task's scope; only first_name and attributes were
+ *                     named (the first name is what the pre-rendered opener
+ *                     clips speak).
+ *   outreach          KEPT, every row not already `closed` is closed with
+ *                     `close_reason = 'erased'`. Same reasoning as `calls`
+ *                     above: the campaign contact attempt happened and is the
+ *                     controller's own record, not personal data by itself.
+ *   call_attempts     KEPT, `opener_audio`/`voicemail_audio`/
+ *                     `transfer_miss_audio` nulled (parked from S3-4: the
+ *                     rendered clip speaks the contact's own first name).
+ *   suppressions      KEPT UNCONDITIONALLY, unlike every table above — a
+ *                     do-not-call decision must outlive the person who is the
+ *                     reason for it, or an erasure would silently readmit
+ *                     them to the dialler. `phone_e164` is replaced with
+ *                     `phone_hash` (HMAC-SHA256(SUPPRESSION_HASH_KEY, the
+ *                     canonical E.164 phone) — see suppressionHash, above),
+ *                     which `isSuppressed` also matches, so the do-not-call
+ *                     check still refuses this number after erasure. Ruling
+ *                     S3-11b: SUPPRESSION_HASH_KEY missing/short, OR the
+ *                     phone not normalizing to a canonical E.164 form, throws
+ *                     — but ONLY when a matching suppression row actually
+ *                     exists to hash; an ordinary erasure with no outbound
+ *                     history never needs the key at all (Ruling, this task's
+ *                     report: this is narrower than "every erasure needs the
+ *                     key", to avoid breaking DSAR erasure everywhere the key
+ *                     has not yet been provisioned).
+ *
+ * ONE TRANSACTION, covering P5 too. A partial erasure is the worst outcome
+ * available: it reports success, satisfies nobody, and leaves the controller
+ * believing a request was honoured.
  *
  * ---------------------------------------------------------------------------
  * FLAGGED FOR COUNSEL (ledger O18), deliberately NOT decided in code:
@@ -1989,7 +2060,7 @@ export async function exportCallerData(businessId, phone) {
  *
  * @param {string} businessId
  * @param {string} phone
- * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number, smsConsents: number}|null>}
+ * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number, smsConsents: number, consents: number, contacts: number, outreach: number, callAttempts: number, suppressions: number}|null>}
  */
 export async function eraseCallerData(businessId, phone) {
   if (!pool || !businessId || !phone) return null;
@@ -2062,6 +2133,71 @@ export async function eraseCallerData(businessId, phone) {
       [businessId, phone]
     );
 
+    // P5 (S3-11, spec §13.5). Same phoneMatch rule as every table above, on
+    // the outbound contact this phone corresponds to.
+    const { rows: contactRows } = await client.query(
+      `SELECT id FROM contacts WHERE business_id = $1 AND ${phoneMatch("phone_e164", 2)}`,
+      [businessId, phone]
+    );
+    const contactIds = contactRows.map((row) => row.id);
+
+    const co = contactIds.length
+      ? await client.query(`DELETE FROM consents WHERE contact_id = ANY($1)`, [contactIds])
+      : { rowCount: 0 };
+
+    const ct = contactIds.length
+      ? await client.query(
+          `UPDATE contacts SET first_name = NULL, attributes = '{}'::jsonb WHERE id = ANY($1)`,
+          [contactIds]
+        )
+      : { rowCount: 0 };
+
+    const oc = contactIds.length
+      ? await client.query(
+          `UPDATE outreach SET state = 'closed', close_reason = 'erased', closed_at = now(), updated_at = now()
+            WHERE business_id = $1 AND contact_id = ANY($2) AND state <> 'closed'`,
+          [businessId, contactIds]
+        )
+      : { rowCount: 0 };
+
+    const ca = await client.query(
+      `UPDATE call_attempts SET opener_audio = NULL, voicemail_audio = NULL, transfer_miss_audio = NULL
+        WHERE business_id = $1 AND ${phoneMatch("to_number", 2)}`,
+      [businessId, phone]
+    );
+
+    // Spec §13.5: a suppression outlives erasure. KEEP the row, hash the
+    // phone instead of nulling it away entirely — but only touch the key
+    // (and require it) when there is actually a row to hash; see the
+    // function doc above for why this is narrower than "every erasure needs
+    // SUPPRESSION_HASH_KEY".
+    const { rows: suppressionRows } = await client.query(
+      `SELECT id FROM suppressions
+        WHERE business_id = $1 AND phone_e164 IS NOT NULL AND ${phoneMatch("phone_e164", 2)}`,
+      [businessId, phone]
+    );
+    let sup = { rowCount: 0 };
+    if (suppressionRows.length) {
+      // The canonical E.164 form, not the raw (possibly punctuated,
+      // possibly national-format) input — isSuppressed hashes
+      // contacts.phone_e164, which is always canonical, so hashing anything
+      // else here would write a suppression that can never match again
+      // (named risk 2). normalizePhoneNumber never guesses a country code,
+      // so an ambiguous phone throws rather than writing an unusable hash.
+      const canonicalPhone = normalizePhoneNumber(phone);
+      if (!canonicalPhone) {
+        throw new Error(
+          "eraseCallerData: cannot compute a trustworthy suppression hash — the phone does not " +
+            "normalize to E.164, and hashing a non-canonical form would silently stop protecting it"
+        );
+      }
+      const hash = suppressionHash(canonicalPhone); // throws before any write if the key is missing/short
+      sup = await client.query(
+        `UPDATE suppressions SET phone_hash = $2, phone_e164 = NULL WHERE id = ANY($1)`,
+        [suppressionRows.map((row) => row.id), hash]
+      );
+    }
+
     if (!scoped) await client.query("COMMIT");
 
     const counts = {
@@ -2070,13 +2206,20 @@ export async function eraseCallerData(businessId, phone) {
       appointments: a.rowCount,
       customerRequests: r.rowCount,
       smsConsents: sc.rowCount,
+      consents: co.rowCount,
+      contacts: ct.rowCount,
+      outreach: oc.rowCount,
+      callAttempts: ca.rowCount,
+      suppressions: sup.rowCount,
     };
     // The audit trail an erasure needs, carrying no phone number — the thing
     // being erased must not be written to a log in the act of erasing it.
     log.info("dsr_erasure_completed", { businessId, ...counts });
     noteAccess("eraseCallerData", {
-      resourceIds: callIds,
-      rowCount: t.rowCount + c.rowCount + a.rowCount + r.rowCount + sc.rowCount,
+      resourceIds: [...callIds, ...contactIds, ...suppressionRows.map((row) => row.id)],
+      rowCount:
+        t.rowCount + c.rowCount + a.rowCount + r.rowCount + sc.rowCount +
+        co.rowCount + ct.rowCount + oc.rowCount + ca.rowCount + sup.rowCount,
     });
     return counts;
   } catch (err) {
@@ -2448,12 +2591,22 @@ export async function claimOutreachForDispatch(outreachId) {
 
 /**
  * Is this number on the tenant's do-not-call list (gate check 4)?
+ *
+ * S3-11 (spec §13.5 amendment): also matches `phone_hash` -- an erasure keeps
+ * the suppression row but nulls `phone_e164` (suppressionHash, above), so a
+ * data subject who opted out and later asked to be forgotten must still be
+ * refused here by hash alone. Computing that hash THROWS when
+ * SUPPRESSION_HASH_KEY is missing or too short (Ruling S3-11b): this function
+ * is gate check 4, and a do-not-call check that cannot rule out a hash match
+ * must never read as "not suppressed" -- it throws instead, the caller
+ * (dispatch.js) never reaches a dial, and Cloud Tasks retries.
  * @param {string} phone - E.164
  * @returns {Promise<boolean>}
  */
 export async function isSuppressed(phone) {
   requireTenantScope("isSuppressed");
-  const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1`, [phone]);
+  const hash = suppressionHash(normalizePhoneNumber(phone) ?? phone);
+  const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1 OR phone_hash = $2`, [phone, hash]);
   if (res.error) throw res.error;
   const rows = res.rows || [];
   noteAccess("isSuppressed", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
@@ -2649,20 +2802,28 @@ export async function setAttemptCallSid(attemptId, sid) {
 
 /**
  * calls.create threw: the attempt happened and failed.
+ *
+ * S3-11: returns the row's own `dialed_at` via RETURNING (no schema/function
+ * change -- app_outbound_stale_attempts returns business_id/attempt_id/kind
+ * only, Ruling S3-11a) so failStaleAttempt (lib/outbound/dispatch.js) can
+ * compute how long a stuck dial had been ringing without a second read.
  * @param {string} attemptId
  * @param {string} [twilioStatus]
+ * @returns {Promise<{dialedAt: Date|null}>}
  */
 export async function failAttempt(attemptId, twilioStatus = "failed") {
   requireTenantScope("failAttempt");
   // result + ended_at, not just twilio_status: the dial_registry trigger fires
   // on ended_at/result, and a row left open there blocks capacity for an hour.
   const res = await q(
-    `UPDATE call_attempts SET twilio_status = $2, result = 'failed', ended_at = now() WHERE id = $1`,
+    `UPDATE call_attempts SET twilio_status = $2, result = 'failed', ended_at = now() WHERE id = $1
+      RETURNING dialed_at`,
     [attemptId, twilioStatus]
   );
   if (res.error) throw res.error;
   if (res.rowCount !== 1) throw new Error(`failAttempt: expected 1 row, got ${res.rowCount}`);
   noteAccess("failAttempt", { resourceIds: [attemptId], rowCount: res.rowCount });
+  return { dialedAt: res.rows[0].dialed_at ?? null };
 }
 
 /**

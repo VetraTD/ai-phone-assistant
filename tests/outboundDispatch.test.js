@@ -295,6 +295,42 @@ describe("failStaleAttempt: the sweep's sidless backstop, reusing dispatch's own
     expect(db.closeOutreach).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
   });
+
+  // S3-11 (Ruling S3-11a): the stuck-dialing alert. failStaleAttempt is the
+  // sweep's ONLY caller of db.failAttempt, so every call here is a dial the
+  // sidless backstop had to step in on. age_ms comes from the attempt row's
+  // own dialed_at (failAttempt's RETURNING), not from a second read.
+  it("emits outbound_stuck_dialing with age_ms computed from the attempt's own dialed_at, and bumps the counter", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    clearStats();
+    const db = fakeDb();
+    // 15 minutes before `now` -- NOW is 2026-09-28T13:00:00Z.
+    db.failAttempt = vi.fn(async () => ({ dialedAt: new Date("2026-09-28T12:45:00Z") }));
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const r = row({ attempts_made: 1 });
+    await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 1, tz: "Europe/London", now: () => NOW, rand: () => 0, log,
+    });
+    expect(log.error).toHaveBeenCalledWith("outbound_stuck_dialing", { attemptId: "a1", outreachId: "o1", age_ms: 900_000 });
+    expect(getLatencyStats().turnTaking.outbound_stuck_dialing).toBe(1);
+  });
+
+  it("outbound_stuck_dialing fires even when the outreach is no longer 'dialing' -- the attempt itself is stale either way", async () => {
+    const { failStaleAttempt } = await import("../lib/outbound/dispatch.js");
+    clearStats();
+    const db = fakeDb();
+    db.lockOutreachState = vi.fn(async () => "closed");
+    db.failAttempt = vi.fn(async () => ({ dialedAt: new Date("2026-09-28T12:50:00Z") }));
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const log = { info: vi.fn(), error: vi.fn() };
+    const r = row({ attempts_made: 1 });
+    await failStaleAttempt({
+      db, enqueue, businessId: "b1", outreachId: "o1", attemptId: "a1", r, attemptNo: 1, tz: "Europe/London", now: () => NOW, rand: () => 0, log,
+    });
+    expect(log.error).toHaveBeenCalledWith("outbound_stuck_dialing", { attemptId: "a1", outreachId: "o1", age_ms: 600_000 });
+    expect(getLatencyStats().turnTaking.outbound_stuck_dialing).toBe(1);
+  });
 });
 
 describe("startOfLocalDay: local midnight as an instant, DST-safe", () => {

@@ -1418,13 +1418,26 @@ CREATE INDEX IF NOT EXISTS consents_contact_idx ON consents (contact_id);
 CREATE TABLE IF NOT EXISTS suppressions (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id    uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-  phone_e164     text NOT NULL,
+  -- Nullable since migration 048 (S3-11): erasure keeps the ROW but nulls
+  -- the phone, replacing it with phone_hash below -- a suppression outlives
+  -- erasure (spec §13.5).
+  phone_e164     text,
+  -- Migration 048 (S3-11): HMAC-SHA256(SUPPRESSION_HASH_KEY, the canonical
+  -- E.164 phone), hex (services/db.js's suppressionHash). NULL until an
+  -- erasure sets it; isSuppressed matches it alongside phone_e164.
+  phone_hash     text,
   reason         text NOT NULL CHECK (reason IN ('opted_out','wrong_number','complaint','manual','tps')),
   source_call_id uuid,
   created_by     text NOT NULL CHECK (created_by IN ('tool','detector','dashboard','api')),
   created_at     timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (business_id, phone_e164)
+  UNIQUE (business_id, phone_e164),
+  CONSTRAINT suppressions_phone_present_check CHECK (phone_e164 IS NOT NULL OR phone_hash IS NOT NULL)
 );
+-- Partial: most rows have phone_hash NULL, and a plain UNIQUE constraint
+-- already treats every NULL as distinct, so a non-partial index would add
+-- nothing but a pointless comparison per un-erased row.
+CREATE UNIQUE INDEX IF NOT EXISTS suppressions_business_phone_hash_idx
+  ON suppressions (business_id, phone_hash) WHERE phone_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS outreach (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1438,7 +1451,9 @@ CREATE TABLE IF NOT EXISTS outreach (
   last_attempt_at  timestamptz,
   hold_until       timestamptz,
   outcome          text,
-  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal')),
+  -- 'erased' (migration 048, S3-11, P5) and 'no_legal_floor' (reserved for
+  -- S3-7) join the list; every other value is unchanged.
+  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal','erased','no_legal_floor')),
   trigger          jsonb NOT NULL DEFAULT '{}'::jsonb,
   idempotency_key  text NOT NULL,
   created_at       timestamptz NOT NULL DEFAULT now(),
