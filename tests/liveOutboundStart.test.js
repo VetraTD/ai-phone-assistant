@@ -600,6 +600,86 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // ---------------------------------------------------------------------
+  // Checkpoint-A re-review, fix round 2.
+  // ---------------------------------------------------------------------
+
+  // N1 (Important). The fix round 1 report claimed "tick() is the only
+  // place [the M9 mark-timeout] transition is visible from out here" -- the
+  // re-review's own probe (P-B) disproved it: firstSeconds.js's onModelAudio
+  // calls the SAME checkClipPlayingTimeout tick() does, and a Live audio
+  // chunk arriving between two Twilio media frames can fire M9 (and abandon
+  // the seed) with nothing in onMediaFrame ever seeing it at the instant it
+  // happens. Round 1's release logic (clipPlaying() snapshotted only around
+  // this file's own onCallerFrame/tick() calls) never caught this, and the
+  // held buffer -- possibly including an opt-out -- was stranded forever.
+  it("N1 fix (checkpoint-A re-review): a held run survives an M9 lapse triggered by onModelAudio, not just tick()", async () => {
+    allowErrors("outbound_backstop_mark_timeout");
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues via the hello-end timer (deferred seed, O-8)
+    expect(call.live.sent.clientContent).toEqual([]); // not seeded yet
+
+    const beforeHold = call.live.sent.audioIn.length;
+    // The gatekeeper's own words, held during the clip -- well under
+    // CLIP_BARGE_MIN_MS, matching the re-review's own probe (~480 ms).
+    await call.feed(480, { voiced: true });
+    expect(call.live.sent.audioIn.length).toBe(beforeHold); // held, not forwarded
+
+    // Advance the clock past clipPlayingUntil (clip length 1,000 ms +
+    // markGraceMs 1,500 ms = 2,500 ms from fire) WITHOUT feeding another
+    // media frame, so tick() never runs and cannot be the one to notice M9.
+    await call.starve(3000);
+
+    // Live produces a chunk. onModelAudio's OWN checkClipPlayingTimeout call
+    // is what fires M9 here, not tick() -- reproducing the re-review's
+    // probe P-B (clipPlayingAfterChunk:false, m9:1, held_release:[]).
+    call.live.push(modelAudioMsg());
+    await call.settle();
+
+    // The next Twilio media frame -- which never stops arriving on a real
+    // call regardless of any mark or model event -- is what makes the
+    // release observable. Round 1 had nothing to catch this transition
+    // outside tick(), so the held burst stayed stuck in the buffer forever.
+    await call.feed(20);
+
+    expect(call.live.sent.audioIn.length - beforeHold).toBeGreaterThanOrEqual(24); // 480 ms / 20 ms
+    await call.hangUp();
+  });
+
+  // N2 (Important). On the silence path (backstop_silence, nobody spoke
+  // before the deadline), the seed is sent immediately at fire -- while the
+  // clip's own audio is still on the wire for up to another ~2.5 s. Round
+  // 1 released the caller-audio hold the instant the seed went out, so
+  // speech said during the clip reached Live in real time; the review's own
+  // probe (P-A) showed Live's reply to that speech, generated before the
+  // clip's audio had finished, was then discarded whole as a generation
+  // "opened during the clip" (catchMidClipGeneration) -- the caller heard
+  // the clip finish and then silence, never an answer. Fixed: hold until
+  // the LATER of "seed sent" and "clip no longer playing" -- on this path
+  // that is the clip ending, so the caller's words reach Live only once
+  // nothing can mistake Live's eventual reply for a stale, mid-clip one.
+  it("N2 fix (checkpoint-A re-review): on the silence path, speech during the clip is held until the clip has actually ended", async () => {
+    const call = await bootOutbound();
+    await call.feed(1400); // backstop_silence fires; seed sent immediately (no generation open)
+    expect(call.live.sent.clientContent.length).toBe(1); // already seeded
+
+    const beforeHold = call.live.sent.audioIn.length;
+    // "Hello?" -- said while the clip (1 s of audio + 1.5 s mark grace from
+    // fire) is still playing, well under CLIP_BARGE_MIN_MS.
+    await call.feed(300, { voiced: true });
+    // Round 1's bug, exactly: the seed was already sent, so this reached
+    // Live in real time regardless of the clip still playing.
+    expect(call.live.sent.audioIn.length).toBe(beforeHold);
+
+    // The clip finishes.
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20); // the next Twilio frame is what actually releases it
+
+    expect(call.live.sent.audioIn.length - beforeHold).toBeGreaterThanOrEqual(15); // 300 ms / 20 ms
+    await call.hangUp();
+  });
+
   // Item 4 (fix round 2, re-review out-of-scope observation 2). Four
   // TEXT-triggered cutters (greeting-respoken, repeat-cut, offer-unverified,
   // the leak guard) all route through clearAudio, and all four judge Live's
