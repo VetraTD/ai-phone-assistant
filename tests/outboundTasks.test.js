@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createDispatchEnqueuer } from "../lib/outbound/tasks.js";
+import { createDispatchEnqueuer, createWebhookDeliveryEnqueuer } from "../lib/outbound/tasks.js";
 
 function fakeClient() {
   const made = [];
@@ -50,5 +50,50 @@ describe("createDispatchEnqueuer", () => {
   it("any other error propagates", async () => {
     const client = { createTask: async () => { const e = new Error("perm"); e.code = 7; throw e; } };
     await expect(mk(client).enqueue({ businessId: "b1", outreachId: "o1", at: new Date(), source: "dispatch" })).rejects.toThrow("perm");
+  });
+});
+
+// S3-8 fix round 1, I1: this enqueuer had zero test coverage at all.
+describe("createWebhookDeliveryEnqueuer", () => {
+  const mkWebhook = (client) =>
+    createWebhookDeliveryEnqueuer({ client, queuePath: Q, serviceUrl: "https://svc.example", serviceAccountEmail: "outbound-tasks@x.iam.gserviceaccount.com" });
+
+  it("creates an OIDC-authenticated POST to /internal/outbound/webhook-deliver scheduled at `at`", async () => {
+    const c = fakeClient();
+    await mkWebhook(c).enqueue({ businessId: "b1", outboxId: "ob1", at: new Date("2026-09-28T13:00:00Z") });
+    const t = c.made[0].task;
+    expect(c.made[0].parent).toBe(Q);
+    expect(t.httpRequest.url).toBe("https://svc.example/internal/outbound/webhook-deliver");
+    expect(t.httpRequest.oidcToken).toEqual({ serviceAccountEmail: "outbound-tasks@x.iam.gserviceaccount.com", audience: "https://svc.example" });
+    expect(JSON.parse(Buffer.from(t.httpRequest.body, "base64").toString())).toEqual({ business_id: "b1", outbox_id: "ob1" });
+    expect(Number(t.scheduleTime.seconds)).toBe(Date.parse("2026-09-28T13:00:00Z") / 1000);
+  });
+
+  it("the same outbox row + time enqueued twice is one task (dedupe by name), and says so -- I2's task-name collision fix depends on this", async () => {
+    const c = fakeClient();
+    const q = mkWebhook(c);
+    const at = new Date("2026-09-28T13:00:00Z");
+    expect(await q.enqueue({ businessId: "b1", outboxId: "ob1", at })).toEqual({ created: true });
+    expect(await q.enqueue({ businessId: "b1", outboxId: "ob1", at })).toEqual({ created: false });
+    expect(c.made).toHaveLength(1);
+  });
+
+  it("a DIFFERENT next_attempt_at for the SAME row gets its own task name -- a real retry is never swallowed by the previous attempt's name", async () => {
+    const c = fakeClient();
+    const q = mkWebhook(c);
+    await q.enqueue({ businessId: "b1", outboxId: "ob1", at: new Date("2026-09-28T13:00:00Z") });
+    expect(await q.enqueue({ businessId: "b1", outboxId: "ob1", at: new Date("2026-09-28T13:01:00Z") })).toEqual({ created: true });
+    expect(c.made).toHaveLength(2);
+  });
+
+  it("a due time with a fraction is scheduled at the NEXT whole second, never before it (same M4 rule as the dispatch enqueuer)", async () => {
+    const c = fakeClient();
+    await mkWebhook(c).enqueue({ businessId: "b1", outboxId: "ob1", at: new Date("2026-09-28T13:00:00.500Z") });
+    expect(Number(c.made[0].task.scheduleTime.seconds)).toBe(Date.parse("2026-09-28T13:00:01Z") / 1000);
+  });
+
+  it("any other error propagates", async () => {
+    const client = { createTask: async () => { const e = new Error("perm"); e.code = 7; throw e; } };
+    await expect(mkWebhook(client).enqueue({ businessId: "b1", outboxId: "ob1", at: new Date() })).rejects.toThrow("perm");
   });
 });

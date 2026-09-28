@@ -13,7 +13,7 @@ import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveVettedAddress, connectVetted, fetchVetted, SsrfRefusedError, _internal } from "../lib/net/ssrfGuard.js";
+import { resolveVettedAddress, connectVetted, fetchVetted, SsrfRefusedError, _internal, MAX_BODY_BYTES, SSRF_TIMEOUT_MS } from "../lib/net/ssrfGuard.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CERT = fs.readFileSync(path.join(HERE, "fixtures", "ssrfGuardTest.cert.pem"));
@@ -168,10 +168,35 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
           // Never responds -- exercises the timeout path.
           return;
         }
+        if (req.url === "/huge") {
+          // C1 (fix round 1): a single, large body -- well past MAX_BODY_BYTES
+          // (8 KiB), but small enough to build synchronously and fast in a
+          // unit test. 5 MiB is >600x the cap.
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end(Buffer.alloc(5 * 1024 * 1024, "x"));
+          return;
+        }
+        if (req.url === "/never-ending") {
+          // A body that never ends on its own -- the client must settle
+          // (and destroy the connection) once MAX_BODY_BYTES is exceeded,
+          // never wait for 'end' or the 6 s timeout. Stops writing once the
+          // client disconnects (res.destroy() on the far end), so this
+          // never leaks an interval past the test.
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          const chunk = Buffer.alloc(64 * 1024, "y"); // 64 KiB/tick, > the 8 KiB cap in one write
+          const timer = setInterval(() => {
+            if (res.destroyed) clearInterval(timer);
+            else res.write(chunk);
+          }, 5);
+          res.on("close", () => clearInterval(timer));
+          res.on("error", () => {}); // the client destroying its end is expected, not a server crash
+          return;
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
       });
     });
+    server.on("clientError", () => {}); // a client that destroys mid-response is expected here too
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     port = server.address().port;
   });
@@ -230,6 +255,46 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       })
     ).rejects.toThrow();
   }, 5000);
+
+  // C1 (fix round 1, Critical): the response body used to be buffered
+  // without limit -- Buffer.concat + .toString("utf8") on a body past
+  // Node's string length limit threw ERR_STRING_TOO_LONG as an UNCAUGHT
+  // exception (server.js has no uncaughtException handler), which killed
+  // the whole voice service. Both tests below are RED against the
+  // pre-fix code (a 5 MiB single write, or a never-ending stream, both
+  // resolve/settle with the full unbounded body and no cap).
+  it("a large single-write body is truncated to MAX_BODY_BYTES, not buffered in full", async () => {
+    const res = await connectVetted({
+      hostname: "localhost",
+      address: "127.0.0.1",
+      family: 4,
+      port,
+      path: "/huge",
+      method: "POST",
+      tlsOptions: { rejectUnauthorized: false },
+    });
+    expect(res.status).toBe(200);
+    expect(Buffer.byteLength(res.body, "utf8")).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(Buffer.byteLength(res.body, "utf8")).toBeGreaterThan(0);
+  });
+
+  it("a never-ending streamed body is cut off at MAX_BODY_BYTES and the socket is destroyed -- never waits for 'end' or the 6s timeout", async () => {
+    const start = Date.now();
+    const res = await connectVetted({
+      hostname: "localhost",
+      address: "127.0.0.1",
+      family: 4,
+      port,
+      path: "/never-ending",
+      method: "POST",
+      timeoutMs: SSRF_TIMEOUT_MS, // the PRODUCTION timeout -- this must settle well before it
+      tlsOptions: { rejectUnauthorized: false },
+    });
+    const elapsedMs = Date.now() - start;
+    expect(res.status).toBe(200);
+    expect(Buffer.byteLength(res.body, "utf8")).toBeLessThanOrEqual(MAX_BODY_BYTES);
+    expect(elapsedMs).toBeLessThan(SSRF_TIMEOUT_MS / 2);
+  });
 
   it("never performs a REAL DNS lookup at connect time: an unresolvable hostname still connects, because the hostname is used only for Host/SNI, never handed to the OS resolver -- named risk 2 (closes the DNS-rebinding window: there is no second lookup for a rebound answer to win)", async () => {
     const res = await connectVetted({

@@ -608,6 +608,113 @@ describe("runPostCall: enqueue after a non-terminal reschedule (fix round 1, ite
   });
 });
 
+// ---------------------------------------------------------------------------
+// S3-8 fix round 1, I1: step 7 (writeOutboxRows) had NO test at all -- the
+// review's own point: "the 68 post-call tests passed with zero changes",
+// which is only reassuring if step 7 is a no-op either way. Every test below
+// asserts a POSITIVE outcome (insertOutboxRow/enqueueOutbox actually called
+// with specific values), so a step 7 that silently does nothing, or throws
+// before reaching the insert, fails these -- RED for exactly that reason.
+// ---------------------------------------------------------------------------
+describe("runPostCall: step 7, the shared results channel (S3-8 fix round 1, I1)", () => {
+  function outboxDb(ctxOverrides = {}, fnOverrides = {}) {
+    const outboxCalls = { insertOutboxRow: [], enqueueOutbox: [] };
+    const db = fakeDb(ctxOverrides, {
+      listActiveWebhookEndpoints: vi.fn(async (eventType) => [
+        { id: "ep-1", url: "https://example.test/hook-1" },
+        { id: "ep-2", url: "https://example.test/hook-2" },
+      ]),
+      insertOutboxRow: vi.fn(async (args) => {
+        outboxCalls.insertOutboxRow.push(args);
+        return { inserted: true, id: args.id };
+      }),
+      outboundResultsLabels: vi.fn(async () => ({ campaignName: "Speed to lead", contactFirstName: "Sam", contactExternalIds: {} })),
+      outboundBookingInfo: vi.fn(async () => null),
+      ...fnOverrides,
+    });
+    db.outboxCalls = outboxCalls;
+    return db;
+  }
+
+  function runWithOutbox(db, overrides = {}) {
+    const enqueueOutbox = vi.fn(async (args) => {
+      db.outboxCalls.enqueueOutbox.push(args);
+      return { created: true };
+    });
+    return run(db, { enqueueOutbox, ...overrides }).then(() => enqueueOutbox);
+  }
+
+  it("call.completed fires for EVERY active/subscribed endpoint: one insertOutboxRow + one enqueueOutbox per endpoint", async () => {
+    const db = outboxDb({}, { fetchCallTranscript: vi.fn(async () => []) });
+    const enqueueOutbox = await runWithOutbox(db);
+
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(2); // one per endpoint (ep-1, ep-2)
+    const eventTypes = db.outboxCalls.insertOutboxRow.map((c) => c.eventType);
+    expect(eventTypes).toEqual(["call.completed", "call.completed"]); // non-terminal -> outreach.closed never fires
+    expect(db.outboxCalls.insertOutboxRow[0]).toMatchObject({ kind: "webhook", targetId: "ep-1", eventType: "call.completed" });
+    expect(db.outboxCalls.insertOutboxRow[0].payload).toMatchObject({ event: "call.completed", direction: "outbound" });
+    expect(enqueueOutbox).toHaveBeenCalledTimes(2);
+    expect(db.outboxCalls.enqueueOutbox[0]).toMatchObject({ businessId: BIZ, outboxId: db.outboxCalls.insertOutboxRow[0].id });
+  });
+
+  it("outreach.closed ALSO fires, per endpoint, only when this attempt closed the outreach (terminal)", async () => {
+    const db = outboxDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
+    await runWithOutbox(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }) });
+
+    // 2 endpoints x 2 events (call.completed, outreach.closed) = 4 inserts.
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(4);
+    const eventTypes = db.outboxCalls.insertOutboxRow.map((c) => c.eventType).sort();
+    expect(eventTypes).toEqual(["call.completed", "call.completed", "outreach.closed", "outreach.closed"]);
+    const closedPayloads = db.outboxCalls.insertOutboxRow.filter((c) => c.eventType === "outreach.closed").map((c) => c.payload);
+    for (const p of closedPayloads) {
+      expect(p.outreach).toMatchObject({ state: "closed", close_reason: "terminal_outcome" });
+      expect(p.outcome).toBe("not_interested");
+    }
+  });
+
+  it("no active/subscribed endpoint for an event -> zero inserts for it, zero enqueues -- never throws", async () => {
+    const db = outboxDb({}, { listActiveWebhookEndpoints: vi.fn(async () => []), fetchCallTranscript: vi.fn(async () => []) });
+    const enqueueOutbox = await runWithOutbox(db);
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(0);
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it("idempotent no-op: insertOutboxRow reporting inserted:false (an existing row) never enqueues a delivery task", async () => {
+    const db = outboxDb(
+      {},
+      {
+        insertOutboxRow: vi.fn(async (args) => ({ inserted: false, id: args.id })),
+        fetchCallTranscript: vi.fn(async () => []),
+      }
+    );
+    const enqueueOutbox = await runWithOutbox(db);
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it("enqueueOutbox unavailable (null) -> logs, never throws, and the row still exists", async () => {
+    const db = outboxDb({}, { fetchCallTranscript: vi.fn(async () => []) });
+    const log = { info: vi.fn(), error: vi.fn() };
+    await run(db, { log, enqueueOutbox: null });
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(2);
+    expect(log.info).toHaveBeenCalledWith("outbound_webhook_enqueue_unavailable", expect.objectContaining({ outboxId: expect.any(String) }));
+  });
+
+  it("enqueueOutbox throwing is logged and counted, never propagated (I3(b): postCall's own step stays non-fatal by design)", async () => {
+    const db = outboxDb({}, { fetchCallTranscript: vi.fn(async () => []) });
+    const log = { info: vi.fn(), error: vi.fn() };
+    const enqueueOutbox = vi.fn(async () => {
+      throw new Error("cloud tasks down");
+    });
+    await expect(run(db, { log, enqueueOutbox })).resolves.toBeUndefined();
+    expect(log.error).toHaveBeenCalledWith("outbound_webhook_enqueue_failed", expect.objectContaining({ attemptId: ATTEMPT }));
+  });
+
+  it("a db missing every outbox function entirely (an older test double) degrades to a no-op, never throws -- backward compatibility", async () => {
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => []) }); // the PLAIN fakeDb, no outbox functions at all
+    await expect(run(db)).resolves.toBeUndefined();
+  });
+});
+
 describe("createPostCall: the exactly-once claim wrapper", () => {
   it("tryClaimByAttempt: claim fails (null: not claimed) -> runPostCall never runs (context is never even read)", async () => {
     const db = fakeDb({});

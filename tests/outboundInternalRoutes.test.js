@@ -1,7 +1,9 @@
 // tests/outboundInternalRoutes.test.js
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import express from "express";
 import request from "supertest";
+import { randomBytes } from "node:crypto";
+import { encryptSecret } from "../lib/connections/secretBox.js";
 import {
   registerOutboundInternalRoutes,
   buildOutboundDeps,
@@ -634,5 +636,243 @@ describe("createCallerIdValidator: timeout throws, only a successful answer is c
     expect(await callerIdValid("+441372656055")).toBe(false);
     expect(await callerIdValid("+441372656055")).toBe(false);
     expect(calls).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S3-8 fix round 1, I1: the delivery route had zero tests. A fake db (no
+// Postgres) exercising the REAL route end to end, with `attemptDelivery`
+// injected so no network call is ever made. I2's fixes (the due check, the
+// compare-and-set on attempts) are proven here too, RED-first against the
+// pre-fix behaviour (see the report's Fix round 1 section for the RED runs).
+// ---------------------------------------------------------------------------
+describe("POST /internal/outbound/webhook-deliver (S3-8 fix round 1)", () => {
+  const OUTBOX_ID = "55555555-5555-5555-5555-555555555555";
+  const ENDPOINT_ID = "66666666-6666-6666-6666-666666666666";
+  const NOW = new Date("2026-09-28T13:02:30Z");
+
+  // A real key for every test here EXCEPT "decrypt failure", which removes
+  // it deliberately. Without this, decryptSecret throws for every test
+  // (secret_ciphertext is a dummy buffer anyway, so decrypt itself never
+  // needs to actually SUCCEED against real ciphertext -- these tests only
+  // reach decryptSecret's key-resolution step before attemptDelivery is
+  // mocked in below it).
+  const OLD_KEY = process.env.CONNECTIONS_WEBHOOK_KEY;
+  beforeAll(() => {
+    process.env.CONNECTIONS_WEBHOOK_KEY = randomBytes(32).toString("base64");
+  });
+  afterAll(() => {
+    if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
+  });
+
+  function mkRow(overrides = {}) {
+    return {
+      id: OUTBOX_ID,
+      kind: "webhook",
+      target_id: ENDPOINT_ID,
+      event_type: "call.completed",
+      payload: { event: "call.completed", direction: "outbound" },
+      status: "pending",
+      attempts: 1,
+      next_attempt_at: new Date(NOW.getTime() - 60_000), // due a minute ago
+      ...overrides,
+    };
+  }
+
+  function mkEndpoint(overrides = {}) {
+    // A REAL ciphertext, encrypted under the CONNECTIONS_WEBHOOK_KEY
+    // beforeAll set above -- decryptSecret must actually succeed for every
+    // test here except "decrypt failure" (which deletes the key first).
+    return {
+      id: ENDPOINT_ID,
+      url: "https://example.test/hook",
+      secret_ciphertext: encryptSecret("whsec_test_only"),
+      active: true,
+      ...overrides,
+    };
+  }
+
+  /**
+   * A fake db that simulates the compare-and-set services/db.js does not
+   * YET implement (blocked this round by a concurrent editor on that file --
+   * see the report). markOutboxRetry/markOutboxDead return `false` when
+   * `expectedAttempts` no longer matches `currentAttempts`, exactly the
+   * contract the real WHERE clause will have -- so the ROUTE's own handling
+   * of that `false` (skip the counter, skip the re-enqueue) is proven now,
+   * and needs no further change once services/db.js catches up.
+   */
+  function webhookDeliverDb({ row = mkRow(), endpoint = mkEndpoint() } = {}) {
+    let currentAttempts = row.attempts;
+    let currentStatus = row.status;
+    const calls = { markOutboxDelivered: [], markOutboxRetry: [], markOutboxDead: [] };
+    return {
+      calls,
+      withTenant: vi.fn(async (_biz, fn) => fn()),
+      getOutboxRow: vi.fn(async () => ({ ...row, attempts: currentAttempts, status: currentStatus })),
+      getWebhookEndpoint: vi.fn(async () => endpoint),
+      markOutboxDelivered: vi.fn(async () => {
+        calls.markOutboxDelivered.push(true);
+        if (currentStatus !== "pending") return false;
+        currentStatus = "delivered";
+        return true;
+      }),
+      markOutboxRetry: vi.fn(async (_id, { attempts, nextAttemptAt, lastError, expectedAttempts }) => {
+        calls.markOutboxRetry.push({ attempts, nextAttemptAt, lastError, expectedAttempts });
+        if (currentStatus !== "pending" || currentAttempts !== expectedAttempts) return false;
+        currentAttempts = attempts;
+        return true;
+      }),
+      markOutboxDead: vi.fn(async (_id, { attempts, lastError, expectedAttempts }) => {
+        calls.markOutboxDead.push({ attempts, lastError, expectedAttempts });
+        if (currentStatus !== "pending" || (expectedAttempts !== undefined && currentAttempts !== expectedAttempts)) return false;
+        currentAttempts = attempts;
+        currentStatus = "dead";
+        return true;
+      }),
+    };
+  }
+
+  function deliverDeps(over = {}) {
+    // `over.db || webhookDeliverDb()`, not a `db:` default alongside
+    // `...over` -- an object literal evaluates EVERY listed property
+    // (including a default that is about to be overridden) before the
+    // spread applies, so an unconditional `webhookDeliverDb()` here would
+    // build (and encrypt) a throwaway endpoint even when the caller passed
+    // its own `db` -- exactly what broke the "decrypt failure" test, whose
+    // whole point is that CONNECTIONS_WEBHOOK_KEY is already gone by the
+    // time this runs.
+    return fakeDeps({
+      db: over.db || webhookDeliverDb(),
+      now: () => NOW,
+      enqueueOutbox: vi.fn(async () => ({ created: true })),
+      attemptDelivery: vi.fn(async () => ({ ok: true, status: 200, lastError: null })),
+      ...over,
+    });
+  }
+
+  async function post(deps, body = { business_id: BIZ, outbox_id: OUTBOX_ID }) {
+    return request(buildApp(deps)).post("/internal/outbound/webhook-deliver").set("Authorization", "Bearer good").send(body);
+  }
+
+  it("400 on a non-uuid id", async () => {
+    const deps = deliverDeps();
+    const res = await post(deps, { business_id: BIZ, outbox_id: "not-a-uuid" });
+    expect(res.status).toBe(400);
+  });
+
+  it("401 without a token", async () => {
+    const deps = deliverDeps();
+    const res = await request(buildApp(deps)).post("/internal/outbound/webhook-deliver").send({ business_id: BIZ, outbox_id: OUTBOX_ID });
+    expect(res.status).toBe(401);
+  });
+
+  it("delivered: 2xx marks the row delivered, no re-enqueue", async () => {
+    const deps = deliverDeps({ attemptDelivery: vi.fn(async () => ({ ok: true, status: 200, lastError: null })) });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ done: true, reason: "delivered" });
+    expect(deps.db.calls.markOutboxDelivered.length).toBe(1);
+    expect(deps.enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it("retry: a failure applies the backoff, writes attempts+1, and re-enqueues at the SAME next_attempt_at the row now has -- named risk 7 / I2 task-name collision", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ attempts: 1 }) });
+    const deps = deliverDeps({ db, attemptDelivery: vi.fn(async () => ({ ok: false, status: 500, lastError: "500" })) });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ done: true, reason: "retry" });
+    expect(db.calls.markOutboxRetry).toEqual([{ attempts: 2, nextAttemptAt: expect.any(Date), lastError: "500", expectedAttempts: 1 }]);
+    expect(deps.enqueueOutbox).toHaveBeenCalledTimes(1);
+    const arg = deps.enqueueOutbox.mock.calls[0][0];
+    expect(arg.outboxId).toBe(OUTBOX_ID);
+    expect(arg.at.getTime()).toBe(db.calls.markOutboxRetry[0].nextAttemptAt.getTime());
+  });
+
+  it("dead on the 6th failure (attempts 5 -> 6), no re-enqueue -- backoff Ruling confirmed", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ attempts: 5 }) });
+    const deps = deliverDeps({ db, attemptDelivery: vi.fn(async () => ({ ok: false, status: "ECONNREFUSED", lastError: "ECONNREFUSED" })) });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ done: true, reason: "dead" });
+    expect(db.calls.markOutboxDead).toEqual([{ attempts: 6, lastError: "ECONNREFUSED", expectedAttempts: 5 }]);
+    expect(deps.enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it("already dead: a no-op, attemptDelivery is never called (named risk 7 -- never retries past dead)", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ status: "dead", attempts: 6 }) });
+    const attemptDelivery = vi.fn(async () => ({ ok: true, status: 200, lastError: null }));
+    const deps = deliverDeps({ db, attemptDelivery });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ done: true, reason: "already_dead" });
+    expect(attemptDelivery).not.toHaveBeenCalled();
+  });
+
+  it("inactive endpoint: marked dead without ever calling attemptDelivery", async () => {
+    const db = webhookDeliverDb({ endpoint: mkEndpoint({ active: false }) });
+    const attemptDelivery = vi.fn(async () => ({ ok: true, status: 200, lastError: null }));
+    const deps = deliverDeps({ db, attemptDelivery });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ done: true, reason: "endpoint_unavailable" });
+    expect(attemptDelivery).not.toHaveBeenCalled();
+    expect(db.calls.markOutboxDead).toEqual([{ attempts: 1, lastError: "endpoint_unavailable", expectedAttempts: 1 }]);
+  });
+
+  it("decrypt failure: classified as key_unavailable and backed off like any other failure, attemptDelivery never called", async () => {
+    // The endpoint (and its ciphertext) is built FIRST, while beforeAll's
+    // real key is still active -- only THEN is the key removed, so this
+    // exercises decryptSecret's own failure, not encryptSecret's.
+    const db = webhookDeliverDb();
+    const OLD_KEY = process.env.CONNECTIONS_WEBHOOK_KEY;
+    delete process.env.CONNECTIONS_WEBHOOK_KEY; // deterministic: decryptSecret throws regardless of ciphertext content
+    try {
+      const attemptDelivery = vi.fn(async () => ({ ok: true, status: 200, lastError: null }));
+      const deps = deliverDeps({ db, attemptDelivery });
+      const res = await post(deps);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ done: true, reason: "retry" });
+      expect(attemptDelivery).not.toHaveBeenCalled();
+      expect(db.calls.markOutboxRetry[0].lastError).toBe("key_unavailable");
+    } finally {
+      if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+      else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
+    }
+  });
+
+  // I2, RED-first (see the report: RED against the pre-fix route, which had
+  // no due check at all -- an early task delivered and burned an attempt).
+  it("I2: an EARLY task (next_attempt_at in the future) is a no-op -- never calls attemptDelivery, never burns an attempt", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ next_attempt_at: new Date(NOW.getTime() + 30 * 60_000) }) }); // due in 30 minutes
+    const attemptDelivery = vi.fn(async () => ({ ok: true, status: 200, lastError: null }));
+    const deps = deliverDeps({ db, attemptDelivery });
+    const res = await post(deps);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ done: true, reason: "not_due" });
+    expect(attemptDelivery).not.toHaveBeenCalled();
+    expect(db.calls.markOutboxRetry).toEqual([]);
+    expect(db.calls.markOutboxDead).toEqual([]);
+  });
+
+  // I2, RED-first: two tasks for the SAME row (a genuine Cloud Tasks
+  // at-least-once redelivery, or the old task-naming bug creating a real
+  // duplicate) both attempt delivery; only the FIRST one's write may apply.
+  it("I2: a duplicate task for the same row loses the compare-and-set race -- no double counter, no double re-enqueue", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ attempts: 1 }) });
+    const attemptDelivery = vi.fn(async () => ({ ok: false, status: 500, lastError: "500" }));
+    const deps = deliverDeps({ db, attemptDelivery });
+
+    // The first task reads attempts=1, fails, writes attempts=2 (its
+    // expectedAttempts=1 matches the fake db's currentAttempts=1).
+    const first = await post(deps);
+    expect(first.body).toMatchObject({ reason: "retry" });
+    expect(deps.enqueueOutbox).toHaveBeenCalledTimes(1);
+
+    // A stale write against the CAS boundary: expectedAttempts:1 no longer
+    // matches the row's now-current attempts (2), the exact shape a
+    // duplicate/racing task's own write would take.
+    const staleWrite = await db.markOutboxRetry(OUTBOX_ID, { attempts: 2, nextAttemptAt: new Date(), lastError: "500", expectedAttempts: 1 });
+    expect(staleWrite).toBe(false);
   });
 });
