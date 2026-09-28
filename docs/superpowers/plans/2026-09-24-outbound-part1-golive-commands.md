@@ -172,66 +172,263 @@ Tenant `+18176011171` ("Digile Media", America/Chicago).
 4. After each call: `status --status paused` on that scenario's campaign, so no retry ever dials.
 5. After scenario 9 only, with its own YES: `unsuppress --phone +18176011171 --contact-phone +14699338887`.
 
-## Section C: Stage 3 additions (DRAFT, YES-gated)
+## Section C: Stage 3 additions (deploy 2, DRAFT, YES-gated)
 
-Written by the S3-11 implementer, not run. Every command below needs its own explicit YES —
-this section is a draft for the controller/owner to review and refine, not a rehearsed sequence
-like Sections A/B. Uses the SAME workaround as every other GCP command in this repo (memory
-gcp-notices-go-nowhere: `admin@vetratd.com` is Account Restricted, and no Essential Contacts
-existed before that memory's fix):
+**Status: no command below has been run against a real GCP project.** Started by the S3-11
+implementer (the original C1/C2 secret + alert draft), consolidated here into the full ordered
+list for the whole stage-3 branch. Every command needs its own explicit YES; this is a draft for
+the controller/owner to review and refine, not a rehearsed sequence like Sections A/B.
+
+**What this deploy carries.** The half-1 deploy never ran — production is still
+`voice-uk-prod-00094-87t` @`96e356b` (the Part 1/stage-2 revision, 100% traffic,
+`OUTBOUND_ENABLED=false`, allow-list `+14699338887`). This single deploy therefore ships ALL of
+stage 3 at once: S3-1 through S3-11, the F-R2 first-seconds fix, and the harness-verdict fix —
+`96e356b..$SHA`, base `b797487`.
+
+`SHA=<FINAL HEAD — placeholder, the controller fills this in>`. As of this draft HEAD is `d88807c`
+(all 6 half-2 tasks + F-R2 + harness fix complete; a final opus review of the whole branch was
+dispatched in parallel with the S3-10 gate and its outcome is not yet known — this doc was written
+before that review lands, per Ruling R-docs-early). **Before Step C0, confirm the branch's own
+final gate is GREEN on the actual final HEAD and update `SHA` to it.**
+
+Gates along the way: HALF 1 stop (`eba8fab`) root 268+1 files/5673 passed, test:db 35/492, census
+63/63; half-2 final task (`d88807c`) root 275+1 files/6010 passed/4 skipped/2 todo, test:db 40
+files/567 passed, census 63/63 — inbound prompt snapshots unchanged since `b797487` (0 non-outbound
+files) at every gate. Sims: round 1 1/24 (harness-instrument-dominated, superseded), round 2 15/24
+(post first-seconds triage); SET A (post-half-2, at `bb63d71`) 1/3 PASS with one real caller-facing
+defect confirmed open (see "What this build still carries" below) — SET B (against the final
+fix-wave code) has not run.
+
+Uses the SAME workaround as every other GCP command in this repo (memory gcp-notices-go-nowhere:
+`admin@vetratd.com` is Account Restricted, and no Essential Contacts existed before that memory's
+fix):
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
-P=vetra-uk-edc8ca; R=europe-west2
+P=vetra-uk-edc8ca; R=europe-west2; SHA=<FINAL HEAD>
 SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
+BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
 ```
 
-**C1. Create the `suppression-hash-key` secret and mount it on `voice-uk-prod` as `SUPPRESSION_HASH_KEY`.**
-- 32 random bytes, base64 (services/db.js's own floor is 32 *characters*; base64-of-32-bytes is
-  44, comfortably over it). Never printed, piped straight from `openssl` to `gcloud`.
-- Same replication style as `twilio-account-sid-alt` (Section A5): user-managed, europe-west2.
-- Rotating this later invalidates every previously-erased suppression's hash (a phone erased
-  under the old key stops being findable by the gate) -- a one-way loss of protection, not a
-  routine rotation.
+**C0. Preflight (read).**
 ```bash
+git status --porcelain --untracked-files=no   # expect empty
+git rev-parse --short HEAD                    # expect $SHA
+```
+
+**C1. Build the image.** Same Cloud Build pattern as Section A6; the smoke steps already load
+`@google-cloud/tasks`/`outbound-admin.js` from Part 1.
+```bash
+gcloud builds submit --config=cloudbuild.yaml --project=vetra-core-edc8ca \
+  --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
+  --substitutions=_TAG=$SHA
+```
+
+**C2. Point the migrate job at the new image.** Allow-list unchanged from Part 1; repeating it is
+idempotent.
+```bash
+gcloud run jobs update vetra-migrate-uk-prod --image=$IMG --project=$P --region=$R \
+  --update-env-vars=OUTBOUND_TEST_ALLOWLIST=+14699338887
+```
+
+**C3. Preflight, read-only, BEFORE migrating.**
+```bash
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/db-inspect.js,--outbound-preflight --project=$P --region=$R --wait
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js,--status --project=$P --region=$R --wait
+```
+**STOP and ask the owner if `--status` shows anything pending other than EXACTLY, in this order:**
+`046_outbound_transfer_miss`, `047_outbound_missing_goal`, `048_outbound_erasure`,
+`049_outbound_triggers`, `050_outbound_outbox_schedule`. (Renumbered mid-build from the plan's
+original 047/048/049 — Ruling R-renumber-2, spec §19 update below — the files on disk already carry
+these final numbers; `migration-seq-proof.log` proves this exact order applies clean on top of the
+production-equivalent 45-migration baseline, with a schema fold that matches a fresh `schema.sql`
+build byte-for-byte at `580ceca`.)
+
+**Warning:** run migrations ONLY through this migrate-job image. The local checkout's
+`database/001`–`045` are CRLF in the working tree (`git ls-files --eol` shows `i/lf w/crlf`); the
+image and the gate worktree are LF. Running `scripts/migrate.js` from this checkout reports 042–045
+as "drifted" against the LF-recorded checksums — a false alarm from the checkout, not a real schema
+problem; don't "fix" it by running from there.
+
+**C4. Migrate, then re-check.** Every one of 046–050 is additive or loosening, confirmed by reading
+all five files: 046 adds a nullable `bytea` column; 047 and 048 widen an existing CHECK to accept
+new values (existing rows already satisfy it); 048 also `DROP`s a `NOT NULL` (loosens, never
+tightens) and adds a nullable column + a partial unique index that only fires when the new nullable
+column is populated; 049 adds a nullable column plus a `NOT NULL DEFAULT '{}'` column (Postgres
+backfills the default on every existing row) and three new objects (a directory table + trigger +
+`SECURITY DEFINER` function) that nothing pre-stage-3 reads; 050 adds one new no-RLS routing table +
+trigger + function, with no column change on any existing table. Nothing here can break the
+currently-running `96e356b` revision.
+```bash
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js --project=$P --region=$R --wait
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js,--status --project=$P --region=$R --wait   # expect pending: none
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/db-inspect.js,--outbound-preflight --project=$P --region=$R --wait   # expect every table ok
+```
+**STOP and ask the owner if any table shows `MISMATCH`.**
+
+**C5. Secrets: `connections-webhook-key` → `CONNECTIONS_WEBHOOK_KEY`, `suppression-hash-key` →
+`SUPPRESSION_HASH_KEY`.** Both are 32 random bytes, base64-encoded, generated locally and piped
+straight to `gcloud` — never printed, never in shell history or a log. Same replication style as
+`twilio-account-sid-alt` (Section A5): user-managed, `europe-west2`.
+
+*Why `SUPPRESSION_HASH_KEY` must exist before this revision ever takes an outbound call, for any
+tenant with even one suppression row on file:* `services/db.js`'s `isSuppressed` (the gate's
+do-not-call check) THROWS when the key is missing (Ruling S3-11b, fail closed — memory
+`plan-verbatim-code-fails-open`). Dispatch's transaction rolls back and Cloud Tasks retries, so no
+illegal dial can happen — but post-call also calls the suppression path, and **sims-report-A run 2
+hit exactly this failure on the local harness** (which doesn't mount the key by default):
+`outbound_postcall_run_failed "SUPPRESSION_HASH_KEY is missing"`, the outreach stuck `'dialing'`
+forever, never reaching `'waiting'`. Mount both secrets in the SAME deploy step as the new revision
+(C6), never after it.
+
+*Rotation note (S3-11 report):* rotating `SUPPRESSION_HASH_KEY` later invalidates every
+previously-erased suppression's hash — a phone number erased under the old key stops being
+findable by the gate. A one-way loss of protection, not a routine rotation.
+```bash
+openssl rand -base64 32 | gcloud secrets create connections-webhook-key --project=$P --replication-policy=user-managed --locations=$R --data-file=-
+gcloud secrets add-iam-policy-binding connections-webhook-key --project=$P --member=serviceAccount:$SA_APP --role=roles/secretmanager.secretAccessor
+
 openssl rand -base64 32 | gcloud secrets create suppression-hash-key --project=$P --replication-policy=user-managed --locations=$R --data-file=-
 gcloud secrets add-iam-policy-binding suppression-hash-key --project=$P --member=serviceAccount:$SA_APP --role=roles/secretmanager.secretAccessor
-gcloud run services update voice-uk-prod --region=$R --project=$P --update-secrets=SUPPRESSION_HASH_KEY=suppression-hash-key:latest
 ```
 **STOP and ask the owner first:** this makes `SUPPRESSION_HASH_KEY` load-bearing for EVERY future
-Art. 17 erasure request that finds a matching suppression row (Ruling S3-11b, fail closed) --
-confirm this deploy step runs before, or together with, the next Art. 17 request this tenant
-might receive, not after.
+Art. 17 erasure request that finds a matching suppression row — confirm this deploy step runs
+before, or together with, the next Art. 17 request this tenant might receive, not after.
 
-**C2. The stuck-dialing alert (`lib/outbound/dispatch.js`'s `failStaleAttempt`, counter
-`outbound_stuck_dialing`), with an EXPLICIT email notification channel.** Memory
-gcp-notices-go-nowhere: no Essential Contacts existed on this org until that fix, and Cloud
-Monitoring alerts need their own channel regardless -- create it explicitly rather than assuming
-one exists.
+**C6. New revision.** `OUTBOUND_ENABLED` stays `false`; the allow-list is unchanged; no other env
+change. Mounts both new secrets.
 ```bash
-# Confirm the destination address with the owner before running -- this draft uses the
-# Essential Contact address from that memory (nithin.dodla@vetratd.com), which may not be
-# the address the owner wants paged for an operational alert.
+gcloud run services update voice-uk-prod --image=$IMG --project=$P --region=$R \
+  --update-env-vars=GIT_COMMIT_SHA=$SHA \
+  --update-secrets=CONNECTIONS_WEBHOOK_KEY=connections-webhook-key:latest,SUPPRESSION_HASH_KEY=suppression-hash-key:latest
+```
+**Verify (read):**
+- The new revision is Ready and takes 100% of traffic, on image `$SHA`. `curl -s $BASE_URL/` shows
+  `Build: $SHA`.
+- Env/secret diff against production today: nothing removed; added = `GIT_COMMIT_SHA` (value) and
+  the two new secret refs. `OUTBOUND_ENABLED` still reads `false`; `OUTBOUND_TEST_ALLOWLIST` still
+  reads `+14699338887`.
+- The boot log does NOT contain `outbound_internal_routes_disabled`.
+- One ordinary inbound call by the owner to +1 817 601 1171; its `live_call_summary` says
+  `direction:"inbound"`, no errors.
+
+**C7. Alerting: `outbound_stuck_dialing` + the S3-8/S3-9 counters that are actually alertable, one
+explicit email channel.** Checked every counter S3-8/S3-9 added (`lib/voice/metrics.js`) against
+whether it is ALSO written to Cloud Logging with a matching event name — a bare `bumpCounter()`
+with no `log.*()` call is invisible to a log-based Cloud Monitoring metric:
+
+| Counter | Logged with a matching event name? | Alertable today |
+|---|---|---|
+| `outbound_stuck_dialing` (`lib/outbound/dispatch.js:534`) | `log.error("outbound_stuck_dialing", ...)` | yes |
+| `outbound_webhook_writeoutbox_failed` (S3-8, `postCall.js:235`) | `log.error(...)` | yes |
+| `outbound_webhook_enqueue_failed` (S3-8 fix round 1, `postCall.js:226`) | `log.error(...)` | yes |
+| `outbound_webhook_reenqueue_failed` (S3-8 fix round 1, `internalRoutes.js:565`) | `log.error(...)` | yes |
+| `outbound_trigger_enqueue_failed` (S3-9 fix round 1, `triggerRoute.js:386`) | `log.error(...)` | yes |
+| `outbound_webhook_dead` (S3-8, `internalRoutes.js:535,601`) | **no — `bumpCounter()` only** | **no** |
+
+`outbound_webhook_dead` (a results-webhook endpoint that exhausted all 6 delivery attempts) has no
+log line to filter on as shipped, so it cannot get a log-based alert today. Recorded here, not
+fixed (docs-only task, no code change) — flag for the owner/a future task.
+
+Memory `gcp-notices-go-nowhere`: no Essential Contacts existed on this org before that memory's own
+fix, and a Cloud Monitoring alert needs its own channel regardless — create one explicitly.
+```bash
+# Confirm the destination address with the owner before running.
 gcloud alpha monitoring channels create --project=$P \
-  --display-name="Outbound stuck-dialing alert" \
-  --type=email --channel-labels=email_address=nithin.dodla@vetratd.com
+  --display-name="Outbound stuck-dialing / webhook alerts" \
+  --type=email --channel-labels=email_address=<OWNER_EMAIL>
 # Note the returned channel resource name (projects/.../notificationChannels/NNNNNN) as $CHANNEL.
 
-gcloud logging metrics create outbound_stuck_dialing --project=$P \
-  --description="failStaleAttempt (lib/outbound/dispatch.js): a dial that never got a CallSid inside OUTBOUND_STALE_SIDLESS_MINUTES" \
-  --log-filter='resource.type="cloud_run_revision" jsonPayload.event="outbound_stuck_dialing"'
-
-gcloud alpha monitoring policies create --project=$P \
-  --display-name="Outbound stuck dialing" \
-  --notification-channels=$CHANNEL \
-  --condition-display-name="outbound_stuck_dialing logged" \
-  --condition-filter='resource.type="cloud_run_revision" AND metric.type="logging.googleapis.com/user/outbound_stuck_dialing"' \
-  --condition-threshold-comparison=COMPARISON_GT --condition-threshold-value=0 \
-  --condition-threshold-duration=0s \
-  --aggregation-alignment-period=300s --aggregation-per-series-aligner=ALIGN_COUNT
+for m in outbound_stuck_dialing outbound_webhook_writeoutbox_failed outbound_webhook_enqueue_failed outbound_webhook_reenqueue_failed outbound_trigger_enqueue_failed; do
+  gcloud logging metrics create "$m" --project=$P \
+    --description="lib/outbound: $m, logged via log.error" \
+    --log-filter="resource.type=\"cloud_run_revision\" jsonPayload.event=\"$m\""
+  gcloud alpha monitoring policies create --project=$P \
+    --display-name="Outbound: $m" \
+    --notification-channels=$CHANNEL \
+    --condition-display-name="$m logged" \
+    --condition-filter="resource.type=\"cloud_run_revision\" AND metric.type=\"logging.googleapis.com/user/$m\"" \
+    --condition-threshold-comparison=COMPARISON_GT --condition-threshold-value=0 \
+    --condition-threshold-duration=0s \
+    --aggregation-alignment-period=300s --aggregation-per-series-aligner=ALIGN_COUNT
+done
 ```
-**STOP and ask the owner:** the exact `gcloud alpha monitoring policies create` flags above are a
-DRAFT, not verified against a real Cloud Monitoring API call (this task never ran a gcloud
-command, per instruction) -- read them back against `gcloud alpha monitoring policies create
---help` before running, and confirm the alert threshold (fires on ANY occurrence in a 5-minute
-window) is the sensitivity the owner wants, given `outbound_stuck_dialing` is expected near zero
-in production (lib/voice/metrics.js's own comment on the counter).
+**STOP and ask the owner:** the `policies create` flags above are a DRAFT, never run against a real
+Cloud Monitoring API in this session — read them back against `gcloud alpha monitoring policies
+create --help` before running, and confirm firing on ANY occurrence in a 5-minute window is the
+sensitivity wanted (every one of these five counters is expected near zero in production).
+
+**C8. Cloud Tasks: no new queue, no new IAM.** Checked both new enqueue paths directly:
+`lib/outbound/tasks.js`'s `createWebhookDeliveryEnqueuer` (S3-8) is constructed in
+`lib/outbound/internalRoutes.js:325` with `queuePath: cfg.tasksQueue, serviceAccountEmail:
+cfg.tasksSa` — the SAME `OUTBOUND_TASKS_QUEUE`/`OUTBOUND_TASKS_SA` config the Part 1 dispatch
+enqueuer already uses; `triggerRoute.js`'s enqueue call (S3-9 fix round 1) reuses the identical
+`outboundDeps.enqueue` closure via `setEnqueue`, not a second queue or a second Cloud Tasks client.
+**None needed.** The `outbound-dispatch` queue and the `outbound-tasks` service account created in
+Section A2/A3 already cover both. Operational note, not a required change: this deploy adds a
+delivery task per outbox row onto that SAME queue (`--max-dispatches-per-second=1
+--max-concurrent-dispatches=5`, Section A3) — worth the owner knowing the queue now carries more
+traffic than Part 1 sized it for, though nothing here requires a rate-limit change today.
+
+**C9. R1 campaign config updates: S01b, S03, S10.** `TEMPLATES.speed_to_lead` now carries
+`goal: "qualify_then_book"` + `why_allowed` by default (S3-6). Re-running the UNEDITED
+`.superpowers/sdd/2026-09-24-outbound-part1/r1-config.mjs` (not touched by S3-6, per its own
+report) already produces a config with both new required keys filled in — no script change needed.
+Scenario numbers → campaign ids (`.superpowers/sdd/2026-09-24-outbound-part1/r1-ids.txt`): S01b (a
+re-run of scenario 1's config, per that session's Ruling GL-8) → `ed6113b6-c458-4527-a968-57720aedd55c`,
+S03 → `8b73d7d5-b08e-4e1c-b70e-2abc4f9efac1`, S10 → `859bf1ce-94c4-4f90-8748-adfa70b8f965`.
+```bash
+node .superpowers/sdd/2026-09-24-outbound-part1/r1-config.mjs 1     # -> R1-S01 config (used for S01b's campaign id)
+node .superpowers/sdd/2026-09-24-outbound-part1/r1-config.mjs 3     # -> R1-S03 config
+node .superpowers/sdd/2026-09-24-outbound-part1/r1-config.mjs 10    # -> R1-S10 config
+```
+For each (`<ID>` = the campaign id above, `<B64>` = that scenario's printed config), dry run first,
+through the migrate job (same job, same shape as Section B):
+```bash
+gcloud run jobs execute vetra-migrate-uk-prod --project=$P --region=$R --wait \
+  --args=scripts/outbound-admin.js,campaign,--phone,+18176011171,--config,<B64>,--campaign-id,<ID>
+# then, with the owner's second YES:
+gcloud run jobs execute vetra-migrate-uk-prod --project=$P --region=$R --wait \
+  --args=scripts/outbound-admin.js,campaign,--phone,+18176011171,--config,<B64>,--campaign-id,<ID>,--confirm
+```
+This writes a new `campaign_versions` row (version+1) on the existing campaign; it does not resume
+or fire it. Resuming (`status --status active --confirm`) and firing are the phone-check session's
+job — see `.superpowers/sdd/2026-09-27-outbound-stage3/next-session-prompt-stage3-deploy-and-phone-check.md`.
+
+**C10. Rollback.**
+```bash
+gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00094-87t=100 --region=$R --project=$P
+gcloud scheduler jobs pause outbound-sweep --location=$R --project=$P   # if anything dials unexpectedly
+```
+Migrations 046–050 stay (all confirmed additive/loosening in C4) — `96e356b` never reads any of the
+five new/loosened columns or the three new routing tables, so it keeps working unmodified, the same
+guarantee Part 1's own rollback relied on. The two new secrets and the webhook delivery queue
+traffic are unused by the old revision and harmless.
+
+## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
+this deploy)
+
+See `.superpowers/sdd/2026-09-27-outbound-stage3/progress.md`'s "HALF 1 DONE" block for the
+half-1 list (m1, N3, N4, N5, F-R2-open-question, the two parked items, X1) — F-R2 itself (the
+"talking over the clip" open question) is now CLOSED as a real, caller-facing Important defect, not
+merely a question: **the SET A regression sim (post-half-2, `bb63d71`) reproduced it directly** —
+`outbound_hello` FAILed `no_stale_reply_after_clip`: on a caller who says "Hello?" then goes silent,
+Live's stale reply (a full opener repeat, "…calling on behalf of Harness Test Clinic.") streamed
+long, `outbound_stale_discard_timeout` fired at 2004 ms but LIFTED the discard mid-generation, and
+the tail played audibly, logged as heard, followed by "Are you still there?" — the exact regression
+the F-R2 rounds were built to close, still open on the script that has NO caller speech during the
+clip to latch onto (the fix's mechanism is voice-triggered). **This is the top item for the final
+fix wave**, per the sims report's own direction: never lift the discard mid-generation; keep
+discarding the stale generation until its own close, with a hard mute cap for a missing close.
+SET A also found a second, unrelated FAIL: `outbound_stop`'s `post_call_exactly_once` — an opt-out
+call's post-call step never started (`post_call_started_at: null`), looks tied to the opt-out tool
+path racing the call's exit, not a stale-reply/clip issue.
+
+Also outstanding from half 2 (deferred Minors, none fixed by this deploy — see `progress.md`'s
+per-task minor lists for the full set): the NANPA Canada/Caribbean area-code list needs
+owner/counsel verification before a campaign reaches those numbers (S3-7); the qualification
+pack's questions still aren't visible in `lib/outbound/prompt.js`'s `outboundCallBlock` free text
+beyond the `prompt()` clause S3-10's fix round 1 added (parked, not a gap — `prompt()` closes the
+Critical); `exportCallerData` (Art. 15) still doesn't read outbound calling's own tables (S3-11
+parked); the outbox redaction SQL is hand-matched to `buildResultsPayload`'s current shape with no
+drift test (S3-8 minor).

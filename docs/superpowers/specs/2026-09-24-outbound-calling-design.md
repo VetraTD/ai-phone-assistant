@@ -855,3 +855,62 @@ The decisions and the tasks that implement them are in `docs/superpowers/plans/2
 - **Amends §13.5:** on erasure a suppression keeps only `phone_hash = HMAC-SHA256(SUPPRESSION_HASH_KEY, phone)`.
 - **§12.3 callback recognition** moves to stage 4. It is still required before `OUTBOUND_ENABLED=true`.
 - **§12.4, the text after a missed call,** moves to the Ilija setup session (P-d).
+
+### 2026-09-28 half-2 build decisions
+
+Built on `feat/outbound-stage3`, half 2 (S3-6 → S3-11 → S3-7 → S3-8 → S3-9 → S3-10, sequential),
+plus the F-R2 first-seconds fix and a harness-verdict fix. Full detail is the ledger,
+`.superpowers/sdd/2026-09-27-outbound-stage3/progress.md` ("HALF 2 START" onward) and the six
+`task-S3-*-report.md` files. This subsection records the product-meaning decisions; it does not
+replace the §19 amendments above.
+
+**Migration numbering (run order 046–050; renumbered mid-build from the plan's original 047/048/049
+— Ruling R-renumber-2, since half 2's own task order differs from the plan's):**
+- `046_outbound_transfer_miss` (S3-4, half 1) — the transfer-miss clip column.
+- `047_outbound_missing_goal` (S3-6 fix round 1) — lets a dispatch refusal record the reason
+  "this campaign has no goal set" without crashing.
+- `048_outbound_erasure` (S3-11) — the "right to be forgotten" (Art. 17) support for outbound: a
+  suppressed phone number can be forgotten while the do-not-call decision itself survives, as a
+  one-way hash.
+- `049_outbound_triggers` (S3-9, renumbered from the plan's 047) — the public "leads-in" link and
+  per-person details.
+- `050_outbound_outbox_schedule` (S3-8 fix round 1) — lets the 5-minute sweep find a stuck
+  results-webhook delivery for ANY tenant, not only ones with other outbound activity that tick.
+
+**Rulings, plain words:**
+- **R-FR2:** a real caller who talks over the recorded opener clip could hear Ava's stale,
+  pre-clip reply play right after the clip ends — sometimes a full re-introduction, sometimes
+  colliding with what the caller is actually saying. Ruled a caller-facing regression from the
+  opener-clip design (checkpoint A) and fixed immediately rather than deferred to the final wave.
+- **R-FR2-latch:** the fix only forwards a caller's speech DURING the clip to the live model once a
+  sustained burst of real voice confirms it (11 voiced frames across an 800 ms window) — a click,
+  cough, or half-second noise doesn't trigger it. Accepted on real recorded audio: zero leaked
+  frames before the opener clip ends, across three microphone loudness levels.
+- **R-renumber-2:** see "Migration numbering" above — the go-live commands must migrate 046–050 in
+  that exact order; a plan document that still cites the old 047/048/049 numbers is out of date.
+- **R-S3-7-tz:** the per-country legal calling-hours floor must be checked against the contact's
+  TRUE recorded timezone, not a business's own best-guess substitute — otherwise a US contact with
+  no timezone on file could be evaluated against only one coast's legal hours (instead of both),
+  right at the one place a caller can be offered a new callback time.
+- **R-S3-8-I3:** a lost delivery of a call's results to a tenant's webhook now gets found and
+  retried by the 5-minute sweep for EVERY tenant, not only tenants with other outbound activity
+  that same tick (migration 050).
+- **R-S3-8-I4:** deleting a person's data (erasure) now also deletes or blanks out their pending
+  results-webhook deliveries — that queue carries the same phone number, name and answers as the
+  rest of a call record, and erasure would have been incomplete without it.
+- **R-S3-8-dead:** confirmed "a results webhook that fails 6 times in a row is given up on" is the
+  intended behaviour (five retries, then stop) — no change from what was built.
+- **R-S3-9-enqueue:** a lead submitted through the public "leads-in" link now triggers an
+  immediate dial attempt, instead of silently waiting for the next 5-minute sweep — the original
+  build's omission was a gap, not a deliberate choice, for a product built around calling a lead
+  back fast.
+- **R-S3-10-prompt:** a qualification campaign's own questions must be spoken into the live
+  model's instructions, not just made available as a tool — otherwise the model has no way to know
+  WHAT to ask a caller, even though it can record an answer once given one.
+- **R-S3-10-persist:** a caller's answer to a qualification question is saved to the database the
+  moment they give it, not batched and written once at the end of the call — safer if the call
+  drops or crashes before it formally "finishes."
+- **S3-11c (fail-closed scope):** the new erasure requirement — a phone number's hashing key must
+  exist before that number can be forgotten — only blocks an erasure request for a phone number
+  that actually has a do-not-call entry on file. An ordinary erasure request unrelated to outbound
+  calling still works even before the new key is deployed everywhere.
