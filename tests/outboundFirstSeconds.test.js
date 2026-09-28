@@ -108,11 +108,13 @@ function rig(overrides = {}) {
  * goes through the REAL inboundVad, its verdict ({voiced, voiceActive}) goes
  * to onCallerFrame, then the controller ticks. 10 ms steps so the exact
  * deadlines (1,650 / 2,600) are hit rather than straddled. `voiced(t)` says
- * whether the frame at `t` is loud.
+ * whether the frame at `t` is loud. `stepMs` (fix round 4, R1): Twilio's
+ * real 20 ms cadence, for the tests that must see the VAD's hangover play
+ * out frame by frame the way production does.
  */
-function run(ctl, fromMs, toMs, voiced = () => false) {
+function run(ctl, fromMs, toMs, voiced = () => false, stepMs = 10) {
   const vad = vads.get(ctl);
-  for (let t = fromMs; t <= toMs; t += 10) {
+  for (let t = fromMs; t <= toMs; t += stepMs) {
     const v = vad.processFrame(voiced(t) ? LOUD : QUIET, t);
     // voicedRunMs (S3-2): the same value index.js's own vad.voicedRunMs(atMs)
     // would report, passed through so the clip-barge threshold (onCallerFrame's
@@ -1346,6 +1348,120 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     ctl.onAssistantTurnText("whatever that reply was", false, 1600); // the dropped generation finally closes
     expect(rec.prompts).toHaveLength(1); // NOT prompted again
     expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
+  });
+
+  // R1 (fix round 4, re-review 3). The N2/NB1/NB2 tests above all stop
+  // feeding caller frames at (or before) the frame the reprompt is armed on,
+  // so onCallerFrame never runs AFTER the arm in any of them. NB1's cancel
+  // keyed on `voiceActive` alone -- and the VAD holds that true for its 300 ms
+  // hangover after the caller's LAST voiced frame. On the slow path the
+  // decision always lands within 350 ms of that frame (otherwise hello-end
+  // would have fired first), so the hangover of a hello that ended BEFORE the
+  // decision cancelled the reprompt for a caller who then stayed silent --
+  // exactly the dead air the reprompt exists for. Every test here keeps
+  // feeding frames past the decision, through the real inboundVad, at
+  // Twilio's own 20 ms cadence. The cancel now needs a genuinely voiced frame
+  // the VAD also counts as speech (`voiced && voiceActive`).
+  describe("R1 (fix round 4): the no-clip reprompt with caller frames fed PAST the decision, 20 ms cadence", () => {
+    const F = 20;
+    const REPROMPT = `The person hasn't heard you yet. Say: ${BACKSTOP_TEXT}`;
+    const silent = () => false;
+    const loud = () => true;
+
+    /** Slow path, no clip, A open at the decision: the hello runs 1,000..lastVoicedMs, the decision is at 2,600. */
+    function slowNoClip(lastVoicedMs) {
+      const r = rig({ firstSpeaker: "clip", backstopAudio: null });
+      const hello = (t) => t >= 1000 && t <= lastVoicedMs;
+      run(r.ctl, 0, 1180, hello, F);
+      expect(r.ctl.onModelAudio(1190)).toBe(false); // A opens before the decision (its head dropped)
+      run(r.ctl, 1200, 2600, hello, F);
+      expect(r.events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_slow" });
+      expect(r.rec.prompts).toEqual([]); // not yet -- A has not resolved
+      return r;
+    }
+
+    it.each([
+      ["at the decision frame itself (2,600)", 2600],
+      ["160 ms before the decision (2,440: still inside the hangover at 2,600)", 2440],
+    ])("slow path, the hello ends %s, the caller then stays SILENT, A closes: exactly one reprompt", (_label, lastVoicedMs) => {
+      const { ctl, rec, events } = slowNoClip(lastVoicedMs);
+      run(ctl, 2620, 2980, silent, F); // silence, through and past the hangover
+      expect(rec.prompts).toEqual([]);
+
+      ctl.onAssistantTurnText("A's reply, dropped whole", true, 3000); // A finishes on its own
+      expect(rec.prompts).toEqual([REPROMPT]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+      expect(ctl.onModelAudio(3050)).toBe(true); // Live's answer to the reprompt is heard
+
+      run(ctl, 3060, 3600, silent, F);
+      ctl.onAssistantTurnText("Live's answer to the reprompt", true, 3700);
+      expect(rec.prompts).toHaveLength(1); // once only
+    });
+
+    it("slow path, the caller stays SILENT and A never closes: the grace timeout reprompts exactly once", () => {
+      const { ctl, rec, events } = slowNoClip(2600);
+      const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+      run(ctl, 2620, liftAt, silent, F); // the last frame is the timeout's own tick
+      expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+      expect(rec.prompts).toEqual([REPROMPT]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+    });
+
+    it("slow path, the caller KEEPS TALKING past the decision (A interrupted by them): no reprompt at all", () => {
+      const { ctl, rec, events } = slowNoClip(2600);
+      run(ctl, 2620, 2780, loud, F); // still talking
+      ctl.onAssistantTurnText("A's reply, cut off by the caller", false, 2800);
+      run(ctl, 2800, 3000, loud, F);
+      run(ctl, 3020, 3600, silent, F); // they finish; Live's reply to THEM is what comes next
+      ctl.onAssistantTurnText("Live's reply to the caller", true, 3700);
+      expect(rec.prompts).toEqual([]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
+    });
+
+    it("slow path, the caller goes quiet past the hangover, then SPEAKS AGAIN before A closes: no reprompt", () => {
+      const { ctl, rec, events } = slowNoClip(2600);
+      run(ctl, 2620, 2980, silent, F); // the hangover lapses at 2,900
+      run(ctl, 3000, 3300, loud, F); // a new run the VAD confirms at 3,200
+      ctl.onAssistantTurnText("A's reply, cut off by the caller", false, 3300);
+      expect(rec.prompts).toEqual([]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
+    });
+
+    // Pins the `voiceActive` half of the condition: a voiced frame alone
+    // (`voiced` without `voiceActive`) would cancel on a cough and leave the
+    // caller in the same dead air.
+    it("slow path, silent but for a 100 ms blip the VAD never confirms: still exactly one reprompt", () => {
+      const { ctl, rec, events } = slowNoClip(2600);
+      run(ctl, 2620, 2980, silent, F);
+      run(ctl, 3000, 3080, loud, F); // 100 ms: never reaches the VAD's 200 ms activation
+      run(ctl, 3100, 3180, silent, F);
+      ctl.onAssistantTurnText("A's reply, dropped whole", true, 3200);
+      expect(rec.prompts).toEqual([REPROMPT]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+    });
+
+    it("hello-end path, the caller stays SILENT past the decision, A closes: exactly one reprompt", () => {
+      const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+      expect(ctl.onModelAudio(300)).toBe(false); // A, open before any onset
+      run(ctl, 0, 1560, (t) => t >= 1000 && t <= 1200, F); // hello-end fires on the first frame >= 1,550 (1,200 + 350)
+      expect(events("outbound_backstop_missing")[0].fields).toMatchObject({ path: "backstop_hello_end" });
+      run(ctl, 1580, 2480, silent, F);
+      expect(rec.prompts).toEqual([]);
+      ctl.onAssistantTurnText("A's reply, dropped whole", true, 2500);
+      expect(rec.prompts).toEqual([REPROMPT]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
+    });
+
+    it("silence path, frames fed past the decision: the silence prompt only, never the reprompt (NB2 holds)", () => {
+      const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
+      expect(ctl.onModelAudio(300)).toBe(false);
+      run(ctl, 0, 1400, silent, F); // backstop_silence, no clip
+      run(ctl, 1420, 1580, silent, F);
+      ctl.onAssistantTurnText("whatever that reply was", true, 1600);
+      run(ctl, 1620, 2000, silent, F);
+      expect(rec.prompts).toEqual([`The person hasn't spoken. Say: ${BACKSTOP_TEXT}`]);
+      expect(events("outbound_no_clip_reprompt")).toHaveLength(0);
+    });
   });
 
   // Item 3 (fix round 2, re-review out-of-scope observation 1). Silence
