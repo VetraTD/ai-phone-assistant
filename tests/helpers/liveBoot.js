@@ -43,10 +43,20 @@ export class FakeSocket extends EventEmitter {
 }
 
 export function fakeLive() {
-  const sent = { clientContent: [], toolResponses: [] };
+  // C1 (checkpoint-A review). `audioIn` records every caller-audio realtime
+  // input, in call order -- the only way to prove "caller audio reaches Live
+  // AFTER the seed" from outside index.js: `sendRealtimeInput` used to be a
+  // pure no-op, so no test could see whether or when a frame reached Live at
+  // all. Push order here IS wall-clock send order (session.sendRealtimeInput
+  // and session.sendClientContent are called synchronously, from the same
+  // single-threaded engine), so comparing `sent.audioIn.length` before and
+  // after a `sent.clientContent` push proves ordering directly.
+  const sent = { clientContent: [], toolResponses: [], audioIn: [] };
   let onmessage = null;
   const session = {
-    sendRealtimeInput: () => {},
+    sendRealtimeInput: (m) => {
+      if (m?.audio) sent.audioIn.push(m.audio);
+    },
     sendClientContent: (m) => sent.clientContent.push(m),
     sendToolResponse: (m) => sent.toolResponses.push(m),
     close: () => {},

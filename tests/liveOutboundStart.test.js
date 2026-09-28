@@ -27,7 +27,7 @@ vi.mock("../lib/logger.js", async (importOriginal) => {
 
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { readShared } from "../lib/callState.js";
-import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK } from "../lib/outbound/firstSeconds.js";
+import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS } from "../lib/outbound/firstSeconds.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 
 let allowed = new Set();
@@ -491,6 +491,112 @@ describe("outbound: the first seconds through the real session", () => {
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
     await call.feed(400, { voiced: true }); // well under 600 ms
     expect(clear).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
+  // ---------------------------------------------------------------------
+  // C1 (Critical, checkpoint-A review). The ordinary half-duplex gate
+  // (lib/voice/live/halfDuplex.js, a 500 ms ring tuned for Live's OWN short
+  // reply) was dropping a caller's whole utterance said during the opener
+  // clip: confirmed on 3 real sim calls, the gate held it, evicted it as the
+  // multi-second clip kept playing, and it never reached Live's ASR at all
+  // -- including a gatekeeper's "He's out." (live_utterance{
+  // playing_at_open:true, forwarded:0, dropped_voiced:16}). index.js now
+  // bypasses that gate entirely, for outbound only, while the clip's own
+  // audio is on the wire, and holds the caller's frames itself, releasing
+  // them to Live the instant the seed goes out -- never before, so Live's
+  // context reads [opener][what the caller said].
+  // ---------------------------------------------------------------------
+  it("C1 fix: caller speech during the clip reaches Live, in order, only after the seed", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // a hello; onset confirmed
+    await call.feed(400); // the hello ends; the clip queues via the hello-end timer (deferred seed, O-8)
+    expect(call.live.sent.clientContent).toEqual([]); // not seeded yet
+
+    // The gatekeeper keeps talking while the clip is STILL playing -- the
+    // checkpoint-A shape ("He's out. Try tomorrow at ten."), well under
+    // CLIP_BARGE_MIN_MS (600 ms) so it must not barge the clip either.
+    const beforeSeed = call.live.sent.audioIn.length;
+    await call.feed(320, { voiced: true });
+    expect(call.live.sent.audioIn.length).toBe(beforeSeed); // held -- zero reached Live before the seed
+
+    // The clip finishes; the seed goes now (O-8's own end-mark timing).
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false },
+    ]);
+    // The held frames reach Live now -- after the seed, never before.
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeSeed);
+    await call.hangUp();
+  });
+
+  it("C1 fix: an utterance AFTER the clip has ended is unaffected -- the ordinary gate forwards it as before", async () => {
+    // The mark this test never delivers is expected to time out (M9) once
+    // clipPlayingUntil passes -- that IS how clipPlaying lapses here.
+    allowErrors("outbound_backstop_mark_timeout");
+    const call = await bootOutbound();
+    await call.feed(1400); // the silence backstop fires and plays (seed at once, no generation open)
+    // Let the clip's own (real, audioOut-timed) playback AND clipPlaying's
+    // own M9 bound both lapse naturally -- OPENER_AUDIO is 1 s + markGraceMs
+    // (1.5 s) = 2.5 s from fire; 2.6 s of silence clears both without
+    // needing the mark event this test is not about.
+    await call.feed(2600);
+    const before = call.live.sent.audioIn.length;
+    await call.feed(200, { voiced: true }); // ordinary caller speech, well after the clip
+    // Forwarded frame-by-frame in real time -- no waiting for anything.
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(before);
+    await call.hangUp();
+  });
+
+  it("C1 fix: a real barge while speech is still held releases it too -- the seed for this clip is abandoned for good", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+    const beforeBarge = call.live.sent.audioIn.length;
+
+    // A genuine barge: sustained speech past CLIP_BARGE_MIN_MS (600 ms). The
+    // clip is cleared and the seed for it is abandoned (giveUpOnSeed) -- the
+    // lead-in speech held up to that point must still reach Live, not be
+    // stranded waiting for a seed that will never come.
+    await call.feed(900, { voiced: true });
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBarge);
+    await call.hangUp();
+  });
+
+  it("C1 fix: held audio is bounded by CLIP_CALLER_HOLD_MAX_MS -- past the cap the OLDEST frames are dropped, counted, never unbounded", async () => {
+    clearStats();
+    // A long clip (well past the cap) so the M9 mark-timeout cannot fire
+    // first and mask the cap: this test is specifically about the explicit
+    // duration bound, not the mark-echo safety net.
+    const LONG_OPENER_AUDIO = Buffer.alloc(8 * 12_000, 0x7f); // 12 s of clip audio
+    const call = await bootOutbound({ database: outboundDb({ openerAudio: LONG_OPENER_AUDIO }) });
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+    expect(call.live.sent.clientContent).toEqual([]);
+    // Taken right as the clip fires: everything up to here (the hello
+    // itself) was forwarded in real time by the ORDINARY gate, before any
+    // holding starts -- not part of what the cap bounds.
+    const beforeHold = call.live.sent.audioIn.length;
+
+    // Hold the caller's audio open far longer than the cap, in short voiced
+    // bursts separated by brief silence so no single run ever crosses
+    // CLIP_BARGE_MIN_MS (600 ms) and clears the clip early.
+    const capFrames = Math.ceil(CLIP_CALLER_HOLD_MAX_MS / 20);
+    let heldMs = 0;
+    while (heldMs < CLIP_CALLER_HOLD_MAX_MS + 3000) {
+      await call.feed(400, { voiced: true });
+      await call.feed(40);
+      heldMs += 440;
+    }
+    const counters = getLatencyStats().turnTaking;
+    expect(counters.outbound_clip_hold_dropped).toBeGreaterThan(0);
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    expect(call.live.sent.clientContent.length).toBe(1); // the seed still went
+    // Released, but never more than the cap's own worth of frames.
+    const released = call.live.sent.audioIn.length - beforeHold;
+    expect(released).toBeGreaterThan(0);
+    expect(released).toBeLessThanOrEqual(capFrames);
     await call.hangUp();
   });
 
