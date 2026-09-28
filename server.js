@@ -689,8 +689,14 @@ registerOutboundDoorRoutes(app, {
 // just above is: it needs only services/db.js, not the Cloud Tasks/OIDC
 // configuration Task 22 still owns. With no campaign's trigger_token_hash
 // matching a given token, every request simply 401s.
+//
+// fix round 1 (I2): the route enqueues a dispatch task on a successful
+// create, but `outboundDeps` (below, the Cloud-Tasks-backed enqueuer) is not
+// resolved until AFTER this point in the file -- `triggerRoute.setEnqueue`
+// is wired in once it is, the SAME `outboundPostCall.setEnqueue` pattern
+// used a few hundred lines down.
 // ---------------------------------------------------------------------------
-registerTriggerRoute(app, { db, log });
+const triggerRoute = registerTriggerRoute(app, { db, log });
 
 // ---------------------------------------------------------------------------
 // Voice webhook
@@ -1527,6 +1533,11 @@ if (outboundDeps) {
 outboundPostCall.setEnqueue(outboundDeps?.enqueue ?? null);
 // S3-8: the same wiring, for step 7's webhook-delivery task enqueue.
 outboundPostCall.setEnqueueOutbox(outboundDeps?.enqueueOutbox ?? null);
+// S3-9 fix round 1 (I2): the SAME wiring, for the leads-in link's own
+// enqueue-on-create (lib/outbound/triggerRoute.js). One shared
+// Cloud-Tasks-backed `enqueue` function -- built once by buildOutboundDeps
+// above -- not a second instance.
+triggerRoute.setEnqueue(outboundDeps?.enqueue ?? null);
 
 // ---------------------------------------------------------------------------
 // Centralized error handler — never expose stack traces

@@ -262,6 +262,32 @@ d("POST /v1/triggers/:triggerToken, through the real route + real db", () => {
     expect(outreachCount.rows[0].n).toBe(1);
   });
 
+  // fix round 1, I1: withTenant's actor id flows straight into the durable
+  // PHI audit row (services/db.js's flushAudit). A real write, read back
+  // from phi_access_log itself -- not a mock's recorded call args.
+  it("fix round 1, I1: the PHI audit row for the write unit of work carries a descriptive actor id, not null", async () => {
+    const phone = "+447700900520";
+    const res = await request(buildApp())
+      .post(`/v1/triggers/${solicitedToken.token}`)
+      .send({
+        phone,
+        consent: { purpose: "enquiry_followup", captured_at: "2026-09-27T10:00:00Z" },
+      });
+    expect(res.status).toBe(202);
+
+    const rows = (
+      await admin.query(
+        `SELECT actor_type, actor_id, operations FROM phi_access_log
+          WHERE business_id = $1 AND $2 = ANY(operations) ORDER BY occurred_at DESC LIMIT 1`,
+        [BIZ, "createOutreachFromTrigger"]
+      )
+    ).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor_type).toBe("system");
+    expect(rows[0].actor_id).toBe("outbound-trigger");
+    expect(rows[0].actor_id).not.toBeNull();
+  });
+
   it("a service campaign accepts no consent block at all", async () => {
     const res = await request(buildApp())
       .post(`/v1/triggers/${serviceToken.token}`)

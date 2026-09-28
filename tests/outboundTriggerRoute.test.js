@@ -46,6 +46,13 @@ import {
   TRIGGER_PATH,
   RATE_LIMIT_MAX,
 } from "../lib/outbound/triggerRoute.js";
+// Imported statically, at the top, BEFORE this file's later
+// vi.resetModules() call (in the "through the real server" section's
+// beforeAll): a dynamic `await import(...)` done AFTER that reset would
+// resolve to a DIFFERENT module instance than the one triggerRoute.js's own
+// static `import { bumpCounter }` closed over, and the counter assertion
+// below would silently watch the wrong object.
+import { getLatencyStats } from "../lib/voice/metrics.js";
 
 const RAW_TOKEN = "a".repeat(64);
 const GOOD_HASH = hashTriggerToken(RAW_TOKEN);
@@ -84,9 +91,9 @@ function fakeDb({ campaignRow = baseCampaignRow(), contactId = "contact-1" } = {
   };
 }
 
-function buildApp(db) {
+function buildApp(db, { enqueue, log = { info: () => {}, error: () => {} } } = {}) {
   const app = express();
-  registerTriggerRoute(app, { db, log: { info: () => {}, error: () => {} } });
+  registerTriggerRoute(app, { db, log, enqueue });
   return app;
 }
 
@@ -206,6 +213,91 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     db.campaignForTrigger.mockRejectedValueOnce(new Error("db down"));
     const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
     expect(res.status).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fix round 1, I2 (controller ruling): spec §12.1 says this route enqueues.
+// Take the enqueuer stub's shape from lib/outbound/tasks.js's real
+// createDispatchEnqueuer().enqueue return value: {created: boolean}.
+// ---------------------------------------------------------------------------
+describe("enqueue on create (fix round 1, I2)", () => {
+  it("a create enqueues exactly once, with the outreach id and business id", async () => {
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const res = await request(buildApp(db, { enqueue })).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
+    expect(res.status).toBe(202);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const call = enqueue.mock.calls[0][0];
+    expect(call.businessId).toBe(BIZ);
+    expect(call.outreachId).toBe(res.body.outreach_id);
+    expect(call.at).toBeInstanceOf(Date);
+  });
+
+  it("an idempotent replay (same idempotency_key) enqueues no second task", async () => {
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const app = buildApp(db, { enqueue });
+    const body = { phone: PHONE, consent: validConsent(), idempotency_key: "replay-key", data: {} };
+    const first = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send(body);
+    const second = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send(body);
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(second.body.outreach_id).toBe(first.body.outreach_id);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("an enqueue throw still gives 202 (the outreach exists; the sweep is the backstop), and bumps the registered counter", async () => {
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => {
+      throw new Error("cloud tasks unavailable");
+    });
+    // "registered" means it is in lib/voice/metrics.js's COUNTER_NAMES and
+    // getLatencyStats().turnTaking actually reports it moving -- bumpCounter
+    // silently drops any name not in that list, so the before/after delta
+    // also proves the registration itself, not just that bumpCounter was
+    // called with some string.
+    const before = getLatencyStats().turnTaking.outbound_trigger_enqueue_failed || 0;
+
+    const res = await request(buildApp(db, { enqueue })).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
+
+    expect(res.status).toBe(202);
+    expect(res.body.outreach_id).toBeTruthy();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.outbound_trigger_enqueue_failed).toBe(before + 1);
+  });
+
+  it("with no enqueue configured at all (the local-dev/pre-Task-22 posture), still 202s and does not throw", async () => {
+    const db = fakeDb();
+    const res = await request(buildApp(db, { enqueue: undefined })).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
+    expect(res.status).toBe(202);
+  });
+
+  it.each([
+    ["a bad token (401)", () => ({ token: "b".repeat(64), body: { phone: PHONE, consent: validConsent() } })],
+    ["a rejected body (422, missing consent)", () => ({ token: RAW_TOKEN, body: { phone: PHONE } })],
+  ])("%s enqueues nothing", async (_label, build) => {
+    const { token, body } = build();
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const res = await request(buildApp(db, { enqueue })).post(`/v1/triggers/${token}`).send(body);
+    expect(res.status).not.toBe(202);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("a 429 (rate limited) also enqueues nothing", async () => {
+    const db = fakeDb();
+    const enqueue = vi.fn(async () => ({ created: true }));
+    const app = buildApp(db, { enqueue });
+    const token = "h".repeat(64);
+    // Every one of these 401s (no campaign has this hash) -- exhausting the
+    // bucket without ever reaching the create path.
+    for (let i = 0; i < RATE_LIMIT_MAX; i++) {
+      await request(app).post(`/v1/triggers/${token}`).send({ phone: PHONE });
+    }
+    const res = await request(app).post(`/v1/triggers/${token}`).send({ phone: PHONE });
+    expect(res.status).toBe(429);
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 
