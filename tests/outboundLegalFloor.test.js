@@ -305,7 +305,10 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
       now,
       phone: "+12142345678",
     });
-    expect(v).toEqual({ ok: false, nearest: null, refused: "no_legal_floor" });
+    // B5 (review, paired with I5): a DIFFERENT refused code from the
+    // outright "no floor for this jurisdiction" case above -- a floor DOES
+    // exist here, it just never overlaps the campaign's own window.
+    expect(v).toEqual({ ok: false, nearest: null, refused: "no_legal_opening" });
   });
 
   it("I1: the same exhaustion, through execute() -- no fabricated time is ever spoken to the caller", async () => {
@@ -350,5 +353,81 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- I4/I5 (review, controller ruling) -----------------------------------
+
+  it("I4: a candidate in the PAST is refused, never booked -- the review's own repro (\"call me tomorrow at ten\" written as today's date)", () => {
+    const now = new Date("2026-09-29T20:00:00Z"); // 15:00 CDT
+    const candidate = new Date("2026-09-29T14:00:00Z"); // 09:00 CDT -- six hours ago
+    const v = validateCallbackTime(candidate, {
+      callingWindow: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+      tz: "America/Chicago",
+      now,
+      phone: "+12142345678",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("too_soon");
+  });
+
+  it("I4: a candidate less than 10 minutes from now is refused (too soon to act on, not just technically future)", () => {
+    const now = new Date("2026-09-29T15:00:00Z"); // inside window+floor
+    const candidate = new Date(now.getTime() + 5 * 60_000);
+    const v = validateCallbackTime(candidate, {
+      callingWindow: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+      tz: "America/Chicago",
+      now,
+      phone: "+12142345678",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("too_soon");
+  });
+
+  it("I5: a refused request's nearest is searched from the REQUESTED time, not from now -- never 'now+1 minute' for a request far in the future", () => {
+    // `now` is Sunday 44 (speed_to_lead-style window: any minute is legal),
+    // but the request is for a specific Sunday time OUTSIDE the US Sunday
+    // floor (12:00-20:00) -- the nearest must roll forward from THAT
+    // request, not collapse to "now+1 minute" the way searching from `now`
+    // alone would (review's own repro: every refusal read as now+1min).
+    const now = new Date("2026-10-04T13:00:00Z"); // Sunday 08:00 CDT -- inside window, inside NEITHER... actually outside floor too (before 12:00)
+    const candidate = new Date("2026-10-11T14:00:00Z"); // NEXT Sunday, 09:00 CDT -- before the 12:00 Sunday floor opens
+    const v = validateCallbackTime(candidate, {
+      callingWindow: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+      tz: "America/Chicago",
+      now,
+      phone: "+12142345678",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("outside_floor");
+    // The nearest opening AT OR AFTER the request (candidate's own Sunday,
+    // 12:00 CDT), not "now+1 minute" (which the pre-fix search-from-now
+    // design would have offered instead).
+    expect(v.nearest).toBe("2026-10-11T17:00:00.000Z"); // that Sunday, 12:00 CDT
+  });
+
+  it("I5: a too-far-ahead candidate's own reason is named too_far_ahead, and its nearest still respects the 14-day cap", () => {
+    const now = new Date("2026-09-28T12:00:00Z");
+    const candidate = new Date(now.getTime() + 20 * 86_400_000);
+    const v = validateCallbackTime(candidate, {
+      callingWindow: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+      tz: "America/Chicago",
+      now,
+      phone: "+12142345678",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe("too_far_ahead");
+    expect(new Date(v.nearest).getTime()).toBeLessThanOrEqual(now.getTime() + 14 * 86_400_000);
+  });
+
+  it("B5: the exhaustion refusal (no_legal_opening) gets its OWN wording through execute(), distinct from the outright no-floor case", async () => {
+    const ctx = makeCtx({
+      phone: "+12142345678",
+      timezone: "America/Chicago",
+      callingWindow: { mon_fri: "23:58-23:59", sat: "23:58-23:59", sun: "23:58-23:59" },
+    });
+    const res = await callback.execute(fc({ when_iso: "2026-09-29T23:58:00" }), ctx);
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(res.functionResponse.response.message).toMatch(/do not overlap/);
+    expect(res.functionResponse.response.message).not.toMatch(/no approved calling-hours/);
   });
 });

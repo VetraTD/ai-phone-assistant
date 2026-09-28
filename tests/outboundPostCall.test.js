@@ -315,6 +315,30 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
     // attemptNo=1 -> entries[1] = "+10m" from NOW.
     expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
   });
+
+  // I4 (review, controller ruling): a stored callback_requested_at that is
+  // NOT strictly in the future is never honoured -- the defense-in-depth
+  // backstop for a stale/pre-fix row, or any path that could write this key
+  // without going through capabilities/callback.js's own booking-time
+  // refusal. Falls through to the ordinary retry schedule, exactly as if no
+  // callback had been requested at all.
+  it("callback_requested WITH a requested time in the PAST falls back to the retry schedule (I4)", async () => {
+    const past = new Date(NOW.getTime() - 5 * 60_000).toISOString();
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: past } });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    // attemptNo=1 -> entries[1] = "+10m" from NOW, the SAME fallback the
+    // "no requested time" test above gets -- never the past instant itself.
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  });
+
+  it("callback_requested WITH a requested time equal to NOW (not strictly future) also falls back (I4)", async () => {
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: NOW.toISOString() } });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  });
 });
 
 describe("runPostCall: no-double-reschedule guard", () => {

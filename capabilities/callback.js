@@ -64,6 +64,13 @@ const SCHEDULE_CALLBACK_DECLARATION = {
 
 const MAX_DAYS_AHEAD = 14;
 const DAY_MS = 86_400_000;
+// I4 (review, controller ruling): a callback booked with no lead time at all
+// re-dials the contact minutes after they asked for a LATER time (the
+// review's own repro: "call me tomorrow at ten", written by the model as
+// TODAY's date, re-dialled within minutes). 10 minutes floors both a
+// genuinely past instant and one so close it could not be dispatched in
+// time to matter.
+const MIN_LEAD_MS = 10 * 60_000;
 
 /**
  * THE validity seam (controller ruling): campaign window + the 14-day cap,
@@ -81,10 +88,15 @@ const DAY_MS = 86_400_000;
  *   resolved/fallback value) still drives the window check and stays what
  *   `floorFor` gets when `rawTimezone` is omitted, so an old caller that
  *   does not know about this parameter keeps its pre-fix behaviour exactly.
- * @returns {{ok: true} | {ok: false, nearest: string} | {ok: false, nearest: null, refused: "no_legal_floor"}}
+ * @returns {{ok: true} | {ok: false, nearest: string, reason: string} | {ok: false, nearest: null, refused: "no_legal_floor"|"no_legal_opening"}}
  */
 export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDaysAhead = MAX_DAYS_AHEAD, phone, rawTimezone }) {
   const capMs = now.getTime() + maxDaysAhead * DAY_MS;
+  // I4 (review, controller ruling): refuse a candidate less than MIN_LEAD_MS
+  // from now -- covers BOTH a genuinely past instant (candidate < now) and
+  // one so close there is no realistic time to act on it before it fires.
+  const minLeadMs = now.getTime() + MIN_LEAD_MS;
+  const tooSoon = candidate.getTime() < minLeadMs;
   const withinCap = candidate.getTime() <= capMs;
   const insideWindow = isInsideWindow(candidate, callingWindow, tz);
 
@@ -109,13 +121,19 @@ export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDay
     }
   }
   const insideFloor = floor ? isInsideFloor(candidate, floor) : true;
-  if (withinCap && insideWindow && insideFloor) return { ok: true };
+  if (!tooSoon && withinCap && insideWindow && insideFloor) return { ok: true };
 
-  // Nearest bookable time: the next opening from now (floor-and-window when
-  // a floor applies, window-only otherwise), capped at the 14-day boundary
-  // so a caller is never offered a date outside the cap this same check
-  // just refused.
-  const opening = floor ? nextLegalOpening(now, floor, callingWindow, tz) : nextWindowOpening(now, callingWindow, tz);
+  // I5 (review, controller ruling): search from the LATER of the requested
+  // instant and the earliest bookable lead time -- never from `now` alone.
+  // Searching from `now` made every refusal during a live call read as
+  // "now+1 minute" (`now` is always inside window+floor by construction, so
+  // the very next minute almost always is too), regardless of what the
+  // contact actually asked for; a caller who asked for next Tuesday got
+  // offered "today, one minute from now". This finds the next opening AT OR
+  // AFTER the requested instant instead, capped at the same 14-day boundary
+  // a caller is never offered a date outside of.
+  const searchFrom = new Date(Math.max(candidate.getTime(), minLeadMs));
+  const opening = floor ? nextLegalOpening(searchFrom, floor, callingWindow, tz) : nextWindowOpening(searchFrom, callingWindow, tz);
   if (floor && !opening) {
     // Fix round 1 (review Important #1): the bounded search found NO instant
     // where the floor and the campaign's own window are open at once -- the
@@ -127,11 +145,23 @@ export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDay
     // booking (insideFloor above still gates `ok:true`), but never a real
     // "nearest" either. Fail closed the same way the early floor-refusal
     // branch above does.
-    return { ok: false, nearest: null, refused: "no_legal_floor" };
+    //
+    // B5 (review, paired with I5): a DIFFERENT refused code from the
+    // outright "no floor exists for this jurisdiction" case above --
+    // execute() (below) gives each its own wording. Structurally these are
+    // different problems: this one has an owner-approved floor, it simply
+    // never overlaps the campaign's own configured window within the bound
+    // (a campaign misconfiguration), where the outright case has no
+    // approved floor for the jurisdiction at all.
+    return { ok: false, nearest: null, refused: "no_legal_opening" };
   }
   const cap = new Date(capMs);
   const nearest = opening && opening.getTime() <= capMs ? opening : cap;
-  return { ok: false, nearest: nearest.toISOString() };
+  // I5 (review): name the refusal reason so execute()'s wording can say WHY,
+  // rather than "not available" for every case alike. Priority mirrors the
+  // guard order above -- the first condition that actually failed.
+  const reason = tooSoon ? "too_soon" : !withinCap ? "too_far_ahead" : !insideWindow ? "outside_hours" : "outside_floor";
+  return { ok: false, nearest: nearest.toISOString(), reason };
 }
 
 /** Parse `when_iso` as a wall-clock time in the contact's timezone, or a fully-qualified instant verbatim. */
@@ -240,7 +270,7 @@ export default {
       rawTimezone: contactRawTimezone,
     });
     if (!verdict.ok) {
-      if (verdict.refused) {
+      if (verdict.refused === "no_legal_floor") {
         // No owner-approved calling-hours floor exists for this contact at
         // all (S3-7): there is no "nearest" time to offer, so this is a
         // hard refusal, not a reschedule suggestion.
@@ -250,11 +280,33 @@ export default {
             "policy for their phone number. Let them know a team member will follow up instead."
         );
       }
+      if (verdict.refused === "no_legal_opening") {
+        // B5 (review, paired with I5): a DIFFERENT problem from the one
+        // above -- a floor DOES exist, it just never overlaps the
+        // campaign's own configured window within the 14-day bound. Saying
+        // "no approved policy" here would be wrong (a policy exists); this
+        // is a campaign misconfiguration, not a missing jurisdiction.
+        return refusal(
+          fc,
+          "This contact's approved calling hours and the campaign's own calling window do not overlap " +
+            "within the next two weeks, so no automatic callback time can be found. Let them know a team " +
+            "member will follow up instead."
+        );
+      }
+      // I5 (review): name the reason, not just "not available" -- a caller
+      // who repeats the same refused request must be able to tell it was
+      // heard, not looping on an unexplained no.
+      const REASON_TEXT = {
+        too_soon: "That time has already passed, or is too soon to book.",
+        too_far_ahead: "That time is more than two weeks away, past the automatic booking window.",
+        outside_hours: "That time is outside the campaign's own calling hours.",
+        outside_floor: "That time is outside the approved calling hours for this contact.",
+      };
       const nearestSpoken = formatContactLocal(new Date(verdict.nearest), contactTz);
       const message =
-        `That time is not available. The nearest available time is ${verdict.nearest} ` +
-        `(${nearestSpoken}, their local time) -- offer that time instead.`;
-      return refusal(fc, message, { nearest: verdict.nearest });
+        `${REASON_TEXT[verdict.reason] || "That time is not available."} The nearest available time is ` +
+        `${verdict.nearest} (${nearestSpoken}, their local time) -- offer that time instead.`;
+      return refusal(fc, message, { nearest: verdict.nearest, reason: verdict.reason });
     }
 
     const callSid = ctx.callSid || null;

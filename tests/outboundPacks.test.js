@@ -319,18 +319,23 @@ describe("schedule_callback", () => {
       const deps = fakeDeps();
       // Contact is in Australia/Sydney -- FAR from the business/server
       // timezone -- so a bug that anchors the wall-clock string to the wrong
-      // zone shows up as either a refusal or the wrong spoken time.
+      // zone shows up as either a refusal or the wrong spoken time. The
+      // phone itself is a real US-mainland (Chicago) number: I6/C8 (this
+      // wave) make the statutory floor ignore an out-of-country contact
+      // timezone and fall back to the NY+LA dual rule, so the requested
+      // instant must clear BOTH coasts at once -- 18:00 UTC is 14:00 EDT /
+      // 11:00 PDT, inside 08:00-20:00 on both.
       const outboundCall = {
         config: { capabilities: ["appointments"], calling_window: { mon_fri: "00:00-23:59", sat: null, sun: null } },
-        contact: { firstName: "Priya", timezone: "Australia/Sydney", phone: "+15559876543" },
+        contact: { firstName: "Priya", timezone: "Australia/Sydney", phone: "+13125559876" },
         campaign: { audience: "business" },
       };
-      const res = await callback.execute(fc({ when_iso: "2026-09-29T14:00:00" }), makeOutboundCtx({ deps, outboundCall }));
+      const res = await callback.execute(fc({ when_iso: "2026-09-30T04:00:00" }), makeOutboundCtx({ deps, outboundCall }));
       expect(res.functionResponse.response.success).toBe(true);
-      // 2026-09-29T14:00:00 in Australia/Sydney (AEST, UTC+10) is 04:00 UTC.
-      expect(res.functionResponse.response.at).toBe("2026-09-29T04:00:00.000Z");
+      // 2026-09-30T04:00:00 in Australia/Sydney (AEST, UTC+10) is 18:00 UTC the prior day.
+      expect(res.functionResponse.response.at).toBe("2026-09-29T18:00:00.000Z");
       expect(deps.setCallOutcomeCode).toHaveBeenCalledWith("CAsid1", "callback_requested");
-      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", { callback_requested_at: "2026-09-29T04:00:00.000Z" });
+      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", { callback_requested_at: "2026-09-29T18:00:00.000Z" });
     } finally {
       vi.useRealTimers();
     }
@@ -342,7 +347,7 @@ describe("schedule_callback", () => {
     try {
       const outboundCall = {
         config: { capabilities: ["appointments"], calling_window: { mon_fri: "09:00-17:00", sat: null, sun: null } },
-        contact: { firstName: "Priya", timezone: "America/Chicago", phone: "+15559876543" },
+        contact: { firstName: "Priya", timezone: "America/Chicago", phone: "+13125559876" },
         campaign: { audience: "business" },
       };
       // 9pm, well outside 09:00-17:00.
@@ -361,7 +366,7 @@ describe("schedule_callback", () => {
     try {
       const outboundCall = {
         config: { capabilities: ["appointments"], calling_window: { mon_fri: "00:00-23:59", sat: null, sun: null } },
-        contact: { firstName: "Priya", timezone: "America/Chicago", phone: "+15559876543" },
+        contact: { firstName: "Priya", timezone: "America/Chicago", phone: "+13125559876" },
         campaign: { audience: "business" },
       };
       const fifteenDaysOut = "2026-10-13T10:00:00"; // NOW (Sep 28) + 15 days
@@ -381,7 +386,13 @@ describe("schedule_callback", () => {
     vi.setSystemTime(NOW);
     try {
       const deps = fakeDeps();
-      const res = await callback.execute(fc({ when_iso: "2026-09-29T10:00:00" }), makeOutboundCtx({ deps, verified: false }));
+      // A real US-mainland (Chicago) number: see the "books a time inside
+      // the window" test above for why the default fixture's fake "555"
+      // area code no longer clears the floor (C8, this wave).
+      const res = await callback.execute(
+        fc({ when_iso: "2026-09-29T10:00:00" }),
+        makeOutboundCtx({ deps, verified: false, phone: "+13125559876" })
+      );
       expect(res.functionResponse.response.success).toBe(true);
     } finally {
       vi.useRealTimers();
