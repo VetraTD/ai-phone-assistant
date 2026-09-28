@@ -337,7 +337,16 @@ describe("S3-6: the custom template is allowed, and custom_basis maps to complia
   });
   it("custom_basis is required when template_key is custom", () =>
     expect(errPaths(v(good(), customMeta("solicited")))).toContain("custom_basis"));
-  it("custom_basis is irrelevant (unchecked) for other template_keys", () => expect(v(good()).ok).toBe(true));
+  it("custom_basis absent is fine for other template_keys (nothing to check)", () => expect(v(good()).ok).toBe(true));
+
+  // C4 (review): off template_key "custom", custom_basis previously did
+  // NOTHING -- silently ignored, no feedback that the value did not matter.
+  it("C4: custom_basis SET on a non-custom template_key is refused at save (was silently inert before this fix)", () => {
+    const r = v({ ...good(), custom_basis: "asked_to_be_contacted" }); // good() defaults to speed_to_lead
+    const e = r.errors.find((e) => e.path === "custom_basis");
+    expect(e).toBeTruthy();
+    expect(e.message).toMatch(/only meaningful when template_key is "custom"/);
+  });
 
   it("case 1: asked_to_be_contacted + compliance_class solicited passes, and maps to purpose enquiry_followup", () => {
     expect(v({ ...good(), custom_basis: "asked_to_be_contacted" }, customMeta("solicited")).ok).toBe(true);

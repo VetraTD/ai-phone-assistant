@@ -35,7 +35,7 @@
  * via `ctx.deps.mergeCallAnswers` -- the same primitive and the same
  * "immediate write inside this tool's own tenant scope" pattern
  * capabilities/outcome.js's `_outcome_note` and capabilities/callback.js's
- * `callback_requested_at` already use (services/tools.js's
+ * `_callback_requested_at` already use (services/tools.js's
  * executeToolCallGuarded holds a tenant scope open for the whole call, so
  * this write is never outside it -- named risk 5). Answers therefore land in
  * `calls.answers` well before the call ends -- by the time
@@ -43,12 +43,17 @@
  * webhook payload, whatever this tool wrote is already there. No change to
  * postCall.js's own code is needed for that to be true.
  *
- * NEVER `_outcome_note` or `_missing_required` (the two leading-underscore
- * keys outcome.js and the booking gate below use): a campaign question key
- * matches `/^[a-z][a-z0-9_]{0,39}$/` (lib/outbound/campaignSchema.js's
+ * NEVER `_outcome_note`, `_missing_required`, or `_callback_requested_at`
+ * (the leading-underscore keys outcome.js, the booking gate below, and
+ * callback.js use): a campaign question key matches
+ * `/^[a-z][a-z0-9_]{0,39}$/` (lib/outbound/campaignSchema.js's
  * QUESTION_KEY_RE), which REQUIRES the first character to be a lowercase
  * letter, so a question key can never collide with a leading-underscore key
- * regardless of what any campaign ever names a question.
+ * regardless of what any campaign ever names a question. Minor (review):
+ * `_callback_requested_at` was plain `callback_requested_at` until this
+ * wave -- the ONE key here that was NOT actually protected by this claim,
+ * despite the header implying it was (a campaign question literally named
+ * `callback_requested_at` fits QUESTION_KEY_RE and would have collided).
  *
  * `prompt(cfg, ctx)` (fix round 1, controller Ruling R-S3-10-prompt: the full
  * Task 24 contract binds). `lib/outbound/prompt.js:44`'s `qualify_then_book`
@@ -209,7 +214,17 @@ export default {
 
     const callSid = ctx.callSid || null;
     if (callSid) {
-      await ctx.deps?.mergeCallAnswers?.(callSid, { [key]: value });
+      // Minor (review): unlike opt_out/outcome.js's own writes, this used
+      // `?.()` straight through -- a missing `mergeCallAnswers` wire silently
+      // no-opped and the tool still answered "Recorded." mergeCallAnswers
+      // (services/db.js) resolves to `undefined` on a genuine SUCCESS too
+      // (unlike insertSuppression's true/false), so the wire's PRESENCE, not
+      // its return value, is what a missing dependency looks like here.
+      if (typeof ctx.deps?.mergeCallAnswers !== "function") {
+        bumpCounter("qualification_answer_refused");
+        return refusal(fc, `The answer for "${key}" could not be recorded. Do not tell them it was.`);
+      }
+      await ctx.deps.mergeCallAnswers(callSid, { [key]: value });
     }
 
     bumpCounter("qualification_answer_recorded");

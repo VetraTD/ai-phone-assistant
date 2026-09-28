@@ -312,7 +312,14 @@ export default {
     const callSid = ctx.callSid || null;
     if (callSid) {
       await ctx.deps?.setCallOutcomeCode?.(callSid, "callback_requested");
-      await ctx.deps?.mergeCallAnswers?.(callSid, { callback_requested_at: candidate.toISOString() });
+      // Minor (review): renamed from the plain `callback_requested_at` --
+      // QUESTION_KEY_RE (campaignSchema.js) allows a campaign question
+      // literally named that (it matches `/^[a-z][a-z0-9_]{0,39}$/` just
+      // like any other question key), which would collide in calls.answers
+      // with THIS tool's own write. Every reader (postCall.js) is renamed
+      // to match; the leading underscore is what qualification.js's own
+      // "never collides with a question key" claim actually depends on.
+      await ctx.deps?.mergeCallAnswers?.(callSid, { _callback_requested_at: candidate.toISOString() });
     }
 
     const spoken = formatContactLocal(candidate, contactTz);

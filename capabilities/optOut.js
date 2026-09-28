@@ -34,6 +34,7 @@
  */
 import { partyOf } from "../lib/capabilities/party.js";
 import { isValidE164 } from "../lib/validate.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 
 const OPT_OUT_DECLARATION = {
   name: "opt_out",
@@ -112,6 +113,12 @@ export default {
     if (callSid) {
       await ctx.deps?.setCallOutcomeCode?.(callSid, "opted_out");
     }
+
+    // B3 (review): compliance observability -- a recorded opt_out (either
+    // outcome of insertSuppression's own true/false) had no counter before
+    // this, and a do-not-call event is exactly the kind of thing a dashboard
+    // needs a rate for.
+    bumpCounter("outbound_opt_out_recorded");
 
     const message =
       'Confirmed and recorded -- this contact will not be called again. If you have not already said so, ' +

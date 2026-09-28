@@ -366,6 +366,26 @@ describe("POST /twilio/outbound-amd: voicemail redirect (in voicemail_on, class 
     expect(deps.db.stampAttemptAmd).toHaveBeenNthCalledWith(2, ATTEMPT, expect.objectContaining({ result: "voicemail_skipped" }));
     expect(deps.log.info).toHaveBeenCalledWith("outbound_voicemail", { callSid: CALL_SID, attemptId: ATTEMPT, result: "skipped", reason: "no_audio" });
   });
+
+  // E2 (review): signMediaUrl THROWS with no signing key configured
+  // (lib/outbound/mediaUrl.js) -- the sibling transfer_miss door path
+  // already catches this (D6); this branch did not, so a deploy missing
+  // every signing secret would 500 the AMD callback instead of falling
+  // through to hangup/voicemail_skipped like the "no stored clip" case.
+  it("E2: no signing key configured -- signMediaUrl's throw is caught, falls back to hangup, voicemail_skipped, reason sign_failed, still 200", async () => {
+    const twilio = twilioClientFake();
+    const noKeyEnv = { BASE_URL: "https://svc.example" }; // no OUTBOUND_MEDIA_URL_SECRET/MEDIA_STREAM_SECRET/TWILIO_AUTH_TOKEN
+    const deps = fakeDeps({ twilioClientFor: twilio.twilioClientFor, env: noKeyEnv });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep" });
+    expect(res.status).toBe(200);
+    expect(twilio.update).toHaveBeenCalledWith({ status: "completed" });
+    expect(deps.db.stampAttemptAmd).toHaveBeenNthCalledWith(2, ATTEMPT, expect.objectContaining({ result: "voicemail_skipped" }));
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_voicemail", { callSid: CALL_SID, attemptId: ATTEMPT, result: "skipped", reason: "sign_failed" });
+    expect(deps.log.error).toHaveBeenCalledWith(
+      "outbound_amd_voicemail_sign_failed",
+      expect.objectContaining({ callSid: CALL_SID, attemptId: ATTEMPT })
+    );
+  });
 });
 
 describe("POST /twilio/outbound-amd: hangup (outside voicemail_on, class refuses, or fax)", () => {

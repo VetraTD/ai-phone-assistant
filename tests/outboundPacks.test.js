@@ -335,7 +335,9 @@ describe("schedule_callback", () => {
       // 2026-09-30T04:00:00 in Australia/Sydney (AEST, UTC+10) is 18:00 UTC the prior day.
       expect(res.functionResponse.response.at).toBe("2026-09-29T18:00:00.000Z");
       expect(deps.setCallOutcomeCode).toHaveBeenCalledWith("CAsid1", "callback_requested");
-      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", { callback_requested_at: "2026-09-29T18:00:00.000Z" });
+      // Minor (review): renamed to `_callback_requested_at` -- the plain key
+      // could collide with a campaign question of the same name.
+      expect(deps.mergeCallAnswers).toHaveBeenCalledWith("CAsid1", { _callback_requested_at: "2026-09-29T18:00:00.000Z" });
     } finally {
       vi.useRealTimers();
     }

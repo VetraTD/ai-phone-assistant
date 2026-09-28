@@ -177,13 +177,21 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
   // PLATFORM_PACKS), always declared on outbound regardless of what the
   // campaign's own capabilities list says, so naming them is required, not
   // forbidden -- this test now asserts the opposite of what it used to.
+  // F3 (review): this used to check `text` -- the WHOLE rendered prompt,
+  // every section -- so a match anywhere (a comment, a different block) would
+  // have passed it just as well as a real situation row naming the tool.
+  // Scoped to the SITUATIONS rows themselves, the same slice the "13 rows"
+  // test right above already isolates.
   it("S3-3: situation rows DO name the always-declared platform tools -- no longer a phantom-tool risk", () => {
-    expect(text).toMatch(/\bset_call_outcome\b/);
-    expect(text).toMatch(/\bschedule_callback\b/);
-    expect(text).toMatch(/\bopt_out\b/);
+    const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
+    const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
+    const situationsText = situationRows.join("\n");
+    expect(situationsText).toMatch(/\bset_call_outcome\b/);
+    expect(situationsText).toMatch(/\bschedule_callback\b/);
+    expect(situationsText).toMatch(/\bopt_out\b/);
     // The old, guessed tool name this file's assertion used to forbid was
     // never the real one -- the shipped tool is set_call_outcome.
-    expect(text).not.toMatch(/\brecord_outcome\b/);
+    expect(situationsText).not.toMatch(/\brecord_outcome\b/);
   });
 
   // Triage round 1 (S3-5 real paid-run evidence, sims-report.md finding F):

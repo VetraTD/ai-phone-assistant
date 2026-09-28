@@ -123,7 +123,8 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
     const { outreachId: id } = await seed("never-1", PHONES.never);
     await admin.query(`INSERT INTO suppressions (business_id, phone_e164, reason, created_by) VALUES ($1,$2,'manual','dashboard')`, [BIZ, PHONES.never]);
     const create = vi.fn();
-    expect(await dispatcher(create)({ businessId: BIZ, outreachId: id })).toEqual({ status: "closed", reason: "suppressed" });
+    // C1 (review): `source: "gate"` says this "never" actually came from evaluateGate.
+    expect(await dispatcher(create)({ businessId: BIZ, outreachId: id })).toEqual({ status: "closed", reason: "suppressed", source: "gate" });
     expect(create).not.toHaveBeenCalled();
     const o = await outreachRow(id);
     expect(o).toMatchObject({ state: "closed", close_reason: "suppressed", attempts_made: 0 });
@@ -166,7 +167,8 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
 
     const create = vi.fn();
     const r = await dispatcher(create)({ businessId: BIZ, outreachId: id }); // must not throw (the crash the CHECK constraint gap caused)
-    expect(r).toEqual({ status: "closed", reason: "missing_goal" });
+    // C1 (review): `source: "pre_gate"` -- this refusal happens before evaluateGate ever runs.
+    expect(r).toEqual({ status: "closed", reason: "missing_goal", source: "pre_gate" });
     expect(create).not.toHaveBeenCalled();
 
     const row = await outreachRow(id);

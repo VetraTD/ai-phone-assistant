@@ -45,6 +45,7 @@ import {
   compareTokenHash,
   TRIGGER_PATH,
   RATE_LIMIT_MAX,
+  IP_RATE_LIMIT_MAX,
 } from "../lib/outbound/triggerRoute.js";
 // Imported statically, at the top, BEFORE this file's later
 // vi.resetModules() call (in the "through the real server" section's
@@ -365,6 +366,51 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
     expect(res.status).toBe(500);
   });
+});
+
+// Minor (review): the per-token limiter alone lets an attacker guess with a
+// FRESH random token on every request -- never sharing a bucket with the
+// last guess -- so each attempt still costs a real DB round trip
+// (campaignByTriggerHash), unbounded. This is the IP-keyed backstop, on its
+// own fresh app/store (buildApp constructs a new one per call, so this
+// cannot contaminate -- or be contaminated by -- any other test's count).
+describe("IP-keyed rate limit (minor, review): the DoS-cost backstop across DIFFERENT guessed tokens", () => {
+  it(`a DIFFERENT bad token on every request still 429s once the IP's own failure count passes ${IP_RATE_LIMIT_MAX}, even though each token's own bucket is untouched`, async () => {
+    const db = fakeDb();
+    const app = buildApp(db);
+    let last;
+    for (let i = 0; i < IP_RATE_LIMIT_MAX; i++) {
+      last = await request(app)
+        .post(`/v1/triggers/${i.toString(16).padStart(64, "0")}`)
+        .send({ phone: PHONE });
+      expect(last.status).toBe(401); // a real refusal, never itself rate limited yet
+    }
+    const res = await request(app)
+      .post(`/v1/triggers/${"a".repeat(64)}`)
+      .send({ phone: PHONE });
+    expect(res.status).toBe(429);
+  }, 20000);
+
+  it("a SUCCESSFUL (202) request in between does not consume an IP failure slot (skipSuccessfulRequests)", async () => {
+    const db = fakeDb();
+    const app = buildApp(db);
+    // One short of the IP ceiling, all real 401 refusals (distinct tokens).
+    for (let i = 0; i < IP_RATE_LIMIT_MAX - 1; i++) {
+      const res = await request(app)
+        .post(`/v1/triggers/${i.toString(16).padStart(64, "0")}`)
+        .send({ phone: PHONE });
+      expect(res.status).toBe(401);
+    }
+    // A real success -- if this counted toward the IP bucket (the bug this
+    // test guards against), the NEXT request below would already be the
+    // (IP_RATE_LIMIT_MAX + 1)th counted event and 429 instead of 401.
+    const ok = await request(app).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: PHONE, consent: validConsent() });
+    expect(ok.status).toBe(202);
+    const stillUnderLimit = await request(app)
+      .post(`/v1/triggers/${"z".repeat(64)}`)
+      .send({ phone: PHONE });
+    expect(stillUnderLimit.status).toBe(401); // NOT 429 -- the success above was correctly skipped
+  }, 20000);
 });
 
 // ---------------------------------------------------------------------------

@@ -1373,10 +1373,6 @@ CREATE TABLE IF NOT EXISTS campaigns (
   -- link's bearer credential. NULL until `scripts/outbound-admin.js
   -- trigger-token-rotate --confirm` sets one; the raw token is never
   -- stored. Kept true in campaign_trigger_directory below by a trigger.
-  -- Migration 049 (S3-9): sha256(32 random bytes), hex -- the leads-in
-  -- link's bearer credential. NULL until `scripts/outbound-admin.js
-  -- trigger-token-rotate --confirm` sets one; the raw token is never
-  -- stored. Kept true in campaign_trigger_directory below by a trigger.
   trigger_token_hash text,
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now()

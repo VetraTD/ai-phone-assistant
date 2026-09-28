@@ -212,9 +212,11 @@ describe("callback_requested overrides the R1 schedule with callback.at (spec §
     };
   }
 
-  it("with a requested time on file (calls.answers.callback_requested_at, schedule_callback's own write): that exact time wins, not entries[attemptNo]", async () => {
+  it("with a requested time on file (calls.answers._callback_requested_at, schedule_callback's own write): that exact time wins, not entries[attemptNo]", async () => {
     const requested = "2026-10-01T15:00:00.000Z"; // NOT what entries[2] ("+3h" from now) would produce
-    const db = fakeDb({ answers: { callback_requested_at: requested } });
+    // Minor (review): renamed from the plain `callback_requested_at` -- see
+    // capabilities/callback.js's own comment for why.
+    const db = fakeDb({ answers: { _callback_requested_at: requested } });
     await runPostCall(
       { attemptId: ATTEMPT, businessId: BIZ },
       { db, now: () => NOW, rand: () => 0, summarize: async () => ({ summary: null, sentiment: null, outcome: "unknown" }) }

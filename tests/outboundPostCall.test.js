@@ -300,7 +300,7 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
 
   it("callback_requested WITH a requested time schedules at that time", async () => {
     const requested = "2026-09-30T14:00:00Z";
-    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: requested } });
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { _callback_requested_at: requested } });
     await run(db);
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
     expect(opts.terminal).toBe(false);
@@ -324,7 +324,7 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
   // callback had been requested at all.
   it("callback_requested WITH a requested time in the PAST falls back to the retry schedule (I4)", async () => {
     const past = new Date(NOW.getTime() - 5 * 60_000).toISOString();
-    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: past } });
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { _callback_requested_at: past } });
     await run(db);
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
     expect(opts.terminal).toBe(false);
@@ -334,7 +334,7 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
   });
 
   it("callback_requested WITH a requested time equal to NOW (not strictly future) also falls back (I4)", async () => {
-    const db = fakeDb({ outcomeCode: "callback_requested", answers: { callback_requested_at: NOW.toISOString() } });
+    const db = fakeDb({ outcomeCode: "callback_requested", answers: { _callback_requested_at: NOW.toISOString() } });
     await run(db);
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
     expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());

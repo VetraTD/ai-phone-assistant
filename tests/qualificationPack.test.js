@@ -154,6 +154,17 @@ describe("qualification.execute() -- record_answer", () => {
     expect(out.functionResponse.response.success).toBe(true);
   });
 
+  // Minor (review): a missing mergeCallAnswers wire used to silently no-op
+  // (`?.()`), and the tool still answered "Recorded." -- unlike
+  // opt_out/outcome.js's own writes, which refuse rather than claim success
+  // for a write that never happened.
+  it("a missing mergeCallAnswers wire refuses -- never claims 'Recorded.' for a write that did not happen", async () => {
+    const ctx = { outboundCall: outboundCallWithQuestions(REQUIRED_QUESTION), callSid: "CA1", deps: {} };
+    const fc = { id: "fc-wire", name: "record_answer", args: { key: "clinic_name", value: "Riverside Clinic" } };
+    const out = await qualification.execute(fc, ctx);
+    expect(out.functionResponse.response.success).toBe(false);
+  });
+
   it("records a valid answer: capabilityState, the capabilityEffect, and a durable write via mergeCallAnswers", async () => {
     const deps = fakeDeps();
     const ctx = { outboundCall: outboundCallWithQuestions(REQUIRED_QUESTION), callSid: "CA1", deps };

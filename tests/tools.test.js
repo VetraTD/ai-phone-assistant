@@ -2150,8 +2150,14 @@ describe("end_call refuses while the caller is still thinking", () => {
   // "anything else" to ask about -- lib/outbound/prompt.js's closing rule
   // tells her never to ask, and this gate must not contradict it. The
   // inbound test right above this one is UNCHANGED and must stay refused.
+  // F1 (review): this test used to check only `success: true` -- a gate that
+  // reports success but never actually records the end_call (endCallArgs
+  // unset, no real sign-off message) would still have passed it. Strengthened
+  // to the SAME shape the "honors end_call during the confirm step" test
+  // (above, line ~539) and I1's own outbound tests (below) already hold
+  // end_call to.
   it("S3-1: on an outbound call, the SAME no-ask situation is ALLOWED (skipOnOutbound)", async () => {
-    const { functionResponse } = await executeToolCall(
+    const { functionResponse, stateEffects } = await executeToolCall(
       { id: "e4b", name: "end_call", args: {} },
       {
         ...baseCtx,
@@ -2164,6 +2170,16 @@ describe("end_call refuses while the caller is still thinking", () => {
       }
     );
     expect(functionResponse.response.success).toBe(true);
+    expect(stateEffects.endCallArgs).toEqual({});
+    expect(stateEffects.endCallRefusal).toBeUndefined();
+    expect(stateEffects.toolResult.name).toBe("end_call");
+    expect(stateEffects.toolResult.success).toBe(true);
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    // A real sign-off, not a bare "success" with nothing to say -- the same
+    // "never the literal floor line" property the inbound test above checks.
+    expect(typeof stateEffects.toolResult.message).toBe("string");
+    expect(stateEffects.toolResult.message.length).toBeGreaterThan(0);
+    expect(stateEffects.toolResult.message).not.toBe("Goodbye!");
   });
 
   // -----------------------------------------------------------------------

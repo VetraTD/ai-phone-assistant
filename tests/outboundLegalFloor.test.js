@@ -193,6 +193,38 @@ describe("nextLegalOpening", () => {
     expect(nextLegalOpening(now, floor, farOut, "America/Chicago", { maxDays: 8 })).not.toBeNull();
   });
 
+  // C6 (review): the pre-fix suite had exactly ONE DST test (US fall-back,
+  // tests/outboundGate.test.js). These three close the gap the review named
+  // -- US spring-forward, and UK BOTH directions (previously zero UK DST
+  // coverage at all) -- each proving the floor's opening uses the
+  // POST-transition offset, not a stale one from before the clocks moved.
+  it("DST boundary: US spring-forward -- the floor's 08:00 opening uses the POST-transition offset (CDT, not stale CST)", () => {
+    const floor = floorFor("+12142345678", "America/Chicago");
+    // 2026-03-08 (Sunday) is when US clocks spring forward; by Monday
+    // 2026-03-09 the zone is CDT (UTC-5), not CST (UTC-6).
+    const now = new Date("2026-03-09T12:59:00Z"); // 07:59 CDT Monday -- one minute before the floor opens
+    const opening = nextLegalOpening(now, floor, wideWindow, "America/Chicago");
+    expect(opening.toISOString()).toBe("2026-03-09T13:00:00.000Z"); // 08:00 CDT
+  });
+
+  it("DST boundary: UK spring-forward -- the floor's 08:00 opening uses the POST-transition offset (BST, not stale GMT)", () => {
+    const floor = floorFor("+447700900001", "Europe/London");
+    // 2026-03-29 (Sunday) is when UK clocks spring forward (BST begins); by
+    // Monday 2026-03-30 the zone is BST (UTC+1), not GMT (UTC+0).
+    const now = new Date("2026-03-30T06:59:00Z"); // 07:59 BST Monday -- one minute before the floor opens
+    const opening = nextLegalOpening(now, floor, wideWindow, "Europe/London");
+    expect(opening.toISOString()).toBe("2026-03-30T07:00:00.000Z"); // 08:00 BST
+  });
+
+  it("DST boundary: UK fall-back -- the floor's 08:00 opening uses the POST-transition offset (GMT, not stale BST)", () => {
+    const floor = floorFor("+447700900001", "Europe/London");
+    // 2026-10-25 (Sunday) is when UK clocks fall back (BST ends); by Monday
+    // 2026-10-26 the zone is GMT (UTC+0), not BST (UTC+1).
+    const now = new Date("2026-10-26T07:59:00Z"); // 07:59 GMT Monday -- one minute before the floor opens
+    const opening = nextLegalOpening(now, floor, wideWindow, "Europe/London");
+    expect(opening.toISOString()).toBe("2026-10-26T08:00:00.000Z"); // 08:00 GMT
+  });
+
   // I9 / controller ruling: the WORST case (review's own rr5/probe3.mjs
   // repro -- an empty floor-intersect-window search, forced to exhaust the
   // entire bound) must not block the event loop. The old per-minute scan

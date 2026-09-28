@@ -138,7 +138,9 @@ describe("dispatch: the gate's verdicts", () => {
     const never = fakeDb(); never.isSuppressed = vi.fn(async () => true);
     const logNever = { info: vi.fn(), error: vi.fn() };
     await mk(never, undefined, { log: logNever }).d({ businessId: "b1", outreachId: "o1" });
-    expect(logNever.info).toHaveBeenCalledWith("outbound_gate_refused", { reason: "suppressed", verdict: "never", outreachId: "o1" });
+    // C1 (review): `source: "gate"` says this "never" actually came from
+    // evaluateGate, not the pre-gate missing_goal short-circuit below.
+    expect(logNever.info).toHaveBeenCalledWith("outbound_gate_refused", { reason: "suppressed", verdict: "never", source: "gate", outreachId: "o1" });
   });
   it("a paused campaign parks the outreach (next_attempt_at NULL, so the sweep stops re-queuing it) with no task", async () => {
     const db = fakeDb(row({ campaign_status: "paused" })); const { d, enqueue } = mk(db);
@@ -160,7 +162,10 @@ describe("S3-6 named risk 5: a campaign version with no valid goal is refused at
     const db = fakeDb(row({ config: cfg }));
     const { d, twilio } = mk(db);
     const r = await d({ businessId: "b1", outreachId: "o1" });
-    expect(r).toEqual({ status: "closed", reason: "missing_goal" });
+    // C1 (review): `source: "pre_gate"` -- this refusal happens BEFORE
+    // evaluateGate ever runs, so the shared "closed" log line must not claim
+    // the gate itself produced a "never" verdict it was never asked for.
+    expect(r).toEqual({ status: "closed", reason: "missing_goal", source: "pre_gate" });
     expect(db.closeOutreach).toHaveBeenCalledWith("o1", "missing_goal");
     expect(twilio.calls.create).not.toHaveBeenCalled();
     // Reuses the SAME log/counter path evaluateGate's own "never" verdict
@@ -171,7 +176,7 @@ describe("S3-6 named risk 5: a campaign version with no valid goal is refused at
   it("goal present but not a real enum value (a typo, or garbage data): same refusal", async () => {
     const db = fakeDb(row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", goal: "sell_everything" } }));
     const { d, twilio } = mk(db);
-    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "closed", reason: "missing_goal" });
+    expect(await d({ businessId: "b1", outreachId: "o1" })).toEqual({ status: "closed", reason: "missing_goal", source: "pre_gate" });
     expect(twilio.calls.create).not.toHaveBeenCalled();
   });
 
