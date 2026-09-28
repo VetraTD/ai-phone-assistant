@@ -166,7 +166,17 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
   function fc(args) {
     return { id: "fc1", name: "schedule_callback", args };
   }
-  function makeCtx({ phone = "+12142345678", timezone = "America/Chicago", callingWindow = { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" } } = {}) {
+  function makeCtx({
+    phone = "+12142345678",
+    timezone = "America/Chicago",
+    // I2 fix round 1: defaults to the SAME value as `timezone` so every
+    // pre-existing test here (which never knew about raw vs resolved) keeps
+    // behaving exactly as before -- only the new dual-zone test below passes
+    // `null` explicitly, to prove the raw column (not the resolved fallback)
+    // is what floorFor actually sees.
+    rawTimezone = timezone,
+    callingWindow = { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+  } = {}) {
     return {
       businessId: "biz-1",
       callId: "call-1",
@@ -174,7 +184,7 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
       party: { phone, source: "dialed", verified: true },
       outboundCall: {
         config: { capabilities: ["appointments"], calling_window: callingWindow },
-        contact: { firstName: "Sam", timezone, phone },
+        contact: { firstName: "Sam", timezone, rawTimezone, phone },
         campaign: { audience: "business" },
       },
       deps: { setCallOutcomeCode: async () => {}, mergeCallAnswers: async () => {} },
@@ -228,5 +238,66 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
       phone: "+33612345678",
     });
     expect(v).toEqual({ ok: false, nearest: null, refused: "no_legal_floor" });
+  });
+
+  // --- Fix round 1 (review Important #1 and #2) ---------------------------
+
+  it("I1: a nextLegalOpening exhaustion (floor and window never overlap) refuses outright -- no fabricated now+14d 'nearest' (review's own repro)", () => {
+    const now = new Date("2026-09-28T13:00:00Z"); // Monday
+    const candidate = new Date("2026-09-28T13:58:00Z"); // 08:58 CDT -- irrelevant to the outcome either way
+    // The US floor never runs past 20:00 on any day; a campaign window open
+    // only 23:58-23:59 every day can never overlap it within the 8-day bound.
+    const neverOverlaps = { mon_fri: "23:58-23:59", sat: "23:58-23:59", sun: "23:58-23:59" };
+    const v = validateCallbackTime(candidate, {
+      callingWindow: neverOverlaps,
+      tz: "America/Chicago",
+      now,
+      phone: "+12142345678",
+    });
+    expect(v).toEqual({ ok: false, nearest: null, refused: "no_legal_floor" });
+  });
+
+  it("I1: the same exhaustion, through execute() -- no fabricated time is ever spoken to the caller", async () => {
+    const ctx = makeCtx({
+      phone: "+12142345678",
+      timezone: "America/Chicago",
+      callingWindow: { mon_fri: "23:58-23:59", sat: "23:58-23:59", sun: "23:58-23:59" },
+    });
+    const res = await callback.execute(fc({ when_iso: "2026-09-29T23:58:00" }), ctx);
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(res.functionResponse.response.nearest).toBeUndefined();
+    expect(res.functionResponse.response.message).not.toMatch(/nearest available time/);
+  });
+
+  it("I2: validateCallbackTime's floor classification uses `rawTimezone`, not `tz`, when both are given", () => {
+    const now = new Date("2026-09-29T12:00:00Z");
+    // The candidate is 09:00 in the RESOLVED zone (America/New_York) -- legal
+    // in NY's own 08:00-20:00 floor -- but rawTimezone null means the true
+    // DB column is unset, so BOTH America/New_York and America/Los_Angeles
+    // must clear at once. At this instant LA is at 06:00, before its floor
+    // opens, so this must be refused despite `tz` alone reading as legal.
+    const candidate = new Date("2026-09-29T13:00:00Z"); // 09:00 EDT == 06:00 PDT
+    const v = validateCallbackTime(candidate, {
+      callingWindow: { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" },
+      tz: "America/New_York",
+      rawTimezone: null,
+      now,
+      phone: "+12142345678",
+    });
+    expect(v.ok).toBe(false);
+    expect(v.nearest).toBe("2026-09-29T15:00:00.000Z"); // 11:00 EDT == 08:00 PDT, the dual-zone opening
+  });
+
+  it("I2: a US contact with NO raw timezone on file, through execute() -- a time legal only in NY (not LA) is refused, not booked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-29T12:00:00Z"));
+    try {
+      const ctx = makeCtx({ phone: "+12142345678", timezone: "America/New_York", rawTimezone: null });
+      const res = await callback.execute(fc({ when_iso: "2026-09-29T09:00:00" }), ctx); // 09:00 in the resolved (NY) clock
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.nearest).toBe("2026-09-29T15:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

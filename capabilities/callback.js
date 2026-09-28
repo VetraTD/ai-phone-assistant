@@ -72,20 +72,34 @@ const DAY_MS = 86_400_000;
  * site to find.
  *
  * @param {Date} candidate - the requested instant, already resolved to UTC
- * @param {{callingWindow: object|null, tz: string, now: Date, maxDaysAhead?: number, phone?: string}} o
+ * @param {{callingWindow: object|null, tz: string, now: Date, maxDaysAhead?: number, phone?: string, rawTimezone?: string|null}} o
  *   `phone` is OPTIONAL (see the file header): when given, the S3-7
  *   per-country floor is also enforced; when omitted, only the window and
- *   the 14-day cap are (the pre-S3-7 contract).
+ *   the 14-day cap are (the pre-S3-7 contract). `rawTimezone` (fix round 1,
+ *   review Important #2) is the RAW contact timezone -- null when genuinely
+ *   unset on the row -- used ONLY to pick the floor's zone(s); `tz` (the
+ *   resolved/fallback value) still drives the window check and stays what
+ *   `floorFor` gets when `rawTimezone` is omitted, so an old caller that
+ *   does not know about this parameter keeps its pre-fix behaviour exactly.
  * @returns {{ok: true} | {ok: false, nearest: string} | {ok: false, nearest: null, refused: "no_legal_floor"}}
  */
-export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDaysAhead = MAX_DAYS_AHEAD, phone }) {
+export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDaysAhead = MAX_DAYS_AHEAD, phone, rawTimezone }) {
   const capMs = now.getTime() + maxDaysAhead * DAY_MS;
   const withinCap = candidate.getTime() <= capMs;
   const insideWindow = isInsideWindow(candidate, callingWindow, tz);
 
   let floor = null;
   if (phone !== undefined) {
-    floor = floorFor(phone, tz);
+    // Fix round 1 (review Important #2): the floor's zone classification
+    // reads the RAW contact timezone, not `tz` -- the controller's "raw, not
+    // fallback" ruling applies to every floor call site, not only gate.js.
+    // `rawTimezone === undefined` (the caller never passed it at all) falls
+    // back to `tz`, not to `null`: defaulting to `null` here would silently
+    // force the dual-zone rule onto every pre-fix caller that only ever knew
+    // about the resolved timezone, which is a behaviour change this fix does
+    // not need to make (execute(), below, always passes the true value now).
+    const floorTz = rawTimezone !== undefined ? rawTimezone : tz;
+    floor = floorFor(phone, floorTz);
     if (floor.refused) {
       // No owner-approved floor exists for this contact at all: never
       // bookable, and there is no "nearest" time to search for -- refuse
@@ -102,6 +116,19 @@ export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDay
   // so a caller is never offered a date outside the cap this same check
   // just refused.
   const opening = floor ? nextLegalOpening(now, floor, callingWindow, tz) : nextWindowOpening(now, callingWindow, tz);
+  if (floor && !opening) {
+    // Fix round 1 (review Important #1): the bounded search found NO instant
+    // where the floor and the campaign's own window are open at once -- the
+    // SAME exhaustion gate.js's own check 7b turns into never("no_legal_floor")
+    // rather than a park or an allow. Falling through to the raw 14-day cap
+    // below would hand back an instant nobody ever verified as legal, and
+    // re-validating that same offered instant refuses it again -- an
+    // unbookable loop (the review's own empirical repro), not a fabricated
+    // booking (insideFloor above still gates `ok:true`), but never a real
+    // "nearest" either. Fail closed the same way the early floor-refusal
+    // branch above does.
+    return { ok: false, nearest: null, refused: "no_legal_floor" };
+  }
   const cap = new Date(capMs);
   const nearest = opening && opening.getTime() <= capMs ? opening : cap;
   return { ok: false, nearest: nearest.toISOString() };
@@ -185,6 +212,15 @@ export default {
     if (!contactPhone) {
       return refusal(fc, "No contact phone number is available, so a callback time cannot be validated.");
     }
+    // Fix round 1 (review Important #2): the RAW contact timezone (null when
+    // genuinely unset -- lib/outbound/callContext.js:130 now carries it
+    // alongside the resolved `contact.timezone` above), NOT the fallback
+    // used for parsing/display. `!== undefined` (not `??`) so an outbound
+    // call context that predates this fix (no `rawTimezone` key at all)
+    // falls back to the resolved value -- validateCallbackTime's own
+    // pre-fix contract -- rather than silently forcing the dual-zone rule
+    // onto every caller that never carried this field.
+    const contactRawTimezone = outbound.contact?.rawTimezone !== undefined ? outbound.contact.rawTimezone : contactTz;
 
     const candidate = parseWhenIso(fc.args?.when_iso, contactTz);
     if (!candidate) {
@@ -201,6 +237,7 @@ export default {
       tz: contactTz,
       now,
       phone: contactPhone,
+      rawTimezone: contactRawTimezone,
     });
     if (!verdict.ok) {
       if (verdict.refused) {
