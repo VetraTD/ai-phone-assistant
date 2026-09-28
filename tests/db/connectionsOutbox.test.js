@@ -223,7 +223,10 @@ d("markOutboxDelivered / markOutboxRetry / markOutboxDead: the pending-only guar
     const epId = await mkEndpoint(BIZ_A);
     const id = await mkRow(BIZ_A, epId);
     await db.withTenant(BIZ_A, () => db.markOutboxDead(id, { attempts: 6, lastError: "ECONNREFUSED" }));
-    const retried = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 7, nextAttemptAt: new Date(Date.now() + 60_000), lastError: "500" }));
+    // expectedAttempts: 6, matching what markOutboxDead just wrote -- this
+    // proves the STATUS guard specifically refuses it (status='dead'), not
+    // merely a mismatched expectedAttempts.
+    const retried = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 7, nextAttemptAt: new Date(Date.now() + 60_000), lastError: "500", expectedAttempts: 6 }));
     expect(retried).toBe(false);
     const row = await readOutboxRow(id);
     expect(row.status).toBe("dead");
@@ -234,13 +237,37 @@ d("markOutboxDelivered / markOutboxRetry / markOutboxDead: the pending-only guar
     const epId = await mkEndpoint(BIZ_A);
     const id = await mkRow(BIZ_A, epId);
     const nextAt = new Date(Date.now() + 300_000);
-    const ok = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 2, nextAttemptAt: nextAt, lastError: "503" }));
+    // expectedAttempts: 0 -- mkRow's fresh insert leaves attempts at its
+    // column default (S3-8 fix round 1: markOutboxRetry's compare-and-set,
+    // I2).
+    const ok = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 2, nextAttemptAt: nextAt, lastError: "503", expectedAttempts: 0 }));
     expect(ok).toBe(true);
     const row = await readOutboxRow(id);
     expect(row.status).toBe("pending");
     expect(row.attempts).toBe(2);
     expect(row.last_error).toBe("503");
     expect(Math.abs(row.next_attempt_at.getTime() - nextAt.getTime())).toBeLessThan(1000);
+  });
+
+  // S3-8 fix round 1, I2: the compare-and-set itself, on real Postgres --
+  // not just the route-level fake-db simulation in
+  // tests/outboundInternalRoutes.test.js.
+  it("I2: a STALE expectedAttempts is refused, even though status is still pending (the actual race the fix closes)", async () => {
+    const epId = await mkEndpoint(BIZ_A);
+    const id = await mkRow(BIZ_A, epId);
+    // The "real" write: attempts 0 -> 1.
+    const first = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 1, nextAttemptAt: new Date(Date.now() + 60_000), lastError: "500", expectedAttempts: 0 }));
+    expect(first).toBe(true);
+
+    // A "duplicate" delivery that started from the SAME original snapshot
+    // (attempts=0) tries to write attempts 0 -> 1 again -- its
+    // expectedAttempts:0 no longer matches the row's real attempts (1).
+    const stale = await db.withTenant(BIZ_A, () => db.markOutboxRetry(id, { attempts: 1, nextAttemptAt: new Date(Date.now() + 120_000), lastError: "503", expectedAttempts: 0 }));
+    expect(stale).toBe(false);
+
+    const row = await readOutboxRow(id);
+    expect(row.attempts).toBe(1); // the FIRST write's value, never double-applied
+    expect(row.last_error).toBe("500"); // the stale write's last_error never landed
   });
 });
 

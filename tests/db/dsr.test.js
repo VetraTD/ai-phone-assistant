@@ -214,10 +214,11 @@ describeDb("Art. 17 erasure", () => {
     const counts = await db.eraseCallerData(BUSINESS, SUBJECT);
     // S3-11 (P5): outbound calling's own tables join the count, all zero
     // here -- this fixture seeds no contacts/consents/outreach/call_attempts/
-    // suppressions rows at all (tests/db/outboundErasure.test.js covers P5).
+    // outbox/suppressions rows at all (tests/db/outboundErasure.test.js
+    // covers P5, including S3-8 fix round 1's outbox/outboxRedacted).
     expect(counts).toEqual({
       transcripts: 1, calls: 1, appointments: 1, customerRequests: 1, smsConsents: 1,
-      consents: 0, contacts: 0, outreach: 0, callAttempts: 0, suppressions: 0,
+      consents: 0, contacts: 0, outreach: 0, callAttempts: 0, outbox: 0, outboxRedacted: 0, suppressions: 0,
     });
   });
 
@@ -242,7 +243,7 @@ describeDb("Art. 17 erasure", () => {
     const counts = await db.eraseCallerData(BUSINESS, "+15550000000");
     expect(counts).toEqual({
       transcripts: 0, calls: 0, appointments: 0, customerRequests: 0, smsConsents: 0,
-      consents: 0, contacts: 0, outreach: 0, callAttempts: 0, suppressions: 0,
+      consents: 0, contacts: 0, outreach: 0, callAttempts: 0, outbox: 0, outboxRedacted: 0, suppressions: 0,
     });
   });
 });

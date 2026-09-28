@@ -82,7 +82,38 @@ async function seedContact(business, phone, name) {
      VALUES ($1,$2,1,$3,'closed','{}',$4,'terminal_outcome',now()) RETURNING id`,
     [business, campaignId, contactId, `erasure-closed-${phone}`]
   );
-  return { contactId, openOutreachId, closedOutreachId: closedOut.rows[0].id };
+
+  // I4 (S3-8 fix round 1, controller ruling): one outbox row per status, a
+  // FROZEN copy of this contact's phone/name/answers in `payload` -- the
+  // exact shape lib/outbound/postCall.js's buildResultsPayload writes.
+  const ep = await admin.query(
+    `INSERT INTO webhook_endpoints (business_id, url, secret_ciphertext, events, active) VALUES ($1,'https://example.com/hook','\\x00','{}',true) RETURNING id`,
+    [business]
+  );
+  const endpointId = ep.rows[0].id;
+  const mkOutboxPayload = () =>
+    JSON.stringify({
+      event: "call.completed",
+      contact: { id: contactId, phone, first_name: name, external_ids: { crm_id: "42" } },
+      answers: { clinic_name: `${name}'s clinic` },
+      summary: `Spoke with ${name} about rescheduling.`,
+      direction: "outbound",
+    });
+  const outboxIds = {};
+  for (const status of ["pending", "dead", "delivered"]) {
+    const row = await admin.query(
+      `INSERT INTO outbox (business_id, kind, target_id, event_type, payload, idempotency_key, status, attempts, next_attempt_at, delivered_at)
+       VALUES ($1,'webhook',$2,'call.completed',$3,$4,$5,0,now(),CASE WHEN $5='delivered' THEN now() ELSE NULL END) RETURNING id`,
+      [business, endpointId, mkOutboxPayload(), `erasure-ob-${status}-${phone}`, status]
+    );
+    outboxIds[status] = row.rows[0].id;
+  }
+
+  return { contactId, openOutreachId, closedOutreachId: closedOut.rows[0].id, outboxIds };
+}
+
+async function outboxRow(id) {
+  return (await admin.query(`SELECT status, payload FROM outbox WHERE id = $1`, [id])).rows[0];
 }
 
 beforeAll(async () => {
@@ -170,6 +201,8 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
     expect(counts.contacts).toBe(1);
     expect(counts.outreach).toBe(1); // only the open one -- the already-closed row is untouched
     expect(counts.callAttempts).toBe(1);
+    expect(counts.outbox).toBe(2); // pending + dead, deleted outright
+    expect(counts.outboxRedacted).toBe(1); // delivered, kept and redacted
     expect(counts.suppressions).toBe(1);
 
     expect(await consentCount(subject.contactId)).toBe(0);
@@ -231,6 +264,12 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
     const rows = await suppressionByPhone(BUSINESS, BYSTANDER);
     expect(rows[0].phone_e164).toBe(BYSTANDER);
     expect(rows[0].phone_hash).toBeNull();
+    // I4: the bystander's own outbox rows, all three statuses, untouched.
+    for (const status of ["pending", "dead", "delivered"]) {
+      const row = await outboxRow(bystander.outboxIds[status]);
+      expect(row.status).toBe(status);
+      expect(row.payload.contact.first_name).toBe("Bystander");
+    }
   });
 
   it("does not touch the same number at another tenant (OTHER_BUSINESS) -- named risk 3", async () => {
@@ -308,5 +347,69 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
     expect(second.outreach).toBe(0); // the outreach row is already closed
     const rows = await suppressionByHash(BUSINESS);
     expect(rows).toHaveLength(1); // still exactly one row -- never duplicated
+  });
+});
+
+// S3-8 fix round 1, I4 (controller ruling): outbox.payload carries a frozen
+// copy of the contact's phone/name/answers -- erasure must reach it too.
+d("Art. 17 erasure reaches outbox (S3-8 fix round 1, I4)", () => {
+  it("a pending row is DELETED outright -- never delivered after erasure", async () => {
+    const pendingId = subject.outboxIds.pending;
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+    expect(await outboxRow(pendingId)).toBeUndefined();
+
+    // The delivery route's own read confirms it too: getOutboxRow (tenant-
+    // scoped, the same function lib/outbound/internalRoutes.js's
+    // deliverOutboxRow calls first) finds nothing -- a "not_found" no-op,
+    // never a delivery.
+    const fresh = await db.withTenant(BUSINESS, () => db.getOutboxRow(pendingId));
+    expect(fresh).toBeNull();
+  });
+
+  it("a dead row is also deleted outright", async () => {
+    const deadId = subject.outboxIds.dead;
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+    expect(await outboxRow(deadId)).toBeUndefined();
+  });
+
+  it("a delivered row is KEPT, but no personal field remains in its payload", async () => {
+    const deliveredId = subject.outboxIds.delivered;
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+
+    const row = await outboxRow(deliveredId);
+    expect(row).toBeDefined();
+    expect(row.status).toBe("delivered"); // kept, not deleted
+
+    const p = row.payload;
+    expect(p.contact.id).toBe(subject.contactId); // the opaque reference is kept
+    expect(p.contact.phone).toBeNull();
+    expect(p.contact.first_name).toBeNull();
+    expect(p.contact.external_ids).toEqual({});
+    expect(p.answers).toEqual({});
+    expect(p.summary).toBeNull();
+    // No personal field remains ANYWHERE in the redacted payload -- the
+    // subject's own name/phone must not survive as a stray string either.
+    const serialized = JSON.stringify(p);
+    expect(serialized).not.toContain("Jane");
+    expect(serialized).not.toContain(SUBJECT);
+  });
+
+  it("the outbox_schedule routing row for a deleted (pending) outbox row is also gone (migration 050's trigger)", async () => {
+    const pendingId = subject.outboxIds.pending;
+    const before = (await admin.query(`SELECT 1 FROM outbox_schedule WHERE outbox_id = $1`, [pendingId])).rows;
+    expect(before).toHaveLength(1); // seeded as pending -- the trigger put it there
+
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+
+    const after = (await admin.query(`SELECT 1 FROM outbox_schedule WHERE outbox_id = $1`, [pendingId])).rows;
+    expect(after).toHaveLength(0);
+  });
+
+  it("does not touch the same number's outbox rows at another tenant (OTHER_BUSINESS)", async () => {
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+
+    const row = await outboxRow(otherSubject.outboxIds.pending);
+    expect(row).toBeDefined(); // untouched -- different tenant
+    expect(row.payload.contact.first_name).toBe("SameNumberOtherTenant");
   });
 });

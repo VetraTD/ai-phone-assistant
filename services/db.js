@@ -2025,6 +2025,20 @@ export async function exportCallerData(businessId, phone) {
  *   call_attempts     KEPT, `opener_audio`/`voicemail_audio`/
  *                     `transfer_miss_audio` nulled (parked from S3-4: the
  *                     rendered clip speaks the contact's own first name).
+ *   outbox            (S3-8 fix round 1, I4, controller ruling) `payload`
+ *                     carries a FROZEN COPY of the contact's phone, first
+ *                     name and answers (lib/outbound/postCall.js's
+ *                     buildResultsPayload) — not reached by the contacts
+ *                     row above. A `pending`/`dead` row is DELETED outright
+ *                     (also removes its outbox_schedule routing row, via
+ *                     migration 050's trigger) — the delivery either never
+ *                     happened or gave up, so there is nothing to keep and
+ *                     the row must never be delivered after this point. A
+ *                     `delivered` row is KEPT (the delivery is the
+ *                     controller's own record that it happened, same
+ *                     reasoning as `calls`/`outreach`), with its
+ *                     `payload.contact`/`answers`/`summary` redacted to a
+ *                     non-personal stub.
  *   suppressions      KEPT UNCONDITIONALLY, unlike every table above — a
  *                     do-not-call decision must outlive the person who is the
  *                     reason for it, or an erasure would silently readmit
@@ -2060,7 +2074,7 @@ export async function exportCallerData(businessId, phone) {
  *
  * @param {string} businessId
  * @param {string} phone
- * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number, smsConsents: number, consents: number, contacts: number, outreach: number, callAttempts: number, suppressions: number}|null>}
+ * @returns {Promise<{transcripts: number, calls: number, appointments: number, customerRequests: number, smsConsents: number, consents: number, contacts: number, outreach: number, callAttempts: number, outbox: number, outboxRedacted: number, suppressions: number}|null>}
  */
 export async function eraseCallerData(businessId, phone) {
   if (!pool || !businessId || !phone) return null;
@@ -2166,6 +2180,51 @@ export async function eraseCallerData(businessId, phone) {
       [businessId, phone]
     );
 
+    // I4 (S3-8 fix round 1, controller ruling): `outbox.payload` carries a
+    // COPY of the contact's phone, first name and answers, frozen at
+    // post-call time (lib/outbound/postCall.js's buildResultsPayload) --
+    // nulling contacts.first_name above does not touch it, and the review
+    // found it was outside eraseCallerData's resources entirely. Matched by
+    // contactIds (already resolved above, the same set outreach/contacts
+    // use), via payload->'contact'->>'id' -- there is no relational
+    // contact_id column on outbox, only the id embedded in its own JSON.
+    //   pending/dead  DELETED outright (also removes the outbox_schedule
+    //                 routing row, via the migration 050 trigger) -- Ruling:
+    //                 "a pending row is never delivered" after erasure, and
+    //                 a dead row has no further use once its subject is gone.
+    //   delivered     KEPT (the delivery already happened and is the
+    //                 controller's own record that it did, same reasoning as
+    //                 `calls`/`outreach` above), payload's contact/answers/
+    //                 summary redacted to a non-personal stub. `contact.id`
+    //                 itself is kept -- it is an opaque reference to the
+    //                 (still-existing, name-nulled) contacts row, not
+    //                 personal data by itself, same rule contacts.id being
+    //                 left alone already follows.
+    const ob = contactIds.length
+      ? await client.query(
+          `DELETE FROM outbox WHERE business_id = $1 AND status IN ('pending','dead') AND payload->'contact'->>'id' = ANY($2)`,
+          [businessId, contactIds]
+        )
+      : { rowCount: 0 };
+
+    const obRedacted = contactIds.length
+      ? await client.query(
+          `UPDATE outbox
+              SET payload = payload || jsonb_build_object(
+                    'contact', jsonb_build_object(
+                      'id', payload->'contact'->>'id',
+                      'phone', NULL,
+                      'first_name', NULL,
+                      'external_ids', '{}'::jsonb
+                    ),
+                    'answers', '{}'::jsonb,
+                    'summary', NULL
+                  )
+            WHERE business_id = $1 AND status = 'delivered' AND payload->'contact'->>'id' = ANY($2)`,
+          [businessId, contactIds]
+        )
+      : { rowCount: 0 };
+
     // Spec §13.5: a suppression outlives erasure. KEEP the row, hash the
     // phone instead of nulling it away entirely — but only touch the key
     // (and require it) when there is actually a row to hash; see the
@@ -2210,6 +2269,8 @@ export async function eraseCallerData(businessId, phone) {
       contacts: ct.rowCount,
       outreach: oc.rowCount,
       callAttempts: ca.rowCount,
+      outbox: ob.rowCount,
+      outboxRedacted: obRedacted.rowCount,
       suppressions: sup.rowCount,
     };
     // The audit trail an erasure needs, carrying no phone number — the thing
@@ -2219,7 +2280,7 @@ export async function eraseCallerData(businessId, phone) {
       resourceIds: [...callIds, ...contactIds, ...suppressionRows.map((row) => row.id)],
       rowCount:
         t.rowCount + c.rowCount + a.rowCount + r.rowCount + sc.rowCount +
-        co.rowCount + ct.rowCount + oc.rowCount + ca.rowCount + sup.rowCount,
+        co.rowCount + ct.rowCount + oc.rowCount + ca.rowCount + ob.rowCount + obRedacted.rowCount + sup.rowCount,
     });
     return counts;
   } catch (err) {
@@ -3820,6 +3881,22 @@ export async function dueOutboxRows(limit) {
 }
 
 /**
+ * Outbox rows due for delivery, ACROSS ALL TENANTS (S3-8 fix round 1, I3(a)
+ * -- the sweep's cross-tenant webhook backstop, migration 050, the
+ * app_outbound_due pattern applied to `outbox`). Reads the outbox_schedule
+ * directory through app_outbound_webhook_due: ids and a business id only, so
+ * this needs no tenant scope -- same reasoning as outboundDue.
+ * @param {number} limit
+ * @param {number} graceSeconds
+ * @returns {Promise<Array<{business_id: string, outbox_id: string}>>}
+ */
+export async function outboundWebhookDue(limit, graceSeconds) {
+  const res = await q(`SELECT business_id, outbox_id FROM app_outbound_webhook_due($1::int, $2::int)`, [limit, graceSeconds]);
+  if (res.error) throw res.error;
+  return res.rows || [];
+}
+
+/**
  * Mark ONE outbox row delivered. Guarded on `status = 'pending'`: a row
  * already `dead` (or somehow already `delivered`, a retried/duplicated
  * delivery task) can never be moved BACK to delivered by a late success --
@@ -3838,16 +3915,24 @@ export async function markOutboxDelivered(id) {
  * Record one failed delivery attempt that WILL retry: `attempts`,
  * `next_attempt_at` (the backoff schedule's next slot) and `last_error` (a
  * status code or error class only -- never a vendor message). Guarded on
- * `status = 'pending'` for the same reason markOutboxDelivered is.
+ * `status = 'pending'` for the same reason markOutboxDelivered is, AND
+ * (fix round 1, I2) on `attempts = $expectedAttempts` -- a compare-and-set.
+ * Two concurrent deliveries of the SAME row (an early task racing the real
+ * one, or a genuine Cloud Tasks at-least-once redelivery) both read the same
+ * `attempts` and both compute `attempts + 1`; without this guard the SECOND
+ * write still matches `status = 'pending'` (this function never changes
+ * status) and clobbers the first with a STALE value instead of losing the
+ * race cleanly. The caller (lib/outbound/internalRoutes.js) reads the
+ * boolean and skips its counter/re-enqueue when this returns false.
  * @param {string} id
- * @param {{attempts: number, nextAttemptAt: Date, lastError: string}} o
+ * @param {{attempts: number, nextAttemptAt: Date, lastError: string, expectedAttempts: number}} o
  * @returns {Promise<boolean>}
  */
-export async function markOutboxRetry(id, { attempts, nextAttemptAt, lastError }) {
+export async function markOutboxRetry(id, { attempts, nextAttemptAt, lastError, expectedAttempts }) {
   requireTenantScope("markOutboxRetry");
   const res = await q(
-    `UPDATE outbox SET attempts = $2, next_attempt_at = $3, last_error = $4 WHERE id = $1 AND status = 'pending'`,
-    [id, attempts, nextAttemptAt, lastError]
+    `UPDATE outbox SET attempts = $2, next_attempt_at = $3, last_error = $4 WHERE id = $1 AND status = 'pending' AND attempts = $5`,
+    [id, attempts, nextAttemptAt, lastError, expectedAttempts]
   );
   if (res.error) throw res.error;
   return res.rowCount === 1;
@@ -3856,18 +3941,31 @@ export async function markOutboxRetry(id, { attempts, nextAttemptAt, lastError }
 /**
  * Mark ONE outbox row dead: the backoff schedule is exhausted (S3-8's
  * BACKOFF_SCHEDULE_MS, lib/connections/outbox.js). Terminal -- nothing ever
- * moves a row OUT of `dead` (named risk 7: "retries past dead").
+ * moves a row OUT of `dead` (named risk 7: "retries past dead"). Same
+ * compare-and-set as markOutboxRetry (fix round 1, I2) when the caller
+ * supplies `expectedAttempts` -- the endpoint-unavailable/inactive path
+ * always does; older callers that omit it fall back to the pre-existing
+ * `status = 'pending'`-only guard (`expectedAttempts` undefined makes the
+ * SQL's `attempts = $5` compare against NULL, which SQL never matches, so
+ * this is written as an explicit optional clause rather than relying on
+ * that).
  * @param {string} id
- * @param {{attempts: number, lastError: string}} o
+ * @param {{attempts: number, lastError: string, expectedAttempts?: number}} o
  * @returns {Promise<boolean>}
  */
-export async function markOutboxDead(id, { attempts, lastError }) {
+export async function markOutboxDead(id, { attempts, lastError, expectedAttempts }) {
   requireTenantScope("markOutboxDead");
-  const res = await q(`UPDATE outbox SET status = 'dead', attempts = $2, last_error = $3 WHERE id = $1 AND status = 'pending'`, [
-    id,
-    attempts,
-    lastError,
-  ]);
+  const res =
+    expectedAttempts === undefined
+      ? await q(`UPDATE outbox SET status = 'dead', attempts = $2, last_error = $3 WHERE id = $1 AND status = 'pending'`, [
+          id,
+          attempts,
+          lastError,
+        ])
+      : await q(
+          `UPDATE outbox SET status = 'dead', attempts = $2, last_error = $3 WHERE id = $1 AND status = 'pending' AND attempts = $4`,
+          [id, attempts, lastError, expectedAttempts]
+        );
   if (res.error) throw res.error;
   return res.rowCount === 1;
 }
