@@ -1369,10 +1369,24 @@ CREATE TABLE IF NOT EXISTS campaigns (
   audience         text NOT NULL CHECK (audience IN ('business','patient')),
   status           text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused')),
   current_version  int  NOT NULL DEFAULT 1,
+  -- Migration 049 (S3-9): sha256(32 random bytes), hex -- the leads-in
+  -- link's bearer credential. NULL until `scripts/outbound-admin.js
+  -- trigger-token-rotate --confirm` sets one; the raw token is never
+  -- stored. Kept true in campaign_trigger_directory below by a trigger.
+  -- Migration 049 (S3-9): sha256(32 random bytes), hex -- the leads-in
+  -- link's bearer credential. NULL until `scripts/outbound-admin.js
+  -- trigger-token-rotate --confirm` sets one; the raw token is never
+  -- stored. Kept true in campaign_trigger_directory below by a trigger.
+  trigger_token_hash text,
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS campaigns_business_idx ON campaigns (business_id);
+-- Partial (most campaigns have none): stops two campaigns ever sharing one
+-- hash, which campaign_trigger_directory's ON CONFLICT DO UPDATE below would
+-- otherwise resolve by silently reassigning ownership of a trigger token.
+CREATE UNIQUE INDEX IF NOT EXISTS campaigns_trigger_token_hash_idx
+  ON campaigns (trigger_token_hash) WHERE trigger_token_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS campaign_versions (
   campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
@@ -1455,6 +1469,12 @@ CREATE TABLE IF NOT EXISTS outreach (
   -- S3-7) join the list; every other value is unchanged.
   close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal','erased','no_legal_floor')),
   trigger          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  -- Migration 049 (S3-9): the per-person facts (S3-6) the leads-in trigger's
+  -- `data` carried, filtered to the campaign's details_fields at write time
+  -- (lib/outbound/triggerRoute.js). Read onto ctx.outboundCall.details and
+  -- rendered as `DETAILS: label: value` lines (lib/outbound/prompt.js) --
+  -- never in the opener or the voicemail.
+  details          jsonb NOT NULL DEFAULT '{}'::jsonb,
   idempotency_key  text NOT NULL,
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
@@ -1806,3 +1826,71 @@ $$;
 
 REVOKE ALL ON FUNCTION app_outbound_stale_attempts(int, int, int, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_outbound_stale_attempts(int, int, int, int) TO vetra_app;
+
+-- ============================================================
+-- Migration 049: outbound -- S3-9, the leads-in link
+-- (POST /v1/triggers/:triggerToken + per-person details)
+-- ============================================================
+-- The 044 pattern again (a no-RLS directory kept true by a trigger, read
+-- only by one SECURITY DEFINER function): the route resolves a trigger
+-- token's sha256 hash to a tenant and campaign BEFORE the tenant is known.
+-- campaigns.trigger_token_hash and outreach.details are declared inline on
+-- their tables above (the fold rule for a column on an already-created
+-- table); only the new objects live here.
+
+CREATE TABLE IF NOT EXISTS campaign_trigger_directory (
+  trigger_token_hash text PRIMARY KEY,
+  campaign_id        uuid NOT NULL,
+  business_id        uuid NOT NULL
+);
+
+REVOKE ALL ON campaign_trigger_directory FROM PUBLIC;
+REVOKE ALL ON campaign_trigger_directory FROM vetra_app;
+
+COMMENT ON TABLE campaign_trigger_directory IS
+  'Routing only: a campaign trigger token''s sha256 hash -> campaign and tenant, for POST /v1/triggers/:triggerToken (S3-9), before the tenant is known. Deliberately has NO row-level security and NO grant to vetra_app: only app_campaign_by_trigger_hash reads it, and a trigger on campaigns keeps it true. Holds ids and the hash only. Must never carry a phone number or a name.';
+
+CREATE OR REPLACE FUNCTION app_sync_campaign_trigger_directory()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP IN ('UPDATE','DELETE') THEN
+    IF OLD.trigger_token_hash IS NOT NULL THEN
+      DELETE FROM campaign_trigger_directory WHERE trigger_token_hash = OLD.trigger_token_hash;
+    END IF;
+  END IF;
+  IF TG_OP IN ('INSERT','UPDATE') THEN
+    IF NEW.trigger_token_hash IS NOT NULL THEN
+      INSERT INTO campaign_trigger_directory (trigger_token_hash, campaign_id, business_id)
+      VALUES (NEW.trigger_token_hash, NEW.id, NEW.business_id)
+      ON CONFLICT (trigger_token_hash) DO UPDATE SET campaign_id = EXCLUDED.campaign_id, business_id = EXCLUDED.business_id;
+    END IF;
+  END IF;
+  RETURN NULL;
+END $$;
+
+DROP TRIGGER IF EXISTS campaign_trigger_directory_sync ON campaigns;
+CREATE TRIGGER campaign_trigger_directory_sync
+  AFTER INSERT OR UPDATE OF trigger_token_hash OR DELETE ON campaigns
+  FOR EACH ROW EXECUTE FUNCTION app_sync_campaign_trigger_directory();
+
+CREATE OR REPLACE FUNCTION app_campaign_by_trigger_hash(p_hash text)
+RETURNS TABLE (business_id uuid, campaign_id uuid, trigger_token_hash text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  v_biz uuid;
+  v_camp uuid;
+  v_hash text;
+  v_current text := current_setting('app.business_id', true);
+BEGIN
+  IF p_hash IS NULL OR btrim(p_hash) = '' THEN RETURN; END IF;
+  SELECT d.business_id, d.campaign_id, d.trigger_token_hash INTO v_biz, v_camp, v_hash
+    FROM campaign_trigger_directory d WHERE d.trigger_token_hash = btrim(p_hash);
+  IF v_biz IS NULL THEN RETURN; END IF;
+  IF v_current IS NULL OR v_current = '' THEN
+    PERFORM set_config('app.business_id', v_biz::text, true);
+  END IF;
+  RETURN QUERY SELECT v_biz, v_camp, v_hash;
+END $$;
+
+REVOKE ALL ON FUNCTION app_campaign_by_trigger_hash(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_campaign_by_trigger_hash(text) TO vetra_app;

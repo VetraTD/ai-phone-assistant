@@ -3241,14 +3241,14 @@ export async function outboundAmdContext(attemptId) {
  *
  * @param {string} attemptId
  * @returns {Promise<null | {attemptNo: number, openerAudio: Buffer|null, toNumber: string, outreachId: string,
- *   campaignId: string, campaignVersion: number, contactId: string, trigger: object, templateKey: string,
+ *   campaignId: string, campaignVersion: number, contactId: string, trigger: object, details: object, templateKey: string,
  *   complianceClass: string, audience: string, config: object, firstName: string|null, contactTimezone: string|null}>}
  */
 export async function outboundCallContext(attemptId) {
   requireTenantScope("outboundCallContext");
   const res = await q(
     `SELECT a.attempt_no, a.opener_audio, a.to_number,
-            o.id AS outreach_id, o.campaign_id, o.campaign_version, o.contact_id, o.trigger,
+            o.id AS outreach_id, o.campaign_id, o.campaign_version, o.contact_id, o.trigger, o.details,
             c.template_key, c.compliance_class, c.audience,
             v.config,
             k.first_name, k.timezone AS contact_timezone
@@ -3273,6 +3273,11 @@ export async function outboundCallContext(attemptId) {
     campaignVersion: row.campaign_version,
     contactId: row.contact_id,
     trigger: row.trigger ?? {},
+    // S3-9: the per-person facts (S3-6) the leads-in trigger stored,
+    // already filtered to the campaign's details_fields at write time
+    // (lib/outbound/triggerRoute.js) -- carried through unfiltered here, the
+    // same "read what was written" rule contact/trigger fields above follow.
+    details: row.details ?? {},
     templateKey: row.template_key,
     complianceClass: row.compliance_class,
     audience: row.audience,
@@ -3912,4 +3917,181 @@ export async function outboundResultsLabels({ campaignId, contactId }) {
     contactFirstName: row.contact_first_name ?? null,
     contactExternalIds: row.contact_external_ids ?? {},
   };
+}
+
+// ---------------------------------------------------------------------------
+// S3-9 (spec §12.1): the leads-in link, POST /v1/triggers/:triggerToken
+// (lib/outbound/triggerRoute.js). Migration 049.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a leads-in trigger token's SHA-256 hash to its campaign and tenant,
+ * through `app_campaign_by_trigger_hash` (migration 049) -- the SAME
+ * no-RLS-directory-plus-SECURITY-DEFINER pattern `outboundAttemptByCallSid`
+ * uses above, for the identical reason: the tenant is not known yet. Own
+ * transaction, own client -- `withTenant` cannot be used before a businessId
+ * exists.
+ *
+ * Returns the directory's own `trigger_token_hash` alongside the ids, so the
+ * caller can re-verify the match with a constant-time comparator
+ * (lib/outbound/triggerRoute.js's `compareTokenHash`) rather than trusting
+ * the SQL equality alone.
+ *
+ * NON_PHI_EXPORTS (lib/phiAudit.js): ids and a hash only, never a phone
+ * number or a name -- the same reasoning `outboundAttemptByCallSid` is
+ * exempt under.
+ * @param {string} hash - sha256(rawToken), hex
+ * @returns {Promise<{businessId:string, campaignId:string, triggerTokenHash:string}|null>} null on a miss (including an unusable/empty hash)
+ */
+export async function campaignByTriggerHash(hash) {
+  if (!pool) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query(
+      `SELECT business_id, campaign_id, trigger_token_hash FROM app_campaign_by_trigger_hash($1)`,
+      [hash]
+    );
+    await client.query("COMMIT");
+    const row = res.rows?.[0];
+    if (!row) return null;
+    return { businessId: row.business_id, campaignId: row.campaign_id, triggerTokenHash: row.trigger_token_hash };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The campaign facts the trigger route needs: its compliance class (consent
+ * is required unless it is `service`), and the CURRENT version's
+ * `details_fields` (S3-6). Read defensively -- a config with no
+ * `details_fields` array (an older campaign version saved before S3-6, or a
+ * malformed one) gives `[]`, so every key the trigger body's `data` carries
+ * becomes an ignored field rather than a thrown error (Ruling S3-9, named
+ * risk 5's mirror: absent config must never read as "copy everything"
+ * either). Runs inside `withTenant` -- the caller resolves the tenant first
+ * via `campaignByTriggerHash`.
+ * @param {string} campaignId
+ * @returns {Promise<{complianceClass:string, status:string, currentVersion:number, detailsFields:Array<{key:string,label:string}>}|null>}
+ */
+export async function campaignForTrigger(campaignId) {
+  requireTenantScope("campaignForTrigger");
+  const res = await q(
+    `SELECT c.compliance_class, c.status, c.current_version, v.config
+       FROM campaigns c
+       JOIN campaign_versions v ON v.campaign_id = c.id AND v.version = c.current_version
+      WHERE c.id = $1`,
+    [campaignId]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  if (!row) return null;
+  const fields = Array.isArray(row.config?.details_fields) ? row.config.details_fields : [];
+  return {
+    complianceClass: row.compliance_class,
+    status: row.status,
+    currentVersion: row.current_version,
+    detailsFields: fields.filter((f) => f && typeof f.key === "string" && typeof f.label === "string"),
+  };
+}
+
+/**
+ * Upsert the contact a leads-in trigger names -- the SAME COALESCE-on-absent-
+ * field shape `scripts/outbound-admin.js`'s `triggerOutreach` uses, so a
+ * re-post that omits a field (e.g. no email on a later submission) keeps
+ * what is already on file rather than wiping it. Runs inside `withTenant`.
+ * @param {{phone:string, firstName:string|null, lastName:string|null, email:string|null, timezone:string|null}} o
+ * @returns {Promise<string>} contactId
+ */
+export async function upsertContactForTrigger({ phone, firstName, lastName, email, timezone }) {
+  requireTenantScope("upsertContactForTrigger");
+  const res = await q(
+    `INSERT INTO contacts (business_id, phone_e164, first_name, last_name, email, timezone)
+     SELECT app_current_business_id(), $1, $2, $3, $4, $5
+     ON CONFLICT (business_id, phone_e164) DO UPDATE SET
+       first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
+       last_name  = COALESCE(EXCLUDED.last_name, contacts.last_name),
+       email      = COALESCE(EXCLUDED.email, contacts.email),
+       timezone   = COALESCE(EXCLUDED.timezone, contacts.timezone),
+       updated_at = now()
+     RETURNING id`,
+    [phone, firstName, lastName, email, timezone]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  if (!row) throw new Error("upsertContactForTrigger: expected 1 row");
+  noteAccess("upsertContactForTrigger", { resourceIds: [row.id], rowCount: res.rowCount || 0 });
+  return row.id;
+}
+
+/**
+ * Record the consent block a leads-in trigger posts. `source` is always
+ * `'api'` here -- this is a form/webhook submission, never
+ * `scripts/outbound-admin.js`'s own operator `'manual'` entry or an inbound
+ * call. Runs inside `withTenant`.
+ * @param {{contactId:string, purpose:string, channels:string[], coversAutomated:boolean, sourceRef:string|null, wordingVersion:string|null, wordingText:string|null, capturedAt:Date}} o
+ * @returns {Promise<string>} consentId
+ */
+export async function recordTriggerConsent({
+  contactId,
+  purpose,
+  channels,
+  coversAutomated,
+  sourceRef,
+  wordingVersion,
+  wordingText,
+  capturedAt,
+}) {
+  requireTenantScope("recordTriggerConsent");
+  const res = await q(
+    `INSERT INTO consents (business_id, contact_id, purpose, channels, covers_automated, source, source_ref, wording_version, wording_text, captured_at)
+     SELECT app_current_business_id(), $1, $2, $3, $4, 'api', $5, $6, $7, $8
+     RETURNING id`,
+    [contactId, purpose, channels, coversAutomated, sourceRef, wordingVersion, wordingText, capturedAt]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  if (!row) throw new Error("recordTriggerConsent: expected 1 row");
+  noteAccess("recordTriggerConsent", { resourceIds: [contactId, row.id], rowCount: res.rowCount || 0 });
+  return row.id;
+}
+
+/**
+ * Create the outreach a leads-in trigger requests, IDEMPOTENTLY: `ON
+ * CONFLICT (business_id, idempotency_key) DO NOTHING`, then a plain SELECT
+ * for the id either way -- a replay of the SAME idempotency_key returns the
+ * SAME outreach_id rather than a second row (or an error).
+ * `next_attempt_at = now()`: `app_outbound_due` (migration 044) and the
+ * dispatcher both treat a NULL as "not due", and the 5-minute sweep is what
+ * actually dials it -- this route does not enqueue a Cloud Task itself
+ * (Ruling S3-9b, this task's report). `details` carries only the keys the
+ * caller (lib/outbound/triggerRoute.js) already filtered against the
+ * campaign's `details_fields` -- this function does not re-filter. Runs
+ * inside `withTenant`.
+ * @param {{campaignId:string, campaignVersion:number, contactId:string, trigger:object, idempotencyKey:string, details:object}} o
+ * @returns {Promise<{id:string, created:boolean}>}
+ */
+export async function createOutreachFromTrigger({ campaignId, campaignVersion, contactId, trigger, idempotencyKey, details }) {
+  requireTenantScope("createOutreachFromTrigger");
+  const ins = await q(
+    `INSERT INTO outreach (business_id, campaign_id, campaign_version, contact_id, state, next_attempt_at, trigger, idempotency_key, details)
+     SELECT app_current_business_id(), $1, $2, $3, 'waiting', now(), $4::jsonb, $5, $6::jsonb
+     ON CONFLICT (business_id, idempotency_key) DO NOTHING
+     RETURNING id`,
+    [campaignId, campaignVersion, contactId, JSON.stringify(trigger || {}), idempotencyKey, JSON.stringify(details || {})]
+  );
+  if (ins.error) throw ins.error;
+  if (ins.rowCount === 1) {
+    noteAccess("createOutreachFromTrigger", { resourceIds: [ins.rows[0].id], rowCount: 1 });
+    return { id: ins.rows[0].id, created: true };
+  }
+  const sel = await q(`SELECT id FROM outreach WHERE business_id = app_current_business_id() AND idempotency_key = $1`, [idempotencyKey]);
+  if (sel.error) throw sel.error;
+  const row = one(sel);
+  if (!row) throw new Error("createOutreachFromTrigger: idempotency conflict but no row found");
+  noteAccess("createOutreachFromTrigger", { resourceIds: [row.id], rowCount: sel.rowCount || 0 });
+  return { id: row.id, created: false };
 }

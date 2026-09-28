@@ -53,6 +53,7 @@ import {
 import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
 import { createTwilioAccountRouter } from "./lib/outbound/twilioAccounts.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
+import { registerTriggerRoute, isTriggerRoutePath } from "./lib/outbound/triggerRoute.js";
 import { postCall as outboundPostCall } from "./lib/outbound/postCall.js";
 
 const app = express();
@@ -187,9 +188,14 @@ app.use(helmet());
 // JSON, so the correct behaviour for a urlencoded body is that NEITHER
 // parser touches it (req.body stays empty) and the route's own OIDC check
 // still refuses it -- never that a stranger's form fields land in req.body.
+//
+// S3-9: /v1/triggers/:triggerToken (lib/outbound/triggerRoute.js) is
+// excluded the SAME way, for the SAME reason -- it declares its own
+// express.json({limit:"16kb"}), and an unexcluded global parser ahead of it
+// would make that 16 KB limit dead code (Ruling S3-9a).
 const defaultUrlencodedParser = express.urlencoded({ extended: false });
 app.use((req, res, next) => {
-  if (isOutboundInternalPath(req.path)) return next();
+  if (isOutboundInternalPath(req.path) || isTriggerRoutePath(req.path)) return next();
   return defaultUrlencodedParser(req, res, next);
 });
 
@@ -209,7 +215,10 @@ app.use((req, res, next) => {
   // cannot drift from what is mounted there, and it matches every spelling
   // Express routes (any case, one trailing slash); an exact-string compare
   // let `/internal/outbound/dispatch/` through (Checkpoint 2a, M5).
-  if (isOutboundInternalPath(req.path)) return next();
+  //
+  // S3-9: isTriggerRoutePath adds /v1/triggers/:triggerToken to the same
+  // exclusion (Ruling S3-9a) -- see the urlencoded parser above.
+  if (isOutboundInternalPath(req.path) || isTriggerRoutePath(req.path)) return next();
   return defaultJsonParser(req, res, next);
 });
 
@@ -673,6 +682,15 @@ registerOutboundDoorRoutes(app, {
   log,
   now: () => Date.now(),
 });
+
+// ---------------------------------------------------------------------------
+// S3-9: the leads-in link, POST /v1/triggers/:triggerToken (spec §12.1).
+// Mounted unconditionally, for the same reason registerOutboundDoorRoutes
+// just above is: it needs only services/db.js, not the Cloud Tasks/OIDC
+// configuration Task 22 still owns. With no campaign's trigger_token_hash
+// matching a given token, every request simply 401s.
+// ---------------------------------------------------------------------------
+registerTriggerRoute(app, { db, log });
 
 // ---------------------------------------------------------------------------
 // Voice webhook

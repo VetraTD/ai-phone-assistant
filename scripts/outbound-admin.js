@@ -70,10 +70,20 @@
 //   endpoint through the SAME SSRF-guarded delivery path the delivery task
 //   handler uses. Dry-run by default: no network call, no secret decrypted,
 //   without --confirm.
+//
+//   node scripts/outbound-admin.js trigger-token-rotate --phone +1... --campaign-id <uuid> [--confirm]
+//   S3-9. Generates 32 random bytes, stores ONLY their sha256 hash
+//   (campaigns.trigger_token_hash), and prints the raw token ONCE, in the
+//   confirmed result -- it is never written to the database, never logged
+//   again, and cannot be recovered afterwards: losing it means rotating
+//   again. Dry-run by default: no token is generated at all without
+//   --confirm, so a dry run cannot accidentally print (or discard) a real
+//   one. Overwrites any existing token for this campaign -- the old one
+//   stops working the moment this commits.
 // ---------------------------------------------------------------------------
 
 import { pathToFileURL } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { connect } from "./migrate.js";
 import { validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
@@ -829,6 +839,64 @@ export async function webhookTest(client, { businessPhone, endpointId, confirm }
 }
 
 // ---------------------------------------------------------------------------
+// rotateTriggerToken (S3-9): mint a new leads-in link token for one campaign.
+// ---------------------------------------------------------------------------
+export async function rotateTriggerToken(client, { businessPhone, campaignId, confirm }) {
+  if (!E164.test(businessPhone || "")) {
+    return { ok: false, error: "businessPhone must be an E.164 number" };
+  }
+  if (!campaignId) {
+    return { ok: false, error: "campaignId is required" };
+  }
+
+  await client.query("BEGIN");
+  try {
+    const bizRes = await client.query("SELECT * FROM app_lookup_business_by_phone($1)", [businessPhone]);
+    if (bizRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no business has phone_number ${businessPhone}` };
+    }
+    const business = bizRes.rows[0];
+
+    const campRes = await client.query("SELECT id FROM campaigns WHERE id = $1 AND business_id = $2", [campaignId, business.id]);
+    if (campRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no campaign ${campaignId} for business ${businessPhone}` };
+    }
+
+    if (!confirm) {
+      await client.query("ROLLBACK");
+      // No token is generated on a dry run -- there is nothing to print, and
+      // nothing that could be mistaken for a real, usable one.
+      return { ok: true, dryRun: true, wouldWrite: { campaignId, action: "generate a new trigger token, overwriting any existing one" } };
+    }
+
+    // 32 random bytes, hex-encoded (the URL path segment). Only its sha256
+    // hash is ever written -- the raw token exists nowhere but this one
+    // process's memory and this one response.
+    const token = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+
+    await client.query(`UPDATE campaigns SET trigger_token_hash = $2, updated_at = now() WHERE id = $1`, [campaignId, tokenHash]);
+
+    const check = await client.query(`SELECT trigger_token_hash FROM campaigns WHERE id = $1`, [campaignId]);
+    if (check.rows[0]?.trigger_token_hash !== tokenHash) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "read-back mismatch: trigger_token_hash" };
+    }
+
+    await client.query("COMMIT");
+    // PRINTED ONCE: this return value, echoed by main()'s single
+    // console.log(JSON.stringify(result)) below -- never stored, never
+    // logged a second time.
+    return { ok: true, businessId: business.id, campaignId, token };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 function argOf(args, name) {
@@ -969,7 +1037,17 @@ export function parseArgs(argv) {
     return { ok: true, value: { command, confirm, businessPhone: phone, endpointId } };
   }
 
-  push("command", `must be one of campaign, status, outbound, trigger, unsuppress, webhook-set, webhook-test (got ${JSON.stringify(command ?? null)})`);
+  if (command === "trigger-token-rotate") {
+    const campaignId = argOf(args, "campaign-id");
+    if (!campaignId) push("campaign-id", "is required (--campaign-id)");
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, value: { command, confirm, businessPhone: phone, campaignId } };
+  }
+
+  push(
+    "command",
+    `must be one of campaign, status, outbound, trigger, unsuppress, webhook-set, webhook-test, trigger-token-rotate (got ${JSON.stringify(command ?? null)})`
+  );
   return { ok: false, errors };
 }
 
@@ -989,6 +1067,7 @@ async function main() {
     else if (v.command === "unsuppress") result = await unsuppress(client, v);
     else if (v.command === "webhook-set") result = await webhookSet(client, v);
     else if (v.command === "webhook-test") result = await webhookTest(client, v);
+    else if (v.command === "trigger-token-rotate") result = await rotateTriggerToken(client, v);
     else result = await triggerOutreach(client, v);
 
     console.log(JSON.stringify(result));
