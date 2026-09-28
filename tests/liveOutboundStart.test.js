@@ -1046,6 +1046,157 @@ describe("outbound: the first seconds through the real session", () => {
     expect(shadow).toHaveLength(1);
     expect(shadow[0].from_speech_ms).not.toBeNull();
   });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 1 (opus review). I1: routeClipFrame latched the hold on
+  // ANY raw voiced frame -- one loud 20 ms frame (a click, a cough, an early
+  // second "Hello?"), or a backstop_slow greeting already mid-utterance when
+  // the clip fired, brought the D1 double-talk/re-ask defect back in full,
+  // because everything from that frame on was captured whole again and
+  // Live's end-of-turn for the already-suppressed generation never fired
+  // during the clip. Fixed: routeClipFrame now latches only on voiceActive
+  // (the VAD's SUSTAINED/confirmed flag, O-6's own onset-confirm notion),
+  // never on raw voiced alone.
+  // -------------------------------------------------------------------
+  // Both tests below assert TWO things, directly rather than through
+  // armServerVadReply's own reconstructed timing (which has its own
+  // ~CLIP_HOLD_DELAY_LINE_MS pipeline lag before a reset is even visible to
+  // it, easy to miscalibrate against): (1) the ROUTING decision itself --
+  // audioIn keeps growing after the blip, proving it never latched the
+  // whole-clip hold -- and (2) the END-TO-END discard -- Live's reply to the
+  // stale hello, pushed directly (the same style the committed C1/F-R2 tests
+  // already use), still never reaches the caller. Together these are the
+  // reviewer's own P1 probe shape without depending on precisely
+  // reconstructing when a fake Live would perceive the blip.
+  it("F-R2 fix round 1, I1: one loud frame early in the clip does not latch the hold (a click, not speech)", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+
+    await call.feed(100); // some silence into the clip
+    const beforeBlip = call.live.sent.audioIn.length;
+    await call.feed(20, { voiced: true }); // ONE loud 20 ms frame -- a click, not speech
+    await call.feed(600); // more silence: still flowing through the delay line, not captured whole
+
+    // Proof the click never latched the hold: silence AFTER it still reaches
+    // Live (delayed, through the line) rather than being held whole -- the
+    // pre-fix defect starved Live of everything from this point on.
+    // Not held whole: the delay line's own rolling ~500 ms window
+    // (CLIP_HOLD_DELAY_LINE_MS) means growth lags what was fed, but ANY
+    // growth at all after 620 ms of feeding proves this is still flowing,
+    // not stuck -- a genuine latch (the pre-fix defect) forwards nothing.
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBlip);
+
+    // Live's reply to the STALE hello, generated only now, is still
+    // correctly recognised as stale and discarded.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1); // still just the clip
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    await call.hangUp();
+  });
+
+  it("F-R2 fix round 1, I1: a cough-length voiced burst (under activeMs) does not latch the hold either", async () => {
+    const call = await bootOutbound();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+
+    await call.feed(200); // some silence into the clip
+    const beforeBurst = call.live.sent.audioIn.length;
+    await call.feed(100, { voiced: true }); // a 100 ms burst -- a cough, under activeMs (200 ms)
+    await call.feed(600);
+
+    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBurst);
+
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    await call.settle();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    await call.hangUp();
+  });
+
+  // -------------------------------------------------------------------
+  // F-R2 fix round 1 (opus review). I2: a discarded (stale) generation's
+  // TEXT still ran the whole turn pipeline as if Ava had said it -- an AI
+  // transcript row (BEFORE the opener's own seed row), the outbound turn
+  // detectors/counters, and the note-sending text guards (which can send
+  // Live a note whose spoken reply may itself land after the seed, the F-R2
+  // symptom through a new door). Fixed: dialFirstSeconds.onAssistantTurnText
+  // now returns `heard` (false when any chunk of the generation's audio was
+  // discarded), gating the transcript row and the outbound detectors; the
+  // streaming guards are gated on dialFirstSeconds.suppressing() at the
+  // moment their text arrives, the same live signal onModelAudio's own
+  // discard already uses.
+  // -------------------------------------------------------------------
+  it("F-R2 fix round 1, I2 (sink 1): a discarded stale generation's text is never persisted as an AI transcript row", async () => {
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
+
+    // The stale generation: audio discarded (staleDiscard/clipPlaying still
+    // true), AND its transcript text arrives too -- this is what makes the
+    // text-side sinks reachable at all.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantSays("Just to confirm, am I speaking with Sam?");
+    await call.turnEnds(); // turnComplete for the STALE generation
+
+    const aiRows = database.addTranscriptEntry.mock.calls.filter(([, speaker]) => speaker === "ai");
+    expect(aiRows).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("F-R2 fix round 1, I2 (sink 2): a discarded stale generation never trips the outbound turn detectors", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    // CAMPAIGN_CONFIG.topic === "your enquiry"; detectOutboundTurn's
+    // topicToUnverified fires on an unverified party naming the campaign's
+    // own topic -- exactly the P8 false positive the review reported.
+    await call.assistantSays("I'm calling about your enquiry.");
+    await call.turnEnds();
+
+    expect(events("outbound_topic_to_unverified")).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("F-R2 fix round 1, I2 (sink 3): a discarded stale generation's text never fires the note-sending guards", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    // The exact phrase the file's own "item 4" test already proves triggers
+    // live_offer_unverified (the unverified-offer note-sending guard).
+    // droppedThisGeneration() reads true here: the modelAudioMsg() chunk
+    // just above was discarded for THIS still-open generation. Gated at the
+    // moment this text arrives, not at turn end -- unlike NB4/item 4's own
+    // scenario a few tests up, which never pushes an audio chunk at all and
+    // so must still fire (droppedThisGeneration() stays false there).
+    await call.assistantSays("We have a slot available on Monday at 9 AM.");
+
+    expect(events("live_offer_unverified")).toHaveLength(0);
+    await call.hangUp();
+  });
 });
 
 describe("inbound unchanged", () => {
