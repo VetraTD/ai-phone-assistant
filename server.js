@@ -1507,6 +1507,8 @@ if (outboundDeps) {
 // configured (e.g. local dev); `setEnqueue(null)` is the same as never
 // calling it -- runPostCall logs and relies on the sweep either way.
 outboundPostCall.setEnqueue(outboundDeps?.enqueue ?? null);
+// S3-8: the same wiring, for step 7's webhook-delivery task enqueue.
+outboundPostCall.setEnqueueOutbox(outboundDeps?.enqueueOutbox ?? null);
 
 // ---------------------------------------------------------------------------
 // Centralized error handler — never expose stack traces

@@ -25,7 +25,10 @@ import {
   setBusinessOutbound,
   triggerOutreach,
   unsuppress,
+  webhookSet,
+  webhookTest,
 } from "../../scripts/outbound-admin.js";
+import { randomBytes } from "node:crypto";
 import { TEMPLATES, PURPOSE_BY_TEMPLATE } from "../../lib/outbound/templates.js";
 import { OPERATOR_TEST_WORDING } from "../../lib/outbound/gate.js";
 
@@ -671,5 +674,137 @@ describeDb("outbound-admin: unsuppress", () => {
     const r = await asProbe((c) => unsuppress(c, { businessPhone: "+19995550000", contactPhone: ALLOWED_PHONE, confirm: true }));
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/no business has phone_number/);
+  });
+});
+
+describeDb("outbound-admin: webhookSet / webhookTest (S3-8)", () => {
+  const OLD_KEY = process.env.CONNECTIONS_WEBHOOK_KEY;
+  const SECRET = "whsec_" + randomBytes(24).toString("hex");
+
+  beforeAll(() => {
+    process.env.CONNECTIONS_WEBHOOK_KEY = randomBytes(32).toString("base64");
+  });
+  afterAll(async () => {
+    if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
+    await admin.query(`DELETE FROM webhook_endpoints WHERE business_id = $1`, [businessId]).catch(() => {});
+  });
+
+  const endpointCount = async () =>
+    (await admin.query(`SELECT count(*)::int AS n FROM webhook_endpoints WHERE business_id = $1`, [businessId])).rows[0].n;
+
+  it("a dry run (no --confirm) writes nothing and never returns the secret", async () => {
+    const before = await endpointCount();
+    const r = await asProbe((c) =>
+      webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/hook", secret: SECRET, events: [], active: true, confirm: false })
+    );
+    expect(r).toMatchObject({ ok: true, dryRun: true, wouldWrite: { url: "https://example.com/hook", events: [], active: true } });
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+    expect(await endpointCount()).toBe(before);
+  });
+
+  it("--confirm creates the row, encrypted, read back correctly, and never returns the secret", async () => {
+    const r = await asProbe((c) =>
+      webhookSet(c, {
+        businessPhone: BUSINESS_PHONE,
+        url: "https://example.com/hook-confirmed",
+        secret: SECRET,
+        events: ["call.completed"],
+        active: true,
+        confirm: true,
+      })
+    );
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.endpointId).toBeTruthy();
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+
+    const row = (await admin.query(`SELECT business_id, url, events, active, secret_ciphertext FROM webhook_endpoints WHERE id = $1`, [r.endpointId])).rows[0];
+    expect(row.business_id).toBe(businessId);
+    expect(row.url).toBe("https://example.com/hook-confirmed");
+    expect(row.events).toEqual(["call.completed"]);
+    expect(row.active).toBe(true);
+    // The stored ciphertext is not the plaintext secret, and decrypts back to it.
+    expect(Buffer.isBuffer(row.secret_ciphertext)).toBe(true);
+    expect(row.secret_ciphertext.toString("utf8")).not.toContain(SECRET);
+    const { decryptSecret } = await import("../../lib/connections/secretBox.js");
+    expect(decryptSecret(row.secret_ciphertext)).toBe(SECRET);
+  });
+
+  it("--endpoint-id updates an existing endpoint instead of creating a new one", async () => {
+    const created = await asProbe((c) =>
+      webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/to-update", secret: SECRET, events: [], active: true, confirm: true })
+    );
+    const before = await endpointCount();
+
+    const updated = await asProbe((c) =>
+      webhookSet(c, {
+        businessPhone: BUSINESS_PHONE,
+        endpointId: created.endpointId,
+        url: "https://example.com/updated",
+        secret: SECRET,
+        events: [],
+        active: false,
+        confirm: true,
+      })
+    );
+    expect(updated).toMatchObject({ ok: true, endpointId: created.endpointId, url: "https://example.com/updated", active: false });
+    expect(await endpointCount()).toBe(before); // no new row
+
+    const row = (await admin.query(`SELECT url, active FROM webhook_endpoints WHERE id = $1`, [created.endpointId])).rows[0];
+    expect(row).toEqual({ url: "https://example.com/updated", active: false });
+  });
+
+  it("refuses an http:// url before any write", async () => {
+    const before = await endpointCount();
+    const r = await asProbe((c) => webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "http://example.com/hook", secret: SECRET, events: [], active: true, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(await endpointCount()).toBe(before);
+  });
+
+  it("fails closed when CONNECTIONS_WEBHOOK_KEY is unset -- refused before any transaction opens", async () => {
+    const savedKey = process.env.CONNECTIONS_WEBHOOK_KEY;
+    delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    try {
+      const before = await endpointCount();
+      const r = await asProbe((c) =>
+        webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/no-key", secret: SECRET, events: [], active: true, confirm: true })
+      );
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/CONNECTIONS_WEBHOOK_KEY/);
+      expect(await endpointCount()).toBe(before);
+    } finally {
+      process.env.CONNECTIONS_WEBHOOK_KEY = savedKey;
+    }
+  });
+
+  it("webhookTest dry run reports what it would send and decrypts/sends nothing", async () => {
+    const created = await asProbe((c) =>
+      webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/test-dry", secret: SECRET, events: [], active: true, confirm: true })
+    );
+    const r = await asProbe((c) => webhookTest(c, { businessPhone: BUSINESS_PHONE, endpointId: created.endpointId, confirm: false }));
+    expect(r).toMatchObject({ ok: true, dryRun: true, wouldSend: { endpointId: created.endpointId, url: "https://example.com/test-dry", event: "call.completed" } });
+  });
+
+  it("webhookTest refuses an inactive endpoint before decrypting or sending anything", async () => {
+    const created = await asProbe((c) =>
+      webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/test-inactive", secret: SECRET, events: [], active: false, confirm: true })
+    );
+    const r = await asProbe((c) => webhookTest(c, { businessPhone: BUSINESS_PHONE, endpointId: created.endpointId, confirm: true }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not active/);
+  });
+
+  it("webhookTest refuses an endpoint id belonging to another tenant", async () => {
+    const other = await admin.query(`INSERT INTO businesses (name, phone_number, timezone) VALUES ('Other Webhook Co', '+15550199088', 'Europe/London') RETURNING id`);
+    const created = await asProbe((c) =>
+      webhookSet(c, { businessPhone: BUSINESS_PHONE, url: "https://example.com/test-cross-tenant", secret: SECRET, events: [], active: true, confirm: true })
+    );
+    try {
+      const r = await asProbe((c) => webhookTest(c, { businessPhone: "+15550199088", endpointId: created.endpointId, confirm: false }));
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/no webhook endpoint/);
+    } finally {
+      await admin.query(`DELETE FROM businesses WHERE id = $1`, [other.rows[0].id]).catch(() => {});
+    }
   });
 });

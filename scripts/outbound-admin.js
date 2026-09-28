@@ -57,9 +57,23 @@
 //   or this is refused before any transaction opens -- go-live pre-deploy Y3.
 //   This is the only way this script can remove a do-not-call entry, and it
 //   must never work for a real lead.
+//
+//   node scripts/outbound-admin.js webhook-set --phone +1... --url https://... \
+//     --secret <at least 16 chars> [--events call.completed,outreach.closed] \
+//     [--active true|false] [--endpoint-id <uuid>] [--confirm]
+//   S3-8. --events omitted or empty subscribes to every event. --endpoint-id
+//   updates an existing endpoint for this tenant instead of creating one.
+//   The secret is encrypted (CONNECTIONS_WEBHOOK_KEY) before it is written
+//   and is NEVER printed back, dry-run or confirmed.
+//   node scripts/outbound-admin.js webhook-test --phone +1... --endpoint-id <uuid> [--confirm]
+//   Sends one real, signed test delivery (event call.completed) to a stored
+//   endpoint through the SAME SSRF-guarded delivery path the delivery task
+//   handler uses. Dry-run by default: no network call, no secret decrypted,
+//   without --confirm.
 // ---------------------------------------------------------------------------
 
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 import { connect } from "./migrate.js";
 import { validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
@@ -67,9 +81,15 @@ import { outboundEnv } from "../lib/outbound/config.js";
 // The dial-time gate honours this consent only while the number is on the
 // SERVICE's allow-list (Checkpoint 2a, F4); one constant, so the two agree.
 import { OPERATOR_TEST_WORDING } from "../lib/outbound/gate.js";
+// S3-8: the results channel. encryptSecret/decryptSecret never appear in any
+// output this script prints (webhook-set never echoes the secret back;
+// webhook-test decrypts only to sign a live test delivery).
+import { encryptSecret, decryptSecret } from "../lib/connections/secretBox.js";
+import { RESULTS_EVENTS, buildResultsPayload, attemptDelivery } from "../lib/connections/outbox.js";
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 const CAMPAIGN_STATUSES = ["draft", "active", "paused"];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The dashboard's documented bound on outbound_max_concurrent (fix round 1,
 // Minor). Named so parseArgs and setBusinessOutbound cannot drift apart.
 const MAX_OUTBOUND_CONCURRENT = 10;
@@ -624,6 +644,191 @@ export async function unsuppress(client, { businessPhone, contactPhone, confirm 
 }
 
 // ---------------------------------------------------------------------------
+// webhookSet (S3-8): create or update one results-channel endpoint
+// (webhook_endpoints). The secret is encrypted here (encryptSecret,
+// lib/connections/secretBox.js) and NEVER appears in the dry-run preview or
+// the confirmed write's return value -- only `wouldWrite`/the final result
+// carry url/events/active, matching the brief's "never print the secret
+// after set".
+// ---------------------------------------------------------------------------
+export async function webhookSet(client, { businessPhone, endpointId, url, secret, events, active, confirm }) {
+  if (!E164.test(businessPhone || "")) {
+    return { ok: false, error: "businessPhone must be an E.164 number" };
+  }
+  if (endpointId && !UUID_RE.test(endpointId)) {
+    return { ok: false, error: "endpointId must be a uuid (--endpoint-id)" };
+  }
+  if (!url || typeof url !== "string" || !url.startsWith("https://")) {
+    return { ok: false, error: "url must be an https:// URL (--url)" };
+  }
+  if (!secret || typeof secret !== "string" || secret.length < 16) {
+    return { ok: false, error: "secret must be at least 16 characters (--secret)" };
+  }
+  const evts = Array.isArray(events) ? events : [];
+  const badEvents = evts.filter((e) => !RESULTS_EVENTS.includes(e));
+  if (badEvents.length) {
+    return { ok: false, error: `unknown event type(s): ${badEvents.join(", ")} -- allowed: ${RESULTS_EVENTS.join(", ")} (empty = every event)` };
+  }
+
+  // Encrypted BEFORE any transaction opens -- a misconfigured/missing
+  // CONNECTIONS_WEBHOOK_KEY (fail-closed, lib/connections/secretBox.js) is
+  // refused up front, never as a half-open write.
+  let ciphertext;
+  try {
+    ciphertext = encryptSecret(secret);
+  } catch (e) {
+    return { ok: false, error: `cannot encrypt secret: ${e.message}` };
+  }
+
+  await client.query("BEGIN");
+  try {
+    const bizRes = await client.query("SELECT * FROM app_lookup_business_by_phone($1)", [businessPhone]);
+    if (bizRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no business has phone_number ${businessPhone}` };
+    }
+    const business = bizRes.rows[0];
+
+    if (endpointId) {
+      const r = await client.query("SELECT id FROM webhook_endpoints WHERE id = $1 AND business_id = $2", [endpointId, business.id]);
+      if (r.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return { ok: false, error: `no webhook endpoint ${endpointId} for business ${businessPhone}` };
+      }
+    }
+
+    const wouldWrite = { businessId: business.id, endpointId: endpointId || "(new)", url, events: evts, active };
+    if (!confirm) {
+      await client.query("ROLLBACK");
+      return { ok: true, dryRun: true, wouldWrite };
+    }
+
+    let id = endpointId;
+    if (endpointId) {
+      await client.query(`UPDATE webhook_endpoints SET url = $2, secret_ciphertext = $3, events = $4, active = $5 WHERE id = $1`, [
+        endpointId,
+        url,
+        ciphertext,
+        evts,
+        active,
+      ]);
+    } else {
+      const ins = await client.query(
+        `INSERT INTO webhook_endpoints (business_id, url, secret_ciphertext, events, active) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [business.id, url, ciphertext, evts, active]
+      );
+      id = ins.rows[0].id;
+    }
+
+    const check = await client.query("SELECT id, url, events, active FROM webhook_endpoints WHERE id = $1", [id]);
+    const row = check.rows[0];
+    const mismatches = [];
+    if (!row) {
+      mismatches.push("row missing entirely");
+    } else {
+      if (row.url !== url) mismatches.push("url");
+      if (row.active !== active) mismatches.push("active");
+      if (JSON.stringify([...row.events].sort()) !== JSON.stringify([...evts].sort())) mismatches.push("events");
+    }
+    if (mismatches.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `read-back mismatch: ${mismatches.join(", ")}` };
+    }
+
+    await client.query("COMMIT");
+    return { ok: true, businessId: business.id, endpointId: id, url, events: evts, active };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// webhookTest (S3-8): a real signed delivery to a stored endpoint, using the
+// SAME attemptDelivery (lib/connections/outbox.js) -- and so the SAME
+// SSRF-guarded fetch (lib/net/ssrfGuard.js) -- the delivery task handler
+// uses. Dry-run by default: without --confirm, no network call is made and
+// no secret is ever decrypted.
+// ---------------------------------------------------------------------------
+export async function webhookTest(client, { businessPhone, endpointId, confirm }) {
+  if (!E164.test(businessPhone || "")) {
+    return { ok: false, error: "businessPhone must be an E.164 number" };
+  }
+  if (!endpointId || !UUID_RE.test(endpointId)) {
+    return { ok: false, error: "endpointId must be a uuid (--endpoint-id)" };
+  }
+
+  // BEGIN/ROLLBACK, even though this reads: app_lookup_business_by_phone's
+  // own set_config('app.business_id', ..., true) is TRANSACTION-LOCAL (its
+  // third argument). Without an explicit transaction, a plain pg.Client
+  // auto-commits each statement in its own implicit transaction, so the
+  // scope it sets would vanish before the very next query -- and the
+  // webhook_endpoints read below, FORCE ROW LEVEL SECURITY, would then
+  // silently see zero rows (found in this task's own DB test: it read back
+  // as "no webhook endpoint ... for business ...", the exact 0-rows-reads-as-
+  // refusal shape services/db.js's requireTenantScope doc warns about).
+  await client.query("BEGIN");
+  let business, endpoint;
+  try {
+    const bizRes = await client.query("SELECT * FROM app_lookup_business_by_phone($1)", [businessPhone]);
+    if (bizRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no business has phone_number ${businessPhone}` };
+    }
+    business = bizRes.rows[0];
+
+    const epRes = await client.query("SELECT id, url, secret_ciphertext, active FROM webhook_endpoints WHERE id = $1 AND business_id = $2", [
+      endpointId,
+      business.id,
+    ]);
+    if (epRes.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: `no webhook endpoint ${endpointId} for business ${businessPhone}` };
+    }
+    endpoint = epRes.rows[0];
+    await client.query("ROLLBACK"); // read-only -- nothing to commit
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+
+  const payload = buildResultsPayload({
+    event: "call.completed",
+    deliveryId: randomUUID(),
+    occurredAt: new Date().toISOString(),
+    campaign: { id: null, name: "webhook-test", version: null },
+    outreach: { id: null, attempt: 0, state: "closed", close_reason: null },
+    call: { result: "connected", answered_by: "human", duration_seconds: 0 },
+    outcome: "other",
+    contact: { id: null, phone: "+10000000000", first_name: "Test", external_ids: {} },
+    summary: "This is a test delivery from scripts/outbound-admin.js webhook-test -- not a real call.",
+  });
+
+  if (!confirm) {
+    return { ok: true, dryRun: true, wouldSend: { endpointId: endpoint.id, url: endpoint.url, event: payload.event, deliveryId: payload.delivery_id } };
+  }
+  if (!endpoint.active) {
+    return { ok: false, error: `endpoint ${endpointId} is not active` };
+  }
+
+  let secret;
+  try {
+    secret = decryptSecret(endpoint.secret_ciphertext);
+  } catch (e) {
+    return { ok: false, error: `cannot decrypt endpoint secret: ${e.message}` };
+  }
+
+  const result = await attemptDelivery({
+    url: endpoint.url,
+    secret,
+    eventType: payload.event,
+    deliveryId: payload.delivery_id,
+    payload,
+  });
+  return { ok: result.ok, endpointId: endpoint.id, url: endpoint.url, deliveryId: payload.delivery_id, status: result.status, lastError: result.lastError };
+}
+
+// ---------------------------------------------------------------------------
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 function argOf(args, name) {
@@ -737,7 +942,34 @@ export function parseArgs(argv) {
     return { ok: true, value: { command, confirm, businessPhone: phone, contactPhone } };
   }
 
-  push("command", `must be one of campaign, status, outbound, trigger, unsuppress (got ${JSON.stringify(command ?? null)})`);
+  if (command === "webhook-set") {
+    const endpointId = argOf(args, "endpoint-id");
+    const url = argOf(args, "url");
+    const secret = argOf(args, "secret");
+    const eventsRaw = argOf(args, "events");
+    const events = eventsRaw
+      ? eventsRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+    const activeRaw = argOf(args, "active");
+    const active = activeRaw === null ? true : activeRaw === "true";
+    if (activeRaw !== null && activeRaw !== "true" && activeRaw !== "false") push("active", "must be true or false (--active)");
+    if (!url) push("url", "is required (--url), an https:// endpoint");
+    if (!secret) push("secret", "is required (--secret)");
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, value: { command, confirm, businessPhone: phone, endpointId: endpointId || undefined, url, secret, events, active } };
+  }
+
+  if (command === "webhook-test") {
+    const endpointId = argOf(args, "endpoint-id");
+    if (!endpointId) push("endpoint-id", "is required (--endpoint-id)");
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, value: { command, confirm, businessPhone: phone, endpointId } };
+  }
+
+  push("command", `must be one of campaign, status, outbound, trigger, unsuppress, webhook-set, webhook-test (got ${JSON.stringify(command ?? null)})`);
   return { ok: false, errors };
 }
 
@@ -755,6 +987,8 @@ async function main() {
     else if (v.command === "status") result = await setCampaignStatus(client, v);
     else if (v.command === "outbound") result = await setBusinessOutbound(client, v);
     else if (v.command === "unsuppress") result = await unsuppress(client, v);
+    else if (v.command === "webhook-set") result = await webhookSet(client, v);
+    else if (v.command === "webhook-test") result = await webhookTest(client, v);
     else result = await triggerOutreach(client, v);
 
     console.log(JSON.stringify(result));

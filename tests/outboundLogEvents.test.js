@@ -12,8 +12,9 @@
 //      the code legitimately logs extra diagnostics §14 never named
 //      (outbound_backstop_render_failed, outbound_internal_routes_disabled,
 //      ...), and equality would make every one of those a red build.
-//      STAGE 3 names (outbound_optout_tool, outbound_webhook_delivery,
-//      outbound_callback_recognized) are not emitted yet -- it.todo entries
+//      STAGE 3 names (outbound_optout_tool, outbound_callback_recognized) --
+//      outbound_webhook_delivery graduated in S3-8 (Task 28) -- are not
+//      emitted yet -- it.todo entries
 //      below name the task that ships each one, so they stay visible without
 //      ever reading as a passing assertion.
 //
@@ -89,12 +90,15 @@ const STAGE_2_NAMES = [
   "outbound_optout_detector_fired",
   "outbound_claimed_human",
   "outbound_context_missing",
+  // S3-8 (Task 28): the shared results channel's delivery task handler now
+  // logs this on every delivered/retry/dead outcome
+  // (lib/outbound/internalRoutes.js's deliverOutboxRow/finishOutboxFailure).
+  "outbound_webhook_delivery",
 ];
 
 /** name -> the stage-3 task that ships it (spec §14; not emitted yet). */
 const STAGE_3_NAMES = {
   outbound_optout_tool: "Task 25",
-  outbound_webhook_delivery: "Task 28",
   outbound_callback_recognized: "Task 26",
 };
 
