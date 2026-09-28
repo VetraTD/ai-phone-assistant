@@ -28,6 +28,14 @@
  *
  * Reordering PACKS is a real change to what the model sees, so it needs a
  * deliberate snapshot update, not a silent one.
+ *
+ * S3-3 (spec §12.2): outcome, callback and opt_out are appended at the end,
+ * after every tenant pack. They contribute nothing to inbound (or to the 110
+ * inbound goldens) at all -- they are PLATFORM packs, filtered onto outbound
+ * calls only by services/gemini.js's filterForOutboundCampaign and stripped
+ * from every inbound call by that same filter (lib/outbound/policy.js's
+ * PLATFORM_PACKS). Their registry position only ever matters for the order
+ * their tools reach the model on an outbound call.
  */
 
 import appointments from "./appointments.js";
@@ -35,6 +43,9 @@ import messages from "./messages.js";
 import transfer from "./transfer.js";
 import quotes from "./quotes.js";
 import smsConsent from "./smsConsent.js";
+import outcome from "./outcome.js";
+import callback from "./callback.js";
+import optOut from "./optOut.js";
 
 /**
  * Registry order. Governs two things at once:
@@ -43,11 +54,14 @@ import smsConsent from "./smsConsent.js";
  *    contribute none, so this is still book -> record -> request_transfer)
  *  - the order clauses appear in the CAPABILITIES line
  *
- * Both are asserted byte-for-byte by tests/promptSnapshot.test.js.
+ * Both are asserted byte-for-byte by tests/promptSnapshot.test.js -- for the
+ * FIVE tenant packs above; outcome/callback/opt_out never reach an inbound
+ * call at all (see the S3-3 note above), so appending them here cannot move
+ * anything an inbound snapshot asserts.
  *
  * @type {import("./_contract.js").CapabilityPack[]}
  */
-const PACKS = [appointments, messages, quotes, transfer, smsConsent];
+const PACKS = [appointments, messages, quotes, transfer, smsConsent, outcome, callback, optOut];
 
 const BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 

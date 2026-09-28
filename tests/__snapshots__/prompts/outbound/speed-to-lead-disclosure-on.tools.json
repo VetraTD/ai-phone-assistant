@@ -104,6 +104,64 @@
     }
   },
   {
+    "name": "set_call_outcome",
+    "description": "Record how this outbound call ended. Call this once, near the end of the call, choosing whichever option best matches what actually happened. Never call this for a booking (book_appointment already records that), an opt-out request (use the opt_out tool instead), or a transfer (request_transfer already records that) -- this tool refuses all three.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "qualified_no_booking",
+            "not_interested",
+            "not_a_fit",
+            "callback_requested",
+            "wrong_person",
+            "wrong_number",
+            "other"
+          ],
+          "description": "qualified_no_booking: a real conversation, no booking made. not_interested: they said no. not_a_fit: they do not meet the criteria. callback_requested: they asked to be called back at a specific time -- use schedule_callback for that, then this. wrong_person: you established this is not the right person (not a wrong NUMBER -- use wrong_number for that). wrong_number: this number does not reach the right person or business at all. other: anything else, with a note."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional short note, e.g. what the contact asked for."
+        }
+      },
+      "required": [
+        "outcome"
+      ]
+    }
+  },
+  {
+    "name": "schedule_callback",
+    "description": "Book a specific day and time to call this contact back. `when_iso` is the day and time IN THE CONTACT'S OWN LOCAL TIME, as YYYY-MM-DDTHH:MM with no timezone offset -- write it exactly as they would read a clock on their own wall, never converted to any other timezone. If the time is not available you will be told the nearest time that is -- offer that instead of guessing another one yourself.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "when_iso": {
+          "type": "string",
+          "description": "The callback's day and time, in the contact's own local time, as YYYY-MM-DDTHH:MM."
+        },
+        "when_text": {
+          "type": "string",
+          "description": "What the contact actually said, e.g. \"tomorrow afternoon\" or \"Thursday around 2\"."
+        }
+      },
+      "required": [
+        "when_iso"
+      ]
+    }
+  },
+  {
+    "name": "opt_out",
+    "description": "Call this the moment the contact asks to stop being called, to be taken off the list, or anything equivalent -- even from a gatekeeper or someone who says this is the wrong number. Say the confirmation sentence you have been given for this situation, then call this tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "check_appointment_availability",
     "description": "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller names a time OR a day. Given a date and time it answers whether that slot is open, and if available is false you offer the returned alternatives instead of collecting details. Given just a date it returns the times open that day: offer open_times first, and if the caller wants something else that day, offer from all_open_times. Never tell a caller nothing else is available while all_open_times still has times in it. Let them choose — never choose for them.",
     "parameters": {

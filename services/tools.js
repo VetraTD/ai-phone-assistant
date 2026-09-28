@@ -10,6 +10,9 @@ import {
   listScheduledBetween,
   getAppointmentById,
   recordSmsConsent,
+  setCallOutcomeCode,
+  insertSuppression,
+  mergeCallAnswers,
   withTenantSafe,
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
@@ -20,7 +23,7 @@ import { checkRequirements, capabilityConfig } from "../lib/capabilities/require
 import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
-import { skipOnOutbound } from "../lib/outbound/policy.js";
+import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import {
   stripFillers,
@@ -312,6 +315,19 @@ const CAPABILITY_DEPS = {
   },
   get recordSmsConsent() {
     return recordSmsConsent;
+  },
+  // S3-3: the platform packs' own writers (capabilities/outcome.js,
+  // capabilities/callback.js, capabilities/optOut.js). Getters, like every
+  // other entry here, so a test that mocks services/db.js without these three
+  // still passes for every call that never reaches an outbound platform pack.
+  get setCallOutcomeCode() {
+    return setCallOutcomeCode;
+  },
+  get insertSuppression() {
+    return insertSuppression;
+  },
+  get mergeCallAnswers() {
+    return mergeCallAnswers;
   },
   get executeIntegration() {
     return executeIntegration;
@@ -839,7 +855,12 @@ export async function executeToolCall(fc, ctx) {
         const campaignCapabilities = Array.isArray(ctx.outboundCall?.config?.capabilities)
           ? ctx.outboundCall.config.capabilities
           : [];
-        if (!pack || !campaignCapabilities.includes(pack.id)) {
+        // S3-3: must allow the platform packs (outcome/callback/opt_out),
+        // exactly like the declaration-time filter's own union -- they are
+        // declared on every outbound call regardless of what the campaign's
+        // own capabilities list says, so this execution-time mirror must
+        // agree or a declared tool would be refused the moment it is called.
+        if (!pack || !(campaignCapabilities.includes(pack.id) || PLATFORM_PACKS.includes(pack.id))) {
           const message = "That is not available on this call.";
           return {
             functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },

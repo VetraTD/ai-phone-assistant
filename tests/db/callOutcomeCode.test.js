@@ -64,3 +64,35 @@ describeDb("setCallOutcomeCode, on real Postgres", () => {
     expect(await row(MISSING_SID)).toBeNull();
   });
 });
+
+// S3-3 (spec §12.2, §11's "answers.callback_requested_at" seam):
+// schedule_callback's own write. Same file, same harness, same shape as
+// setCallOutcomeCode above -- the sibling this function was written beside.
+describeDb("mergeCallAnswers, on real Postgres", () => {
+  it("a landed row with no prior answers: writes the patch as the whole object", async () => {
+    await expect(db.mergeCallAnswers(SID, { callback_requested_at: "2026-10-01T15:00:00.000Z" })).resolves.toBeUndefined();
+    expect((await row()).answers).toEqual({ callback_requested_at: "2026-10-01T15:00:00.000Z" });
+  });
+
+  it("a SECOND merge adds a key without clobbering the first (shallow JSONB merge, not an overwrite)", async () => {
+    await db.mergeCallAnswers(SID, { callback_requested_at: "2026-10-01T15:00:00.000Z" });
+    await db.mergeCallAnswers(SID, { another_key: "kept alongside" });
+    expect((await row()).answers).toEqual({
+      callback_requested_at: "2026-10-01T15:00:00.000Z",
+      another_key: "kept alongside",
+    });
+  });
+
+  it("a later merge for the SAME key overwrites just that key", async () => {
+    await db.mergeCallAnswers(SID, { callback_requested_at: "2026-10-01T15:00:00.000Z" });
+    await db.mergeCallAnswers(SID, { callback_requested_at: "2026-10-02T09:00:00.000Z" });
+    expect((await row()).answers).toEqual({ callback_requested_at: "2026-10-02T09:00:00.000Z" });
+  });
+
+  it("a missing calls row: throws rather than silently reporting success", async () => {
+    await expect(db.mergeCallAnswers(MISSING_SID, { callback_requested_at: "2026-10-01T15:00:00.000Z" })).rejects.toThrow(
+      /expected 1 row, got 0/
+    );
+    expect(await row(MISSING_SID)).toBeNull();
+  });
+});

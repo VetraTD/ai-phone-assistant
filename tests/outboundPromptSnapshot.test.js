@@ -261,13 +261,43 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
     expect(outboundNames).not.toContain("open_case_file");
   });
 
-  it("a campaign that lists no implemented capability (missed-call-callback shape) keeps exactly the engine tools", () => {
+  // S3-3 supersedes this item's old name and assertion: `qualification`
+  // still has no pack, but `callback`/`opt_out`/`outcome` shipped real ones
+  // in S3-3, and this fixture's own campaign config lists all three (see
+  // tests/fixtures/businessConfigs.js) -- so "keeps exactly the engine
+  // tools" is no longer true even without the PLATFORM_PACKS union, since
+  // the campaign names them itself.
+  it("a campaign that lists only qualification plus the S3-3 platform capabilities gets the engine tools plus the three platform tools, nothing else", () => {
     const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
     const names = buildAllDeclarations(config, extras).map((d) => d.name);
     // confirm_identity (Task 18) is unconditional on outbound, like end_call
     // and set_call_intent — it never passes through the campaign-capability
-    // filter because it is not a capability pack's tool.
-    expect(names).toEqual(["set_call_intent", "end_call", "confirm_identity"]);
+    // filter because it is not a capability pack's tool. set_call_outcome/
+    // schedule_callback/opt_out (S3-3) are PLATFORM_PACKS -- declared
+    // regardless of what the campaign's own capabilities list says, and this
+    // fixture's config also lists them explicitly (a harmless, idempotent
+    // union either way). Order is registry order (capabilities/index.js):
+    // outcome, callback, opt_out.
+    expect(names).toEqual([
+      "set_call_intent",
+      "end_call",
+      "confirm_identity",
+      "set_call_outcome",
+      "schedule_callback",
+      "opt_out",
+    ]);
+  });
+
+  it("PLATFORM_PACKS survive even when a campaign's own capabilities list omits them entirely", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
+    const withoutPlatformCaps = {
+      ...extras,
+      outboundCall: { ...extras.outboundCall, config: { ...extras.outboundCall.config, capabilities: ["qualification"] } },
+    };
+    const names = buildAllDeclarations(config, withoutPlatformCaps).map((d) => d.name);
+    expect(names).toContain("set_call_outcome");
+    expect(names).toContain("schedule_callback");
+    expect(names).toContain("opt_out");
   });
 
   it("without extras.outboundCall, the tool builders are unaffected (inbound-shape control; promptSnapshot.test.js has the byte-identical proof)", () => {

@@ -144,6 +144,30 @@
       "core": true,
       "adapterKind": null,
       "configSchema": null
+    },
+    {
+      "id": "outcome",
+      "label": "Call outcome",
+      "description": "Record how an outbound call ended (qualified, not interested, wrong number, ...). Always available on an outbound call; never used on inbound.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "callback",
+      "label": "Callback scheduling",
+      "description": "Book a specific day and time to call an outbound contact back, inside the campaign's calling window. Always available on an outbound call; never used on inbound.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "opt_out",
+      "label": "Opt out / do not call",
+      "description": "Record a do-not-call request immediately, inside the call, so this contact is never dialled again. Always available on an outbound call; never used on inbound.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": null
     }
   ],
   "adapters": {

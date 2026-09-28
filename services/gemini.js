@@ -29,7 +29,7 @@ import {
 import { collectTools, collectAdapterTools, actionToolNames, getPack, packForTool } from "../capabilities/index.js";
 import { assertVendorAllowed } from "../lib/compliance.js";
 import { outboundIdentityLine, outboundCallBlock, OUTBOUND_CLOSING_RULE } from "../lib/outbound/prompt.js";
-import { skipOnOutbound } from "../lib/outbound/policy.js";
+import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
 import {
   collectStaticFragments,
   collectStepGuidance,
@@ -139,8 +139,19 @@ export function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
  * kept unconditionally (D-c + O-1: Live's step machine needs `set_call_intent`
  * to leave IDENTIFY_INTENT).
  *
- * A no-op when `extras` carries no outbound call context, so inbound and every
- * existing snapshot are untouched.
+ * A no-op for every EXISTING (tenant) pack when `extras` carries no outbound
+ * call context, so inbound and every existing snapshot are untouched.
+ *
+ * S3-3 (spec §12.2): PLATFORM_PACKS (lib/outbound/policy.js -- outcome,
+ * callback, opt_out) is unioned into `campaignCapabilities` on outbound, so
+ * their tools survive regardless of what the campaign itself lists, and the
+ * SAME three pack ids are explicitly excluded on the inbound branch below --
+ * their own `tools()` return a declaration unconditionally (like
+ * transfer.js's CORE pattern), so without this exclusion they would leak onto
+ * every inbound call the moment their pack files existed. This is the only
+ * change to the inbound branch's behaviour: every OTHER pack was already
+ * untouched by it (no existing pack owns a name in PLATFORM_PACKS), so no
+ * existing inbound snapshot moves.
  *
  * @param {object[]} declarations
  * @param {object} extras
@@ -148,7 +159,12 @@ export function buildAllDeclarations(cfg, extras = {}, markerMode = false) {
  */
 function filterForOutboundCampaign(declarations, extras) {
   const outbound = extras?.outboundCall;
-  if (!outbound) return declarations;
+  if (!outbound) {
+    return declarations.filter((d) => {
+      const pack = packForTool(d.name);
+      return !(pack && PLATFORM_PACKS.includes(pack.id));
+    });
+  }
   const campaignCapabilities = Array.isArray(outbound?.config?.capabilities) ? outbound.config.capabilities : [];
   return declarations.filter((d) => {
     const pack = packForTool(d.name);
@@ -157,7 +173,10 @@ function filterForOutboundCampaign(declarations, extras) {
     // capability tool the registry itself does not know about, which is a
     // bug elsewhere. Fail CLOSED (exclude) rather than let an unrecognised
     // tool through unfiltered on the one call type that must stay narrow.
-    return pack ? campaignCapabilities.includes(pack.id) : false;
+    // S3-3: the union with PLATFORM_PACKS -- idempotent when a campaign also
+    // lists one of them explicitly (CAMPAIGN_ENUMS.capabilities allows it),
+    // and what keeps them declared even on a campaign that never does.
+    return pack ? campaignCapabilities.includes(pack.id) || PLATFORM_PACKS.includes(pack.id) : false;
   });
 }
 

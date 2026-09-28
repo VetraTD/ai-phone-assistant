@@ -170,12 +170,20 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     expect(situationRows.length).toBe(13);
   });
 
-  it("no situation line names a tool that is not declared on the call (spec §9.5 D-c) -- plain English only", () => {
-    const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
-    const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    for (const row of situationRows) {
-      expect(row).not.toMatch(/\b(schedule_callback|opt_out|record_outcome|wrong_person)\b/);
-    }
+  // S3-3 supersedes this item's old assertion. Before S3-3, none of these
+  // tools existed (capabilities/index.js had no pack for them), so naming
+  // one would have been the phantom-tool failure this test used to guard
+  // against. Now they are PLATFORM packs (lib/outbound/policy.js
+  // PLATFORM_PACKS), always declared on outbound regardless of what the
+  // campaign's own capabilities list says, so naming them is required, not
+  // forbidden -- this test now asserts the opposite of what it used to.
+  it("S3-3: situation rows DO name the always-declared platform tools -- no longer a phantom-tool risk", () => {
+    expect(text).toMatch(/\bset_call_outcome\b/);
+    expect(text).toMatch(/\bschedule_callback\b/);
+    expect(text).toMatch(/\bopt_out\b/);
+    // The old, guessed tool name this file's assertion used to forbid was
+    // never the real one -- the shipped tool is set_call_outcome.
+    expect(text).not.toMatch(/\brecord_outcome\b/);
   });
 
   it("named risk 4: the gatekeeper line contains no topic text (real config, real topic)", () => {

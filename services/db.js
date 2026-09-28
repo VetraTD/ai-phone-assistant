@@ -942,6 +942,32 @@ export async function setCallOutcomeCode(callSid, outcomeCode) {
 }
 
 /**
+ * S3-3 (spec §12.2, §11's "answers.callback_requested_at" seam --
+ * outboundPostCallContext's own doc names it). `calls.answers` has no
+ * dedicated writer either -- this is the first one. `schedule_callback`
+ * (capabilities/callback.js) is the only caller today, merging
+ * `{callback_requested_at}` in; a shallow JSONB merge (`||`) rather than a
+ * full overwrite so a later write never has to know what an earlier one
+ * already stored. Same shape as setCallOutcomeCode immediately above: keyed
+ * by CallSid, THROWS rather than logs-and-returns on a DB error or a missing
+ * row -- a tenantless write under FORCE RLS matches zero rows and reports
+ * success, which here would silently drop the callback time a caller was
+ * just told back.
+ * @param {string} callSid - Twilio Call SID
+ * @param {object} patch - merged shallowly into the existing `answers` (or `{}`)
+ */
+export async function mergeCallAnswers(callSid, patch) {
+  if (!pool) return;
+  const res = await q(
+    `UPDATE calls SET answers = COALESCE(answers, '{}'::jsonb) || $2::jsonb WHERE twilio_call_sid = $1`,
+    [callSid, JSON.stringify(patch || {})]
+  );
+  if (res.error) throw res.error;
+  if (res.rowCount !== 1) throw new Error(`mergeCallAnswers: expected 1 row, got ${res.rowCount}`);
+  noteAccess("mergeCallAnswers", { rowCount: res.rowCount });
+}
+
+/**
  * Fetch all transcript entries for a call, ordered by sequence.
  * @param {string} callId - DB call UUID
  * @returns {Promise<Array<{speaker: string, message: string, sequence: number}>>}
@@ -3375,24 +3401,62 @@ export async function outboundCallEffects(callId) {
 }
 
 /**
+ * The shared INSERT every suppression writer runs (spec §12.2/§13.3):
+ * tenant-scoped (the caller has already run requireTenantScope), `ON
+ * CONFLICT DO NOTHING` on the (business_id, phone_e164) unique -- a row
+ * already suppressing this number, from ANY writer (a tool, a detector,
+ * the dashboard, the API), is success, not a race to report.
+ *
+ * Not exported, and deliberately not a third public entry point:
+ * insertSuppression and insertDetectorSuppression below are the two callers,
+ * and tests/phiAuditCoverage.test.js requires each EXPORTED, classified
+ * function to record its own access by name -- so each of them calls
+ * noteAccess itself rather than delegating that half to this helper too.
+ * @param {{phone: string, reason: string, sourceCallId: string|null, createdBy: string}} o
+ */
+async function writeSuppressionRow({ phone, reason, sourceCallId, createdBy }) {
+  const res = await q(
+    `INSERT INTO suppressions (business_id, phone_e164, reason, source_call_id, created_by)
+     SELECT app_current_business_id(), $1, $2, $3, $4
+     ON CONFLICT (business_id, phone_e164) DO NOTHING
+     RETURNING id`,
+    [phone, reason, sourceCallId, createdBy]
+  );
+  if (res.error) throw res.error;
+  return res;
+}
+
+/**
+ * S3-3 (spec §12.2): the general suppression writer -- a TOOL recording a
+ * do-not-call reason immediately, inside its own tenant scope
+ * (services/tools.js's executeToolCallGuarded already holds one open for the
+ * whole call). Used by capabilities/optOut.js (reason `opted_out`, created_by
+ * `tool`) and capabilities/outcome.js's wrong_number branch (reason
+ * `wrong_number`, created_by `tool`) -- the wrong-number suppression writer,
+ * a must-hold.
+ * @param {{phone: string, reason: "opted_out"|"wrong_number"|"complaint"|"manual"|"tps", sourceCallId?: string|null, createdBy: "tool"|"detector"|"dashboard"|"api"}} o
+ * @returns {Promise<boolean>} true iff THIS call inserted the row
+ */
+export async function insertSuppression({ phone, reason, sourceCallId = null, createdBy }) {
+  requireTenantScope("insertSuppression");
+  const res = await writeSuppressionRow({ phone, reason, sourceCallId, createdBy });
+  noteAccess("insertSuppression", { resourceIds: [res.rows?.[0]?.id].filter(Boolean), rowCount: res.rowCount || 0 });
+  return res.rowCount === 1;
+}
+
+/**
  * The opt-out detector's own write (spec §13.3 step 2): a suppression the
- * DETECTOR found, not the tool. `ON CONFLICT DO NOTHING` -- a business-scoped
- * unique (business_id, phone_e164) may already hold one (the tool got there
- * first, or an earlier call's detector did), and that is success, not a
- * race to report.
+ * DETECTOR found, not the tool. A thin wrapper over the SAME insert
+ * insertSuppression uses, with the detector's fixed reason/created_by --
+ * `ON CONFLICT DO NOTHING` -- a business-scoped unique (business_id,
+ * phone_e164) may already hold one (the tool got there first, or an earlier
+ * call's detector did), and that is success, not a race to report.
  * @param {{phone: string, sourceCallId: string|null}} o
  * @returns {Promise<boolean>} true iff THIS call inserted the row
  */
 export async function insertDetectorSuppression({ phone, sourceCallId = null }) {
   requireTenantScope("insertDetectorSuppression");
-  const res = await q(
-    `INSERT INTO suppressions (business_id, phone_e164, reason, source_call_id, created_by)
-     SELECT app_current_business_id(), $1, 'opted_out', $2, 'detector'
-     ON CONFLICT (business_id, phone_e164) DO NOTHING
-     RETURNING id`,
-    [phone, sourceCallId]
-  );
-  if (res.error) throw res.error;
+  const res = await writeSuppressionRow({ phone, reason: "opted_out", sourceCallId, createdBy: "detector" });
   noteAccess("insertDetectorSuppression", { resourceIds: [res.rows?.[0]?.id].filter(Boolean), rowCount: res.rowCount || 0 });
   return res.rowCount === 1;
 }

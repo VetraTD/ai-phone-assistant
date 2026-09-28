@@ -256,6 +256,12 @@ const BUILTIN_TOOL_NAMES = [
   "request_transfer",
   // sms_consent pack
   "record_sms_consent",
+  // S3-3: outcome/callback/opt_out packs -- platform packs, declared on
+  // every outbound call regardless of tenant config (lib/outbound/policy.js
+  // PLATFORM_PACKS), never on inbound.
+  "set_call_outcome",
+  "schedule_callback",
+  "opt_out",
 ];
 
 router.get("/api/integrations/definitions", (req, res) => {

@@ -353,6 +353,72 @@ describe("runPostCall: the opt-out detector (spec §13.3)", () => {
   });
 });
 
+describe("D9 (this task) -- the outcome the CALL is recorded with, not just the suppression row", () => {
+  // The bug: a caller's own "stop calling me", with no tool ever called, used
+  // to reach tier 4 (the LLM summary) unresolved -- the detector ran, but
+  // strictly AFTER the outcome had already been decided and written, so its
+  // only effect was the suppression insert. A plausible LLM guess like
+  // `not_interested` for that sentence was what actually landed in
+  // calls.outcome_code. This is the exact transcript from the task brief.
+  it('a transcript with "please stop calling me" and no tool call resolves the outcome to opted_out, without ever calling summarize()', async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }));
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "please stop calling me" }]) });
+    await run(db, { summarize });
+    expect(summarize).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+  });
+
+  it("bumps outbound_optout_outcome_from_detector only when the detector actually decided the outcome", async () => {
+    const bumpCounter = vi.spyOn(await import("../lib/voice/metrics.js"), "bumpCounter");
+    const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "stop calling me" }]) });
+    await run(db);
+    expect(bumpCounter).toHaveBeenCalledWith("outbound_optout_outcome_from_detector");
+    bumpCounter.mockRestore();
+  });
+
+  it("qualifier honoured: a tier-1 door outcome (e.g. booked via a tool) is NOT overwritten by a later opt-out phrase in the same transcript", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb(
+      { outcomeCode: "callback_requested" },
+      { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "actually, stop calling me" }]) }
+    );
+    await run(db, { summarize });
+    // The suppression is still written -- the detector always fires on a hit
+    // -- but the CALL's own outcome stays what tier 1 already resolved.
+    expect(db.insertDetectorSuppression).toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "callback_requested");
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it("qualifier honoured: a tier-3 effect (booked) is NOT overwritten by an opt-out phrase either", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb(
+      {},
+      {
+        outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })),
+        fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "take me off your list" }]),
+      }
+    );
+    await run(db, { summarize });
+    expect(db.insertDetectorSuppression).toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "booked");
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it("an existing suppression still resolves the outcome to opted_out, even though nothing new is inserted", async () => {
+    const db = fakeDb(
+      {},
+      {
+        fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "please stop calling me" }]),
+        isSuppressed: vi.fn(async () => true),
+      }
+    );
+    await run(db);
+    expect(db.insertDetectorSuppression).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+  });
+});
+
 describe("runPostCall: the silent-call rule (spec §13.4)", () => {
   it("silent -> sets the final verdict and the 72h hold, logs outbound_silent_call", async () => {
     const log = { info: vi.fn(), error: vi.fn() };
