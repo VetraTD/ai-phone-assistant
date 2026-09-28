@@ -138,9 +138,19 @@
  *
  *   --outbound         drive /twilio/outbound-answer instead of /twilio/live-voice
  *   --silent           the person says nothing (default: "Hello?" at --hello-ms)
- *   --hello-ms <ms>    when the person says "Hello?", from the simulated answer
- *                      (default 1870, the owner's measured value). The audio is
- *                      the outbound_hello script: --synth --script outbound_hello
+ *   --script <name>    speak a multi-line SITUATION instead of one "Hello?" (S3-5):
+ *                      outbound_stop, outbound_gatekeeper_fetch, outbound_gatekeeper_later,
+ *                      outbound_child, outbound_bad_time, outbound_wrong_number,
+ *                      outbound_robot, outbound_email (lib/probe/script.js). An INBOUND
+ *                      script name (demo_booking, ...) is refused -- LOCAL ONLY, same as
+ *                      every other --outbound mode. The first line plays at --hello-ms,
+ *                      same as the default single "Hello?"; each later line plays once
+ *                      Ava's reply to the one before it has been quiet for --gap
+ *                      (default 900 ms), the same turn-taking --script uses inbound.
+ *                      Synthesise once: --synth --script <name>
+ *   --hello-ms <ms>    when the person says their FIRST line, from the simulated answer
+ *                      (default 1870, the owner's measured value). With no --script the
+ *                      audio is the outbound_hello script: --synth --script outbound_hello
  *   --answer-to-stream-ms <ms>  when the stream `start` is sent after the answer
  *                      (default 330: spike B measured 319-334 ms on real calls;
  *                      a local server would otherwise start the stream ~90 ms
@@ -151,12 +161,14 @@
  *   --call-sid <sid>   use an existing attempt instead of seeding one
  *   --no-render        skip the render: no clip, so the prompt path runs
  *   --keep-seed        do not delete the seeded rows afterwards
- *   --hold <ms>        call length from the answer (default 20000)
+ *   --hold <ms>        call length from the answer (default 20000; a multi-line
+ *                      --script needs more room -- see the S3-5 report for the
+ *                      recommended value per script)
  */
 import "dotenv/config";
 import { WebSocket } from "ws";
 import { appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio } from "../lib/probe/script.js";
+import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio, OUTBOUND_SITUATION_SCRIPTS } from "../lib/probe/script.js";
 import {
   buildInboundAnswerRequest,
   buildOutboundAnswerRequest,
@@ -342,8 +354,22 @@ if (P1_PROBE && !P1_PROBE.startsWith(spendLive.P1_PREFIX)) {
 
 /** --outbound's own refusals, all before anything is seeded, rendered or spent. */
 let OUTBOUND_AMD = null;
+// S3-5: the refusal used to be unconditional ("--script is inbound only").
+// It now admits exactly the outbound situation scripts (lib/probe/script.js)
+// -- an INBOUND script name (demo_booking, diagnostic, ...) is still refused,
+// because those speak a caller answering an inbound call, not a person
+// picking up one Ava placed.
+const OUTBOUND_SCRIPT_NAMES = new Set([...OUTBOUND_SITUATION_SCRIPTS, "outbound_hello"]);
 if (OUTBOUND) {
-  if (SCRIPT_NAME) die(`--outbound says one line ("Hello?") or nothing (--silent); --script is inbound only.`);
+  if (SCRIPT_NAME && !OUTBOUND_SCRIPT_NAMES.has(SCRIPT_NAME)) {
+    die(
+      `--outbound --script "${SCRIPT_NAME}" is not an outbound script.\n\n` +
+        `Expected one of: ${[...OUTBOUND_SCRIPT_NAMES].join(", ")}.\n` +
+        `An inbound script name speaks a caller answering an inbound call, not a\n` +
+        `person picking up one Ava placed.`
+    );
+  }
+  if (SCRIPT_NAME && OUTBOUND_SILENT) die(`--outbound --script speaks; --silent is for when nobody does. Pick one.`);
   if (HANGUP_AFTER || HANGUP_ARM_AFTER || HANGUP_ON_COUNTER || EXPECTATIONS.length) {
     die("--hangup-* and --expect-counter are inbound only.");
   }
@@ -392,8 +418,14 @@ if (!AUTH_TOKEN) {
   );
 }
 
-/** The script, as frames. Empty in silent mode. */
-const script = SCRIPT_NAME ? buildProbeScript(resolveScriptLines(SCRIPT_NAME)) : [];
+/**
+ * The INBOUND script, as frames. Empty in silent mode, and also skipped
+ * under --outbound (S3-5): mainOutbound() builds its own `scriptLines` from
+ * the same SCRIPT_NAME, on its own schedule (never before --dry-run's early
+ * return), and main() -- the only reader of this one -- never runs on that
+ * path (see the dispatch at the foot of this file).
+ */
+const script = !OUTBOUND && SCRIPT_NAME ? buildProbeScript(resolveScriptLines(SCRIPT_NAME)) : [];
 
 // Validated HERE and not discovered mid-call, for the reason resolveScriptLines
 // throws on an unknown script name rather than quietly running the default: a
@@ -1119,9 +1151,19 @@ async function postSigned(req) {
  * "The answer" is the moment the answer POST is SENT: that is when Twilio
  * would have seen the pickup, and every client-side time is measured from it.
  *
+ * `scriptLines` is the outbound script (lib/probe/script.js, already run
+ * through buildProbeScript): one line for the pre-existing default ("Hello?",
+ * the outbound_hello script) or several for an S3-5 situation script. Only
+ * the FIRST line is scheduled by its own timer (`--hello-ms`, H2's lead-in
+ * arithmetic, unchanged from before this task); line 2 onward are queued by
+ * `maybeSpeakNext` once Ava's reply to the line before it has gone quiet for
+ * `--gap` -- the SAME rule main()'s inbound `--script` mode uses, so the two
+ * turn-taking implementations cannot drift apart in what "the model replied"
+ * means.
+ *
  * @returns {Promise<{observer: ReturnType<typeof createClientObserver>, stats: object}>}
  */
-async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadIn = { leadInMs: 0, leadInFrames: 0 } }) {
+async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], leadIn = { leadInMs: 0, leadInFrames: 0 } }) {
   const observer = createClientObserver({ leadInMs: leadIn.leadInMs });
   const playout = createPlayoutClock({ frameMs: FRAME_MS });
   const stats = {
@@ -1208,6 +1250,44 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
   let outQueue = [];
   let finished = false;
 
+  // S3-5: multi-line turn-taking. Line 0 is scheduled by its own timer
+  // below (unchanged); `cursor` starts at 1 so `maybeSpeakNext` only ever
+  // sends line 2 onward. For the pre-existing single-line case
+  // (scriptLines.length === 1) `cursor >= scriptLines.length` is true from
+  // the start, so `maybeSpeakNext` is a permanent no-op and this call's
+  // behaviour is byte-identical to before this task.
+  let cursor = 1;
+  let assistantFramesThisTurn = 0;
+  let lastAssistantMediaAt = 0;
+  /** @type {{label: string, endedAt: number}[]} */
+  const turns = [];
+  const multiLine = scriptLines.length > 1;
+
+  /**
+   * Queue the next line once Ava's reply to the one before it has been
+   * quiet for GAP_MS, or once REPLY_WAIT_MS has passed with no reply heard
+   * at all -- the inbound `--script` rule (main()'s own maybeSpeakNext),
+   * reused rather than re-derived so the two cannot disagree about what
+   * "the model replied" means.
+   */
+  function maybeSpeakNext(now) {
+    if (finished || outQueue.length > 0 || cursor >= scriptLines.length || turns.length === 0) return;
+    const waitedSinceTurnStart = now - turns.at(-1).endedAt;
+    const heardSomething = assistantFramesThisTurn > 0;
+    const assistantQuiet = heardSomething && now - lastAssistantMediaAt >= GAP_MS;
+    const gaveUp = !heardSomething && waitedSinceTurnStart >= REPLY_WAIT_MS;
+    if (!assistantQuiet && !gaveUp) return;
+
+    const nextLine = scriptLines[cursor];
+    cursor += 1;
+    for (let i = 0; i < nextLine.mulaw.length; i += FRAME_BYTES) outQueue.push(nextLine.mulaw.subarray(i, i + FRAME_BYTES));
+    turns.push({ label: nextLine.label, endedAt: now + (nextLine.mulaw.length / FRAME_BYTES) * FRAME_MS });
+    console.log(
+      `speak      ${nextLine.label}  (heard ${((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)} s back${gaveUp ? ", NO REPLY" : ""})`
+    );
+    assistantFramesThisTurn = 0;
+  }
+
   function hangUp(reason) {
     if (finished) return;
     finished = true;
@@ -1247,12 +1327,41 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
     );
     observer.streamStarted(Date.now());
 
-    // "Hello?" at --hello-ms after the answer means the person's VOICE
-    // starts then, not the FILE (H2): the clip's own lead-in silence
-    // (leadIn.leadInMs) is sent earlier, so the voiced frame -- the one at
-    // index leadIn.leadInFrames -- lands on the ticker below at --hello-ms.
+    // The first line's VOICE starts at --hello-ms after the answer, not the
+    // FILE (H2): the clip's own lead-in silence (leadIn.leadInMs) is sent
+    // earlier, so the voiced frame -- the one at index leadIn.leadInFrames --
+    // lands on the ticker below at --hello-ms. True whether the script is
+    // one line ("Hello?") or several (an S3-5 situation).
     const { fileStartMs } = scheduleCallerClip(HELLO_MS, leadIn.leadInMs);
-    if (mode === "speaks_first") later(() => outQueue.push(...helloFrames), answeredAt + fileStartMs - Date.now());
+    if (mode === "speaks_first" && scriptLines[0]) {
+      const firstLine = scriptLines[0];
+      const firstFrames = [];
+      for (let i = 0; i < firstLine.mulaw.length; i += FRAME_BYTES) firstFrames.push(firstLine.mulaw.subarray(i, i + FRAME_BYTES));
+      later(() => {
+        outQueue.push(...firstFrames);
+        // Baseline for maybeSpeakNext's "quiet since the line before this
+        // one ended" -- irrelevant when scriptLines.length === 1 (cursor is
+        // already >= scriptLines.length so maybeSpeakNext never reads it).
+        turns.push({ label: firstLine.label, endedAt: Date.now() + firstFrames.length * FRAME_MS });
+      }, answeredAt + fileStartMs - Date.now());
+    }
+
+    // S3-5: line 2 onward, once each of Ava's replies has gone quiet --
+    // registered ONLY for a multi-line script, so the pre-existing
+    // single-"Hello?" timing is untouched by this task.
+    if (multiLine) {
+      every(() => maybeSpeakNext(Date.now()), FRAME_MS);
+      // A script that finishes early hangs up rather than burn budget on a
+      // path that is already known to be spoken out (cost on this path is
+      // quadratic in call length, the same reason main()'s inbound mode
+      // does this).
+      every(() => {
+        if (finished) return;
+        const spokeEverything = cursor >= scriptLines.length && outQueue.length === 0;
+        const quietFor = Date.now() - lastAssistantMediaAt;
+        if (spokeEverything && assistantFramesThisTurn > 0 && quietFor >= GAP_MS * 2) hangUp("script_finished");
+      }, 200);
+    }
 
     // ONE ticker (H3), as the inbound mode: paced by WALL CLOCK, not by
     // counting ticks -- see startMediaTicker (lib/probe/outboundHarness.js),
@@ -1312,6 +1421,10 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
     observer.fromServer(msg, now);
     if (msg.event === "media" && msg.media?.payload) {
       playout.onMedia(now);
+      // S3-5: turn-taking bookkeeping only -- unused (and harmless) when
+      // scriptLines.length === 1, since maybeSpeakNext never runs then.
+      lastAssistantMediaAt = now;
+      assistantFramesThisTurn += 1;
       return;
     }
     if (msg.event === "mark" && msg.mark?.name) {
@@ -1361,25 +1474,30 @@ async function runOutboundCall({ seed, common, parties, mode, helloFrames, leadI
 async function mainOutbound() {
   const mode = OUTBOUND_SILENT ? "silent" : "speaks_first";
   const databaseUrl = process.env.DATABASE_URL;
+  // S3-5: which of the 8 situation scripts this run is, or null for the
+  // pre-existing default (silent, or the single "Hello?" of outbound_hello).
+  // The refusal above already limits SCRIPT_NAME to OUTBOUND_SCRIPT_NAMES.
+  const situation = mode === "speaks_first" && SCRIPT_NAME && SCRIPT_NAME !== "outbound_hello" ? SCRIPT_NAME : null;
+  const scriptName = situation || "outbound_hello";
 
   // The caller's audio, checked before anything is seeded or spent.
-  let helloFrames = [];
+  /** @type {{label: string, mulaw: Buffer}[]} */
+  let scriptLines = [];
   // H2: the real fixture carries lead-in silence before the voice starts
   // (Google TTS's own recording latency); leadInFrames/leadInMs let the
   // schedule and the onset both account for it. { leadInMs: 0, leadInFrames: 0 }
   // (silent mode, --dry-run) is exactly the OLD behaviour: no adjustment.
   let leadIn = { leadInMs: 0, leadInFrames: 0 };
   if (mode === "speaks_first" && !DRY_RUN) {
-    let hello;
     try {
-      [hello] = buildProbeScript(resolveScriptLines("outbound_hello"));
+      scriptLines = buildProbeScript(resolveScriptLines(scriptName));
     } catch (err) {
-      die(`${err.message}\n\nSynthesise it once (Google TTS, a few characters): node scripts/live-call-harness.js --synth --script outbound_hello`);
+      die(`${err.message}\n\nSynthesise it once (Google TTS, a few characters): node scripts/live-call-harness.js --synth --script ${scriptName}`);
     }
-    for (let i = 0; i < hello.mulaw.length; i += FRAME_BYTES) helloFrames.push(hello.mulaw.subarray(i, i + FRAME_BYTES));
-    leadIn = detectLeadIn(hello.mulaw, { frameBytes: FRAME_BYTES, frameMs: FRAME_MS });
+    const firstLine = scriptLines[0];
+    leadIn = detectLeadIn(firstLine.mulaw, { frameBytes: FRAME_BYTES, frameMs: FRAME_MS });
     if (!leadIn.voiced) {
-      console.log(`lead_in    WARNING: no frame of outbound_hello.ulaw reached the RMS threshold -- treating lead_in_ms as 0`);
+      console.log(`lead_in    WARNING: no frame of ${scriptName}.ulaw's first line reached the RMS threshold -- treating lead_in_ms as 0`);
     }
     console.log(`lead_in    ${leadIn.leadInMs} ms (${leadIn.leadInFrames} frames of ${leadIn.frames}, voiced=${leadIn.voiced})`);
   }
@@ -1401,7 +1519,13 @@ async function mainOutbound() {
       seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact });
     }
     console.log(`base       ${BASE}`);
-    console.log(`mode       ${mode}${mode === "speaks_first" ? ` ("Hello?" at ${HELLO_MS} ms)` : ""}${OUTBOUND_AMD ? `, AMD ${OUTBOUND_AMD} at ${AMD_MS} ms` : ""}`);
+    console.log(
+      `mode       ${mode}${
+        mode === "speaks_first"
+          ? ` (${situation ? `${scriptName}, ${resolveScriptLines(scriptName).length} lines` : `"Hello?"`} at ${HELLO_MS} ms)`
+          : ""
+      }${OUTBOUND_AMD ? `, AMD ${OUTBOUND_AMD} at ${AMD_MS} ms` : ""}`
+    );
     console.log(`callSid    ${seed.callSid}   (${seed.seeded ? "seeded" : "existing attempt"})`);
     console.log(`attempt    ${seed.attemptId} #${seed.attemptNo}, outreach ${seed.outreachId}, campaign ${seed.campaignId} v${seed.campaignVersion}`);
     console.log(`business   ${seed.businessId} "${seed.businessName}", caller_id ${seed.callerId} -> contact ${seed.contact}`);
@@ -1428,7 +1552,12 @@ async function mainOutbound() {
             customParameters: "<the answer TwiML's <Parameter>s, via parseTwiml>",
             mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
           },
-          caller: mode === "speaks_first" ? `"Hello?" (outbound_hello) at ${HELLO_MS} ms after the answer` : "silence",
+          caller:
+            mode === "speaks_first"
+              ? situation
+                ? `${resolveScriptLines(scriptName).length} lines (${scriptName}), first at ${HELLO_MS} ms after the answer`
+                : `"Hello?" (outbound_hello) at ${HELLO_MS} ms after the answer`
+              : "silence",
           hang_up_at_ms: HOLD_MS,
         })
       );
@@ -1463,12 +1592,29 @@ async function mainOutbound() {
     console.log(`clip       ${clip ? `${clipBytes} bytes stored: the clip path` : "none stored: the prompt path"}`);
 
     state.callStarted = true;
-    const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, helloFrames, leadIn });
+    const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, scriptLines, leadIn });
 
     // The session writes the calls row's end and its summary at teardown.
     await new Promise((r) => setTimeout(r, 1500));
     const dbRead = await readBackOutbound({ admin, callSid: seed.callSid });
     const server = await readServerLogFor(seed.callSid);
+
+    // S3-5: the situation criteria (opted_out/wrong_number/callback rows) --
+    // read directly here rather than adding to lib/probe/outboundSeed.js's
+    // readBackOutbound(), which every other --outbound mode also calls.
+    // Scoped to THIS run's own business_id/outreach_id (seedOutboundAttempt
+    // creates a fresh business per run), so a leftover row from an earlier
+    // run -- or from a DIFFERENT business that happens to reuse the same
+    // phone number -- can never be read back as this run's own (named risk
+    // 3: cross-run contamination).
+    let dbExtra = dbRead;
+    if (situation) {
+      const [suppressionRes, outreachRes] = await Promise.all([
+        admin.query(`SELECT reason, created_by FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [seed.businessId, seed.contact]),
+        admin.query(`SELECT next_attempt_at, outcome, state, close_reason FROM outreach WHERE id = $1`, [seed.outreachId]),
+      ]);
+      dbExtra = { ...dbRead, suppression: suppressionRes.rows[0] ?? null, outreach: outreachRes.rows[0] ?? null };
+    }
 
     // H3: measured over the ticker's own lifetime (mediaTickerStartMs ->
     // mediaTickerEndMs, set when stopAllTimers actually stopped it) -- never
@@ -1487,10 +1633,26 @@ async function mainOutbound() {
 
     const verdict = outboundVerdict({
       mode,
+      ...(situation
+        ? {
+            situation,
+            topic: seed.config?.topic || "",
+            // Ruling (S3-5): the harness's own business is always seeded
+            // Europe/London (lib/probe/outboundSeed.js), and triggerOutreach
+            // is always called with timezone: null, so contactTimezone()
+            // would resolve to Europe/London here too -- hardcoded rather
+            // than re-derived, since re-deriving it needs a contact row this
+            // script never reads. Cost if the harness's own fixture ever
+            // changes timezone: a wrong "tomorrow HH:MM" expectation, caught
+            // immediately by the criterion it feeds failing every run.
+            timezone: "Europe/London",
+            now: new Date(),
+          }
+        : {}),
       clip,
       client: observer.snapshot(),
       server,
-      db: dbRead,
+      db: dbExtra,
       personaName: seed.personaName,
       answerToStreamMs: ANSWER_TO_STREAM_MS,
       pacing,
@@ -1511,6 +1673,7 @@ async function mainOutbound() {
         kind: "outbound_harness_verdict",
         pass: verdict.pass,
         mode,
+        situation,
         clip,
         callSid: seed.callSid,
         warnings: verdict.warnings,
@@ -1518,7 +1681,7 @@ async function mainOutbound() {
         measurements: verdict.measurements,
         render: render ? { lines: render.lines, refused: render.refused, stored: render.stored, total_ms: render.total_ms, failed: render.failed, sessions: render.sessions } : null,
         server: server ? { ...serverView, summary_usage: server.summary?.usage ?? null, summary_model: server.summary?.model ?? null, summary: undefined } : null,
-        db: dbRead,
+        db: dbExtra,
         requests: {
           answer: stats.answerStatus,
           in_progress: stats.inProgressStatus,

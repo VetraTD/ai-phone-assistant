@@ -456,19 +456,21 @@ describe("the simulated outbound call, through the real door and session", () =>
     });
     expect(results(v)).toEqual({
       path_backstop_silence: "PASS",
-      backstop_queued_at_1650: "PASS",
+      backstop_queued_at_target_ms: "PASS",
       played_out_le_2500: "PASS",
       seeded: "PASS",
       no_second_intro: "PASS",
       calls_direction_outbound: "PASS",
       post_call_exactly_once: "PASS",
     });
-    // The key name (backstop_queued_at_1650) is a stale label from before
-    // S3-2 -- the underlying target (SILENT_QUEUE_TARGET_MS) already
-    // recomputes from FIRST_SECONDS_DEFAULTS and is checked correctly here;
-    // only the identifier's own number is out of date (lib/probe/
-    // outboundHarness.js, parked -- not this task's file).
-    expect(v.criteria.backstop_queued_at_1650.client_queued_ms).toBe(1400);
+    // RENAMED (S3-5): the key was `backstop_queued_at_1650`, a stale label
+    // from before S3-2 -- the underlying target (SILENT_QUEUE_TARGET_MS)
+    // already recomputed from FIRST_SECONDS_DEFAULTS and was checked
+    // correctly here; only the identifier's own number was out of date. It
+    // is now named after the constant, not a number (lib/probe/
+    // outboundHarness.js), so a future change to silenceBackstopMs cannot
+    // make it stale again.
+    expect(v.criteria.backstop_queued_at_target_ms.client_queued_ms).toBe(1400);
     // Played out at the echo, 1,400 + 350: T1's own fix -- this is now UNDER
     // 2,000, where it used to read 2,010 (above_2000: true) before P-a.
     expect(v.criteria.played_out_le_2500).toMatchObject({ server_from_answer_ms: 1750, measured: "playout", above_2000: false });
