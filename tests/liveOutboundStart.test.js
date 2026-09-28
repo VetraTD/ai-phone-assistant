@@ -1266,9 +1266,22 @@ describe("outbound: the first seconds through the real session", () => {
       await call.feed(80, { voiced: true });
       if (i < 3) await call.feed(40);
     }
-    // Held whole: nothing of this gappy speech reached Live while the clip
-    // still plays -- proof the count-based confirm (not voiceActive) caught
-    // it, well within CLIP_CONFIRM_WINDOW_MS.
+    // 440 ms elapsed so far. A CONSECUTIVE-frame confirm (voiceActive's own
+    // rule) would never have reached CLIP_CONFIRM_VOICED_FRAMES within any
+    // one run; this pushes total elapsed since the FIRST voiced frame past
+    // CLIP_CONFIRM_WINDOW_MS (800 ms) -- BEFORE the clip's own end mark is
+    // ever delivered. This is the assertion that actually distinguishes
+    // "confirmed early via the count, now fully latched" from "never
+    // confirmed, still pending": once latched, this trailing silence goes
+    // straight into the capped hold and cannot leak before release,
+    // regardless of how long the clip goes on playing; a provisional window
+    // that never confirmed times out on ITS OWN clock and releases early,
+    // mid-clip -- before the seed, breaching C1 -- with nothing to do with
+    // whether the clip has ended yet. (A naive "nothing leaked before the
+    // mark" check cannot tell these apart: releaseClipHold flushes ANY
+    // still-pending provisional content too, so an unconfirmed run and a
+    // confirmed one look identical if checked only after the mark.)
+    await call.feed(500);
     expect(call.live.sent.audioIn.length).toBe(beforeHold);
 
     // The clip finishes; the seed goes now. The held speech reaches Live
