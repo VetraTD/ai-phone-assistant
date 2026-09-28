@@ -118,7 +118,7 @@ describe("a give_up_after_days breach closes the outreach early, ahead of the sc
         template_key: "speed_to_lead",
         config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055" },
       },
-      contact: { phone_e164: "+447700900001", timezone: "Europe/London" },
+      contact: { phone_e164: "+447700900001", timezone: "Europe/London", raw_timezone: "Europe/London" },
       outreach: { attempts_made: 1, created_at: new Date("2026-09-21T08:00:00Z"), hold_until: null },
       suppressed: false,
       consents: [

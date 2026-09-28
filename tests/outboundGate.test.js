@@ -10,7 +10,7 @@ const base = () => ({
   business: { outbound_enabled: true, outbound_max_concurrent: 2 },
   campaign: { status: "active", compliance_class: "solicited", template_key: "speed_to_lead",
     config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055" } },
-  contact: { phone_e164: "+447700900001", timezone: "Europe/London" },
+  contact: { phone_e164: "+447700900001", timezone: "Europe/London", raw_timezone: "Europe/London" },
   outreach: { attempts_made: 0, created_at: new Date("2026-09-28T12:59:00Z"), hold_until: null },
   suppressed: false,
   consents: [{ purpose: "enquiry_followup", channels: ["call"], covers_automated: true, captured_at: new Date("2026-09-28T12:58:00Z"), expires_at: null, revoked_at: null }],
@@ -188,6 +188,11 @@ describe("evaluateGate: a missing or malformed fact throws, never allows", () =>
     ["campaign.config.calling_window not an object", (f) => { f.campaign.config.calling_window = null; }],
     ["contact.phone_e164 not a non-empty string", (f) => { f.contact.phone_e164 = ""; }],
     ["contact.timezone empty", (f) => { f.contact.timezone = ""; }],
+    // S3-7: raw_timezone missing (undefined) must throw, not silently read as
+    // "no timezone on file" (null) -- a wrong alias must not switch the
+    // floor's US dual-zone rule on by accident.
+    ["contact.raw_timezone undefined (unwired caller)", (f) => { delete f.contact.raw_timezone; }],
+    ["contact.raw_timezone empty string", (f) => { f.contact.raw_timezone = ""; }],
     ["outreach.attempts_made undefined", (f) => { f.outreach.attempts_made = undefined; }],
     ["outreach.created_at garbage", (f) => { f.outreach.created_at = "garbage"; }],
     ["outreach.hold_until unparsable", (f) => { f.outreach.hold_until = "garbage"; }],
@@ -215,4 +220,117 @@ describe("evaluateGate: a missing or malformed fact throws, never allows", () =>
     const f = base(); mutate(f);
     expect(() => gate(f)).toThrow(/gate fact/);
   });
+});
+
+// S3-7 (spec S3-D5, P-b): the per-country calling-hours floor, a SEPARATE
+// check below the campaign's own window (check 7, unchanged above). Every
+// case here opens the campaign's OWN calling_window wide (00:00-23:59 every
+// day) so check 7 never binds first -- the floor is what's under test.
+describe("evaluateGate: the per-country calling-hours floor (S3-7)", () => {
+  const WIDE_OPEN = { mon_fri: "00:00-23:59", sat: "00:00-23:59", sun: "00:00-23:59" };
+  const floorBase = () => {
+    const f = base();
+    f.campaign.config = { ...f.campaign.config, calling_window: WIDE_OPEN };
+    // Every test below except the UK one swaps in a non-allow-listed
+    // contact number -- check 1 (global_disabled) would otherwise refuse
+    // before the floor is ever reached. ON has no other side effect here:
+    // dialsToday stays at base()'s default 0, well under the cap.
+    f.env.enabled = true;
+    return f;
+  };
+
+  it("Sunday 11:00 America/Chicago for a US contact (known timezone): later, opening at 12:00 the same day", () => {
+    const f = floorBase();
+    f.contact = { phone_e164: "+12142825551", timezone: "America/Chicago", raw_timezone: "America/Chicago" }; // 214 = Dallas, TX
+    f.now = new Date("2026-10-04T16:00:00Z"); // Sunday 11:00 CDT
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    expect(gate(f).at.toISOString()).toBe("2026-10-04T17:00:00.000Z"); // Sunday 12:00 CDT
+  });
+
+  it("20:30 Tuesday, US contact: later (the US floor closes at 20:00)", () => {
+    const f = floorBase();
+    f.contact = { phone_e164: "+12142825551", timezone: "America/Chicago", raw_timezone: "America/Chicago" };
+    f.now = new Date("2026-09-30T01:30:00Z"); // Tuesday 20:30 CDT
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    expect(gate(f).at.toISOString()).toBe("2026-09-30T13:00:00.000Z"); // Wednesday 08:00 CDT
+  });
+
+  it("20:30 Tuesday, UK contact: allowed (the GB floor runs to 21:00)", () => {
+    const f = floorBase();
+    f.now = new Date("2026-09-29T19:30:00Z"); // Tuesday 20:30 BST
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+
+  it("a US contact with NO timezone on file must clear the floor in BOTH America/New_York and America/Los_Angeles at once (named risk 2)", () => {
+    const f = floorBase();
+    // raw_timezone null -- the true DB absence -- while the RESOLVED
+    // `timezone` (what check 7 and the jitter would use) is some unrelated
+    // fallback, proving the floor reads raw_timezone and not this value.
+    f.contact = { phone_e164: "+12142825551", timezone: "Europe/London", raw_timezone: null };
+    f.now = new Date("2026-09-29T13:00:00Z"); // 09:00 America/New_York (EDT) == 06:00 America/Los_Angeles (PDT)
+    // NY alone is inside its 08:00-20:00; LA alone is not yet open -- ALL
+    // zones must pass, so this must still be "later", not "allow".
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    // The combined window opens when the LATER zone (LA) opens: LA 08:00 ==
+    // NY 11:00 (both EDT and PDT are UTC-4/-7 in late September).
+    expect(gate(f).at.toISOString()).toBe("2026-09-29T15:00:00.000Z");
+  });
+
+  it("a Toronto number (416, Canada) is never allowed, and never reads as a US number: no_legal_floor, not outside_window/outside_floor", () => {
+    const f = floorBase();
+    f.contact = { phone_e164: "+14162345678", timezone: "America/Toronto", raw_timezone: "America/Toronto" };
+    expect(gate(f)).toEqual({ verdict: "never", reason: "no_legal_floor" });
+  });
+
+  it("a +33 (France) number: never, no_legal_floor -- no invented EU envelope", () => {
+    const f = floorBase();
+    f.contact = { phone_e164: "+33612345678", timezone: "Europe/Paris", raw_timezone: "Europe/Paris" };
+    expect(gate(f)).toEqual({ verdict: "never", reason: "no_legal_floor" });
+  });
+
+  it("pins the NANPA test set: 416/604/876/787/242 refused, 214/469/212/415 are US", () => {
+    const refused = ["+14162345678", "+16042345678", "+18762345678", "+17872345678", "+12422345678"];
+    for (const phone of refused) {
+      const f = floorBase();
+      f.contact = { phone_e164: phone, timezone: "America/New_York", raw_timezone: "America/New_York" };
+      expect(gate(f), phone).toEqual({ verdict: "never", reason: "no_legal_floor" });
+    }
+    const us = ["+12142345678", "+14692345678", "+12122345678", "+14152345678"];
+    for (const phone of us) {
+      const f = floorBase();
+      f.contact = { phone_e164: phone, timezone: "America/New_York", raw_timezone: "America/New_York" };
+      f.now = new Date("2026-09-29T15:00:00Z"); // 11:00 EDT Tuesday -- inside the US floor
+      expect(gate(f), phone).toEqual({ verdict: "allow" });
+    }
+  });
+
+  it("fails closed when the floor and the campaign's own window structurally never overlap (named risk 1: never 'allow', never park)", () => {
+    const f = base(); // NOT floorBase(): this campaign window is deliberately narrow
+    f.env.enabled = true; // +1214... is not on the allow-list; see floorBase's own note
+    f.campaign.config = { ...f.campaign.config, calling_window: { mon_fri: "23:58-23:59", sat: "23:58-23:59", sun: "23:58-23:59" } };
+    f.contact = { phone_e164: "+12142825551", timezone: "America/Chicago", raw_timezone: "America/Chicago" };
+    f.now = new Date("2026-10-05T04:58:00Z"); // 23:58 CDT Sunday Oct 4 -- inside the campaign window, outside the US floor
+    const result = gate(f);
+    expect(result.verdict).not.toBe("allow");
+    expect(result).toEqual({ verdict: "never", reason: "no_legal_floor" });
+  });
+
+  it("DST boundary: the US floor's 08:00 opening uses the POST-transition offset (EST, not stale EDT)", () => {
+    const f = floorBase();
+    f.contact = { phone_e164: "+12142825551", timezone: "America/New_York", raw_timezone: "America/New_York" };
+    // 2026-11-01 (Sunday) is when US clocks fall back; by Monday 2026-11-02
+    // the zone is EST (UTC-5), not EDT (UTC-4). Consent/give-up windows
+    // pinned close to `now` so this reaches the floor check (5 and 8b are
+    // earlier/later checks, not what this test is about).
+    f.outreach.created_at = new Date("2026-11-01T12:59:00Z");
+    f.consents[0].captured_at = new Date("2026-11-01T12:59:00Z");
+    f.now = new Date("2026-11-02T12:59:00Z"); // 07:59 EST Monday -- one minute before the floor opens
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    expect(gate(f).at.toISOString()).toBe("2026-11-02T13:00:00.000Z"); // 08:00 EST
+  });
+
+  // Sabotage target (report + commit body): drop the Sunday row from
+  // US_WINDOWS in lib/outbound/legalFloor.js. Expected RED: the Sunday test
+  // above, which pins opening at 12:00 the SAME day, must fail once Sunday
+  // has no window of its own to open at all.
 });

@@ -22,9 +22,21 @@
  * see lib/outbound/callContext.js). S3-7 adds the per-country legal floor
  * later, and it is added HERE and only here, so execute() never needs a
  * second edit the day that ships.
+ *
+ * S3-7: the floor is optional on `validateCallbackTime`'s `phone` option
+ * (omitted, not falsy -- `phone === undefined`), so the pre-S3-7 "unit
+ * level" tests of the window+cap logic alone (tests/outboundPacks.test.js)
+ * keep testing exactly what they always tested. `execute()` (below) always
+ * supplies it, guarded by the same fail-closed no-phone check it already has
+ * for no-timezone, so PRODUCTION never takes the skip path.
+ * outboundCall.contact.timezone is already resolved (contactTimezone()'s
+ * fallback), never the raw DB column, so floorFor's US "no timezone on
+ * file" dual-zone rule cannot fire from this call site -- only gate.js's
+ * dispatch-time check (which has the raw column) can.
  */
 import { HAS_OFFSET_RE, parseNaiveDateTime, zonedComponentsToUtcMs } from "../lib/capabilities/datetime.js";
 import { isInsideWindow, nextWindowOpening } from "../lib/outbound/schedule.js";
+import { floorFor, isInsideFloor, nextLegalOpening } from "../lib/outbound/legalFloor.js";
 
 const SCHEDULE_CALLBACK_DECLARATION = {
   name: "schedule_callback",
@@ -60,19 +72,36 @@ const DAY_MS = 86_400_000;
  * site to find.
  *
  * @param {Date} candidate - the requested instant, already resolved to UTC
- * @param {{callingWindow: object|null, tz: string, now: Date, maxDaysAhead?: number}} o
- * @returns {{ok: true} | {ok: false, nearest: string}}
+ * @param {{callingWindow: object|null, tz: string, now: Date, maxDaysAhead?: number, phone?: string}} o
+ *   `phone` is OPTIONAL (see the file header): when given, the S3-7
+ *   per-country floor is also enforced; when omitted, only the window and
+ *   the 14-day cap are (the pre-S3-7 contract).
+ * @returns {{ok: true} | {ok: false, nearest: string} | {ok: false, nearest: null, refused: "no_legal_floor"}}
  */
-export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDaysAhead = MAX_DAYS_AHEAD }) {
+export function validateCallbackTime(candidate, { callingWindow, tz, now, maxDaysAhead = MAX_DAYS_AHEAD, phone }) {
   const capMs = now.getTime() + maxDaysAhead * DAY_MS;
   const withinCap = candidate.getTime() <= capMs;
   const insideWindow = isInsideWindow(candidate, callingWindow, tz);
-  if (withinCap && insideWindow) return { ok: true };
 
-  // Nearest bookable time: the next window opening from now, capped at the
-  // 14-day boundary so a caller is never offered a date outside the cap
-  // this same check just refused.
-  const opening = nextWindowOpening(now, callingWindow, tz);
+  let floor = null;
+  if (phone !== undefined) {
+    floor = floorFor(phone, tz);
+    if (floor.refused) {
+      // No owner-approved floor exists for this contact at all: never
+      // bookable, and there is no "nearest" time to search for -- refuse
+      // outright (fail closed) rather than offer a time the floor will
+      // never grant.
+      return { ok: false, nearest: null, refused: floor.refused };
+    }
+  }
+  const insideFloor = floor ? isInsideFloor(candidate, floor) : true;
+  if (withinCap && insideWindow && insideFloor) return { ok: true };
+
+  // Nearest bookable time: the next opening from now (floor-and-window when
+  // a floor applies, window-only otherwise), capped at the 14-day boundary
+  // so a caller is never offered a date outside the cap this same check
+  // just refused.
+  const opening = floor ? nextLegalOpening(now, floor, callingWindow, tz) : nextWindowOpening(now, callingWindow, tz);
   const cap = new Date(capMs);
   const nearest = opening && opening.getTime() <= capMs ? opening : cap;
   return { ok: false, nearest: nearest.toISOString() };
@@ -147,6 +176,15 @@ export default {
     if (!contactTz) {
       return refusal(fc, "No contact timezone is available, so a callback time cannot be validated.");
     }
+    // S3-7: the floor needs the contact's own number too -- fail closed the
+    // same way a missing timezone already does, rather than silently
+    // skipping the floor (validateCallbackTime's `phone` is optional
+    // precisely so a caller CAN skip it, and this tool must never be that
+    // caller).
+    const contactPhone = outbound.contact?.phone;
+    if (!contactPhone) {
+      return refusal(fc, "No contact phone number is available, so a callback time cannot be validated.");
+    }
 
     const candidate = parseWhenIso(fc.args?.when_iso, contactTz);
     if (!candidate) {
@@ -162,8 +200,19 @@ export default {
       callingWindow: outbound.config?.calling_window || null,
       tz: contactTz,
       now,
+      phone: contactPhone,
     });
     if (!verdict.ok) {
+      if (verdict.refused) {
+        // No owner-approved calling-hours floor exists for this contact at
+        // all (S3-7): there is no "nearest" time to offer, so this is a
+        // hard refusal, not a reschedule suggestion.
+        return refusal(
+          fc,
+          "This contact cannot be booked for an automatic callback -- there is no approved calling-hours " +
+            "policy for their phone number. Let them know a team member will follow up instead."
+        );
+      }
       const nearestSpoken = formatContactLocal(new Date(verdict.nearest), contactTz);
       const message =
         `That time is not available. The nearest available time is ${verdict.nearest} ` +
