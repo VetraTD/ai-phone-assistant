@@ -2663,25 +2663,26 @@ export async function failAttempt(attemptId, twilioStatus = "failed") {
 }
 
 /**
- * The pre-rendered backstop line and voicemail (§9.3), rendered while it
- * rings. Refused once post-call has started: post-call clears these columns
- * (spec §11 step 1), and a render that finished after a quick no-answer must
- * not write the clips back for good.
+ * The pre-rendered backstop line, voicemail and transfer-miss clip (§9.3,
+ * S3-4/D6), rendered while it rings. Refused once post-call has started:
+ * post-call clears these columns (spec §11 step 1), and a render that
+ * finished after a quick no-answer must not write the clips back for good.
  *
  * WRITES ONLY WHAT IT IS GIVEN (Task 14 fix round 1, I4): a null or absent
  * clip leaves its column as it is. Dispatch stores the opener the moment its
- * render finishes and the voicemail when that one does, and the second write
- * must not null out the first. Clearing is post-call's job (spec §11), with
- * its own statement.
+ * render finishes, the voicemail (or transfer_miss) when that one does, and
+ * a later write never nulls out an earlier one. Clearing is post-call's job
+ * (spec §11), with its own statement.
  * @param {string} attemptId
- * @param {{opener?: Buffer|null, voicemail?: Buffer|null}} audio
+ * @param {{opener?: Buffer|null, voicemail?: Buffer|null, transfer_miss?: Buffer|null}} audio
  */
-export async function storeAttemptAudio(attemptId, { opener = null, voicemail = null } = {}) {
+export async function storeAttemptAudio(attemptId, { opener = null, voicemail = null, transfer_miss = null } = {}) {
   requireTenantScope("storeAttemptAudio");
   const res = await q(
-    `UPDATE call_attempts SET opener_audio = COALESCE($2::bytea, opener_audio), voicemail_audio = COALESCE($3::bytea, voicemail_audio)
+    `UPDATE call_attempts SET opener_audio = COALESCE($2::bytea, opener_audio), voicemail_audio = COALESCE($3::bytea, voicemail_audio),
+            transfer_miss_audio = COALESCE($4::bytea, transfer_miss_audio)
       WHERE id = $1 AND post_call_started_at IS NULL`,
-    [attemptId, opener, voicemail]
+    [attemptId, opener, voicemail, transfer_miss]
   );
   if (res.error) throw res.error;
   if (res.rowCount !== 1) throw new Error(`storeAttemptAudio: expected 1 row, got ${res.rowCount} (missing, unscoped, or post-call already started)`);
@@ -2924,6 +2925,26 @@ export async function fetchAttemptVoicemailAudio(attemptId) {
   const row = one(res);
   noteAccess("fetchAttemptVoicemailAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
   return row?.voicemail_audio ?? null;
+}
+
+/**
+ * S3-4 (D6, migration 046): the pre-rendered "sorry, no one's free" clip, for
+ * the SAME signed media door as the voicemail (`GET /media/outbound/:callSid/
+ * :kind.wav`, kind=transfer_miss) -- played by the outbound-transfer-result
+ * route when a transfer goes unanswered, so the caller hears Ava's own Live
+ * voice instead of Twilio's <Say>. Same scoping rule as
+ * fetchAttemptVoicemailAudio: runs inside `withTenant`, resolved by the
+ * caller's own by-CallSid lookup first.
+ * @param {string} attemptId
+ * @returns {Promise<Buffer|null>} raw mu-law bytes, or null when there is none
+ */
+export async function fetchAttemptTransferMissAudio(attemptId) {
+  requireTenantScope("fetchAttemptTransferMissAudio");
+  const res = await q(`SELECT transfer_miss_audio FROM call_attempts WHERE id = $1`, [attemptId]);
+  if (res.error) throw res.error;
+  const row = one(res);
+  noteAccess("fetchAttemptTransferMissAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
+  return row?.transfer_miss_audio ?? null;
 }
 
 /**
@@ -3288,7 +3309,8 @@ export async function outboundPostCallContext(attemptId) {
  * Post-call step 1 (spec §11): set `result` (only if still unset -- an
  * unanswered attempt already has one from the door/AMD routes, and COALESCE
  * never clobbers a more specific verdict), `ended_at` (same rule), and clear
- * the two audio columns unconditionally -- an answered call's clips are no
+ * the three audio columns (S3-4: transfer_miss_audio joins opener_audio/
+ * voicemail_audio here) unconditionally -- an answered call's clips are no
  * longer needed, and an unanswered one may already have had them cleared.
  * @param {string} attemptId
  * @param {string} resultIfUnset - 'connected' for an answered attempt whose result is still null
@@ -3298,7 +3320,7 @@ export async function finalizeAttemptResult(attemptId, resultIfUnset) {
   const res = await q(
     `UPDATE call_attempts
         SET result = COALESCE(result, $2), ended_at = COALESCE(ended_at, now()),
-            opener_audio = NULL, voicemail_audio = NULL
+            opener_audio = NULL, voicemail_audio = NULL, transfer_miss_audio = NULL
       WHERE id = $1`,
     [attemptId, resultIfUnset]
   );

@@ -113,15 +113,19 @@ d("the outbound harness's seed, render, read-back and cleanup", () => {
 
   it("renders through the real renderAudio adapter (fake Live) and stores the clips the session then reads", async () => {
     const render = await seedMod.renderAttemptClips({ db, seed, env: { GEMINI_API_KEY: "test" }, connect: fakeConnect, settleMs: 0 });
-    expect(Object.keys(render.lines).sort()).toEqual(["opener", "voicemail"]);
+    // S3-4 (D6): the harness's speed_to_lead template lists "transfer", so
+    // the fixed transfer_miss line renders alongside the two templated ones.
+    expect(Object.keys(render.lines).sort()).toEqual(["opener", "transfer_miss", "voicemail"]);
     expect(render.failed).toBeNull();
     expect(render.stored.opener).toBeGreaterThan(0);
     expect(render.stored.voicemail).toBeGreaterThan(0);
+    expect(render.stored.transfer_miss).toBeGreaterThan(0);
     // The clip was rendered in the BUSINESS's voice and language (+44 -> en-GB).
     expect(fakeConnect.mock.calls[0][0].config.speechConfig.languageCode).toBe("en-GB");
     const byKind = Object.fromEntries(render.sessions.map((s) => [s.kind, s]));
     expect(byKind.opener).toMatchObject({ outcome: "accepted", overlap: 1, word_ratio: 1, usage_before_turn_complete: true, model: "gemini-3.1-flash-live-preview" });
     expect(byKind.voicemail).toMatchObject({ outcome: "accepted" });
+    expect(byKind.transfer_miss).toMatchObject({ outcome: "accepted" });
     expect(await seedMod.openerClipBytes({ admin, callSid: seed.callSid })).toBe(render.stored.opener);
 
     // What the Live session will read at pickup: the stored clip and its text.
@@ -154,6 +158,7 @@ d("the outbound harness's seed, render, read-back and cleanup", () => {
     expect(back.calls).toBeNull(); // no call ran
     expect(back.attempt).toMatchObject({ id: seed.attemptId, attempt_no: 1, answered_at: null, result: null });
     expect(back.attempt.opener_audio_bytes).toBeGreaterThan(0);
+    expect(back.attempt.transfer_miss_audio_bytes).toBeGreaterThan(0);
 
     const cleanup = await seedMod.cleanupOutboundSeed({ admin, seed });
     expect(cleanup.clean).toBe(true);

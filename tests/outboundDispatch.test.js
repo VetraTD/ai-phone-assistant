@@ -1,6 +1,6 @@
 // tests/outboundDispatch.test.js
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createDispatcher, startOfLocalDay, RENDER_BEFORE_DIAL_MAX_MS } from "../lib/outbound/dispatch.js";
+import { createDispatcher, startOfLocalDay, RENDER_BEFORE_DIAL_MAX_MS, TRANSFER_MISS_LINE } from "../lib/outbound/dispatch.js";
 import { TEMPLATES } from "../lib/outbound/templates.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { renderTemplate, spokenNumber } from "../lib/outbound/campaignSchema.js";
@@ -527,10 +527,38 @@ describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
     expect(renderAudio).toHaveBeenCalledWith({
       row: expect.objectContaining({ first_name: "Sam", business_name: "Digile Media" }),
       attemptNo: 1,
-      lines: { opener: expectedOpener, voicemail: expectedVoicemail },
+      // S3-4 (D6): the default template's capabilities list "transfer", so
+      // the fixed transfer_miss line joins the two rendered ones.
+      lines: { opener: expectedOpener, voicemail: expectedVoicemail, transfer_miss: TRANSFER_MISS_LINE },
       // Task 14 fix round 1 (I4): the per-clip store hook.
       onClip: expect.any(Function),
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // S3-4 (D6): transfer_miss is gated on the campaign's own capabilities
+  // list, independently of the opener/voicemail budget checks above.
+  // ---------------------------------------------------------------------
+  it("S3-4: a campaign that does NOT list 'transfer' never renders the transfer_miss line", async () => {
+    const db = fakeDb(
+      row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", capabilities: ["qualification", "appointments", "opt_out", "outcome"] } })
+    );
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    const call = renderAudio.mock.calls[0][0];
+    expect(call.lines).not.toHaveProperty("transfer_miss");
+  });
+
+  it("S3-4: a campaign that lists 'transfer' with no target configured yet still renders the fixed line (unused clips are cleared like any other)", async () => {
+    const db = fakeDb(row({ config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", transfer: null } }));
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio });
+    await d({ businessId: "b1", outreachId: "o1" });
+
+    const call = renderAudio.mock.calls[0][0];
+    expect(call.lines.transfer_miss).toBe(TRANSFER_MISS_LINE);
   });
 
   it("an attempt NOT in voicemail_on ([1,5]): lines has only opener, no voicemail key", async () => {
@@ -582,7 +610,33 @@ describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
     expect(call.lines).toHaveProperty("opener");
   });
 
-  it("both lines over budget: lines is empty and renderAudio is not even called", async () => {
+  it("both lines over budget, campaign does not list transfer: lines is empty and renderAudio is not even called", async () => {
+    const db = fakeDb(
+      row({
+        config: {
+          ...structuredClone(TEMPLATES.speed_to_lead),
+          caller_id: "+441372656055",
+          opener: "x".repeat(130),
+          voicemail: "y".repeat(310),
+          // S3-4: isolate this test's original claim (nothing renders) from
+          // the new, independent transfer_miss line -- covered on its own
+          // just below.
+          capabilities: ["qualification", "appointments", "opt_out", "outcome"],
+        },
+      })
+    );
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, log });
+    const result = await d({ businessId: "b1", outreachId: "o1" });
+
+    expect(result.status).toBe("dialed"); // the call still goes out; the backstop is optional
+    expect(renderAudio).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", chars: 130 });
+    expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", chars: 310 });
+  });
+
+  it("S3-4: both lines over budget BUT the campaign lists transfer -- renderAudio still fires, for transfer_miss alone", async () => {
     const db = fakeDb(
       row({
         config: {
@@ -598,10 +652,9 @@ describe("dispatch: the lines rendering (Task 13, §9.3 step 1, O-4)", () => {
     const { d } = mk(db, undefined, { renderAudio, log });
     const result = await d({ businessId: "b1", outreachId: "o1" });
 
-    expect(result.status).toBe("dialed"); // the call still goes out; the backstop is optional
-    expect(renderAudio).not.toHaveBeenCalled();
-    expect(log.error).toHaveBeenCalledWith("outbound_backstop_render_refused", { attemptId: "a1", chars: 130 });
-    expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", chars: 310 });
+    expect(result.status).toBe("dialed");
+    expect(renderAudio).toHaveBeenCalledTimes(1);
+    expect(renderAudio.mock.calls[0][0].lines).toEqual({ transfer_miss: TRANSFER_MISS_LINE });
   });
 });
 
@@ -788,7 +841,15 @@ describe("D10: render before dial", () => {
   it("no line was ever safe to render -- dials at once (nothing to wait for)", async () => {
     const db = fakeDb(
       row({
-        config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", opener: "x".repeat(130), voicemail: "y".repeat(310) },
+        config: {
+          ...structuredClone(TEMPLATES.speed_to_lead),
+          caller_id: "+441372656055",
+          opener: "x".repeat(130),
+          voicemail: "y".repeat(310),
+          // S3-4: isolate this test's original claim from the independent
+          // transfer_miss line, covered separately below.
+          capabilities: ["qualification", "appointments", "opt_out", "outcome"],
+        },
       })
     );
     const log = { info: vi.fn(), error: vi.fn() };
@@ -798,6 +859,23 @@ describe("D10: render before dial", () => {
     expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
     expect(Date.now() - start).toBeLessThan(1000);
     expect(renderAudio).not.toHaveBeenCalled();
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+    expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
+  });
+
+  it("S3-4: opener/voicemail both refused but the campaign lists transfer -- the dial STILL isn't delayed (only 'opener' gates the pre-dial wait)", async () => {
+    const db = fakeDb(
+      row({
+        config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", opener: "x".repeat(130), voicemail: "y".repeat(310) },
+      })
+    );
+    const log = { info: vi.fn(), error: vi.fn() };
+    const renderAudio = vi.fn(async () => null); // transfer_miss is asked for, but this fake never resolves it via onClip
+    const { d, twilio } = mk(db, undefined, { renderAudio, log });
+    const start = Date.now();
+    expect((await d({ businessId: "b1", outreachId: "o1" })).status).toBe("dialed");
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(renderAudio).toHaveBeenCalledTimes(1); // for transfer_miss alone
     expect(twilio.calls.create).toHaveBeenCalledTimes(1);
     expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
   });
@@ -835,7 +913,9 @@ describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
     await d({ businessId: "b1", outreachId: "o1" });
 
     const { lines } = renderAudio.mock.calls[0][0];
-    expect(lines).toEqual({ opener: "It's Ava, an AI assistant from Digile Media." });
+    // S3-4: the default template lists "transfer", so the fixed line still
+    // renders even though neither the opener nor the voicemail has a name.
+    expect(lines).toEqual({ opener: "It's Ava, an AI assistant from Digile Media.", transfer_miss: TRANSFER_MISS_LINE });
     expect(JSON.stringify(lines)).not.toMatch(/\bnull\b|\bundefined\b/);
     expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", reason: "unusable_line" });
   });
@@ -848,6 +928,9 @@ describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
           ...structuredClone(TEMPLATES.speed_to_lead),
           caller_id: "+441372656055",
           opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}.",
+          // S3-4: isolate this test's original claim (neither backstop line
+          // is usable) from the independent transfer_miss line.
+          capabilities: ["qualification", "appointments", "opt_out", "outcome"],
         },
       })
     );

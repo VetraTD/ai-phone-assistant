@@ -238,6 +238,23 @@ d("storeAttemptAudio writes only what it is given; fetchAttemptOpenerAudio", () 
     await expect(db.fetchAttemptOpenerAudio(attemptId)).rejects.toThrow(/withTenant/);
   });
 
+  // S3-4 (D6, migration 046): transfer_miss_audio, a third independent
+  // column -- writing it must not touch opener_audio/voicemail_audio, the
+  // SAME "writes only what it is given" property the opener/voicemail pair
+  // already proves above.
+  it("S3-4: transfer_miss is stored independently of opener/voicemail, and fetchAttemptTransferMissAudio reads it back tenant-scoped", async () => {
+    await db.withTenant(BIZ, () => db.storeAttemptAudio(attemptId, { transfer_miss: Buffer.from([3, 1, 4]) }));
+    const row = (await admin.query(`SELECT opener_audio, voicemail_audio, transfer_miss_audio FROM call_attempts WHERE id = $1`, [attemptId])).rows[0];
+    expect([...row.opener_audio]).toEqual([7, 7]); // unchanged by the transfer_miss write
+    expect([...row.voicemail_audio]).toEqual([9]); // unchanged by the transfer_miss write
+    expect([...row.transfer_miss_audio]).toEqual([3, 1, 4]);
+
+    const got = await db.withTenant(BIZ, () => db.fetchAttemptTransferMissAudio(attemptId));
+    expect([...got]).toEqual([3, 1, 4]);
+    expect(await db.withTenant(OTHER_BIZ, () => db.fetchAttemptTransferMissAudio(attemptId))).toBeNull();
+    await expect(db.fetchAttemptTransferMissAudio(attemptId)).rejects.toThrow(/withTenant/);
+  });
+
   it("the post-call guard still refuses: once post-call started, nothing is written back", async () => {
     await admin.query(`UPDATE call_attempts SET post_call_started_at = now(), opener_audio = NULL WHERE id = $1`, [attemptId]);
     try {

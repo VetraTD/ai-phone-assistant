@@ -275,6 +275,21 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
     expect(opts).toMatchObject({ terminal: true, closeReason: "terminal_outcome", outcome });
   });
 
+  // S3-4 (D6): "transferred" is set deterministically by the door route
+  // (ctx.outcomeCode, tier 1/2), never guessed by the summarizer -- unlike
+  // the it.each above, which drives the OTHER terminal outcomes through
+  // `summarize()` (tier 4). The completed-transfer door route
+  // (doorRoutes.js's outbound-transfer-result) is what actually writes this
+  // outcome_code; this test only proves postCall.js closes on it.
+  it("transferred (ctx.outcomeCode, door-set) closes the outreach (terminal_outcome), without ever calling summarize()", async () => {
+    const summarize = vi.fn(async () => ({ summary: "s", sentiment: "neutral", outcome: "other" }));
+    const db = fakeDb({ outcomeCode: "transferred" });
+    await run(db, { summarize });
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts).toMatchObject({ terminal: true, closeReason: "terminal_outcome", outcome: "transferred" });
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
   it("qualified_no_booking is NOT terminal -- reschedules", async () => {
     const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
     await run(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "qualified_no_booking" }) });

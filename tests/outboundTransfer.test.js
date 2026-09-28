@@ -20,6 +20,7 @@ import express from "express";
 import request from "supertest";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { registerOutboundDoorRoutes } from "../lib/outbound/doorRoutes.js";
+import { verifyMediaUrl } from "../lib/outbound/mediaUrl.js";
 import { parseTransferWhen, isInsideTransferWindow } from "../lib/outbound/schedule.js";
 
 // ---------------------------------------------------------------------------
@@ -488,11 +489,14 @@ function doorFakeDb(over = {}) {
     })),
     fetchBusinessById: vi.fn(async () => ({ id: DOOR_BIZ, name: "Riverside Family Clinic" })),
     setCallOutcomeCode: vi.fn(async () => {}),
+    // S3-4 (D6): no stored clip by default -- every existing test in this
+    // file that never overrides this keeps getting today's <Say> fallback.
+    fetchAttemptTransferMissAudio: vi.fn(async () => null),
     ...over,
   };
 }
 
-function doorApp(db) {
+function doorApp(db, envOverride = {}) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   registerOutboundDoorRoutes(app, {
@@ -503,7 +507,7 @@ function doorApp(db) {
     twilioClientFor: () => ({}),
     log: { info: vi.fn(), error: vi.fn() },
     now: () => 1_700_000_000_000,
-    env: { BASE_URL: "https://voice.example.com" },
+    env: { BASE_URL: "https://voice.example.com", ...envOverride },
   });
   return app;
 }
@@ -582,7 +586,11 @@ describe("POST /twilio/outbound-whisper", () => {
 });
 
 describe("POST /twilio/outbound-transfer-result", () => {
-  it("DialCallStatus=completed: empty TwiML, no outcome_code write", async () => {
+  // S3-4 (D6, controller ruling): a completed transfer now writes the
+  // deterministic outcome_code -- postCall.js's TERMINAL_OUTCOMES then closes
+  // the outreach terminal_outcome instead of rescheduling a contact who was
+  // already transferred. The empty TwiML is unchanged.
+  it("DialCallStatus=completed: empty TwiML, outcome_code 'transferred' written", async () => {
     const db = doorFakeDb();
     const res = await request(doorApp(db))
       .post("/twilio/outbound-transfer-result")
@@ -592,7 +600,7 @@ describe("POST /twilio/outbound-transfer-result", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toBe("<Response></Response>");
-    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "transferred");
   });
 
   // I7 (Controller Ruling, OVERNIGHT, fix wave checkpoint 2b): the line no
@@ -636,6 +644,95 @@ describe("POST /twilio/outbound-transfer-result", () => {
     expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
     expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
     expect(db.fetchBusinessById).not.toHaveBeenCalled();
+    // No tenant to scope a read to either -- never even attempted.
+    expect(db.fetchAttemptTransferMissAudio).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------
+  // S3-4 (D6): the transfer-miss clip, in Ava's own Live voice.
+  // ---------------------------------------------------------------------
+  describe("S3-4: the transfer-miss clip (D6, one voice per call)", () => {
+    it("an unanswered transfer WITH a stored clip: <Play> of a signed transfer_miss URL, no <Say>", async () => {
+      const clip = Buffer.from([1, 2, 3]);
+      const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => clip) });
+      const res = await request(doorApp(db, { OUTBOUND_MEDIA_URL_SECRET: "a-test-secret" }))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
+
+      expect(res.status).toBe(200);
+      expect(res.text).not.toContain("<Say");
+      expect(res.text).toMatch(/^<Response><Play>.*<\/Play><Hangup\/><\/Response>$/);
+      const urlMatch = res.text.match(/<Play>(.*)<\/Play>/);
+      const url = urlMatch[1].replace(/&amp;/g, "&");
+      expect(url).toMatch(
+        /^https:\/\/voice\.example\.com\/media\/outbound\/CAparent00000000000000000000000001\/transfer_miss\.wav\?exp=\d+&sig=[0-9a-f]+$/
+      );
+      const parsed = new URL(url);
+      const verdict = verifyMediaUrl({
+        callSid: PARENT_SID,
+        kind: "transfer_miss",
+        exp: parsed.searchParams.get("exp"),
+        sig: parsed.searchParams.get("sig"),
+        now: 1_700_000_000_000,
+        env: { OUTBOUND_MEDIA_URL_SECRET: "a-test-secret" },
+      });
+      expect(verdict).toEqual({ ok: true });
+      // The outcome_code write still happens -- the clip only changes what
+      // TwiML the caller hears, never the deterministic outcome (Named risk 2).
+      expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
+    });
+
+    it("an unanswered transfer with NO stored clip: today's <Say>, unchanged", async () => {
+      const db = doorFakeDb(); // default: fetchAttemptTransferMissAudio resolves null
+      const res = await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
+
+      expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
+      expect(db.fetchAttemptTransferMissAudio).toHaveBeenCalledWith(DOOR_ATTEMPT);
+    });
+
+    it("a completed transfer never plays or fetches the miss clip -- it never rang unanswered", async () => {
+      const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => Buffer.from([1])) });
+      const res = await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+
+      expect(res.text).toBe("<Response></Response>");
+      expect(db.fetchAttemptTransferMissAudio).not.toHaveBeenCalled();
+    });
+
+    it("a read failure falls back to <Say> rather than 500ing (its failure must never affect the call)", async () => {
+      const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => { throw new Error("db down"); }) });
+      const res = await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
+
+      expect(res.status).toBe(200);
+      expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
+    });
+
+    it("a stored clip but no signing secret configured falls back to <Say> rather than 500ing", async () => {
+      const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => Buffer.from([1])) });
+      // doorApp()'s default env carries no OUTBOUND_MEDIA_URL_SECRET/
+      // MEDIA_STREAM_SECRET/TWILIO_AUTH_TOKEN -- signMediaUrl throws.
+      const res = await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
+
+      expect(res.status).toBe(200);
+      expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
+    });
   });
 
   it("Ruling P-5: an ?attempt= mismatch takes the unresolved path even though the CallSid itself is real", async () => {

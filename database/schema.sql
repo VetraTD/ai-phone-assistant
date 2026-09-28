@@ -1472,6 +1472,7 @@ CREATE TABLE IF NOT EXISTS call_attempts (
   post_call_started_at  timestamptz,
   opener_audio          bytea,
   voicemail_audio       bytea,
+  transfer_miss_audio   bytea,
   created_at            timestamptz NOT NULL DEFAULT now(),
   UNIQUE (outreach_id, attempt_no)
 );

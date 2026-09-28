@@ -36,6 +36,9 @@ function fakeDb(over = {}) {
     stampAttemptStatus: vi.fn(async () => ({ firstTerminalStamp: true, answered: true })),
     completeCall: vi.fn(async () => {}),
     fetchAttemptVoicemailAudio: vi.fn(async () => Buffer.from([0xff, 0x7e, 0x80, 0x01])),
+    // S3-4 (D6, migration 046): the transfer-miss clip, served by the SAME
+    // media door under kind=transfer_miss.
+    fetchAttemptTransferMissAudio: vi.fn(async () => Buffer.from([0xff, 0x7e, 0x80, 0x02])),
     ...over,
   };
 }
@@ -295,10 +298,34 @@ describe("GET /media/outbound/:callSid/:kind.wav", () => {
     expect(deps.db.fetchAttemptVoicemailAudio).not.toHaveBeenCalled();
   });
 
-  it("returns 404 for any kind other than voicemail", async () => {
+  it("returns 404 for any kind not on the allow-list (e.g. opener)", async () => {
     const url = signMediaUrl({ base: "https://svc.example", callSid: CALL_SID, kind: "opener", now: NOW });
     const path = url.replace("https://svc.example", "");
     const deps = fakeDeps({ now: () => NOW });
+    const res = await request(buildApp(deps)).get(path);
+    expect(res.status).toBe(404);
+  });
+
+  // S3-4 (D6, migration 046, controller ruling): the allow-list is
+  // MEDIA_KINDS in doorRoutes.js, extended to include transfer_miss.
+  it("serves bytes starting with RIFF for kind=transfer_miss when the signature is good", async () => {
+    const url = signMediaUrl({ base: "https://svc.example", callSid: CALL_SID, kind: "transfer_miss", now: NOW });
+    const path = url.replace("https://svc.example", "");
+    const deps = fakeDeps({ now: () => NOW });
+    const res = await request(buildApp(deps)).get(path);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/audio\/wav/);
+    expect(Buffer.from(res.body).slice(0, 4).toString("ascii")).toBe("RIFF");
+    expect(deps.db.fetchAttemptTransferMissAudio).toHaveBeenCalledWith(ATTEMPT);
+    // Never the voicemail fetcher for this kind.
+    expect(deps.db.fetchAttemptVoicemailAudio).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for kind=transfer_miss when there is no stored clip", async () => {
+    const url = signMediaUrl({ base: "https://svc.example", callSid: CALL_SID, kind: "transfer_miss", now: NOW });
+    const path = url.replace("https://svc.example", "");
+    const db = fakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => null) });
+    const deps = fakeDeps({ db, now: () => NOW });
     const res = await request(buildApp(deps)).get(path);
     expect(res.status).toBe(404);
   });

@@ -59,24 +59,29 @@ afterAll(async () => {
 
 /** A fresh call_attempts row under the shared outreach; attempt_no auto-increments so callers never collide. */
 async function mkAttempt(sid, overrides = {}) {
-  const { openerAudio = null, voicemailAudio = null, result = null } = overrides;
+  const { openerAudio = null, voicemailAudio = null, transferMissAudio = null, result = null } = overrides;
   const att = await admin.query(
-    `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at,opener_audio,voicemail_audio,result)
-     VALUES ($1,$2,(SELECT COALESCE(MAX(attempt_no),0)+1 FROM call_attempts WHERE outreach_id=$2),'+441372656055','+447700900311',$3,now(),$4,$5,$6) RETURNING id`,
-    [BIZ, outreachId, sid, openerAudio, voicemailAudio, result]
+    `INSERT INTO call_attempts (business_id,outreach_id,attempt_no,from_number,to_number,twilio_call_sid,dialed_at,opener_audio,voicemail_audio,transfer_miss_audio,result)
+     VALUES ($1,$2,(SELECT COALESCE(MAX(attempt_no),0)+1 FROM call_attempts WHERE outreach_id=$2),'+441372656055','+447700900311',$3,now(),$4,$5,$6,$7) RETURNING id`,
+    [BIZ, outreachId, sid, openerAudio, voicemailAudio, transferMissAudio, result]
   );
   return att.rows[0].id;
 }
 
 d("finalizeAttemptResult: COALESCE-protected, clears the audio clips", () => {
-  it("sets result and ended_at when unset, and clears opener/voicemail audio", async () => {
-    const id = await mkAttempt("CAwrite-final-1", { openerAudio: Buffer.from([1, 2, 3]), voicemailAudio: Buffer.from([4, 5]) });
+  it("sets result and ended_at when unset, and clears opener/voicemail/transfer_miss audio (S3-4)", async () => {
+    const id = await mkAttempt("CAwrite-final-1", {
+      openerAudio: Buffer.from([1, 2, 3]),
+      voicemailAudio: Buffer.from([4, 5]),
+      transferMissAudio: Buffer.from([6, 7, 8]),
+    });
     await db.withTenant(BIZ, () => db.finalizeAttemptResult(id, "connected"));
-    const row = (await admin.query(`SELECT result, ended_at, opener_audio, voicemail_audio FROM call_attempts WHERE id = $1`, [id])).rows[0];
+    const row = (await admin.query(`SELECT result, ended_at, opener_audio, voicemail_audio, transfer_miss_audio FROM call_attempts WHERE id = $1`, [id])).rows[0];
     expect(row.result).toBe("connected");
     expect(row.ended_at).not.toBeNull();
     expect(row.opener_audio).toBeNull();
     expect(row.voicemail_audio).toBeNull();
+    expect(row.transfer_miss_audio).toBeNull();
   });
 
   it("never clobbers an already-set result (AMD or the door landed first) -- idempotent on a retry", async () => {

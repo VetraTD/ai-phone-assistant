@@ -173,6 +173,18 @@ d("stampAttemptStatus and fetchAttemptVoicemailAudio, as vetra_app inside withTe
     await expect(db.withTenant(OTHER_BIZ, () => db.fetchAttemptVoicemailAudio(attemptId))).resolves.toBeNull();
   });
 
+  // S3-4 (D6, migration 046): the SAME RLS-scoping property, for the new column.
+  it("stores and reads back the transfer-miss clip, scoped to the right tenant", async () => {
+    const clip = Buffer.from([0x0a, 0x0b, 0x0c]);
+    await admin.query(`UPDATE call_attempts SET transfer_miss_audio = $2 WHERE id = $1`, [attemptId, clip]);
+    const read = await db.withTenant(BIZ, () => db.fetchAttemptTransferMissAudio(attemptId));
+    expect(Buffer.compare(read, clip)).toBe(0);
+  });
+
+  it("a different tenant's scope cannot read this attempt's transfer-miss clip either", async () => {
+    await expect(db.withTenant(OTHER_BIZ, () => db.fetchAttemptTransferMissAudio(attemptId))).resolves.toBeNull();
+  });
+
   // Fix round 1, item 6. Every case above reuses the SAME `attemptId`
   // fixture, which by this point has already been stamped `answered: true`
   // (the very first test in this block). `no-answer` on a real attempt is
