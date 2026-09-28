@@ -399,15 +399,24 @@ describe("the simulated outbound call, through the real door and session", () =>
       db: { calls: { direction: db.createCall.mock.calls[0][4].direction }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
       personaName: "Ava",
     });
+    // F-R2 fix (harness-fix-brief item 1): path_backstop_hello_end expects
+    // the CURRENT default's clip-first path specifically -- this scenario
+    // deliberately overrides OUTBOUND_FIRST_SPEAKER to exercise the OLD
+    // pre-S3-2 race instead (see this describe's own comment), so it FAILs
+    // that one criterion on the real "live_reply" path while everything else
+    // -- including no_stale_reply_after_clip, since no clip ever played here
+    // to hold anything against -- stays clean.
     expect(results(v)).toEqual({
       no_frame_before_onset: "PASS",
-      path_live_reply: "PASS",
-      from_speech_ms_le_2000: "PASS",
+      path_backstop_hello_end: "FAIL",
+      clip_after_hello_le_2000: "PASS",
+      no_stale_reply_after_clip: "PASS",
       calls_direction_outbound: "PASS",
       post_call_exactly_once: "PASS",
     });
-    expect(v.criteria.from_speech_ms_le_2000.client_from_speech_ms).toBe(280);
-    expect(v.pass).toBe(true);
+    expect(v.criteria.path_backstop_hello_end).toMatchObject({ path: "live_reply" });
+    expect(v.criteria.clip_after_hello_le_2000.client_from_speech_ms).toBe(280);
+    expect(v.pass).toBe(false);
   });
 
   // CHANGED (S3-2, P-a): 1,640/1,660/1,650 -> 1,380/1,400 -- silenceBackstopMs
@@ -516,7 +525,7 @@ describe("the simulated outbound call, through the real door and session", () =>
     });
     expect(v.criteria.no_frame_before_onset.result).toBe("FAIL");
     expect(v.criteria.no_frame_before_onset.frames_before_onset).toBeGreaterThan(0);
-    expect(v.criteria.path_live_reply).toMatchObject({ result: "FAIL", path: "backstop_silence" });
+    expect(v.criteria.path_backstop_hello_end).toMatchObject({ result: "FAIL", path: "backstop_silence" });
     expect(v.pass).toBe(false);
   });
 

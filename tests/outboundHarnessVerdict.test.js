@@ -526,8 +526,12 @@ describe("the verdict", () => {
     from_answer_ms: 2900,
     first_audio_mark_from_stream_start_ms: 2550,
   };
+  // F-R2 fix (harness-fix-brief item 1): the default recording-first pickup's
+  // clean path is backstop_hello_end, not live_reply (path_backstop_hello_end's
+  // own doc explains why "live_reply" was never reachable under the current
+  // default -- f-r2-investigation.md §7).
   const speaksServer = {
-    firstAudio: { from_answer_ms: 2950, from_speech_ms: 980, path: "live_reply", measured: "playout" },
+    firstAudio: { from_answer_ms: 2950, from_speech_ms: 980, path: "backstop_hello_end", measured: "playout" },
     backstopPlayed: [],
     backstopMissing: [],
     firstTurnIncomplete: [],
@@ -541,8 +545,9 @@ describe("the verdict", () => {
     expect(v.pass).toBe(true);
     expect(Object.fromEntries(Object.entries(v.criteria).map(([k, c]) => [k, c.result]))).toEqual({
       no_frame_before_onset: "PASS",
-      path_live_reply: "PASS",
-      from_speech_ms_le_2000: "PASS",
+      path_backstop_hello_end: "PASS",
+      clip_after_hello_le_2000: "PASS",
+      no_stale_reply_after_clip: "PASS",
       calls_direction_outbound: "PASS",
       post_call_exactly_once: "PASS",
     });
@@ -610,15 +615,17 @@ describe("the verdict", () => {
 
   it("a reply slower than 2,000 ms after onset fails; no reply at all fails", () => {
     const slow = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, from_speech_ms: 2001 }, server: speaksServer, db: dbOk, personaName: "Ava" });
-    expect(slow.criteria.from_speech_ms_le_2000.result).toBe("FAIL");
+    expect(slow.criteria.clip_after_hello_le_2000.result).toBe("FAIL");
     const none = outboundVerdict({ mode: "speaks_first", clip: true, client: { ...speaksClient, first_media_at: null, from_speech_ms: null }, server: speaksServer, db: dbOk, personaName: "Ava" });
-    expect(none.criteria.from_speech_ms_le_2000.result).toBe("FAIL");
+    expect(none.criteria.clip_after_hello_le_2000.result).toBe("FAIL");
   });
 
-  it("the backstop's slow path is not a live reply", () => {
-    const server = { ...speaksServer, firstAudio: { ...speaksServer.firstAudio, path: "backstop_slow" } };
+  // F-R2 fix (harness-fix-brief item 1): backstop_silence and backstop_slow
+  // both FAIL path_backstop_hello_end, with the actual path always reported.
+  it.each(["backstop_slow", "backstop_silence"])("the hello arriving on the %s path is not backstop_hello_end", (path) => {
+    const server = { ...speaksServer, firstAudio: { ...speaksServer.firstAudio, path } };
     const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server, db: dbOk, personaName: "Ava" });
-    expect(v.criteria.path_live_reply.result).toBe("FAIL");
+    expect(v.criteria.path_backstop_hello_end).toMatchObject({ result: "FAIL", path });
   });
 
   it("a stream that started well after the simulated answer offset is WARNED about, not folded into a criterion", () => {
@@ -649,7 +656,8 @@ describe("the verdict", () => {
 
   it("no server log: the path is UNKNOWN, and UNKNOWN is not a pass", () => {
     const v = outboundVerdict({ mode: "speaks_first", clip: true, client: speaksClient, server: null, db: dbOk, personaName: "Ava" });
-    expect(v.criteria.path_live_reply.result).toBe("UNKNOWN");
+    expect(v.criteria.path_backstop_hello_end.result).toBe("UNKNOWN");
+    expect(v.criteria.no_stale_reply_after_clip.result).toBe("UNKNOWN");
     expect(v.pass).toBe(false);
   });
 
@@ -927,6 +935,228 @@ describe("S3-5: outbound situation scripts", () => {
     it("an empty topic never matches (never a false PASS from a missing config value)", () => {
       expect(mentionsTopic("anything at all", "")).toBe(false);
     });
+
+    // F-R2 fix (harness-fix-brief item 3). REAL data, outbound_gatekeeper_fetch-3
+    // (harness-server-r2.log, callSid CAharness1a0e69f12dba4a4c642): the model's
+    // real reply dropped one word ("our") from the topic's literal string --
+    // "regarding clinic systems", not "regarding our clinic systems" -- which
+    // false-failed identity_confirmed_at_last_line under the old exact-substring
+    // check (sims-report-r2.md finding B). The normalised content-word match
+    // now passes it while an unrelated sentence -- sharing no topic word at all
+    // -- still fails, exactly the brief's own bar.
+    it("REAL data (outbound_gatekeeper_fetch-3): a wording variant that drops a stopword still mentions the topic", () => {
+      expect(mentionsTopic("Thanks for speaking with me, Sam. I'm reaching out to book a thirty-minute discovery call regarding clinic systems.", TOPIC)).toBe(true);
+    });
+
+    it("an unrelated sentence sharing no topic word still fails", () => {
+      expect(mentionsTopic("Sorry, is this a bad time to talk?", TOPIC)).toBe(false);
+    });
+  });
+
+  // F-R2 fix (harness-fix-brief item 3), end to end. REAL raw log text,
+  // outbound_gatekeeper_fetch-3 (harness-server-r2.log), copied verbatim --
+  // memory a-test-proves-a-wire-only-if-both-ends-are-real.
+  describe("F-R2 fix: outbound_gatekeeper_fetch-3's real topic wording no longer false-fails", () => {
+    const REAL_CALL_SID = "CAharness1a0e69f12dba4a4c642";
+    const RAW_LOG = [
+      '{"message":"outbound_backstop_played [a4a4c642]","ts":"2026-09-28T06:06:35.462Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e69f12dba4a4c642","attemptId":"7dc82899-717c-463a-940d-4e860dfe267c","path":"backstop_silence","source":"stored","seed":"at_fire"}',
+      '{"message":"outbound_first_audio [a4a4c642]","ts":"2026-09-28T06:06:35.476Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e69f12dba4a4c642","attemptId":"7dc82899-717c-463a-940d-4e860dfe267c","from_answer_ms":1766,"from_speech_ms":null,"path":"backstop_silence","measured":"playout"}',
+      '{"message":"outbound_clip_hold_released [a4a4c642] - clip_ended_pre_frame","ts":"2026-09-28T06:06:40.298Z","level":"INFO","event":"outbound_clip_hold_released","callSid":"CAharness1a0e69f12dba4a4c642","frames":242,"dropped":0,"reason":"clip_ended_pre_frame"}',
+      '{"message":"live_debug_assistant_turn [a4a4c642]","ts":"2026-09-28T06:06:51.739Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e69f12dba4a4c642","step":"identify_intent","debug_only":true,"text":"Thanks for speaking with me, Sam. I\'m reaching out to book a thirty-minute discovery call regarding clinic systems.","user_text":"One moment. Hi, this is Sam."}',
+      '{"message":"live_utterance [a4a4c642]","ts":"2026-09-28T06:06:53.598Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69f12dba4a4c642","step":"gather_details","utterance":1,"opened_ms":1145677,"duration_ms":669,"voiced_ms":380,"peak_rms":6068,"playing_at_open":true,"frames":35,"forwarded":54,"held":6,"dropped_voiced":0,"released":0,"strategy_opened":true,"close_rule":null,"transcript_ms":2661,"transcript_chars":28}',
+      '{"message":"live_utterance [a4a4c642]","ts":"2026-09-28T06:06:53.598Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69f12dba4a4c642","step":"gather_details","utterance":2,"opened_ms":1147131,"duration_ms":1033,"voiced_ms":440,"peak_rms":4130,"playing_at_open":false,"frames":53,"forwarded":53,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":false,"close_rule":"vendor_bookkeeping","transcript_ms":null,"transcript_chars":0}',
+      '{"message":"live_call_summary [a4a4c642]","ts":"2026-09-28T06:06:53.598Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e69f12dba4a4c642","turns":2,"usage":{"text_in":18336,"audio_in":937,"text_out":0,"audio_out":220,"cached_in":0,"turns_billed":2},"close_reason":"twilio_stop"}',
+    ].join("\n");
+
+    it("identity_confirmed_at_last_line now PASSES on the real transcript (was FAIL under the exact-substring check)", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: REAL_CALL_SID });
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_gatekeeper_fetch",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server: view,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
+      });
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      expect(v.criteria.identity_confirmed_at_last_line).toMatchObject({
+        result: "PASS",
+        leaked_before_last_line: false,
+        topic_reached_after_last_line: true,
+      });
+      // backstop_silence: the caller's own line opens DURING the clip by
+      // design (playing_at_open:true on utterance 1 above) -- exempted, not a
+      // stale-reply collision (harness-fix-brief item 2's own scoping).
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({ result: "PASS", collision_playing_at_open: false });
+    });
+  });
+
+  // F-R2 fix (harness-fix-brief item 2). The clip-hold defect: real round-2
+  // raw log text, copied verbatim (memory a-test-proves-a-wire-only-if-both-
+  // ends-are-real) -- see STALE_REPLY_EXTRA_WAIT_MS's own doc for the replay
+  // numbers behind the threshold.
+  describe("no_stale_reply_after_clip", () => {
+    // REAL data, outbound_stop-1 (harness-server-r2.log, callSid
+    // CAharness1a0e68e5336976c94e9): signal (A) -- Live speaks a WHOLE turn
+    // ("Just to confirm, am I speaking with Sam?") whose user_text is only
+    // the pre-clip greeting ("Hello?"), before the caller's real line
+    // ("Please stop calling me.") gets its own, separate reply.
+    const STOP1_CALL_SID = "CAharness1a0e68e5336976c94e9";
+    const STOP1_RAW_LOG = [
+      '{"message":"outbound_backstop_played [976c94e9]","ts":"2026-09-28T05:48:18.190Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e68e5336976c94e9","attemptId":"e427869e-dd00-4dd8-b039-a53a6014132d","path":"backstop_hello_end","source":"stored","seed":"at_end_mark"}',
+      '{"message":"outbound_first_audio [976c94e9]","ts":"2026-09-28T05:48:18.191Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e68e5336976c94e9","attemptId":"e427869e-dd00-4dd8-b039-a53a6014132d","from_answer_ms":1792,"from_speech_ms":659,"path":"backstop_hello_end","measured":"playout"}',
+      '{"message":"outbound_clip_hold_released [976c94e9] - seed_sent","ts":"2026-09-28T05:48:23.545Z","level":"INFO","event":"outbound_clip_hold_released","callSid":"CAharness1a0e68e5336976c94e9","frames":269,"dropped":0,"reason":"seed_sent"}',
+      '{"message":"live_debug_assistant_turn [976c94e9]","ts":"2026-09-28T05:48:26.814Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e68e5336976c94e9","step":"identify_intent","debug_only":true,"text":"Just to confirm, am I speaking with Sam?","user_text":"Hello?"}',
+      '{"message":"live_debug_assistant_turn [976c94e9]","ts":"2026-09-28T05:48:32.217Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e68e5336976c94e9","step":"identify_intent","debug_only":true,"text":"Of course -- we won\'t call you again.","user_text":"Please stop calling me."}',
+      '{"message":"live_utterance [976c94e9]","ts":"2026-09-28T05:48:33.730Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e68e5336976c94e9","step":"ending","utterance":1,"opened_ms":41446,"duration_ms":378,"voiced_ms":100,"peak_rms":3988,"playing_at_open":false,"frames":20,"forwarded":20,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":5662,"transcript_chars":6}',
+      '{"message":"live_utterance [976c94e9]","ts":"2026-09-28T05:48:33.730Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e68e5336976c94e9","step":"ending","utterance":2,"opened_ms":52353,"duration_ms":530,"voiced_ms":240,"peak_rms":2709,"playing_at_open":false,"frames":28,"forwarded":28,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":false,"close_rule":"vendor_bookkeeping","transcript_ms":844,"transcript_chars":23}',
+      '{"message":"live_call_summary [976c94e9]","ts":"2026-09-28T05:48:33.732Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e68e5336976c94e9","turns":2,"usage":{"text_in":12103,"audio_in":596,"text_out":0,"audio_out":128,"cached_in":0,"turns_billed":2},"close_reason":"end_call_mark"}',
+    ].join("\n");
+
+    it("REAL data (outbound_stop-1): FAILs on the audible stale re-ask, with the stale turn reported", () => {
+      const view = parseServerLog(STOP1_RAW_LOG, { callSid: STOP1_CALL_SID });
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_stop",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server: view,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
+      });
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "FAIL",
+        path: "backstop_hello_end",
+        audible_stale_reply: { text: "Just to confirm, am I speaking with Sam?", user_text: "Hello?" },
+      });
+      // The rest of the call is otherwise clean -- this criterion, not
+      // turns_reached/suppression/outcome, is what must catch the defect.
+      expect(v.criteria.turns_reached.result).toBe("PASS");
+      expect(v.pass).toBe(false);
+    });
+
+    // REAL data, outbound_bad_time-2 (harness-server-r2.log, callSid
+    // CAharness1a0e69b5dd9c5070159): signal (C) ONLY -- no separate stale
+    // turn was ever logged (only one, real turn exists) and no playing_at_
+    // open collision (the caller started clean, after everything had gone
+    // quiet) -- but the gap between the greeting utterance and the caller's
+    // real line (12,340ms) still runs 6,840ms longer than the clip's own
+    // known length (275 frames x 20ms = 5,500ms), far past
+    // STALE_REPLY_EXTRA_WAIT_MS. Proves signal (C) catches what (A)/(B) miss.
+    const BADTIME2_CALL_SID = "CAharness1a0e69b5dd9c5070159";
+    const BADTIME2_RAW_LOG = [
+      '{"message":"outbound_backstop_played [c5070159]","ts":"2026-09-28T06:02:33.961Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e69b5dd9c5070159","attemptId":"286e85e4-bda0-4835-8b99-58b21e9e4ae1","path":"backstop_hello_end","source":"stored","seed":"at_end_mark"}',
+      '{"message":"outbound_first_audio [c5070159]","ts":"2026-09-28T06:02:33.976Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e69b5dd9c5070159","attemptId":"286e85e4-bda0-4835-8b99-58b21e9e4ae1","from_answer_ms":1827,"from_speech_ms":669,"path":"backstop_hello_end","measured":"playout"}',
+      '{"message":"outbound_clip_hold_released [c5070159] - seed_sent","ts":"2026-09-28T06:02:39.425Z","level":"INFO","event":"outbound_clip_hold_released","callSid":"CAharness1a0e69b5dd9c5070159","frames":275,"dropped":0,"reason":"seed_sent"}',
+      '{"message":"live_debug_assistant_turn [c5070159]","ts":"2026-09-28T06:02:54.379Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e69b5dd9c5070159","step":"identify_intent","debug_only":true,"text":"I\'ll call you back tomorrow at three o\'clock then. Thank you for your time, and have a safe drive.","user_text":"Call me tomorrow at 3:00."}',
+      '{"message":"live_utterance [c5070159]","ts":"2026-09-28T06:02:55.902Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69b5dd9c5070159","step":"ending","utterance":1,"opened_ms":897236,"duration_ms":372,"voiced_ms":100,"peak_rms":3394,"playing_at_open":false,"frames":20,"forwarded":20,"held":0,"dropped_voiced":6,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":5766,"transcript_chars":6}',
+      '{"message":"live_utterance [c5070159]","ts":"2026-09-28T06:02:55.902Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69b5dd9c5070159","step":"ending","utterance":2,"opened_ms":909576,"duration_ms":1877,"voiced_ms":1200,"peak_rms":6289,"playing_at_open":false,"frames":95,"forwarded":95,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":false,"close_rule":"vendor_bookkeeping","transcript_ms":813,"transcript_chars":25}',
+      '{"message":"live_call_summary [c5070159]","ts":"2026-09-28T06:02:55.903Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e69b5dd9c5070159","turns":2,"usage":{"text_in":18608,"audio_in":1141,"text_out":0,"audio_out":325,"cached_in":0,"turns_billed":2},"close_reason":"end_call_mark"}',
+    ].join("\n");
+
+    it("REAL data (outbound_bad_time-2): FAILs on extra_wait alone -- no audible stale turn, no playing_at_open collision", () => {
+      const view = parseServerLog(BADTIME2_RAW_LOG, { callSid: BADTIME2_CALL_SID });
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_bad_time",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server: view,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false } },
+      });
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "FAIL",
+        audible_stale_reply: null,
+        collision_playing_at_open: false,
+        clip_ms: 5500,
+        gap_ms: 12340,
+        extra_wait_ms: 6840,
+      });
+      expect(v.pass).toBe(false);
+    });
+
+    // REAL data, outbound_child-2 (harness-server-r2.log, callSid
+    // CAharness1a0e69893ab6e6c2b68): the SAME call demonstrates both fixes
+    // together (harness-fix-brief items 2 and 4) -- the pre-reveal stale
+    // re-ask is caught by no_stale_reply_after_clip, and at_most_one_question
+    // (scoped to turns AFTER the reveal line, item 4) correctly stops
+    // double-penalising the exact same defect.
+    const CHILD2_CALL_SID = "CAharness1a0e69893ab6e6c2b68";
+    const CHILD2_RAW_LOG = [
+      '{"message":"outbound_backstop_played [6e6c2b68]","ts":"2026-09-28T05:59:29.317Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e69893ab6e6c2b68","attemptId":"1eff8fa3-3ec0-4cca-a7a3-e1700e06e97e","path":"backstop_hello_end","source":"stored","seed":"at_end_mark"}',
+      '{"message":"outbound_first_audio [6e6c2b68]","ts":"2026-09-28T05:59:29.331Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e69893ab6e6c2b68","attemptId":"1eff8fa3-3ec0-4cca-a7a3-e1700e06e97e","from_answer_ms":1926,"from_speech_ms":796,"path":"backstop_hello_end","measured":"playout"}',
+      '{"message":"outbound_clip_hold_released [6e6c2b68] - seed_sent","ts":"2026-09-28T05:59:34.511Z","level":"INFO","event":"outbound_clip_hold_released","callSid":"CAharness1a0e69893ab6e6c2b68","frames":260,"dropped":0,"reason":"seed_sent"}',
+      '{"message":"live_debug_assistant_turn [6e6c2b68]","ts":"2026-09-28T05:59:37.880Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e69893ab6e6c2b68","step":"identify_intent","debug_only":true,"text":"Just to confirm, am I speaking with Sam?","user_text":"Hello?"}',
+      '{"message":"live_debug_assistant_turn [6e6c2b68]","ts":"2026-09-28T05:59:48.754Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e69893ab6e6c2b68","step":"identify_intent","debug_only":true,"text":"I understand. Is he around, or is there a better time to catch him?...","user_text":"He\'s not here. I\'m his son."}',
+      '{"message":"live_utterance [6e6c2b68]","ts":"2026-09-28T05:59:57.429Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69893ab6e6c2b68","step":"identify_intent","utterance":1,"opened_ms":712460,"duration_ms":503,"voiced_ms":220,"peak_rms":6848,"playing_at_open":false,"frames":26,"forwarded":26,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":5487,"transcript_chars":6}',
+      '{"message":"live_utterance [6e6c2b68]","ts":"2026-09-28T05:59:57.429Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69893ab6e6c2b68","step":"identify_intent","utterance":2,"opened_ms":723007,"duration_ms":1500,"voiced_ms":980,"peak_rms":5020,"playing_at_open":false,"frames":76,"forwarded":76,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":806,"transcript_chars":27}',
+      '{"message":"live_utterance [6e6c2b68]","ts":"2026-09-28T05:59:57.429Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e69893ab6e6c2b68","step":"identify_intent","utterance":3,"opened_ms":733838,"duration_ms":468,"voiced_ms":160,"peak_rms":5224,"playing_at_open":false,"frames":24,"forwarded":24,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":false,"close_rule":"vendor_bookkeeping","transcript_ms":858,"transcript_chars":16}',
+      '{"message":"live_call_summary [6e6c2b68]","ts":"2026-09-28T05:59:57.430Z","level":"INFO","event":"live_call_summary","callSid":"CAharness1a0e69893ab6e6c2b68","turns":3,"usage":{"text_in":18388,"audio_in":1089,"text_out":0,"audio_out":259,"cached_in":0,"turns_billed":2},"close_reason":"twilio_stop"}',
+    ].join("\n");
+
+    it("REAL data (outbound_child-2): no_stale_reply_after_clip FAILs the pre-reveal re-ask; at_most_one_question now correctly PASSes (was FAIL(2) under the old every-turn count)", () => {
+      const view = parseServerLog(CHILD2_RAW_LOG, { callSid: CHILD2_CALL_SID });
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_child",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server: view,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false }, outreach: null },
+      });
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "FAIL",
+        audible_stale_reply: { text: "Just to confirm, am I speaking with Sam?", user_text: "Hello?" },
+      });
+      expect(v.criteria.at_most_one_question).toMatchObject({ result: "PASS", question_marks: 1 });
+      expect(v.pass).toBe(false); // still fails the call overall, just via the right criterion
+    });
+
+    // No real round-2 run happens to be clean on this path (the tax was
+    // near-universal this round -- STALE_REPLY_EXTRA_WAIT_MS's own doc) --
+    // this fixture is plausible, not real, shaped like a fixed run: the
+    // caller's real line opens GAP_MS-ish after the clip's own known length,
+    // nothing else plays in between.
+    it("a clean hello-end call (plausible, not real -- no stale turn, no collision, gap within the clip's own length + tolerance) PASSes", () => {
+      const server = {
+        firstAudio: { path: "backstop_hello_end", from_answer_ms: 1800, from_speech_ms: 650, measured: "playout" },
+        assistantTurns: [{ text: "No trouble, I'll call back tomorrow at ten, thank you.", user_text: "He's out. Try tomorrow at ten." }],
+        clipHoldReleased: { frames: 260, dropped: 0, reason: "seed_sent" },
+        liveUtterances: [
+          { utterance: 1, opened_ms: 10000, duration_ms: 400, playing_at_open: false, held: 0, forwarded: 20 },
+          { utterance: 2, opened_ms: 15900, duration_ms: 1200, playing_at_open: false, held: 0, forwarded: 60 }, // gap 5900 - clip 5200 = 700ms extra, under the 1500ms tolerance
+        ],
+      };
+      const v = outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_gatekeeper_later",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        client: {},
+        server,
+        db: { calls: { direction: "outbound" }, attempt: { post_call_started_at: "t", silent: false }, outreach: { next_attempt_at: tomorrowAtForTest(10, 0) } },
+      });
+      expect(v.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "PASS",
+        audible_stale_reply: null,
+        collision_playing_at_open: false,
+        clip_ms: 5200,
+        gap_ms: 5900,
+        extra_wait_ms: 700,
+      });
+    });
+
+    function tomorrowAtForTest(hour, minute) {
+      return computeAttemptAt({ entry: { kind: "next_day", h: hour, m: minute }, now: NOW, timezone: TZ }).toISOString();
+    }
   });
 
   describe("outbound_stop", () => {
@@ -950,6 +1180,10 @@ describe("S3-5: outbound situation scripts", () => {
         no_ask_refusal: "PASS",
         not_marked_silent: "PASS",
         first_audio_path_backstop: "PASS",
+        // F-R2 fix (harness-fix-brief item 2): every speaks_first situation
+        // run also asserts no_stale_reply_after_clip -- this one turn answers
+        // "Please stop calling me." directly, not the pre-clip "Hello?".
+        no_stale_reply_after_clip: "PASS",
         // Shared by every mode (situation or not): calls_direction_outbound
         // and post_call_exactly_once, computed after the switch either way.
         calls_direction_outbound: "PASS",
@@ -1042,16 +1276,22 @@ describe("S3-5: outbound situation scripts", () => {
     // Script is now 2 lines ("Hello, reception?" / "He's out. Try tomorrow
     // at ten.") -- no real paid run exists yet for this restructured
     // wording, so this fixture is a plausible, not a real, transcript.
-    const turns = [
-      turn("Hi, is that Sam speaking?", "Hello, reception?"),
-      turn("No trouble, I'll call back tomorrow at ten, thank you.", "He's out. Try tomorrow at ten."),
-    ];
+    //
+    // F-R2 fix (harness-fix-brief item 2): this used to open with a turn
+    // replying to ONLY the pre-clip greeting ("Hello, reception?") -- exactly
+    // the stale-reply defect no_stale_reply_after_clip now catches (see that
+    // criterion's own doc: on the current backstop_hello_end default, a
+    // genuinely clean call's one real, heard turn answers the SUBSTANTIVE
+    // line directly, the same shape outbound_stop/outbound_bad_time's own
+    // clean fixtures already use). Trimmed to that one turn.
+    const turns = [turn("No trouble, I'll call back tomorrow at ten, thank you.", "He's out. Try tomorrow at ten.")];
 
     it("clean: next_attempt_at is tomorrow 10:00 London time, outcome callback_requested", () => {
       const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: turns }), db: dbFor({ outcome_code: "callback_requested", outreach: { next_attempt_at: want10.toISOString() } }) });
       expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.next_attempt_tomorrow_10.result).toBe("PASS");
       expect(v.criteria.outcome_callback_requested.result).toBe("PASS");
+      expect(v.criteria.no_stale_reply_after_clip.result).toBe("PASS");
       expect(v.pass).toBe(true);
     });
 
@@ -1073,7 +1313,7 @@ describe("S3-5: outbound situation scripts", () => {
     });
 
     it("turns_reached FAILS when the last line is never heard at all", () => {
-      const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: [turns[0]] }), db: dbFor({ outcome_code: "callback_requested" }) });
+      const v = verdictFor("outbound_gatekeeper_later", { server: serverFor({ assistantTurns: [] }), db: dbFor({ outcome_code: "callback_requested" }) });
       expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "He's out. Try tomorrow at ten." });
       expect(v.pass).toBe(false);
     });
@@ -1206,22 +1446,25 @@ describe("S3-5: outbound situation scripts", () => {
 
   describe("outbound_robot", () => {
     const db = dbFor({});
-    // REAL data, outbound_robot-1: 2 caller lines, 2 real turns, 1:1.
-    const cleanTurns = [
-      turn("Is that Sam?Is that Sam?", "Hello?"),
-      turn("Yes, I'm an AI assistant calling on behalf of Harness Test Clinic. Am I speaking to Sam?And am I speaking to Sam?", "Are you a robot?"),
-    ];
+    // REAL data, outbound_robot-1, trimmed (F-R2 fix, harness-fix-brief item
+    // 2): the original 2-turn shape had turn 0 replying to ONLY the pre-clip
+    // greeting ("Hello?") -- exactly the stale-reply defect
+    // no_stale_reply_after_clip now catches (see that criterion's own doc). A
+    // genuinely clean backstop_hello_end call's one real, heard turn answers
+    // the SUBSTANTIVE line directly.
+    const cleanTurns = [turn("Yes, I'm an AI assistant calling on behalf of Harness Test Clinic. Am I speaking to Sam?And am I speaking to Sam?", "Are you a robot?")];
 
     it("clean (real data): no claimed-human hit, and the AI disclosure lands in the reply to the question", () => {
       const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: cleanTurns }), db });
       expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.no_claimed_human.result).toBe("PASS");
       expect(v.criteria.ai_disclosure_after_question).toMatchObject({ result: "PASS" });
+      expect(v.criteria.no_stale_reply_after_clip.result).toBe("PASS");
       expect(v.pass).toBe(true);
     });
 
     it("turns_reached FAILS when 'Are you a robot?' never gets a reply", () => {
-      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db });
+      const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: [] }), db });
       expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Are you a robot?" });
       expect(v.pass).toBe(false);
     });
@@ -1233,7 +1476,10 @@ describe("S3-5: outbound situation scripts", () => {
     });
 
     it("FAILS when the reply to the robot question carries no AI disclosure", () => {
-      const noDisclosure = [cleanTurns[0], turn("Ha, good question! How can I help today?", "Are you a robot?")];
+      // Self-contained (not built from cleanTurns): a "Hello?" opener turn
+      // followed by an undisclosed reply -- this test is about
+      // ai_disclosure_after_question only, not no_stale_reply_after_clip.
+      const noDisclosure = [turn("Is that Sam?", "Hello?"), turn("Ha, good question! How can I help today?", "Are you a robot?")];
       const v = verdictFor("outbound_robot", { server: serverFor({ assistantTurns: noDisclosure }), db });
       expect(v.criteria.ai_disclosure_after_question).toMatchObject({ result: "FAIL" });
       expect(v.pass).toBe(false);
@@ -1241,9 +1487,13 @@ describe("S3-5: outbound situation scripts", () => {
   });
 
   describe("outbound_email", () => {
-    // REAL data, outbound_email-1: 2 caller lines, 2 real turns, 1:1.
+    // REAL data, outbound_email-1, trimmed (F-R2 fix, harness-fix-brief item
+    // 2): the original 2-turn shape had turn 0 replying to ONLY the pre-clip
+    // greeting ("Hello.") -- exactly the stale-reply defect
+    // no_stale_reply_after_clip now catches (see that criterion's own doc). A
+    // genuinely clean backstop_hello_end call's one real, heard turn answers
+    // the SUBSTANTIVE line directly.
     const cleanTurns = [
-      turn("Hi, is that Sam speaking?", "Hello."),
       turn("Of course, someone from Harness Test Clinic will follow up with you by email. Thank you for your time and take care.", "Just email me instead."),
     ];
 
@@ -1255,11 +1505,12 @@ describe("S3-5: outbound situation scripts", () => {
       expect(v.criteria.turns_reached.result).toBe("PASS");
       expect(v.criteria.outcome_other.result).toBe("PASS");
       expect(v.criteria.note_mentions_email).toMatchObject({ result: "PASS", note: "Contact asked to be reached by email instead of a call." });
+      expect(v.criteria.no_stale_reply_after_clip.result).toBe("PASS");
       expect(v.pass).toBe(true);
     });
 
     it("turns_reached FAILS when 'Just email me instead.' never gets a reply", () => {
-      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: [cleanTurns[0]] }), db: dbFor({ outcome_code: "other" }) });
+      const v = verdictFor("outbound_email", { server: serverFor({ assistantTurns: [] }), db: dbFor({ outcome_code: "other" }) });
       expect(v.criteria.turns_reached).toMatchObject({ result: "FAIL", last_line: "Just email me instead." });
       expect(v.pass).toBe(false);
     });
