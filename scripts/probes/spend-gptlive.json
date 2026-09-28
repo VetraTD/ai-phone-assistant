@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 22.497972,
+  "spent_usd": 23.120411,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -5639,11 +5639,205 @@
       "probe": "P1-LIVE-R1",
       "usd": 0.050183,
       "note": "round 1 scenario 9 (2026-09-27): 2 outbound calls (attempt 1 carrier voicemail, attempt 2 opt-out) + 3 clip renders, priced from live_call_summary/outbound_render_usage (gemini-3.8-live)"
+    },
+    {
+      "at": "2026-09-28T03:07:58.231Z",
+      "callSid": "CAharness1a0e5fb527f32807f2e",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.013573,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:12:10.562Z",
+      "callSid": "CAharness1a0e5fefa6252422017",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0361275,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:13:31.415Z",
+      "callSid": "CAharness1a0e600376085f7537d",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.022586000000000002,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:15:13.993Z",
+      "callSid": "CAharness1a0e601dfbfa13cbab8",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.025056500000000002,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:16:04.012Z",
+      "callSid": "CAharness1a0e602a9feb2ac24fd",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.023026,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:16:59.370Z",
+      "callSid": "CAharness1a0e603637744a0181f",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0386615,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:20:00.201Z",
+      "callSid": "CAharness1a0e6062ac4730c2c0f",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.025484000000000003,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:21:10.422Z",
+      "callSid": "CAharness1a0e60755983616c5a9",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.023671499999999998,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:23:25.613Z",
+      "callSid": "CAharness1a0e6096f924ba13814",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.018535499999999996,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:24:15.680Z",
+      "callSid": "CAharness1a0e60a0fab1992af17",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0312985,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:25:09.511Z",
+      "callSid": "CAharness1a0e60ae13b27aa871e",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.023886499999999998,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:26:40.431Z",
+      "callSid": "CAharness1a0e60c605ba3ec2bf4",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0203155,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:27:28.269Z",
+      "callSid": "CAharness1a0e60d057dc2f56972",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.024172999999999997,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:28:19.271Z",
+      "callSid": "CAharness1a0e60dc38109f32ad1",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.030989500000000003,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:29:10.427Z",
+      "callSid": "CAharness1a0e60eaa30e45cac54",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.014602,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:29:52.891Z",
+      "callSid": "CAharness1a0e60f51830607c211",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0232565,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:30:34.760Z",
+      "callSid": "CAharness1a0e61006ac5a4ff3cf",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.05,
+      "basis": "full_reserve",
+      "reason": "call: no usageMetadata arrived"
+    },
+    {
+      "at": "2026-09-28T03:32:10.553Z",
+      "callSid": "CAharness1a0e6113e699ffe6190",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.030791999999999993,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:33:00.445Z",
+      "callSid": "CAharness1a0e6120fb372c5a58b",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.023063,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:33:43.981Z",
+      "callSid": "CAharness1a0e612d79cc8674aaa",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.0142995,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:34:24.667Z",
+      "callSid": "CAharness1a0e6137caa93b85449",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.017924000000000002,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:35:15.462Z",
+      "callSid": "CAharness1a0e6141c55c1c64bdb",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.026869,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:36:11.257Z",
+      "callSid": "CAharness1a0e61518c73125ba13",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.014248,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-28T03:36:55.986Z",
+      "callSid": "CAharness1a0e615beb768526e8c",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S3",
+      "usd": 0.05,
+      "basis": "full_reserve",
+      "reason": "render_opener: no usageMetadata arrived"
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-27T19:19:32.509Z",
+  "updated_at": "2026-09-28T03:36:55.986Z",
   "cap_history": [
     {
       "cap": 5,
