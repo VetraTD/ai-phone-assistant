@@ -87,14 +87,25 @@ function outboundDb() {
   };
 }
 
-function bootOutbound() {
-  return bootLive({
+// CHANGED (final wave W1, A16): the call is now taken PAST THE FIRST SECONDS
+// before any test here speaks. In clip mode Live never speaks first: until
+// the backstop decision, any Live output is discarded, and since A16 its
+// transcript is marked unheard as well (it used to slip through whenever it
+// arrived before an audio chunk). Every test below was letting the assistant
+// talk before anything had been decided -- a shape a real call cannot have --
+// so the detectors and the nudge under test were judging text the caller
+// could never hear. 1,400 ms of silence fires the no-clip silence backstop
+// (this file's opener renders no clip), after which the assistant is heard.
+async function bootOutbound() {
+  const call = await bootLive({
     config: CONFIG,
     callSid: SID,
     customParameters: { direction: "outbound" },
     authorizedCallSid: SID,
     database: outboundDb(),
   });
+  await call.feed(1400);
+  return call;
 }
 
 function bootInbound() {

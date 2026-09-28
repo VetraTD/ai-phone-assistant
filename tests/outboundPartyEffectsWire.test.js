@@ -194,6 +194,20 @@ async function boot({ execute = makeExecute() } = {}) {
   await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
   await new Promise((r) => setImmediate(r));
 
+  // CHANGED (final wave W1, A16/A19): the call is taken PAST THE FIRST
+  // SECONDS before any test here acts. In clip mode Live never speaks first:
+  // until the backstop decision, Live's output is discarded, its transcript
+  // is unheard (A16), and a caller-visible action tool from it is refused
+  // (A19). 1,400 ms of Twilio silence frames fires the no-clip silence
+  // backstop (this file's opener renders no clip); from then on the model's
+  // turns are heard, which is what these wire tests are about.
+  const SILENCE = Buffer.alloc(160, 0xff).toString("base64");
+  for (let i = 0; i < 70; i++) {
+    clock += 20;
+    ws.deliver({ event: "media", media: { payload: SILENCE } });
+  }
+  await new Promise((r) => setImmediate(r));
+
   const settle = async () => {
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));

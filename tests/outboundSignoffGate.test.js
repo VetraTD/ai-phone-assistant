@@ -81,14 +81,21 @@ function outboundDb() {
   };
 }
 
-function bootOutbound() {
-  return bootLive({
+// CHANGED (final wave W1, A16/A19): past the first seconds before any test
+// acts -- see tests/liveOutboundConversationLayer.test.js's bootOutbound for
+// the reason. In clip mode Live never speaks first: a turn spoken before the
+// backstop decision is unheard (A16) and its caller-visible tools refused
+// (A19). 1,400 ms of silence fires the no-clip silence backstop.
+async function bootOutbound() {
+  const call = await bootLive({
     config: CONFIG,
     callSid: SID,
     customParameters: { direction: "outbound" },
     authorizedCallSid: SID,
     database: outboundDb(),
   });
+  await call.feed(1400);
+  return call;
 }
 
 /**

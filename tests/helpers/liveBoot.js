@@ -151,6 +151,10 @@ export async function bootLive({
   database,
   authorizedCallSid,
   postCall,
+  // Final wave W1 (I2): the hang-up drain's bounds, passed through when a
+  // test sets them; omitted -> the production constants.
+  clipDrainMaxMs,
+  clipDrainSettleMs,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
@@ -173,6 +177,8 @@ export async function bootLive({
     env,
     capabilityDeps: deps,
     postCall: postCall ?? fakePostCall(),
+    ...(clipDrainMaxMs !== undefined ? { clipDrainMaxMs } : {}),
+    ...(clipDrainSettleMs !== undefined ? { clipDrainSettleMs } : {}),
   });
 
   ws.deliver({

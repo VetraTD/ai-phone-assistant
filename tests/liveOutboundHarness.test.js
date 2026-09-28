@@ -291,6 +291,13 @@ async function answerAndStart({ env = {} } = {}) {
     database: db,
     env: { ...ENV, ...env },
     postCall,
+    // Final wave W1 (I2): a hang-up while the clip hold carries speech now
+    // drains it to Live (bounded, 2 s in production) before the session's
+    // own post-call half runs. This file's fake Live transcribes nothing, and
+    // hangUpAndComplete() asserts that half lands within hangUp()'s own
+    // settle -- so the drain's bound is kept tiny here. The drain itself is
+    // proved in tests/liveOutboundStart.test.js.
+    clipDrainMaxMs: 10,
   });
 
   const observer = createClientObserver();
@@ -590,6 +597,14 @@ describe("the simulated outbound call, through the real door and session", () =>
   it("Task 20 fix round 1, item 5: the FINAL turn (right before hangup) reaches the opt-out detector", async () => {
     const ctx = await answerAndStart();
     const { call, db, app } = ctx;
+    // CHANGED (final wave W1, A16): past the first seconds first -- the
+    // silence backstop fires and its clip's end mark echoes. In clip mode an
+    // assistant turn spoken before any of that is discarded (Live never speaks
+    // first), and since A16 its transcript is unheard too, so it would leave
+    // no row for this test to order. Done BEFORE the delayed write below is
+    // installed: the seed's own disclosure row is written at fire.
+    await call.feed(1400);
+    echo(call, BACKSTOP_END_MARK);
 
     // A deterministic ORDER log of WHEN each event actually happened,
     // checked only after BOTH are guaranteed to have occurred (an explicit

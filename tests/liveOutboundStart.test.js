@@ -30,6 +30,7 @@ import { readShared } from "../lib/callState.js";
 import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS } from "../lib/outbound/firstSeconds.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { detectOptOut } from "../lib/outbound/detectors.js";
+import { createPostCall } from "../lib/outbound/postCall.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -126,8 +127,8 @@ async function logsDuring(run) {
   return { out, lines, events: (name) => lines.filter((l) => l.event === name) };
 }
 
-function bootOutbound({ database = outboundDb(), env = {}, customParameters = { direction: "outbound" }, authorizedCallSid = SID, callSid = SID, waitForConnect = true } = {}) {
-  return bootLive({ config: CONFIG, callSid, env, customParameters, authorizedCallSid, database, waitForConnect });
+function bootOutbound({ database = outboundDb(), env = {}, customParameters = { direction: "outbound" }, authorizedCallSid = SID, callSid = SID, waitForConnect = true, postCall, clipDrainMaxMs, clipDrainSettleMs } = {}) {
+  return bootLive({ config: CONFIG, callSid, env, customParameters, authorizedCallSid, database, waitForConnect, postCall, clipDrainMaxMs, clipDrainSettleMs });
 }
 
 /** 24 kHz PCM16 as the model sends it: enough for several 20 ms mu-law frames. */
@@ -774,8 +775,15 @@ describe("outbound: the first seconds through the real session", () => {
   // bookkeeping must say so too: an honest `cut: false` in the log, the
   // "missed" counter rather than the "cut" one, and the per-call cut budget
   // left unspent.
+  // CHANGED (final wave W1, A16): this test's own scenario -- a transcript
+  // fragment arriving while the clip plays, with no audio chunk -- used to
+  // reach the offer guard, which then logged an honest `cut: false`. That
+  // fragment belongs to a generation the caller will never hear (its audio
+  // would be discarded: the clip is on the wire), and the guard reaching it
+  // at all was the A16 gap (re-review 1 m5: a spoken note went out to Live
+  // on exactly this shape). The guard is now not reached; NB4's own contract
+  // -- no cut claimed, no cut counted, no budget spent -- holds a fortiori.
   it("NB4: the offer guard does not log a cut, bump the cut counter, or spend its budget when the clip protects the audio", async () => {
-    allowErrors("live_offer_unverified");
     clearStats();
     const call = await bootOutbound();
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
@@ -783,14 +791,11 @@ describe("outbound: the first seconds through the real session", () => {
 
     await call.assistantSays("We have a slot available on Monday at 9 AM.");
     expect(clear).not.toHaveBeenCalled();
-
-    const logged1 = events("live_offer_unverified")[0];
-    expect(logged1.cut).toBe(false); // honest: nothing was actually cut
-    expect(logged1.cuts).toBe(0); // the per-call budget was not spent
+    expect(events("live_offer_unverified")).toHaveLength(0); // A16: not reached at all
 
     const counters = getLatencyStats().turnTaking;
-    expect(counters.live_offer_cuts).toBe(0);
-    expect(counters.live_offer_cut_missed).toBe(1); // "we would have, but didn't", not "we cut"
+    expect(counters.live_offer_cuts ?? 0).toBe(0);
+    expect(counters.live_offer_cut_missed ?? 0).toBe(0);
     await call.hangUp();
   });
 
@@ -1528,6 +1533,251 @@ describe("W1 I1: the stale-reply discard lifts on the stale generation's OWN clo
     call.live.push({ serverContent: { outputTranscription: { text: "Goodbye." } } });
     await call.turnEnds(); // ITS close, late -- nothing has played since
     expect(aiRowsBesidesSeed(database)).toHaveLength(0);
+    await call.hangUp();
+  });
+});
+
+/**
+ * runPostCall's own db calls, faked -- every field of outboundPostCallContext
+ * taken from services/db.js's RETURN statement (the producer), not a log line.
+ * `rows` is the SAME array the session's addTranscriptEntry writes into, so
+ * the post-call transcript read sees exactly what the session persisted.
+ */
+function postCallDb(rows) {
+  const ctx = {
+    attemptNo: 1,
+    dialedAt: new Date("2026-09-28T10:00:00Z"),
+    answeredAt: new Date("2026-09-28T10:00:05Z"),
+    endedAt: null,
+    answeredBy: "human",
+    result: null,
+    silent: false,
+    sessionFinishedAt: new Date("2026-09-28T10:00:20Z"),
+    statusCompletedAt: null,
+    twilioCallSid: SID,
+    outreachId: "out-1",
+    outreachState: "dialing",
+    attemptsMade: 1,
+    outreachCreatedAt: new Date("2026-09-28T09:59:00Z"),
+    campaignId: "camp-1",
+    campaignVersion: 3,
+    contactId: "contact-1",
+    complianceClass: "solicited",
+    templateKey: "speed_to_lead",
+    config: CAMPAIGN_CONFIG,
+    phoneE164: CONTACT,
+    contactTimezone: "America/Chicago",
+    businessTimezone: "Europe/London",
+    callId: "call-1",
+    callSid: SID,
+    outcomeCode: null,
+    answers: null,
+  };
+  return {
+    withTenant: vi.fn(async (_biz, fn) => fn()),
+    claimPostCall: vi.fn(async () => new Date("2026-09-28T10:00:21Z")),
+    releasePostCallClaim: vi.fn(async () => true),
+    outboundPostCallContext: vi.fn(async () => ctx),
+    fetchCallTranscript: vi.fn(async () => rows.map((r) => ({ ...r }))),
+    finalizeAttemptResult: vi.fn(async () => {}),
+    outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })),
+    isSuppressed: vi.fn(async () => false),
+    insertDetectorSuppression: vi.fn(async () => true),
+    setCallOutcomeCode: vi.fn(async () => {}),
+    updateCallSummary: vi.fn(async () => {}),
+    setAttemptSilent: vi.fn(async () => {}),
+    setOutreachHold: vi.fn(async () => {}),
+    applyOutreachResult: vi.fn(async () => true),
+  };
+}
+const noopSummarize = async () => ({ summary: null, sentiment: null, outcome: "unknown" });
+
+/**
+ * A fake Live that TRANSCRIBES what it receives: once it has been sent
+ * `minVoiced` voiced frames (counted only from the moment this is armed), it
+ * answers with an inputTranscription -- on a later tick, as a network reply
+ * would. Reads only call.live.sent.audioIn, never the test's own intent.
+ */
+function transcribeOnReceipt(call, text, { minVoiced = 11, then = null } = {}) {
+  let voicedSeen = 0;
+  let fired = false;
+  const audioIn = call.live.sent.audioIn;
+  const realPush = audioIn.push.bind(audioIn);
+  audioIn.push = (audio) => {
+    const n = realPush(audio);
+    if (!fired && audio?.data && pcmPeak(audio.data) > 4000) voicedSeen += 1;
+    if (!fired && voicedSeen >= minVoiced) {
+      fired = true;
+      setImmediate(() => {
+        call.live.push({ serverContent: { inputTranscription: { text } } });
+        then?.();
+      });
+    }
+    return n;
+  };
+}
+
+describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the edges", () => {
+  function recordingDb() {
+    const rows = [];
+    const database = outboundDb();
+    database.addTranscriptEntry = vi.fn(async (_callId, speaker, message, sequence) => {
+      rows.push({ speaker, message, sequence });
+    });
+    return { rows, database };
+  }
+
+  // I2 (final review; ledger m1/A7). "Stop calling me." said DURING the
+  // clip, then the caller hangs up before the clip ends. The words were held
+  // (C1) and the hang-up dropped them: no transcript, no caller row, nothing
+  // for the post-call D9 detector -- and the retry schedule re-dialled them.
+  it("I2: 'Stop calling me.' said mid-clip, then the hang-up -- the held speech is drained to Live, its caller row is written, and post-call's opt-out detector writes the suppression", async () => {
+    const { rows, database } = recordingDb();
+    const pcDb = postCallDb(rows);
+    const postCall = createPostCall({ db: pcDb, summarize: noopSummarize });
+    const call = await bootOutbound({ database, postCall });
+    await call.feed(400, { voiced: true }); // "Hello?"
+    await call.feed(400); // the hello ends; the clip queues (hello-end)
+    transcribeOnReceipt(call, "Stop calling me."); // armed only now: the hello itself already reached Live
+
+    const beforeHold = call.live.sent.audioIn.length;
+    for (let i = 0; i < 3; i++) {
+      await call.feed(160, { voiced: true }); // runs well under CLIP_BARGE_MIN_MS: the clip keeps playing
+      await call.feed(40);
+    }
+    expect(call.live.sent.audioIn.length).toBe(beforeHold); // held (C1): nothing reached Live yet
+
+    await call.hangUp(); // Twilio `stop`, the clip still playing
+
+    await vi.waitFor(() => expect(pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
+    expect(pcDb.insertDetectorSuppression).toHaveBeenCalledWith({ phone: CONTACT, sourceCallId: "call-1" });
+    expect(rows.filter((r) => r.speaker === "caller").map((r) => r.message)).toContain("Stop calling me.");
+    // The post-call claim ran only AFTER that row was written.
+    const stopRowCall = database.addTranscriptEntry.mock.calls.findIndex(([, , message]) => message === "Stop calling me.");
+    expect(pcDb.claimPostCall.mock.invocationCallOrder[0]).toBeGreaterThan(
+      database.addTranscriptEntry.mock.invocationCallOrder[stopRowCall]
+    );
+    expect(events("outbound_clip_hold_drained")).toHaveLength(1);
+    expect(events("outbound_clip_hold_drained")[0].voiced_frames).toBeGreaterThan(0);
+    expect(events("outbound_clip_hold_drain_settled")[0]).toMatchObject({ transcribed: true, reason: "settled" });
+    expect(events("outbound_clip_hold_teardown_dropped")).toHaveLength(0);
+  });
+
+  it("I2: nothing Live says during the drain is heard -- no AI row for its reply, the caller row still written", async () => {
+    const { rows, database } = recordingDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    transcribeOnReceipt(call, "Stop calling me.", {
+      then: () => {
+        call.live.push(modelAudioMsg());
+        call.live.push({ serverContent: { outputTranscription: { text: "Of course, we won't call you again. Goodbye." } } });
+        call.live.push({ serverContent: { turnComplete: true } });
+      },
+    });
+    for (let i = 0; i < 3; i++) {
+      await call.feed(160, { voiced: true });
+      await call.feed(40);
+    }
+    await call.hangUp();
+    await vi.waitFor(() => expect(events("outbound_clip_hold_drain_settled")).toHaveLength(1), { timeout: 4000 });
+    expect(rows.filter((r) => r.speaker === "caller").map((r) => r.message)).toContain("Stop calling me.");
+    expect(rows.filter((r) => r.speaker === "ai")).toEqual([]);
+  });
+
+  it("I2: a drain that never yields text ends at its bound, counted, and post-call still runs after it", async () => {
+    const { database } = recordingDb();
+    let claimed = 0;
+    const call = await bootOutbound({
+      database,
+      clipDrainMaxMs: 150,
+      postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => { claimed += 1; return false; } },
+    });
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    for (let i = 0; i < 3; i++) {
+      await call.feed(160, { voiced: true });
+      await call.feed(40);
+    }
+    await call.hangUp();
+    await vi.waitFor(() => expect(claimed).toBe(1), { timeout: 2000 });
+    expect(events("outbound_clip_hold_drain_settled")[0]).toMatchObject({ transcribed: false, reason: "max" });
+  });
+
+  // A12 (F-R2 M6/m4/m6): teardown's routine leftovers -- the delay line's
+  // silence -- are not counted as dropped speech, and nothing is drained.
+  it("A12: a hang-up with only SILENCE held is not a drain and counts no dropped frames; the log carries voiced_frames 0", async () => {
+    clearStats();
+    const call = await bootOutbound();
+    await call.feed(1400); // backstop_silence: the clip plays
+    await call.feed(200); // silence into the delay line
+    await call.hangUp();
+    expect(events("outbound_clip_hold_drained")).toHaveLength(0);
+    const td = events("outbound_clip_hold_teardown_dropped");
+    expect(td).toHaveLength(1);
+    expect(td[0].voiced_frames).toBe(0);
+    expect(td[0].frames).toBeGreaterThan(0);
+    const c = getLatencyStats().turnTaking;
+    expect(c.outbound_clip_hold_dropped ?? 0).toBe(0);
+    expect(c.outbound_clip_hold_voiced_dropped ?? 0).toBe(0);
+  });
+
+  // A26 (F-R2 re-review 2 out-of-scope; probe Q10): the new-caller-turn
+  // flush folded a model turn with no close WITHOUT persisting it -- a clip
+  // barge while the stale hello reply was open lost the caller's "Hello?".
+  it("A26: a clip barge while the stale hello reply is open -- the new-caller-turn flush writes the caller's 'Hello?' row (and no AI row for the unheard reply)", async () => {
+    const { rows, database } = recordingDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true });
+    await call.callerSays("Hello?"); // Live's transcript of the pre-clip hello
+    await call.feed(400); // the clip queues (hello-end)
+    call.live.push(modelAudioMsg()); // the stale reply opens: discarded
+    await call.settle();
+    await call.assistantSays("Hi, is that Sam?");
+    // Quiet long enough for the hello's own turn to close on our side (the
+    // vendor arm's 1.2 s bookkeeping hangover), still inside the clip...
+    await call.feed(900);
+    // ...then a genuine barge (>= CLIP_BARGE_MIN_MS): the gate forwards it and
+    // the strategy opens a NEW caller turn -- the flush this test is about.
+    await call.feed(900, { voiced: true });
+
+    expect(rows.filter((r) => r.speaker === "caller").map((r) => r.message)).toContain("Hello?");
+    expect(rows.filter((r) => r.speaker === "ai")).toEqual([]);
+    expect(call.ws.liveState.history.some((h) => /is that Sam/.test(JSON.stringify(h)))).toBe(false); // A22 on this path too
+    await call.hangUp();
+  });
+
+  // A17 (F-R2 re-review 1 m6): finish()'s own flush wrote the unheard stale
+  // reply as an AI row on a mid-clip hang-up -- a record of a disclosure Live
+  // never spoke to anyone.
+  it("A17: a hang-up mid-clip while the stale reply is open writes the caller row but no AI row for the unheard reply", async () => {
+    const { rows, database } = recordingDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true });
+    await call.callerSays("Hello?");
+    await call.feed(400);
+    call.live.push(modelAudioMsg()); // discarded
+    await call.settle();
+    await call.assistantSays("Hi, is that Sam? It's Ava, an AI assistant from Digile Media.");
+    await call.hangUp();
+    expect(rows.filter((r) => r.speaker === "caller").map((r) => r.message)).toEqual(["Hello?"]);
+    expect(rows.filter((r) => r.speaker === "ai")).toEqual([]);
+  });
+
+  // A16 (F-R2 re-review 1 m5, probe R7): a stale generation whose transcript
+  // arrives BEFORE its first audio chunk slipped past the streaming guards
+  // (droppedThisGeneration() was still false) -- the offer guard fired and a
+  // spoken note went to Live mid-clip.
+  it("A16: stale text arriving before any audio during the clip trips no streaming guard, sends no note, and leaves no AI row", async () => {
+    const { rows, database } = recordingDb();
+    const call = await bootOutbound({ database });
+    await call.feed(1400); // backstop_silence: the clip is playing
+    const notesBefore = call.live.sent.clientContent.length;
+    await call.assistantSays("We have a slot available on Monday at 9 AM."); // text only, no chunk yet
+    expect(events("live_offer_unverified")).toHaveLength(0);
+    expect(call.live.sent.clientContent.length).toBe(notesBefore); // no note to Live
+    await call.turnEnds();
+    expect(rows.filter((r) => r.speaker === "ai" && r.message !== OPENER)).toEqual([]);
     await call.hangUp();
   });
 });
