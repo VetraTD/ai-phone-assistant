@@ -1315,15 +1315,23 @@ describe("outbound: the first seconds through the real session", () => {
     await call.settle();
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // seed sent; staleDiscardDeadline armed
 
-    // Past staleGenerationGraceMs (2,000 ms) with no media frame in between,
-    // so tick() -- not onModelAudio -- is what fires the timeout on the next
-    // ordinary frame, same shape as the N1 fix test above.
+    // Past the idle bound (STALE_GENERATION_IDLE_MS, final wave W1 -- was a
+    // 2,000 ms wall clock) with no media frame in between, so tick() -- not
+    // onModelAudio -- is what fires the timeout on the next ordinary frame,
+    // same shape as the N1 fix test above.
     await call.starve(2100);
     await call.feed(20); // fires checkStaleDiscardTimeout via tick()
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
 
     // The NEXT generation: genuinely heard (nothing discarded for it --
-    // clipPlaying and staleDiscard are both false by now).
+    // clipPlaying and staleDiscard are both false by now). CHANGED (final
+    // wave W1, I1 -- replaces this test's own NB3 flag-clear ruling R2): it
+    // PLAYS audio first. Heard-ness is scoped to the generation now, and a
+    // text-only "reply" after an abandoned generation is indistinguishable
+    // from that generation's own late transcript -- which must never read
+    // heard. A reply the caller hears always carries audio.
+    call.live.push(modelAudioMsg());
+    await call.settle();
     await call.assistantSays("We have a slot available on Monday at 9 AM.");
     await call.turnEnds();
 
@@ -1403,6 +1411,123 @@ describe("outbound: the first seconds through the real session", () => {
     const firstVoicedIdx = voiced.indexOf(true);
     expect(firstVoicedIdx).toBeGreaterThan(0);
     expect(voiced.slice(0, firstVoicedIdx).every((v) => v === false)).toBe(true);
+    await call.hangUp();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FINAL FIX WAVE W1 -- the first seconds (final-review.md I1/I2 and the
+// "First seconds" triage rows). Every test here drives the REAL session
+// (index.js + the real firstSeconds controller) through liveBoot's fake Live.
+// ---------------------------------------------------------------------------
+
+/** The session's own AI transcript rows, minus the seed's disclosure row (b7). */
+const aiRowsBesidesSeed = (database) =>
+  database.addTranscriptEntry.mock.calls.filter(([, speaker, message]) => speaker === "ai" && message !== OPENER);
+
+describe("W1 I1: the stale-reply discard lifts on the stale generation's OWN close", () => {
+  // Sim A run 1 (harness-server-A.log:30-32): the stale reply to the pre-clip
+  // "Hello?" was a full opener repeat, streamed at speaking pace on
+  // gemini-3.8-live. No `interrupted` ever came; the 2 s wall-clock timeout
+  // fired MID-GENERATION (waited 2004 ms), the rest of the generation played,
+  // and its turnComplete 61 ms later wrote the whole stale opener as an AI
+  // row. This is that shape, both ends real: the stale generation opens
+  // mid-clip, streams a chunk + a transcript fragment every 100 ms of media
+  // through the seed and past the OLD deadline (seed + 2,000), and closes
+  // 60 ms after it.
+  const STALE = ["Hello, is that Sam? ", "It's Ava, calling ", "on behalf of Digile Media ", "about your enquiry. "];
+
+  async function staleStream(call, ms, state) {
+    for (let t = 0; t < ms; t += 100) {
+      await call.feed(100);
+      call.live.push(modelAudioMsg(100));
+      call.live.push({ serverContent: { outputTranscription: { text: STALE[state.i++ % STALE.length] } } });
+    }
+    await call.settle();
+  }
+
+  it("sim A run 1's shape: nothing of the stale generation reaches Twilio, the transcript, the detectors or the history -- and the next generation plays", async () => {
+    allowErrors("outbound_stale_discard_timeout"); // so a regression fails on the named assertion below, not on afterEach
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400, { voiced: true }); // "Hello?"
+    await call.feed(400); // the hello ends; the clip queues via the hello-end timer (seed deferred, O-8)
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
+
+    const state = { i: 0 };
+    await staleStream(call, 600, state); // the stale reply opens MID-CLIP
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // the seed goes; still streaming
+    expect(call.live.sent.clientContent).toHaveLength(1);
+    await staleStream(call, 2000, state); // through seed + 2,000 -- the OLD wall-clock deadline
+    await call.feed(60);
+    call.live.push({ serverContent: { turnComplete: true } }); // 60 ms after the old deadline
+    await call.settle();
+    await call.settle();
+
+    // Nothing of it reached the caller: only the clip's own single enqueue.
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    // ...nor any sink: no AI row, no turn detector, no history entry.
+    expect(aiRowsBesidesSeed(database)).toHaveLength(0);
+    expect(events("outbound_topic_to_unverified")).toHaveLength(0);
+    expect(call.ws.liveState.history.some((h) => /calling on behalf/.test(JSON.stringify(h)))).toBe(false);
+    // The wait ended on the close, not on a clock.
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
+
+    // Ava is not muted: the NEXT generation plays.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue.mock.calls.length).toBeGreaterThan(1);
+    await call.hangUp();
+  });
+
+  // The NB3 glue shape (F-R2 re-review 1): a stale generation that never
+  // closes at all. The idle bound abandons it; its own late transcript
+  // ("...Goodbye.") still arrives; then the next generation plays. The heard
+  // reply's row must be exactly its own text -- none of the stale text glued
+  // onto it -- and its guards/rows must still work (NB3's own concern).
+  it("the NB3 glue shape: an abandoned generation's text is cut; the post-lift reply plays and is persisted alone", async () => {
+    allowErrors("outbound_stale_discard_timeout");
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    const state = { i: 0 };
+    await staleStream(call, 300, state);
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(2100); // the generation goes quiet and never closes: idle bound (and the OLD 2 s clock) both pass
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+
+    call.live.push({ serverContent: { outputTranscription: { text: "Goodbye." } } }); // its own late transcript
+    await call.settle();
+    call.live.push(modelAudioMsg()); // the NEXT generation: plays
+    await call.settle();
+    expect(enqueue.mock.calls.length).toBeGreaterThan(1);
+    await call.assistantSays("I'm calling about your enquiry.");
+    await call.turnEnds();
+
+    const rows = aiRowsBesidesSeed(database);
+    expect(rows.map((r) => r[2])).toEqual(["I'm calling about your enquiry."]);
+    // Lifted by the idle bound, not a clock: reason recorded.
+    expect(events("outbound_stale_discard_timeout")[0]).toMatchObject({ reason: "idle" });
+    await call.hangUp();
+  });
+
+  it("an abandoned generation's own late close reads unheard: no AI row for it", async () => {
+    allowErrors("outbound_stale_discard_timeout");
+    const database = outboundDb();
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    const state = { i: 0 };
+    await staleStream(call, 300, state);
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(2100); // abandoned by the idle bound (the OLD clock would have passed too)
+    call.live.push({ serverContent: { outputTranscription: { text: "Goodbye." } } });
+    await call.turnEnds(); // ITS close, late -- nothing has played since
+    expect(aiRowsBesidesSeed(database)).toHaveLength(0);
     await call.hangUp();
   });
 });

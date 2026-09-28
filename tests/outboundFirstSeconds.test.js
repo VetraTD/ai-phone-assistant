@@ -29,7 +29,8 @@ import {
   BACKSTOP_REFETCH_LEAD_MS,
   ONSET_CONFIRM_DEFER_MS,
   CLIP_BARGE_MIN_MS,
-  STALE_GENERATION_GRACE_MS,
+  STALE_GENERATION_IDLE_MS,
+  STALE_GENERATION_MAX_MS,
   firstTurnComplete,
 } from "../lib/outbound/firstSeconds.js";
 import { createVad } from "../lib/voice/inboundVad.js";
@@ -282,7 +283,7 @@ describe("5. seeded suppression", () => {
   // `ctl.onMark(BACKSTOP_END_MARK)` with NO `atMs`, which defaults to
   // `now()` -- 0 in this rig -- rather than a realistic echo time. That put
   // `catchMidClipGeneration`'s own grace deadline (item 3, fix round 2) at
-  // 0 + STALE_GENERATION_GRACE_MS = 2,000, BEFORE the next chunk at 2,700 --
+  // 0 + the then 2,000 ms grace, BEFORE the next chunk at 2,700 --
   // so the chunk passed via a SPURIOUS outbound_stale_discard_timeout, not
   // because the mark echoed and the generation genuinely closed, which is
   // what this test is named for. (The re-review also found the report had
@@ -1178,7 +1179,12 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
   // no longer reaches this call at all while the clip plays -- is
   // liveOutboundStart.test.js's "I1: a vendor `interrupted` does not clear
   // the clip" below.)
-  it("M4: onAudioCleared while the clip is STILL PLAYING drops only condition (ii) -- a generation still open keeps the discard, on a fresh grace clock", () => {
+  // CHANGED (final wave W1, A27): this used to wait out a 2 s wall clock
+  // after the clear even though the open generation had CLOSED -- giveUpOnSeed
+  // left `seedSent` false, so the close could never lift the discard. The
+  // clip barge / clear abandons condition (ii) for good; the generation's own
+  // close now lifts it at once (the same close-driven rule as the seed path).
+  it("M4 + A27: onAudioCleared while the clip is STILL PLAYING drops only condition (ii) -- the open generation keeps the discard, and ITS OWN CLOSE lifts it at once", () => {
     const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
     run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // backstop_hello_end fires and starts playing
     expect(enqueue).toHaveBeenCalledTimes(1);
@@ -1188,17 +1194,31 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     ctl.onAudioCleared(2000); // e.g. a genuine >= CLIP_BARGE_MIN_MS barge, before the end mark
     expect(ctl.clipPlaying()).toBe(false); // the clip itself is gone
     expect(ctl.onModelAudio(2050)).toBe(false); // but the OPEN generation still has not closed
+    expect(ctl.onModelAudio(2300)).toBe(false);
 
-    // Its own grace clock, started at the clear (2,000) -- there is no seed
-    // instant to anchor it to any more, since the seed was never sent.
-    const liftAt = 2000 + STALE_GENERATION_GRACE_MS;
-    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
-    ctl.tick(liftAt);
-    expect(ctl.onModelAudio(liftAt)).toBe(true);
-    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    // It closes (Live's own `interrupted` on hearing the barge): the discard
+    // lifts NOW, not 2 s after the clear.
+    expect(ctl.onAssistantTurnText("the reply the caller barged over", false, 2400)).toBe(false);
+    expect(ctl.onModelAudio(2450)).toBe(true); // Live's answer to the barge plays
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
   });
 
-  it("M4: the M9 mark-echo timeout also drops only condition (ii) -- a generation still open keeps the discard, on a fresh grace clock", () => {
+  it("M4: after a clear, a generation that goes quiet without ever closing lifts at the IDLE bound (never a wall clock from the clear)", () => {
+    const { ctl, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(ctl.onModelAudio(1700)).toBe(false);
+    ctl.onAudioCleared(2000);
+    expect(ctl.onModelAudio(2050)).toBe(false); // the last stale chunk
+    const liftAt = 2050 + STALE_GENERATION_IDLE_MS; // idle runs from the LAST chunk (later than the clear)
+    ctl.tick(liftAt - 10);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
+    ctl.tick(liftAt);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ reason: "idle", severity: "warn" });
+    expect(ctl.onModelAudio(liftAt + 10)).toBe(true);
+  });
+
+  it("M4: the M9 mark-echo timeout also drops only condition (ii) -- a generation still open keeps the discard until it closes", () => {
     const { ctl, events } = rig({ firstSpeaker: "clip" });
     run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
     expect(ctl.onModelAudio(1700)).toBe(false); // a generation is open
@@ -1210,27 +1230,92 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(events("outbound_backstop_mark_timeout")).toHaveLength(1);
     expect(ctl.onModelAudio(markTimeoutAt + 10)).toBe(false); // condition (i) alone did not lift it
 
-    const liftAt = markTimeoutAt + STALE_GENERATION_GRACE_MS;
-    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
-    ctl.tick(liftAt);
-    expect(ctl.onModelAudio(liftAt)).toBe(true);
-    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    // Still streaming 3 s later (well past the old 2 s wall clock): still stale.
+    for (let t = markTimeoutAt + 200; t <= markTimeoutAt + 3000; t += 200) {
+      ctl.tick(t);
+      expect(ctl.onModelAudio(t)).toBe(false);
+    }
+    ctl.onAssistantTurnText("the stale reply", true, markTimeoutAt + 3100); // it closes
+    expect(ctl.onModelAudio(markTimeoutAt + 3200)).toBe(true);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
   });
 
-  it("named risk 4: a turnComplete that never arrives does not mute Live forever -- STALE_GENERATION_GRACE_MS after the seed, the discard lifts anyway, logged", () => {
+  // FINAL REVIEW I1 (sim A run 1). The 2 s wall clock lifted the discard
+  // MID-GENERATION: the stale reply to the hello streamed past it at speaking
+  // pace, with no `interrupted`, and closed 61 ms after the timeout -- its
+  // tail played and its text read heard. Close-driven now.
+  it("I1: sim A run 1's shape -- a stale generation streaming 2 s+ past the seed, closing 61 ms after the OLD deadline, never plays and never reads heard", () => {
+    const { ctl, rec, events } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // hello, then the clip at hello-end
+    for (let t = 1700; t <= 2600; t += 100) expect(ctl.onModelAudio(t)).toBe(false); // mid-clip stream
+    ctl.onMark(BACKSTOP_END_MARK, 2600); // the seed goes; the generation is still streaming
+    expect(rec.seeds).toHaveLength(1);
+    for (let t = 2700; t <= 2600 + 2000; t += 100) {
+      ctl.tick(t);
+      expect(ctl.onModelAudio(t)).toBe(false); // including AT the old deadline (seed + 2,000)
+    }
+    expect(ctl.onAssistantTurnText("Hello, is that Sam? It's Ava, calling on behalf of Digile Media.", true, 2600 + 2061)).toBe(false);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
+    expect(ctl.onModelAudio(2600 + 2200)).toBe(true); // the NEXT generation plays
+  });
+
+  it("I1: the hard cap -- a stale generation that streams and NEVER closes is released at STALE_GENERATION_MAX_MS after the seed, logged at error level", () => {
+    const { ctl, events, rec } = rig({ firstSpeaker: "clip" });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(ctl.onModelAudio(1700)).toBe(false);
+    ctl.onMark(BACKSTOP_END_MARK, 2600);
+    const capAt = 2600 + STALE_GENERATION_MAX_MS;
+    for (let t = 2700; t < capAt; t += 250) expect(ctl.onModelAudio(t)).toBe(false); // never idle
+    ctl.tick(capAt);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    expect(events("outbound_stale_discard_timeout")[0]).toMatchObject({ level: "error" });
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ reason: "cap", waited_ms: STALE_GENERATION_MAX_MS, callSid: "CA1", attemptId: "att-1" });
+    expect(events("outbound_stale_discard_timeout")[0].fields.severity).toBeUndefined();
+    expect(rec.seeds).toHaveLength(1);
+    expect(ctl.onModelAudio(capAt + 10)).toBe(true); // never muted forever
+  });
+
+  it("named risk 4: a generation that goes quiet and never closes lifts at the IDLE bound -- measured from the later of the seed and its last chunk", () => {
     const { ctl, enqueue, events } = rig({ firstSpeaker: "clip" });
     run(ctl, 0, 1190, (t) => t >= 1000);
     expect(ctl.onModelAudio(1200)).toBe(false); // a generation in flight, never to close
     run(ctl, 1200, 2600, (t) => t >= 1000);
     expect(enqueue).toHaveBeenCalledTimes(1);
-    ctl.onMark(BACKSTOP_END_MARK, 3700); // seed sent at 3,700; the grace clock starts here
-    const liftAt = 3700 + STALE_GENERATION_GRACE_MS;
+    ctl.onMark(BACKSTOP_END_MARK, 3700); // seed sent at 3,700: later than the last chunk (1,200)
+    const liftAt = 3700 + STALE_GENERATION_IDLE_MS;
 
-    expect(ctl.onModelAudio(liftAt - 10)).toBe(false);
     ctl.tick(liftAt - 10);
-    expect(ctl.onModelAudio(liftAt)).toBe(true); // never muted forever
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
+    expect(ctl.onModelAudio(liftAt)).toBe(true); // lifted by onModelAudio's own check, then plays
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
-    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ callSid: "CA1", attemptId: "att-1", waited_ms: STALE_GENERATION_GRACE_MS });
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ callSid: "CA1", attemptId: "att-1", reason: "idle", waited_ms: STALE_GENERATION_IDLE_MS });
+  });
+
+  // FINAL REVIEW I1 (replaces the NB3 ruling R2): heard-ness is scoped to the
+  // generation. An abandoned generation's own late close reads UNHEARD, and
+  // index.js is told to drop the reply text accumulated for it -- at the
+  // abandonment, and again when the next generation's first chunk plays.
+  it("I1: an abandoned generation's own late close reads unheard; the reply accumulator is cut at the lift and at the next played chunk", () => {
+    const cuts = [];
+    const { ctl } = rig({ firstSpeaker: "clip", discardReplyText: () => cuts.push("cut") });
+    run(ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(ctl.onModelAudio(1700)).toBe(false);
+    ctl.onMark(BACKSTOP_END_MARK, 2600);
+    ctl.tick(2600 + STALE_GENERATION_IDLE_MS); // abandoned
+    expect(cuts).toEqual(["cut"]);
+    expect(ctl.droppedThisGeneration()).toBe(true); // its late transcript still gates the streaming guards
+    expect(ctl.onAssistantTurnText("...Goodbye.", true, 4200)).toBe(false); // its own late close: unheard
+
+    // A fresh abandonment, then the NEXT generation plays: cut again, heard.
+    const r = rig({ firstSpeaker: "clip", discardReplyText: () => cuts.push("cut2") });
+    run(r.ctl, 0, 1550, (t) => t >= 1000 && t <= 1200);
+    expect(r.ctl.onModelAudio(1700)).toBe(false);
+    r.ctl.onMark(BACKSTOP_END_MARK, 2600);
+    r.ctl.tick(2600 + STALE_GENERATION_IDLE_MS);
+    expect(r.ctl.onModelAudio(4200)).toBe(true); // the next generation plays
+    expect(cuts).toEqual(["cut", "cut2", "cut2"]);
+    expect(r.ctl.droppedThisGeneration()).toBe(false);
+    expect(r.ctl.onAssistantTurnText("I'm calling about your enquiry.", true, 4400)).toBe(true);
   });
 
   // M3 (fix round 1, Ruling): no clip (the render failed or refused), clip
@@ -1264,20 +1349,20 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
   // staleDiscardDeadline, so named risk 4 (a turnComplete that never
   // arrives) was NOT actually bounded here -- the re-review's own probe saw
   // chunks still dropped at 20, 30 and 60 s with no timeout ever logged.
-  // This proves the bound directly: the SAME STALE_GENERATION_GRACE_MS the
-  // has-clip paths use.
-  it("N1: the no-clip M3 discard is bounded too -- if the generation never closes, it lifts at STALE_GENERATION_GRACE_MS after the decision, logged", () => {
+  // This proves the bound directly: the SAME idle/cap bounds the has-clip
+  // paths use (CHANGED, final wave W1 I1: was a 2 s wall clock).
+  it("N1: the no-clip M3 discard is bounded too -- if the generation goes quiet and never closes, it lifts at the idle bound after the decision, logged", () => {
     const { ctl, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
     run(ctl, 0, 1190, (t) => t >= 1000);
     expect(ctl.onModelAudio(1200)).toBe(false);
     run(ctl, 1200, 2600, (t) => t >= 1000); // the slow-path decision fires at 2,600, no clip
-    const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+    const liftAt = 2600 + STALE_GENERATION_IDLE_MS;
 
-    expect(ctl.onModelAudio(liftAt - 10)).toBe(false); // still discarded, well past 20/30/60 s in real terms
     ctl.tick(liftAt - 10);
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(0);
     expect(ctl.onModelAudio(liftAt)).toBe(true); // never muted forever
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
-    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ waited_ms: STALE_GENERATION_GRACE_MS });
+    expect(events("outbound_stale_discard_timeout")[0].fields).toMatchObject({ waited_ms: STALE_GENERATION_IDLE_MS, reason: "idle" });
   });
 
   // N2/item 2 (fix round 2). Unlike every has-clip path, the no-clip M3
@@ -1302,12 +1387,12 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     expect(rec.prompts).toHaveLength(1);
   });
 
-  it("N2: the grace-timeout resolution ALSO re-prompts Live once (named risk 4's bound is one of the two ways this can resolve)", () => {
+  it("N2: the idle-bound resolution ALSO re-prompts Live once (named risk 4's bound is one of the two ways this can resolve)", () => {
     const { ctl, rec, events } = rig({ firstSpeaker: "clip", backstopAudio: null });
     run(ctl, 0, 1190, (t) => t >= 1000);
     expect(ctl.onModelAudio(1200)).toBe(false);
     run(ctl, 1200, 2600, (t) => t >= 1000);
-    const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+    const liftAt = 2600 + STALE_GENERATION_IDLE_MS;
     ctl.tick(liftAt);
     expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
     expect(events("outbound_no_clip_reprompt")).toHaveLength(1);
@@ -1398,9 +1483,9 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
       expect(rec.prompts).toHaveLength(1); // once only
     });
 
-    it("slow path, the caller stays SILENT and A never closes: the grace timeout reprompts exactly once", () => {
+    it("slow path, the caller stays SILENT and A never closes: the idle bound reprompts exactly once", () => {
       const { ctl, rec, events } = slowNoClip(2600);
-      const liftAt = 2600 + STALE_GENERATION_GRACE_MS;
+      const liftAt = 2600 + STALE_GENERATION_IDLE_MS;
       run(ctl, 2620, liftAt, silent, F); // the last frame is the timeout's own tick
       expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
       expect(rec.prompts).toEqual([REPROMPT]);
