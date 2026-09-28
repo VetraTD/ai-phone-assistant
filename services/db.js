@@ -2600,12 +2600,33 @@ export async function claimOutreachForDispatch(outreachId) {
  * is gate check 4, and a do-not-call check that cannot rule out a hash match
  * must never read as "not suppressed" -- it throws instead, the caller
  * (dispatch.js) never reaches a dial, and Cloud Tasks retries.
+ *
+ * S3-11 fix round 1 (review Important finding, `services/db.js:2608`): `phone`
+ * MUST normalize to canonical E.164 before hashing, the same way
+ * eraseCallerData's write side already requires (below) -- every hash ever
+ * WRITTEN is guaranteed canonical because that path throws on a
+ * normalization failure, and hashing anything else here would silently read
+ * as "not suppressed" for a number that IS on the do-not-call list (fail
+ * OPEN, named risk 2's own failure mode, on the axis the global constraints
+ * single out: `??` hiding a missing wire the same way an unguarded `?.`
+ * would). Not reachable via either production caller today (dispatch.js and
+ * postCall.js both pass contacts.phone_e164, and scripts/outbound-admin.js's
+ * write path already regex-validates E.164 before insert) -- fixed anyway,
+ * because "not reachable today" is not the same guarantee as "cannot ever
+ * reach it", and this is gate check 4 on the do-not-call list.
  * @param {string} phone - E.164
  * @returns {Promise<boolean>}
  */
 export async function isSuppressed(phone) {
   requireTenantScope("isSuppressed");
-  const hash = suppressionHash(normalizePhoneNumber(phone) ?? phone);
+  const canonicalPhone = normalizePhoneNumber(phone);
+  if (!canonicalPhone) {
+    throw new Error(
+      "isSuppressed: cannot compute a trustworthy suppression hash — the phone does not " +
+        "normalize to E.164, and hashing a non-canonical form could silently read as not suppressed"
+    );
+  }
+  const hash = suppressionHash(canonicalPhone);
   const res = await q(`SELECT id FROM suppressions WHERE phone_e164 = $1 OR phone_hash = $2`, [phone, hash]);
   if (res.error) throw res.error;
   const rows = res.rows || [];

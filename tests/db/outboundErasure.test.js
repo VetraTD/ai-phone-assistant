@@ -205,6 +205,23 @@ d("Art. 17 erasure reaches outbound calling's own tables (P5, S3-11)", () => {
     expect(stillSuppressed).toBe(true);
   });
 
+  // S3-11 fix round 1 (review Important finding, services/db.js:2608): before
+  // this fix, isSuppressed fell back to hashing the RAW phone when it could
+  // not normalize to E.164, instead of throwing -- named risk 2's own failure
+  // mode, on the READ side this time (eraseCallerData's write side already
+  // threw). Once erased, this suppression is findable ONLY by hash (its
+  // phone_e164 is NULL) -- so a non-canonical query phone can never compute
+  // the matching hash, and the fixed function must throw rather than
+  // silently answer "not suppressed" for a number that genuinely is.
+  it("fail-closed (review Important finding): a non-canonical phone for a suppressed-BY-HASH contact throws, not silently reads not-suppressed", async () => {
+    await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
+
+    // Before the fix this resolved to `false` (fail open, undetected) --
+    // SUBJECT_NATIONAL cannot normalize, so the old `?? phone` fallback
+    // hashed the raw string and never matched expectedHash(SUBJECT).
+    await expect(db.withTenant(BUSINESS, () => db.isSuppressed(SUBJECT_NATIONAL))).rejects.toThrow();
+  });
+
   it("does not touch another contact at the same business (BYSTANDER)", async () => {
     await db.withTenant(BUSINESS, () => db.eraseCallerData(BUSINESS, SUBJECT));
 

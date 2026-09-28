@@ -110,6 +110,23 @@ describe("dispatch: the gate's verdicts", () => {
     expect(db.closeOutreach).toHaveBeenCalledWith("o1", "suppressed");
     expect(twilio.calls.create).not.toHaveBeenCalled();
   });
+  // S3-11 fix round 1 (review Important finding, services/db.js's isSuppressed):
+  // fail-closed on the read side must actually reach dispatch's own
+  // never-dial guarantee, not merely be asserted about in isolation. Mirrors
+  // the "M2" throw-propagation pattern above (db.setAttemptCallSid/
+  // lockOutreachState throwing "db down" -> d() rejects) for isSuppressed
+  // specifically: a throw there (e.g. the fixed isSuppressed refusing a
+  // non-canonical phone) must never be swallowed into "not suppressed, dial
+  // it" -- it must propagate out of dispatch() uncaught, so the route 500s
+  // and Cloud Tasks retries rather than placing a call.
+  it("isSuppressed throwing (fail-closed) propagates out of dispatch uncaught -- never dials, never silently treats it as not-suppressed", async () => {
+    const db = fakeDb();
+    db.isSuppressed = vi.fn(async () => { throw new Error("isSuppressed: cannot compute a trustworthy suppression hash"); });
+    const { d, twilio } = mk(db);
+    await expect(d({ businessId: "b1", outreachId: "o1" })).rejects.toThrow(/cannot compute a trustworthy suppression hash/);
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+    expect(db.insertCallAttempt).not.toHaveBeenCalled();
+  });
   // Checkpoint 2a, M10: a refusal line with no outreachId cannot be traced
   // back to the row it refused.
   it("both gate-refusal log lines carry the outreachId", async () => {
