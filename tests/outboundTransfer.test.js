@@ -652,10 +652,14 @@ describe("POST /twilio/outbound-transfer-result", () => {
   // S3-4 (D6): the transfer-miss clip, in Ava's own Live voice.
   // ---------------------------------------------------------------------
   describe("S3-4: the transfer-miss clip (D6, one voice per call)", () => {
-    it("an unanswered transfer WITH a stored clip: <Play> of a signed transfer_miss URL, no <Say>", async () => {
+    // Named risk 1: a <Play> URL the media route would actually refuse. So
+    // this fetches the URL through the REAL route on the SAME app/db, never
+    // just asserting it signs and verifies in isolation.
+    it("an unanswered transfer WITH a stored clip: <Play> of a signed transfer_miss URL, no <Say> -- and the URL actually plays through the real media route", async () => {
       const clip = Buffer.from([1, 2, 3]);
       const db = doorFakeDb({ fetchAttemptTransferMissAudio: vi.fn(async () => clip) });
-      const res = await request(doorApp(db, { OUTBOUND_MEDIA_URL_SECRET: "a-test-secret" }))
+      const app = doorApp(db, { OUTBOUND_MEDIA_URL_SECRET: "a-test-secret" });
+      const res = await request(app)
         .post("/twilio/outbound-transfer-result")
         .query({ attempt: DOOR_ATTEMPT })
         .type("form")
@@ -679,6 +683,17 @@ describe("POST /twilio/outbound-transfer-result", () => {
         env: { OUTBOUND_MEDIA_URL_SECRET: "a-test-secret" },
       });
       expect(verdict).toEqual({ ok: true });
+
+      // Named risk 1, for real: fetch the URL through the SAME app's own
+      // GET /media/outbound/:callSid/:kind.wav -- the sabotage protocol
+      // (dropping transfer_miss from doorRoutes.js's MEDIA_KINDS) turns THIS
+      // 200 into a 404.
+      const mediaPath = url.replace("https://voice.example.com", "");
+      const mediaRes = await request(app).get(mediaPath);
+      expect(mediaRes.status).toBe(200);
+      expect(mediaRes.headers["content-type"]).toMatch(/audio\/wav/);
+      expect(Buffer.from(mediaRes.body).slice(0, 4).toString("ascii")).toBe("RIFF");
+
       // The outcome_code write still happens -- the clip only changes what
       // TwiML the caller hears, never the deterministic outcome (Named risk 2).
       expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
