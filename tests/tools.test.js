@@ -2166,6 +2166,85 @@ describe("end_call refuses while the caller is still thinking", () => {
     expect(functionResponse.response.success).toBe(true);
   });
 
+  // -----------------------------------------------------------------------
+  // I1 (Important, checkpoint-A review). end_call's generic gate refused on
+  // 8/24 real sim calls -- up to 3 times on one call -- because a platform
+  // pack tool (opt_out/set_call_outcome/schedule_callback) is deliberately
+  // NOT an action tool (S3-3), and a short outbound call rarely reaches
+  // callerTurnCount>=2 either. A completed platform-pack tool call is now
+  // its own "did something" signal for THIS gate, without adding those
+  // tools to ACTION_TOOL_NAMES (O-12's unverified-party guard is untouched
+  // -- lib/voice/live/tools.js still reports isAction:false for them).
+  // -----------------------------------------------------------------------
+  it("I1: outbound + a completed platform-pack tool (opt_out) unlocks the generic gate", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      { id: "i1a", name: "end_call", args: { reason: "opted out" } },
+      {
+        ...baseCtx,
+        step: "identify_intent", // not confirm/ending
+        callerTurnCount: 1, // hadConversation would refuse alone
+        outboundCall: { config: {}, contact: {}, campaign: {} },
+        platformToolDoneThisCall: true, // set by lib/voice/live/tools.js after opt_out succeeded
+      }
+    );
+    expect(functionResponse.response.success).toBe(true);
+    expect(stateEffects.endCallArgs).toEqual({ reason: "opted out" });
+  });
+
+  it("I1: outbound + no tool + turn one still refuses -- a premature hang-up stays blocked", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      { id: "i1b", name: "end_call", args: { reason: "premature" } },
+      {
+        ...baseCtx,
+        step: "identify_intent",
+        callerTurnCount: 1,
+        outboundCall: { config: {}, contact: {}, campaign: {} },
+        // platformToolDoneThisCall absent -- no platform tool ever ran.
+      }
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(stateEffects.endCallArgs).toBeUndefined();
+    expect(stateEffects.endCallRefusal).toBe("generic");
+  });
+
+  it("I1: inbound is unchanged -- platformToolDoneThisCall alone (no ctx.outboundCall) never unlocks the gate", async () => {
+    const { functionResponse } = await executeToolCall(
+      { id: "i1c", name: "end_call", args: { reason: "premature" } },
+      {
+        ...baseCtx,
+        step: "identify_intent",
+        callerTurnCount: 1,
+        // No outboundCall -- an inbound call, or the cascade, can never set
+        // platformToolDoneThisCall in practice, but the gate itself must
+        // ignore the field entirely when outboundCall is absent, not merely
+        // rely on the field never being set.
+        platformToolDoneThisCall: true,
+      }
+    );
+    expect(functionResponse.response.success).toBe(false);
+  });
+
+  it("I1: the outbound generic refusal never asks \"anything else\" (S3-1) -- model and caller-facing text both", async () => {
+    const { functionResponse, stateEffects } = await executeToolCall(
+      { id: "i1d", name: "end_call", args: {} },
+      {
+        ...baseCtx,
+        step: "identify_intent",
+        callerTurnCount: 1,
+        outboundCall: { config: {}, contact: {}, campaign: {} },
+      }
+    );
+    expect(functionResponse.response.success).toBe(false);
+    // The inbound instruction TO ask ("ONE short sentence asking...") must
+    // not appear -- it contradicts S3-1's own rule, which the message DOES
+    // (correctly) quote as a prohibition ("never ask whether there is
+    // anything else"), so the assertion is on the instruction shape, not the
+    // bare substring.
+    expect(functionResponse.response.message).not.toMatch(/ONE short sentence/i);
+    expect(functionResponse.response.message).toMatch(/never ask whether there is anything else/i);
+    expect(stateEffects.toolResult.message).not.toMatch(/anything else/i);
+  });
+
   it("allows the hang-up once the latch reports the refusal already spent", async () => {
     const { functionResponse } = await executeToolCall(
       { id: "e5", name: "end_call", args: {} },

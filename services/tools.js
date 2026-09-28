@@ -24,6 +24,7 @@ import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
+import { OUTBOUND_CLOSING_RULE } from "../lib/outbound/prompt.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import {
   stripFillers,
@@ -702,7 +703,25 @@ export async function executeToolCall(fc, ctx) {
         }
       }
 
-      if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation)) {
+      // I1 fix (checkpoint-A review). On outbound, opt_out / set_call_outcome
+      // / schedule_callback are deliberately NOT action tools (S3-3, "Named
+      // risk 2": putting them in ACTION_TOOL_NAMES would let O-12's
+      // unverified-party guard treat them as verified writes) -- so
+      // `didSomething` above is always false after using one, and a short
+      // outbound call (one gatekeeper turn, then goodbye) rarely reaches
+      // `hadConversation`'s callerTurnCount>=2 either. The call has done its
+      // job in exactly the cases this was meant to unlock; a completed
+      // platform-pack tool call is its own "did something" signal for THIS
+      // gate only. lib/outbound/policy.js's PLATFORM_PACKS is the single
+      // source (via lib/voice/live/tools.js's platformToolDoneThisCall), so
+      // this can never drift from S3-3's own definition of "these three
+      // tools". Scoped to the generic branch alone -- NOT `didSomething`
+      // itself, which also feeds the no_ask gate above: that gate is already
+      // a no-op on outbound (skipOnOutbound), so widening `didSomething`
+      // there would only perturb its instrumentation counters for no
+      // caller-visible reason.
+      const platformToolDone = Boolean(ctx?.outboundCall) && Boolean(ctx?.platformToolDoneThisCall);
+      if (!heardOnlyHesitation && (wrappingUp || didSomething || hadConversation || platformToolDone)) {
         const endCallArgs = fc.args ?? {};
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
@@ -807,7 +826,22 @@ export async function executeToolCall(fc, ctx) {
         "If you have ALREADY asked in this turn whether there is anything else, say NOTHING " +
         "further — just wait for their answer. Only if you have not asked yet, say ONE short " +
         "sentence asking, then stop and wait.";
-      const message = heardOnlyHesitation
+      // I1 fix (checkpoint-A review). This wording talked in terms of "ask
+      // ONE short sentence" / "anything else" unconditionally, directly
+      // contradicting S3-1's outbound closing rule (OUTBOUND_CLOSING_RULE,
+      // lib/outbound/prompt.js: "never ask whether there is anything else
+      // you can help with" -- we placed this call). Conditional on
+      // ctx?.outboundCall the same way the no_ask branch already is, above.
+      const message = ctx?.outboundCall
+        ? heardOnlyHesitation
+          ? "[not caller speech] NOT A FAILURE — the person is still on the line and the call " +
+            "is still open. What they said was brief and does not settle whether they are " +
+            "finished talking. Do NOT say goodbye, do NOT sign off, and do NOT repeat anything " +
+            "you have already said. Wait for them to say more before ending the call. " +
+            OUTBOUND_CLOSING_RULE
+          : "[not caller speech] NOT A FAILURE — the call is still open. Do NOT say goodbye and " +
+            "do NOT repeat anything you have already said. " + OUTBOUND_CLOSING_RULE
+        : heardOnlyHesitation
         ? "[not caller speech] NOT A FAILURE — the caller is still on the line and the call is " +
           "still open. What they said was brief (\"okay\", \"mm\", \"uh\") and does not settle " +
           "whether they are finished. Do NOT say goodbye, do NOT sign off, and do NOT repeat " +
@@ -826,8 +860,13 @@ export async function executeToolCall(fc, ctx) {
             success: false,
             // Note the split: `message` above is the refusal shown to the
             // MODEL, this is the line meant for the caller. Only the latter is
-            // ever spoken.
-            message: "Is there anything else I can help you with?",
+            // ever spoken. I1 fix: on outbound this must not ask "anything
+            // else" either (S3-1) -- nudgeOutbound1 ("Are you still there?")
+            // is the existing outbound-approved neutral filler, reused rather
+            // than inventing new caller-facing copy with no owner sign-off.
+            message: ctx?.outboundCall
+              ? getOutboundStrings(ctx?.config).nudgeOutbound1
+              : "Is there anything else I can help you with?",
             callerSafe: true,
           },
           toolCallEvent: { name: fc.name, args: fc.args },
