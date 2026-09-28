@@ -8,7 +8,7 @@
  * "the per-country calling-hours floor (S3-7)" describe block.
  */
 import { describe, it, expect, vi } from "vitest";
-import { floorFor, isInsideFloor, nextLegalOpening, NON_US_NANP } from "../lib/outbound/legalFloor.js";
+import { floorFor, isInsideFloor, nextLegalOpening, US_MAINLAND_NANP } from "../lib/outbound/legalFloor.js";
 import callback, { validateCallbackTime } from "../capabilities/callback.js";
 
 describe("floorFor", () => {
@@ -20,8 +20,29 @@ describe("floorFor", () => {
     });
   });
 
-  it("+44 with a contact timezone on file uses THAT zone, not the Europe/London default", () => {
-    expect(floorFor("+447700900001", "Europe/Paris")).toMatchObject({ country: "GB", zones: ["Europe/Paris"] });
+  // I6 / controller Ruling R5 (supersedes the old "raw tz binds every floor
+  // call site" rule): a timezone is honoured for the floor ONLY when it lies
+  // inside the number's own country. Europe/Paris is not Europe/London, so a
+  // +44 contact with that timezone on file must fall back to Europe/London,
+  // not adopt the unvalidated zone.
+  it("+44 with a contact timezone OUTSIDE GB (Europe/Paris) ignores it -- Europe/London, not the unvalidated zone (I6)", () => {
+    expect(floorFor("+447700900001", "Europe/Paris")).toMatchObject({ country: "GB", zones: ["Europe/London"] });
+  });
+
+  it("+44 with a contact timezone that IS Europe/London uses it (the only zone GB ever honours)", () => {
+    expect(floorFor("+447700900001", "Europe/London")).toMatchObject({ country: "GB", zones: ["Europe/London"] });
+  });
+
+  // The review's own repro (rr5/probe1.mjs): a US NANP number carrying a
+  // contact timezone from a different country entirely must not adopt it.
+  it("I6: a US-mainland number with tz Asia/Tokyo ignores it -- falls back to the NY+LA dual rule, never a single Tokyo zone", () => {
+    expect(floorFor("+12142345678", "Asia/Tokyo")).toMatchObject({ country: "US", zones: ["America/New_York", "America/Los_Angeles"] });
+  });
+
+  // The review's other repro: a GB number carrying an America/* contact
+  // timezone must not adopt it either.
+  it("I6: a GB number with tz America/Los_Angeles ignores it -- falls back to Europe/London", () => {
+    expect(floorFor("+447700900001", "America/Los_Angeles")).toMatchObject({ country: "GB", zones: ["Europe/London"] });
   });
 
   it("+1 with a US-mainland area code, contact timezone known -> US, that one zone", () => {
@@ -79,8 +100,19 @@ describe("floorFor", () => {
     expect(floorFor("+121423456789", null)).toEqual({ refused: "no_legal_floor" }); // one digit long
   });
 
-  it("NON_US_NANP is frozen (Object.freeze on a Set does not block .add() -- that is a JS limitation, not a promise this test makes)", () => {
-    expect(Object.isFrozen(NON_US_NANP)).toBe(true);
+  it("US_MAINLAND_NANP is frozen (Object.freeze on a Set does not block .add() -- that is a JS limitation, not a promise this test makes)", () => {
+    expect(Object.isFrozen(US_MAINLAND_NANP)).toBe(true);
+  });
+
+  // C8 / controller Ruling R4: this MUST be an ALLOW-list, not a deny-list --
+  // an area code this list has simply never heard of is refused, exactly the
+  // same as a known-Canadian one, rather than silently inheriting the US
+  // envelope. A made-up code (999 is not, and never will be, a real NANP
+  // area code -- N11-shaped codes and the digit "9" in the middle position
+  // are reserved) proves the fail-closed direction directly, with no
+  // dependency on this list's own real-world completeness.
+  it("C8: an area code this list does not recognise is refused -- fail CLOSED on an unknown code, not open (Ruling R4)", () => {
+    expect(floorFor("+19992345678", null)).toEqual({ refused: "no_legal_floor" });
   });
 });
 
@@ -159,6 +191,25 @@ describe("nextLegalOpening", () => {
     const now = new Date("2026-09-28T13:00:00Z"); // Monday -- next Sunday is 6 days out
     expect(nextLegalOpening(now, floor, farOut, "America/Chicago", { maxDays: 2 })).toBeNull();
     expect(nextLegalOpening(now, floor, farOut, "America/Chicago", { maxDays: 8 })).not.toBeNull();
+  });
+
+  // I9 / controller ruling: the WORST case (review's own rr5/probe3.mjs
+  // repro -- an empty floor-intersect-window search, forced to exhaust the
+  // entire bound) must not block the event loop. The old per-minute scan
+  // measured 3,356 ms here; this runs on the SAME Cloud Run service that
+  // paces every concurrent call's own 20 ms audio frames, so the bound the
+  // review picked (< 20 ms) is not an arbitrary nicety. A dual-zone floor
+  // (no contact timezone) is included because it is the more expensive of
+  // the two floor shapes (twice the per-day Intl work).
+  it("I9: a 14-day worst-case search (no overlap ever) completes in under 20ms -- fails on the old per-minute scan (3.4s measured)", () => {
+    const floor = floorFor("+12142345678", null); // dual-zone: NY + LA
+    const neverOverlaps = { mon_fri: "23:58-23:59", sat: "23:58-23:59", sun: "23:58-23:59" };
+    const now = new Date("2026-09-28T13:00:00Z");
+    const t0 = performance.now();
+    const result = nextLegalOpening(now, floor, neverOverlaps, "America/New_York", { maxDays: 14 });
+    const elapsedMs = performance.now() - t0;
+    expect(result).toBeNull();
+    expect(elapsedMs).toBeLessThan(20);
   });
 });
 
