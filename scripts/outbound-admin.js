@@ -58,13 +58,18 @@
 //   This is the only way this script can remove a do-not-call entry, and it
 //   must never work for a real lead.
 //
-//   node scripts/outbound-admin.js webhook-set --phone +1... --url https://... \
-//     --secret <at least 16 chars> [--events call.completed,outreach.closed] \
+//   WEBHOOK_SECRET=<at least 16 chars> node scripts/outbound-admin.js webhook-set \
+//     --phone +1... --url https://... [--events call.completed,outreach.closed] \
 //     [--active true|false] [--endpoint-id <uuid>] [--confirm]
 //   S3-8. --events omitted or empty subscribes to every event. --endpoint-id
 //   updates an existing endpoint for this tenant instead of creating one.
 //   The secret is encrypted (CONNECTIONS_WEBHOOK_KEY) before it is written
 //   and is NEVER printed back, dry-run or confirmed.
+//   D6 (W3 final review): the secret is taken from WEBHOOK_SECRET (an
+//   environment variable) or, with --secret-stdin, piped on stdin -- NEVER
+//   --secret on the command line, which this refuses outright (a job
+//   execution's stored arguments and this process's own argv are both a
+//   worse exposure than an env var or a pipe).
 //   node scripts/outbound-admin.js webhook-test --phone +1... --endpoint-id <uuid> [--confirm]
 //   Sends one real, signed test delivery (event call.completed) to a stored
 //   endpoint through the SAME SSRF-guarded delivery path the delivery task
@@ -84,6 +89,7 @@
 
 import { pathToFileURL } from "node:url";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { connect } from "./migrate.js";
 import { validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
@@ -907,6 +913,22 @@ function has(args, name) {
   return args.includes(`--${name}`);
 }
 
+// D6 (final review, security): the ONLY way `webhook-set` accepts a secret
+// besides WEBHOOK_SECRET -- reads fd 0 synchronously (this CLI is a
+// one-shot, non-interactive migrate-job invocation, never a TTY someone is
+// expected to type into) and trims exactly the trailing newline a shell
+// pipe (`echo`/`printf`) leaves. Returns null on anything unusable (no
+// stdin, empty after trimming) rather than throwing -- parseArgs' own
+// "is required" check is what reports that, with one consistent message.
+function readSecretFromStdin() {
+  try {
+    const data = readFileSync(0, "utf8").trim();
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
 function decodeConfigB64(b64, push) {
   if (!b64) {
     push("config", "is required (--config <base64 JSON>)");
@@ -1013,7 +1035,6 @@ export function parseArgs(argv) {
   if (command === "webhook-set") {
     const endpointId = argOf(args, "endpoint-id");
     const url = argOf(args, "url");
-    const secret = argOf(args, "secret");
     const eventsRaw = argOf(args, "events");
     const events = eventsRaw
       ? eventsRaw
@@ -1025,7 +1046,22 @@ export function parseArgs(argv) {
     const active = activeRaw === null ? true : activeRaw === "true";
     if (activeRaw !== null && activeRaw !== "true" && activeRaw !== "false") push("active", "must be true or false (--active)");
     if (!url) push("url", "is required (--url), an https:// endpoint");
-    if (!secret) push("secret", "is required (--secret)");
+    // D6 (final review, security): the signing secret must never be a Cloud
+    // Run job ARGUMENT -- a job execution's args are readable afterward
+    // (`gcloud run jobs executions describe`) and are visible to anyone who
+    // can list this process while it runs, unlike an environment variable
+    // or a piped stream. Refused outright, with a reason, rather than
+    // silently accepted and quietly exposed.
+    if (has(args, "secret")) {
+      push(
+        "secret",
+        "must not be passed on the command line -- it is retained in the job execution's stored arguments; " +
+          "set WEBHOOK_SECRET in the environment, or pipe it on stdin with --secret-stdin"
+      );
+    }
+    let secret = process.env.WEBHOOK_SECRET || null;
+    if (!secret && has(args, "secret-stdin")) secret = readSecretFromStdin();
+    if (!secret) push("secret", "is required -- set WEBHOOK_SECRET in the environment, or pipe it on stdin with --secret-stdin");
     if (errors.length) return { ok: false, errors };
     return { ok: true, value: { command, confirm, businessPhone: phone, endpointId: endpointId || undefined, url, secret, events, active } };
   }

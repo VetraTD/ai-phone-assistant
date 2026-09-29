@@ -170,6 +170,42 @@ describeDb("outbound-admin: parseArgs", () => {
     expect(r.ok).toBe(false);
     expect(r.errors.map((e) => e.path)).toContain("contact-phone");
   });
+
+  // D6 (final review, security): the webhook signing secret must never be a
+  // Cloud Run job ARGUMENT (stored, visible after the fact). These read/set
+  // the REAL process.env.WEBHOOK_SECRET, the same source parseArgs itself
+  // reads for the webhook-set command.
+  describe("webhook-set: secret via env/stdin, never argv (D6)", () => {
+    const OLD_SECRET = process.env.WEBHOOK_SECRET;
+    afterAll(() => {
+      if (OLD_SECRET === undefined) delete process.env.WEBHOOK_SECRET;
+      else process.env.WEBHOOK_SECRET = OLD_SECRET;
+    });
+
+    it("--secret on argv is refused with a clear, actionable error -- never silently accepted", () => {
+      delete process.env.WEBHOOK_SECRET;
+      const r = parseArgs(["webhook-set", "--phone", BUSINESS_PHONE, "--url", "https://example.com/hook", "--secret", "shhh-do-not-log-me"]);
+      expect(r.ok).toBe(false);
+      expect(r.errors.map((e) => e.path)).toContain("secret");
+      const msg = r.errors.find((e) => e.path === "secret").message;
+      expect(msg).toMatch(/command line/);
+      expect(msg).toMatch(/WEBHOOK_SECRET/);
+    });
+
+    it("reads the secret from WEBHOOK_SECRET when --secret is not on argv at all", () => {
+      process.env.WEBHOOK_SECRET = "env-sourced-secret-1234567890";
+      const r = parseArgs(["webhook-set", "--phone", BUSINESS_PHONE, "--url", "https://example.com/hook"]);
+      expect(r.ok).toBe(true);
+      expect(r.value.secret).toBe("env-sourced-secret-1234567890");
+    });
+
+    it("no WEBHOOK_SECRET, no --secret-stdin: refused as required, not silently null", () => {
+      delete process.env.WEBHOOK_SECRET;
+      const r = parseArgs(["webhook-set", "--phone", BUSINESS_PHONE, "--url", "https://example.com/hook"]);
+      expect(r.ok).toBe(false);
+      expect(r.errors.map((e) => e.path)).toContain("secret");
+    });
+  });
 });
 
 describeDb("outbound-admin: upsertCampaign", () => {
