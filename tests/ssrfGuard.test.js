@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveVettedAddress, connectVetted, fetchVetted, SsrfRefusedError, _internal, MAX_BODY_BYTES, SSRF_TIMEOUT_MS } from "../lib/net/ssrfGuard.js";
+import { trustedCa } from "./helpers/trustedCa.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CERT = fs.readFileSync(path.join(HERE, "fixtures", "ssrfGuardTest.cert.pem"));
@@ -242,7 +243,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Vetra-Event": "call.completed" },
       body: JSON.stringify({ hello: "world" }),
-      tlsOptions: { ca: CERT }, // test-only: trust the self-signed fixture cert, rather than disabling validation
+      tlsOptions: { ca: trustedCa(CERT) }, // test-only: trust the fixture (+ NODE_EXTRA_CA_CERTS), rather than disabling validation
     });
     expect(res.status).toBe(200);
     expect(lastRequest.method).toBe("POST");
@@ -268,7 +269,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       port,
       path: "/deliver",
       method: "POST",
-      tlsOptions: { ca: CERT, hostname: "evil.example", servername: "evil.example", lookup: evilLookup },
+      tlsOptions: { ca: trustedCa(CERT), hostname: "evil.example", servername: "evil.example", lookup: evilLookup },
     });
     expect(res.status).toBe(200); // reached the REAL local server, not "evil.example"
     expect(evilLookup).not.toHaveBeenCalled(); // tlsOptions' own lookup override never wins
@@ -307,7 +308,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
         port,
         path: "/redirect-me",
         method: "POST",
-        tlsOptions: { ca: CERT },
+        tlsOptions: { ca: trustedCa(CERT) },
       })
     ).rejects.toMatchObject({ reason: "redirect" });
   });
@@ -322,7 +323,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
         path: "/hang",
         method: "POST",
         timeoutMs: 150,
-        tlsOptions: { ca: CERT },
+        tlsOptions: { ca: trustedCa(CERT) },
       })
     ).rejects.toThrow();
   }, 5000);
@@ -342,7 +343,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       port,
       path: "/huge",
       method: "POST",
-      tlsOptions: { ca: CERT },
+      tlsOptions: { ca: trustedCa(CERT) },
     });
     expect(res.status).toBe(200);
     expect(Buffer.byteLength(res.body, "utf8")).toBeLessThanOrEqual(MAX_BODY_BYTES);
@@ -359,7 +360,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       path: "/never-ending",
       method: "POST",
       timeoutMs: SSRF_TIMEOUT_MS, // the PRODUCTION timeout -- this must settle well before it
-      tlsOptions: { ca: CERT },
+      tlsOptions: { ca: trustedCa(CERT) },
     });
     const elapsedMs = Date.now() - start;
     expect(res.status).toBe(200);
@@ -384,7 +385,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       // UNRESOLVABLE hostname, so its own cert-identity check is bypassed
       // while chain-of-trust (`ca`) is still required: `rejectUnauthorized`
       // itself stays pinned true (lib/net/ssrfGuard.js), never disabled.
-      tlsOptions: { ca: CERT, checkServerIdentity: () => undefined },
+      tlsOptions: { ca: trustedCa(CERT), checkServerIdentity: () => undefined },
     });
     expect(res.status).toBe(200);
     expect(lastRequest.headers.host).toBe(`this-hostname-does-not-exist-anywhere.invalid:${port}`);

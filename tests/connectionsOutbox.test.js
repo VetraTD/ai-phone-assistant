@@ -25,6 +25,7 @@ import {
   attemptDelivery,
 } from "../lib/connections/outbox.js";
 import { connectVetted, SsrfRefusedError } from "../lib/net/ssrfGuard.js";
+import { trustedCa } from "./helpers/trustedCa.js";
 import { log } from "../lib/logger.js";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { clearStats } from "../lib/voice/metrics.js";
@@ -308,7 +309,7 @@ describe("connections outbox: the secret is never logged (real local delivery, r
           // D3 residual fix (wave-W2W3-rereview.md): ssrfGuard.js now pins
           // rejectUnauthorized true regardless of tlsOptions, so this real
           // local fixture is trusted with `ca`, same as tests/ssrfGuard.test.js.
-          tlsOptions: { ca: CERT },
+          tlsOptions: { ca: trustedCa(CERT) },
         });
 
       const result = await attemptDelivery({
