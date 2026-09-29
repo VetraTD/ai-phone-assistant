@@ -31,6 +31,7 @@ import {
   CLIP_BARGE_MIN_MS,
   STALE_GENERATION_IDLE_MS,
   STALE_GENERATION_MAX_MS,
+  CLIP_HOLD_DELAY_LINE_MS,
   firstTurnComplete,
 } from "../lib/outbound/firstSeconds.js";
 import { createVad } from "../lib/voice/inboundVad.js";
@@ -1591,11 +1592,37 @@ describe("S3-2: stale-audio discard (named risks 1, 2, 4)", () => {
     });
   });
 
-  it("a truly silent call (no onset at all) never logs the shadow line", () => {
-    const { ctl, events } = rig({ firstSpeaker: "clip" });
+  // CHANGED (final wave W1, A9 -- F-R2 M2; spec S3-D2 "logged on every
+  // call"): a truly silent call (backstop_silence, no onset at all) used to
+  // log NO shadow line. It logs one now, both measurements null with the
+  // reason; the counter stays a per-hello-call count.
+  it("a truly silent call (no onset at all) logs the shadow line with null measurements and reason no_onset -- the counter is not bumped", () => {
+    const { ctl, events, rec } = rig({ firstSpeaker: "clip" });
     run(ctl, 0, 1400);
     ctl.onSessionEnd();
-    expect(events("outbound_live_shadow")).toHaveLength(0);
+    expect(events("outbound_live_shadow")).toHaveLength(1);
+    expect(events("outbound_live_shadow")[0].fields).toMatchObject({ from_speech_ms: null, from_speech_end_ms: null, reason: "no_onset" });
+    expect(rec.counters).not.toContain("outbound_live_shadow");
+  });
+
+  // A8 (F-R2 M1): a reply that began after the clip started playing was
+  // measured through index.js's clip delay line -- subtracted, and reported.
+  it("A8: a discarded reply that began after the clip queued is measured net of CLIP_HOLD_DELAY_LINE_MS; one before it is not adjusted", () => {
+    const a = rig({ firstSpeaker: "clip" });
+    run(a.ctl, 0, 1550, (t) => t >= 1000 && t <= 1200); // hello 1,000-1,200; clip queues at 1,550
+    expect(a.ctl.onModelAudio(2300)).toBe(false); // Live's reply begins mid-clip
+    a.ctl.onSessionEnd();
+    expect(a.events("outbound_live_shadow")[0].fields).toMatchObject({
+      from_speech_ms: 2300 - 1000 - CLIP_HOLD_DELAY_LINE_MS,
+      from_speech_end_ms: 2300 - 1200 - CLIP_HOLD_DELAY_LINE_MS,
+      delay_line_adjust_ms: CLIP_HOLD_DELAY_LINE_MS,
+      reason: "measured",
+    });
+    const b = rig({ firstSpeaker: "clip" });
+    run(b.ctl, 0, 1290, (t) => t >= 1000 && t <= 1200);
+    expect(b.ctl.onModelAudio(1300)).toBe(false); // before the clip: no delay line in the path
+    b.ctl.onSessionEnd();
+    expect(b.events("outbound_live_shadow")[0].fields).toMatchObject({ from_speech_ms: 300, delay_line_adjust_ms: 0 });
   });
 });
 

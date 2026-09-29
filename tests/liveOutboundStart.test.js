@@ -602,11 +602,19 @@ describe("outbound: the first seconds through the real session", () => {
     allowErrors("outbound_backstop_mark_timeout");
     const call = await bootOutbound();
     await call.feed(1400); // the silence backstop fires and plays (seed at once, no generation open)
+    // CHANGED (final wave W1, F10 -- N5): speech said DURING the clip is now
+    // unique frames, and must reach Live once the clip's own M9 bound lapses
+    // (release point 3) -- the old assertion (audioIn merely grew) passed
+    // whether or not the hold was ever released.
+    const held = patternFrames([[300, true]]);
+    await call.feedFrames(held.frames.map((f) => f.buf));
     // Let the clip's own (real, audioOut-timed) playback AND clipPlaying's
     // own M9 bound both lapse naturally -- OPENER_AUDIO is 1 s + markGraceMs
-    // (1.5 s) = 2.5 s from fire; 2.6 s of silence clears both without
+    // (1.5 s) = 2.5 s from fire; 2.3 s more of silence clears both without
     // needing the mark event this test is not about.
-    await call.feed(2600);
+    await call.feed(2300);
+    const heldIds = call.live.sent.audioIn.map((a) => held.byPcm.get(a.data)?.id).filter((x) => x !== undefined);
+    expect(heldIds).toEqual(held.frames.map((f) => f.id)); // every held frame, in order, once
     const before = call.live.sent.audioIn.length;
     await call.feed(200, { voiced: true }); // ordinary caller speech, well after the clip
     // Forwarded frame-by-frame in real time -- no waiting for anything.
@@ -614,18 +622,25 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
+  // CHANGED (final wave W1, F10 -- checkpoint-A re-review N5): this used to
+  // assert only that audioIn GREW, which frames forwarded in real time after
+  // the barge satisfy whether or not the HELD lead-in was ever released. The
+  // held frames are now unique and must each reach Live, in order.
   it("C1 fix: a real barge while speech is still held releases it too -- the seed for this clip is abandoned for good", async () => {
     const call = await bootOutbound();
     await call.feed(400, { voiced: true }); // a hello
     await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
-    const beforeBarge = call.live.sent.audioIn.length;
 
     // A genuine barge: sustained speech past CLIP_BARGE_MIN_MS (600 ms). The
     // clip is cleared and the seed for it is abandoned (giveUpOnSeed) -- the
     // lead-in speech held up to that point must still reach Live, not be
     // stranded waiting for a seed that will never come.
-    await call.feed(900, { voiced: true });
-    expect(call.live.sent.audioIn.length).toBeGreaterThan(beforeBarge);
+    const { frames, byPcm } = patternFrames([[900, true]]);
+    await call.feedFrames(frames.map((f) => f.buf));
+    const ids = call.live.sent.audioIn.map((a) => byPcm.get(a.data)?.id).filter((x) => x !== undefined);
+    const leadIn = frames.slice(0, 20).map((f) => f.id); // the first 400 ms: held until the barge fired at ~600 ms
+    for (const id of leadIn) expect(ids).toContain(id);
+    expect(ids).toEqual(ids.slice().sort((a, b) => a - b));
     await call.hangUp();
   });
 
@@ -1044,11 +1059,20 @@ describe("outbound: the first seconds through the real session", () => {
   // call -- spec S3-D2's "logged on every call", currently dead (the
   // investigation's own finding) because the hold prevents Live from ever
   // generating DURING the window logShadow measures.
+  // CHANGED (final wave W1, F14 -- F-R2 review M3): the value is pinned now,
+  // not just "not null" -- from the fake's own reply time, net of the clip
+  // delay line (A8), which is reported alongside.
   it("F-R2 invariant 4: a hello-end call logs a real outbound_live_shadow.from_speech_ms, not null", async () => {
     const call = await bootOutbound();
-    armServerVadReply(call);
+    let replyAt = null;
+    armServerVadReply(call, {
+      msg: () => {
+        replyAt = call.clock();
+        return modelAudioMsg();
+      },
+    });
 
-    await call.feed(400, { voiced: true }); // a hello
+    await call.feed(400, { voiced: true }); // a hello: voiced frames at 20..400 (onset backdated to 20)
     await call.feed(400); // the hello ends; the clip queues (deferred seed, O-8)
     await call.feed(1000); // the caller says nothing more while the clip plays
     call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
@@ -1058,7 +1082,14 @@ describe("outbound: the first seconds through the real session", () => {
 
     const shadow = events("outbound_live_shadow");
     expect(shadow).toHaveLength(1);
-    expect(shadow[0].from_speech_ms).not.toBeNull();
+    expect(replyAt).not.toBeNull();
+    expect(shadow[0]).toMatchObject({
+      from_speech_ms: replyAt - 20 - CLIP_HOLD_DELAY_LINE_MS,
+      from_speech_end_ms: replyAt - 400 - CLIP_HOLD_DELAY_LINE_MS,
+      delay_line_adjust_ms: CLIP_HOLD_DELAY_LINE_MS,
+      discarded_chunks: 1,
+      reason: "measured",
+    });
   });
 
   // -------------------------------------------------------------------
@@ -1161,9 +1192,10 @@ describe("outbound: the first seconds through the real session", () => {
   // symptom through a new door). Fixed: dialFirstSeconds.onAssistantTurnText
   // now returns `heard` (false when any chunk of the generation's audio was
   // discarded), gating the transcript row and the outbound detectors; the
-  // streaming guards are gated on dialFirstSeconds.suppressing() at the
-  // moment their text arrives, the same live signal onModelAudio's own
-  // discard already uses.
+  // streaming guards are gated on dialFirstSeconds.droppedThisGeneration()
+  // at the moment their text arrives (NOT suppressing() -- see NB4), which
+  // since final wave W1 (A16) is also set by text arriving while Live's
+  // audio would be discarded.
   // -------------------------------------------------------------------
   it("F-R2 fix round 1, I2 (sink 1): a discarded stale generation's text is never persisted as an AI transcript row", async () => {
     const database = outboundDb();
@@ -2052,6 +2084,127 @@ describe("W1 A19: tool calls from a generation the caller never heard", () => {
     expect(insertSuppression.mock.calls[0][0]).toMatchObject({ phone: CONTACT, reason: "opted_out" });
     await vi.waitFor(() => expect(call.responsesFor("end_call")).toHaveLength(1));
     expect(call.responsesFor("end_call")[0].response).toMatchObject({ success: false });
+  });
+});
+
+describe("W1 A5 / A14: the clip's two edges", () => {
+  // A5 (checkpoint-A re-review N4; ported from its probe P-G, rr/c1probe2.test.js):
+  // speech crossing the clip's end mark lost ~100-180 ms -- once the hold
+  // released, clipPlaying() was false but isPlaying() stayed true for the
+  // clip's own tail + 150 ms grace, and the half-duplex gate's ring (empty
+  // at that point) dropped a short voiced run as echo. P-G at HEAD eba8fab:
+  // 75 frames fed, 67 reached Live, 8 missing.
+  it("A5 (P-G): speech across the end mark on the silence path -- every frame reaches Live, none twice", async () => {
+    const call = await bootOutbound();
+    await call.feed(1400); // backstop_silence: the clip fires, the seed goes at once
+    const before = call.live.sent.audioIn.length;
+    const inClip = patternFrames([
+      [200, true], [40, false], [200, true], [40, false], [200, true], [40, false], [200, true], [40, false],
+    ]);
+    await call.feedFrames(inClip.frames.map((f) => f.buf));
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    const afterMark = patternFrames([[100, true], [40, false], [400, false]], 1000);
+    await call.feedFrames(afterMark.frames.map((f) => f.buf));
+    const byPcm = new Map([...inClip.byPcm, ...afterMark.byPcm]);
+    const ids = call.live.sent.audioIn.slice(before).map((a) => byPcm.get(a.data)?.id).filter((x) => x !== undefined);
+    const fed = [...inClip.frames, ...afterMark.frames].map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicates
+    expect(ids.slice().sort((a, b) => a - b)).toEqual(fed); // missing 0 (P-G: 8 missing)
+    await call.hangUp();
+  });
+
+  // A14 (F-R2 parked P9): on backstop_slow the clip barge measured the VAD's
+  // voiced run from BEFORE the clip -- a greeting still going when the clip
+  // fired (by design: onset + 1,600 ms) had >= CLIP_BARGE_MIN_MS already,
+  // so the clip was cut on its FIRST frame. The run is measured from the
+  // clip's own start now.
+  it("A14: a greeting still going when backstop_slow fires does not cut the opener on its first frame; 600 ms more of it still barges", async () => {
+    const call = await bootOutbound({ database: outboundDb({ openerAudio: Buffer.alloc(8 * 5000, 0x7f) }) }); // a 5 s clip
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(1700, { voiced: true }); // one unbroken greeting through the slow deadline (onset + 1,600)
+    expect(events("outbound_backstop_played")[0]).toMatchObject({ path: "backstop_slow" });
+    expect(clear).not.toHaveBeenCalled(); // not cut on (or near) its first frame
+    expect(call.ws.liveDialFirstSeconds.clipPlaying()).toBe(true);
+    await call.feed(600, { voiced: true }); // the same greeting, now >= CLIP_BARGE_MIN_MS INTO the clip
+    expect(clear).toHaveBeenCalled(); // a real interruption still barges
+    await call.hangUp();
+  });
+});
+
+describe("W1 A4 / A24 / F12", () => {
+  // A4 (checkpoint-A re-review N3, probe P-C: clearCalls 2): the clip barge
+  // and the ordinary half-duplex barge both acted on the same >= 600 ms run.
+  it("A4: a clip barge clears the audio and records the barge ONCE", async () => {
+    const call = await bootOutbound();
+    await call.feed(1400); // the clip plays
+    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
+    await call.feed(900, { voiced: true }); // a genuine barge
+    expect(clear).toHaveBeenCalledTimes(1);
+    await call.hangUp();
+    expect(events("live_call_summary")[0].barges).toBe(1);
+  });
+
+  // A24 (F-R2 re-review 2 m7): gating auditTurn on `heard` also dropped the
+  // caller-side instruments on every turn whose reply was discarded.
+  it("A24: an unheard turn still runs the caller-side instruments (counts only, no note)", async () => {
+    clearStats();
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    call.live.push(modelAudioMsg()); // the stale reply: discarded
+    await call.settle();
+    await call.callerSays("Hello?");
+    const notesBefore = call.live.sent.clientContent.length;
+    await call.turnEnds(); // unheard: auditTurn skipped
+    const c = getLatencyStats().turnTaking;
+    expect(c.live_transcript_script_checked).toBe(1);
+    expect(c.live_caller_turn_language_checked).toBe(1);
+    expect(call.live.sent.clientContent.length).toBe(notesBefore); // no note to Live
+    await call.hangUp();
+  });
+
+  // F12 (checkpoint-A re-review 2 m2): the N2 test asserts the mechanism
+  // (speech held until the clip ends), not the observable. Ported from its
+  // probe P-A2 (rr/c1probe2.test.js): a CAUSAL Live that replies only once
+  // it has received the speech -- its reply must reach the caller. Round-1
+  // code (released at the seed, mid-clip): 0 reply chunks enqueued; P-A2 at
+  // eba8fab: 20.
+  it("F12 (P-A2): silence path, speech mid-clip -- Live's reply to it, generated once it hears it, reaches the Twilio side", async () => {
+    const call = await bootOutbound({ database: outboundDb({ openerAudio: Buffer.alloc(8 * 4000, 0x7f) }) }); // 4 s clip
+    await call.feed(1400); // backstop_silence: the seed goes at fire
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    const before = call.live.sent.audioIn.length;
+    let replied = null;
+    // Causal: Live answers only once it has RECEIVED the speech -- its 40
+    // voiced frames (P-A2 counted every frame; since A15 the silence flows
+    // during the clip, so the count is of voiced frames).
+    const voicedReceived = () => call.live.sent.audioIn.slice(before).filter((a) => pcmPeak(a.data) > 4000).length;
+    const maybeReply = async (when) => {
+      if (replied || voicedReceived() < 40) return; // Live has not received the speech yet
+      replied = { when, enqBefore: enqueue.mock.calls.length };
+      call.live.push(modelAudioMsg(400));
+      await call.settle();
+      call.live.push({ serverContent: { outputTranscription: { text: "No problem, I'll call back tomorrow." } } });
+      call.live.push({ serverContent: { turnComplete: true } });
+      await call.settle();
+      replied.enqAfter = enqueue.mock.calls.length;
+    };
+    for (let t = 0; t < 960; t += 240) {
+      await call.feed(200, { voiced: true }); // broken speech mid-clip, runs under CLIP_BARGE_MIN_MS
+      await call.feed(40);
+    }
+    await maybeReply("mid_clip");
+    await call.feed(3040);
+    await maybeReply("before_mark");
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    await maybeReply("after_mark");
+    await call.feed(400);
+    await maybeReply("late");
+    expect(replied).not.toBeNull();
+    expect(replied.when).not.toBe("mid_clip"); // held until the clip ended (N2)
+    expect(replied.enqAfter - replied.enqBefore).toBeGreaterThan(0); // and the caller HEARS the answer
+    await call.hangUp();
   });
 });
 
