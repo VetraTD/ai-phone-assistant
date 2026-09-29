@@ -914,3 +914,14 @@ replace the §19 amendments above.
   exist before that number can be forgotten — only blocks an erasure request for a phone number
   that actually has a do-not-call entry on file. An ordinary erasure request unrelated to outbound
   calling still works even before the new key is deployed everywhere.
+
+### 2026-09-28 final-review fix wave (decisions that change behaviour)
+- **Stale reply after the opener (F-R2 / I1):** the discarded reply to the pre-clip "Hello?" is dropped until that generation itself closes (bounded by an idle timer and a hard cap), never lifted by a 2 s wall clock; its text never counts as said.
+- **Mid-clip opt-out + hang-up (I2):** speech held during the opener is still sent to the model at hang-up so a "stop calling me" reaches the transcript and the opt-out detector. Residual risk: if the model returns no transcript within 2 s the opt-out is lost; `outbound_clip_hold_drain_untranscribed` counts it.
+- **Clip hold (A15):** after the caller starts talking during the opener only voiced audio is held; silence keeps flowing so the model closes the pre-clip turn during the opener.
+- **Unheard replies (A19):** a reply the caller never heard cannot end the call or trigger caller-visible actions; opt-out/suppression writes still run.
+- **Calling-hours floor:** +1 numbers use an ALLOW-list of US-mainland area codes — an unknown +1 code is refused (fails closed); a contact/lead timezone is honoured only when it lies in the number's own country. Owner/counsel still verify the list.
+- **Callbacks:** past or too-soon times are refused; a refused time's "nearest" is computed from the requested time.
+- **Leads-in link:** the default idempotency key includes the campaign (amends §12.1's `hash(phone + source_ref)`); lead-form names/details are sanitised and length-capped before any prompt or opener use (public route and admin CLI).
+- **Erasure (P5):** also clears outreach details/trigger payloads, `calls.answers`, every personal contact field, and outbox payloads; a schema-walking test fails if a new personal column is not erased. The cleartext phone kept in `contacts.phone_e164` / `call_attempts.to_number` is an owner decision.
+- **Secrets are loud:** a missing `SUPPRESSION_HASH_KEY` / `CONNECTIONS_WEBHOOK_KEY` logs `outbound_secret_missing` at boot and ERROR events on every refusal (alertable).

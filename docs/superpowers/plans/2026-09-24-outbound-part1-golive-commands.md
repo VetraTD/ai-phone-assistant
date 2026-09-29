@@ -185,11 +185,11 @@ the controller/owner to review and refine, not a rehearsed sequence like Section
 stage 3 at once: S3-1 through S3-11, the F-R2 first-seconds fix, and the harness-verdict fix —
 `96e356b..$SHA`, base `b797487`.
 
-`SHA=<FINAL HEAD — placeholder, the controller fills this in>`. As of this draft HEAD is `d88807c`
-(all 6 half-2 tasks + F-R2 + harness fix complete; a final opus review of the whole branch was
-dispatched in parallel with the S3-10 gate and its outcome is not yet known — this doc was written
-before that review lands, per Ruling R-docs-early). **Before Step C0, confirm the branch's own
-final gate is GREEN on the actual final HEAD and update `SHA` to it.**
+`SHA` = the final code head **`e451d91`** (all 6 half-2 tasks, the F-R2 fix, the harness fix, the
+final opus review's fix wave W1–W3 and its residuals; final gate GREEN at e451d91: root 6114 passed /
+5 skipped, test:db 579, census 63/63, inbound prompt snapshots unchanged since b797487). Later commits
+on the branch are docs/spend-JSON only; building from the branch HEAD at deploy time is equivalent —
+confirm with `git diff --stat e451d91 HEAD -- . ':!docs' ':!*.md' ':!scripts/probes/spend*.json'` (empty).
 
 Gates along the way: HALF 1 stop (`eba8fab`) root 268+1 files/5673 passed, test:db 35/492, census
 63/63; half-2 final task (`d88807c`) root 275+1 files/6010 passed/4 skipped/2 todo, test:db 40
@@ -204,7 +204,7 @@ Uses the SAME workaround as every other GCP command in this repo (memory gcp-not
 fix):
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
-P=vetra-uk-edc8ca; R=europe-west2; SHA=<FINAL HEAD>
+P=vetra-uk-edc8ca; R=europe-west2; SHA=e451d91
 SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
 BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
 IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
@@ -324,11 +324,14 @@ with no `log.*()` call is invisible to a log-based Cloud Monitoring metric:
 | `outbound_webhook_enqueue_failed` (S3-8 fix round 1, `postCall.js:226`) | `log.error(...)` | yes |
 | `outbound_webhook_reenqueue_failed` (S3-8 fix round 1, `internalRoutes.js:565`) | `log.error(...)` | yes |
 | `outbound_trigger_enqueue_failed` (S3-9 fix round 1, `triggerRoute.js:386`) | `log.error(...)` | yes |
-| `outbound_webhook_dead` (S3-8, `internalRoutes.js:535,601`) | **no — `bumpCounter()` only** | **no** |
+| `outbound_webhook_dead` (S3-8; fix wave W3 added `log.error`) | `log.error("outbound_webhook_dead", ...)` | yes |
+| `outbound_secret_missing` (fix wave W3, boot-time check, `internalRoutes.js:~350`) | `log.error(...)` with `{key}` (never the value) | yes |
+| `outbound_webhook_key_unavailable` (W3, first delivery attempt without CONNECTIONS_WEBHOOK_KEY) | `log.error(...)` | yes |
+| `outbound_internal_dispatch_failed` (dispatch refused/failed, e.g. missing SUPPRESSION_HASH_KEY) | `log.error(...)` | yes |
+| `outbound_postcall_run_failed` (post-call failed, e.g. missing SUPPRESSION_HASH_KEY once a suppression row exists — sim set A run 2) | `log.error(...)` | yes |
 
-`outbound_webhook_dead` (a results-webhook endpoint that exhausted all 6 delivery attempts) has no
-log line to filter on as shipped, so it cannot get a log-based alert today. Recorded here, not
-fixed (docs-only task, no code change) — flag for the owner/a future task.
+`outbound_secret_missing` firing right after the deploy means a secret was not mounted: STOP, mount
+it (C2), redeploy. Without SUPPRESSION_HASH_KEY every opted-out call's post-call fails closed.
 
 Memory `gcp-notices-go-nowhere`: no Essential Contacts existed on this org before that memory's own
 fix, and a Cloud Monitoring alert needs its own channel regardless — create one explicitly.
@@ -339,7 +342,7 @@ gcloud alpha monitoring channels create --project=$P \
   --type=email --channel-labels=email_address=<OWNER_EMAIL>
 # Note the returned channel resource name (projects/.../notificationChannels/NNNNNN) as $CHANNEL.
 
-for m in outbound_stuck_dialing outbound_webhook_writeoutbox_failed outbound_webhook_enqueue_failed outbound_webhook_reenqueue_failed outbound_trigger_enqueue_failed; do
+for m in outbound_stuck_dialing outbound_webhook_writeoutbox_failed outbound_webhook_enqueue_failed outbound_webhook_reenqueue_failed outbound_trigger_enqueue_failed outbound_webhook_dead outbound_secret_missing outbound_webhook_key_unavailable outbound_internal_dispatch_failed outbound_postcall_run_failed; do
   gcloud logging metrics create "$m" --project=$P \
     --description="lib/outbound: $m, logged via log.error" \
     --log-filter="resource.type=\"cloud_run_revision\" jsonPayload.event=\"$m\""
@@ -356,7 +359,7 @@ done
 **STOP and ask the owner:** the `policies create` flags above are a DRAFT, never run against a real
 Cloud Monitoring API in this session — read them back against `gcloud alpha monitoring policies
 create --help` before running, and confirm firing on ANY occurrence in a 5-minute window is the
-sensitivity wanted (every one of these five counters is expected near zero in production).
+sensitivity wanted (every one of these counters is expected near zero in production).
 
 **C8. Cloud Tasks: no new queue, no new IAM.** Checked both new enqueue paths directly:
 `lib/outbound/tasks.js`'s `createWebhookDeliveryEnqueuer` (S3-8) is constructed in
