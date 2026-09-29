@@ -761,9 +761,9 @@ describe("S3-5: outbound situation scripts", () => {
   /** A real assistant turn: `text` is what Ava said, `user_text` is the ASR's transcript of what the caller said (null on a filler turn -- the model heard nothing new). */
   const turn = (text, userText = null) => ({ text, user_text: userText });
 
-  /** The 8 names really are the ones lib/probe/script.js registers. */
-  it("OUTBOUND_SITUATION_SCRIPTS names 8 scripts, each with the caller lines a situation criterion assumes", () => {
-    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(8);
+  /** The names really are the ones lib/probe/script.js registers. CHANGED (final wave W1): 8 -> 11, the next paid set's three. */
+  it("OUTBOUND_SITUATION_SCRIPTS names 11 scripts, each with the caller lines a situation criterion assumes", () => {
+    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(11);
     for (const name of OUTBOUND_SITUATION_SCRIPTS) expect(resolveScriptLines(name).length).toBeGreaterThan(0);
   });
 
@@ -950,6 +950,152 @@ describe("S3-5: outbound situation scripts", () => {
 
     it("an unrelated sentence sharing no topic word still fails", () => {
       expect(mentionsTopic("Sorry, is this a bad time to talk?", TOPIC)).toBe(false);
+    });
+
+    // F17 (final wave W1; harness-fix review minor): the threshold is EVERY
+    // significant topic word, so ONE shared word -- a sentence about "the
+    // clinic" that never names its systems -- must not count as the topic.
+    it("one shared topic word is not enough ('clinic' without 'systems', and 'systems' without 'clinic')", () => {
+      expect(mentionsTopic("Is this the clinic's main line?", TOPIC)).toBe(false);
+      expect(mentionsTopic("Our phone systems are down today.", TOPIC)).toBe(false);
+      expect(mentionsTopic("It's about the clinic systems.", TOPIC)).toBe(true); // both: the control
+    });
+  });
+
+  // F18 (final wave W1; harness-fix review minor): the backstop_silence
+  // exemption of no_stale_reply_after_clip's signal (B) had never been seen to
+  // CHANGE a result. REAL data, round 1's outbound_gatekeeper_fetch-1
+  // (harness-server.log, callSid CAharness1a0e5fefa6252422017; clip 42,245
+  // bytes, "speak gk_fetch_wait (heard 5.3 s back)", sims/outbound_gatekeeper_
+  // fetch-1.txt): the caller's second utterance really opened while the clip
+  // played (playing_at_open:true). On its real path (backstop_silence) that is
+  // by design and PASSes; the SAME utterances on a hello-end path FAIL as a
+  // collision -- the exemption, and only it, decides this fixture.
+  describe("F18: the silence-path exemption flips a real fixture", () => {
+    const SID = "CAharness1a0e5fefa6252422017";
+    const RAW_LOG = [
+      '{"message":"outbound_backstop_played [52422017]","ts":"2026-09-28T03:11:44.368Z","level":"INFO","event":"outbound_backstop_played","callSid":"CAharness1a0e5fefa6252422017","attemptId":"2c9cc040-db78-424b-b6c4-c486fe88b63e","path":"backstop_silence","source":"stored","seed":"at_fire"}',
+      '{"message":"outbound_first_audio [52422017]","ts":"2026-09-28T03:11:44.384Z","level":"INFO","event":"outbound_first_audio","callSid":"CAharness1a0e5fefa6252422017","attemptId":"2c9cc040-db78-424b-b6c4-c486fe88b63e","from_answer_ms":1771,"from_speech_ms":null,"path":"backstop_silence","measured":"playout"}',
+      '{"message":"live_debug_assistant_turn [52422017]","ts":"2026-09-28T03:11:55.612Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e5fefa6252422017","step":"identify_intent","debug_only":true,"text":"Thank you.","user_text":"One moment."}',
+      '{"message":"live_debug_assistant_turn [52422017]","ts":"2026-09-28T03:12:06.345Z","level":"INFO","event":"live_debug_assistant_turn","callSid":"CAharness1a0e5fefa6252422017","step":"identify_intent","debug_only":true,"text":"I\'m calling to book a thirty-minute discovery call regarding our clinic systems. What day or time works best for you?","user_text":"Hi, this is Sam."}',
+      '{"message":"live_utterance [52422017]","ts":"2026-09-28T03:12:08.156Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e5fefa6252422017","step":"gather_details","utterance":1,"opened_ms":298083,"duration_ms":454,"voiced_ms":180,"peak_rms":3280,"playing_at_open":true,"frames":24,"forwarded":44,"held":5,"dropped_voiced":1,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":867,"transcript_chars":13}',
+      '{"message":"live_utterance [52422017]","ts":"2026-09-28T03:12:08.156Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e5fefa6252422017","step":"gather_details","utterance":2,"opened_ms":303478,"duration_ms":656,"voiced_ms":360,"peak_rms":6068,"playing_at_open":true,"frames":34,"forwarded":34,"held":5,"dropped_voiced":0,"released":0,"strategy_opened":true,"close_rule":"vendor_bookkeeping","transcript_ms":996,"transcript_chars":11}',
+      '{"message":"live_utterance [52422017]","ts":"2026-09-28T03:12:08.156Z","level":"INFO","event":"live_utterance","callSid":"CAharness1a0e5fefa6252422017","step":"gather_details","utterance":3,"opened_ms":308819,"duration_ms":1061,"voiced_ms":460,"peak_rms":4130,"playing_at_open":false,"frames":54,"forwarded":54,"held":0,"dropped_voiced":0,"released":0,"strategy_opened":false,"close_rule":"vendor_bookkeeping","transcript_ms":1025,"transcript_chars":16}',
+    ].join("\n");
+    const run = (server) =>
+      outboundVerdict({
+        mode: "speaks_first",
+        situation: "outbound_gatekeeper_fetch",
+        topic: TOPIC,
+        timezone: TZ,
+        now: NOW,
+        clipBytes: 42245,
+        client: { heard_before_first_post_clip_line_ms: 5300 },
+        server,
+        db: dbFor({}),
+      }).criteria.no_stale_reply_after_clip;
+
+    it("real path (backstop_silence): exempt -> PASS; the same utterances on backstop_hello_end -> FAIL (collision)", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: SID });
+      expect(view.liveUtterances[1].playing_at_open).toBe(true); // the real collision-shaped utterance
+      expect(run(view)).toMatchObject({ result: "PASS", path: "backstop_silence", collision_playing_at_open: false });
+      const flipped = { ...view, firstAudio: { ...view.firstAudio, path: "backstop_hello_end" } };
+      expect(run(flipped)).toMatchObject({ result: "FAIL", path: "backstop_hello_end", collision_playing_at_open: true });
+    });
+
+    // F4: the identity criterion says in its own JSON that it is a proxy.
+    it("F4: identity_confirmed_at_last_line self-flags as a topic-mention-timing proxy", () => {
+      const view = parseServerLog(RAW_LOG, { callSid: SID });
+      const v = outboundVerdict({ mode: "speaks_first", situation: "outbound_gatekeeper_fetch", topic: TOPIC, timezone: TZ, now: NOW, client: {}, server: view, db: dbFor({}) });
+      expect(v.criteria.identity_confirmed_at_last_line.proxy).toMatch(/proxy|timing/i);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Final wave W1: the next paid set's three scripts. NO real log of any of
+  // these shapes exists yet (none has been run) -- every fixture below is
+  // PLAUSIBLE, not real, built from the fields the product's own log lines
+  // carry (outbound_clip_hold_drained / _drain_settled, outbound_live_shadow,
+  // outbound_first_audio) and the client observer's own snapshot fields.
+  // ---------------------------------------------------------------------
+  describe("final wave W1 scripts (plausible fixtures -- no real run exists yet)", () => {
+    const base = (over = {}) => ({ ...serverFor(over), liveUtterances: [], clipHoldDrained: [], clipHoldDrainSettled: [], liveShadow: [], ...over.extra });
+
+    it("outbound_double_hello: PASS when Live's stale reply was discarded during the clip; FAIL when the shadow shows none", () => {
+      const turns = [turn("Hi Sam, thanks -- I'm calling about our clinic systems.", "Hi, this is Sam.")];
+      const pass = verdictFor("outbound_double_hello", {
+        server: base({ assistantTurns: turns, extra: { liveShadow: [{ discarded_chunks: 14, reason: "measured" }] } }),
+        db: dbFor({}),
+      });
+      expect(pass.criteria.stale_reply_discarded_during_clip).toMatchObject({ result: "PASS", discarded_chunks: 14 });
+      expect(pass.criteria.path_backstop_hello_end.result).toBe("PASS");
+      expect(pass.criteria.turns_reached.result).toBe("PASS");
+      const fail = verdictFor("outbound_double_hello", {
+        server: base({ assistantTurns: turns, extra: { liveShadow: [{ discarded_chunks: 0, reason: "no_discarded_chunk" }] } }),
+        db: dbFor({}),
+      });
+      expect(fail.criteria.stale_reply_discarded_during_clip.result).toBe("FAIL");
+    });
+
+    it("outbound_double_hello: the timed second hello opening during the clip is NOT a collision (signal B exempt); an audible stale turn still FAILs", () => {
+      const turns = [turn("Hi Sam, thanks -- I'm calling about our clinic systems.", "Hi, this is Sam.")];
+      const utts = [
+        { utterance: 1, opened_ms: 1000, playing_at_open: false },
+        { utterance: 2, opened_ms: 2200, playing_at_open: true }, // the second "Hello?", over the clip by design
+      ];
+      const ok = verdictFor("outbound_double_hello", {
+        server: base({ assistantTurns: turns, extra: { liveUtterances: utts, liveShadow: [{ discarded_chunks: 3 }] } }),
+        db: dbFor({}),
+      });
+      expect(ok.criteria.no_stale_reply_after_clip).toMatchObject({ result: "PASS", collision_playing_at_open: false });
+      const stale = [turn("Hi, is that Sam? It's Ava, calling on behalf of Harness Test Clinic.", "Hello?"), ...turns];
+      const bad = verdictFor("outbound_double_hello", {
+        server: base({ assistantTurns: stale, extra: { liveUtterances: utts, liveShadow: [{ discarded_chunks: 3 }] } }),
+        db: dbFor({}),
+      });
+      expect(bad.criteria.no_stale_reply_after_clip.result).toBe("FAIL");
+    });
+
+    it("outbound_stop_midclip_hangup: PASS on a transcribed drain + an opted_out suppression + outcome; no turns_reached (hangs up by design)", () => {
+      const v = verdictFor("outbound_stop_midclip_hangup", {
+        server: base({
+          extra: {
+            clipHoldDrained: [{ frames: 61, voiced_frames: 38 }],
+            clipHoldDrainSettled: [{ reason: "settled", transcribed: true, waited_ms: 812 }],
+          },
+        }),
+        db: dbFor({ outcome_code: "opted_out", suppression: { reason: "opted_out", created_by: "detector" } }),
+      });
+      expect(v.criteria.turns_reached).toBeUndefined();
+      expect(v.criteria.hold_drained).toMatchObject({ result: "PASS", voiced_frames: 38, transcribed: true });
+      expect(v.criteria.suppression_opted_out.result).toBe("PASS");
+      expect(v.criteria.outcome_opted_out.result).toBe("PASS");
+      expect(v.criteria.post_call_exactly_once.result).toBe("PASS");
+    });
+
+    it("outbound_stop_midclip_hangup: FAIL when the held speech was dropped (no drain) or the drain yielded no text", () => {
+      const noDrain = verdictFor("outbound_stop_midclip_hangup", { server: base(), db: dbFor({ suppression: null }) });
+      expect(noDrain.criteria.hold_drained).toMatchObject({ result: "FAIL", drained: 0 });
+      expect(noDrain.criteria.suppression_opted_out.result).toBe("FAIL");
+      const untranscribed = verdictFor("outbound_stop_midclip_hangup", {
+        server: base({ extra: { clipHoldDrained: [{ frames: 61, voiced_frames: 38 }], clipHoldDrainSettled: [{ reason: "max", transcribed: false }] } }),
+        db: dbFor({}),
+      });
+      expect(untranscribed.criteria.hold_drained).toMatchObject({ result: "FAIL", transcribed: false, drain_end: "max" });
+    });
+
+    it("outbound_business_greeting: PASS on backstop_slow with no clear, or a clear >= CLIP_BARGE_MIN_MS in; FAIL on a first-frame cut", () => {
+      const turns = [turn("Thanks Sam -- I'm calling about our clinic systems.", "Hi, this is Sam.")];
+      const server = base({ assistantTurns: turns, firstAudioPath: "backstop_slow" });
+      const noClear = verdictFor("outbound_business_greeting", { server, db: dbFor({}), client: { first_media_at: 2700, first_clear_after_first_media_ms: null } });
+      expect(noClear.criteria.path_backstop_slow.result).toBe("PASS");
+      expect(noClear.criteria.opener_not_cut_on_first_frame.result).toBe("PASS");
+      const lateBarge = verdictFor("outbound_business_greeting", { server, db: dbFor({}), client: { first_media_at: 2700, first_clear_after_first_media_ms: 640 } });
+      expect(lateBarge.criteria.opener_not_cut_on_first_frame.result).toBe("PASS");
+      const firstFrame = verdictFor("outbound_business_greeting", { server, db: dbFor({}), client: { first_media_at: 2700, first_clear_after_first_media_ms: 20 } });
+      expect(firstFrame.criteria.opener_not_cut_on_first_frame).toMatchObject({ result: "FAIL", first_clear_after_first_media_ms: 20 });
+      const wrongPath = verdictFor("outbound_business_greeting", { server: base({ assistantTurns: turns }), db: dbFor({}), client: { first_media_at: 2700 } });
+      expect(wrongPath.criteria.path_backstop_slow).toMatchObject({ result: "FAIL", path: "backstop_hello_end" });
     });
   });
 

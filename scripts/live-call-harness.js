@@ -141,7 +141,11 @@
  *   --script <name>    speak a multi-line SITUATION instead of one "Hello?" (S3-5):
  *                      outbound_stop, outbound_gatekeeper_fetch, outbound_gatekeeper_later,
  *                      outbound_child, outbound_bad_time, outbound_wrong_number,
- *                      outbound_robot, outbound_email (lib/probe/script.js). An INBOUND
+ *                      outbound_robot, outbound_email, and (final wave W1)
+ *                      outbound_double_hello, outbound_stop_midclip_hangup,
+ *                      outbound_business_greeting (lib/probe/script.js; a line
+ *                      with afterPreviousMs is spoken over the clip on a timer,
+ *                      hangUpAfterMs hangs up after its line). An INBOUND
  *                      script name (demo_booking, ...) is refused -- LOCAL ONLY, same as
  *                      every other --outbound mode. The first line plays at --hello-ms,
  *                      same as the default single "Hello?"; each later line plays once
@@ -1287,27 +1291,48 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
    * reused rather than re-derived so the two cannot disagree about what
    * "the model replied" means.
    */
+  // Final wave W1: set once the first line sent by ORDINARY turn-taking has
+  // gone -- the caller's first post-clip line. A timed line (afterPreviousMs,
+  // spoken over the clip by design) is not it.
+  let heardBeforeCaptured = false;
+
   function maybeSpeakNext(now) {
     if (finished || outQueue.length > 0 || cursor >= scriptLines.length || turns.length === 0) return;
+    const nextLine = scriptLines[cursor];
     const waitedSinceTurnStart = now - turns.at(-1).endedAt;
     const heardSomething = assistantFramesThisTurn > 0;
-    const assistantQuiet = heardSomething && now - lastAssistantMediaAt >= GAP_MS;
-    const gaveUp = !heardSomething && waitedSinceTurnStart >= REPLY_WAIT_MS;
-    if (!assistantQuiet && !gaveUp) return;
+    const timed = typeof nextLine.afterPreviousMs === "number";
+    let gaveUp = false;
+    if (timed) {
+      // Final wave W1 (lib/probe/script.js): sent this long after the
+      // previous line ENDED, whatever Ava is doing -- the caller talks over
+      // the clip by design.
+      if (waitedSinceTurnStart < nextLine.afterPreviousMs) return;
+    } else {
+      const assistantQuiet = heardSomething && now - lastAssistantMediaAt >= GAP_MS;
+      gaveUp = !heardSomething && waitedSinceTurnStart >= REPLY_WAIT_MS;
+      if (!assistantQuiet && !gaveUp) return;
 
-    // F-R2 harness-fix round 2: cursor is still 1 here on the FIRST call that
-    // actually sends a line -- exactly "the caller's first post-clip line" --
-    // so this is the one place to capture what the console is about to print.
-    if (cursor === 1) stats.heardBeforeFirstPostClipLineMs = assistantFramesThisTurn * FRAME_MS;
+      // F-R2 harness-fix round 2: the FIRST line sent by ordinary turn-taking
+      // is exactly "the caller's first post-clip line" -- the one place to
+      // capture what the console is about to print. (It was `cursor === 1`
+      // until the final wave added timed lines, which are never it.)
+      if (!heardBeforeCaptured) {
+        heardBeforeCaptured = true;
+        stats.heardBeforeFirstPostClipLineMs = assistantFramesThisTurn * FRAME_MS;
+      }
+    }
 
-    const nextLine = scriptLines[cursor];
     cursor += 1;
     for (let i = 0; i < nextLine.mulaw.length; i += FRAME_BYTES) outQueue.push(nextLine.mulaw.subarray(i, i + FRAME_BYTES));
-    turns.push({ label: nextLine.label, endedAt: now + (nextLine.mulaw.length / FRAME_BYTES) * FRAME_MS });
+    const lineMs = (nextLine.mulaw.length / FRAME_BYTES) * FRAME_MS;
+    turns.push({ label: nextLine.label, endedAt: now + lineMs });
     console.log(
-      `speak      ${nextLine.label}  (heard ${((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)} s back${gaveUp ? ", NO REPLY" : ""})`
+      `speak      ${nextLine.label}  (${timed ? `timed, ${nextLine.afterPreviousMs} ms after the last line` : `heard ${((assistantFramesThisTurn * FRAME_MS) / 1000).toFixed(1)} s back${gaveUp ? ", NO REPLY" : ""}`})`
     );
-    assistantFramesThisTurn = 0;
+    if (!timed) assistantFramesThisTurn = 0;
+    // Final wave W1: the caller hangs up this long after this line ends.
+    if (typeof nextLine.hangUpAfterMs === "number") later(() => hangUp("script_hangup"), lineMs + nextLine.hangUpAfterMs);
   }
 
   function hangUp(reason) {
