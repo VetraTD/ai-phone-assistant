@@ -599,6 +599,70 @@ describe("buildOutboundDeps", () => {
   });
 });
 
+// W3 (final review I10/R6): a missing or short SUPPRESSION_HASH_KEY/
+// CONNECTIONS_WEBHOOK_KEY used to halt outbound silently -- fail-closed, but
+// never loud. These read REAL process.env (not the `env` object passed to
+// buildOutboundDeps), the same source suppressionHash/loadWebhookKey
+// actually consult at dispatch/delivery time.
+describe("buildOutboundDeps: W3 I10/R6 -- a missing/short outbound secret is logged loudly at boot, once, when these routes actually mount", () => {
+  const FULL_ENV = {
+    BASE_URL: "https://x.example/",
+    OUTBOUND_TASKS_QUEUE: "projects/p/locations/l/queues/q",
+    OUTBOUND_TASKS_SA: "sa@x.iam.gserviceaccount.com",
+  };
+  const OLD_HASH = process.env.SUPPRESSION_HASH_KEY;
+  const OLD_WEBHOOK = process.env.CONNECTIONS_WEBHOOK_KEY;
+
+  function setSecrets({ hash, webhook } = {}) {
+    if (hash === undefined) delete process.env.SUPPRESSION_HASH_KEY;
+    else process.env.SUPPRESSION_HASH_KEY = hash;
+    if (webhook === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    else process.env.CONNECTIONS_WEBHOOK_KEY = webhook;
+  }
+
+  afterAll(() => {
+    if (OLD_HASH === undefined) delete process.env.SUPPRESSION_HASH_KEY;
+    else process.env.SUPPRESSION_HASH_KEY = OLD_HASH;
+    if (OLD_WEBHOOK === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_WEBHOOK;
+  });
+
+  it("both secrets missing: logs outbound_secret_missing for EACH key, never the value", () => {
+    setSecrets({});
+    const log = { info: vi.fn(), error: vi.fn() };
+    buildOutboundDeps(FULL_ENV, { log });
+    expect(log.error).toHaveBeenCalledWith("outbound_secret_missing", { key: "SUPPRESSION_HASH_KEY" });
+    expect(log.error).toHaveBeenCalledWith("outbound_secret_missing", { key: "CONNECTIONS_WEBHOOK_KEY" });
+    for (const call of log.error.mock.calls) {
+      expect(Object.keys(call[1] || {})).toEqual(["key"]); // never a "value"/"secret" field alongside it
+    }
+  });
+
+  it("a too-short SUPPRESSION_HASH_KEY (under 32 chars) is refused the same as missing; a valid CONNECTIONS_WEBHOOK_KEY is not flagged", () => {
+    setSecrets({ hash: "too-short", webhook: randomBytes(32).toString("base64") });
+    const log = { info: vi.fn(), error: vi.fn() };
+    buildOutboundDeps(FULL_ENV, { log });
+    expect(log.error).toHaveBeenCalledWith("outbound_secret_missing", { key: "SUPPRESSION_HASH_KEY" });
+    expect(log.error).not.toHaveBeenCalledWith("outbound_secret_missing", { key: "CONNECTIONS_WEBHOOK_KEY" });
+  });
+
+  it("both secrets present and valid: logs nothing about a missing secret", () => {
+    setSecrets({ hash: "a".repeat(32), webhook: randomBytes(32).toString("base64") });
+    const log = { info: vi.fn(), error: vi.fn() };
+    buildOutboundDeps(FULL_ENV, { log });
+    const calls = [...log.info.mock.calls, ...log.error.mock.calls].filter(([e]) => e === "outbound_secret_missing");
+    expect(calls).toEqual([]);
+  });
+
+  it("the routes not mounting at all (BASE_URL unset) never runs this check -- nothing to log yet", () => {
+    setSecrets({});
+    const log = { info: vi.fn(), error: vi.fn() };
+    expect(buildOutboundDeps({ BASE_URL: "https://x.example/" }, { log })).toBeNull();
+    const calls = [...log.info.mock.calls, ...log.error.mock.calls].filter(([e]) => e === "outbound_secret_missing");
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("createCallerIdValidator: timeout throws, only a successful answer is cached", () => {
   it("throws when the Twilio lookup exceeds the timeout (dispatch must retry, never close the outreach)", async () => {
     let calls = 0;
@@ -797,6 +861,9 @@ describe("POST /internal/outbound/webhook-deliver (S3-8 fix round 1)", () => {
     expect(res.body).toEqual({ done: true, reason: "dead" });
     expect(db.calls.markOutboxDead).toEqual([{ attempts: 6, lastError: "ECONNREFUSED", expectedAttempts: 5 }]);
     expect(deps.enqueueOutbox).not.toHaveBeenCalled();
+    // W3 (final review item 2b): the counter and the log event name must
+    // match -- a log-based alert cannot match a nested field value.
+    expect(deps.log.error).toHaveBeenCalledWith("outbound_webhook_dead", expect.objectContaining({ outboxId: OUTBOX_ID }));
   });
 
   it("already dead: a no-op, attemptDelivery is never called (named risk 7 -- never retries past dead)", async () => {
@@ -818,6 +885,10 @@ describe("POST /internal/outbound/webhook-deliver (S3-8 fix round 1)", () => {
     expect(res.body).toEqual({ done: true, reason: "endpoint_unavailable" });
     expect(attemptDelivery).not.toHaveBeenCalled();
     expect(db.calls.markOutboxDead).toEqual([{ attempts: 1, lastError: "endpoint_unavailable", expectedAttempts: 1 }]);
+    // W3 (final review item 2b): this path used to log the dead transition
+    // at INFO, not even ERROR, for an endpoint that will now never be
+    // delivered to again.
+    expect(deps.log.error).toHaveBeenCalledWith("outbound_webhook_dead", expect.objectContaining({ outboxId: OUTBOX_ID, reason: "endpoint_unavailable" }));
   });
 
   it("decrypt failure: classified as key_unavailable and backed off like any other failure, attemptDelivery never called", async () => {
@@ -835,6 +906,40 @@ describe("POST /internal/outbound/webhook-deliver (S3-8 fix round 1)", () => {
       expect(res.body).toMatchObject({ done: true, reason: "retry" });
       expect(attemptDelivery).not.toHaveBeenCalled();
       expect(db.calls.markOutboxRetry[0].lastError).toBe("key_unavailable");
+    } finally {
+      if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+      else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
+    }
+  });
+
+  // W3 (final review minor): key_unavailable used to stay at INFO
+  // (finishOutboxFailure's own "retry" log line) for up to ~14.5h of silent
+  // backoff before a single ERROR at `dead` -- too slow for a
+  // misconfiguration that will never self-heal on its own.
+  it("W3: key_unavailable on the row's FIRST delivery attempt (attempts:0) is ALSO logged at ERROR immediately, with a stable event name", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ attempts: 0 }) });
+    const OLD_KEY = process.env.CONNECTIONS_WEBHOOK_KEY;
+    delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    try {
+      const deps = deliverDeps({ db });
+      const res = await post(deps);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ done: true, reason: "retry" });
+      expect(deps.log.error).toHaveBeenCalledWith("outbound_webhook_key_unavailable", { outboxId: OUTBOX_ID, message: expect.any(String) });
+    } finally {
+      if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
+      else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
+    }
+  });
+
+  it("W3: key_unavailable on a LATER attempt (attempts:1, matching the 'decrypt failure' test above) is never re-logged at ERROR -- only the first attempt is", async () => {
+    const db = webhookDeliverDb({ row: mkRow({ attempts: 1 }) });
+    const OLD_KEY = process.env.CONNECTIONS_WEBHOOK_KEY;
+    delete process.env.CONNECTIONS_WEBHOOK_KEY;
+    try {
+      const deps = deliverDeps({ db });
+      await post(deps);
+      expect(deps.log.error).not.toHaveBeenCalledWith("outbound_webhook_key_unavailable", expect.anything());
     } finally {
       if (OLD_KEY === undefined) delete process.env.CONNECTIONS_WEBHOOK_KEY;
       else process.env.CONNECTIONS_WEBHOOK_KEY = OLD_KEY;
