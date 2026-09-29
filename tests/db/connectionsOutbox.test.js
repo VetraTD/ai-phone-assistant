@@ -134,6 +134,16 @@ d("getOutboxRow / getWebhookEndpoint: tenant scoping (no cross-tenant read)", ()
     expect(seenByOwner?.url).toBe("https://example.com/only-a");
     expect(seenByOther).toBeNull();
   });
+
+  // D7 (final review, least privilege): getWebhookEndpoint is the ONE
+  // function that legitimately returns secret_ciphertext -- it runs at
+  // actual delivery time (lib/outbound/internalRoutes.js's deliverOutboxRow),
+  // right before decryptSecret needs it.
+  it("getWebhookEndpoint: secret_ciphertext comes back as a Buffer, never a decrypted string", async () => {
+    const epId = await mkEndpoint(BIZ_A, { url: "https://example.com/cipher-check" });
+    const row = await db.withTenant(BIZ_A, () => db.getWebhookEndpoint(epId));
+    expect(Buffer.isBuffer(row.secret_ciphertext)).toBe(true);
+  });
 });
 
 d("listActiveWebhookEndpoints: event-filter matching", () => {
@@ -159,11 +169,16 @@ d("listActiveWebhookEndpoints: event-filter matching", () => {
     expect(forCompleted.some((e) => e.url === "https://example.com/inactive")).toBe(false);
   });
 
-  it("secret_ciphertext comes back as a Buffer, never a decrypted string", async () => {
-    await mkEndpoint(BIZ_A, { url: "https://example.com/buffer-check", events: [] });
+  // D7 (final review, least privilege): postCall.js (the only caller) uses
+  // only `ep.id` -- the ciphertext must never pass through this function's
+  // return value at all. getWebhookEndpoint (above), used at actual
+  // delivery time, is where the ciphertext legitimately comes back.
+  it("D7: never returns secret_ciphertext at all", async () => {
+    await mkEndpoint(BIZ_A, { url: "https://example.com/no-ciphertext", events: [] });
     const rows = await db.withTenant(BIZ_A, () => db.listActiveWebhookEndpoints("call.completed"));
-    const row = rows.find((e) => e.url === "https://example.com/buffer-check");
-    expect(Buffer.isBuffer(row.secret_ciphertext)).toBe(true);
+    const row = rows.find((e) => e.url === "https://example.com/no-ciphertext");
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty("secret_ciphertext");
   });
 });
 
@@ -268,50 +283,6 @@ d("markOutboxDelivered / markOutboxRetry / markOutboxDead: the pending-only guar
     const row = await readOutboxRow(id);
     expect(row.attempts).toBe(1); // the FIRST write's value, never double-applied
     expect(row.last_error).toBe("500"); // the stale write's last_error never landed
-  });
-});
-
-d("dueOutboxRows: per-tenant, status=pending, next_attempt_at due -- no cross-tenant leakage", () => {
-  it("only returns THIS tenant's due rows, even when another tenant also has one", async () => {
-    const epA = await mkEndpoint(BIZ_A);
-    const epB = await mkEndpoint(BIZ_B);
-    const idA = uid();
-    const idB = uid();
-    await db.withTenant(BIZ_A, () =>
-      db.insertOutboxRow({ id: idA, kind: "webhook", targetId: epA, eventType: "call.completed", payload: {}, idempotencyKey: `due-a-${idA}`, nextAttemptAt: new Date(Date.now() - 1000) })
-    );
-    await db.withTenant(BIZ_B, () =>
-      db.insertOutboxRow({ id: idB, kind: "webhook", targetId: epB, eventType: "call.completed", payload: {}, idempotencyKey: `due-b-${idB}`, nextAttemptAt: new Date(Date.now() - 1000) })
-    );
-
-    const dueForA = await db.withTenant(BIZ_A, () => db.dueOutboxRows(100));
-    const dueForB = await db.withTenant(BIZ_B, () => db.dueOutboxRows(100));
-
-    expect(dueForA.some((r) => r.id === idA)).toBe(true);
-    expect(dueForA.some((r) => r.id === idB)).toBe(false); // tenant A never sees tenant B's due row
-    expect(dueForB.some((r) => r.id === idB)).toBe(true);
-    expect(dueForB.some((r) => r.id === idA)).toBe(false);
-  });
-
-  it("a row not yet due (next_attempt_at in the future) is excluded", async () => {
-    const epId = await mkEndpoint(BIZ_A);
-    const id = uid();
-    await db.withTenant(BIZ_A, () =>
-      db.insertOutboxRow({ id, kind: "webhook", targetId: epId, eventType: "call.completed", payload: {}, idempotencyKey: `future-${id}`, nextAttemptAt: new Date(Date.now() + 3_600_000) })
-    );
-    const due = await db.withTenant(BIZ_A, () => db.dueOutboxRows(100));
-    expect(due.some((r) => r.id === id)).toBe(false);
-  });
-
-  it("a DELIVERED or DEAD row is excluded even if its next_attempt_at is in the past", async () => {
-    const epId = await mkEndpoint(BIZ_A);
-    const id = uid();
-    await db.withTenant(BIZ_A, () =>
-      db.insertOutboxRow({ id, kind: "webhook", targetId: epId, eventType: "call.completed", payload: {}, idempotencyKey: `delivered-${id}`, nextAttemptAt: new Date(Date.now() - 1000) })
-    );
-    await db.withTenant(BIZ_A, () => db.markOutboxDelivered(id));
-    const due = await db.withTenant(BIZ_A, () => db.dueOutboxRows(100));
-    expect(due.some((r) => r.id === id)).toBe(false);
   });
 });
 

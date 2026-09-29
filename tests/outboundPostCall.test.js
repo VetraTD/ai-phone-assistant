@@ -65,7 +65,15 @@ function fakeDb(ctxOverrides = {}, fnOverrides = {}) {
     ctx,
     withTenant: vi.fn(async (_biz, fn) => fn()),
     outboundPostCallContext: vi.fn(async () => ctx),
-    finalizeAttemptResult: vi.fn(async (...a) => calls.finalizeAttemptResult.push(a)),
+    // W3 (final review D2): the real function now RETURNS the ended_at it
+    // committed (via RETURNING) -- this default fake returns null, matching
+    // the pre-fix behaviour (no return value used) for every one of the many
+    // existing tests below that never look at it. Tests proving D2 override
+    // this to return a real Date.
+    finalizeAttemptResult: vi.fn(async (...a) => {
+      calls.finalizeAttemptResult.push(a);
+      return null;
+    }),
     outboundCallEffects: vi.fn(async () => ({ booked: false, optedOut: false })),
     fetchCallTranscript: vi.fn(async () => []),
     setCallOutcomeCode: vi.fn(async (...a) => calls.setCallOutcomeCode.push(a)),
@@ -693,6 +701,51 @@ describe("runPostCall: step 7, the shared results channel (S3-8 fix round 1, I1)
     for (const p of closedPayloads) {
       expect(p.outreach).toMatchObject({ state: "closed", close_reason: "terminal_outcome" });
       expect(p.outcome).toBe("not_interested");
+    }
+  });
+
+  // W3 (final review D1): `terminal` alone is ALSO true for the attempt
+  // that LOST the applyOutreachResult WHERE-clause race (a later attempt on
+  // the same outreach already applied its own close/reschedule) -- the old
+  // code fired a false outreach.closed webhook event for a close that never
+  // actually happened on the attempt reporting it.
+  it("W3 D1: outreach.closed does NOT fire, and the payload's outreach.state stays 'waiting', when applyOutreachResult reports applied:false", async () => {
+    const db = outboxDb(
+      {},
+      {
+        fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]),
+        applyOutreachResult: vi.fn(async () => false), // this attempt's own write never landed
+      }
+    );
+    await runWithOutbox(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "not_interested" }) });
+
+    // Only call.completed fires, per endpoint -- outreach.closed never does.
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(2);
+    const eventTypes = db.outboxCalls.insertOutboxRow.map((c) => c.eventType);
+    expect(eventTypes).toEqual(["call.completed", "call.completed"]);
+    for (const c of db.outboxCalls.insertOutboxRow) {
+      expect(c.payload.outreach).toMatchObject({ state: "waiting", close_reason: null });
+    }
+  });
+
+  // W3 (final review D2): ctx.endedAt is TXN 1's own pre-read, taken BEFORE
+  // step 1's finalizeAttemptResult COALESCE ever runs -- null exactly when
+  // that COALESCE is what first sets ended_at, which used to make
+  // duration_seconds silently null in the webhook payload.
+  it("W3 D2: duration_seconds reflects finalizeAttemptResult's own returned ended_at, not the stale pre-step-1 ctx.endedAt", async () => {
+    const REAL_ENDED_AT = new Date("2026-09-25T11:59:35Z"); // 30s after baseCtx's answeredAt (11:59:05Z)
+    const db = outboxDb(
+      { endedAt: null }, // TXN 1's own read: not yet set
+      {
+        fetchCallTranscript: vi.fn(async () => []),
+        finalizeAttemptResult: vi.fn(async () => REAL_ENDED_AT), // step 1's own COALESCE just set it
+      }
+    );
+    await runWithOutbox(db);
+
+    expect(db.outboxCalls.insertOutboxRow.length).toBe(2); // call.completed x 2 endpoints
+    for (const c of db.outboxCalls.insertOutboxRow) {
+      expect(c.payload.call.duration_seconds).toBe(30);
     }
   });
 

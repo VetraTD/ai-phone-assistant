@@ -3609,8 +3609,15 @@ export async function outboundPostCallContext(attemptId) {
  * the three audio columns (S3-4: transfer_miss_audio joins opener_audio/
  * voicemail_audio here) unconditionally -- an answered call's clips are no
  * longer needed, and an unanswered one may already have had them cleared.
+ *
+ * W3 (final review D2): returns the `ended_at` this UPDATE actually
+ * committed (via RETURNING) -- the caller's own pre-read `ctx.endedAt` (TXN
+ * 1, before this statement runs) is stale exactly when this COALESCE is the
+ * thing that first sets it, and postCall.js's step 7 duration_seconds must
+ * be computed from the REAL value, not a null read before it existed.
  * @param {string} attemptId
  * @param {string} resultIfUnset - 'connected' for an answered attempt whose result is still null
+ * @returns {Promise<Date|null>}
  */
 export async function finalizeAttemptResult(attemptId, resultIfUnset) {
   requireTenantScope("finalizeAttemptResult");
@@ -3618,12 +3625,14 @@ export async function finalizeAttemptResult(attemptId, resultIfUnset) {
     `UPDATE call_attempts
         SET result = COALESCE(result, $2), ended_at = COALESCE(ended_at, now()),
             opener_audio = NULL, voicemail_audio = NULL, transfer_miss_audio = NULL
-      WHERE id = $1`,
+      WHERE id = $1
+      RETURNING ended_at`,
     [attemptId, resultIfUnset]
   );
   if (res.error) throw res.error;
   if (res.rowCount !== 1) throw new Error(`finalizeAttemptResult: expected 1 row, got ${res.rowCount}`);
   noteAccess("finalizeAttemptResult", { resourceIds: [attemptId], rowCount: res.rowCount });
+  return res.rows[0]?.ended_at ?? null;
 }
 
 /**
@@ -3855,13 +3864,21 @@ export async function outboundStaleAttempts(limit, sidlessMinutes, lostMinutes, 
  * filter at all (an empty `events` array is read as "every event" -- Ruling
  * S3-8, so creating an endpoint with `--events` omitted is a sane default
  * rather than a silent no-op) or one that names `eventType`.
+ *
+ * D7 (final review, least privilege): never selects `secret_ciphertext`.
+ * postCall.js's step 7 (this function's only caller) uses only `ep.id` (to
+ * stamp the outbox row's `target_id`) -- it never decrypts anything at
+ * insert time, so there is no reason for the plaintext-adjacent ciphertext
+ * to pass through this process's memory at all. `getWebhookEndpoint`
+ * (below) is the one function that legitimately returns it, at actual
+ * delivery time.
  * @param {string} eventType
- * @returns {Promise<Array<{id: string, url: string, secret_ciphertext: Buffer}>>}
+ * @returns {Promise<Array<{id: string, url: string}>>}
  */
 export async function listActiveWebhookEndpoints(eventType) {
   requireTenantScope("listActiveWebhookEndpoints");
   const res = await q(
-    `SELECT id, url, secret_ciphertext
+    `SELECT id, url
        FROM webhook_endpoints
       WHERE active = true AND (events = '{}' OR $1 = ANY(events))`,
     [eventType]
@@ -3930,28 +3947,6 @@ export async function getOutboxRow(id) {
   const row = one(res);
   noteAccess("getOutboxRow", { resourceIds: [id], rowCount: res.rowCount || 0 });
   return row;
-}
-
-/**
- * This tenant's own due outbox rows (status='pending', next_attempt_at due):
- * the sweep's per-tenant backstop (Ruling S3-8, "the sweep backstop for due
- * outbox rows" -- see lib/outbound/internalRoutes.js's own doc for why this
- * is scoped to tenants the sweep tick already touched, not a cross-tenant
- * scan: a NEW cross-tenant definer function would be a migration, and the
- * brief's STOP rule applies). Ids and scheduling fields only, never
- * `payload` -- the handler re-reads the full row via getOutboxRow when it
- * actually attempts delivery.
- * @param {number} limit
- * @returns {Promise<Array<{id: string, attempts: number}>>}
- */
-export async function dueOutboxRows(limit) {
-  requireTenantScope("dueOutboxRows");
-  const res = await q(
-    `SELECT id, attempts FROM outbox WHERE status = 'pending' AND next_attempt_at <= now() ORDER BY next_attempt_at LIMIT $1`,
-    [limit]
-  );
-  if (res.error) throw res.error;
-  return res.rows || [];
 }
 
 /**

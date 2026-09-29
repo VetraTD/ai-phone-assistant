@@ -379,6 +379,14 @@ describe("inbound finish() makes zero outbox inserts", () => {
   it("a real inbound call, start to hangup, never calls insertOutboxRow or listActiveWebhookEndpoints", async () => {
     const insertOutboxRow = vi.fn(async () => ({ inserted: true, id: "should-not-happen" }));
     const listActiveWebhookEndpoints = vi.fn(async () => []);
+    // D8 (final review, positive control): the two `.not.toHaveBeenCalled()`
+    // assertions below are vacuously true if finish() never ran at all -- a
+    // harness change that stopped BEFORE post-call processing would pass
+    // them for the wrong reason (memory: negative-counters-cannot-confirm).
+    // live_call_summary is logged exactly once, at the very end of finish()
+    // (lib/voice/live/index.js:6737); a call-through spy (not mocked) lets
+    // it prove the path was actually reached while still logging normally.
+    const infoSpy = vi.spyOn(log, "info");
 
     const database = {
       isEnabled: () => true,
@@ -427,7 +435,14 @@ describe("inbound finish() makes zero outbox inserts", () => {
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 
-    expect(insertOutboxRow).not.toHaveBeenCalled();
-    expect(listActiveWebhookEndpoints).not.toHaveBeenCalled();
+    try {
+      expect(insertOutboxRow).not.toHaveBeenCalled();
+      expect(listActiveWebhookEndpoints).not.toHaveBeenCalled();
+      // D8 positive control: proves finish() actually ran to completion,
+      // not merely that it never happened to reach the outbox step.
+      expect(infoSpy).toHaveBeenCalledWith("live_call_summary", expect.anything());
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
