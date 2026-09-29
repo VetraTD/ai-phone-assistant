@@ -266,6 +266,21 @@ async function boot({
   });
   await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
   await new Promise((r) => setImmediate(r));
+  // CHANGED (final wave W1, A19): an OUTBOUND call is taken past the first
+  // seconds before any test here calls a tool. In clip mode Live never speaks
+  // first: until the backstop decision its output is discarded, and a
+  // caller-visible tool from it -- request_transfer among them -- is refused
+  // (A19), since the caller never heard the model propose it. 1,400 ms of
+  // silence frames fires the no-clip silence backstop (this file's opener
+  // renders no clip). Inbound is left exactly as it was.
+  if ((customParameters ?? { direction: "outbound" }).direction === "outbound") {
+    const SILENCE = Buffer.alloc(160, 0xff).toString("base64");
+    for (let i = 0; i < 70; i++) {
+      clock += 20;
+      ws.deliver({ event: "media", media: { payload: SILENCE } });
+    }
+    await new Promise((r) => setImmediate(r));
+  }
   return { ws, live };
 }
 

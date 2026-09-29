@@ -212,6 +212,10 @@ export async function bootLive({
     ws,
     live,
     store,
+    // Final wave W1: the capability deps object the session's tools read
+    // (ctx.deps), so a test can add a writer the fake set lacks (e.g.
+    // insertSuppression for the outbound opt_out pack).
+    deps,
     settle,
 
     /** The caller speaks. Does NOT end the turn. */

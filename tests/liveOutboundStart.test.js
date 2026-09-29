@@ -1971,6 +1971,90 @@ describe("W1 A18: the pre-clip-tail phase is bounded", () => {
   });
 });
 
+describe("W1 A19: tool calls from a generation the caller never heard", () => {
+  // Final review A19 (F-R2 re-review 1/2, parked "tool calls from a
+  // discarded generation still execute"): a stale reply mid-clip -- audio
+  // discarded, never heard -- could still hang up (end_call) or perform a
+  // caller-visible action. Refused now; suppression/opt-out writes still run.
+  it("a stale generation mid-clip: end_call is refused (no exit is armed), while its set_call_outcome still runs", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    call.live.push(modelAudioMsg()); // the stale reply opens: discarded
+    await call.settle();
+    const out = await call.callToolBatch([
+      ["set_call_outcome", { outcome: "not_interested" }],
+      ["end_call", { reason: "caller not interested" }],
+    ]);
+    const byName = Object.fromEntries(out.map((r) => [r.name, r.response]));
+    expect(byName.set_call_outcome).toMatchObject({ success: true }); // kept: not caller-visible
+    expect(byName.end_call).toMatchObject({ success: false });
+    expect(byName.end_call.message).toMatch(/could not hear/i);
+    await call.assistantSays("Thanks for your time. Goodbye.");
+    await call.turnEnds();
+    expect(events("live_exit_armed")).toHaveLength(0); // nothing hangs up on a reply nobody heard
+    expect(events("outbound_unheard_tool_refused").map((l) => l.tool)).toEqual(["end_call"]);
+    await call.hangUp();
+  });
+
+  it("a caller-visible action (a message write) from a stale generation is refused; a HEARD generation's is not gated", async () => {
+    const database = outboundDb({ campaignConfig: { ...CAMPAIGN_CONFIG, capabilities: ["messages"] } });
+    const call = await bootOutbound({ database });
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    call.live.push(modelAudioMsg()); // stale, discarded
+    await call.settle();
+    const refused = await call.callTool("record_customer_request", { request_type: "message", message: "call me back" });
+    expect(refused[0].response).toMatchObject({ success: false });
+    expect(refused[0].response.message).toMatch(/could not hear/i);
+    await call.turnEnds();
+    // The clip ends and the stale generation has closed: what follows is heard.
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    call.live.push(modelAudioMsg()); // plays
+    await call.settle();
+    // The same write, from a heard generation, passes every gate it has to
+    // (O-12's identity check, the write-order read-back + agreement).
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    await call.assistantTurn("I'll pass that along. Shall I go ahead and confirm that?");
+    await call.callerSays("Yes, please.");
+    call.live.push(modelAudioMsg()); // the next reply, heard
+    await call.settle();
+    const ran = await call.callTool("record_customer_request", { request_type: "message", message: "call me back" });
+    expect(ran[0].response).toMatchObject({ success: true });
+    await call.hangUp();
+  });
+
+  it("after the hang-up (the I2 drain), Live's opt_out still WRITES the suppression; its end_call is refused", async () => {
+    const call = await bootOutbound();
+    const insertSuppression = vi.fn(async () => true);
+    call.deps.insertSuppression = insertSuppression;
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    transcribeOnReceipt(call, "Stop calling me.", {
+      then: () => {
+        call.live.push({
+          toolCall: {
+            functionCalls: [
+              { id: "d1", name: "opt_out", args: {} },
+              { id: "d2", name: "end_call", args: { reason: "opted out" } },
+            ],
+          },
+        });
+      },
+    });
+    for (let i = 0; i < 3; i++) {
+      await call.feed(160, { voiced: true });
+      await call.feed(40);
+    }
+    await call.hangUp(); // the drain starts; Live hears the held words and calls opt_out + end_call
+    await vi.waitFor(() => expect(insertSuppression).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(insertSuppression.mock.calls[0][0]).toMatchObject({ phone: CONTACT, reason: "opted_out" });
+    await vi.waitFor(() => expect(call.responsesFor("end_call")).toHaveLength(1));
+    expect(call.responsesFor("end_call")[0].response).toMatchObject({ success: false });
+  });
+});
+
 describe("W1 A20 / A28: the un-latch instruments", () => {
   // A20 (F-R2 re-review 2 m1): a provisional latch still pending when the
   // clip's own end releases it is NOT an un-latch of noise -- the counter's
