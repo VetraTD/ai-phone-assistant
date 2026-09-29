@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveVettedAddress, connectVetted, fetchVetted, SsrfRefusedError, _internal, MAX_BODY_BYTES, SSRF_TIMEOUT_MS } from "../lib/net/ssrfGuard.js";
-import { trustedCa } from "./helpers/trustedCa.js";
+import { trustedCa, detectInterceptingIssuer } from "./helpers/trustedCa.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CERT = fs.readFileSync(path.join(HERE, "fixtures", "ssrfGuardTest.cert.pem"));
@@ -285,7 +285,32 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
   // caller's `rejectUnauthorized:false` slipped through and switched off
   // certificate validation entirely -- it must not, so the fixture's
   // self-signed cert is refused as untrusted.
-  it("D3: a caller-supplied tlsOptions.rejectUnauthorized:false is never honored -- an untrusted cert is still refused", async () => {
+  //
+  // Second follow-up (2026-09-29): on a machine whose local TLS is
+  // intercepted (this sandbox: Norton), the OTHER real-TLS tests in this
+  // file need that interceptor's own root trusted globally
+  // (`NODE_EXTRA_CA_CERTS`, `trustedCa` above) just to verify the re-signed
+  // leaf at all. Once that root is globally trusted, THIS test's premise
+  // breaks: the fixture's cert is re-signed by the SAME now-trusted root,
+  // so the connection succeeds whether or not the pin held -- a handshake
+  // can no longer distinguish "the pin held" from "the interceptor made
+  // everything trusted". Detected at runtime (never a hardcoded machine
+  // check) and skipped with a clear reason on THAT machine only; runs
+  // unchanged everywhere else. The pin itself still has coverage with no
+  // handshake involved: the sabotage cycle in wave-residual-report.md
+  // removes `rejectUnauthorized: true` from lib/net/ssrfGuard.js directly
+  // and shows this exact test go RED for the right reason.
+  it("D3: a caller-supplied tlsOptions.rejectUnauthorized:false is never honored -- an untrusted cert is still refused", async (ctx) => {
+    const interceptor = await detectInterceptingIssuer({ hostname: "localhost", port });
+    if (interceptor) {
+      ctx.skip(
+        `local TLS interception detected (peer certificate issuer "${interceptor}") -- ` +
+          `a caller's rejectUnauthorized:false would connect successfully through the ` +
+          `interceptor's own now-globally-trusted root regardless of whether the pin held, ` +
+          `so this handshake-based refusal check cannot hold on this machine; the pin itself ` +
+          `is proven directly by the sabotage cycle in wave-residual-report.md.`
+      );
+    }
     await expect(
       connectVetted({
         hostname: "localhost",
