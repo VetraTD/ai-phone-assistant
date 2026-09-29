@@ -1056,6 +1056,42 @@ describe("S3-5: outbound situation scripts", () => {
       expect(bad.criteria.no_stale_reply_after_clip.result).toBe("FAIL");
     });
 
+    // N1 (harness residual wave, wave-W1-rereview.md): a CORRECT double_hello
+    // run plays exactly this reply -- Ava answers the HELD second "Hello?"
+    // after the opener, and that reply's own transcript is the same words as
+    // the pre-clip greeting. The two fixtures above never included this
+    // reply at all (the rereview's own finding); with it, plus a real
+    // heard_before_first_post_clip_line_ms past the clip's own length, both
+    // signal (A) and signal (C) would otherwise fire on this exact shape.
+    // PASSes once the hold log itself proves this run captured voiced
+    // content (`clipHoldReleased.frames > 0`, a real per-run field); without
+    // that evidence the identical reply is judged as any other stale shape.
+    it("N1: a real reply to the HELD second hello (same words as the pre-clip greeting) PASSes once the hold log proves voiced content was captured", () => {
+      const heldReply = turn("Hi, is that Sam? It's Ava, calling on behalf of Harness Test Clinic.", "Hello?");
+      const confirmReply = turn("Hi Sam, thanks -- I'm calling about our clinic systems.", "Hi, this is Sam.");
+      const withEvidence = verdictFor("outbound_double_hello", {
+        clipBytes: 40000, // clip_ms 5000
+        client: { heard_before_first_post_clip_line_ms: 8000 }, // clip + ~3s of Ava's real reply
+        server: base({ assistantTurns: [heldReply, confirmReply], extra: { clipHoldReleased: { frames: 40, dropped: 0, reason: "seed_sent" } } }),
+        db: dbFor({}),
+      });
+      expect(withEvidence.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "PASS",
+        audible_stale_reply: null,
+        stale_audio_ms: null,
+      });
+
+      // Same reply, but nothing in the log proves this run ever captured
+      // voiced content during the clip -- judged exactly as before: FAIL.
+      const withoutEvidence = verdictFor("outbound_double_hello", {
+        clipBytes: 40000,
+        client: { heard_before_first_post_clip_line_ms: 8000 },
+        server: base({ assistantTurns: [heldReply, confirmReply] }),
+        db: dbFor({}),
+      });
+      expect(withoutEvidence.criteria.no_stale_reply_after_clip.result).toBe("FAIL");
+    });
+
     it("outbound_stop_midclip_hangup: PASS on a transcribed drain + an opted_out suppression + outcome; no turns_reached (hangs up by design)", () => {
       const v = verdictFor("outbound_stop_midclip_hangup", {
         server: base({
@@ -1096,6 +1132,38 @@ describe("S3-5: outbound situation scripts", () => {
       expect(firstFrame.criteria.opener_not_cut_on_first_frame).toMatchObject({ result: "FAIL", first_clear_after_first_media_ms: 20 });
       const wrongPath = verdictFor("outbound_business_greeting", { server: base({ assistantTurns: turns }), db: dbFor({}), client: { first_media_at: 2700 } });
       expect(wrongPath.criteria.path_backstop_slow).toMatchObject({ result: "FAIL", path: "backstop_hello_end" });
+    });
+
+    // N1 (harness residual wave, wave-W1-rereview.md): backstop_slow can cut
+    // in mid-way through this script's own long first line, so the caller's
+    // greeting tail is held into the clip and Ava's one real reply answers
+    // it -- a reply whose transcript IS the greeting's own words (the same
+    // shape signal (A) is built to catch). PASSes once the hold log proves
+    // this run really captured voiced content; without that evidence the
+    // identical reply is judged as any other stale shape -- FAIL.
+    it("N1: a real reply to the greeting's own held tail PASSes once the hold log proves voiced content was captured", () => {
+      const greetingText = "Good morning, thank you for calling Riverside Dental, this is Sarah speaking, how can I help you today?";
+      const heldReply = turn("Thanks Sarah -- I'm calling about our clinic systems, is Sam available?", greetingText);
+      const confirmReply = turn("Thanks Sam -- I'm calling about our clinic systems.", "Hi, this is Sam.");
+      const withEvidence = verdictFor("outbound_business_greeting", {
+        clipBytes: 40000, // clip_ms 5000
+        client: { heard_before_first_post_clip_line_ms: 8000 }, // clip + ~3s of Ava's real reply
+        server: base({ assistantTurns: [heldReply, confirmReply], firstAudioPath: "backstop_slow", extra: { clipHoldReleased: { frames: 55, dropped: 0, reason: "seed_sent" } } }),
+        db: dbFor({}),
+      });
+      expect(withEvidence.criteria.no_stale_reply_after_clip).toMatchObject({
+        result: "PASS",
+        audible_stale_reply: null,
+        stale_audio_ms: null,
+      });
+
+      const withoutEvidence = verdictFor("outbound_business_greeting", {
+        clipBytes: 40000,
+        client: { heard_before_first_post_clip_line_ms: 8000 },
+        server: base({ assistantTurns: [heldReply, confirmReply], firstAudioPath: "backstop_slow" }),
+        db: dbFor({}),
+      });
+      expect(withoutEvidence.criteria.no_stale_reply_after_clip.result).toBe("FAIL");
     });
   });
 

@@ -295,8 +295,25 @@ async function answerAndStart({ env = {} } = {}) {
     // drains it to Live (bounded, 2 s in production) before the session's
     // own post-call half runs. This file's fake Live transcribes nothing, and
     // hangUpAndComplete() asserts that half lands within hangUp()'s own
-    // settle -- so the drain's bound is kept tiny here. The drain itself is
-    // proved in tests/liveOutboundStart.test.js.
+    // settle -- so the drain's bound is kept tiny here. The drain's own
+    // timing (a genuine 2 s wait, and the bound-reached path) is proved in
+    // tests/liveOutboundStart.test.js (I2's `clipDrainMaxMs: 150` case).
+    //
+    // N2 Ruling (harness residual wave, wave-W1-rereview.md): kept, not
+    // widened. This file proves WIRING -- the drain runs before post-call,
+    // and post-call runs exactly once (hangUpAndComplete's own assertions) --
+    // never a real elapsed-time bound, so a short injected value here cannot
+    // mask a timing defect this suite would otherwise catch; no assertion in
+    // this file, at any value of clipDrainMaxMs, depends on wall-clock
+    // duration. What it DID leave uncaught was a DIFFERENT process's own
+    // fixed wait -- scripts/live-call-harness.js's paid-run CLI, which read
+    // the DB/server-log back a fixed 1.5s after socket-close, racing a real
+    // ~2s production drain. That is a property of the CLI script, not of
+    // this in-process unit test (there is no socket-close-to-readback gap to
+    // race here at all), so raising this number would not have caught it
+    // either -- fixed instead where the race actually lives: N2's bounded
+    // poll on post-call's own completion evidence (outbound_attempt_result /
+    // post_call_started_at), replacing that fixed wait.
     clipDrainMaxMs: 10,
   });
 

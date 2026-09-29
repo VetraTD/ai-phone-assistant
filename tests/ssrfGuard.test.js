@@ -242,7 +242,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Vetra-Event": "call.completed" },
       body: JSON.stringify({ hello: "world" }),
-      tlsOptions: { rejectUnauthorized: false }, // test-only: self-signed fixture cert
+      tlsOptions: { ca: CERT }, // test-only: trust the self-signed fixture cert, rather than disabling validation
     });
     expect(res.status).toBe(200);
     expect(lastRequest.method).toBe("POST");
@@ -268,11 +268,34 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       port,
       path: "/deliver",
       method: "POST",
-      tlsOptions: { rejectUnauthorized: false, hostname: "evil.example", servername: "evil.example", lookup: evilLookup },
+      tlsOptions: { ca: CERT, hostname: "evil.example", servername: "evil.example", lookup: evilLookup },
     });
     expect(res.status).toBe(200); // reached the REAL local server, not "evil.example"
     expect(evilLookup).not.toHaveBeenCalled(); // tlsOptions' own lookup override never wins
     expect(lastRequest.headers.host).toBe(`localhost:${port}`); // Host/SNI stayed the real hostname
+  });
+
+  // D3 residual fix (wave-W2W3-rereview.md, elevated from Minor to
+  // Important): `rejectUnauthorized` is now pinned true alongside
+  // hostname/servername/lookup -- a caller-supplied
+  // `tlsOptions.rejectUnauthorized:false` must never be honored, even
+  // though nothing in production passes `tlsOptions` at all today. No `ca`
+  // is given here, so the ONLY way this request could succeed is if the
+  // caller's `rejectUnauthorized:false` slipped through and switched off
+  // certificate validation entirely -- it must not, so the fixture's
+  // self-signed cert is refused as untrusted.
+  it("D3: a caller-supplied tlsOptions.rejectUnauthorized:false is never honored -- an untrusted cert is still refused", async () => {
+    await expect(
+      connectVetted({
+        hostname: "localhost",
+        address: "127.0.0.1",
+        family: 4,
+        port,
+        path: "/deliver",
+        method: "POST",
+        tlsOptions: { rejectUnauthorized: false }, // must be overridden, not honored
+      })
+    ).rejects.toThrow(/self.signed|self signed|unable to verify|certificate/i);
   });
 
   it("treats a 3xx as a refusal (manual redirect, never followed) -- named risk 3", async () => {
@@ -284,7 +307,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
         port,
         path: "/redirect-me",
         method: "POST",
-        tlsOptions: { rejectUnauthorized: false },
+        tlsOptions: { ca: CERT },
       })
     ).rejects.toMatchObject({ reason: "redirect" });
   });
@@ -299,7 +322,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
         path: "/hang",
         method: "POST",
         timeoutMs: 150,
-        tlsOptions: { rejectUnauthorized: false },
+        tlsOptions: { ca: CERT },
       })
     ).rejects.toThrow();
   }, 5000);
@@ -319,7 +342,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       port,
       path: "/huge",
       method: "POST",
-      tlsOptions: { rejectUnauthorized: false },
+      tlsOptions: { ca: CERT },
     });
     expect(res.status).toBe(200);
     expect(Buffer.byteLength(res.body, "utf8")).toBeLessThanOrEqual(MAX_BODY_BYTES);
@@ -336,7 +359,7 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       path: "/never-ending",
       method: "POST",
       timeoutMs: SSRF_TIMEOUT_MS, // the PRODUCTION timeout -- this must settle well before it
-      tlsOptions: { rejectUnauthorized: false },
+      tlsOptions: { ca: CERT },
     });
     const elapsedMs = Date.now() - start;
     expect(res.status).toBe(200);
@@ -356,7 +379,12 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       path: "/deliver",
       method: "POST",
       body: "{}",
-      tlsOptions: { rejectUnauthorized: false },
+      // The fixture cert's own SAN only covers "localhost" (the hostname
+      // every other test here uses) -- this test's whole point is an
+      // UNRESOLVABLE hostname, so its own cert-identity check is bypassed
+      // while chain-of-trust (`ca`) is still required: `rejectUnauthorized`
+      // itself stays pinned true (lib/net/ssrfGuard.js), never disabled.
+      tlsOptions: { ca: CERT, checkServerIdentity: () => undefined },
     });
     expect(res.status).toBe(200);
     expect(lastRequest.headers.host).toBe(`this-hostname-does-not-exist-anywhere.invalid:${port}`);
@@ -376,6 +404,11 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
       headers: {},
       body: "{}",
       resolver, // unused: a literal IP host never calls the resolver
+      // D3 residual fix: left as rejectUnauthorized:false on purpose (the
+      // one of the 8 call sites NOT among the "7 affected tests") -- 127.0.0.1
+      // is itself private, so resolveVettedAddress refuses this call before
+      // connectVetted ever opens a TLS socket; tlsOptions, whatever it says,
+      // is never even reached.
       tlsOptions: { rejectUnauthorized: false },
     }).catch((e) => e);
     // 127.0.0.1 is itself in the private range, so the composed call is

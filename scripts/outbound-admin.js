@@ -94,6 +94,11 @@ import { connect } from "./migrate.js";
 import { validateCampaign } from "../lib/outbound/campaignSchema.js";
 import { PURPOSE_BY_TEMPLATE } from "../lib/outbound/templates.js";
 import { outboundEnv } from "../lib/outbound/config.js";
+// I8 residual fix (wave-W2W3-rereview.md): the same name-shape check the
+// public trigger route validates body.first_name with (lib/outbound/
+// triggerRoute.js) -- this CLI is the review's own named residual gap, the
+// SECOND (and only other) writer of contacts.first_name in the repo.
+import { validateName } from "../lib/outbound/triggerRoute.js";
 // The dial-time gate honours this consent only while the number is on the
 // SERVICE's allow-list (Checkpoint 2a, F4); one constant, so the two agree.
 import { OPERATOR_TEST_WORDING } from "../lib/outbound/gate.js";
@@ -468,6 +473,18 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
   const tzError = timezoneError(phone, tz);
   if (tzError) return { ok: false, error: tzError };
 
+  // I8 residual fix (wave-W2W3-rereview.md): this CLI's --first-name writes
+  // contacts.first_name straight -- the SAME sink the public trigger route's
+  // own I8 fix validates (lib/outbound/triggerRoute.js's `validateName`,
+  // reused here rather than re-derived, so the two can never disagree about
+  // what a "real name" looks like). An operator (or a script wrapping this
+  // CLI) could otherwise still write an arbitrary string into the field
+  // that reaches Ava's own opener clip verbatim (prompt.js).
+  const firstNameResult = validateName(firstName);
+  if (!firstNameResult.ok) {
+    return { ok: false, error: "--first-name must be a name of at most 40 letters/spaces/'-." };
+  }
+
   // ALLOW-LIST GUARD. Refused before any transaction opens and before the
   // campaign or contact are even looked up: a manual consent can never be
   // fabricated for a real lead, and a refusal here leaves nothing to unwind.
@@ -509,7 +526,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       businessId: business.id,
       campaignId: campaign.id,
       campaignVersion: campaign.current_version,
-      contact: { phone_e164: phone, first_name: firstName || null, timezone: tz },
+      contact: { phone_e164: phone, first_name: firstNameResult.value, timezone: tz },
       consent: consentManual
         ? { source: "manual", covers_automated: true, purpose, channels: ["call"], wording_version: OPERATOR_TEST_WORDING }
         : null,
@@ -529,7 +546,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
        ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
                                                            timezone = COALESCE(EXCLUDED.timezone, contacts.timezone), updated_at = now()
        RETURNING id`,
-      [business.id, phone, firstName || null, tz]
+      [business.id, phone, firstNameResult.value, tz]
     );
     const contactId = contactRes.rows[0].id;
 
@@ -568,7 +585,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
     const contactCheck = (await client.query("SELECT first_name, timezone FROM contacts WHERE id = $1", [contactId])).rows[0];
     if (!contactCheck) mismatches.push("contact missing");
     else {
-      if (firstName && contactCheck.first_name !== firstName) mismatches.push("first_name");
+      if (firstNameResult.value && contactCheck.first_name !== firstNameResult.value) mismatches.push("first_name");
       if (tz && contactCheck.timezone !== tz) mismatches.push("timezone");
     }
     if (mismatches.length) {

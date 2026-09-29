@@ -1641,8 +1641,32 @@ async function mainOutbound() {
     state.callStarted = true;
     const { observer, stats } = await runOutboundCall({ seed, common, parties, mode, scriptLines, leadIn });
 
-    // The session writes the calls row's end and its summary at teardown.
-    await new Promise((r) => setTimeout(r, 1500));
+    // N2 fix (harness residual wave, wave-W1-rereview.md). The old fixed
+    // 1.5s wait here raced the clip-hold drain (beginClipHoldDrain waits up
+    // to CLIP_HOLD_DRAIN_MAX_MS, ~2s, before finishAttemptSession/post-call
+    // even start) plus whatever post-call itself then takes to write
+    // suppression/outcome/outreach: suppression_opted_out, outcome_opted_out
+    // and post_call_exactly_once could all read the DB before post-call had
+    // actually run. Bounded poll instead, on post-call's own real completion
+    // evidence: the `outbound_attempt_result` log line, post-call's LAST
+    // act (lib/outbound/postCall.js's runPostCall logs it only after every
+    // write -- suppression, outcome, outreach, the outbox rows -- has
+    // already committed; the same event `post_call_exactly_once` itself
+    // reads) when --server-log is given; otherwise the weaker but still
+    // real `post_call_started_at` DB column (services/db.js's
+    // claimPostCall), the only completion-adjacent signal available with no
+    // server log at all. Capped so a call that genuinely never reaches
+    // post-call cannot hang the harness.
+    {
+      const deadline = Date.now() + 15000;
+      for (;;) {
+        const reached = SERVER_LOG
+          ? existsSync(SERVER_LOG) && parseServerLog(decodeLogBuffer(readFileSync(SERVER_LOG)), { callSid: seed.callSid }).attemptResultCount >= 1
+          : (await readBackOutbound({ admin, callSid: seed.callSid })).attempt?.post_call_started_at != null;
+        if (reached || Date.now() >= deadline) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
     const dbRead = await readBackOutbound({ admin, callSid: seed.callSid });
     const server = await readServerLogFor(seed.callSid);
 

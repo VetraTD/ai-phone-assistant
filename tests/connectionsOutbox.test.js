@@ -305,7 +305,10 @@ describe("connections outbox: the secret is never logged (real local delivery, r
           headers: opts.headers,
           body: opts.body,
           timeoutMs: opts.timeoutMs,
-          tlsOptions: { rejectUnauthorized: false },
+          // D3 residual fix (wave-W2W3-rereview.md): ssrfGuard.js now pins
+          // rejectUnauthorized true regardless of tlsOptions, so this real
+          // local fixture is trusted with `ca`, same as tests/ssrfGuard.test.js.
+          tlsOptions: { ca: CERT },
         });
 
       const result = await attemptDelivery({

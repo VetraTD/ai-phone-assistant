@@ -499,6 +499,35 @@ describeDb("outbound-admin: triggerOutreach", () => {
     expect(afterOutreach.rows[0].n).toBe(beforeOutreach.rows[0].n);
   });
 
+  // I8 residual fix (wave-W2W3-rereview.md): the same repro the public
+  // trigger route's own I8 fix targets (lib/outbound/triggerRoute.js) --
+  // "Sam, your account is overdue" fits the 40-char opener budget and would
+  // be spoken verbatim in Ava's opener clip (prompt.js) if it reached
+  // contacts.first_name unvalidated. Refused before the allow-list guard,
+  // the campaign lookup, or any write.
+  it("--first-name that is not name-shaped is refused, and nothing is written", async () => {
+    const phone = "+447700900602";
+    const beforeContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
+    const r = await asProbe((c) =>
+      triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: "Sam, your account is overdue", consentManual: false, confirm: true })
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/--first-name/);
+    const afterContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
+    expect(afterContacts.rows[0].n).toBe(beforeContacts.rows[0].n);
+  });
+
+  // A real name's own punctuation (apostrophe, hyphen) is not refused.
+  it("--first-name with a real name's own punctuation is accepted and stored trimmed", async () => {
+    const phone = "+447700900603";
+    const r = await asProbe((c) =>
+      triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone, firstName: "  Siobhan O'Brien-Hart  ", consentManual: false, confirm: true })
+    );
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const contact = await admin.query(`SELECT first_name FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, phone]);
+    expect(contact.rows[0].first_name).toBe("Siobhan O'Brien-Hart");
+  });
+
   it("--consent-manual for a number NOT on the allow-list is refused, and nothing is written", async () => {
     const beforeContacts = await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE business_id = $1 AND phone_e164 = $2`, [businessId, NOT_ALLOWED_PHONE]);
     const r = await asProbe((c) => triggerOutreach(c, { businessPhone: BUSINESS_PHONE, campaignId, phone: NOT_ALLOWED_PHONE, timezone: US_TZ, firstName: "Nope", consentManual: true, confirm: true }));
