@@ -45,6 +45,18 @@ describe("ssrfGuard: private-range refusal (injected resolver, no real DNS)", ()
     ["::ffff:127.0.0.1", 6, "IPv4-mapped loopback, dotted form"],
     ["::ffff:7f00:1", 6, "IPv4-mapped loopback, hex-group form (no dots)"],
     ["::ffff:a00:1", 6, "IPv4-mapped 10.0.0.1, hex-group form"],
+    // D4 (final review): reserved ranges the original list left accepted.
+    ["198.18.0.1", 4, "198.18.0.0/15 (benchmarking)"],
+    ["198.19.255.255", 4, "198.18.0.0/15 (top of range)"],
+    ["224.0.0.1", 4, "224.0.0.0/4 (multicast)"],
+    ["240.0.0.1", 4, "240.0.0.0/4 (reserved)"],
+    ["255.255.255.255", 4, "broadcast"],
+    ["192.0.0.8", 4, "192.0.0.0/24 (IETF protocol assignments)"],
+    ["fec0::1", 6, "fec0::/10 (deprecated site-local)"],
+    ["64:ff9b::7f00:1", 6, "64:ff9b::/96 (NAT64) embedding 127.0.0.1"],
+    ["64:ff9b::a00:1", 6, "64:ff9b::/96 (NAT64) embedding 10.0.0.1"],
+    ["2002:a00:1::", 6, "2002::/16 (6to4) embedding 10.0.0.1"],
+    ["2002:7f00:1::", 6, "2002::/16 (6to4) embedding 127.0.0.1"],
   ];
 
   it.each(PRIVATE_CASES)("refuses %s (family %i, %s)", async (address, family) => {
@@ -65,6 +77,21 @@ describe("ssrfGuard: private-range refusal (injected resolver, no real DNS)", ()
     const resolver = fakeResolver([{ address: "203.0.113.9", family: 4 }]);
     const vetted = await resolveVettedAddress("public.example.com", { resolver });
     expect(vetted).toEqual({ address: "203.0.113.9", family: 4 });
+  });
+
+  // D4 (final review): the NAT64/6to4 checks classify the EMBEDDED IPv4,
+  // not the whole prefix -- a transition address wrapping a genuinely
+  // public IPv4 must not be blanket-refused just for using that form.
+  it("a NAT64 (64:ff9b::/96) address embedding a PUBLIC IPv4 is accepted, not blanket-refused", async () => {
+    const resolver = fakeResolver([{ address: "64:ff9b::cb00:7109", family: 6 }]); // embeds 203.0.113.9
+    const vetted = await resolveVettedAddress("nat64.example.com", { resolver });
+    expect(vetted).toEqual({ address: "64:ff9b::cb00:7109", family: 6 });
+  });
+
+  it("a 6to4 (2002::/16) address embedding a PUBLIC IPv4 is accepted, not blanket-refused", async () => {
+    const resolver = fakeResolver([{ address: "2002:cb00:7109::", family: 6 }]); // embeds 203.0.113.9
+    const vetted = await resolveVettedAddress("sixtofour.example.com", { resolver });
+    expect(vetted).toEqual({ address: "2002:cb00:7109::", family: 6 });
   });
 
   it("\"localhost\" resolves through the SAME resolver-trust path -- whatever the resolver hands back is what gets checked, never the hostname text", async () => {
@@ -225,6 +252,27 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
     // port -- correct HTTP behaviour (RFC 7230 §5.4), not a guard concern.
     expect(lastRequest.headers.host).toBe(`localhost:${port}`);
     expect(lastRequest.body).toBe(JSON.stringify({ hello: "world" }));
+  });
+
+  // D3 (final review, security): tlsOptions must never be able to override
+  // hostname/servername/lookup -- the three fields that close the
+  // DNS-rebinding window (named risk 2). A colliding tlsOptions.lookup
+  // that redirected the connection to a different address would defeat
+  // resolveVettedAddress entirely.
+  it("D3: a colliding tlsOptions.hostname/servername/lookup can never redirect the connection away from the vetted address", async () => {
+    const evilLookup = vi.fn((_h, opts, cb) => (opts && opts.all ? cb(null, [{ address: "203.0.113.9", family: 4 }]) : cb(null, "203.0.113.9", 4)));
+    const res = await connectVetted({
+      hostname: "localhost",
+      address: "127.0.0.1",
+      family: 4,
+      port,
+      path: "/deliver",
+      method: "POST",
+      tlsOptions: { rejectUnauthorized: false, hostname: "evil.example", servername: "evil.example", lookup: evilLookup },
+    });
+    expect(res.status).toBe(200); // reached the REAL local server, not "evil.example"
+    expect(evilLookup).not.toHaveBeenCalled(); // tlsOptions' own lookup override never wins
+    expect(lastRequest.headers.host).toBe(`localhost:${port}`); // Host/SNI stayed the real hostname
   });
 
   it("treats a 3xx as a refusal (manual redirect, never followed) -- named risk 3", async () => {
