@@ -48,10 +48,26 @@ node scripts/outbound-admin.js webhook-set --phone +1... --url https://your-endp
 ```
 
 Notes:
-- `outreach.state`/`close_reason`/`next_attempt_at` describe the outreach **after** this attempt's own post-call write — `state` is `"closed"` only on the attempt that actually closed it.
+- `outreach.state`/`close_reason`/`next_attempt_at` describe the outreach **after** this attempt's own post-call write — `state` is `"closed"` only on the attempt whose own write actually closed it (never merely the attempt that happened to be terminal — a losing side of an internal race is reported `"waiting"`, same as a non-terminal call).
 - `booking` is `null` unless `outcome` is `"booked"`. `length_min` is always `null` today — the schema carries no per-appointment duration yet.
 - `summary` is `null` when the outcome was decided without ever calling the summarizer (a door/tool outcome, a booking/opt-out effect, or the opt-out detector all skip it).
 - `contact.phone`/`contact.first_name`/`answers` can carry personal data about the person who was called. Treat this endpoint's contents accordingly.
+
+### `answers` — internal keys
+
+`answers` mostly carries campaign-question keys (the caller's own answers, e.g. `"clinic_name"` above). A few keys are internal bookkeeping, written by the platform itself rather than a campaign question, and are reserved with a leading underscore so they cannot collide with a question key (`QUESTION_KEY_RE` refuses a `_`-prefixed question name at save time):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `_outcome_note` | string | Free-text note the `set_call_outcome` tool attached to a door/tool outcome (the caller's own words, not a transcript excerpt). |
+| `_missing_required` | string[] | Question keys the qualification gate required but the call ended without an answer for — booking still proceeded (spec §12.2: "a missing answer never costs a booking"); this is what makes that visible after the fact. |
+| `_callback_requested_at` | ISO 8601 string | The specific time the caller asked to be called back, when `schedule_callback` recorded one. Only present when `outcome` is `"callback_requested"` **and** a specific time was given — the mechanical "next schedule slot" case (no specific time requested) leaves this unset. |
+
+Any other `_`-prefixed key you see is reserved for future internal use — treat it as opaque, do not build on its absence.
+
+### A note on retry visibility (Cloud Tasks task-name tombstoning)
+
+Our sweep re-enqueues a stalled delivery under the SAME deterministic task name it originally used (`w-<delivery_id>-<ceil(next_attempt_at seconds)>`). If that exact task already ran once and Cloud Tasks has not yet expired its name (a "tombstone" window, vendor behaviour we have not independently measured), the re-enqueue call returns `ALREADY_EXISTS`, which our sweep treats as success — the row is not actually re-scheduled until the tombstone expires and a later sweep tick tries again. In practice this only widens an already-rare rescue path (our own compare-and-set already prevents a duplicate delivery from double-counting `attempts`); we note it here because the visible symptom, if you are watching `X-Vetra-Delivery` ids closely, is a delivery that looks "stuck pending" for longer than one sweep interval before it resumes.
 
 ## Headers
 
