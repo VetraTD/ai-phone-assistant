@@ -764,8 +764,8 @@ describe("S3-5: outbound situation scripts", () => {
   const turn = (text, userText = null) => ({ text, user_text: userText });
 
   /** The names really are the ones lib/probe/script.js registers. CHANGED (final wave W1): 8 -> 11, the next paid set's three. */
-  it("OUTBOUND_SITUATION_SCRIPTS names 11 scripts, each with the caller lines a situation criterion assumes", () => {
-    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(11);
+  it("OUTBOUND_SITUATION_SCRIPTS names 12 scripts, each with the caller lines a situation criterion assumes", () => {
+    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(12);
     for (const name of OUTBOUND_SITUATION_SCRIPTS) expect(resolveScriptLines(name).length).toBeGreaterThan(0);
   });
 
@@ -903,10 +903,12 @@ describe("S3-5: outbound situation scripts", () => {
     claimedHumanCount = 0,
     noAsk = 0,
     attemptResultCount = 1,
+    identityConfirmed = [],
   } = {}) {
     return {
       firstAudio: { path: firstAudioPath, from_answer_ms: 2000, from_speech_ms: 900, measured: "playout" },
       assistantTurns,
+      identityConfirmed,
       debugTranscriptOn: true,
       attemptResultCount,
       askedContactNumberCount,
@@ -923,6 +925,102 @@ describe("S3-5: outbound situation scripts", () => {
 
   const verdictFor = (situation, over = {}) =>
     outboundVerdict({ mode: "speaks_first", situation, topic: TOPIC, timezone: TZ, now: NOW, client: {}, ...over });
+
+  // -------------------------------------------------------------------------
+  // 2026-09-30 (D-R2-1 / D-R2-3). Each new criterion must be able to FAIL
+  // (memory sim-must-be-able-to-fail): proved here, for free, on the REAL
+  // assistant text of the 2026-09-30 phone-check calls
+  // (.superpowers/sdd/2026-09-27-outbound-stage3/progress.md "2026-09-30
+  // phone check"), mapped onto the harness scripts' caller lines.
+  // -------------------------------------------------------------------------
+  describe("2026-09-30 criteria: FAIL on the real 09-30 calls, PASS on a correct call", () => {
+    const REASON = TEMPLATES.speed_to_lead.call_reason;
+    const reasonFirst = (assistantTurns, identityConfirmed = [{ confirmed: true }]) =>
+      verdictFor("outbound_reason_first", {
+        callReason: REASON,
+        server: serverFor({ assistantTurns, identityConfirmed }),
+        db: dbFor({ outcome_code: "qualified_no_booking" }),
+      }).criteria;
+
+    // CALL 1 (S1b Hello, ..e4a73a1b), turn 1 verbatim.
+    const CALL1_REPLY = "Thanks for confirming. To start, what's the name of your clinic?";
+
+    it("reason_before_first_question FAILS on call 1's real reply (no reason, straight to a question)", () => {
+      const c = reasonFirst([
+        { text: CALL1_REPLY, user_text: "Yes, this is Sam." },
+        { text: "Thanks.", user_text: "Okay, sure." },
+      ]);
+      expect(c.reason_before_first_question.result).toBe("FAIL");
+    });
+
+    it("PASSES when the reason comes first in the same turn", () => {
+      const c = reasonFirst([
+        { text: "Great, thanks Sam. I'm following up on the enquiry you sent us. What were you hoping we could help with?", user_text: "Yes, this is Sam." },
+        { text: "Of course.", user_text: "Okay, sure." },
+      ]);
+      expect(c.reason_before_first_question.result).toBe("PASS");
+      expect(c.identity_confirmed.result).toBe("PASS");
+    });
+
+    it("PASSES when the reason is its own turn before the question", () => {
+      const c = reasonFirst([
+        { text: "Thanks Sam. You recently got in touch with us, so I'm just following up.", user_text: "Yes, this is Sam." },
+        { text: "What were you hoping we could help with?", user_text: "Okay, sure." },
+      ]);
+      expect(c.reason_before_first_question.result).toBe("PASS");
+    });
+
+    it("the reason AFTER the question does not count", () => {
+      const c = reasonFirst([
+        { text: "What were you hoping we could help with? I'm following up on your enquiry.", user_text: "Yes, this is Sam." },
+      ]);
+      expect(c.reason_before_first_question.result).toBe("FAIL");
+    });
+
+    it("identity_confirmed FAILS when confirm_identity never ran (a refused one logs nothing)", () => {
+      const c = reasonFirst([{ text: "I'm following up on your enquiry. What can we help with?", user_text: "Yes, this is Sam." }], []);
+      expect(c.identity_confirmed.result).toBe("FAIL");
+    });
+
+    // CALL 3 (S10 gatekeeper, ..cf41ed), both turns verbatim; confirm_identity
+    // ran from the stale generation (the event shape services/tools.js logs).
+    const CALL3_TURNS = [
+      {
+        text: "Great, tomorrow, Thursday, October 1st at 10 AM is available for a 30-minute discovery call -- shall I get that booked for you?",
+        user_text: "Hello, reception?",
+      },
+      { text: "I will call back tomorrow at 10 AM. Thank you for your time and have a great day.", user_text: "He's out. Try tomorrow at ten." },
+    ];
+    const gatekeeper = (assistantTurns, identityConfirmed) =>
+      verdictFor("outbound_gatekeeper_later", {
+        callReason: REASON,
+        server: serverFor({ assistantTurns, identityConfirmed }),
+        db: dbFor({ outcome_code: "callback_requested" }),
+      }).criteria;
+
+    it("gatekeeper: no_identity_confirmed and no_offer_to_gatekeeper both FAIL on call 3's real shape", () => {
+      const c = gatekeeper(CALL3_TURNS, [{ confirmed: true }]);
+      expect(c.no_identity_confirmed.result).toBe("FAIL");
+      expect(c.no_offer_to_gatekeeper.result).toBe("FAIL");
+    });
+
+    it("gatekeeper: both PASS on a correct call (the vague line, a callback, nothing offered)", () => {
+      const c = gatekeeper(
+        [
+          { text: "It's Ava from Brightwork Studio, returning Sam's enquiry. Is he around, or is there a better time to call?", user_text: "Hello, reception?" },
+          { text: "No problem, I'll call back tomorrow at ten. Thanks, goodbye.", user_text: "He's out. Try tomorrow at ten." },
+        ],
+        [{ confirmed: false }]
+      );
+      expect(c.no_identity_confirmed.result).toBe("PASS");
+      expect(c.no_offer_to_gatekeeper.result).toBe("PASS");
+    });
+
+    it("gatekeeper: telling them the REASON is an offer too", () => {
+      const c = gatekeeper([{ text: "You recently got in touch with us and I'm following up on that. Is Sam there?", user_text: "Hello, reception?" }], []);
+      expect(c.no_offer_to_gatekeeper.result).toBe("FAIL");
+    });
+  });
 
   describe("mentionsTopic", () => {
     it.each([

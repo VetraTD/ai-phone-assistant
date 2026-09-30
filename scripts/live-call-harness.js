@@ -1708,6 +1708,7 @@ async function mainOutbound() {
         ? {
             situation,
             topic: seed.config?.topic || "",
+            callReason: seed.config?.call_reason || "",
             // Ruling (S3-5): the harness's own business is always seeded
             // Europe/London (lib/probe/outboundSeed.js), and triggerOutreach
             // is always called with timezone: null, so contactTimezone()
