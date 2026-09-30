@@ -91,7 +91,19 @@ import { bumpCounter } from "../lib/voice/metrics.js";
 
 function campaignQuestions(ctx) {
   const outbound = ctx?.outboundCall;
+  if (!outbound) return callbackQuestions(ctx);
   return Array.isArray(outbound?.config?.questions) ? outbound.config.questions : [];
+}
+
+/**
+ * S4-1 (spec §12.3): on an INBOUND call recognised as a lead's callback
+ * (lib/outbound/callbackRecognition.js), the questions still unanswered for
+ * their open outreach. `ctx.callbackOutreach` is set only by that helper, only
+ * on inbound, so every other inbound call still reads [] here.
+ */
+function callbackQuestions(ctx) {
+  const remaining = ctx?.callbackOutreach?.remainingQuestions;
+  return Array.isArray(remaining) ? remaining : [];
 }
 
 function validKeys(questions) {
@@ -108,13 +120,19 @@ function askableQuestions(questions) {
 /** Is this campaign's qualification capability turned on for this outbound call? */
 function qualificationEnabled(ctx) {
   const outbound = ctx?.outboundCall;
-  if (!outbound) return false; // named risk 3: inbound never reaches past here
+  // Named risk 3: inbound never reaches past here -- except a recognised
+  // callback with at least one question still to ask (S4-1).
+  if (!outbound) return callbackQuestions(ctx).length > 0;
   const capabilities = Array.isArray(outbound.config?.capabilities) ? outbound.config.capabilities : [];
   return capabilities.includes("qualification");
 }
 
-function recordAnswerDeclaration(questions) {
+function recordAnswerDeclaration(questions, { withAsk = false } = {}) {
   const keys = validKeys(questions);
+  // A callback's tail line lists the questions in words, not keys; this maps one to the other.
+  const gloss = withAsk
+    ? " " + askableQuestions(questions).map((q) => `${q.key} = "${q.ask}"`).join("; ") + "."
+    : "";
   return {
     name: "record_answer",
     description:
@@ -128,7 +146,7 @@ function recordAnswerDeclaration(questions) {
           type: "string",
           ...(keys.length ? { enum: keys } : {}),
           description: keys.length
-            ? `Which question this answers. One of: ${keys.join(", ")}.`
+            ? `Which question this answers. One of: ${keys.join(", ")}.${gloss}`
             : "Which question this answers.",
         },
         value: {
@@ -170,7 +188,7 @@ export default {
     // text harness, which supply neither field) -- return nothing, full stop.
     // Task 26 (inbound callback recognition) is the only place this widens.
     if (!qualificationEnabled(ctx)) return [];
-    return [recordAnswerDeclaration(campaignQuestions(ctx))];
+    return [recordAnswerDeclaration(campaignQuestions(ctx), { withAsk: !ctx?.outboundCall })];
   },
 
   /**
@@ -183,6 +201,10 @@ export default {
    */
   prompt(cfg, ctx = {}) {
     if (!qualificationEnabled(ctx)) return { static: { capabilities: [] } };
+    // A recognised callback gets its questions in the DYNAMIC tail
+    // (services/gemini.js buildCallbackSection); the cached static prefix
+    // stays exactly what it is for every other inbound call.
+    if (!ctx?.outboundCall) return { static: { capabilities: [] } };
     const questions = askableQuestions(campaignQuestions(ctx));
     if (questions.length === 0) return { static: { capabilities: [] } };
 

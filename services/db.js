@@ -2908,6 +2908,87 @@ export async function closeOutreach(outreachId, closeReason, outcome = null) {
   noteAccess("closeOutreach", { resourceIds: [outreachId], rowCount: res.rowCount });
 }
 
+/** How long after our last dial an inbound call from that number still counts as a callback (spec §6.3). */
+const CALLBACK_WINDOW_DAYS = 14;
+
+/**
+ * S4-1 (spec §12.3, §6.3, amendment C2): is this inbound caller a lead we
+ * called and who is now ringing back? An ORDINARY tenant-scoped query (RLS is
+ * the tenant boundary), not a definer function.
+ *
+ * The most recent outreach in state 'waiting' (a dialing / in_call row is a
+ * call in flight, a closed one is finished) whose last_attempt_at is within
+ * the last 14 days, for a contact with this phone, and the number is NOT on
+ * the do-not-call list. The suppression check is `isSuppressed`, so a number
+ * kept only by hash after erasure still refuses; that hashing THROWS when
+ * SUPPRESSION_HASH_KEY is missing, and the throw propagates -- the start
+ * helper turns any throw into "not recognised" (the prompt stays as it was).
+ * A suppressed or erased number reads as null, never as a hit.
+ *
+ * Returns the pinned campaign version's topic and questions (never the
+ * campaign's current version) and `answeredKeys`: the non-`_` keys present in
+ * `calls.answers` of every call linked to this outreach.
+ *
+ * @param {string} phoneE164
+ * @returns {Promise<null | {outreachId: string, campaignId: string, contactId: string,
+ *   campaignVersion: number, lastAttemptAt: Date, topic: string|null,
+ *   questions: object[], answeredKeys: string[]}>}
+ */
+export async function openOutreachForPhone(phoneE164) {
+  requireTenantScope("openOutreachForPhone");
+  const canonical = normalizePhoneNumber(phoneE164);
+  if (!canonical) return null; // "anonymous", "", a withheld number: nobody to recognise
+  const res = await q(
+    `SELECT o.id, o.campaign_id, o.campaign_version, o.contact_id, o.last_attempt_at, v.config
+       FROM outreach o
+       JOIN contacts k ON k.id = o.contact_id
+       JOIN campaign_versions v ON v.campaign_id = o.campaign_id AND v.version = o.campaign_version
+      WHERE k.phone_e164 = $1
+        AND o.state = 'waiting'
+        AND o.last_attempt_at IS NOT NULL
+        AND o.last_attempt_at >= now() - ($2::int * interval '1 day')
+      ORDER BY o.last_attempt_at DESC
+      LIMIT 1`,
+    [canonical, CALLBACK_WINDOW_DAYS]
+  );
+  if (res.error) throw res.error;
+  const row = one(res);
+  if (!row) return null;
+  if (await isSuppressed(canonical)) return null;
+  const calls = await q(`SELECT answers FROM calls WHERE outreach_id = $1`, [row.id]);
+  if (calls.error) throw calls.error;
+  const answered = new Set();
+  for (const c of calls.rows || []) {
+    const a = c.answers;
+    if (a && typeof a === "object" && !Array.isArray(a)) {
+      for (const key of Object.keys(a)) if (!key.startsWith("_")) answered.add(key);
+    }
+  }
+  const config = row.config && typeof row.config === "object" ? row.config : {};
+  noteAccess("openOutreachForPhone", { resourceIds: [row.id, row.contact_id], rowCount: 1 });
+  return {
+    outreachId: row.id,
+    campaignId: row.campaign_id,
+    contactId: row.contact_id,
+    campaignVersion: row.campaign_version,
+    lastAttemptAt: row.last_attempt_at,
+    topic: typeof config.topic === "string" && config.topic.trim() ? config.topic.trim() : null,
+    questions: Array.isArray(config.questions) ? config.questions : [],
+    answeredKeys: [...answered],
+  };
+}
+
+/**
+ * S4-1: the lead rang back. Closes the outreach `called_back` so no retry
+ * dials them mid-callback. Throws (closeOutreach) when the row is no longer
+ * open; the caller catches and logs, and recognition still stands.
+ * @param {string} outreachId
+ */
+export async function closeOutreachCalledBack(outreachId) {
+  await closeOutreach(outreachId, "called_back", null);
+  noteAccess("closeOutreachCalledBack", { resourceIds: [outreachId], rowCount: 1 });
+}
+
 /**
  * Store the CallSid Twilio returned. Never overwrites a DIFFERENT one: the
  * directory trigger (044) routes callbacks by this value. Idempotent for the

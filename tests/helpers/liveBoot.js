@@ -86,6 +86,9 @@ export function fakeDb(config, businessId) {
     listIntegrationsForBusiness: async () => [],
     fetchBusinessKnowledge: async () => [],
     fetchCallerContext: async () => null,
+    // S4-1: inbound callback recognition. No outreach by default.
+    openOutreachForPhone: async () => null,
+    closeOutreachCalledBack: async () => {},
     // Task 20: the outbound finish() hook's own half of post-call. A no-op
     // here so every existing (inbound AND outbound) test that boots a
     // session through this helper, and never asked to exercise post-call

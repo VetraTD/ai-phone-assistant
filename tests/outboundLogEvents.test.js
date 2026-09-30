@@ -94,12 +94,14 @@ const STAGE_2_NAMES = [
   // logs this on every delivered/retry/dead outcome
   // (lib/outbound/internalRoutes.js's deliverOutboxRow/finishOutboxFailure).
   "outbound_webhook_delivery",
+  // S4-1 (Task 26 graduated): lib/outbound/callbackRecognition.js logs this
+  // when an inbound caller is recognised as a lead we called.
+  "outbound_callback_recognized",
 ];
 
 /** name -> the stage-3 task that ships it (spec §14; not emitted yet). */
 const STAGE_3_NAMES = {
   outbound_optout_tool: "Task 25",
-  outbound_callback_recognized: "Task 26",
 };
 
 describe("outbound §14 log events are actually emitted (stage 2, subset)", () => {

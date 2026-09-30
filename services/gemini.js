@@ -772,7 +772,7 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
   // nothing (named risk 3's inbound gate lives in the pack, not only in the
   // filter -- see capabilities/qualification.js's file header). A no-op for
   // every other pack: none of them reads `ctx.outboundCall`.
-  declarations.push(...filterForOutboundCampaign(collectTools(config, { outboundCall: outbound }), extras));
+  declarations.push(...filterForOutboundCampaign(collectTools(config, { outboundCall: outbound, callbackOutreach: extras?.callbackOutreach || null }), extras));
 
   return { functionDeclarations: declarations };
 }
@@ -1003,6 +1003,39 @@ export function isBusinessOpen(config) {
  * @param {string} timezone
  * @returns {string}
  */
+/**
+ * S4-1 (spec §12.3): the returned-call line. Dynamic tail only -- it names a
+ * person and a date, so it must never sit in the cached static prefix. Returns
+ * "" with no `callbackOutreach`, which is what keeps every inbound prompt
+ * without a callback byte-identical.
+ *
+ * "We called this person on {weekday day month} about {topic}. Questions still
+ * unanswered: {the questions' own words}." -- each sentence omitted when it
+ * has nothing to say (no topic -> no "about"; nothing left -> no questions).
+ *
+ * @param {object|null} callbackOutreach - extras.callbackOutreach
+ * @param {string} timezone - the business's
+ * @returns {string}
+ */
+export function buildCallbackSection(callbackOutreach, timezone) {
+  if (!callbackOutreach) return "";
+  let when = "";
+  const at = new Date(callbackOutreach.lastAttemptAt);
+  if (!Number.isNaN(at.getTime())) {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", { timeZone: timezone || "UTC", weekday: "long", day: "numeric", month: "long" })
+        .formatToParts(at)
+        .map((p) => [p.type, p.value])
+    );
+    when = ` on ${parts.weekday} ${parts.day} ${parts.month}`;
+  }
+  const topic = typeof callbackOutreach.topic === "string" && callbackOutreach.topic.trim() ? ` about ${callbackOutreach.topic.trim()}` : "";
+  let text = `=== RETURNED CALL ===\nThis caller is ringing back after we called them. We called this person${when}${topic}.`;
+  const asks = (callbackOutreach.remainingQuestions || []).map((q) => q.ask).filter(Boolean);
+  if (asks.length) text += ` Questions still unanswered: ${asks.join(" / ")}.`;
+  return text;
+}
+
 function buildCallerContextSection(callerContext, timezone, profile, rules = []) {
   if (!callerContext) return "";
 
@@ -1914,6 +1947,8 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     collectCallerContextRules(config, { integrations: extras?.integrations || [], now })
   );
   if (callerContextSection) sections.push(callerContextSection);
+  const callbackSection = buildCallbackSection(extras.callbackOutreach, config.timezone);
+  if (callbackSection) sections.push(callbackSection);
 
   // === THIS CALLER'S NUMBER ===
   //
@@ -2950,6 +2985,7 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // book_appointment's existing-appointment guard is the consumer. Read
         // only from call metadata, never from model arguments.
         callerContext: extras?.callerContext || null,
+        callbackOutreach: extras?.callbackOutreach || null,
         // Eval/benchmark harness seam: when set, services/tools.js hands this
         // to a capability pack's execute in place of the real CAPABILITY_DEPS.
         // undefined in production, where the real deps are always used.
