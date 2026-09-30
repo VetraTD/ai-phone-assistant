@@ -2010,6 +2010,57 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
       expect(r.pcDb.insertDetectorSuppression).not.toHaveBeenCalled();
     });
 
+    // RESIDUAL FIX 1 (re-review N2 race). Live's own turnComplete during the drain
+    // takes the write latch, so the drain's persist is a no-op and its write may
+    // still be in flight when the read-back runs. A correctly transcribed call
+    // must not be held for review (and must not raise the alert).
+    it("N2 race: Live's own turn close writes the row slowly -> the read-back waits for it; no marker, no hold", async () => {
+      const r = heldRig();
+      r.database.addTranscriptEntry = vi.fn(async (_callId, speaker, message, sequence) => {
+        await new Promise((res) => setTimeout(res, 400));
+        r.rows.push({ speaker, message, sequence });
+      });
+      const stt = vi.fn(async () => ({ text: "should never be asked" }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainSettleMs: 50 });
+      await call.feed(400, { voiced: true });
+      await call.feed(400);
+      transcribeOnReceipt(call, "Stop calling me.", {
+        then: () => call.live.push({ serverContent: { turnComplete: true } }),
+      });
+      for (let i = 0; i < 3; i++) {
+        await call.feed(160, { voiced: true });
+        await call.feed(40);
+      }
+      await call.hangUp();
+      await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 5000 });
+      expect(r.rows.filter((x) => x.speaker === "caller").map((x) => x.message)).toEqual(["Stop calling me."]);
+      expect(r.answers).toEqual({});
+      expect(events("outbound_clip_hold_drain_row_unverified")).toHaveLength(0);
+      expect(events("outbound_optout_unverified_hold")).toHaveLength(0);
+    });
+
+    // RESIDUAL FIX 2: an EARLIER caller row with the same words must not vouch
+    // for a drain whose own row never landed.
+    it("N2: an earlier caller row containing the same words does not vouch for a drain row that never landed", async () => {
+      allowErrors("outbound_optout_unverified_hold");
+      const r = heldRig();
+      r.rows.push({ speaker: "caller", message: "Stop calling me.", sequence: -2 }); // written well before the drain
+      r.database.addTranscriptEntry = vi.fn(async () => {}); // the drain's own write is swallowed
+      const stt = vi.fn(async () => ({ text: "should never be asked" }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt });
+      await call.feed(400, { voiced: true });
+      await call.feed(400);
+      transcribeOnReceipt(call, "Stop calling me.");
+      for (let i = 0; i < 3; i++) {
+        await call.feed(160, { voiced: true });
+        await call.feed(40);
+      }
+      await call.hangUp();
+      await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+      expect(events("outbound_clip_hold_drain_row_unverified")).toHaveLength(1);
+      expect(r.answers).toEqual({ _optout_unverified: true });
+    });
+
     // FINAL FIX WAVE r1. The hint rides only THIS process's own claim. When that
     // claim is not ours, the durable marker is all another process can see.
     describe("r1: the hint only reaches this process's own claim", () => {

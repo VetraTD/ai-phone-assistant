@@ -243,7 +243,12 @@ export default {
     if (!callSid && ctx.callbackOutreach) {
       bumpCounter("qualification_answer_refused");
       bumpCounter("qualification_answer_no_callsid");
-      log.error("qualification_answer_no_callsid", { key, severity: "warn" });
+      log.error("qualification_answer_no_callsid", {
+        key,
+        businessId: ctx.businessId ?? null,
+        outreachId: ctx.callbackOutreach?.outreachId ?? null,
+        severity: "warn",
+      });
       return refusal(fc, `The answer for "${key}" could not be recorded. Do not tell them it was.`);
     }
     if (callSid) {
