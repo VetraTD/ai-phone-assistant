@@ -113,7 +113,7 @@ describe("EU floor: the holiday follows the contact's local date, per zone", () 
   it("a holiday date is refused in every part of the day (00:30 and 23:30 local)", () => {
     expect(inside(phoneFor("33"), "2026-07-14", "10:30", "Europe/Paris")).toBe(false);
     expect(inside(phoneFor("33"), "2026-07-15", "10:30", "Europe/Paris")).toBe(true);
-    expect(inside(phoneFor("33"), "2026-07-13", "19:30", "Europe/Paris")).toBe(true);
+    expect(inside(phoneFor("33"), "2026-07-13", "18:30", "Europe/Paris")).toBe(true); // eve: open until 19:00
   });
 });
 
@@ -219,9 +219,11 @@ describe("EU floor: stale holiday table (year not covered) fails closed", () => 
     vi.spyOn(log, "error").mockImplementation(() => {});
     const f = floorFor(phoneFor("49"), null);
     expect(nextLegalOpening(at("2030-12-31", "21:00", "Europe/Berlin"), f, WIDE, "Europe/Berlin")).toBeNull();
-    // ...while a search that stays in 2030 still finds its opening.
-    const o = nextLegalOpening(at("2030-12-30", "21:00", "Europe/Berlin"), f, WIDE, "Europe/Berlin");
-    expect(o.toISOString()).toBe(at("2030-12-31", "10:00", "Europe/Berlin").toISOString());
+    // ...while a search that stays clear of the boundary still finds its opening.
+    const o = nextLegalOpening(at("2030-12-27", "21:00", "Europe/Berlin"), f, WIDE, "Europe/Berlin");
+    expect(o.toISOString()).toBe(at("2030-12-30", "10:00", "Europe/Berlin").toISOString());
+    // 30 Dec 2030 evening: the only next opening is 31 Dec, whose eve check needs 1 Jan 2031 -> null.
+    expect(nextLegalOpening(at("2030-12-30", "21:00", "Europe/Berlin"), f, WIDE, "Europe/Berlin")).toBeNull();
   });
   it("GB and US never consult the holiday table (a 2040 GB Saturday is fine)", () => {
     const spy = vi.spyOn(log, "error").mockImplementation(() => {});
@@ -303,5 +305,72 @@ describe("EU floor: schedule_callback (validateCallbackTime) inherits it", () =>
   });
   it("a time inside the floor is accepted", () => {
     expect(v(at("2026-10-14", "15:00", "Europe/Paris"))).toEqual({ ok: true });
+  });
+});
+
+describe("EU floor: pre-holiday days end at 19:00 (R-t4-eve, Italian Code of Conduct, applied EU-wide)", () => {
+  const de = () => floorFor("+4915112345678", null);
+  it("DE Fri 2 Oct 2026 (3 Oct is a holiday): 18:59 allowed, 19:00 and 19:30 refused", () => {
+    expect(isInsideFloor(at("2026-10-02", "18:59", "Europe/Berlin"), de())).toBe(true);
+    expect(isInsideFloor(at("2026-10-02", "19:00", "Europe/Berlin"), de())).toBe(false);
+    expect(isInsideFloor(at("2026-10-02", "19:30", "Europe/Berlin"), de())).toBe(false);
+  });
+  it("IT Mon 1 Jun 2026 (2 Jun is a holiday): 19:30 refused, 18:59 allowed; the morning ranges are untouched", () => {
+    const it_ = floorFor("+390212345678", null);
+    expect(isInsideFloor(at("2026-06-01", "19:30", "Europe/Rome"), it_)).toBe(false);
+    expect(isInsideFloor(at("2026-06-01", "18:59", "Europe/Rome"), it_)).toBe(true);
+    expect(isInsideFloor(at("2026-06-01", "10:00", "Europe/Rome"), it_)).toBe(true);
+  });
+  it("FR Mon 13 Jul 2026 (14 Jul is a holiday): 19:30 refused, 18:59 allowed", () => {
+    const fr = floorFor("+33612345678", null);
+    expect(isInsideFloor(at("2026-07-13", "19:30", "Europe/Paris"), fr)).toBe(false);
+    expect(isInsideFloor(at("2026-07-13", "18:59", "Europe/Paris"), fr)).toBe(true);
+  });
+  it("a normal day is still open until 19:59 (Tue 13 Oct 2026)", () => {
+    expect(isInsideFloor(at("2026-10-13", "19:59", "Europe/Berlin"), de())).toBe(true);
+  });
+  it("evaluated per zone: PT Tue 9 Jun 2026 (10 Jun holiday), no contact tz: Lisbon 18:59 ok, 19:00 refused", () => {
+    const pt = floorFor("+351912345678", null);
+    expect(isInsideFloor(at("2026-06-09", "18:59", "Europe/Lisbon"), pt)).toBe(true);
+    expect(isInsideFloor(at("2026-06-09", "19:00", "Europe/Lisbon"), pt)).toBe(false);
+  });
+  it("every country, every weekday eve in 2026 that is not itself a holiday: 18:30 allowed, 19:30 refused", () => {
+    let checked = 0;
+    for (const [cc, code, tz] of EU) {
+      const f = floorFor(phoneFor(code), tz);
+      const set = new Set(HOLIDAYS.holidays[cc]);
+      for (const h of HOLIDAYS.holidays[cc].filter((d) => d.startsWith("2026"))) {
+        const eve = new Date(new Date(`${h}T12:00:00Z`).getTime() - 86_400_000);
+        const iso = eve.toISOString().slice(0, 10);
+        const wd = eve.getUTCDay();
+        if (wd < 1 || wd > 5 || set.has(iso) || !iso.startsWith("2026")) continue;
+        expect(isInsideFloor(at(iso, "18:30", tz), f), `${cc} ${iso} 18:30`).toBe(true);
+        expect(isInsideFloor(at(iso, "19:30", tz), f), `${cc} ${iso} 19:30`).toBe(false);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(80);
+  });
+  it("31 Dec 2030 (next day 1 Jan 2031 is outside the table): refused all day, with the stale alert", () => {
+    const spy = vi.spyOn(log, "error").mockImplementation(() => {});
+    const se = floorFor(phoneFor("46"), null); // SE: not used by the other stale tests (the alert is throttled per country+year)
+    expect(isInsideFloor(at("2030-12-31", "10:30", "Europe/Stockholm"), se)).toBe(false);
+    expect(isInsideFloor(at("2030-12-31", "19:30", "Europe/Stockholm"), se)).toBe(false);
+    expect(spy).toHaveBeenCalledWith("outbound_holiday_table_stale", expect.objectContaining({ country: "SE", year: 2031 }));
+  });
+  it("nextLegalOpening agrees: IT Mon 1 Jun 19:30 -> Wed 3 Jun 10:00 (2 Jun is a holiday)", () => {
+    const o = nextLegalOpening(at("2026-06-01", "19:30", "Europe/Rome"), floorFor("+390212345678", null), WIDE, "Europe/Rome");
+    expect(o.toISOString()).toBe(at("2026-06-03", "10:00", "Europe/Rome").toISOString());
+  });
+  it("GB and US are unchanged by the eve rule (GB Fri 2 Oct 2026 20:30 allowed; US day-before-holiday 19:30 allowed)", () => {
+    expect(isInsideFloor(at("2026-10-02", "20:30", "Europe/London"), floorFor("+447700900001", null))).toBe(true);
+    expect(isInsideFloor(at("2026-07-03", "19:30", "America/Chicago"), floorFor("+12142345678", "America/Chicago"))).toBe(true);
+  });
+  it("schedule_callback: a request at 19:30 on an eve is refused outside_floor, nearest is the first opening after the holiday", () => {
+    const r = validateCallbackTime(at("2026-06-01", "19:30", "Europe/Rome"), {
+      callingWindow: WIDE, tz: "Europe/Rome", now: new Date("2026-05-28T08:00:00Z"), phone: "+390212345678", rawTimezone: "Europe/Rome",
+    });
+    expect(r).toMatchObject({ ok: false, reason: "outside_floor" });
+    expect(r.nearest).toBe(at("2026-06-03", "10:00", "Europe/Rome").toISOString());
   });
 });

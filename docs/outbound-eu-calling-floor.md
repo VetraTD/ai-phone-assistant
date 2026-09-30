@@ -12,9 +12,17 @@ One strict default for all 27 EU member states, applied to every audience (B2C a
 - 10:00-13:00 and 14:00-20:00 on the contact's local clock (end times exclusive).
 - No Saturday, no Sunday.
 - No nationwide public holiday of the number's country.
+- On a weekday whose NEXT local calendar day is a nationwide public holiday of that country, the last
+  range ends at 19:00 instead of 20:00 (so 10:00-13:00 and 14:00-19:00). Evaluated per zone. If the next
+  day falls in a year outside the holiday table (31 Dec 2030), the call is refused.
 
 It is sized to France (décret 2022-1313, in force 2023-03-01: Mon-Fri, 10-13 / 14-20, no holidays,
-consumer calls). No stricter rule was found in any member state. The campaign's own `calling_window`
+consumer calls) plus the Italian telemarketing Code of Conduct's 19:00 end on pre-holiday days
+(Garante docweb 9993833, applied EU-wide by controller ruling R-t4-eve; the Code binds signatories,
+its force for others is unresolved, and we apply it anyway because it is stricter). The rest of the
+Italian Code (Saturday 10:00-19:00, 09:00 start) is looser and is not applied. Coverage of the 19
+smaller states rests on secondary sources only, so "no stricter rule found" there means "not found".
+The campaign's own `calling_window`
 still applies on top (the call must be inside both).
 
 GB and US-mainland floors are unchanged. Every other country code is refused (`no_legal_floor`).
@@ -65,11 +73,12 @@ GB and US-mainland floors are unchanged. Every other country code is refused (`n
 
 ## Differs from the default: NOT applied, needs owner/counsel sign-off
 
-These are looser than the default. The software does not use them.
+These are looser than the default, except where item 3 says otherwise. The software does not use them.
 
 1. IE 09:00-21:00 Mon-Sat (Saturday, 09:00 start, 21:00 end, no lunch gap).
 2. ES 09:00-21:00 Mon-Fri (no lunch gap).
-3. IT 09:00-20:00 Mon-Fri; Saturday and pre-holiday 10:00-19:00.
+3. IT 09:00-20:00 Mon-Fri and Saturday 10:00-19:00 (looser than the default). The Code's 19:00 end on
+   pre-holiday days IS applied (see The default); only its 09:00 start and Saturday window are not.
 4. NL 09:00-22:00 Mon-Fri; Saturday 10:00-16:00.
 5. PT 09:00-22:00 (uncertain source).
 6. FR: a consumer-requested callback at a stated date and time may fall on a weekend (one law-firm
@@ -81,6 +90,9 @@ These are looser than the default. The software does not use them.
    Christi, Assumption, Reformation Day, All Saints), ES autonomous communities, IT patron saints,
    BE community days (11 Jul, 27 Sep), PT municipal holidays, FR Alsace-Moselle (Good Friday, 26 Dec).
    Residual risk: a call on a regional day off is still inside the weekday default.
+   Also not blocked because `date-holidays` does not tag them "public": SE Midsummer Eve (bank day,
+   2026-06-19), 24 and 31 December in SE, DK and DE, DK 1 May and Grundlovsdag (5 June). These are
+   de-facto days off; blocking them needs owner/counsel sign-off.
 10. `date-holidays` accuracy varies by country (community-maintained). Sample the table against an
     official calendar before relying on a market.
 

@@ -40,7 +40,12 @@ if (!dir) {
 }
 const req = createRequire(path.resolve(dir) + path.sep);
 const Holidays = req("date-holidays");
+const PINNED_VERSION = "3.37.0";
 const version = req("date-holidays/package.json").version;
+if (version !== PINNED_VERSION) {
+  console.error(`date-holidays version mismatch: installed ${version}, pinned ${PINNED_VERSION}. Install the pinned version into the scratch dir.`);
+  process.exit(1);
+}
 
 const holidays = {};
 for (const cc of EU) {
